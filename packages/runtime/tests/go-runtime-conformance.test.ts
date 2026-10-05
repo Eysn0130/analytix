@@ -6587,13 +6587,6 @@ describe('Go runtime kernel conformance manifest', () => {
       } finally {
         await stopGoRuntimeServer(restarted)
       }
-
-      const adapterSource = repoSource('src/main/runtime/analytix-adapter.ts')
-      expect(adapterSource).not.toContain('ensureGoBackendOrRollback')
-      expect(adapterSource).toContain('TypeScript runtime fallback is retired')
-      expect(adapterSource).toContain('go-runtime-candidate-g6-readiness')
-      expect(adapterSource).toContain('ANALYTIX_RUNTIME_PROVIDER_MATRIX_STATUS')
-      expect(adapterSource).toContain('ANALYTIX_RUNTIME_MCP_MATRIX_STATUS')
     } finally {
       try {
         if (server) await stopGoRuntimeServer(server)
@@ -6614,6 +6607,18 @@ describe('Go runtime kernel conformance manifest', () => {
       }
     }
   }, 300_000)
+
+  it('keeps desktop canary readiness in its delegated implementation without TypeScript fallback', () => {
+    const adapterSource = repoSource('src/main/runtime/analytix-adapter.ts')
+    const canarySource = repoSource('src/main/runtime/go-runtime-canary.ts')
+    expect(adapterSource).not.toContain('ensureGoBackendOrRollback')
+    expect(adapterSource).toContain('TypeScript runtime fallback is retired')
+    expect(adapterSource).toContain("import { probeGoRuntimeCanary } from './go-runtime-canary'")
+    expect(adapterSource).toContain('return probeGoRuntimeCanary(settings, baseUrl, backend, g6Readiness, headers)')
+    expect(canarySource).toContain('go-runtime-candidate-g6-readiness')
+    expect(adapterSource).toContain('ANALYTIX_RUNTIME_PROVIDER_MATRIX_STATUS')
+    expect(adapterSource).toContain('ANALYTIX_RUNTIME_MCP_MATRIX_STATUS')
+  })
 
   it('maps every Batch 5 kernel component to TypeScript contract evidence', () => {
     const manifest = buildGoRuntimeKernelConformanceManifest()

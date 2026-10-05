@@ -273,7 +273,7 @@ describe('desktop private history startup migration', () => {
     const source = readFileSync(new URL('./analytix-adapter.ts', import.meta.url), 'utf8')
     const startOffset = source.indexOf('async function startGoConformanceSidecarOnce')
     const stopOffset = source.indexOf('async function stopGoConformanceSidecarOnce')
-    const stopEndOffset = source.indexOf('async function fetchTextWithTimeout', stopOffset)
+    const stopEndOffset = source.indexOf('function redactedErrorMessage', stopOffset)
     expect(startOffset).toBeGreaterThanOrEqual(0)
     expect(stopOffset).toBeGreaterThan(startOffset)
     expect(stopEndOffset).toBeGreaterThan(stopOffset)
@@ -4087,6 +4087,57 @@ exit 1
       rmSync(evidenceDir, { recursive: true, force: true })
     }
   })
+
+  it.each(['unstaged', 'staged', 'committed'] as const)(
+    'rejects operator evidence when the delegated canary has %s changes',
+    (changeKind) => {
+      const evidenceDir = mkdtempSync(join(tmpdir(), 'analytix-canary-operator-evidence-'))
+      const originalPath = process.env.PATH
+      const currentCommit = changeKind === 'committed' ? 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' : TEST_COMMIT
+      const fakeGit = join(evidenceDir, process.platform === 'win32' ? 'git.cmd' : 'git')
+      const writeGit = (changed: boolean) => writeFileSync(fakeGit, `#!/usr/bin/env node
+const args = process.argv.slice(2)
+if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+  console.log('${currentCommit}')
+  process.exit(0)
+}
+if (args[0] === 'merge-base' && args[1] === '--is-ancestor') process.exit(0)
+if (args[0] === 'diff' && args.includes('--quiet')) {
+  const matchesChange = ${JSON.stringify(changeKind)} === 'staged'
+    ? args.includes('--cached')
+    : ${JSON.stringify(changeKind)} === 'committed'
+      ? args.includes('${TEST_COMMIT}..${currentCommit}')
+      : args[2] === '--'
+  process.exit(${changed} && matchesChange && args.includes('src/main/runtime/go-runtime-canary.ts') ? 1 : 0)
+}
+console.error('unexpected git command')
+process.exit(1)
+`, { encoding: 'utf8', mode: 0o755 })
+
+      try {
+        const evidence = writeRuntimeEvidenceFiles(evidenceDir)
+        const env = credentialedG6Env(evidence)
+        delete env.ANALYTIX_RUNTIME_GO_CURRENT_COMMIT
+        delete env.ANALYTIX_TEST_ALLOW_CURRENT_COMMIT_OVERRIDE
+        process.env.PATH = `${evidenceDir}${delimiter}${originalPath || ''}`
+
+        writeGit(false)
+        expect(resolveGoRuntimeG6ReadinessStatus(env).ready).toBe(true)
+
+        writeGit(true)
+        const readiness = resolveGoRuntimeG6ReadinessStatus(env)
+        expect(readiness.ready).toBe(false)
+        expect(readiness.missingRequiredChecks).toContain('operatorGate')
+        expect(readiness.operatorGate).toEqual(expect.objectContaining({
+          status: 'failed',
+          message: expect.stringContaining('does not cover')
+        }))
+      } finally {
+        process.env.PATH = originalPath
+        rmSync(evidenceDir, { recursive: true, force: true })
+      }
+    }
+  )
 
   it('rejects retired numbered operator gate evidence ids', () => {
     const evidenceDir = mkdtempSync(join(tmpdir(), 'analytix-runtime-operator-retired-id-'))

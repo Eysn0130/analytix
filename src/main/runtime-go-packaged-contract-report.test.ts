@@ -4,6 +4,7 @@ import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempS
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 
 const require = createRequire(import.meta.url)
@@ -1268,6 +1269,103 @@ process.exit(91)
         kunEnvironmentStillRejected: true
       }
     })
+  })
+
+  // Execute the scanner itself, using real rg for the affected owners. Other
+  // child checks are stubbed: these fixtures prove only the named scanner gates.
+  function runSovereigntyOwnerFixture(sources: Record<string, string | null>): string {
+    const dir = mkdtempSync(join(tmpdir(), 'analytix-sovereignty-owner-'))
+    const navigationPath = 'src/renderer/src/components/shell/NavigationRail.tsx'
+    const readerPath = 'packages/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs/reader.go'
+    const fs = require('node:fs') as typeof import('node:fs')
+    const fixturePaths: Record<string, string> = {}
+    for (const [path, source] of Object.entries(sources)) {
+      const fixturePath = join(dir, path)
+      fixturePaths[path] = fixturePath
+      if (source !== null) {
+        mkdirSync(resolve(fixturePath, '..'), { recursive: true })
+        writeFileSync(fixturePath, source)
+      }
+    }
+    const errors: string[] = []
+    try {
+      runInNewContext(readFileSync('scripts/scan-product-sovereignty.cjs', 'utf8'), {
+        require: (id: string) => {
+          if (id === './native-component-contract.cjs') return require('../../scripts/native-component-contract.cjs')
+          if (id === 'node:fs') return {
+            ...fs,
+            existsSync: (path: string) => Object.hasOwn(sources, path) ? sources[path] !== null : existsSync(path),
+            readFileSync: (path: string, encoding: BufferEncoding) => fs.readFileSync(fixturePaths[path] || path, encoding)
+          }
+          if (id === 'node:child_process') return {
+            spawnSync: (command: string, args: string[], options: Record<string, unknown>) => {
+              if (command === 'rg' && args.includes(navigationPath)) {
+                return spawnSync(command, args.map((arg) => fixturePaths[arg] || arg), options)
+              }
+              if (command === 'rg' && args[2] === 'packages/runtime-go' && args[3] === 'packages/runtime') {
+                const result = spawnSync(command, ['-n', '--with-filename', args[1], fixturePaths[readerPath] || readerPath], options)
+                return { ...result, stdout: String(result.stdout).replaceAll(fixturePaths[readerPath] || readerPath, readerPath) }
+              }
+              return { status: command === 'rg' && args[0] === '--files' ? 0 : 1, stdout: '', stderr: '' }
+            }
+          }
+          throw new Error(`unexpected scanner dependency: ${id}`)
+        },
+        console: { error: (message: string) => errors.push(message), log: () => {} },
+        process: { argv: [], cwd: () => process.cwd(), exitCode: 0, exit: () => {} }
+      })
+      return errors.join('\n')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('keeps forbidden entries rejected in the current navigation owner', () => {
+    const path = 'src/renderer/src/components/shell/NavigationRail.tsx'
+    const clean = readFileSync(path, 'utf8')
+    expect(runSovereigntyOwnerFixture({ [path]: clean })).not.toContain('top-level forbidden entry scan failed')
+    const failure = runSovereigntyOwnerFixture({ [path]: `${clean}\nconst forbiddenEntry = "WorkflowCreateLoopView"\n` })
+    expect(failure).toContain('top-level forbidden entry scan failed')
+    expect(failure).toContain('Workflow/Create Loop quarantine scan failed')
+    expect(failure).toContain('const forbiddenEntry = "WorkflowCreateLoopView"')
+  })
+
+  it('keeps a missing current navigation owner rejected by freshness and entry scans', () => {
+    const failure = runSovereigntyOwnerFixture({ 'src/renderer/src/components/shell/NavigationRail.tsx': null })
+    expect(failure).toContain('scan path freshness failed')
+    expect(failure).toContain('top-level forbidden entry scan failed')
+    expect(failure).toContain('Workflow/Create Loop quarantine scan failed')
+    expect(failure).toContain('NavigationRail.tsx: No such file or directory')
+  })
+
+  const coreAbsenceReaderPath = 'packages/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs/reader.go'
+  const coreAbsenceReader = readFileSync(coreAbsenceReaderPath, 'utf8')
+  const coreAbsenceStart = coreAbsenceReader.indexOf('func verifyCoreResourcesAbsentV2(')
+  const coreAbsenceEnd = coreAbsenceReader.indexOf('\n}\n', coreAbsenceStart) + 3
+  const coreAbsenceFunction = coreAbsenceReader.slice(coreAbsenceStart, coreAbsenceEnd)
+  const coreAbsenceResourceLine = coreAbsenceFunction.split('\n')[1]
+
+  it('classifies the real Core resource absence guard without granting its file execution authority', () => {
+    const output = runSovereigntyOwnerFixture({ [coreAbsenceReaderPath]: coreAbsenceReader })
+    expect(output).not.toContain('native component registry / Cargo / Tauri boundary failed')
+  })
+
+  it.each([
+    ['reference moved outside the function', coreAbsenceReader.replace(coreAbsenceResourceLine, '\tfor _, name := range []string{"backend"} {') + '\nvar movedResources = ' + coreAbsenceResourceLine.split('range ')[1].slice(0, -2) + '\n'],
+    ['another reference in the same file', `${coreAbsenceReader}\nvar anotherHelper = "analytix-data-engine"\n`],
+    ['execution added to the guard', coreAbsenceReader.replace('\treturn nil\n}\n\nfunc validateCompiledCoreQualificationV2', '\texec.Command("analytix-data-engine").Run()\n\treturn nil\n}\n\nfunc validateCompiledCoreQualificationV2')],
+    ['execution added elsewhere in the file', `${coreAbsenceReader}\nfunc executeHelper() { exec.Command("analytix-data-engine").Run() }\n`],
+    ['resource inventory expanded', coreAbsenceReader.replace('"runtime/analytix-data-engine"}', '"runtime/analytix-data-engine", "runtime/another-helper"}')],
+    ['native resource removed', coreAbsenceReader.replace(', "runtime/analytix-data-engine"', '')],
+    ['absence condition reversed', coreAbsenceReader.replace('!errors.Is(err, os.ErrNotExist) {\n\t\t\treturn errors.New("core package', 'errors.Is(err, os.ErrNotExist) {\n\t\t\treturn errors.New("core package')],
+    ['copied guard in a comment', coreAbsenceReader.replace(coreAbsenceFunction, `/*\n${coreAbsenceFunction}*/\n`)],
+    ['copied guard in a raw string', coreAbsenceReader.replace(coreAbsenceFunction, `var guardText = \`\n${coreAbsenceFunction}\`\n`)]
+  ])('keeps Core absence classification fail-closed for %s', (_name, source) => {
+    expect(source).not.toBe(coreAbsenceReader)
+    const failure = runSovereigntyOwnerFixture({ [coreAbsenceReaderPath]: source })
+    expect(failure).toContain('native component registry / Cargo / Tauri boundary failed')
+    expect(failure).toContain('Data-plane helpers may be referenced only by the frozen Go execution authority:')
+    expect(failure).toContain(coreAbsenceReaderPath)
   })
 
   it('keeps product regression reporting later checks after an early child failure', () => {

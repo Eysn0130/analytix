@@ -17,6 +17,7 @@ export const runtimeGoRelevantEvidencePaths = [
   'scripts/cache-first-review-gate.mjs',
   'scripts/scan-product-sovereignty.cjs',
   'src/main/runtime/analytix-adapter.ts',
+  'src/main/runtime/go-runtime-canary.ts',
   'scripts/runtime-go-validation-command.mjs',
   'scripts/runtime-go-validation-delegate.mjs',
   'scripts/runtime-go-live-validation.mjs',
