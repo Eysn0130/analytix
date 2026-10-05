@@ -800,7 +800,7 @@ export function createMaintenanceActions(
     }
   }),
 
-  rewindAndResend: async (userBlockId, newText) => {
+  rewindAndResend: async (userBlockId, newText, onCaptured) => {
     const trimmed = newText.trim()
     if (!trimmed || editInFlight) return
     const state = get()
@@ -841,6 +841,9 @@ export function createMaintenanceActions(
     editInFlight = true
     let sent = false
     try {
+      // The closed payload and original draft CAS now own any later failure.
+      // This synchronous handoff is renderer-local, not a Core acknowledgement.
+      onCaptured?.()
       // This read checks current Go authority before either destructive operation.
       // StartTurn will still plan fresh context-bound use; no old receipt is reused.
       if (payload.attachmentIds.length) {
@@ -905,8 +908,8 @@ export function createMaintenanceActions(
       } catch { /* Preserve a retryable draft; never expose an unsafe error body. */ }
       if (!sent && isCurrent()) set({ error: i18n.t('common:rewindResendFailed') })
     } finally {
-      // The bubble closes before validation. Keep its captured payload on the
-      // original draft for any failed completion while that owner still exists.
+      // After local capture the bubble may close before async validation.
+      // Keep its payload on the original draft while that owner still exists.
       // Core may have committed even without a reply or SSE; this draft is not
       // history or permission to resend. Object identity protects newer drafts.
       const owner = get().threads.find(thread => thread.id === activeThreadId)

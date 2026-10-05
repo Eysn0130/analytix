@@ -21,6 +21,7 @@ import { parseWritePromptForDisplay } from '../../write/quoted-selection'
 import { parseClawUserPromptForDisplay, type ClawUserPromptDisplay } from '@shared/app-settings'
 import { projectOrdinaryPublicText } from '@shared/ordinary-log-pii-projection'
 import { openWorkspacePathInEditor } from '../../lib/open-workspace-path'
+import { normalizeWorkspaceRoot } from '../../lib/workspace-path'
 import { DiffView } from '../DiffView'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { observeTerminalDOMCommit } from '../../thread/tracing/thread-performance-trace'
@@ -256,6 +257,7 @@ function UserMessageBubble({
   const [draft, setDraft] = useState(publicBlockText)
   const [writeMetaOpen, setWriteMetaOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editOriginRef = useRef<{ threadId: string | null; workspace: string; blockId: string } | null>(null)
   const parsedWritePrompt = useMemo(() => {
     if (route !== 'write' && route !== 'chat') return null
     const parsed = parseWritePromptForDisplay(publicBlockText)
@@ -294,11 +296,16 @@ function UserMessageBubble({
 
   const startEdit = (): void => {
     if (busy || !canEdit) return
+    const state = useChatStore.getState()
+    const owner = state.threads.find(thread => thread.id === state.activeThreadId)
+    editOriginRef.current = { threadId: state.activeThreadId, blockId: block.id,
+      workspace: normalizeWorkspaceRoot(owner?.workspace) || normalizeWorkspaceRoot(state.workspaceRoot) }
     setDraft(displayText)
     setEditing(true)
   }
 
   const cancelEdit = (): void => {
+    editOriginRef.current = null
     setDraft(publicBlockText)
     setEditing(false)
   }
@@ -306,8 +313,18 @@ function UserMessageBubble({
   const submit = async (): Promise<void> => {
     const trimmed = draft.trim()
     if (!trimmed || busy) return
-    setEditing(false)
-    await rewindAndResend(block.id, trimmed)
+    const state = useChatStore.getState()
+    const owner = state.threads.find(thread => thread.id === state.activeThreadId)
+    const origin = editOriginRef.current
+    // A retained local editor cannot transfer its payload after navigation.
+    if (!origin || origin.threadId !== state.activeThreadId || origin.blockId !== block.id ||
+      origin.workspace !== (normalizeWorkspaceRoot(owner?.workspace) || normalizeWorkspaceRoot(state.workspaceRoot))) return
+    // Close only after the store owns the validated local payload. Rejected
+    // operations retain this editor; later failures use its guarded draft.
+    await rewindAndResend(block.id, trimmed, () => {
+      editOriginRef.current = null
+      setEditing(false)
+    })
   }
 
   if (editing) {
