@@ -1566,7 +1566,7 @@ export function SubagentInspectorPanel({
 	        {selectedAgent ? (
 	          <div className="flex h-full min-h-0 flex-col">
 	            <SubagentMetadata agent={selectedAgent} />
-	            {selectedThreadId ? (
+	            {selectedThreadId && visible ? (
 	              <SubagentTimeline
 	                state={visibleDetailState}
                 runtimeStateOverride={selectedTimelineStateOverride}

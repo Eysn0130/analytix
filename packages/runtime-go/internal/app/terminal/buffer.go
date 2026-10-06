@@ -56,6 +56,13 @@ func (b *LimitedOutputBuffer) String() string {
 	return string(b.data) + "\n[truncated]"
 }
 
+// Snapshot returns captured bytes without the legacy display marker.
+func (b *LimitedOutputBuffer) Snapshot() (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(append([]byte(nil), b.data...)), b.truncated
+}
+
 func (b *LimitedOutputBuffer) Truncated() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()

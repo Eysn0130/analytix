@@ -8,6 +8,7 @@ import {
 describe('typed local-display runtime path allowlist', () => {
   it('admits the complete closed production path family including deterministic cleaning', () => {
     expect(LOCAL_DISPLAY_RUNTIME_PATHS_V1).toEqual([
+      '/v1/local-display/tool-result-snapshot',
       '/v1/local-display/generated-artifact',
       '/v1/local-display/object-editing',
       '/v1/local-display/browser-selection',
@@ -33,6 +34,8 @@ describe('typed local-display runtime path allowlist', () => {
 
   it('rejects unknown, prefixed, and query-bearing paths', () => {
     expect(isLocalDisplayRuntimePathV1('/v1/local-display/funds-cleaning')).toBe(false)
+    expect(isLocalDisplayRuntimePathV1('/v1/local-display/tool-result-snapshot?thread=forged')).toBe(false)
+    expect(isLocalDisplayRuntimePathV1('/v1/local-display/tool-result-snapshot/')).toBe(false)
     expect(isLocalDisplayRuntimePathV1('/prefix/v1/local-display/funds-cleaning/run')).toBe(false)
     expect(isLocalDisplayRuntimePathV1('/v1/local-display/funds-cleaning/run?case=forged')).toBe(false)
   })

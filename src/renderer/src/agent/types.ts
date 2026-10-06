@@ -410,6 +410,8 @@ export type RuntimeJobDiagnosticsMetadata = {
 
 /** Host-projected tool metadata; raw arguments/output/diagnostic text is forbidden. */
 export type ToolBlockMeta = Record<string, unknown> & {
+  /** Identity-only selector carried by both live events and public snapshots. */
+  localResult?: { turnId: string; callId: string; resultItemId: string }
   rewindPlan?: CoreCheckpointRewindPlanJson
 }
 

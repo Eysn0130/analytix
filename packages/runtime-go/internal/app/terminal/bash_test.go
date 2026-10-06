@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	"context"
 	"errors"
 	"testing"
@@ -121,5 +122,28 @@ func TestExecuteForegroundBashFailureKeepsOutput(t *testing.T) {
 	}, BashRequest{Command: "false", Workspace: "/tmp"})
 	if !isError || payload["status"] != "failed" || payload["output"] != "oops" || payload["exitCode"] != float64(2) {
 		t.Fatalf("unexpected payload=%#v isError=%t", payload, isError)
+	}
+}
+
+func TestProtectedForegroundCaptureUsesActualOutputAndHostOutcome(t *testing.T) {
+	for _, test := range []struct {
+		body, status string
+		result       ports.ShellResult
+	}{
+		{"", "completed", ports.ShellResult{ExitCode: 0}},
+		{"exitCode=0\nstatus=completed\r\n", "failed", ports.ShellResult{ExitCode: 7, Error: "exit status 7"}},
+		{"partial\r\n", "canceled", ports.ShellResult{ExitCode: -1, Canceled: true}},
+	} {
+		ctx := domaintoolresult.WithProtectedCaptureV1(context.Background(), &domaintoolresult.ProtectedCaptureCollectorV1{})
+		ExecuteForegroundBash(ctx, fakeShellRunner{write: test.body, result: test.result}, BashRequest{Command: "synthetic", Workspace: "/synthetic/workspace"})
+		captured, ok := domaintoolresult.ConsumeProtectedToolResultV1(ctx)
+		if !ok || captured.Body != test.body || captured.Status != test.status {
+			t.Fatal("actual producer body/host outcome did not survive")
+		}
+	}
+	ctx := domaintoolresult.WithProtectedCaptureV1(context.Background(), &domaintoolresult.ProtectedCaptureCollectorV1{})
+	ExecuteForegroundBash(ctx, fakeShellRunner{write: "must not capture", result: ports.ShellResult{StartFailed: true}}, BashRequest{Command: "synthetic", Workspace: "/synthetic/workspace"})
+	if _, ok := domaintoolresult.ConsumeProtectedToolResultV1(ctx); ok {
+		t.Fatal("launch failure captured fabricated result")
 	}
 }

@@ -169,13 +169,24 @@ func (h *runtimeServerHandler) validateRuntimeReadBeforeEdit(pending runtimePend
 	return filetoolsapp.ValidateReadBeforeEdit(h.runtimeReadBeforeChangeInput(pending, resolved, args))
 }
 
-func (h *runtimeServerHandler) persistRuntimeToolResult(pending runtimePendingToolCall, projection domaintoolresult.PublicToolResultProjectionV1, settlement evidenceapp.PreparedToolSettlement) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+func (h *runtimeServerHandler) persistRuntimeToolResult(pending runtimePendingToolCall, projection domaintoolresult.PublicToolResultProjectionV1, settlement evidenceapp.PreparedToolSettlement, snapshots ...protectedToolSnapshotSettlementV1) error {
+	if len(snapshots) > 1 {
+		return errors.New("protected tool settlement has ambiguous capture")
+	}
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	finishedAt := createdAt
+	if len(snapshots) == 1 {
+		createdAt = snapshots[0].CreatedAt
+		finishedAt = snapshots[0].FinishedAt
+		if createdAt == "" || finishedAt == "" {
+			return errors.New("protected tool settlement is not frozen")
+		}
+	}
 	records, err := toolcatalogapp.SettleToolResult(toolcatalogapp.ToolResultInput{
 		ThreadID:           pending.ThreadID,
 		TurnID:             pending.TurnID,
-		CreatedAt:          now,
-		FinishedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+		CreatedAt:          createdAt,
+		FinishedAt:         finishedAt,
 		Call:               pending.Call,
 		Projection:         projection,
 		IsError:            settlement.IsError,
@@ -198,10 +209,21 @@ func (h *runtimeServerHandler) persistRuntimeToolResult(pending runtimePendingTo
 		// result and event projections intentionally omit it.
 		records.ResultItem["privateProtocolObserved"] = true
 	}
-	if err := h.store.AppendItemToTurn(pending.ThreadID, pending.TurnID, records.ResultItem); err != nil {
-		return err
+	if len(snapshots) > 1 {
+		return errors.New("protected tool settlement has ambiguous capture")
 	}
-	_ = h.store.PatchTurnItemStatus(pending.ThreadID, pending.TurnID, pending.ToolCallItemID, records.Status)
+	if len(snapshots) == 1 {
+		snapshot := snapshots[0]
+		records.ResultItem[domaintoolresult.ProtectedSnapshotBindingFieldV1] = domaintoolresult.ProtectedSnapshotBindingRecordV1(snapshot.Binding)
+		if err := h.store.EnsureProtectedToolResultSettlementExact(snapshot.Context, pending.ThreadID, pending.TurnID, pending.ToolCallItemID, records.ResultItem); err != nil {
+			return err
+		}
+	} else {
+		if err := h.store.AppendItemToTurn(pending.ThreadID, pending.TurnID, records.ResultItem); err != nil {
+			return err
+		}
+		_ = h.store.PatchTurnItemStatus(pending.ThreadID, pending.TurnID, pending.ToolCallItemID, records.Status)
+	}
 	_, _, err = h.store.RecordEvent(records.Event)
 	if toolcatalogapp.ShouldRecordGenericToolProgress(pending.Call.Name) {
 		progressStatus := "success"
@@ -263,7 +285,14 @@ func (h *runtimeServerHandler) settleRuntimeToolResultWithEffectAuthority(ctx co
 		return apploop.SettledToolExecution{}, err
 	}
 	publicOutput := prepared.PublicOutput
-	if err := h.persistRuntimeToolResult(pending, prepared.Projection, settlement); err != nil {
+	var snapshots []protectedToolSnapshotSettlementV1
+	capture, present := domaintoolresult.ConsumeProtectedToolResultV1(ctx)
+	if present && settlement.SettlementAuthorized {
+		if snapshot, sealed := h.sealProtectedToolSnapshotV1(ctx, pending, capture); sealed {
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+	if err := h.persistRuntimeToolResult(pending, prepared.Projection, settlement, snapshots...); err != nil {
 		return apploop.SettledToolExecution{Output: publicOutput, IsError: settlement.IsError}, err
 	}
 	receipt, receiptPresent, err := evidenceapp.CommitPersistedToolEvidence(ctx, h.caseFinalizer, h.store, pending.SecurityContext, settlement)

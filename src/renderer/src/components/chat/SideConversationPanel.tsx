@@ -1,3 +1,4 @@
+import { ProtectedToolResult } from './presentation/ProtectedToolResult'
 import {
   useEffect,
   useLayoutEffect,
@@ -172,7 +173,7 @@ function sideToolDetailPreview(block: ToolBlock): string {
   return compact.length > 240 ? `${compact.slice(0, 239).trimEnd()}...` : compact
 }
 
-function SideToolBubble({ block }: { block: ToolBlock }): ReactElement {
+function SideToolBubble({ block, threadId }: { block: ToolBlock; threadId?: string }): ReactElement {
   const { t } = useTranslation('common')
   const childChip = formatChildAgentChip(sideToolChild(block), t)
   const detailPreview = sideToolDetailPreview(block)
@@ -194,6 +195,7 @@ function SideToolBubble({ block }: { block: ToolBlock }): ReactElement {
           <span className="shrink-0 text-[11px] uppercase tracking-wide opacity-70">{block.status}</span>
         )}
       </div>
+      {block.meta?.localResult ? <ProtectedToolResult block={block} threadId={threadId} /> : null}
       {block.filePath || childChip || detailPreview ? (
         <div className="mt-1.5 flex min-w-0 flex-col gap-1 text-[11.5px] leading-4 opacity-85">
           {block.filePath ? (
@@ -215,7 +217,7 @@ function SideToolBubble({ block }: { block: ToolBlock }): ReactElement {
   )
 }
 
-function SideMessageBubble({ block, onOpenOwnerThread }: { block: ChatBlock; onOpenOwnerThread?: (requestId: string) => void }): ReactElement | null {
+function SideMessageBubble({ block, threadId, onOpenOwnerThread }: { block: ChatBlock; threadId?: string; onOpenOwnerThread?: (requestId: string) => void }): ReactElement | null {
   if (block.kind === 'approval' || block.kind === 'user_input') {
     return <GateResponseContext.Provider value={{ onOpenOwnerThread }}><MessageBubble block={block} /></GateResponseContext.Provider>
   }
@@ -240,7 +242,7 @@ function SideMessageBubble({ block, onOpenOwnerThread }: { block: ChatBlock; onO
     )
   }
   if (block.kind === 'tool') {
-    return <SideToolBubble block={block} />
+    return <SideToolBubble block={block} threadId={threadId} />
   }
   if (block.kind === 'compaction') {
     return (
@@ -657,7 +659,7 @@ export function SideConversationPanel({
                 </div>
               ) : null}
               {activeSide.blocks.map((block) => (
-                <SideMessageBubble key={block.id} block={block} onOpenOwnerThread={onOpenThreadRequest ? requestId => onOpenThreadRequest(activeSide.threadId, requestId) : undefined} />
+                <SideMessageBubble key={block.id} block={block} threadId={activeSide.threadId} onOpenOwnerThread={onOpenThreadRequest ? requestId => onOpenThreadRequest(activeSide.threadId, requestId) : undefined} />
               ))}
               {activeSide.liveAssistant ? (
                 <SideMessageBubble

@@ -95,14 +95,14 @@ function directResponse(displayMode: 'full' | 'masked'): DirectSourcePreviewResp
 }
 
 describe('AcceptedSlotDisplay', () => {
-  it('observes active-case switches and current-case snapshot invalidation on existing seams', () => {
+  it('observes active-case switches and current-case snapshot invalidation on existing seams', async () => {
     const cases: string[] = []
     const snapshots: string[] = []
     const stopCases = subscribeSharedActiveCaseContext((current) => cases.push(current?.caseId ?? ''))
     const stopSnapshots = subscribeStatsCacheInvalidation((event) => snapshots.push(event.caseId))
     try {
-      setSharedActiveCaseContext({ caseId: 'case-a', workspaceRoot: '/workspace' })
-      setSharedActiveCaseContext({ caseId: 'case-b', workspaceRoot: '/workspace' })
+      await setSharedActiveCaseContext({ caseId: 'case-a', workspaceRoot: '/workspace' })
+      await setSharedActiveCaseContext({ caseId: 'case-b', workspaceRoot: '/workspace' })
       emitStatsCacheInvalidation({
         caseId: 'case-b',
         eventId: 'snapshot-b-2',
@@ -114,7 +114,7 @@ describe('AcceptedSlotDisplay', () => {
     } finally {
       stopCases()
       stopSnapshots()
-      setSharedActiveCaseContext(null)
+      await setSharedActiveCaseContext(null)
     }
   })
 

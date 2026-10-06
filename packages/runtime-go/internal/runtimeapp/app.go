@@ -38,6 +38,7 @@ import (
 	reportpublicationstore "analytix.local/runtime-go/internal/adapters/outbound/reportpublication"
 	secretstore "analytix.local/runtime-go/internal/adapters/outbound/secretstore"
 	threadriskpolicystore "analytix.local/runtime-go/internal/adapters/outbound/threadriskpolicy"
+	toolresultsnapshotstore "analytix.local/runtime-go/internal/adapters/outbound/toolresultsnapshot"
 	turnterminalstore "analytix.local/runtime-go/internal/adapters/outbound/turnterminalstore"
 	attachmentauthorityapp "analytix.local/runtime-go/internal/app/attachmentauthority"
 	attachmentuseapp "analytix.local/runtime-go/internal/app/attachmentuse"
@@ -65,6 +66,7 @@ import (
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
+	toolresultsnapshotapp "analytix.local/runtime-go/internal/app/toolresultsnapshot"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	turnterminalapp "analytix.local/runtime-go/internal/app/turnterminal"
@@ -709,6 +711,16 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, err
 	}
+	toolSnapshots, err := toolresultsnapshotstore.NewStore(ctx, filepath.Join(config.DataDir, "private", "tool-result-snapshots-v1"), privateCASAccessAuthority)
+	if err != nil {
+		return nil, err
+	}
+	toolSnapshotsOwnedByHandler := false
+	defer func() {
+		if !toolSnapshotsOwnedByHandler {
+			resultErr = errors.Join(resultErr, toolSnapshots.Close())
+		}
+	}()
 	checkpointAuthorityStore, err := checkpointauthority.NewStoreContext(ctx,
 		filepath.Join(config.DataDir, "private", "checkpoint-authority"), privateCASAccessAuthority,
 	)
@@ -1813,7 +1825,56 @@ func newRuntimeServerHandlerWithRootsModeE(
 	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
 	workspaceRead := &workspacereadapp.Service{Files: filestore.NewWorkspaceReadFiles(sandboxSettings.ProtectedReadDirs)}
+	validateToolSnapshotCurrentOrigin := func(readCtx context.Context, node map[string]any, original domainsecurity.TurnSecurityContext) (domainsecurity.TurnSecurityContext, error) {
+		workspace, _ := node["workspace"].(string)
+		current, err := toolresultsnapshotapp.CurrentOwnContextV1(node, original)
+		if err != nil {
+			return domainsecurity.TurnSecurityContext{}, err
+		}
+		if err := turnsecurityapp.ValidateCurrentOrdinaryEffect(turnsecurityapp.CurrentValidationInput{
+			OperationContext: readCtx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+			SnapshotAuthority: datasetSnapshotAuthority, SnapshotAuthorityV2: datasetSnapshotAuthorityV2, Context: current, Workspace: workspace,
+		}); err != nil {
+			return domainsecurity.TurnSecurityContext{}, err
+		}
+		if caseThreads.IsCaseThread(current.ThreadID) {
+			exact, err := currentCaseAuthority.ValidateCurrent(current.ThreadID, node)
+			if err != nil || exact != current {
+				return domainsecurity.TurnSecurityContext{}, errors.New("tool result current origin is unavailable")
+			}
+		}
+		inherited, err := threadapp.ValidateActiveInheritedHistoryV1(readCtx, node, caseThreads, store)
+		if err != nil || inherited[original.TurnID] {
+			return domainsecurity.TurnSecurityContext{}, errors.New("tool result current origin is unavailable")
+		}
+		return current, nil
+	}
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
+		ToolResultSnapshots: toolSnapshots,
+		ToolResultSnapshotHistoryValidate: func(readCtx context.Context, thread map[string]any, frozen domainsecurity.TurnSecurityContext) error {
+			if _, err := validateToolSnapshotCurrentOrigin(readCtx, thread, frozen); err != nil {
+				return err
+			}
+			return toolresultsnapshotapp.ValidateHistoricalScopeV1(readCtx, thread, frozen, toolresultsnapshotapp.HistoricalScopeDependenciesV1{
+				Primary:               store,
+				ValidateCurrentOrigin: validateToolSnapshotCurrentOrigin,
+				ObserveCaseContexts: func(ctx context.Context) (*casethreadapp.VerifiedCommittedContextInventoryV1, error) {
+					records, err := caseThreadStore.List(ctx)
+					if err != nil {
+						return nil, err
+					}
+					return casethreadapp.VerifyCommittedContextInventoryV1(ctx, records, finalAuthority)
+				},
+				ObserveChildren: func(ctx context.Context) (pendingworkapp.TrustedInventoryV1, []domainjob.Record, bool, error) {
+					inventory, err := pendingWorkPreflight.TrustedInventoryV1(ctx)
+					if err != nil {
+						return pendingworkapp.TrustedInventoryV1{}, nil, false, err
+					}
+					runs, err := jobs.ReadChildRunIdentitySnapshotV1(ctx, filepath.Join(config.DataDir, "child-runs"))
+					return inventory, runs.Records, runs.HasLegacyTypeScript, err
+				},
+			})
+		},
 		DocumentCodec:       newDocumentCodec(config),
 		ManagedEditingFiles: managededitingfiles.New(),
 		ObjectEditing:       objectEditingHandler.Service,
@@ -1922,11 +1983,16 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if !simulation && caseEntityCapability.store != nil {
 		ownedResources = append(ownedResources, &caseEntityCapability)
 	}
+	toolSnapshotHTTP, ok := handler.(interface{ ToolResultLocalDisplayV1() http.Handler })
+	if !ok {
+		return nil, errors.New("protected tool snapshot composition unavailable")
+	}
 	handler, err = bindRuntimeOwnedResourcesV1(handler, ownedResources...)
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}
 	localDisplayHandler := httpapi.LocalDisplayMuxV1{
+		ToolResults:  toolSnapshotHTTP.ToolResultLocalDisplayV1(),
 		RuntimeToken: config.RuntimeToken,
 		Insecure:     config.Insecure,
 		Next:         handler,
@@ -1998,6 +2064,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	// resources close through the defer above. Only a live handler owns them.
 	providerRegistryAuthorityTransferred = !simulation
 	providerClientOwnedByHandler = !simulation
+	toolSnapshotsOwnedByHandler = !simulation
 	return boundHandler, nil
 }
 

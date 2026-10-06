@@ -2675,6 +2675,7 @@ const GoG5NamedRuntimeApi = z.enum([
   'fetchUpstreamModels',
   'getAnalytixConfigFile',
   'importMappingPreview',
+  'invalidateToolResultLocalDisplay',
   'onRuntimeStatus',
   'openAnalytixConfigDir',
   'probeModelCapabilities',

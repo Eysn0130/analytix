@@ -590,6 +590,40 @@ func (s *DurableEventSessionStore) EnsurePrivateToolResultItemExact(threadID, tu
 	return err
 }
 
+// EnsureProtectedToolResultSettlementExact uses primary bytes both as source
+// and committed evidence. Call status and private result change together once.
+func (s *DurableEventSessionStore) EnsureProtectedToolResultSettlementExact(ctx context.Context, threadID, turnID, callItemID string, item map[string]any) error {
+	projected, ok := domaintoolresult.PrivateDurableToolResultItemRecordV1(item)
+	if !ok || !reflect.DeepEqual(contracts.CloneMap(item), contracts.CloneMap(projected)) || item[domaintoolresult.ProtectedSnapshotBindingFieldV1] == nil {
+		return errors.New("protected tool settlement is not closed")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot, err := s.ReadPrimaryThreadSnapshotV1(ctx, threadID)
+	if err != nil {
+		return err
+	}
+	mutation := turnapp.OrdinaryToolSettlementInput{Thread: snapshot.Thread, ThreadID: threadID, TurnID: turnID, ToolCallItemID: callItemID, CallID: stringField(item, "callId"), ToolName: stringField(item, "toolName"), Status: stringField(item, "status"), Timestamp: stringField(item, "finishedAt"), ResultItem: item}
+	next, changed, err := turnapp.EnsureOrdinaryToolSettlementExact(mutation)
+	if err != nil || !changed {
+		return err
+	}
+	if err := turnapp.ValidateSecurityBoundAppend(snapshot.Thread, turnID, item); err != nil {
+		return err
+	}
+	writeErr := s.upsertThreadNoLock(next, false)
+	persisted, readErr := s.ReadPrimaryThreadSnapshotV1(ctx, threadID)
+	if readErr != nil {
+		return errors.Join(writeErr, readErr)
+	}
+	mutation.Thread = persisted.Thread
+	_, stillChanged, exactErr := turnapp.EnsureOrdinaryToolSettlementExact(mutation)
+	if exactErr == nil && !stillChanged {
+		return nil
+	}
+	return errors.Join(writeErr, exactErr, errors.New("protected tool settlement primary exact readback unavailable"))
+}
+
 func (s *DurableEventSessionStore) PatchTurnItemStatus(threadID, turnID, itemID, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

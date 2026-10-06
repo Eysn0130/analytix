@@ -960,6 +960,12 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
     cleaningDiffPreview: browserLocalDisplayUnavailable,
     directSourcePreview: browserLocalDisplayUnavailable,
     acceptedSlotDisplay: browserLocalDisplayUnavailable,
+    openToolResultLocalDisplay: async () => ({ ok: false, code: 'unavailable' }),
+    closeToolResultLocalDisplay: async () => undefined,
+    copyToolResultLocalDisplay: async () => ({ ok: false, code: 'unavailable' }),
+    saveToolResultLocalDisplay: async () => ({ ok: false, code: 'unavailable' }),
+    invalidateToolResultLocalDisplay: async () => undefined,
+    onToolResultLocalDisplayInvalidated: () => () => undefined,
     stageFundsCSVSnapshot: browserFundsCSVSnapshotStageUnavailable,
     confirmFundsCSVSnapshot: browserFundsCSVSnapshotConfirmUnavailable,
     cancelFundsCSVImport: browserFundsCSVImportCancelUnavailable,
@@ -981,6 +987,12 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
     | 'cleaningDiffPreview'
     | 'directSourcePreview'
     | 'acceptedSlotDisplay'
+    | 'openToolResultLocalDisplay'
+    | 'closeToolResultLocalDisplay'
+    | 'copyToolResultLocalDisplay'
+    | 'saveToolResultLocalDisplay'
+    | 'invalidateToolResultLocalDisplay'
+    | 'onToolResultLocalDisplayInvalidated'
     | 'stageFundsCSVSnapshot'
     | 'confirmFundsCSVSnapshot'
     | 'cancelFundsCSVImport'
@@ -1134,6 +1146,12 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       cleaningDiffPreview: flatApi.cleaningDiffPreview,
       directSourcePreview: flatApi.directSourcePreview,
       acceptedSlotDisplay: flatApi.acceptedSlotDisplay,
+      openToolResultLocalDisplay: flatApi.openToolResultLocalDisplay,
+      closeToolResultLocalDisplay: flatApi.closeToolResultLocalDisplay,
+      copyToolResultLocalDisplay: flatApi.copyToolResultLocalDisplay,
+      saveToolResultLocalDisplay: flatApi.saveToolResultLocalDisplay,
+      invalidateToolResultLocalDisplay: flatApi.invalidateToolResultLocalDisplay,
+      onToolResultLocalDisplayInvalidated: flatApi.onToolResultLocalDisplayInvalidated,
       stageFundsCSVSnapshot: flatApi.stageFundsCSVSnapshot,
       confirmFundsCSVSnapshot: flatApi.confirmFundsCSVSnapshot,
       cancelFundsCSVImport: flatApi.cancelFundsCSVImport,

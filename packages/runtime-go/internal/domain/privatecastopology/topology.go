@@ -30,6 +30,7 @@ type RootSpecV1 struct {
 }
 
 var runtimeRootSpecsV1 = []RootSpecV1{
+	rootSpec("tool-result-snapshots-v1", "tool-result-snapshots-v1", LayoutDirectRootV1, SnapshotStrictCanonicalJSONV1),
 	rootSpec("runtime-sidecar-authority-v1/allocations", "backend-generation", LayoutDirectRootV1, SnapshotStrictCanonicalJSONV1),
 	rootSpec("accepted-finals/records", "accepted-finals", LayoutOwnerLeafV1, SnapshotStrictCanonicalJSONV1),
 	rootSpec("accepted-finals/dispositions", "accepted-finals", LayoutOwnerLeafV1, SnapshotStrictCanonicalJSONV1),
@@ -170,7 +171,7 @@ func KnownTopLevelOwnerAliasV1(value string) bool {
 }
 
 func ValidateRuntimeRootSpecsV1() error {
-	if len(runtimeRootSpecsV1) != 57 {
+	if len(runtimeRootSpecsV1) != 58 {
 		return errors.New("runtime private CAS topology root count changed")
 	}
 	rootIDs := make(map[string]struct{}, len(runtimeRootSpecsV1))
@@ -218,7 +219,7 @@ func ValidateRuntimeRootSpecsV1() error {
 			}
 		}
 	}
-	if len(groups) != 20 || opaque != 4 {
+	if len(groups) != 21 || opaque != 4 {
 		return errors.New("runtime private CAS topology group or opaque policy count changed")
 	}
 	return nil

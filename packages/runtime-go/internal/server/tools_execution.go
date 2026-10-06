@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	provider "analytix.local/runtime-go/internal/provider"
 )
 
@@ -120,11 +122,11 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 	case "native_selection_read", "native_selection_propose":
 		return h.executeNativeSelectionTool(ctx, pending, args)
 	case "read":
-		output, readContent, isError := executeReadRuntimeTool(pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeWindow)
+		output, readContent, isError := executeReadRuntimeToolWithCapture(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeWindow)
 		h.recordRuntimeRead(pending, output, readContent, isError)
 		return output, isError
 	case "read_file":
-		output, readContent, isError := executeReadRuntimeTool(pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeNumbered)
+		output, readContent, isError := executeReadRuntimeToolWithCapture(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeNumbered)
 		h.recordRuntimeRead(pending, output, readContent, isError)
 		return output, isError
 	case "ls":
@@ -222,6 +224,7 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 }
 
 func (h *runtimeServerHandler) executeAndSettleRuntimeTool(ctx context.Context, pending runtimePendingToolCall, override any, transform apploop.ToolOutputTransform) (apploop.SettledToolExecution, error) {
+	ctx = domaintoolresult.WithProtectedCaptureV1(ctx, &domaintoolresult.ProtectedCaptureCollectorV1{})
 	return apploop.ExecuteAndSettleWithSideEffectIntent(apploop.SideEffectIntentExecutionInput{
 		Context: ctx, Pending: pending, Override: override, Transform: transform,
 		Acquire: func(effectCtx context.Context, _ domainsecurity.TurnSecurityContext) (context.Context, func(), error) {
@@ -335,16 +338,23 @@ func (h *runtimeServerHandler) executeRuntimeAuthorizedReadOnlyToolBatch(ctx con
 	if len(calls) == 0 {
 		return "", nil, nil
 	}
+	captures := make(map[string]*domaintoolresult.ProtectedCaptureCollectorV1, len(calls))
+	for _, pending := range calls {
+		if captures[pending.Call.ID] != nil {
+			return "", nil, errors.New("duplicate batch capture identity")
+		}
+		captures[pending.Call.ID] = &domaintoolresult.ProtectedCaptureCollectorV1{}
+	}
 	var messages []provider.Message
 	receipt, err := h.pendingWork.WithOpenToolBatch(ctx, h.runtimeSubagentState().EffectGate(), calls, func(effectCtx context.Context) error {
 		results := toolcatalogapp.ExecuteBatch(effectCtx, calls, func(ctx context.Context, pending runtimePendingToolCall) (any, bool) {
-			return h.executeRuntimeToolWithEffectAuthority(ctx, pending, nil)
+			return h.executeRuntimeToolWithEffectAuthority(domaintoolresult.WithProtectedCaptureV1(ctx, captures[pending.Call.ID]), pending, nil)
 		}, func(pending runtimePendingToolCall, cancelErr error) (any, bool) {
 			return runtimeToolCancelledOutput(pending.Call, cancelErr), true
 		})
 		var executeErr error
 		messages, executeErr = apploop.PersistReadOnlyBatchResults(effectCtx, results, func(ctx context.Context, pending runtimePendingToolCall, output any, isError bool) (provider.Message, error) {
-			settled, settleErr := apploop.SettleReadOnlyBatchToolOutputV1(ctx, pending,
+			settled, settleErr := apploop.SettleReadOnlyBatchToolOutputV1(domaintoolresult.WithProtectedCaptureV1(ctx, captures[pending.Call.ID]), pending,
 				func(effectCtx context.Context, _ domainsecurity.TurnSecurityContext) (context.Context, func(), error) {
 					return apploop.AcquirePendingToolEffect(effectCtx, pending, h.runtimeSubagentState().AcquireContextEffectForAuthority)
 				}, output, isError, h.settleRuntimeToolResultWithEffectAuthority, h.mcp)

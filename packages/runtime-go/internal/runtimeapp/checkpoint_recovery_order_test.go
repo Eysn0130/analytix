@@ -20,6 +20,7 @@ func TestCheckpointQuarantineKeepsExistingPrivateCASOwnerRecoveryOrder(t *testin
 		names = append(names, owner.name)
 	}
 	want := []string{
+		"tool-result-snapshots-v1",
 		"backend-generation",
 		"accepted-finals",
 		"case-entity",
@@ -43,6 +44,14 @@ func TestCheckpointQuarantineKeepsExistingPrivateCASOwnerRecoveryOrder(t *testin
 	}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("private CAS owner recovery order changed: got=%v want=%v", names, want)
+	}
+	snapshotOwner := owners[0]
+	wantSnapshotRoots := []string{filepath.Join("/frozen-data-root", "private", "tool-result-snapshots-v1")}
+	if !reflect.DeepEqual(snapshotOwner.expectedRoots, wantSnapshotRoots) {
+		t.Fatalf("tool result snapshot recovery roots = %v, want %v", snapshotOwner.expectedRoots, wantSnapshotRoots)
+	}
+	if !snapshotOwner.standaloneCASRoots || snapshotOwner.additionalTopologyCount != 0 || snapshotOwner.applyBeforeTransaction != nil {
+		t.Fatal("tool result snapshot recovery must remain standalone without additional topology or pre-transaction mutation")
 	}
 }
 

@@ -998,6 +998,10 @@ function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetad
     const projection = PublicToolResultProjectionV1.safeParse(item.output)
     if (projection.success && projection.data.projectionKind === 'artifact_status') meta.generatedArtifact = projection.data.artifact
   }
+  if (item.kind === 'tool_result' && ['bash', 'read', 'read_file'].includes(item.toolName ?? '') &&
+      item.turnId && item.callId && item.id) {
+    meta.localResult = { turnId: item.turnId, callId: item.callId, resultItemId: item.id }
+  }
   return {
     kind: 'tool',
     id: toolBlockId(item, normalizedChild),

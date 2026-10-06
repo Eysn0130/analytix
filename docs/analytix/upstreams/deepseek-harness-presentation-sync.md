@@ -1,7 +1,7 @@
 # DeepSeek Harness presentation intake
 
 Status: Reference / scoped port-and-adapt record.
-Scope: renderer presentation stage 1; public incremental/tool DTO stage 2 is design only.
+Scope: renderer presentation stage 1, plus the bounded protected-local settled Shell/Read candidate described below. Public incremental/tool DTO stage 2 remains design only.
 Current base: Analytix `09003e3f185bd0255cb227a9f96f1cc03b683fdd`.
 Source: official `deepseek-ai/deepseek-harness`, release `dsh-v0.2.1-alpha.1`,
 commit `5badb15009ae1756c3afe0ae0cef1faafc290ccc`. Currentness and parity are not claimed.
@@ -146,3 +146,43 @@ Four unused mascot locale keys are removed while legacy preference compatibility
 remains. Icon provenance follows current consumers; the 139 admitted SVGs and
 their license/provenance identities are unchanged. The historical 35-source
 intake and 67 disposition rows do not establish 67 fresh acceptance results.
+
+## Protected-local settled Shell/Read candidate
+
+The separately approved bounded task starts from Analytix
+`c7d2a370855a8d371c61c32cc2422515b9404ef2`. It adds the following
+renderer-only MIT adaptations. The stage-1 source rows above keep their
+recorded base and evidence. This candidate is uncommitted. Local affected-owner
+Go/TypeScript checks, the production exact-owner checks and source build have
+passed. Canonical integration, native UI acceptance and current CI remain
+pending; local source evidence does not establish release or parity.
+
+| Exact upstream path at the pinned commit | Git blob | Local destination |
+| --- | --- | --- |
+| `packages/client/ui-primitives/src/TerminalBlock.tsx` | `76e7f92808f3783f68b1b6da27b98895ad6a732d` | `src/renderer/src/components/chat/presentation/TerminalBlock.tsx` |
+| `packages/client/ui-primitives/src/TerminalBlock.module.css` | `c4d4ddda1a7a901bae644120152ebff17c578113` | `src/renderer/src/components/chat/presentation/TerminalBlock.module.css` |
+| `packages/client/ui-primitives/src/ReadBlock.tsx` | `0eaf96374f7689ed9b7aae68df9bedaa8e716ddf` | `src/renderer/src/components/chat/presentation/ReadBlock.tsx` |
+| `packages/client/ui-primitives/src/ReadBlock.module.css` | `601bb29f48e11edebaed068488c0db71aabcf883` | `src/renderer/src/components/chat/presentation/ReadBlock.module.css` |
+| `packages/client/ui-primitives/src/ansi.ts` | `2b5ae35a5dca178ad214c853dbd9cc9b2425b011` | `src/renderer/src/components/chat/presentation/ansi.ts` |
+| `packages/client/ui-primitives/src/head-tail-cap.ts` | `195a1c98bebebbfe69b8be9bc1cc0b57b5c1e7a6` | `src/renderer/src/components/chat/presentation/head-tail-cap.ts` |
+
+Task source research verified the official commit/tag, complete source tree
+and six source blobs; two read-only reviewers checked the integration boundaries. The ui-primitives
+package declares MIT; its selected tree has no gitlink, nested license
+exception, or selected font/image asset. Root MIT terms and copyright remain
+in `THIRD_PARTY_NOTICES.md` and every adapted file header. Existing React,
+clsx and Shiki dependencies retain their existing notices; no dependency was
+added. Upstream `anser` is replaced by an Analytix-owned bounded numeric SGR
+resolver around the admitted cursor logic. Raw clipboard hooks, inferred
+success, running deltas and DSH runtime/session authority are excluded.
+
+Actual producer capture, private CAS, authorization and settlement are
+Analytix Go owners. Main mediates fresh reads and ordinary Write masking for
+copy/save. The effect removes SGR decoration before masking split tokens;
+other terminal control languages are unsupported for copy/save. The lazy
+renderer payload does not become a public projection,
+Markdown transcript, model history, execution argument or second runtime.
+The initial body cap is 32 KiB UTF-8; folding and ANSI/highlight budgets do not
+alter the frozen copy/save source. Preview, Search/Diff/Web and source-exact
+case export are outside this candidate. Official upstream testing/pre-push
+guides were inspected as reference; upstream CI was not run or claimed green.

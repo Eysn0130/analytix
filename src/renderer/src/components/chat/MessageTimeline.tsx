@@ -1,3 +1,4 @@
+import { ProtectedToolResultScope } from './presentation/ProtectedToolResult'
 import type { ProfilerOnRenderCallback, ReactElement, RefObject } from 'react'
 import { Profiler, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -1167,12 +1168,13 @@ function MessageTurn({
           {workExpanded && processSections.length > 0 ? (
             <div className="flex flex-col gap-1">
               {processSections.map((section) => (
-                <ProcessSectionRow
-                  key={section.id}
-                  section={section}
-                  processing={effectiveProcessing}
-                  viewportRef={viewportRef}
-                />
+                <ProtectedToolResultScope.Provider key={section.id} value={activeThreadId}>
+                  <ProcessSectionRow
+                    section={section}
+                    processing={effectiveProcessing}
+                    viewportRef={viewportRef}
+                  />
+                </ProtectedToolResultScope.Provider>
               ))}
             </div>
           ) : null}
