@@ -2465,6 +2465,7 @@ expectWindowAnalytixApiAllowList(
     'fetchUpstreamModels',
     'getAnalytixConfigFile',
     'importMappingPreview',
+    'invalidateToolResultLocalDisplay',
     'onRuntimeStatus',
     'openAnalytixConfigDir',
     'probeModelCapabilities',

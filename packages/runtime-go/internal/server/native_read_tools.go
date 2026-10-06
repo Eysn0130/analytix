@@ -14,10 +14,6 @@ const (
 	runtimeReadDefaultLimit = filetoolsapp.DefaultReadLimit
 )
 
-func executeReadRuntimeTool(pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string, mode string) (map[string]any, string, bool) {
-	return executeReadRuntimeToolWithCapture(nil, pending, args, protectedReadDirs, readRoots, mode)
-}
-
 func executeReadRuntimeToolWithCapture(ctx context.Context, pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string, mode string) (map[string]any, string, bool) {
 	return filestore.ExecuteReadTextTool(filestore.ReadTextToolInput{
 		Capture: func(candidate domaintoolresult.ProtectedCaptureV1) {

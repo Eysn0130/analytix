@@ -1628,6 +1628,7 @@ function desktopSovereigntyControlCase() {
     'fetchUpstreamModels',
     'getAnalytixConfigFile',
     'importMappingPreview',
+    'invalidateToolResultLocalDisplay',
     'onRuntimeStatus',
     'openAnalytixConfigDir',
     'probeModelCapabilities',
