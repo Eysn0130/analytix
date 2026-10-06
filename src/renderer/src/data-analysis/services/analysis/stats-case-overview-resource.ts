@@ -165,13 +165,44 @@ function writeCaseOverviewCache(
   emitCaseOverview(store, caseId, overview);
 }
 
-export function setSharedActiveCaseContext(
+const beforeActiveCaseChange = new Set<() => void>();
+let activeCaseChangeTicket = 0;
+let activeCaseInvalidation: Promise<void> | null = null;
+export function sharedActiveCaseContextTransitionPending(): boolean { return activeCaseInvalidation !== null; }
+export function subscribeBeforeSharedActiveCaseContextChange(listener: () => void): () => void {
+  beforeActiveCaseChange.add(listener);
+  return () => { beforeActiveCaseChange.delete(listener); };
+}
+
+export async function setSharedActiveCaseContext(
   context: { caseId?: string | null; workspaceRoot?: string | null } | null
-): SharedActiveCaseContext | null {
+): Promise<SharedActiveCaseContext | null> {
   const store = getSharedCaseOverviewStore();
   const caseId = String(context?.caseId || "").trim();
   const workspaceRoot = String(context?.workspaceRoot || "").trim();
   const previous = store.activeCaseContext;
+  const ticket = ++activeCaseChangeTicket;
+  const unchanged = (previous?.caseId ?? "") === caseId && (previous?.workspaceRoot ?? "") === workspaceRoot;
+  if (unchanged && !activeCaseInvalidation) return previous;
+  for (const clear of [...beforeActiveCaseChange]) clear();
+  // An A -> B -> A intent cancels B even while B's Host ACK is pending.
+  // Same-context callers retain that barrier before returning to their caller.
+  const invalidation = unchanged && activeCaseInvalidation ? activeCaseInvalidation : (async () => {
+    if (typeof window !== "undefined" && window.analytix?.runtime) {
+      await window.analytix.runtime.invalidateToolResultLocalDisplay();
+    }
+  })();
+  activeCaseInvalidation = invalidation;
+  try { await invalidation; }
+  catch { return store.activeCaseContext; }
+  finally {
+    if (activeCaseInvalidation === invalidation) {
+      activeCaseInvalidation = null;
+      for (const clear of [...beforeActiveCaseChange]) clear();
+    }
+  }
+  if (ticket !== activeCaseChangeTicket || unchanged) return store.activeCaseContext;
+  for (const clear of [...beforeActiveCaseChange]) clear();
   if (!caseId) {
     if (previous === null) {
       return null;
@@ -356,6 +387,7 @@ export async function preloadCaseOverviewForWorkspace(
   if (!result.ok) {
     throw new Error(result.message || "ensure workspace case failed");
   }
-  setSharedActiveCaseContext({ caseId: result.caseId, workspaceRoot: normalizedWorkspaceRoot });
+  const current = await setSharedActiveCaseContext({ caseId: result.caseId, workspaceRoot: normalizedWorkspaceRoot });
+  if (current?.caseId !== result.caseId || current.workspaceRoot !== normalizedWorkspaceRoot) return null;
   return preloadSharedCaseOverview(result.caseId);
 }

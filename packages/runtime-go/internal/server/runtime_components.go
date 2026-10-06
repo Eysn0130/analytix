@@ -49,6 +49,7 @@ import (
 	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	managededitingport "analytix.local/runtime-go/internal/ports/managedediting"
 	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
+	snapshotport "analytix.local/runtime-go/internal/ports/toolresultsnapshot"
 	provider "analytix.local/runtime-go/internal/provider"
 	research "analytix.local/runtime-go/internal/research"
 )
@@ -68,14 +69,16 @@ type ProviderExecutionCurrentnessValidator interface {
 }
 
 type RuntimeServerComponents struct {
-	DocumentCodec            codecport.Codec
-	ManagedEditingFiles      managededitingport.Files
-	OfficeAdapters           map[string]adapterport.Adapter
-	OfficePackageHost        *packagehostapp.Service
-	ObjectEditing            *objecteditingapp.Service
-	WorkspaceRead            *workspacereadapp.Service
-	UncontainedMCPConfigured bool
-	AsyncTurnObserverV1      func(AsyncTurnObservationV1)
+	ToolResultSnapshots               snapshotport.Store
+	ToolResultSnapshotHistoryValidate func(context.Context, map[string]any, domainsecurity.TurnSecurityContext) error
+	DocumentCodec                     codecport.Codec
+	ManagedEditingFiles               managededitingport.Files
+	OfficeAdapters                    map[string]adapterport.Adapter
+	OfficePackageHost                 *packagehostapp.Service
+	ObjectEditing                     *objecteditingapp.Service
+	WorkspaceRead                     *workspacereadapp.Service
+	UncontainedMCPConfigured          bool
+	AsyncTurnObserverV1               func(AsyncTurnObservationV1)
 	// AsyncTurnPhaseObserverV1 is an optional in-process regression barrier.
 	// It receives fixed phase labels only, never public or persisted data.
 	AsyncTurnPhaseObserverV1 func(string)
@@ -199,68 +202,70 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 	handler := &runtimeServerHandler{
 		asyncTurnPhaseObserver: components.AsyncTurnPhaseObserverV1,
 
-		turnSeq:            components.ChildIdentityFloors.TurnSequence,
-		runtimeToken:       config.RuntimeToken,
-		insecure:           config.Insecure,
-		startedAt:          config.StartedAt,
-		host:               config.Host,
-		port:               config.Port,
-		dataDir:            config.DataDir,
-		infoDataDir:        firstNonEmptyString(components.InfoDataDir, config.DataDir),
-		mutationAuthority:  mutationAuthority,
-		store:              components.Store,
-		attachments:        components.Attachments,
-		attachmentAccess:   components.AttachmentAccess,
-		attachmentUses:     components.AttachmentUses,
-		memories:           components.Memories,
-		caseFinalizer:      components.CaseFinalizer,
-		asyncTurnObserver:  components.AsyncTurnObserverV1,
-		caseThreads:        components.CaseThreads,
-		turnSecurity:       components.TurnSecurity,
-		continuations:      components.Continuations,
-		pendingWork:        components.PendingWork,
-		checkpoints:        components.Checkpoints,
-		workspaceMutations: workspacemutationapp.NewCoordinator(),
-		publicProjector:    threadapp.EnsurePublicProjector(components.PublicProjector),
-		provider:           components.Provider,
-		providerConfig:     components.ProviderConfig,
-		providerExecution:  components.ProviderExecution,
-		providerRegistry:   components.ProviderRegistry,
-		mediaExecution:     components.MediaExecution,
-		modelProxyURL:      components.ModelProxyURL,
-		approvalPolicy:     components.ApprovalPolicy,
-		sandboxMode:        components.SandboxMode,
-		gate:               components.Gate,
-		gates:              controlapp.NewGateRegistry[runtimePendingToolCall](),
-		mcp:                components.MCP,
-		mcpSearch:          components.MCPSearch,
-		commandProbe:       components.CommandProbe,
-		commandHomeDir:     components.CommandHomeDir,
-		workspaceProbe:     components.WorkspaceProbe,
-		shellRunner:        components.ShellRunner,
-		gitStatusProbe:     components.GitStatusProbe,
-		worktreeManager:    components.WorktreeManager,
-		allowWriteRoots:    components.AllowWriteRoots,
-		protectedReadDirs:  components.ProtectedReadDirs,
-		jobs:               components.Jobs,
-		childCompletions:   components.ChildCompletions,
-		foregroundHandoffs: components.ForegroundHandoffs,
-		g6Readiness:        components.G6Readiness,
-		autoResearch:       components.AutoResearch,
-		skills:             components.Skills,
-		subagents:          components.Subagents,
-		subagentState:      components.SubagentState,
-		nativeAuthority:    components.NativeAuthority,
-		caseEntities:       components.CaseEntities,
-		resolveCaseIngress: components.ResolveCaseIngress,
-		caseAnswerSlots:    components.CaseAnswerSlots,
-		steeringAuthority:  components.SteeringAuthority,
-		web:                components.Web,
-		visionBridge:       components.VisionBridge,
-		stepLimits:         components.StepLimits,
-		heartbeatInterval:  components.HeartbeatInterval,
-		readRegistry:       filetoolsapp.NewReadRegistry(),
-		cachePrefixShapes:  map[string]appusage.PrefixBaseline{},
+		turnSeq:                     components.ChildIdentityFloors.TurnSequence,
+		runtimeToken:                config.RuntimeToken,
+		insecure:                    config.Insecure,
+		startedAt:                   config.StartedAt,
+		host:                        config.Host,
+		port:                        config.Port,
+		dataDir:                     config.DataDir,
+		infoDataDir:                 firstNonEmptyString(components.InfoDataDir, config.DataDir),
+		mutationAuthority:           mutationAuthority,
+		store:                       components.Store,
+		toolSnapshots:               components.ToolResultSnapshots,
+		toolSnapshotHistoryValidate: components.ToolResultSnapshotHistoryValidate,
+		attachments:                 components.Attachments,
+		attachmentAccess:            components.AttachmentAccess,
+		attachmentUses:              components.AttachmentUses,
+		memories:                    components.Memories,
+		caseFinalizer:               components.CaseFinalizer,
+		asyncTurnObserver:           components.AsyncTurnObserverV1,
+		caseThreads:                 components.CaseThreads,
+		turnSecurity:                components.TurnSecurity,
+		continuations:               components.Continuations,
+		pendingWork:                 components.PendingWork,
+		checkpoints:                 components.Checkpoints,
+		workspaceMutations:          workspacemutationapp.NewCoordinator(),
+		publicProjector:             threadapp.EnsurePublicProjector(components.PublicProjector),
+		provider:                    components.Provider,
+		providerConfig:              components.ProviderConfig,
+		providerExecution:           components.ProviderExecution,
+		providerRegistry:            components.ProviderRegistry,
+		mediaExecution:              components.MediaExecution,
+		modelProxyURL:               components.ModelProxyURL,
+		approvalPolicy:              components.ApprovalPolicy,
+		sandboxMode:                 components.SandboxMode,
+		gate:                        components.Gate,
+		gates:                       controlapp.NewGateRegistry[runtimePendingToolCall](),
+		mcp:                         components.MCP,
+		mcpSearch:                   components.MCPSearch,
+		commandProbe:                components.CommandProbe,
+		commandHomeDir:              components.CommandHomeDir,
+		workspaceProbe:              components.WorkspaceProbe,
+		shellRunner:                 components.ShellRunner,
+		gitStatusProbe:              components.GitStatusProbe,
+		worktreeManager:             components.WorktreeManager,
+		allowWriteRoots:             components.AllowWriteRoots,
+		protectedReadDirs:           components.ProtectedReadDirs,
+		jobs:                        components.Jobs,
+		childCompletions:            components.ChildCompletions,
+		foregroundHandoffs:          components.ForegroundHandoffs,
+		g6Readiness:                 components.G6Readiness,
+		autoResearch:                components.AutoResearch,
+		skills:                      components.Skills,
+		subagents:                   components.Subagents,
+		subagentState:               components.SubagentState,
+		nativeAuthority:             components.NativeAuthority,
+		caseEntities:                components.CaseEntities,
+		resolveCaseIngress:          components.ResolveCaseIngress,
+		caseAnswerSlots:             components.CaseAnswerSlots,
+		steeringAuthority:           components.SteeringAuthority,
+		web:                         components.Web,
+		visionBridge:                components.VisionBridge,
+		stepLimits:                  components.StepLimits,
+		heartbeatInterval:           components.HeartbeatInterval,
+		readRegistry:                filetoolsapp.NewReadRegistry(),
+		cachePrefixShapes:           map[string]appusage.PrefixBaseline{},
 	}
 	if handler.store != nil {
 		handler.store.SetCaseThreadAuthority(handler.caseThreads)

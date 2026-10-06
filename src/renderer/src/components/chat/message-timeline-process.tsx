@@ -1,3 +1,4 @@
+import { ProtectedToolResult } from './presentation/ProtectedToolResult'
 import type { MouseEvent as ReactMouseEvent, ReactElement, RefObject } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -1608,6 +1609,7 @@ function ProcessEntryDetail({
     )
   }
   if (detail.kind === 'tool') {
+    if (block.kind === 'tool' && block.meta?.localResult) return <>{runtimeMetaDetail}<ProtectedToolResult block={block} /></>
     if (detail.isPatch) {
       return (
         <>

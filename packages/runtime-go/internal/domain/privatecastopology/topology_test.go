@@ -12,7 +12,7 @@ func TestRuntimePrivateCASTopologyIsExactAndHasFourOpaqueRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	specs := RuntimeRootSpecsV1()
-	if len(specs) != 57 {
+	if len(specs) != 58 {
 		t.Fatalf("root count = %d", len(specs))
 	}
 	groups := map[string]int{}
@@ -29,7 +29,7 @@ func TestRuntimePrivateCASTopologyIsExactAndHasFourOpaqueRoots(t *testing.T) {
 		"dataset-snapshot-authority/materials",
 		"report-publication/artifacts",
 	}
-	if len(groups) != 20 || !slices.Equal(opaque, wantOpaque) {
+	if len(groups) != 21 || !slices.Equal(opaque, wantOpaque) {
 		t.Fatalf("topology groups/opaque roots changed: groups=%#v opaque=%#v", groups, opaque)
 	}
 	if roots := RootsForRecoveryGroupV1("checkpoint-authority"); len(roots) != 6 {
@@ -101,9 +101,9 @@ func TestRuntimePrivateCASDirectoryTopologyIsExact(t *testing.T) {
 	scanParents := CreateRecoveryScanParentPathsV1()
 	shards := CanonicalShardComponentsV1()
 	ownerGroups := RecoverableOwnerDirectoryGroupsV1()
-	if len(slots) != 78 || len(fixedParents) != 22 || len(shardParents) != 57 ||
-		len(scanParents) != 79 || len(shards) != 256 || len(ownerGroups) != 16 ||
-		MaximumCreateResidueCandidateLocationsV1() != 14_670 {
+	if len(slots) != 79 || len(fixedParents) != 22 || len(shardParents) != 58 ||
+		len(scanParents) != 80 || len(shards) != 256 || len(ownerGroups) != 16 ||
+		MaximumCreateResidueCandidateLocationsV1() != 14_927 {
 		t.Fatalf(
 			"directory topology counts changed: slots=%d fixedParents=%d shardParents=%d scanParents=%d shards=%d owners=%d candidates=%d",
 			len(slots),

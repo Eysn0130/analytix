@@ -1,3 +1,5 @@
+import { invalidateToolResultLocalDisplaysV1 } from './ipc/tool-result-local-display-ipc'
+import { TOOL_RESULT_LOCAL_DISPLAY_PATH_V1, TOOL_RESULT_LOCAL_DISPLAY_MAX_BYTES_V1 } from '../../packages/runtime/src/contracts/tool-result-local-display'
 import { registerBrowserGuest } from './browser/browser-selection'
 import { clearWriteRetrievalCache } from './services/write-retrieval-service'
 import {
@@ -1118,6 +1120,7 @@ const bundledFundsActivation = createBundledFundsOnDemandActivationV1({
 
 function publishRuntimeStatus(input: RuntimeStatusPublicV1Input): void {
   const full = createRuntimeStatusPublicV1(input)
+  if (full.state !== 'running') invalidateToolResultLocalDisplaysV1()
   lastRuntimeStatus = full
   const { message: _message, at: _at, ...publicDiagnostic } = full
   logWarn('runtime-status', full.code, publicDiagnostic)
@@ -1958,13 +1961,34 @@ async function localDisplayRuntimeRequest(
           method: 'POST',
           headers,
           body,
+          ...(path === TOOL_RESULT_LOCAL_DISPLAY_PATH_V1 ? { redirect: 'error' as const, cache: 'no-store' as const } : {}),
           signal: AbortSignal.any([
             ...(signal ? [signal] : []),
             AbortSignal.timeout(path === '/v1/local-display/funds-import/stage' ||
               path === '/v1/local-display/funds-import/confirm' ? 180_000 : 60_000)
           ])
         })
-        const responseBody = await response.text()
+        let responseBody: string
+        if (path === TOOL_RESULT_LOCAL_DISPLAY_PATH_V1) {
+          const reader = response.body?.getReader()
+          if (!reader) return { ok: false, status: 502, body: '' }
+          const chunks: Uint8Array[] = []
+          let size = 0
+          try {
+            for (;;) {
+              const chunk = await reader.read()
+              if (chunk.done) break
+              size += chunk.value.byteLength
+              if (size > TOOL_RESULT_LOCAL_DISPLAY_MAX_BYTES_V1 || signal?.aborted ||
+                  !isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
+                await reader.cancel()
+                return { ok: false, status: 502, body: '' }
+              }
+              chunks.push(chunk.value)
+            }
+            responseBody = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))
+          } finally { reader.releaseLock() }
+        } else responseBody = await response.text()
         if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
           return { ok: false, status: 409, body: '' }
         }
@@ -2496,6 +2520,7 @@ app.whenReady().then(async () => {
     retainTerminalRuntimeProtectedRoots(prev)
     retainTerminalRuntimeProtectedRoots(next)
     const startupConfigChanged = runtimeStartupConfigChanged(prev, next)
+    if (startupConfigChanged || prev.workspaceRoot !== next.workspaceRoot) invalidateToolResultLocalDisplaysV1()
     let releaseTerminalCreates = startupConfigChanged
       ? terminalPtyController?.suspendCreates() ?? null
       : null

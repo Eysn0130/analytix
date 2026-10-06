@@ -1,4 +1,5 @@
 export const LOCAL_DISPLAY_RUNTIME_PATHS_V1 = [
+  '/v1/local-display/tool-result-snapshot',
   '/v1/local-display/generated-artifact',
   '/v1/local-display/object-editing',
   '/v1/local-display/browser-selection',

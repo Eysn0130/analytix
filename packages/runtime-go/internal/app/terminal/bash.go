@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	"analytix.local/runtime-go/internal/ports"
 )
 
@@ -80,6 +81,18 @@ func ExecuteForegroundBash(ctx context.Context, runner ports.ShellRunner, reques
 		status = "failed"
 		isError = true
 	}
+	rawBody, captureCut := output.Snapshot()
+	captureBody, byteCut := domaintoolresult.BoundProtectedTextV1(rawBody, domaintoolresult.ProtectedSnapshotBodyLimitV1)
+	label, _ := domaintoolresult.BoundProtectedTextV1(request.Command, 1024)
+	var exitCode *int
+	captureStatus := status
+	if result.ExitCode >= 0 {
+		code := result.ExitCode
+		exitCode = &code
+	} else if status == "completed" {
+		captureStatus = "unknown"
+	}
+	domaintoolresult.CaptureProtectedToolResultV1(ctx, domaintoolresult.ProtectedCaptureV1{Kind: "shell", Status: captureStatus, Body: captureBody, Label: label, ExitCode: exitCode, DurationMs: time.Since(startedAt).Milliseconds(), Truncated: captureCut || byteCut})
 	outputText := output.String()
 	return map[string]any{
 		"command":        request.Command,

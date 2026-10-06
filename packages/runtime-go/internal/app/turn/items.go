@@ -7,6 +7,7 @@ import (
 
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 var (
@@ -91,8 +92,28 @@ type RecoveredToolSettlementInput struct {
 // and its exact tool-result append as one in-memory mutation. Exact replay is
 // side-effect free; every identity or byte mismatch fails closed.
 func EnsureRecoveredToolSettlementExact(input RecoveredToolSettlementInput) (map[string]any, bool, error) {
+	return ensureToolSettlementExact(input, true)
+}
+
+// OrdinaryToolSettlementInput retains the exact successful or failed Host
+// result. Recovery's error-only authority is not borrowed by ordinary tools.
+type OrdinaryToolSettlementInput = RecoveredToolSettlementInput
+
+func EnsureOrdinaryToolSettlementExact(input OrdinaryToolSettlementInput) (map[string]any, bool, error) {
+	return ensureToolSettlementExact(input, false)
+}
+func ensureToolSettlementExact(input RecoveredToolSettlementInput, recovered bool) (map[string]any, bool, error) {
 	thread := contracts.CloneMap(input.Thread)
-	projected, _ := domainevent.ProjectPublicValuePreservingClosedPlanDigestV1(input.ResultItem)
+	var projected any
+	if recovered {
+		projected, _ = domainevent.ProjectPublicValuePreservingClosedPlanDigestV1(input.ResultItem)
+	} else {
+		private, closed := domaintoolresult.PrivateDurableToolResultItemRecordV1(input.ResultItem)
+		if !closed || !reflect.DeepEqual(contracts.CloneMap(private), contracts.CloneMap(input.ResultItem)) {
+			return nil, false, errors.New("ordinary tool result is not closed")
+		}
+		projected = private
+	}
 	resultItem, ok := projected.(map[string]any)
 	if !ok {
 		return nil, false, errors.New("recovered tool result projection is invalid")
@@ -113,11 +134,11 @@ func EnsureRecoveredToolSettlementExact(input RecoveredToolSettlementInput) (map
 		stringField(resultItem, "kind") != "tool_result" || stringField(resultItem, "role") != "tool" ||
 		stringField(resultItem, "callId") != callID ||
 		stringField(resultItem, "toolName") != toolName || stringField(resultItem, "status") != status ||
-		stringField(resultItem, "createdAt") != timestamp || stringField(resultItem, "finishedAt") != timestamp {
+		(recovered && stringField(resultItem, "createdAt") != timestamp) || stringField(resultItem, "createdAt") == "" || stringField(resultItem, "finishedAt") != timestamp {
 		return nil, false, errors.New("recovered tool settlement identity is invalid")
 	}
 	isError, isErrorOK := resultItem["isError"].(bool)
-	if !isErrorOK || !isError {
+	if !isErrorOK || (recovered && !isError) {
 		return nil, false, errors.New("recovered tool settlement lifecycle is invalid")
 	}
 	turns, _ := thread["turns"].([]any)

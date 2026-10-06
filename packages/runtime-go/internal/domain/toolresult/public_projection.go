@@ -426,6 +426,7 @@ func PrivateDurableToolResultItemRecordV1(item map[string]any) (map[string]any, 
 	reportAdmissionValue, reportAdmissionPresent := item["hostReportAdmission"]
 	privateProtocolObservedValue, privateProtocolObservedPresent := item["privateProtocolObserved"]
 	caseSourceProofValue, caseSourceProofPresent := item[CaseSourceBindingProofFieldV1]
+	snapshotValue, snapshotPresent := item[ProtectedSnapshotBindingFieldV1]
 	isCaseProjection := rawProjectionErr == nil && rawProjection.ProjectionKind == ProjectionCaseSourceStatus
 	if isCaseProjection {
 		if !caseSourceProofPresent || validateCaseSourceBindingProofForItemV1(rawProjection, item) != nil {
@@ -435,7 +436,7 @@ func PrivateDurableToolResultItemRecordV1(item map[string]any) (map[string]any, 
 		return projected, false
 	}
 	if contextDigest == "" && grantID == "" && contextEpoch == 0 && !markerPresent && !reportAdmissionPresent &&
-		!privateProtocolObservedPresent && !caseSourceProofPresent {
+		!privateProtocolObservedPresent && !caseSourceProofPresent && !snapshotPresent {
 		return projected, true
 	}
 	if !domainsecurity.IsSHA256Hex(contextDigest) || !domainsecurity.IsSHA256Hex(grantID) || contextEpoch == 0 ||
@@ -466,6 +467,13 @@ func PrivateDurableToolResultItemRecordV1(item map[string]any) (map[string]any, 
 			return projected, false
 		}
 		projected["hostReportAdmission"] = HostReportAdmissionRecordV1(admission)
+	}
+	if snapshotPresent {
+		binding, err := ParseProtectedSnapshotBindingV1(snapshotValue)
+		if err != nil || !oneOf(publicItemString(projected, "toolName"), "bash", "read", "read_file") {
+			return projected, false
+		}
+		projected[ProtectedSnapshotBindingFieldV1] = ProtectedSnapshotBindingRecordV1(binding)
 	}
 	if privateProtocolObservedPresent {
 		observed, ok := privateProtocolObservedValue.(bool)

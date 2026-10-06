@@ -1,3 +1,4 @@
+import { registerToolResultLocalDisplayIpcV1 } from './tool-result-local-display-ipc'
 import { registerBrowserSelectionIpc } from '../browser/browser-selection'
 import { authorizeWriteRetrievalSource } from './write-retrieval-ipc'
 import { createWriteExportSnapshotResolver } from './write-export-ipc'
@@ -2769,6 +2770,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     return rendererPackageHost(payload)
   })
 
+  registerToolResultLocalDisplayIpcV1(getMainWindow, localDisplayRequest)
   const resolveExportSnapshot = createWriteExportSnapshotResolver(localDisplayRequest)
   registerBrowserSelectionIpc(getMainWindow, localDisplayRequest)
   const objectEditing = createObjectEditingHandler(localDisplayRequest)

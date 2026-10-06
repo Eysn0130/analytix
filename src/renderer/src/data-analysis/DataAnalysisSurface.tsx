@@ -113,8 +113,9 @@ function RuntimeBootstrap({ workspaceRoot }: { workspaceRoot: string }): null {
           workspaceRoot: normalizedWorkspaceRoot
         });
         if (!canceled && result.ok) {
+          const context = await setSharedActiveCaseContext({ caseId: result.caseId, workspaceRoot: normalizedWorkspaceRoot });
+          if (canceled || context?.caseId !== result.caseId) return;
           actions.setActiveCaseId(result.caseId);
-          setSharedActiveCaseContext({ caseId: result.caseId, workspaceRoot: normalizedWorkspaceRoot });
           void preloadSharedCaseOverview(result.caseId).catch(() => {});
         }
       } catch {
@@ -232,8 +233,10 @@ function RuntimeBootstrap({ workspaceRoot }: { workspaceRoot: string }): null {
   useEffect(() => {
     const caseId = normalizedActiveCaseId;
     if (caseId) {
-      setSharedActiveCaseContext({ caseId, workspaceRoot });
-      void preloadSharedCaseOverview(caseId).catch(() => {});
+      void setSharedActiveCaseContext({ caseId, workspaceRoot }).then(context => {
+        if (context?.caseId === caseId) return preloadSharedCaseOverview(caseId);
+        return undefined;
+      }).catch(() => {});
     }
   }, [normalizedActiveCaseId, workspaceRoot]);
 

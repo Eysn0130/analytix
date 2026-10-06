@@ -30,6 +30,7 @@ type FrozenSecurityContextLoaderV1 func(threadID, turnID string) (domainsecurity
 type CurrentSecurityContextLoaderV1 func(threadID string) (domainsecurity.TurnSecurityContext, error)
 
 type LocalDisplayMuxV1 struct {
+	ToolResults  http.Handler
 	RuntimeToken string
 	Insecure     bool
 	Next         http.Handler
@@ -53,6 +54,9 @@ func (mux LocalDisplayMuxV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Private packaged asset admission never inherits diagnostic insecure mode.
 	insecure := mux.Insecure
+	if r.URL.Path == ToolResultLocalDisplayPathV1 {
+		insecure = false
+	}
 	if r.URL.Path == OfficePrivateAdmissionPath || r.URL.Path == BrowserSelectionPath {
 		insecure = false
 	}
@@ -63,6 +67,14 @@ func (mux LocalDisplayMuxV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	values := r.Header.Values(LocalDisplayHeaderV1)
 	if len(values) != 1 || values[0] != LocalDisplayHeaderValueV1 {
 		WriteJSON(w, http.StatusForbidden, map[string]any{"code": "local_display_forbidden", "message": "typed local display authority is required"})
+		return
+	}
+	if r.URL.Path == ToolResultLocalDisplayPathV1 {
+		if strings.TrimSpace(mux.RuntimeToken) == "" || mux.ToolResults == nil {
+			writeLocalDisplayUnavailableV1(w)
+			return
+		}
+		mux.ToolResults.ServeHTTP(w, r)
 		return
 	}
 	if mux.LocalDisplay == nil {
@@ -81,7 +93,14 @@ func (mux LocalDisplayMuxV1) Shutdown(ctx context.Context) error {
 			_ = handler.FundsCSVAdmission.Close()
 		}
 	}
+	var nextErr error
 	if lifecycle, ok := mux.Next.(interface{ Shutdown(context.Context) error }); ok {
+		nextErr = lifecycle.Shutdown(ctx)
+	}
+	if nextErr != nil {
+		return nextErr
+	}
+	if lifecycle, ok := mux.ToolResults.(interface{ Shutdown(context.Context) error }); ok {
 		return lifecycle.Shutdown(ctx)
 	}
 	return nil

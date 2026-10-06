@@ -1,3 +1,4 @@
+import { withToolResultLocalDisplayTransitionV1 } from '../ipc/tool-result-local-display-ipc'
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import {
   DATA_ANALYSIS_NATIVE_AUTHORITY_BLOCKER,
@@ -80,12 +81,14 @@ export function registerDataAnalysisIpcHandlers({
   })
   ipcMain.handle('data-analysis:ensure-workspace-case', async (event, payload: unknown) => {
     requireAuthorizedRenderer(manager, event)
-    const authority = await manager.ensureBackend()
-    if (authority.terminal || authority.authority !== 'go-native' || authority.phase !== 'running') {
-      return { ok: false, message: DATA_ANALYSIS_NATIVE_AUTHORITY_BLOCKER }
-    }
-    const workspaceRoot = text((payload as { workspaceRoot?: unknown } | null)?.workspaceRoot)
-    return ensureDataAnalysisWorkspaceCase(manager, workspaceRoot)
+    return withToolResultLocalDisplayTransitionV1(async () => {
+      const authority = await manager.ensureBackend()
+      if (authority.terminal || authority.authority !== 'go-native' || authority.phase !== 'running') {
+        return { ok: false, message: DATA_ANALYSIS_NATIVE_AUTHORITY_BLOCKER }
+      }
+      const workspaceRoot = text((payload as { workspaceRoot?: unknown } | null)?.workspaceRoot)
+      return ensureDataAnalysisWorkspaceCase(manager, workspaceRoot)
+    })
   })
 
   ipcMain.handle('data-analysis:pick-files', async (event) => {

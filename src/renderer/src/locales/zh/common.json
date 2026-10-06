@@ -2290,5 +2290,32 @@
   "markdownTableCsv": "CSV",
   "markdownTableTsv": "TSV",
   "markdownTableMarkdown": "Markdown",
-  "markdownTableExportHint": "公式形式的值按文本导出；Markdown 保留公式原文，并转义制表符和换行。"
+  "markdownTableExportHint": "公式形式的值按文本导出；Markdown 保留公式原文，并转义制表符和换行。",
+  "protectedToolOpen": "查看本地结果",
+  "protectedToolLoading": "正在核验本地权限…",
+  "protectedToolUnavailable": "此本地结果当前不可用。",
+  "protectedToolUnsupported": "此正文无法导出为安全的脱敏片段。",
+  "protectedToolRetry": "重试",
+  "protectedToolCopy": "复制脱敏文本",
+  "protectedToolCopied": "已复制脱敏文本",
+  "protectedToolSave": "保存脱敏片段",
+  "protectedToolShowLines": "展开 {{count}} 行",
+  "protectedToolText": "文本",
+  "protectedToolWrap": "换行",
+  "protectedToolUnwrap": "保留原列宽",
+  "protectedToolWindow": "显示 {{shown}} / {{total}} 行",
+  "protectedToolExit": "退出码 {{code}}",
+  "protectedToolUnknown": "状态未知",
+  "protectedToolFailed": "失败",
+  "protectedToolCompleted": "已完成",
+  "protectedToolEmpty": "无可见输出",
+  "protectedToolTruncated": "有界结果片段",
+  "protectedToolDuration": "{{duration}} ms",
+  "protectedToolStatus": {
+    "completed": "已完成",
+    "failed": "失败",
+    "timeout": "已超时",
+    "canceled": "已取消",
+    "unknown": "状态未知"
+  }
 }

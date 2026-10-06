@@ -9,6 +9,7 @@ import (
 	"time"
 
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 const (
@@ -21,6 +22,7 @@ const (
 )
 
 type ReadTextToolInput struct {
+	Capture           func(domaintoolresult.ProtectedCaptureV1)
 	Workspace         string
 	Args              map[string]any
 	ProtectedReadDirs []string
@@ -68,6 +70,11 @@ func ExecuteReadTextTool(input ReadTextToolInput) (map[string]any, string, bool)
 		Encoding:     textFile.Encoding,
 		View:         view,
 	})
+	if input.Capture != nil {
+		body, cut := domaintoolresult.BoundProtectedTextV1(filetoolsapp.OriginalReadTextSelectionV1(textFile.Content, view), domaintoolresult.ProtectedSnapshotBodyLimitV1)
+		label, _ := domaintoolresult.BoundProtectedTextV1(resolved.OutputPath(), 1024)
+		input.Capture(domaintoolresult.ProtectedCaptureV1{Kind: "read", Status: "completed", Body: body, Label: label, Truncated: view.Truncated || cut, StartLine: view.StartLine, EndLine: view.EndLine, TotalLines: view.TotalLines})
+	}
 	return output, view.RawContent, false
 }
 

@@ -4026,3 +4026,36 @@ it('keeps closed cache observation and cost coverage without treating legacy fal
   const legacy = usageFromCore({}, {cacheDiagnostics: {dynamicStateLeaked: false, dynamicStateCheck: 'checked', responseModelObservation: 'PRIVATE', modelInputFirstDifference: 'PRIVATE'} as never})
   expect(legacy.cacheDiagnostics).toBeUndefined()
 })
+
+
+describe('settled protected result metadata bridge', () => {
+  it.each(['bash', 'read', 'read_file'])('carries %s identity through the real tool event port', async (toolName) => {
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    const sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+    const item: CoreTurnItemJson = {
+      id: 'item_result_' + 'b'.repeat(64), turnId: 'turn_own', threadId: 'thr_own', createdAt: '2026-10-06T00:00:00Z',
+      kind: 'tool_result', role: 'tool', status: 'completed', toolName,
+      callId: 'call_host_' + 'a'.repeat(64), toolKind: 'tool_call', isError: false,
+      output: { schemaVersion: 1, projectionKind: 'host_status', disclosure: 'metadata_only',
+        status: 'completed', messageKey: 'tool_completed', code: 'tool_completed',
+        privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false }
+    }
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: 'thr_own', turnId: 'turn_own', item }, sink, async () => undefined)
+    expect(received).toHaveLength(1)
+    expect(received[0].meta?.localResult).toEqual({
+      turnId: 'turn_own', callId: 'call_host_' + 'a'.repeat(64), resultItemId: 'item_result_' + 'b'.repeat(64)
+    })
+    // A later lifecycle-only event must omit the key so the existing three
+    // consumer metadata merges retain the settled identity.
+    await dispatchAnalytixRuntimeEvent({ kind: 'tool_progress', threadId: 'thr_own', turnId: 'turn_own',
+      callId: item.callId, toolName, status: 'completed' }, sink, async () => undefined)
+    expect(Object.hasOwn(received[1].meta ?? {}, 'localResult')).toBe(false)
+  })
+  it('does not give unknown tools or call-only items a settled selector', () => {
+    const base = { id: 'item_call', turnId: 'turn_own', threadId: 'thr_own', role: 'tool' as const, createdAt: '2026-10-06T00:00:00Z', callId: 'call_host_' + 'a'.repeat(64), status: 'completed' as const }
+    const unknown = chatBlockFromItem({ ...base, kind: 'tool_result', toolName: 'ls', output: {} })
+    const call = chatBlockFromItem({ ...base, kind: 'tool_call', toolName: 'bash' })
+    expect(unknown?.kind === 'tool' ? unknown.meta?.localResult : undefined).toBeUndefined()
+    expect(call?.kind === 'tool' ? call.meta?.localResult : undefined).toBeUndefined()
+  })
+})

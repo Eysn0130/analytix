@@ -2290,5 +2290,32 @@
   "markdownTableCsv": "CSV",
   "markdownTableTsv": "TSV",
   "markdownTableMarkdown": "Markdown",
-  "markdownTableExportHint": "Formula-like values export as text. Markdown retains formula text; tabs and line breaks are escaped."
+  "markdownTableExportHint": "Formula-like values export as text. Markdown retains formula text; tabs and line breaks are escaped.",
+  "protectedToolOpen": "View local result",
+  "protectedToolLoading": "Checking local access…",
+  "protectedToolUnavailable": "This local result is unavailable.",
+  "protectedToolUnsupported": "This body cannot be exported as a safe redacted snippet.",
+  "protectedToolRetry": "Retry",
+  "protectedToolCopy": "Copy redacted text",
+  "protectedToolCopied": "Redacted text copied",
+  "protectedToolSave": "Save redacted snippet",
+  "protectedToolShowLines": "Show {{count}} lines",
+  "protectedToolText": "Text",
+  "protectedToolWrap": "Wrap",
+  "protectedToolUnwrap": "Preserve columns",
+  "protectedToolWindow": "Showing {{shown}} of {{total}} lines",
+  "protectedToolExit": "Exit code {{code}}",
+  "protectedToolUnknown": "Status unknown",
+  "protectedToolFailed": "Failed",
+  "protectedToolCompleted": "Completed",
+  "protectedToolEmpty": "No visible output",
+  "protectedToolTruncated": "Bounded result snippet",
+  "protectedToolDuration": "{{duration}} ms",
+  "protectedToolStatus": {
+    "completed": "Completed",
+    "failed": "Failed",
+    "timeout": "Timed out",
+    "canceled": "Canceled",
+    "unknown": "Status unknown"
+  }
 }

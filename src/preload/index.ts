@@ -1,3 +1,4 @@
+import { toolResultLocalViewRequestSchemaV1, toolResultLocalEffectRequestSchemaV1, toolResultLocalViewResultSchemaV1, toolResultLocalEffectResultSchemaV1 } from '../../packages/runtime/src/contracts/tool-result-local-display'
 import { WRITE_SHUTDOWN_REQUEST, WRITE_SHUTDOWN_ACK, writeShutdownRequestSchema, writeShutdownResultSchema, type WriteShutdownHandler } from '../shared/write-shutdown'
 import { canvasHostRequestSchema, canvasHostResponseSchema } from '../../packages/runtime/src/contracts/canvas-host'
 import { nativeOfficeActionChoiceSchema, nativeOfficeMenuTargetSchema, nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema, nativeOfficeInputFreezeSchema } from '../shared/native-office'
@@ -135,6 +136,33 @@ const flatApi = {
     ipcRenderer.invoke('runtime:direct-source-preview', request),
   acceptedSlotDisplay: (request) =>
     ipcRenderer.invoke('runtime:accepted-slot-display', request),
+  openToolResultLocalDisplay: async (request) => {
+    const parsed = toolResultLocalViewRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    const result = toolResultLocalViewResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:open', parsed.data))
+    return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+  },
+  closeToolResultLocalDisplay: async (viewId) => { await ipcRenderer.invoke('tool-result-local:close', viewId) },
+  copyToolResultLocalDisplay: async (request) => {
+    const parsed = toolResultLocalEffectRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    const result = toolResultLocalEffectResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:copy', parsed.data))
+    return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+  },
+  saveToolResultLocalDisplay: async (request) => {
+    const parsed = toolResultLocalEffectRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    const result = toolResultLocalEffectResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:save', parsed.data))
+    return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+  },
+  invalidateToolResultLocalDisplay: async () => { await ipcRenderer.invoke('tool-result-local:invalidate') },
+  onToolResultLocalDisplayInvalidated: (handler) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (value === null || typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)) handler(value)
+    }
+    ipcRenderer.on('tool-result-local:invalidated', wrapped)
+    return () => ipcRenderer.removeListener('tool-result-local:invalidated', wrapped)
+  },
   stageFundsCSVSnapshot: () =>
     ipcRenderer.invoke('runtime:stage-funds-csv-snapshot'),
   confirmFundsCSVSnapshot: (selector) =>
@@ -543,6 +571,12 @@ const api = {
     cleaningDiffPreview: flatApi.cleaningDiffPreview,
     directSourcePreview: flatApi.directSourcePreview,
     acceptedSlotDisplay: flatApi.acceptedSlotDisplay,
+    openToolResultLocalDisplay: flatApi.openToolResultLocalDisplay,
+    closeToolResultLocalDisplay: flatApi.closeToolResultLocalDisplay,
+    copyToolResultLocalDisplay: flatApi.copyToolResultLocalDisplay,
+    saveToolResultLocalDisplay: flatApi.saveToolResultLocalDisplay,
+    invalidateToolResultLocalDisplay: flatApi.invalidateToolResultLocalDisplay,
+    onToolResultLocalDisplayInvalidated: flatApi.onToolResultLocalDisplayInvalidated,
     stageFundsCSVSnapshot: flatApi.stageFundsCSVSnapshot,
     confirmFundsCSVSnapshot: flatApi.confirmFundsCSVSnapshot,
     cancelFundsCSVImport: flatApi.cancelFundsCSVImport,

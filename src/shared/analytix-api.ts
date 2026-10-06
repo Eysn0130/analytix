@@ -1,3 +1,4 @@
+import type { ToolResultLocalViewRequestV1, ToolResultLocalViewResultV1, ToolResultLocalEffectRequestV1, ToolResultLocalEffectResultV1 } from '../../packages/runtime/src/contracts/tool-result-local-display'
 import type { WriteShutdownHandler } from './write-shutdown'
 import type { ProviderEndpointKind } from './provider-display'
 import type {
@@ -765,6 +766,12 @@ export type AnalytixFlatApi = {
   cleaningDiffPreview: (request: CleaningDiffPreviewRequest) => Promise<LocalDisplayResult>
   directSourcePreview: (request: DirectSourcePreviewRequest) => Promise<LocalDisplayResult>
   acceptedSlotDisplay: (request: AcceptedSlotDisplayRequest) => Promise<LocalDisplayResult>
+  openToolResultLocalDisplay: (request: ToolResultLocalViewRequestV1) => Promise<ToolResultLocalViewResultV1>
+  closeToolResultLocalDisplay: (viewId: string) => Promise<void>
+  copyToolResultLocalDisplay: (request: ToolResultLocalEffectRequestV1) => Promise<ToolResultLocalEffectResultV1>
+  saveToolResultLocalDisplay: (request: ToolResultLocalEffectRequestV1) => Promise<ToolResultLocalEffectResultV1>
+  invalidateToolResultLocalDisplay: () => Promise<void>
+  onToolResultLocalDisplayInvalidated: (handler: (viewId: string | null) => void) => () => void
   stageFundsCSVSnapshot: () => Promise<FundsCSVSnapshotStageResult>
   confirmFundsCSVSnapshot: (selector: string) => Promise<FundsCSVSnapshotConfirmResult>
   cancelFundsCSVImport: (selector: string) => Promise<FundsImportCancelResult>
@@ -1046,6 +1053,12 @@ export type AnalytixRuntimeApi = Pick<
   | 'cleaningDiffPreview'
   | 'directSourcePreview'
   | 'acceptedSlotDisplay'
+  | 'openToolResultLocalDisplay'
+  | 'closeToolResultLocalDisplay'
+  | 'copyToolResultLocalDisplay'
+  | 'saveToolResultLocalDisplay'
+  | 'invalidateToolResultLocalDisplay'
+  | 'onToolResultLocalDisplayInvalidated'
   | 'stageFundsCSVSnapshot'
   | 'confirmFundsCSVSnapshot'
   | 'cancelFundsCSVImport'
