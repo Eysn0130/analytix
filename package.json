@@ -187,7 +187,7 @@
     "7zip-bin": "^5.2.0",
     "acorn": "^8.16.0",
     "autoprefixer": "^10.4.21",
-    "electron": "41.10.3",
+    "electron": "41.10.6",
     "electron-vite": "^3.1.0",
     "eslint": "^10.4.0",
     "eslint-plugin-react-hooks": "^7.1.1",
