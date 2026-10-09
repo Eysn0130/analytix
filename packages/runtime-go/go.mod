@@ -1,11 +1,11 @@
 module analytix.local/runtime-go
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/xuri/excelize/v2 v2.11.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.38.0
 )
 
