@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -28,30 +27,11 @@ func validateExactEventThreadID(threadID string) error {
 
 func exactEventSequenceV1(value any) (int, bool) {
 	const maxExactFloat64Integer = int64(1<<53 - 1)
-	var parsed int64
-	switch typed := value.(type) {
-	case int:
-		parsed = int64(typed)
-	case int64:
-		parsed = typed
-	case float64:
-		if typed != float64(int64(typed)) {
-			return 0, false
-		}
-		parsed = int64(typed)
-	case json.Number:
-		value, err := typed.Int64()
-		if err != nil {
-			return 0, false
-		}
-		parsed = value
-	default:
+	parsed, ok := contracts.NumericSeq(value)
+	if !ok || parsed <= 0 || int64(parsed) > maxExactFloat64Integer {
 		return 0, false
 	}
-	if parsed <= 0 || parsed > maxExactFloat64Integer || int64(int(parsed)) != parsed {
-		return 0, false
-	}
-	return int(parsed), true
+	return parsed, true
 }
 
 func validateEventThreadDirectory(path string) (os.FileInfo, bool, error) {

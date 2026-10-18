@@ -45,7 +45,7 @@ func IntegerV1(value any, minimum int) (int, bool) {
 	case int64:
 		number = v
 	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) || v != math.Trunc(v) || v > 9007199254740991 {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < float64(math.MinInt) || v != math.Trunc(v) || v > 9007199254740991 {
 			return 0, false
 		}
 		number = int64(v)
@@ -58,7 +58,7 @@ func IntegerV1(value any, minimum int) (int, bool) {
 	default:
 		return 0, false
 	}
-	if number < int64(minimum) || number > 9007199254740991 || int64(int(number)) != number {
+	if number < int64(minimum) || number > 9007199254740991 || number > math.MaxInt {
 		return 0, false
 	}
 	return int(number), true

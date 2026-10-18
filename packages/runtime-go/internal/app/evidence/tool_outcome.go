@@ -124,7 +124,7 @@ func mergeOutcomeMeta(values ...map[string]any) map[string]any {
 }
 
 func normalizedOutcomeMeta(meta map[string]any, rpcValue any) map[string]any {
-	out := make(map[string]any, len(meta)+1)
+	out := make(map[string]any, len(meta))
 	for key, value := range meta {
 		out[key] = value
 	}

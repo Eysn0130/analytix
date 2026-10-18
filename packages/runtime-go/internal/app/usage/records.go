@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	contracts "analytix.local/runtime-go/internal/contracts"
 )
 
 const (
@@ -1004,8 +1006,12 @@ func unionStrings(left []string, right []string) []string {
 }
 
 func intNumber(value any) int {
+	if number, ok := contracts.NumericSeq(value); ok {
+		return nonNegativeInt(number)
+	}
 	number, ok := finiteFloat(value)
-	if !ok || number <= 0 {
+	// MaxInt rounds up in float64 on 64-bit hosts; use the exclusive upper bound.
+	if !ok || number <= 0 || number >= -float64(math.MinInt) {
 		return 0
 	}
 	return int(number)
