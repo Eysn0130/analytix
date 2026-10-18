@@ -239,12 +239,13 @@ function useActiveNavigationItemIds(
 
 function scrollActiveNavigationItemIntoView(root: HTMLElement | null, itemId: string | null): void {
   if (!root || !itemId) return
-  const escapedItemId = typeof CSS !== 'undefined' && CSS.escape
-    ? CSS.escape(itemId)
-    : itemId.replace(/"/g, '\\"')
-  const target = root.querySelector<HTMLElement>(
-    `[data-thread-user-message-navigation-item-id="${escapedItemId}"]`
-  )
+  let target: HTMLElement | null = null
+  for (const node of root.querySelectorAll<HTMLElement>('[data-thread-user-message-navigation-item-id]')) {
+    if (node.dataset.threadUserMessageNavigationItemId === itemId) {
+      target = node
+      break
+    }
+  }
   if (!target) return
   if (target.offsetTop < root.scrollTop) {
     root.scrollTop = target.offsetTop
