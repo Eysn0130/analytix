@@ -110,9 +110,12 @@ func TestGeneralTerminalDiagnosticsAsyncCutsAndRecovery(t *testing.T) {
 				completion = "outbox_usage_settle"
 			}
 			if cut != "none" {
-				// The fallback requests failed after the completed CAS winner.
-				// Replay validation rejects that status before another outbox call.
-				fallback = "terminal_finish"
+				// A legal ordinary loser replays the completed winner's outbox.
+				// The fallback reports the append or usage stage that still fails.
+				fallback = completion
+				if cut == "append_then_usage" {
+					fallback = "outbox_usage_settle"
+				}
 			}
 			if started.Stage != "started" || finished.Stage != "finished" || finished.CompletionDetailClass != completion || finished.FailureRecordDetailClass != fallback || finished.TerminalStatus != "completed" {
 				t.Fatalf("closed async detail mismatch: completion=%s fallback=%s status=%s", finished.CompletionDetailClass, finished.FailureRecordDetailClass, finished.TerminalStatus)
@@ -129,13 +132,13 @@ func TestGeneralTerminalDiagnosticsAsyncCutsAndRecovery(t *testing.T) {
 				t.Fatal("observer or stderr exposed a private cause")
 			}
 			if cut == "append" || cut == "append_then_usage" {
-				if attempts != 1 {
+				if attempts != 2 {
 					t.Fatal("diagnostic changed completion/fallback append attempt count")
 				}
 			}
 			if cut == "append_then_usage" {
-				// An explicit settlement retry now gets past append, but must
-				// expose the still-blocked usage stage without changing the CAS.
+				// The fallback already advanced append to the blocked usage stage.
+				// Another settlement must report usage without changing the CAS.
 				_, err := handler.store.RecordGeneralTerminalEventBundle(threadID, turnID)
 				var pathError *os.PathError
 				if turnapp.GeneralTerminalDetailClassV1(err) != "outbox_usage_settle" || !errors.As(err, &pathError) || strings.Contains(err.Error(), usagePath) {
