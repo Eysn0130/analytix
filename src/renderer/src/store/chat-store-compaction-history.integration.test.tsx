@@ -3,7 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { CompactResponse } from '../../../../packages/runtime/src/contracts/turns'
-import type { RuntimeEventKind } from '../../../../packages/runtime/src/contracts/events'
+import type { PipelineStage, RuntimeEventKind } from '../../../../packages/runtime/src/contracts/events'
 import type { SseErrorPayload } from '@shared/analytix-api'
 import { isStrictPublicRuntimeSseErrorPayload, type PublicRuntimeSseDecodeDiagnostic } from '@shared/public-runtime-sse'
 import {
@@ -26,11 +26,21 @@ type RejectedSseFrame = {
   seq?: number
   schemaVersion?: number
   diagnostic?: PublicRuntimeSseDecodeDiagnostic
+  pipeline?: {
+    stage: PipelineStage | 'provider_admission_rejected' | 'unknown'
+    presentFields: boolean[]
+    detailsKind: 'record' | 'absent' | 'other'
+    logicalLabelMatches?: boolean
+    logicalIdCanonical?: boolean
+    logicalDetailsValid?: boolean
+    unexpectedLogicalEnvelopeFields?: number
+  }
 }
 const rejectedSseFrames = vi.hoisted(() => [] as RejectedSseFrame[])
 vi.mock('@shared/public-runtime-sse', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@shared/public-runtime-sse')>()
-  const { RuntimeEventKind } = await import('../../../../packages/runtime/src/contracts/events')
+  const { RuntimeEventKind, PipelineStage, LogicalStepStartedDetailsV1Schema, LogicalStepClosedDetailsV1Schema } =
+    await import('../../../../packages/runtime/src/contracts/events')
   return { ...actual, projectPublicRuntimeSseBlock: (...args: Parameters<typeof actual.projectPublicRuntimeSseBlock>) => {
     const [block, expectedThreadId, filter, onDiagnostic] = args
     let metadata: Omit<RejectedSseFrame, 'diagnostic'> = { kind: 'unknown' }
@@ -50,6 +60,34 @@ vi.mock('@shared/public-runtime-sse', async (importOriginal) => {
             metadata = { kind: kind.success ? kind.data : 'unknown',
               ...(Number.isSafeInteger(event.seq) ? { seq: event.seq as number } : {}),
               ...(Number.isSafeInteger(event.schemaVersion) ? { schemaVersion: event.schemaVersion as number } : {}) }
+            if (event.kind === 'pipeline_stage') {
+              const stage = PipelineStage.safeParse(event.stage)
+              const details = event.details && typeof event.details === 'object' && !Array.isArray(event.details)
+                ? event.details as Record<string, unknown> : undefined
+              // Retain only a closed stage classification and structural facts,
+              // never IDs, raw labels, unknown field names, prose or frame text.
+              metadata.pipeline = {
+                stage: stage.success ? stage.data : event.stage === 'provider_admission_rejected'
+                  ? 'provider_admission_rejected' : 'unknown',
+                // Fixed order: turnId, itemId, trace, message, child, attempt, maxAttempt.
+                presentFields: ['turnId', 'itemId', 'trace', 'message', 'child', 'attempt', 'maxAttempt']
+                  .map(key => Object.prototype.hasOwnProperty.call(event, key)),
+                detailsKind: details ? 'record' : event.details === undefined ? 'absent' : 'other'
+              }
+              const logicalLabels = { logical_step_started: 'Logical step started',
+                logical_step_assembled: 'Logical step assembled', logical_step_closed: 'Logical step closed' }
+              if (stage.success && (stage.data === 'logical_step_started' || stage.data === 'logical_step_assembled' ||
+                  stage.data === 'logical_step_closed')) {
+                metadata.pipeline.logicalLabelMatches = event.label === logicalLabels[stage.data]
+                metadata.pipeline.logicalIdCanonical = LogicalStepStartedDetailsV1Schema.safeParse({
+                  schemaVersion: 1, logicalStepId: details?.logicalStepId }).success
+                metadata.pipeline.logicalDetailsValid = (stage.data === 'logical_step_closed'
+                  ? LogicalStepClosedDetailsV1Schema : LogicalStepStartedDetailsV1Schema).safeParse(event.details).success
+                metadata.pipeline.unexpectedLogicalEnvelopeFields = Object.keys(event).filter(key => ![
+                  'kind', 'seq', 'timestamp', 'threadId', 'turnId', 'stage', 'label', 'details'
+                ].includes(key)).length
+              }
+            }
           }
         }
       } catch { /* Diagnostic observation must not change parsing. */ }

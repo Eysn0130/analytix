@@ -72,7 +72,10 @@
 .hint { color: var(--ds-text-muted); font-size: 12px; line-height: 20px; }
 .answer { white-space: pre-wrap; overflow-wrap: anywhere; }
 .primary, .secondary { border: .5px solid var(--ds-border); border-radius: 999px; padding: 6px 16px; font: inherit; cursor: pointer; }
-.primary { color: var(--ds-bg-canvas); background: var(--ds-text); }
+.primary { color: var(--ax-on-primary); background: var(--ax-primary); }
 .secondary { color: var(--ds-text-muted); background: transparent; }
 .primary:disabled, .secondary:disabled { opacity: .45; cursor: default; }
 .card:focus-visible, .primary:focus-visible, .secondary:focus-visible { outline: 2px solid var(--ds-accent); outline-offset: 2px; }
+
+.primary:hover:not(:disabled) { background: var(--ax-primary-hover); }
+.primary:active:not(:disabled) { background: var(--ax-primary-pressed); }

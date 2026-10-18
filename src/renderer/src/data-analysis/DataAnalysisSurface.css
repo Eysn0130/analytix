@@ -75,7 +75,7 @@
 .ui-prompt-field { display: grid; gap: 6px; }
 .ui-dialog button:focus-visible,
 .ui-prompt-input:focus-visible,
-.ui-context-menu button:focus-visible { outline: 2px solid var(--ds-text-muted); outline-offset: 2px; }
+.ui-context-menu button:focus-visible { outline: 2px solid var(--ax-focus); outline-offset: 2px; }
 .ui-toast-center { position: fixed; z-index: 2300; right: 20px; bottom: 20px; display: grid; gap: 10px; max-width: min(400px,calc(100vw - 40px)); }
 .ui-toast { display: flex; align-items: flex-start; gap: 12px; padding: 16px; }
 .ui-toast-content { flex: 1; min-width: 0; }

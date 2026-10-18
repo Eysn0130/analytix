@@ -126,3 +126,5 @@
 :global(:root[data-motion-reduced='true']) .spinnerMotion,
 :global(:root[data-motion-reduced='true']) .spinnerArc { animation: none; }
 :global(:root[data-motion-reduced='true']) .spinnerArc { stroke-dasharray: 18 150; stroke-dashoffset: -3; }
+
+.primary:active:not(:disabled) { background: var(--ax-primary-pressed); }

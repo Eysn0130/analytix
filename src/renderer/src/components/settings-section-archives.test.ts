@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedThread } from '../agent/types'
 import { SettingsSidebar } from './SettingsSidebar'
@@ -44,14 +43,11 @@ const labels: Record<string, string> = {
   debug: 'Troubleshooting',
   claw: 'Connect phone',
   settingsFooter: 'Settings',
-  settingsNavPersonal: 'Personal',
-  settingsNavIntegrations: 'Integrations',
-  settingsNavCoding: 'Coding',
-  settingsNavArchived: 'Archived group',
-  settingsSearchLabel: 'Search settings',
-  settingsSearchPlaceholder: 'Search settings',
-  settingsSearchClear: 'Clear search',
-  settingsSearchEmpty: 'No matching settings',
+  settingsTabGeneral: 'General',
+  settingsTabModels: 'Models',
+  settingsTabWorkspace: 'Workspace',
+  settingsTabTools: 'Tools & permissions',
+  settingsSectionLabel: 'Settings section',
   archivesTitle: 'Archived chats',
   archivesOverview: 'Archived chat history',
   archivesOverviewDesc: 'Review archived chats.',
@@ -194,27 +190,29 @@ describe('ArchivedThreadsSettingsSection', () => {
     expect(bridge.list).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps archived chats selected as a bottom utility outside the three navigation groups', () => {
-    const html = renderToStaticMarkup(createElement(SettingsSidebar, {
+  it('keeps archived chats selected and reachable in the Workspace section picker', async () => {
+    const setCategory = vi.fn()
+    root = createRoot(host)
+    await act(async () => root!.render(createElement(SettingsSidebar, {
       category: 'archives',
       goBack: () => undefined,
-      setCategory: () => undefined,
+      setCategory,
       t
-    }))
+    })))
 
-    const codingIndex = html.indexOf('Coding')
-    const archivesIndex = html.indexOf('Archived chats')
-    const navigationEndIndex = html.indexOf('</nav>')
-    expect(html).toContain('Search settings')
-    expect(html).toContain('Browser')
-    expect(html).toContain('Computer control')
-    expect(html).toContain('Personal')
-    expect(html).toContain('Integrations')
-    expect(codingIndex).toBeGreaterThanOrEqual(0)
-    expect(html).not.toContain('Archived group')
-    expect(navigationEndIndex).toBeGreaterThanOrEqual(0)
-    expect(archivesIndex).toBeGreaterThan(navigationEndIndex)
-    expect(html.match(/Archived chats/g)).toHaveLength(1)
-    expect(html).toMatch(/<button[^>]*aria-current="page"[^>]*>[\s\S]*?Archived chats[\s\S]*?<\/button>/)
+    expect([...host.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual([
+      'General', 'Models', 'Workspace', 'Tools & permissions'
+    ])
+    expect(host.querySelectorAll('[role="tab"][aria-selected="true"]')).toHaveLength(1)
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Workspace')
+    const select = host.querySelector<HTMLSelectElement>('select')!
+    expect(host.querySelector('label')?.htmlFor).toBe(select.id)
+    expect(select.value).toBe('archives')
+    expect([...select.options].map(option => option.value)).toEqual(['write', 'worktree', 'memory', 'archives'])
+    expect(select.selectedOptions[0]?.textContent).toBe('Archived chats')
+    expect(host.querySelectorAll('option[value="archives"]')).toHaveLength(1)
+    select.value = 'write'
+    await act(async () => select.dispatchEvent(new Event('change', { bubbles: true })))
+    expect(setCategory).toHaveBeenLastCalledWith('write')
   })
 })

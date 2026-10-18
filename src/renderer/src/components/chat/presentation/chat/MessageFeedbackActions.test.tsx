@@ -6,10 +6,14 @@ import { parse } from 'postcss'
 import i18n from '../../../../i18n'
 import { rendererRuntimeClient } from '../../../../agent/runtime-client'
 import { MessageFeedbackActions } from './MessageFeedbackActions'
+import { applyTheme } from '../../../../lib/apply-theme'
+import { primaryPaletteCases, resolveThemeToken, themeVariables } from '../theme-token-test-helpers'
 
-let root: Root, container: HTMLDivElement, previousTheme: string | null
+let root: Root, container: HTMLDivElement, previousTheme: string | null, previousStyle: string | null, previousAccent: string | null
 beforeEach(async () => {
   previousTheme = document.documentElement.getAttribute('data-theme')
+  previousStyle = document.documentElement.getAttribute('style')
+  previousAccent = document.documentElement.getAttribute('data-accent')
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   await i18n.changeLanguage('en')
@@ -20,13 +24,17 @@ afterEach(async () => {
   await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals()
   if (previousTheme === null) document.documentElement.removeAttribute('data-theme')
   else document.documentElement.setAttribute('data-theme', previousTheme)
+  if (previousStyle === null) document.documentElement.removeAttribute('style')
+  else document.documentElement.setAttribute('style', previousStyle)
+  if (previousAccent === null) document.documentElement.removeAttribute('data-accent')
+  else document.documentElement.setAttribute('data-accent', previousAccent)
 })
 const click = async (button: Element) => { await act(async () => button.dispatchEvent(new MouseEvent('click', { bubbles: true }))) }
 
-it.each(['light', 'dark'])('keeps the body portal in the real %s chat token scope with defined fill and radius', async theme => {
-  document.documentElement.setAttribute('data-theme', theme)
+it.each(primaryPaletteCases)('keeps the body portal in the real $theme $label chat token scope with paired primary colors and radius', async ({ theme, accent, fill, foreground, hover, pressed }) => {
+  applyTheme(theme, accent)
   vi.spyOn(rendererRuntimeClient, 'runtimeRequest').mockResolvedValue({ ok: true, status: 200, body: JSON.stringify({ items: [] }) })
-  await act(async () => root.render(createElement(MessageFeedbackActions, { threadId: `ui-theme-${theme}`, messageId: 'message' })))
+  await act(async () => root.render(createElement(MessageFeedbackActions, { threadId: `ui-theme-${theme}-${accent ?? 'default'}`, messageId: 'message' })))
   await click(container.querySelector('button[aria-label="Good response"]')!)
   const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
   const backdrop = dialog.parentElement!
@@ -37,12 +45,7 @@ it.each(['light', 'dark'])('keeps the body portal in the real %s chat token scop
     const url = new URL(relative, import.meta.url); expect(url.protocol).toBe('file:')
     return fs.readFileSync(decodeURIComponent(url.pathname), 'utf8')
   }
-  const variables = new Map<string, string>()
-  parse(readCss('../tokens.css')).walkRules(rule => {
-    if (rule.selectors.some(selector => backdrop.matches(selector))) {
-      rule.walkDecls(declaration => { if (declaration.prop.startsWith('--')) variables.set(declaration.prop, declaration.value) })
-    }
-  })
+  const variables = themeVariables(backdrop, [parse(readCss('../../../../styles/base-shell.css')), parse(readCss('../tokens.css'))])
   const sheet = parse(readCss('./MessageFeedbackDialog.module.css'))
   sheet.walkRules('.backdrop', rule => { rule.walkDecls(declaration => { if (declaration.prop.startsWith('--')) variables.set(declaration.prop, declaration.value) }) })
   const declarations = (selector: string) => {
@@ -50,18 +53,18 @@ it.each(['light', 'dark'])('keeps the body portal in the real %s chat token scop
     sheet.walkRules(selector, rule => { rule.walkDecls(declaration => { values.set(declaration.prop, declaration.value) }) })
     return values
   }
-  const resolve = (value: string | undefined): string | undefined => {
-    const token = value?.match(/^var\((--[\w-]+)\)$/)?.[1]
-    return token ? resolve(variables.get(token)) : value
-  }
-  const fill = theme === 'dark' ? 'rgb(249, 250, 251)' : 'rgb(15, 17, 21)'
+  const resolve = (value: string | undefined) => resolveThemeToken(value, variables)
   expect(resolve(declarations('.submit').get('background'))).toBe(fill)
+  expect(resolve(declarations('.submit').get('color'))).toBe(foreground)
+  expect(resolve(declarations('.submit:hover:not(:disabled)').get('background'))).toBe(hover)
+  expect(resolve(declarations('.submit:active:not(:disabled)').get('background'))).toBe(pressed)
   expect(resolve(declarations('.chip[data-active]').get('background'))).toBe(fill)
   expect(resolve(declarations('.chip[data-active]').get('border-color'))).toBe(fill)
-  expect(resolve(declarations('.chip[data-active]').get('color'))).toBe(theme === 'dark' ? 'rgb(15, 17, 21)' : 'rgb(255, 255, 255)')
+  expect(resolve(declarations('.chip[data-active]').get('color'))).toBe(foreground)
   expect(resolve(declarations('.dialog').get('border-radius'))).toBe('28px')
   expect(resolve(declarations('.detail').get('border-radius'))).toBe('16px')
   expect(resolve(variables.get('--dsw-alias-bg-base'))).toBe(theme === 'dark' ? 'rgb(21, 21, 23)' : 'rgb(255, 255, 255)')
+  expect(resolve(variables.get('--dsw-alias-label-primary'))).toBe(theme === 'dark' ? 'rgb(249, 250, 251)' : 'rgb(15, 17, 21)')
   expect(declarations('.chip:hover:not(:disabled):not([data-active])').get('background')).toBe('var(--dsw-alias-interactive-bg-hover)')
   await click(dialog.querySelector('button[aria-pressed="false"]')!)
   expect(dialog.querySelector('button[data-active]')?.getAttribute('aria-pressed')).toBe('true')

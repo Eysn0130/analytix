@@ -52,7 +52,7 @@ export function TopNoticeCard({
         <button
           type="button"
           onClick={onDismiss}
-          className="inline-flex h-10 min-w-[64px] shrink-0 items-center justify-center rounded-full bg-[#0d0d0d] px-4 text-sm font-semibold leading-5 text-white transition hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35 dark:bg-ds-ink dark:text-ds-main dark:hover:bg-ds-ink/85"
+          className="inline-flex h-10 min-w-[64px] shrink-0 items-center justify-center rounded-full bg-primary px-4 text-sm font-semibold leading-5 text-primary-foreground transition hover:bg-primary-hover active:bg-primary-pressed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
         >
           {confirmLabel}
         </button>

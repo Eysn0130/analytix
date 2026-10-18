@@ -61,7 +61,7 @@ it('removes the dedicated pet settings navigation while keeping General discover
   try {
     await act(async () => root.render(createElement(SettingsSidebar, { category: 'general', goBack: () => {}, setCategory: () => {}, t })))
     expect(host.textContent).not.toContain('easterEgg')
-    expect(host.querySelector('[aria-current="page"]')?.textContent).toContain('general')
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(t('settingsTabGeneral'))
   } finally { await act(async () => root.unmount()) }
 })
 

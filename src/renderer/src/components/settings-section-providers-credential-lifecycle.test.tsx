@@ -16,7 +16,7 @@ import {
 } from '@shared/app-settings'
 import type { ProviderRegistryRequest, ProviderRegistryResult } from '@shared/analytix-api'
 import { PROVIDER_REGISTRY_FAILURE_MESSAGES_V1, providerRegistryRequestSchemaV1, providerRegistryResultSchemaV1 } from '../../../../packages/runtime/src/contracts/provider-registry.js'
-import { ProvidersSettingsSection } from './settings-section-providers'
+import { ProvidersSettingsSection, type ProviderSettingsActions } from './settings-section-providers'
 import { useChatStore } from '../store/chat-store'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { mergeSettings } from './settings-utils'
@@ -173,7 +173,8 @@ async function enter(input: HTMLInputElement, value: string) {
 async function mount(
   expectCredential = true,
   savedForm?: AppSettingsV1,
-  saveModelPreferences?: (patch: AppSettingsPatch) => Promise<AppSettingsV1>
+  saveModelPreferences?: (patch: AppSettingsPatch) => Promise<AppSettingsV1>,
+  onProviderActionsChange?: (actions: ProviderSettingsActions | null) => void
 ) {
   const form = savedForm ?? normalizeAppSettings({
     version: 1, locale: 'en', theme: 'system', uiFontScale: 'small',
@@ -189,7 +190,8 @@ async function mount(
   await act(async () => {
     root!.render(<ProvidersSettingsSection ctx={{
       t: (key: string) => key, form, provider: form.provider, analytix: form.runtime,
-      update: (patch: unknown) => patches.push(patch), saveModelPreferences, selectControlClass: ''
+      update: (patch: unknown) => patches.push(patch), saveModelPreferences,
+      onProviderActionsChange, selectControlClass: ''
     }} />)
   })
   expect(registry.calls.some((call) => call.operation === 'list')).toBe(true)
@@ -323,6 +325,31 @@ afterEach(async () => {
 })
 
 describe('mounted Provider credential lifecycle', () => {
+  it('keeps required custom fields visible while advanced and destructive controls start collapsed', () => {
+    const advanced = [...container.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent === 'modelProviderAdvancedSettings')!
+    const danger = [...container.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent === 'modelProviderSectionDanger')!
+    expect(advanced.open).toBe(false)
+    expect(danger.open).toBe(false)
+    expect(keyInput().closest('details')).toBeNull()
+    expect(endpointInput().closest('details')).toBeNull()
+    const proxy = container.querySelector<HTMLInputElement>('input[placeholder="proxyUrlPlaceholder"]')!
+    expect(proxy.closest('details')).toBe(advanced)
+  })
+
+  it('shows the required protocol and first model outside advanced settings for a new custom provider', async () => {
+    await addDraft()
+    const protocol = [...container.querySelectorAll('label')].find(item =>
+      item.textContent?.startsWith('modelProviderEndpointFormat'))?.querySelector('select')
+    const addModel = [...container.querySelectorAll('button')].find(item =>
+      item.textContent?.trim() === 'providerModelAdd')
+    expect(protocol).toBeDefined()
+    expect(protocol!.disabled).toBe(false)
+    expect(protocol!.closest('details')).toBeNull()
+    expect(addModel).toBeDefined()
+    expect(addModel!.closest('details')).toBeNull()
+    expect(endpointInput().closest('details')).toBeNull()
+  })
+
   it.each(['endpoint', 'model', 'key-aba'] as const)('preserves a newer %s draft when an older preset confirmation resolves', async (edit) => {
     const preset = await mountExistingPreset()
     if (edit === 'key-aba') await selectAlpha()
@@ -636,7 +663,7 @@ describe('mounted Provider credential lifecycle', () => {
     registry.failNext('credential-replace')
     await click('modelProviderSaveChanges')
     expect(keyInput().value === firstInput).toBe(true)
-    expect(notices).toEqual([{ tone: 'error', message: 'Provider settings update failed.' }])
+    expect(notices).toEqual([{ tone: 'error', message: 'modelProviderUpdateFailed' }])
     await click('modelProviderSaveChanges')
     expect(keyInput().value.length).toBe(0)
     expect(registry.mutations().length).toBe(2)
@@ -652,6 +679,150 @@ describe('mounted Provider credential lifecycle', () => {
     await act(async () => { gate.release.resolve() })
     expect(notices.length).toBe(0)
     expect(patches.length).toBe(0)
+  })
+})
+
+async function mountWithFooterActions() {
+  await unmount()
+  let latest: ProviderSettingsActions | null = null
+  const registrations: Array<ProviderSettingsActions | null> = []
+  await mount(true, undefined, undefined, (actions) => {
+    latest = actions
+    registrations.push(actions)
+  })
+  return {
+    registrations,
+    current: (): ProviderSettingsActions => {
+      expect(latest).not.toBeNull()
+      return latest!
+    }
+  }
+}
+
+describe('modal footer Provider actions', () => {
+  it('registers final Save and Cancel without duplicate Provider buttons and unregisters on close', async () => {
+    const footer = await mountWithFooterActions()
+    expect(footer.current()).toMatchObject({ dirty: false, busy: false })
+    expect(container.textContent).not.toContain('modelProviderSaveChanges')
+    await enter(keyInput(), firstInput)
+    expect(footer.current().dirty).toBe(true)
+    expect(container.textContent).not.toContain('modelProviderDiscardChanges')
+    await act(async () => { expect(await footer.current().save()).toBe(true) })
+    expect(keyInput().value).toBe('')
+    expect(footer.current()).toMatchObject({ dirty: false, busy: false })
+    expect(registry.mutations().map((call) => call.operation)).toEqual(['credential-replace'])
+    const stale = footer.current()
+    await unmount()
+    expect(footer.registrations.at(-1)).toBeNull()
+    expect(await stale.save()).toBe(false)
+    await mount()
+    expect(keyInput().value).toBe('')
+    expect(keyInput().placeholder).toBe('modelProviderApiKeySavedPlaceholder')
+  })
+
+  it('keeps a failed footer Save draft available for explicit retry', async () => {
+    const footer = await mountWithFooterActions()
+    await enter(keyInput(), firstInput)
+    registry.failNext('credential-replace')
+    await act(async () => { expect(await footer.current().save()).toBe(false) })
+    expect(keyInput().value === firstInput).toBe(true)
+    expect(footer.current()).toMatchObject({ dirty: true, busy: false })
+    expect(notices).toEqual([{ tone: 'error', message: 'modelProviderUpdateFailed' }])
+    await act(async () => { expect(await footer.current().save()).toBe(true) })
+    expect(keyInput().value).toBe('')
+  })
+
+  it('discards in-memory credentials, Provider drafts and an unfinished model form without clearing the saved key', async () => {
+    const footer = await mountWithFooterActions()
+    const baseline = registry.snapshot()
+    await enter(keyInput(), firstInput)
+    await click('showSecret')
+    await click('providerModelEditAction')
+    await act(async () => { expect(await footer.current().save()).toBe(false) })
+    await act(async () => { footer.current().discard() })
+    expect(keyInput().value).toBe('')
+    expect(keyInput().type).toBe('password')
+    expect(container.querySelector('input[placeholder="providerModelIdPlaceholder"]')).toBeNull()
+    expect(footer.current().dirty).toBe(false)
+    await readyDraft()
+    expect(container.textContent).not.toContain('modelProviderDraftConfirm')
+    expect(container.textContent).not.toContain('modelProviderDraftDiscard')
+    await act(async () => { footer.current().discard() })
+    expect(draftIdInput().value).toBe('provider-alpha')
+    expect(keyInput().value).toBe('')
+    expect(footer.current().dirty).toBe(false)
+    expect(registry.snapshot()).toEqual(baseline)
+    expect(registry.mutations()).toEqual([])
+  })
+
+  it('connects and selects a new Provider through final footer Save', async () => {
+    const footer = await mountWithFooterActions()
+    await readyDraft()
+    const id = draftIdInput().value
+    await act(async () => { expect(await footer.current().save()).toBe(true) })
+    expect(registry.mutations().map((call) => call.operation)).toEqual(['connect', 'select'])
+    expect(registry.snapshot().selectedProviderId).toBe(id)
+    expect(footer.current()).toMatchObject({ dirty: false, busy: false })
+    expect(keyInput().value).toBe('')
+  })
+
+  it('keeps a newer key draft open and serializes footer Save while an earlier write is pending', async () => {
+    const footer = await mountWithFooterActions()
+    await enter(keyInput(), firstInput)
+    const gate = registry.hold('credential-replace')
+    let pending!: Promise<boolean>
+    await act(async () => { pending = footer.current().save() })
+    await gate.entered.promise
+    expect(footer.current().busy).toBe(true)
+    expect(await footer.current().save()).toBe(false)
+    await enter(keyInput(), secondInput)
+    await act(async () => {
+      gate.release.resolve()
+      expect(await pending).toBe(false)
+    })
+    expect(keyInput().value === secondInput).toBe(true)
+    expect(footer.current()).toMatchObject({ dirty: true, busy: false })
+    expect(registry.mutations()).toHaveLength(1)
+    await act(async () => { expect(await footer.current().save()).toBe(true) })
+    expect(keyInput().value).toBe('')
+  })
+
+  it('does not acknowledge a model form opened during an earlier footer Save', async () => {
+    const footer = await mountWithFooterActions()
+    await enter(keyInput(), firstInput)
+    const gate = registry.hold('credential-replace')
+    let pending!: Promise<boolean>
+    await act(async () => { pending = footer.current().save() })
+    await gate.entered.promise
+    await click('providerModelEditAction')
+    await act(async () => { reasoningToggle().click() })
+    await act(async () => {
+      gate.release.resolve()
+      expect(await pending).toBe(false)
+    })
+    expect(reasoningToggle().getAttribute('aria-checked')).toBe('true')
+    expect(footer.current()).toMatchObject({ dirty: true, busy: false })
+    await act(async () => { footer.current().discard() })
+    expect(footer.current().dirty).toBe(false)
+  })
+
+  it('invalidates a discarded pre-write continuation before it can connect', async () => {
+    const footer = await mountWithFooterActions()
+    await readyDraft()
+    const gate = registry.hold('list')
+    let pending!: Promise<boolean>
+    await act(async () => { pending = footer.current().save() })
+    await gate.entered.promise
+    await act(async () => { footer.current().discard() })
+    await act(async () => {
+      gate.release.resolve()
+      expect(await pending).toBe(false)
+    })
+    expect(draftIdInput().value).toBe('provider-alpha')
+    expect(keyInput().value).toBe('')
+    expect(footer.current()).toMatchObject({ dirty: false, busy: false })
+    expect(registry.mutations()).toEqual([])
+    expect(patches).toEqual([])
   })
 })
 
@@ -766,7 +937,7 @@ describe('model drafts and final Provider Save readback', () => {
     await click('providerModelSave')
     fixture.failNext()
     await click('modelProviderSaveChanges')
-    expect(notices).toEqual([{ tone: 'error', message: 'Provider settings update failed.' }])
+    expect(notices).toEqual([{ tone: 'error', message: 'modelProviderUpdateFailed' }])
     expect((await fixture.readback()).provider.modelPreferences ?? []).toEqual([])
     await click('providerModelEditAction'); expectHighReasoning(); await click('providerModelCancel')
     await click('modelProviderSaveChanges')

@@ -159,6 +159,21 @@ type closedPlanDigestProjectionEntryV1 struct {
 	stagedPlaceholder map[string]any
 }
 
+// StageClosedLogicalStepIDV1 protects only the validated correlation ID of a
+// closed root logical-step event during ordinary projection. It does not walk
+// nested values or stage tool-result metadata. Restoration requires the exact
+// placeholder to survive at details.logicalStepId; this grants no publication
+// authority and leaves malformed or embedded lookalikes on the prose path.
+func StageClosedLogicalStepIDV1(value any) (any, func(any) (any, bool)) {
+	entries := []closedPlanDigestProjectionEntryV1{}
+	staged := stageRootLogicalStepIDV1(value, &entries)
+	for index := range entries {
+		entries[index].placeholder["total"] = float64(len(entries))
+		entries[index].stagedPlaceholder["total"] = float64(len(entries))
+	}
+	return staged, func(projected any) (any, bool) { return restoreClosedPlanDigestsV1(projected, entries) }
+}
+
 // This must run once at the publication root, never inside the recursive tool
 // metadata walker: a complete pipeline lookalike embedded in user content is
 // still ordinary prose. Only the exact details.logicalStepId path is staged.

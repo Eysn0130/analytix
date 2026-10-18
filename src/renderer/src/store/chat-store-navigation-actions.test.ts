@@ -269,6 +269,7 @@ describe('chat-store navigation workspace selection', () => {
           getSettings: vi.fn(async () => ({
             workspaceRoot: '/Users/sun/Projects/analytix',
             theme: 'light',
+            accentColor: 'green',
             uiFontScale: 'medium',
             cursorSpotlight: true,
             locale: 'zh',
@@ -330,6 +331,8 @@ describe('chat-store navigation workspace selection', () => {
 
     await expect(harness.actions.boot()).resolves.toBeUndefined()
 
+    expect(document.documentElement.setAttribute).toHaveBeenCalledWith('data-accent', 'green')
+    expect(document.documentElement.style.setProperty).toHaveBeenCalledWith('--ax-primary', '#168348')
     expect(provider.connect).toHaveBeenCalledTimes(1)
     expect(harness.loadComposerModels).toHaveBeenCalledTimes(1)
     expect(harness.refreshThreads).toHaveBeenCalledTimes(1)

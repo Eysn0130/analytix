@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelProviderProfileV1 } from '@shared/app-settings'
 import type { ProviderRegistryPublicProvider } from '@shared/analytix-api'
+import enSettings from '../locales/en/settings.json'
+import zhSettings from '../locales/zh/settings.json'
 import providerSettingsSource from './settings-section-providers.tsx?raw'
 import {
   modelProvidersSettingsPatch,
@@ -109,11 +111,26 @@ describe('Provider Settings Registry authority', () => {
   })
 
   it('keeps protected recovery as explicit Main-owned actions with no artifact input', () => {
-    expect(providerSettingsSource).toContain('Portable manifest / protected credential recovery')
+    expect(providerSettingsSource).toContain("title={t('modelProviderRecoveryTitle')}")
+    expect(providerSettingsSource).toContain("description={t('modelProviderRecoveryDescription')}")
+    expect(enSettings.modelProviderRecoveryTitle).toBe('Portable settings and credential recovery')
+    expect(zhSettings.modelProviderRecoveryTitle).toBe('便携设置与凭据恢复')
+    for (const key of [
+      'modelProviderRecoveryTools', 'modelProviderRecoveryDescription',
+      'modelProviderRecoveryPrepare', 'modelProviderRecoveryCreate',
+      'modelProviderRecoveryApply', 'modelProviderRecoveryFinalize'
+    ] as const) {
+      expect(providerSettingsSource).toContain(`t('${key}')`)
+      for (const catalog of [enSettings, zhSettings]) {
+        expect(catalog[key].trim().length).toBeGreaterThan(0)
+        expect(catalog[key]).not.toBe(key)
+      }
+    }
     expect(providerSettingsSource).toContain("runProtectedRecoveryAction('createDestinationRequest')")
     expect(providerSettingsSource).toContain("runProtectedRecoveryAction('createSourceBundle')")
     expect(providerSettingsSource).toContain("runProtectedRecoveryAction('applyDestinationBundle')")
     expect(providerSettingsSource).toContain("runProtectedRecoveryAction('finalizeSourceReceipt')")
+    expect(providerSettingsSource).toContain('await window.analytix.providerCredentialRecovery[action]()')
     expect(providerSettingsSource).not.toContain('requestPath')
     expect(providerSettingsSource).not.toContain('bundlePath')
     expect(providerSettingsSource).not.toContain('receiptPath')

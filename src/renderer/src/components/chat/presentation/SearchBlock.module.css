@@ -22,7 +22,7 @@
   --dsw-alias-interactive-bg-hover-solid: #f1f3f5;
   --dsw-alias-state-error-primary: #ec1313;
   --dsw-alias-state-warn-label: #dd8629;
-  --dsw-alias-state-business-primary: #4176e6;
+  --dsw-alias-state-business-primary: var(--ax-accent-text);
 }
 :global([data-theme='dark']) .scope, :global([data-theme='dark']) .block {
   --dsw-alias-label-primary: #f9fafb;
@@ -36,7 +36,7 @@
   --dsw-alias-border-l3: rgba(255, 255, 255, .16);
   --dsw-alias-interactive-bg-hover-solid: #353638;
   --dsw-alias-state-error-primary: #f25a5a;
-  --dsw-alias-state-business-primary: #7aaaff;
+  --dsw-alias-state-business-primary: var(--ax-accent-text);
 }
 .block.chatBlock { margin: 4px 0 4px 4px; }
 .scope .fallbackCard { font: var(--dsw-font-markdown-code-block-small); }

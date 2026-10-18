@@ -1169,8 +1169,8 @@ body [contenteditable="plaintext-only"] {
   max-width: 340px;
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.95));
+  border: 1px solid var(--color-border, rgba(15, 23, 42, 0.12));
+  background: linear-gradient(180deg, var(--color-bg-elevated, #ffffff), var(--color-bg-subtle, #f8fafc));
   box-shadow: 0 18px 50px rgba(2, 6, 23, 0.2), 0 2px 6px rgba(2, 6, 23, 0.08);
   backdrop-filter: blur(12px) saturate(150%);
   -webkit-backdrop-filter: blur(12px) saturate(150%);
@@ -1188,7 +1188,7 @@ body [contenteditable="plaintext-only"] {
 .drillTitle {
   font-size: 13px;
   font-weight: 800;
-  color: rgba(2, 6, 23, 0.86);
+  color: var(--color-text, #0d0d0d);
   margin-bottom: 10px;
   letter-spacing: 0.2px;
 }
@@ -1207,22 +1207,22 @@ body [contenteditable="plaintext-only"] {
   align-items: start;
   padding: 8px 10px;
   border-radius: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--color-border, rgba(15, 23, 42, 0.12));
+  background: var(--color-bg-elevated, #ffffff);
   font-size: 12px;
-  color: rgba(2, 6, 23, 0.86);
+  color: var(--color-text, #0d0d0d);
   transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
 }
 
 .drillOption:hover {
-  border-color: rgba(31, 111, 235, 0.22);
+  border-color: color-mix(in srgb, var(--color-accent, #3659ef) 22%, transparent);
   box-shadow: 0 8px 18px rgba(2, 6, 23, 0.08);
   transform: translateY(-1px);
 }
 
 .drillOption input {
   margin: 2px 0 0 0;
-  accent-color: rgba(31, 111, 235, 0.95);
+  accent-color: var(--color-accent, #3659ef);
 }
 
 .drillOptionMain {
@@ -1233,16 +1233,16 @@ body [contenteditable="plaintext-only"] {
 .drillOptionSub {
   display: block;
   font-size: 11px;
-  color: rgba(2, 6, 23, 0.55);
+  color: var(--color-text-muted, #5d5d5d);
   margin-left: 0;
 }
 
 .drillOption input:checked ~ .drillOptionMain {
-  color: rgba(31, 111, 235, 0.98);
+  color: var(--color-accent-strong, #3154db);
 }
 
 .drillOption input:checked ~ .drillOptionSub {
-  color: rgba(31, 111, 235, 0.72);
+  color: var(--color-accent-strong, #3154db);
 }
 
 .drillRow {
@@ -1256,7 +1256,7 @@ body [contenteditable="plaintext-only"] {
 .drillLabel {
   font-size: 12px;
   font-weight: 700;
-  color: rgba(2, 6, 23, 0.75);
+  color: var(--color-text, #0d0d0d);
 }
 
 .drillInput {
@@ -1264,22 +1264,23 @@ body [contenteditable="plaintext-only"] {
   height: 30px;
   padding: 0 8px;
   border-radius: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.18);
-  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--color-border, rgba(15, 23, 42, 0.18));
+  background: var(--color-bg-elevated, #ffffff);
+  color: var(--color-text, #0d0d0d);
   font-size: 12px;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .drillInput:focus {
   outline: none;
-  border-color: rgba(31, 111, 235, 0.5);
-  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.12);
+  border-color: var(--color-accent-strong, #3154db);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent, #3659ef) 12%, transparent);
 }
 
 .drillHint {
   grid-column: 1 / -1;
   font-size: 11px;
-  color: rgba(2, 6, 23, 0.55);
+  color: var(--color-text-muted, #5d5d5d);
 }
 
 .drillActions {
@@ -1292,29 +1293,37 @@ body [contenteditable="plaintext-only"] {
   height: 30px;
   padding: 0 10px;
   border-radius: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--color-border, rgba(15, 23, 42, 0.12));
+  background: var(--color-bg-elevated, #ffffff);
   font-size: 12px;
   font-weight: 700;
-  color: rgba(2, 6, 23, 0.75);
+  color: var(--color-text, #0d0d0d);
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
 }
 
 .drillBtn:hover {
-  border-color: rgba(2, 6, 23, 0.22);
+  border-color: color-mix(in srgb, var(--color-text, #0d0d0d) 22%, transparent);
   box-shadow: 0 8px 18px rgba(2, 6, 23, 0.08);
   transform: translateY(-1px);
 }
 
 .drillBtn.primary {
-  border-color: rgba(31, 111, 235, 0.4);
-  background: linear-gradient(180deg, rgba(31, 111, 235, 0.18), rgba(31, 111, 235, 0.12));
-  color: rgba(31, 111, 235, 0.95);
+  border-color: var(--color-accent, #3659ef);
+  background: var(--color-accent, #3659ef);
+  color: var(--color-on-accent, #ffffff);
+}
+
+.drillBtn.primary:hover {
+  background: color-mix(in srgb, var(--color-accent, #3659ef) 96%, black);
+}
+
+.drillBtn.primary:active {
+  background: color-mix(in srgb, var(--color-accent, #3659ef) 92%, black);
 }
 
 .drillBtn.ghost {
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--color-bg-subtle, #f3f3f3);
 }
 
 /* Node info popover */

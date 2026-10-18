@@ -15,7 +15,10 @@ const fixture = vi.hoisted(() => {
 })
 // Mock only neighboring surfaces. The persistent AppShell, workspace metadata,
 // private lease hook and complete plan rendering are the production consumers.
-vi.mock('./components/Workbench', () => ({ Workbench: () => createElement(QuestionPlanPreview, { owner: fixture.owner, presented: true }) }))
+vi.mock('./components/Workbench', () => ({ Workbench: function WorkbenchRouteFixture() {
+  const route = useChatStore(state => state.route)
+  return createElement(QuestionPlanPreview, { owner: fixture.owner, presented: route === 'chat' })
+} }))
 vi.mock('./components/SettingsView', () => ({ SettingsView: () => 'settings-fixture' }))
 vi.mock('./components/InitialSetupDialog', () => ({ InitialSetupDialog: () => null }))
 vi.mock('./components/RuntimeStatusBanner', () => ({ RuntimeStatusBanner: () => null }))
@@ -77,7 +80,7 @@ describe('Question plan authority across the real persistent shell routes', () =
     expect(container.textContent).toContain('Original content through ordinary Settings navigation.')
     expect(container.textContent).not.toContain(i18n.t('common:protectedToolRetry'))
   })
-  it('observes a true global revoke while Workbench is absent and requires an explicit fresh native read on return', async () => {
+  it('observes a true global revoke while the plan is not presented and requires an explicit fresh native read on return', async () => {
     const before = open.mock.calls.length
     await route('settings')
     await act(async () => [...invalidationListeners].forEach(listener => listener(null, 'authority')))

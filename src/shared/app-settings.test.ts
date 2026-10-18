@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  APP_ACCENT_COLORS,
   applyAnalytixRuntimePatch,
   analytixToolPermissionModeFromSettings,
   analytixToolPermissionModeSettings,
@@ -1821,5 +1822,20 @@ describe('Schedule calendar normalization compatibility', () => {
   })
   it('does not downgrade an explicitly damaged calendar zone', () => {
     expect(() => normalizeScheduleSettings({ tasks: [{ schedule: { kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '', timeZone: '' } }] })).toThrow()
+  })
+})
+
+
+describe('saved accent color preference', () => {
+  it.each([undefined, null, 'custom', '#123456', 123])('defaults invalid or legacy accent %j to blue', accentColor => {
+    const raw = { ...settings(), accentColor } as unknown as AppSettingsV1
+    expect(normalizeAppSettings(raw).accentColor).toBe('blue')
+  })
+  it.each(APP_ACCENT_COLORS)('preserves %s through normalization and legacy migration without changing runtime identity', accentColor => {
+    const original = settings()
+    const themed = { ...original, accentColor }
+    expect(normalizeAppSettings(themed).accentColor).toBe(accentColor)
+    expect(migrateLegacyAppSettings(themed).accentColor).toBe(accentColor)
+    expect(buildAnalytixRuntimeSettingsKey(themed)).toBe(buildAnalytixRuntimeSettingsKey(original))
   })
 })

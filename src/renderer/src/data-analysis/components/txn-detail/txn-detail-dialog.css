@@ -144,7 +144,7 @@
 }
 
 .txnTableWrap::-webkit-scrollbar-thumb:hover {
-  background: rgba(31, 111, 235, 0.28);
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
 }
 
 .txnTableWrap::-webkit-scrollbar-track,
@@ -190,7 +190,7 @@
 
 .persistentHorizontalScrollbar.is-scrollable:hover .persistentHorizontalScrollbar__thumb,
 .persistentHorizontalScrollbar__thumb:hover {
-  background: rgba(31, 111, 235, 0.28);
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
 }
 
 .persistentHorizontalScrollbar.is-static .persistentHorizontalScrollbar__thumb {
@@ -288,7 +288,7 @@
 
 .txnSortIcon.active {
   opacity: 0.95;
-  color: rgba(31, 111, 235, 0.95);
+  color: var(--color-accent-strong);
 }
 
 .txnTable th.sortable {
@@ -296,11 +296,11 @@
 }
 
 .txnTable th.sorted {
-  color: rgba(31, 111, 235, 0.95);
+  color: var(--color-accent-strong);
 }
 
 .txnTable th:hover {
-  background: rgba(31, 111, 235, 0.06);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
 .txnTable tr.txnRow.even td {
@@ -308,11 +308,11 @@
 }
 
 .txnTable tr:hover td {
-  background: rgba(31, 111, 235, 0.06);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
 .txnTable tr.highlight td {
-  background: rgba(31, 111, 235, 0.1);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .txnSkCell {
@@ -412,6 +412,7 @@
 }
 
 .txnModalThemeStats {
+  --workbench-ui-on-accent: var(--color-on-accent);
   --stats-tree-secondary-title-size: 12.5px;
   --stats-table-font-size: var(--stats-tree-secondary-title-size);
   --stats-table-row-font-size: 12px;
@@ -512,12 +513,12 @@
 
 .txnModalThemeStats .txnSortIcon.active {
   opacity: 1;
-  color: var(--stats-table-head-text);
+  color: var(--color-accent-strong);
 }
 
 .txnModalThemeStats .txnTable th.sorted {
   background: var(--stats-table-head-hover);
-  color: var(--stats-table-head-text);
+  color: var(--color-accent-strong);
 }
 
 .txnModalThemeStats .tableToolbar {

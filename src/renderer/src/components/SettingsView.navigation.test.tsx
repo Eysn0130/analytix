@@ -1,35 +1,52 @@
 // @vitest-environment jsdom
-import { act, createElement, type ComponentProps, type RefObject } from 'react'
-import { createRoot } from 'react-dom/client'
+import { act, createElement, StrictMode, type ComponentProps, type RefObject } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { normalizeAppSettings, type AppSettingsPatch, type AppSettingsV1 } from '@shared/app-settings'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { useChatStore } from '../store/chat-store'
 import { SETTINGS_CHANGED_EVENT } from '../lib/keyboard-shortcut-settings'
+import { mergeSettings } from './settings-utils'
 import i18n from '../i18n'
-import { SettingsSidebar } from './SettingsSidebar'
+import { SETTINGS_TABS, SettingsSidebar } from './SettingsSidebar'
 
-type NavigationContext = { form: AppSettingsV1; update: (patch: AppSettingsPatch) => void; openProviderSettings: () => void; logsSectionRef: RefObject<HTMLDivElement | null> }
-const capture = vi.hoisted(() => ({
-  current: null as NavigationContext | null,
-  providerDirty: null as ((dirty: boolean) => void) | null,
-  retiredDebugRender: vi.fn(() => null)
-}))
+type NavigationContext = {
+  form: AppSettingsV1
+  update: (patch: AppSettingsPatch) => void
+  openProviderSettings: () => void
+  logsSectionRef: RefObject<HTMLDivElement | null>
+  onProviderDraftDirtyChange: (dirty: boolean) => void
+}
+const capture = vi.hoisted(() => ({ current: null as NavigationContext | null,
+  providerDirty: null as ((dirty: boolean) => void) | null }))
 
 vi.mock('./settings-sections', async () => {
   const { createElement: h } = await import('react')
-  const empty = () => null
-  const out = Object.fromEntries(['ArchivedThreads','Browser','Claw','ComputerUse','ImageGeneration','KeyboardShortcuts','Worktree','Memory','Permissions','SpeechToText','Updates','Write'].map(n => [n + 'SettingsSection', empty]))
+  const section = (name: string) => ({ ctx }: { ctx: NavigationContext }) => {
+    capture.current = ctx
+    return h('div', { 'data-test-settings-section': name })
+  }
+  const out = Object.fromEntries(['ArchivedThreads', 'Browser', 'Claw', 'ComputerUse', 'ImageGeneration',
+    'KeyboardShortcuts', 'Worktree', 'Memory', 'Permissions', 'SpeechToText', 'Updates', 'Write']
+    .map(name => [name + 'SettingsSection', section(name)]))
   return { ...out, GeneralSettingsSection: ({ ctx }: { ctx: NavigationContext }) => {
     capture.current = ctx
-    return h('div', { 'data-test-settings-section': 'general', 'data-test-draft': ctx.form.codePromptPrefix },
-      h('div', { ref: ctx.logsSectionRef, 'data-test-deep-link': 'logs' }),
+    return h('div', { 'data-test-settings-section': 'general' },
+      h('input', { 'aria-label': 'Fixture draft', value: ctx.form.codePromptPrefix,
+        onChange: (event: { target: { value: string } }) => ctx.update({ codePromptPrefix: event.target.value }) }),
+      h('details', null, h('summary', null, 'Fixture diagnostics'),
+        h('div', { ref: ctx.logsSectionRef, 'data-test-deep-link': 'logs' })),
       h('button', { 'data-test-provider-settings': '', onClick: ctx.openProviderSettings }, 'Fixture Providers'))
-  }, ProvidersSettingsSection: ({ ctx }: { ctx: { onProviderDraftDirtyChange: (dirty: boolean) => void } }) => {
+  }, ProvidersSettingsSection: ({ ctx }: { ctx: NavigationContext }) => {
+    capture.current = ctx
     capture.providerDirty = ctx.onProviderDraftDirtyChange
     return h('div', { 'data-test-settings-section': 'providers' })
-  }, LlmDebugSettingsSection: capture.retiredDebugRender,
-  AgentsSettingsSection: ({ ctx }: any) => h('div', { ref: ctx.agentsSectionRef }, h('div', { ref: ctx.skillSectionRef, 'data-test-deep-link': 'skill' }), h('div', { ref: ctx.mcpSectionRef, 'data-test-deep-link': 'mcp' })) }
+  }, AgentsSettingsSection: ({ ctx }: any) => {
+    capture.current = ctx
+    return h('div', { ref: ctx.agentsSectionRef },
+      h('div', { ref: ctx.skillSectionRef, 'data-test-deep-link': 'skill' }),
+      h('div', { ref: ctx.mcpSectionRef, 'data-test-deep-link': 'mcp' }))
+  } }
 })
 vi.mock('./settings-section-account', async () => {
   const { createElement: h } = await import('react')
@@ -37,348 +54,248 @@ vi.mock('./settings-section-account', async () => {
 })
 import { SettingsView } from './SettingsView'
 
-describe('SettingsSidebar navigation', () => {
-  let host: HTMLDivElement, root: ReturnType<typeof createRoot>
+const label = (key: string): string => i18n.t(`settings:${key}`)
+
+describe('compact settings navigation', () => {
+  let host: HTMLDivElement, root: Root
   const changeCategory = vi.fn()
-  const t = (key: string): string => i18n.t(`settings:${key}`)
   const render = async (category: ComponentProps<typeof SettingsSidebar>['category'] = 'general') => {
-    await act(async () => root.render(createElement(SettingsSidebar, { category, goBack: vi.fn(), setCategory: changeCategory, t })))
+    await act(async () => root.render(createElement(SettingsSidebar, {
+      category, setCategory: changeCategory, goBack: vi.fn(), t: label
+    })))
   }
-  const search = async (value: string) => {
-    const input = host.querySelector<HTMLInputElement>('input')!
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-  }
-  const archives = () => [...host.querySelectorAll<HTMLButtonElement>('button')]
-    .find(button => button.textContent?.trim() === t('archives'))
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-    await i18n.changeLanguage('en')
-    changeCategory.mockClear()
     host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    changeCategory.mockClear()
   })
   afterEach(async () => {
     await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals()
   })
-  it.each(['en', 'zh'])('keeps three groups, Personal shortcuts and an independent Archives entry in %s', async language => {
-    await i18n.changeLanguage(language); await render()
-    const groups = [...host.querySelectorAll('section[aria-label]')]
-    expect(groups.map(group => group.getAttribute('aria-label'))).toEqual([
-      t('settingsNavPersonal'), t('settingsNavIntegrations'), t('settingsNavCoding')
-    ])
-    expect(groups[0].textContent).toContain(t('keyboardShortcuts'))
-    expect(groups[2].textContent).not.toContain(t('keyboardShortcuts'))
-    expect(host.querySelectorAll('nav button')).toHaveLength(14)
-    expect(archives()?.closest('section')).toBeNull()
-    expect(host.textContent).not.toContain(t('debug'))
-    await act(async () => archives()!.click())
-    expect(changeCategory).toHaveBeenCalledWith('archives')
+  it.each(['en', 'zh'])('offers four localized tabs and all real sections in %s', async language => {
+    await i18n.changeLanguage(language)
+    for (const tab of SETTINGS_TABS) {
+      await render(tab.categories[0])
+      const tabs = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+      expect(tabs.map(button => button.textContent)).toEqual(SETTINGS_TABS.map(item => label(item.labelKey)))
+      expect(host.querySelectorAll('[role="tab"][aria-selected="true"]')).toHaveLength(1)
+      expect([...host.querySelectorAll<HTMLOptionElement>('select option')].map(option => option.value)).toEqual(tab.categories)
+      expect(tabs.every(button => button.getAttribute('aria-controls') === 'ax-settings-tabpanel')).toBe(true)
+    }
+    expect(host.querySelector('input[type="search"]')).toBeNull()
+    expect(host.textContent).not.toContain(label('deprecatedHubCompatibility'))
+  })
+  it('supports keyboard tab navigation and keeps archives and editable workspaces available', async () => {
+    await render('general')
+    const first = host.querySelector<HTMLButtonElement>('[role="tab"]')!
+    await act(async () => first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+    expect(changeCategory).toHaveBeenLastCalledWith('providers')
+    await act(async () => first.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })))
+    expect(changeCategory).toHaveBeenLastCalledWith('agents')
     await render('archives')
-    expect(archives()?.getAttribute('aria-current')).toBe('page')
-  })
-  it('finds Archives through search, reports an empty match and restores the utility when cleared', async () => {
-    await render(); await search('archive')
-    expect(archives()).toBeDefined()
-    expect(host.textContent).not.toContain(t('settingsSearchEmpty'))
-    await act(async () => archives()!.click())
-    expect(changeCategory).toHaveBeenCalledWith('archives')
-    await search('unmatched-fixture-query')
-    expect(archives()).toBeUndefined()
-    expect(host.textContent).toContain(t('settingsSearchEmpty'))
-    const clear = host.querySelector<HTMLButtonElement>(`button[aria-label="${t('settingsSearchClear')}"]`)!
-    await act(async () => clear.click())
-    expect(host.querySelector<HTMLInputElement>('input')!.value).toBe('')
-    expect(archives()).toBeDefined()
-  })
-  it.each([
-    ['en', 'logs'], ['en', 'diagnostics'], ['en', 'debug'], ['en', 'Local error log'],
-    ['zh', '排障'], ['zh', '本地错误日志']
-  ])('finds General for %s log query %s without restoring Debug', async (language, query) => {
-    await i18n.changeLanguage(language); await render(); await search(query)
-    const entries = [...host.querySelectorAll<HTMLButtonElement>('nav button')]
-    expect(entries).toHaveLength(1)
-    expect(entries[0].textContent).toContain(t('general'))
-    await act(async () => entries[0].click())
-    expect(changeCategory).toHaveBeenCalledWith('general')
-    expect(capture.retiredDebugRender).not.toHaveBeenCalled()
+    const select = host.querySelector<HTMLSelectElement>('select')!
+    expect(select.value).toBe('archives')
+    select.value = 'write'
+    await act(async () => select.dispatchEvent(new Event('change', { bubbles: true })))
+    expect(changeCategory).toHaveBeenLastCalledWith('write')
   })
 })
 
-it('resets only the content owner when category changes, preserves same-category settings refresh and deep links', async () => {
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-  await i18n.changeLanguage('en')
-  const initial = useChatStore.getState(), settings = normalizeAppSettings({
-    workspaceRoot: '/synthetic/a',
-    runtime: {
-      textToSpeech: { model: 'speech-2.8-hd' },
-      musicGeneration: { model: 'music-2.6' },
-      videoGeneration: { model: 'MiniMax-Hailuo-2.3' }
-    },
-    provider: { providers: [{ id: 'legacy-media', name: 'Legacy media', baseUrl: 'https://media.invalid',
-      endpointFormat: 'chat_completions', models: [], modelProfiles: {} }] }
-  } as unknown as AppSettingsV1)
-  const legacyProfile = Object.assign(settings.provider.providers[0], { apiKey: 'sk-test' })
-  expect(legacyProfile.apiKey).toBe('sk-test')
-  Object.assign(window, { analytix: { app: {}, write: {}, updates: {} } })
-  vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue(settings)
-  const scroll = vi.fn(); Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
-  const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(fn => { fn(0); return 1 })
-  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
-  const click = async (text: string) => act(async () => { [...host.querySelectorAll('button')].find(b => b.textContent?.trim() === text)!.click() })
-  try {
-    useChatStore.setState({ settingsSection: 'general' })
-    await act(async () => root.render(createElement(SettingsView)))
-    const owner = host.querySelector<HTMLDivElement>('.ds-settings-content')!; expect(owner).not.toBeNull()
-    owner.scrollTop = 1196
-    await click(i18n.t('write', { ns: 'settings' })); expect(owner.scrollTop).toBe(0)
-    owner.scrollTop = 420
-    await act(async () => window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: { ...settings, codePromptPrefix: 'Synthetic retained draft' } })))
-    expect(owner.scrollTop).toBe(420)
-    await act(async () => useChatStore.setState({ settingsSection: 'skill' }))
-    expect(owner.scrollTop).toBe(0); expect(scroll).toHaveBeenCalled()
-    expect(host.querySelector('[data-test-deep-link="skill"]')).not.toBeNull()
-    await act(async () => useChatStore.setState({ settingsSection: 'mcp' }))
-    expect(host.querySelector('[data-test-deep-link="mcp"]')).not.toBeNull()
-    expect(host.querySelector('.ds-settings-sidebar [aria-current="page"]')?.textContent).toBe(i18n.t('agents', { ns: 'settings' }))
-    await act(async () => useChatStore.setState({ settingsSection: 'mediaGeneration' }))
-    expect(host.querySelector('[data-test-settings-section="general"]')).not.toBeNull()
-    expect(host.querySelector('.ds-settings-sidebar [aria-current="page"]')?.textContent).toBe(i18n.t('general', { ns: 'settings' }))
-    await act(async () => useChatStore.setState({ settingsSection: 'debug' }))
-    expect(host.querySelector('[data-test-settings-section="general"]')).not.toBeNull()
-    expect(scroll.mock.contexts.at(-1)).toBe(host.querySelector('[data-test-deep-link="logs"]'))
-    expect(capture.retiredDebugRender).not.toHaveBeenCalled()
-    expect(settings.runtime.textToSpeech.model).toBe('speech-2.8-hd')
-    expect(settings.runtime.musicGeneration.model).toBe('music-2.6')
-    expect(settings.runtime.videoGeneration.model).toBe('MiniMax-Hailuo-2.3')
-    for (const saved of ['speech-2.8-hd', 'music-2.6', 'MiniMax-Hailuo-2.3', 'sk-test']) expect(host.innerHTML).not.toContain(saved)
-    expect(host.textContent).not.toContain(i18n.t('mediaGeneration', { ns: 'settings' }))
-    expect(host.textContent).not.toContain(i18n.t('deprecatedHubCompatibility', { ns: 'settings' }))
-    await act(async () => useChatStore.setState({ settingsSection: 'account' }))
-    expect(host.querySelector('[data-test-settings-section="account"]')).not.toBeNull()
-    expect(host.querySelector('.ds-settings-sidebar [aria-current="page"]')).toBeNull()
-    await act(async () => useChatStore.setState({ settingsSection: 'general' }))
-    expect(host.querySelector('[data-test-settings-section="general"]')).not.toBeNull()
-    expect(host.querySelector('.ds-settings-sidebar [aria-current="page"]')?.textContent).toBe(i18n.t('general', { ns: 'settings' }))
-    expect(host.textContent).not.toContain('Mascot modes')
-  } finally { await act(async () => root.unmount()); host.remove(); useChatStore.setState(initial); raf.mockRestore(); vi.restoreAllMocks() }
-})
-
-
-describe('SettingsView departure requires the current draft to be saved', () => {
-  const initial = useChatStore.getState()
-  let root: ReturnType<typeof createRoot>, host: HTMLDivElement, bridge: Window['analytix'] | undefined
-  let stored: AppSettingsV1, failed: boolean, writes: AppSettingsPatch[]
+describe('settings modal draft lifecycle', () => {
+  const initialStore = useChatStore.getState()
+  let host: HTMLDivElement, root: Root | null, bridge: Window['analytix'] | undefined
+  let stored: AppSettingsV1, writes: AppSettingsPatch[], failWrite: boolean
   let writeGate: Promise<void> | null, releaseWrite: (() => void) | undefined
-  let reloadGate: Promise<void> | null, releaseReload: (() => void) | undefined
-  const chat = vi.fn(async () => undefined), write = vi.fn(async () => undefined), claw = vi.fn(),
-    schedule = vi.fn(), plugins = vi.fn(), setRoute = vi.fn(), onboarding = vi.fn()
-  const destinations = () => chat.mock.calls.length + write.mock.calls.length + claw.mock.calls.length +
-    schedule.mock.calls.length + plugins.mock.calls.length + setRoute.mock.calls.length + onboarding.mock.calls.length
+  let opener: HTMLButtonElement
+  const setRoute = vi.fn()
   const context = () => { expect(capture.current).not.toBeNull(); return capture.current! }
-  const edit = async (value: string) => act(async () => context().update({ codePromptPrefix: value }))
-  const click = async (entry: 'back' | 'chat' | 'plugins' | 'schedule' | 'providers') => {
-    await act(async () => {
-      if (entry === 'providers') host.querySelector<HTMLButtonElement>('[data-test-provider-settings]')!.click()
-      else if (entry === 'back') [...host.querySelectorAll<HTMLButtonElement>('.ds-settings-sidebar button')]
-        .find(button => button.textContent?.trim() === i18n.t('settings:back'))!.click()
-      else {
-        const key = entry === 'chat' ? 'chatNavigationLabel' : entry
-        host.querySelector<HTMLButtonElement>(`.ds-navigation-rail button[aria-label="${i18n.t('common:' + key)}"]`)!.click()
-      }
-    })
-  }
+  const button = (key: string) => key === 'settingsResetAppearance'
+    ? host.querySelector<HTMLButtonElement>('.ax-settings-reset')!
+    : [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === label(key))!
+  const click = async (key: string) => act(async () => button(key).click())
+  const edit = async (patch: AppSettingsPatch) => act(async () => context().update(patch))
+  const key = async (value: string) => act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true })))
+  const unmount = async () => { if (root) { await act(async () => root!.unmount()); root = null } }
   beforeEach(async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     vi.stubGlobal('fetch', () => { throw new Error('Unexpected fixture network') })
     vi.stubGlobal('WebSocket', class { constructor() { throw new Error('Unexpected fixture network') } })
     await i18n.changeLanguage('en'); vi.useFakeTimers()
-    stored = normalizeAppSettings({ workspaceRoot: '/fixture/settings-departure' } as AppSettingsV1)
-    failed = false; writes = []; writeGate = null; reloadGate = null; releaseWrite = undefined; releaseReload = undefined
-    capture.current = null; capture.providerDirty = null; bridge = window.analytix
-    window.analytix = { app: {}, write: {}, updates: {}, settings: { getSettings: async () => stored },
+    stored = normalizeAppSettings({ theme: 'light', locale: 'en', workspaceRoot: '/fixture/settings-modal' } as AppSettingsV1)
+    writes = []; failWrite = false; writeGate = null; releaseWrite = undefined
+    capture.current = null; capture.providerDirty = null; setRoute.mockClear(); bridge = window.analytix
+    window.analytix = { app: {}, write: {}, updates: {},
       logs: { error: vi.fn(async () => undefined) } } as unknown as Window['analytix']
-    vi.spyOn(rendererRuntimeClient, 'getSettings').mockImplementation(async () => stored)
-    vi.spyOn(rendererRuntimeClient, 'setSettings').mockImplementation(async partial => {
-      writes.push(structuredClone(partial))
+    vi.spyOn(rendererRuntimeClient, 'getSettings').mockImplementation(async () => structuredClone(stored))
+    vi.spyOn(rendererRuntimeClient, 'readSettingsFromHost').mockImplementation(async () => structuredClone(stored))
+    vi.spyOn(rendererRuntimeClient, 'setSettings').mockImplementation(async patch => {
+      writes.push(structuredClone(patch))
       if (writeGate) await writeGate
-      if (failed) throw new Error('Fixture save failed')
-      stored = { ...stored, ...partial } as AppSettingsV1
-      return stored
+      if (failWrite) throw new Error('Fixture private failure')
+      stored = mergeSettings(stored, patch)
+      return structuredClone(stored)
     })
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(fn => { fn(0); return 1 })
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
-    useChatStore.setState({ route: 'settings', settingsSection: 'general', settingsReturnRoute: 'chat',
-      openCode: chat, openWrite: write, openClaw: claw, openSchedule: schedule, openPlugins: plugins,
-      setRoute, openInitialSetup: onboarding, applyI18nFromSettings: vi.fn(async () => undefined),
-      reloadUiSettings: vi.fn(async () => { if (reloadGate) await reloadGate }),
-      showTopNotice: vi.fn(), probeRuntime: vi.fn(async () => undefined) })
+    useChatStore.setState({ route: 'settings', settingsSection: 'general', settingsReturnRoute: 'chat', setRoute,
+      applyI18nFromSettings: vi.fn(async () => undefined), reloadUiSettings: vi.fn(async () => undefined),
+      probeRuntime: vi.fn(async () => undefined), showTopNotice: vi.fn() })
+    opener = document.createElement('button'); opener.textContent = 'Open settings'; document.body.append(opener); opener.focus()
     host = document.createElement('div'); document.body.append(host); root = createRoot(host)
-    await act(async () => root.render(createElement(SettingsView)))
-    expect(capture.current).not.toBeNull()
+    await act(async () => root!.render(createElement(SettingsView)))
   })
   afterEach(async () => {
-    await act(async () => root.unmount()); host.remove(); capture.current = null
+    await unmount(); host.remove(); opener.remove()
     if (bridge) window.analytix = bridge
     else Reflect.deleteProperty(window, 'analytix')
-    useChatStore.setState(initial); vi.clearAllTimers(); vi.useRealTimers()
-    vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+    useChatStore.setState(initialStore); capture.current = null
+    vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
   })
-  it.each(['chat', 'write', 'claw', 'schedule', 'plugins'] as const)('retains a failed draft before returning to %s and retries successfully', async destination => {
-    useChatStore.setState({ settingsReturnRoute: destination })
-    failed = true; await edit('Retained failed draft'); await click('back')
-    expect(destinations()).toBe(0); expect(context().form.codePromptPrefix).toBe('Retained failed draft')
-    expect(host.querySelector('[role="status"]')?.textContent).toBe('Fixture save failed')
-    failed = false; await click('back')
-    expect(destinations()).toBe(1); expect(writes.at(-1)?.codePromptPrefix).toBe('Retained failed draft')
-    const selected = destination === 'chat' ? chat : destination === 'write' ? write : destination === 'claw' ? claw
-      : destination === 'schedule' ? schedule : setRoute
-    expect(selected).toHaveBeenCalledTimes(1)
+  it('starts clean after the StrictMode effect replay and closes without a discard prompt', async () => {
+    await unmount()
+    root = createRoot(host)
+    await act(async () => root!.render(createElement(StrictMode, null, createElement(SettingsView))))
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('')
+    expect(button('settingsSavePreferences').disabled).toBe(true)
+    await key('Escape')
+    expect(host.querySelector('[role="alert"]')).toBeNull()
+    expect(setRoute).toHaveBeenCalledWith('chat')
+    expect(writes).toEqual([])
   })
-  it.each(['chat', 'plugins', 'schedule'] as const)('blocks %s departure on a failed save and preserves a retry', async entry => {
-    failed = true; await edit('Rail draft'); await click(entry)
-    expect(destinations()).toBe(0); expect(context().form.codePromptPrefix).toBe('Rail draft')
-    failed = false; await click(entry)
-    expect(destinations()).toBe(1)
+  it('previews accent, cancels without writes and preserves a failed accent draft for retry', async () => {
+    await edit({ accentColor: 'orange' })
+    expect(document.documentElement.dataset.accent).toBe('orange')
+    expect(writes).toEqual([])
+    await click('settingsCancel')
+    expect(document.documentElement.dataset.accent).toBe('blue')
+    expect(writes).toEqual([])
+    await unmount(); root = createRoot(host)
+    await act(async () => root!.render(createElement(SettingsView)))
+    await edit({ accentColor: 'teal' }); failWrite = true
+    await click('settingsSavePreferences')
+    expect(context().form.accentColor).toBe('teal')
+    expect(document.documentElement.dataset.accent).toBe('teal')
+    expect(stored.accentColor).toBe('blue')
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(label('settingsSaveFailed'))
+    failWrite = false; await click('settingsSavePreferences')
+    expect(stored.accentColor).toBe('teal')
+    await click('settingsCancel')
+    expect(document.documentElement.dataset.accent).toBe('teal')
   })
-  it('opens Providers from the General configuration entry without opening setup', async () => {
-    await click('providers')
-    expect(useChatStore.getState().route).toBe('settings')
-    expect(useChatStore.getState().settingsSection).toBe('providers')
-    expect(host.querySelector('[data-test-settings-section="providers"]')).not.toBeNull()
-    expect(writes).toHaveLength(0)
-    expect(onboarding).not.toHaveBeenCalled()
-    expect(destinations()).toBe(0)
+  it('holds edits beyond the old debounce and saves once only on the explicit action', async () => {
+    await edit({ codePromptPrefix: 'Pending draft' })
+    await act(async () => vi.advanceTimersByTimeAsync(2500))
+    expect(writes).toEqual([])
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(label('settingsUnsavedChanges'))
+    await click('settingsSavePreferences')
+    expect(writes).toEqual([{ codePromptPrefix: 'Pending draft' }])
+    expect(button('settingsSavePreferences').disabled).toBe(true)
+    await click('settingsCancel')
+    expect(setRoute).toHaveBeenCalledWith('chat')
+    await act(async () => vi.advanceTimersByTimeAsync(3000))
+    expect(writes).toHaveLength(1)
   })
-  it('keeps a failed General draft until the Providers entry can save it and retry', async () => {
-    failed = true; await edit('Provider entry retained draft'); await click('providers')
-    expect(useChatStore.getState().settingsSection).toBe('general')
-    expect(host.querySelector('[data-test-settings-section="providers"]')).toBeNull()
-    expect(context().form.codePromptPrefix).toBe('Provider entry retained draft')
-    expect(host.querySelector('[role="status"]')?.textContent).toBe('Fixture save failed')
-    failed = false; await click('providers')
-    expect(writes.at(-1)?.codePromptPrefix).toBe('Provider entry retained draft')
-    expect(stored.codePromptPrefix).toBe('Provider entry retained draft')
-    expect(useChatStore.getState().settingsSection).toBe('providers')
-    expect(host.querySelector('[data-test-settings-section="providers"]')).not.toBeNull()
-    expect(onboarding).not.toHaveBeenCalled()
-    expect(destinations()).toBe(0)
+  it.each(['chat', 'write', 'claw', 'schedule', 'plugins'] as const)('Cancel discards without writing and returns to %s', async destination => {
+    await act(async () => useChatStore.setState({ settingsReturnRoute: destination }))
+    await edit({ theme: 'dark', locale: 'zh', codePromptPrefix: 'Discard this' })
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    await click('settingsCancel')
+    expect(setRoute).toHaveBeenCalledWith(destination)
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(useChatStore.getState().applyI18nFromSettings).toHaveBeenLastCalledWith('en')
+    await act(async () => vi.advanceTimersByTimeAsync(2000))
+    expect(writes).toEqual([])
   })
-  it('offers an explicit save retry without discarding the draft or duplicating an accepted save on Back', async () => {
-    failed = true; await edit('Draft to retry'); await click('back')
-    const retry = [...host.querySelectorAll<HTMLButtonElement>('button')]
-      .find(button => button.textContent?.trim() === i18n.t('settings:retrySave'))!
-    expect(retry).not.toBeUndefined()
-    failed = false; await act(async () => retry.click())
-    expect(destinations()).toBe(0); expect(context().form.codePromptPrefix).toBe('Draft to retry')
-    expect(writes).toHaveLength(2)
-    await click('back'); expect(destinations()).toBe(1); expect(writes).toHaveLength(2)
+  it.each(['Escape', 'close'])('asks before discarding via %s, restores editing focus and never flushes', async close => {
+    await edit({ codePromptPrefix: 'Keep until confirmed' })
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Fixture draft"]')!; input.focus()
+    if (close === 'Escape') await key('Escape')
+    else await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${label('settingsClose')}"]`)!.click())
+    expect(document.activeElement).toBe(button('settingsKeepEditing'))
+    expect(setRoute).not.toHaveBeenCalled(); expect(writes).toEqual([])
+    await key('Escape')
+    expect(document.activeElement).toBe(input)
+    expect(context().form.codePromptPrefix).toBe('Keep until confirmed')
+    await key('Escape'); await click('settingsDiscard')
+    expect(setRoute).toHaveBeenCalledWith('chat')
+    await act(async () => vi.advanceTimersByTimeAsync(1000))
+    expect(writes).toEqual([])
   })
-  it('keeps an edit made during SET and its debounce instead of leaving on the old reply', async () => {
-    writeGate = new Promise<void>(done => { releaseWrite = done })
-    await edit('First draft'); await click('back'); expect(writes).toHaveLength(1)
-    await edit('New draft during save')
-    await act(async () => { releaseWrite!() })
-    expect(destinations()).toBe(0); expect(context().form.codePromptPrefix).toBe('New draft during save')
-    writeGate = null
-    await act(async () => { await vi.advanceTimersByTimeAsync(450) })
-    expect(writes.at(-1)?.codePromptPrefix).toBe('New draft during save')
-    await click('back'); expect(destinations()).toBe(1)
+  it('retains a failed draft and retries using the same explicit action', async () => {
+    failWrite = true; await edit({ codePromptPrefix: 'Retry me' }); await click('settingsSavePreferences')
+    expect(context().form.codePromptPrefix).toBe('Retry me')
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(label('settingsSaveFailed'))
+    expect(host.textContent).not.toContain('Fixture private failure')
+    failWrite = false; await click('settingsSavePreferences')
+    expect(stored.codePromptPrefix).toBe('Retry me'); expect(writes).toHaveLength(2)
   })
-  it('retains an edit and rejects stale Host refresh during the awaited UI reload', async () => {
-    reloadGate = new Promise<void>(done => { releaseReload = done })
-    await edit('Saved before reload'); await click('back')
-    await edit('New edit during reload')
-    await act(async () => window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: stored })))
-    expect(context().form.codePromptPrefix).toBe('New edit during reload')
-    await act(async () => { releaseReload!() })
-    expect(destinations()).toBe(0); expect(context().form.codePromptPrefix).toBe('New edit during reload')
+  it('prevents close while a dispatched Save settles and does not enqueue duplicate writes', async () => {
+    writeGate = new Promise<void>(resolve => { releaseWrite = resolve })
+    await edit({ codePromptPrefix: 'In flight' }); await click('settingsSavePreferences')
+    expect(button('settingsCancel').disabled).toBe(true)
+    await key('Escape')
+    await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${label('settingsClose')}"]`)!.click())
+    expect(setRoute).not.toHaveBeenCalled(); expect(writes).toHaveLength(1)
+    await act(async () => { releaseWrite!(); await writeGate })
+    await click('settingsCancel')
+    expect(setRoute).toHaveBeenCalledTimes(1)
+    await act(async () => vi.advanceTimersByTimeAsync(2000))
+    expect(writes).toHaveLength(1)
   })
-  it('ignores a rejected old reload after a new edit without changing its saving status', async () => {
-    let rejectReload!: (reason: unknown) => void
-    reloadGate = new Promise<void>((_resolve, reject) => { rejectReload = reject })
-    // The existing background reload succeeds; hold only this explicit departure reload.
-    vi.mocked(useChatStore.getState().reloadUiSettings).mockResolvedValueOnce(undefined)
-    await edit('Saved before old reload'); await click('back')
-    await edit('New draft during old reload')
-    await act(async () => rejectReload(new Error('Fixture old reload failure')))
-    expect(destinations()).toBe(0); expect(context().form.codePromptPrefix).toBe('New draft during old reload')
-    expect(host.textContent).toContain(i18n.t('settings:applying'))
-    expect(host.textContent).not.toContain(i18n.t('settings:applyFailed'))
-    expect(useChatStore.getState().showTopNotice).not.toHaveBeenCalled()
+  it('keeps Host changes and Provider preferences when saving an unrelated local draft', async () => {
+    await edit({ codePromptPrefix: 'My change' })
+    const preference = { id: 'fixture', baseUrl: 'https://provider.invalid/v1',
+      endpointFormat: 'chat_completions' as const, modelProfiles: {} }
+    const refreshed = { ...stored, workspaceRoot: '/fixture/new-host-root', provider: { ...stored.provider, modelPreferences: [preference] } } as AppSettingsV1
+    stored = refreshed
+    await act(async () => window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: refreshed })))
+    expect(context().form.codePromptPrefix).toBe('My change')
+    await click('settingsSavePreferences')
+    expect(writes).toEqual([{ codePromptPrefix: 'My change' }])
+    expect(stored.workspaceRoot).toBe('/fixture/new-host-root')
+    expect(stored.provider.modelPreferences).toEqual([preference])
   })
-  it('reports a current departure reload failure without offering an ineffective save retry', async () => {
-    let rejectReload!: (reason: unknown) => void
-    reloadGate = new Promise<void>((_resolve, reject) => { rejectReload = reject })
-    vi.mocked(useChatStore.getState().reloadUiSettings).mockResolvedValueOnce(undefined)
-    await edit('Accepted draft'); await click('back')
-    await act(async () => rejectReload(new Error('Fixture departure reload failure')))
-    expect(destinations()).toBe(0); expect(context().form.codePromptPrefix).toBe('Accepted draft')
-    expect(host.textContent).not.toContain(i18n.t('settings:applyFailed'))
-    expect([...host.querySelectorAll('button')].some(button => button.textContent?.trim() ===
-      i18n.t('settings:retrySave'))).toBe(false)
-    expect(useChatStore.getState().showTopNotice).toHaveBeenCalledWith({
-      tone: 'error', message: 'Fixture departure reload failure'
-    })
-    reloadGate = null; await click('back')
-    expect(destinations()).toBe(1); expect(writes).toHaveLength(1)
+  it('resets appearance only and preserves provider credentials and workspace choices', async () => {
+    await edit({ theme: 'dark', accentColor: 'orange', uiFontScale: 'large', workspaceRoot: '/fixture/edited-root' })
+    const provider = structuredClone(context().form.provider)
+    await click('settingsResetAppearance')
+    expect(context().form.accentColor).toBe('blue')
+    expect(context().form.theme).toBe('light'); expect(context().form.uiFontScale).toBe('small')
+    expect(context().form.provider).toEqual(provider)
+    expect(context().form.workspaceRoot).toBe('/fixture/edited-root'); expect(writes).toEqual([])
   })
-  it('does not use a retired Settings entry to navigate after late success', async () => {
-    writeGate = new Promise<void>(done => { releaseWrite = done })
-    await edit('Entry to retire'); await click('back')
-    await act(async () => root.render(null))
-    await act(async () => { releaseWrite!() })
-    expect(destinations()).toBe(0)
-  })
-  it('keeps an invalid port on the current page without attempting a write', async () => {
-    await act(async () => context().update({ runtime: { port: 0 } }))
-    await click('back')
-    expect(writes).toHaveLength(0); expect(destinations()).toBe(0)
-    expect(context().form.runtime.port).toBe(0)
-  })
-  it('honors only the latest explicit departure while the save queue drains', async () => {
-    writeGate = new Promise<void>(done => { releaseWrite = done })
-    await edit('One current draft'); await click('plugins'); await click('chat')
-    await act(async () => { releaseWrite!() })
-    expect(plugins).not.toHaveBeenCalled(); expect(chat).toHaveBeenCalledTimes(1)
-  })
-  it('synchronizes accepted categories so repeated external Provider navigation remains actionable', async () => {
-    const sidebarClick = async (key: string) => act(async () => {
-      [...host.querySelectorAll<HTMLButtonElement>('.ds-settings-sidebar button')]
-        .find(button => button.textContent?.trim() === i18n.t(`settings:${key}`))!.click()
-    })
-    await sidebarClick('providers')
-    expect(useChatStore.getState().settingsSection).toBe('providers')
-    await sidebarClick('general')
-    expect(useChatStore.getState().settingsSection).toBe('general')
-    await act(async () => useChatStore.getState().openSettings('providers'))
-    expect(host.querySelector('[data-test-settings-section="providers"]')).not.toBeNull()
-    await act(async () => capture.providerDirty!(true))
+  it('maps existing deep links to real sections and opens collapsed diagnostics', async () => {
+    const owner = host.querySelector<HTMLDivElement>('.ax-settings-content')!
+    owner.scrollTop = 1000
+    await act(async () => useChatStore.getState().openSettings('write'))
+    expect(owner.scrollTop).toBe(0)
+    expect(host.querySelector('[data-test-settings-section="Write"]')).not.toBeNull()
+    await act(async () => useChatStore.getState().openSettings('skill'))
+    expect(host.querySelector('[data-test-deep-link="skill"]')).not.toBeNull()
     await act(async () => useChatStore.getState().openSettings('mcp'))
-    expect(useChatStore.getState().settingsSection).toBe('providers')
-    expect(host.querySelector('[data-test-deep-link="mcp"]')).toBeNull()
-    await act(async () => capture.providerDirty!(false))
-    await act(async () => useChatStore.getState().openSettings('mcp'))
-    expect(useChatStore.getState().settingsSection).toBe('mcp')
     expect(host.querySelector('[data-test-deep-link="mcp"]')).not.toBeNull()
+    await act(async () => useChatStore.getState().openSettings('debug'))
+    expect(host.querySelector<HTMLDetailsElement>('details')!.open).toBe(true)
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(label('settingsTabGeneral'))
+    await act(async () => useChatStore.getState().openSettings('account'))
+    expect(host.querySelector('[data-test-settings-section="account"]')).not.toBeNull()
+    await act(async () => useChatStore.getState().openSettings('mediaGeneration'))
+    expect(host.querySelector('[data-test-settings-section="general"]')).not.toBeNull()
   })
-
-  it('keeps an unsaved Provider draft when sidebar utilities or the legacy Debug link request another page', async () => {
-    const sidebarClick = async (key: string) => act(async () => {
-      [...host.querySelectorAll<HTMLButtonElement>('.ds-settings-sidebar button')]
-        .find(button => button.textContent?.trim() === i18n.t(`settings:${key}`))!.click()
-    })
-    await sidebarClick('providers')
-    expect(capture.providerDirty).not.toBeNull()
+  it('blocks a Provider draft from disappearing on tab navigation', async () => {
+    await act(async () => useChatStore.getState().openSettings('providers'))
     await act(async () => capture.providerDirty!(true))
-    await sidebarClick('archives'); await sidebarClick('keyboardShortcuts')
-    await act(async () => useChatStore.setState({ settingsSection: 'debug' }))
+    await act(async () => host.querySelector<HTMLButtonElement>('#ax-settings-tab-workspace')!.click())
     expect(host.querySelector('[data-test-settings-section="providers"]')).not.toBeNull()
-    expect(host.querySelector('[data-test-deep-link="logs"]')).toBeNull()
-    expect(useChatStore.getState().showTopNotice).toHaveBeenCalledWith({
-      tone: 'info', message: i18n.t('settings:modelProviderUnsavedChanges')
-    })
-    expect(capture.retiredDebugRender).not.toHaveBeenCalled()
+    expect(useChatStore.getState().showTopNotice).toHaveBeenCalledWith({ tone: 'info', message: label('modelProviderUnsavedChanges') })
+    expect(writes).toEqual([])
+  })
+  it('uses one focus owner, traps Tab and returns focus after the modal unmounts', async () => {
+    expect(host.querySelectorAll('[role="dialog"][aria-modal="true"]')).toHaveLength(1)
+    const cancel = button('settingsCancel'); cancel.focus()
+    await act(async () => cancel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })))
+    expect(document.activeElement).toBe(host.querySelector(`button[aria-label="${label('settingsClose')}"]`))
+    await unmount()
+    expect(document.activeElement).toBe(opener)
   })
 })
