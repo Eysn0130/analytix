@@ -231,7 +231,11 @@ func (h *runtimeServerHandler) persistRuntimeToolResultWithProcessContext(ctx co
 		if err := h.store.EnsureProtectedToolResultSettlementExact(snapshot.Context, pending.ThreadID, pending.TurnID, pending.ToolCallItemID, records.ResultItem); err != nil {
 			return err
 		}
-	} else if settlement.SettlementAuthorized && domainprocess.MutationCaptureReadyV1(ctx, pending.Call.Name) {
+	} else if settlement.SettlementAuthorized && (domainprocess.MutationCaptureReadyV1(ctx, pending.Call.Name) ||
+		((pending.Call.Name == "user_input" || pending.Call.Name == "request_user_input") &&
+			pending.ExecutionGrant.ServerIdentity == "host:builtin" && !pending.ExecutionGrant.ReadOnly)) {
+		// Native Question replay checks the call and result timestamps exactly.
+		// Commit both from this frozen record, including without a snapshot.
 		if err := h.store.EnsureOrdinaryToolResultSettlementExact(ctx, pending.ThreadID, pending.TurnID, pending.ToolCallItemID, records.ResultItem); err != nil {
 			return err
 		}
@@ -367,7 +371,7 @@ func (h *runtimeServerHandler) persistTerminalQuestionResult(ctx context.Context
 		if err != nil || !dispatched {
 			return errors.Join(errors.New("terminal Question lacks original dispatch authority"), err)
 		}
-		settlement, err := evidenceapp.PrepareToolSettlement(ctx, h.caseFinalizer, h.turnSecurity, filestore.CaseBindingReader{}, h.store, h.mcp, pending, map[string]any{"code": "tool_cancelled"}, true)
+		settlement, err := evidenceapp.PrepareToolSettlement(ctx, h.caseFinalizer, h.turnSecurity, h.workspaceReader, h.store, h.mcp, pending, map[string]any{"code": "tool_cancelled"}, true)
 		if err != nil {
 			return err
 		}

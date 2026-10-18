@@ -2,14 +2,16 @@ package runtimeapp
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
+	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
 	"analytix.local/runtime-go/internal/contracts"
 	jsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
+	domainstartup "analytix.local/runtime-go/internal/domain/startup"
 	"analytix.local/runtime-go/internal/jobs"
 )
 
@@ -23,26 +25,53 @@ type legacyTypeScriptThreadReaderV1 interface {
 // freeze instead needs the exact raw parent tuple long enough to issue a
 // source-hash-bound witness before semantic migration removes it.
 type legacyTypeScriptRawThreadReaderV1 struct {
-	root string
+	ctx       context.Context
+	authority *persistencefs.RootAuthority
+	entries   map[string]persistencefs.EntryRecord
 }
 
-func newLegacyTypeScriptRawThreadReaderV1(root string) legacyTypeScriptRawThreadReaderV1 {
-	return legacyTypeScriptRawThreadReaderV1{root: filepath.Clean(strings.TrimSpace(root))}
+func newLegacyTypeScriptRawThreadReaderV1(ctx context.Context, authority *persistencefs.RootAuthority, entries []persistencefs.EntryRecord) legacyTypeScriptRawThreadReaderV1 {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	indexed := make(map[string]persistencefs.EntryRecord, len(entries))
+	for _, entry := range entries {
+		if _, duplicate := indexed[entry.Path]; duplicate {
+			return legacyTypeScriptRawThreadReaderV1{}
+		}
+		indexed[entry.Path] = entry
+	}
+	return legacyTypeScriptRawThreadReaderV1{ctx: ctx, authority: authority, entries: indexed}
 }
 
 func (reader legacyTypeScriptRawThreadReaderV1) GetThread(threadID string) (map[string]any, error) {
 	threadID = strings.TrimSpace(threadID)
-	if reader.root == "" || contracts.SafeRecordID(threadID) != threadID {
+	if reader.authority == nil || contracts.SafeRecordID(threadID) != threadID {
 		return nil, errors.New("legacy lineage thread identity is invalid")
 	}
-	threadDir := filepath.Join(reader.root, "threads", threadID)
-	if err := rejectLegacyLineageSymlinkV1(threadDir, true); err != nil {
+	// The complete startup snapshot establishes that this thread directory was
+	// present. Its live filesystem identity is checked by the adapter's pinned
+	// handles and final name-mapping checks, not inferred from a zero entry.
+	directory, present := reader.entries["durable/threads/"+threadID]
+	if !present || directory.Type != domainstartup.ManagedEntryTypeDirectory {
+		return nil, errors.New("legacy lineage thread directory is unavailable")
+	}
+	body, present, err := reader.readSource(threadID, "thread.json")
+	if err != nil {
 		return nil, err
 	}
-	threadPath := filepath.Join(threadDir, "thread.json")
-	thread, err := readLegacyLineageObjectV1(threadPath, 64*1024*1024)
-	if errors.Is(err, os.ErrNotExist) {
-		thread, err = readLegacyLineageMetadataV1(filepath.Join(threadDir, "metadata.jsonl"), threadID)
+	var thread map[string]any
+	if present {
+		thread, err = readLegacyLineageObjectV1(body, 64*1024*1024)
+	} else {
+		body, present, err = reader.readSource(threadID, "metadata.jsonl")
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, errors.New("legacy lineage metadata snapshot is unavailable")
+		}
+		thread, err = readLegacyLineageMetadataV1(body, threadID)
 	}
 	if err != nil {
 		return nil, err
@@ -50,26 +79,32 @@ func (reader legacyTypeScriptRawThreadReaderV1) GetThread(threadID string) (map[
 	if thread == nil || runtimeappStringFieldV1(thread, "id") != threadID {
 		return nil, errors.New("legacy lineage thread snapshot is invalid")
 	}
-	return hydrateLegacyLineageToolCallsV1(
-		threadID, thread, filepath.Join(threadDir, "messages.jsonl"),
-	)
-}
-
-func readLegacyLineageObjectV1(path string, maxBytes int) (map[string]any, error) {
-	if err := rejectLegacyLineageSymlinkV1(path, false); err != nil {
-		return nil, err
-	}
-	body, err := os.ReadFile(path)
+	body, present, err = reader.readSource(threadID, "messages.jsonl")
 	if err != nil {
 		return nil, err
 	}
+	return hydrateLegacyLineageToolCallsV1(threadID, thread, body, present)
+}
+
+func (reader legacyTypeScriptRawThreadReaderV1) readSource(threadID, sourceName string) ([]byte, bool, error) {
+	path := "durable/threads/" + threadID + "/" + sourceName
+	expected, present := reader.entries[path]
+	if !present {
+		// Only absence from the complete snapshot synthesizes this explicit state.
+		// The adapter must prove it is still absent before permitting fallback.
+		expected = persistencefs.EntryRecord{Path: path, Type: domainstartup.ManagedEntryTypeAbsent}
+	}
+	return reader.authority.ReadLegacyTypeScriptLineageSourceV1(reader.ctx, threadID, sourceName, expected)
+}
+
+func readLegacyLineageObjectV1(body []byte, maxBytes int) (map[string]any, error) {
 	return jsonstrict.DecodeObject(body, jsonstrict.Options{
 		MaxBytes: maxBytes, MaxDepth: 256, MaxTokens: 2_000_000, MaxStringBytes: 16 * 1024 * 1024,
 	})
 }
 
-func readLegacyLineageMetadataV1(path, threadID string) (map[string]any, error) {
-	records, err := readLegacyLineageJSONLV1(path)
+func readLegacyLineageMetadataV1(body []byte, threadID string) (map[string]any, error) {
+	records, err := readLegacyLineageJSONLV1(body)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +125,7 @@ func readLegacyLineageMetadataV1(path, threadID string) (map[string]any, error) 
 	return latest, nil
 }
 
-func hydrateLegacyLineageToolCallsV1(threadID string, thread map[string]any, path string) (map[string]any, error) {
+func hydrateLegacyLineageToolCallsV1(threadID string, thread map[string]any, body []byte, present bool) (map[string]any, error) {
 	turns := runtimeappListAnyV1(thread["turns"])
 	emptyTurns := map[string]bool{}
 	knownTurns := map[string]bool{}
@@ -103,10 +138,10 @@ func hydrateLegacyLineageToolCallsV1(threadID string, thread map[string]any, pat
 		knownTurns[turnID] = true
 		emptyTurns[turnID] = len(runtimeappListAnyV1(turn["items"])) == 0
 	}
-	records, err := readLegacyLineageJSONLV1(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if !present {
 		return thread, nil
 	}
+	records, err := readLegacyLineageJSONLV1(body)
 	if err != nil {
 		return nil, err
 	}
@@ -150,17 +185,9 @@ func hydrateLegacyLineageToolCallsV1(threadID string, thread map[string]any, pat
 	return hydrated, nil
 }
 
-func readLegacyLineageJSONLV1(path string) ([]map[string]any, error) {
-	if err := rejectLegacyLineageSymlinkV1(path, false); err != nil {
-		return nil, err
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
+func readLegacyLineageJSONLV1(body []byte) ([]map[string]any, error) {
 	records := []map[string]any{}
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for line := 1; scanner.Scan(); line++ {
 		raw := strings.TrimSpace(scanner.Text())
@@ -179,17 +206,6 @@ func readLegacyLineageJSONLV1(path string) ([]map[string]any, error) {
 		return nil, err
 	}
 	return records, nil
-}
-
-func rejectLegacyLineageSymlinkV1(path string, directory bool) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || directory && !info.IsDir() || !directory && !info.Mode().IsRegular() {
-		return errors.New("legacy lineage source type is invalid")
-	}
-	return nil
 }
 
 func newFrozenLegacyTypeScriptChildLineageWitnessV1(

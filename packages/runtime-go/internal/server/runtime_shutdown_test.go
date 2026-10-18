@@ -796,9 +796,21 @@ func TestTerminalQuestionResultRepairsEventAfterOnlyPrimaryResultCommitted(t *te
 }
 
 func TestTerminalQuestionPreservesDurableNormalResultAndBlocksUnsettledSubmission(t *testing.T) {
-	for _, withResult := range []bool{false, true} {
-		t.Run(map[bool]string{false: "unsettled_submission", true: "settled_submission"}[withResult], func(t *testing.T) {
+	for _, fixture := range []struct {
+		name        string
+		withResult  bool
+		unprotected bool
+	}{
+		{"unsettled_submission", false, false},
+		{"settled_submission", true, false},
+		{"unprotected_settled_submission", true, true},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			withResult := fixture.withResult
 			h, pending, inputID := shutdownNativeQuestionFixture(t, "request_user_input")
+			if fixture.unprotected {
+				h.toolSnapshots = nil
+			}
 			text := "synthetic answer"
 			var args map[string]any
 			if err := json.Unmarshal(pending.Call.Arguments, &args); err != nil {
@@ -818,6 +830,37 @@ func TestTerminalQuestionPreservesDurableNormalResultAndBlocksUnsettledSubmissio
 				output := appturn.UserInputResolvedOutputForQuestions("submitted", answers, false, inputID, questions)
 				if _, err := h.persistRuntimeToolResultAndMessage(context.Background(), pending, output, false); err != nil {
 					t.Fatal(err)
+				}
+				thread, err := h.store.GetThread(pending.ThreadID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				durable, err := executiongrantapp.DurableSettlementFromThread(pending.ThreadID, thread, pending.TurnID, toolcatalogapp.ToolResultItemID(pending.TurnID, pending.Call.ID), pending.ExecutionGrant)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, protected := durable.ResultItem[domaintoolresult.ProtectedSnapshotBindingFieldV1]; protected == fixture.unprotected {
+					t.Fatal("Question result did not use the selected snapshot owner")
+				}
+				input := appturn.OrdinaryToolSettlementInput{
+					Thread: thread, ThreadID: pending.ThreadID, TurnID: pending.TurnID,
+					ToolCallItemID: pending.ToolCallItemID, CallID: pending.Call.ID, ToolName: pending.Call.Name,
+					Status: stringField(durable.ResultItem, "status"), Timestamp: stringField(durable.ResultItem, "finishedAt"), ResultItem: durable.ResultItem,
+				}
+				if _, changed, err := appturn.EnsureOrdinaryToolSettlementExact(input); err != nil || changed {
+					t.Fatalf("original Question call/result lifecycle is not exactly settled: changed=%v err=%v", changed, err)
+				}
+				// Corrupt only the detached read. Cleanup must continue to reject
+				// a different call timestamp, never repair or ignore that conflict.
+				turn, _, _ := gatecontinuationapp.RestartInventoryTurnV1(thread, pending.TurnID)
+				for _, raw := range listAny(turn["items"]) {
+					item, _ := raw.(map[string]any)
+					if stringField(item, "id") == pending.ToolCallItemID {
+						item["finishedAt"] = "2000-01-01T00:00:00Z"
+					}
+				}
+				if _, _, err := appturn.EnsureOrdinaryToolSettlementExact(input); !errors.Is(err, appturn.ErrTurnItemIdentityConflict) {
+					t.Fatalf("different Question call timestamp was not rejected: %v", err)
 				}
 			}
 			err = h.Shutdown(context.Background())
@@ -866,6 +909,12 @@ func TestTerminalQuestionRejectsWrongSignedContextAndMissingDispatch(t *testing.
 		t.Fatal(err)
 	}
 	gate.TerminalStatus, gate.TerminalReasonCode = domaincontinuation.StatusInterrupted, "runtime_shutdown"
+	reader := h.workspaceReader
+	h.workspaceReader = nil
+	if err := h.persistTerminalQuestionResult(context.Background(), gate); err == nil {
+		t.Fatal("Question cancellation accepted a missing composed workspace reader")
+	}
+	h.workspaceReader = reader
 	gate.Pending.SecurityContext.ContextDigest = domainsecurity.SHA256Hex([]byte("different signed context"))
 	if err := h.persistTerminalQuestionResult(context.Background(), gate); err == nil {
 		t.Fatal("Question cancellation accepted a different signed context")

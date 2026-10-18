@@ -441,8 +441,8 @@ func TestPrivateCASTopologyCatalogIsTheSingleTypedRootAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	specs := domainprivatecas.RuntimeRootSpecsV1()
-	if len(specs) != 58 {
-		t.Fatalf("runtime private CAS physical root count = %d, want 58", len(specs))
+	if len(specs) != 59 {
+		t.Fatalf("runtime private CAS physical root count = %d, want 59", len(specs))
 	}
 	groups := map[string]int{}
 	opaque := 0
@@ -466,8 +466,8 @@ func TestPrivateCASTopologyCatalogIsTheSingleTypedRootAuthority(t *testing.T) {
 			toolResultRoots++
 		}
 	}
-	if len(groups) != 21 || opaque != 4 {
-		t.Fatalf("runtime private CAS topology = %d groups and %d opaque roots, want 21 and 4", len(groups), opaque)
+	if len(groups) != 22 || opaque != 4 {
+		t.Fatalf("runtime private CAS topology = %d groups and %d opaque roots, want 22 and 4", len(groups), opaque)
 	}
 	if toolResultRoots != 1 {
 		t.Fatal("tool result snapshots must have exactly one typed CAS root")
@@ -713,10 +713,10 @@ func TestPrivateCASDirectoryRecoveryUsesOneTopologyAndNoCreateTraversal(t *testi
 	if err := domainprivatecas.ValidateRuntimeDirectorySlotsV1(); err != nil {
 		t.Fatal(err)
 	}
-	if len(domainprivatecas.FixedDirectorySlotsV1()) != 79 ||
-		len(domainprivatecas.CreateRecoveryScanParentPathsV1()) != 80 ||
+	if len(domainprivatecas.FixedDirectorySlotsV1()) != 80 ||
+		len(domainprivatecas.CreateRecoveryScanParentPathsV1()) != 81 ||
 		len(domainprivatecas.RecoverableOwnerDirectoryGroupsV1()) != 16 ||
-		domainprivatecas.MaximumCreateResidueCandidateLocationsV1() != 14_927 {
+		domainprivatecas.MaximumCreateResidueCandidateLocationsV1() != 15_184 {
 		t.Fatal("private CAS directory recovery topology changed")
 	}
 	root := runtimeGoRoot(t)
@@ -1494,11 +1494,16 @@ func TestSemanticStageUsesOnlyItsBoundPrivateCASAuthority(t *testing.T) {
 	if callback == nil {
 		t.Fatal("runtimeapp semantic-stage private CAS callback is missing")
 	}
+	cleanupBinding := privateCASRuntimeStartupCleanupBinding(privateCASFunctionDeclaration(t, app, "newRuntimeServerHandlerWithRootsModeE"), callback)
+	cleanupSource, err := os.ReadFile(filepath.Join(root, "internal", "runtimeapp", "startup_activation.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	constructorExact := false
 	handlerExact := false
 	namedStageError := false
 	deferredClose := false
-	joinedCloseError := false
+	joinedCloseError := privateCASRuntimeStartupCleanupSourceValid(string(cleanupSource)) && privateCASSemanticStageCleanupJoined(callback, cleanupBinding)
 	usedOuterAuthority := false
 	if callback.Type.Results != nil && len(callback.Type.Results.List) == 1 {
 		result := callback.Type.Results.List[0]
@@ -1531,20 +1536,6 @@ func TestSemanticStageUsesOnlyItsBoundPrivateCASAuthority(t *testing.T) {
 				if ok && selector.Sel.Name == "Close" && privateCASIdent(selector.X) == "stageAccessAuthority" {
 					deferredClose = true
 				}
-				if ok && selector.Sel.Name == "Join" && privateCASIdent(selector.X) == "errors" && len(call.Args) == 2 &&
-					privateCASIdent(call.Args[0]) == "stageErr" {
-					ast.Inspect(call.Args[1], func(argument ast.Node) bool {
-						closeCall, ok := argument.(*ast.CallExpr)
-						if !ok {
-							return true
-						}
-						closeSelector, ok := closeCall.Fun.(*ast.SelectorExpr)
-						if ok && closeSelector.Sel.Name == "Close" && privateCASIdent(closeSelector.X) == "stageAccessAuthority" {
-							joinedCloseError = true
-						}
-						return true
-					})
-				}
 				return true
 			})
 		}
@@ -1556,6 +1547,175 @@ func TestSemanticStageUsesOnlyItsBoundPrivateCASAuthority(t *testing.T) {
 			constructorExact, handlerExact, namedStageError, deferredClose, joinedCloseError, usedOuterAuthority,
 		)
 	}
+}
+
+// This is one local choice between the standard join and its cause-preserving
+// startup wrapper, not an extension point for arbitrary cleanup callbacks.
+func privateCASRuntimeStartupCleanupBinding(owner *ast.FuncDecl, callback *ast.FuncLit) *ast.Object {
+	var initial, selected *ast.AssignStmt
+	var binding *ast.Ident
+	for index, statement := range owner.Body.List {
+		assignment, ok := statement.(*ast.AssignStmt)
+		if !ok || len(assignment.Lhs) != 1 || privateCASIdent(assignment.Lhs[0]) != "joinStartupCleanup" {
+			continue
+		}
+		if initial != nil || assignment.Tok != token.DEFINE || len(assignment.Rhs) != 1 ||
+			!privateCASSelectorMatches(assignment.Rhs[0], "errors", "Join") || index+1 >= len(owner.Body.List) {
+			return nil
+		}
+		binding = assignment.Lhs[0].(*ast.Ident)
+		if binding.Obj == nil || assignment.Rhs[0].(*ast.SelectorExpr).X.(*ast.Ident).Obj != nil {
+			return nil
+		}
+		guard, ok := owner.Body.List[index+1].(*ast.IfStmt)
+		if !ok || guard.Init != nil || guard.Else != nil || len(guard.Body.List) == 0 {
+			return nil
+		}
+		condition, ok := guard.Cond.(*ast.BinaryExpr)
+		if !ok || condition.Op != token.LOR || privateCASIdent(condition.X) != "planStartup" || privateCASIdent(condition.Y) != "simulation" {
+			return nil
+		}
+		selected, ok = guard.Body.List[0].(*ast.AssignStmt)
+		if !ok || selected.Tok != token.ASSIGN || len(selected.Lhs) != 1 || len(selected.Rhs) != 1 ||
+			privateCASIdent(selected.Lhs[0]) != binding.Name || privateCASIdent(selected.Rhs[0]) != "joinRuntimeStartupCleanupV1" ||
+			selected.Rhs[0].(*ast.Ident).Obj != nil {
+			return nil
+		}
+		initial = assignment
+	}
+	if binding == nil || callback.Pos() <= selected.End() || callback.End() > owner.End() {
+		return nil
+	}
+	writes, valid := 0, true
+	ast.Inspect(owner.Body, func(node ast.Node) bool {
+		switch current := node.(type) {
+		case *ast.Ident:
+			if current.Name == binding.Name && current.Obj != binding.Obj {
+				valid = false
+			}
+		case *ast.AssignStmt:
+			for _, left := range current.Lhs {
+				ast.Inspect(left, func(node ast.Node) bool {
+					if identifier, ok := node.(*ast.Ident); ok && identifier.Name == binding.Name {
+						writes++
+						valid = valid && (current == initial || current == selected)
+					}
+					return true
+				})
+			}
+		case *ast.RangeStmt:
+			for _, target := range []ast.Expr{current.Key, current.Value} {
+				ast.Inspect(target, func(node ast.Node) bool {
+					if identifier, ok := node.(*ast.Ident); ok && identifier.Name == binding.Name {
+						valid = false
+					}
+					return true
+				})
+			}
+		case *ast.UnaryExpr:
+			if current.Op == token.AND {
+				ast.Inspect(current.X, func(node ast.Node) bool {
+					if identifier, ok := node.(*ast.Ident); ok && identifier.Name == binding.Name {
+						valid = false
+					}
+					return true
+				})
+			}
+		}
+		return true
+	})
+	if !valid || writes != 2 {
+		return nil
+	}
+	return binding.Obj
+}
+
+func privateCASSemanticStageCleanupJoined(callback *ast.FuncLit, binding *ast.Object) bool {
+	if binding == nil || callback.Type.Results == nil || len(callback.Type.Results.List) != 1 {
+		return false
+	}
+	result := callback.Type.Results.List[0]
+	if len(result.Names) != 1 || result.Names[0].Name != "stageErr" || privateCASIdent(result.Type) != "error" {
+		return false
+	}
+	var deferred *ast.DeferStmt
+	defers := 0
+	ast.Inspect(callback.Body, func(node ast.Node) bool {
+		if _, ok := node.(*ast.DeferStmt); ok {
+			defers++
+		}
+		return true
+	})
+	for _, statement := range callback.Body.List {
+		if current, ok := statement.(*ast.DeferStmt); ok {
+			if deferred != nil {
+				return false
+			}
+			deferred = current
+		}
+	}
+	if defers != 1 || deferred == nil || len(deferred.Call.Args) != 0 || deferred.Call.Ellipsis.IsValid() {
+		return false
+	}
+	literal, ok := deferred.Call.Fun.(*ast.FuncLit)
+	if !ok || literal.Type.Params.NumFields() != 0 || literal.Type.Results.NumFields() != 0 || len(literal.Body.List) != 1 {
+		return false
+	}
+	assignment, ok := literal.Body.List[0].(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.ASSIGN || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 ||
+		privateCASIdent(assignment.Lhs[0]) != "stageErr" || assignment.Lhs[0].(*ast.Ident).Obj != result.Names[0].Obj ||
+		!privateCASCallExpressionMatches(assignment.Rhs[0], "", "joinStartupCleanup", 2) {
+		return false
+	}
+	join := assignment.Rhs[0].(*ast.CallExpr)
+	callee, ok := join.Fun.(*ast.Ident)
+	if !ok || callee.Obj != binding || join.Ellipsis.IsValid() || privateCASIdent(join.Args[0]) != "stageErr" ||
+		join.Args[0].(*ast.Ident).Obj != result.Names[0].Obj || !privateCASCallExpressionMatches(join.Args[1], "stageAccessAuthority", "Close", 0) {
+		return false
+	}
+	return !join.Args[1].(*ast.CallExpr).Ellipsis.IsValid()
+}
+
+func privateCASRuntimeStartupCleanupSourceValid(source string) bool {
+	parsed, err := parser.ParseFile(token.NewFileSet(), "startup_activation.go", source, 0)
+	if err != nil {
+		return false
+	}
+	wanted := map[string]string{
+		"Unwrap": `func (err *startupPreparationErrorV1) Unwrap() error { return err.cause }`,
+		"joinRuntimeStartupCleanupV1": `func joinRuntimeStartupCleanupV1(input ...error) error {
+			if len(input) == 0 { return nil }
+			causes := []error{input[0]}
+			for _, cause := range input[1:] {
+				if cause != nil {
+					causes = append(causes, &startupPreparationErrorV1{cause: cause, cleanup: true})
+				}
+			}
+			return errors.Join(causes...)
+		}`,
+	}
+	matched := 0
+	seen := map[string]bool{}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		want, checked := wanted[function.Name.Name]
+		if !checked {
+			continue
+		}
+		if seen[function.Name.Name] {
+			return false
+		}
+		actual := source[int(function.Pos())-1 : int(function.End())-1]
+		if strings.Join(strings.Fields(actual), " ") != strings.Join(strings.Fields(want), " ") {
+			return false
+		}
+		matched++
+		seen[function.Name.Name] = true
+	}
+	return matched == 2
 }
 
 func copiedOriginalStageObservationOwner(relative, function string) bool {

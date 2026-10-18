@@ -113,6 +113,7 @@ func TestTerminalProductionCallGraphIsClosed(t *testing.T) {
 		},
 		"BuildBackgroundJobCompletionNotificationItem": {
 			{file: "app/subagent/background_delivery.go", function: "PersistCompletionItems"},
+			{file: "app/subagent/startup_recovery.go", function: "CanonicalBackgroundCompletionLifecycleEventsV1"},
 			{file: "app/subagent/startup_recovery.go", function: "reconcileSettledDeliveredLifecycle"},
 		},
 		"BuildBackgroundJobCompletionNotificationEvent": {

@@ -16,3 +16,13 @@ func readSemanticStageManagedFile(
 ) ([]byte, error) {
 	return nil, errSecureManagedUnsupported
 }
+
+func readLegacyTypeScriptLineageManagedSourceV1(
+	context.Context,
+	*RootAuthority,
+	string,
+	string,
+	domainstartup.SemanticEntryStateV1,
+) ([]byte, bool, error) {
+	return nil, false, errSecureManagedUnsupported
+}

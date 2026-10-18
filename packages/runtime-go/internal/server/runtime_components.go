@@ -95,6 +95,7 @@ type RuntimeServerComponents struct {
 	CaseFinalizer       evidenceapp.CasePublicationFinalizer
 	CaseThreads         casethreadapp.Authority
 	TurnSecurity        turnsecurityapp.WorkspaceSecurityAuthority
+	WorkspaceReader     turnsecurityapp.WorkspaceReader
 	Continuations       *continuationapp.Service
 	PendingWork         *pendingworkapp.Service
 	Checkpoints         checkpointapp.SnapshotAuthority
@@ -232,6 +233,7 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 		asyncTurnObserver:           components.AsyncTurnObserverV1,
 		caseThreads:                 components.CaseThreads,
 		turnSecurity:                components.TurnSecurity,
+		workspaceReader:             components.WorkspaceReader,
 		continuations:               components.Continuations,
 		pendingWork:                 components.PendingWork,
 		checkpoints:                 components.Checkpoints,

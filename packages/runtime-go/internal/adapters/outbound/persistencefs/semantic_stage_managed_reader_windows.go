@@ -173,3 +173,62 @@ func semanticStageWindowsVerifyNameMapping(
 	}
 	return nil
 }
+
+func readLegacyTypeScriptLineageManagedSourceV1(
+	ctx context.Context,
+	authority *RootAuthority,
+	durableDir, relative string,
+	expected domainstartup.SemanticEntryStateV1,
+) (body []byte, present bool, resultErr error) {
+	if expected.Type == domainstartup.ManagedEntryTypeFile {
+		handle, _, err := secureWindowsOpenManagedParent(authority, durableDir, "threads")
+		if err != nil {
+			return nil, false, err
+		}
+		identity, err := windowsOpenedDirectoryIdentity(handle)
+		if err != nil {
+			return nil, false, errors.Join(err, windows.CloseHandle(handle))
+		}
+		root := &startupPrivateDirectory{handle: handle, identity: identity}
+		defer func() {
+			resultErr = errors.Join(resultErr, root.Close())
+			if resultErr != nil {
+				clear(body)
+				body, present = nil, false
+			}
+		}()
+		body, err = readSemanticStageManagedFile(ctx, root, relative, expected)
+		return body, err == nil, err
+	}
+	parent, name, err := secureWindowsOpenManagedParent(authority, durableDir, relative)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, windows.CloseHandle(parent)) }()
+	identity, err := windowsOpenedDirectoryIdentity(parent)
+	if err != nil {
+		return nil, false, err
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		handle, openErr := secureWindowsOpenRelative(parent, name, windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, windows.FILE_OPEN, false)
+		if openErr == nil {
+			return nil, false, errors.Join(errors.New("legacy lineage absent source appeared"), windows.CloseHandle(handle))
+		}
+		if !secureWindowsNotFound(openErr) {
+			return nil, false, errors.New("legacy lineage absent source became unsafe")
+		}
+		reopened, _, err := secureWindowsOpenManagedParent(authority, durableDir, relative)
+		if err != nil {
+			return nil, false, err
+		}
+		reopenedIdentity, identityErr := windowsOpenedDirectoryIdentity(reopened)
+		closeErr := windows.CloseHandle(reopened)
+		if identityErr != nil || reopenedIdentity != identity || closeErr != nil {
+			return nil, false, errors.Join(errors.New("legacy lineage absent source parent changed"), identityErr, closeErr)
+		}
+	}
+	return nil, false, nil
+}

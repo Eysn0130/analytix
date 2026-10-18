@@ -1,11 +1,16 @@
 package runtimeapp
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
+	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	"analytix.local/runtime-go/internal/jobs"
 )
 
@@ -41,7 +46,7 @@ func TestLegacyTypeScriptRawThreadReaderFreezesSidecarLineageBeforeClosedHydrati
 		t.Fatal(err)
 	}
 
-	reader := newLegacyTypeScriptRawThreadReaderV1(root)
+	reader := legacyLineageReaderForTestV1(t, root, threadID)
 	thread, err := reader.GetThread(threadID)
 	if err != nil {
 		t.Fatalf("read raw staged lineage: %v", err)
@@ -50,16 +55,27 @@ func TestLegacyTypeScriptRawThreadReaderFreezesSidecarLineageBeforeClosedHydrati
 	if len(items) != 1 || runtimeappStringFieldV1(items[0].(map[string]any), "callId") != "call_parent" {
 		t.Fatalf("raw lineage reader did not retain only the exact tool call: %#v", items)
 	}
-	witness, err := newFrozenLegacyTypeScriptChildLineageWitnessV1(childRoot, reader)
+	roots, _ := reader.authority.Roots()
+	lineage, err := prepareRuntimeRetiredTypeScriptAuditLineageV1(context.Background(), roots, reader.authority, legacyLineageEntriesForTestV1(reader))
 	if err != nil {
 		t.Fatalf("freeze sidecar-only raw lineage: %v", err)
 	}
+	if _, exists := lineage.parentIDs[threadID]; !exists {
+		t.Fatal("prepared lineage did not retain the witnessed parent identity")
+	}
+	witness := lineage.witness
 	observation, err := jobs.BuildLegacyTypeScriptLineageObservationV1(childRoot)
 	if err != nil || len(observation.Entries) != 1 {
 		t.Fatalf("observe child source: entries=%d err=%v", len(observation.Entries), err)
 	}
 	if err := witness.VerifyLegacyTypeScriptLineageV1(observation.Entries[0].Lineage); err != nil {
 		t.Fatalf("frozen raw lineage witness rejected exact source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(threadDir, "metadata.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lineage.witness.VerifyLegacyTypeScriptLineageV1(observation.Entries[0].Lineage); err != nil {
+		t.Fatalf("prepared witness reread parent content after repair: %v", err)
 	}
 }
 
@@ -77,8 +93,122 @@ func TestLegacyTypeScriptRawThreadReaderRejectsAmbiguousSidecarJSON(t *testing.T
 	if err := os.WriteFile(filepath.Join(threadDir, "messages.jsonl"), ambiguous, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newLegacyTypeScriptRawThreadReaderV1(root).GetThread("thr_parent"); err == nil {
+	if _, err := legacyLineageReaderForTestV1(t, root, "thr_parent").GetThread("thr_parent"); err == nil {
 		t.Fatal("ambiguous raw sidecar lineage was accepted")
+	}
+}
+
+// Build expected states once from the fixture, before each test mutates it.
+// Production callers instead pass their already-captured startup snapshot.
+func legacyLineageReaderForTestV1(t *testing.T, root, threadID string) legacyTypeScriptRawThreadReaderV1 {
+	t.Helper()
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skip("secure managed reader is unsupported")
+	}
+	reader := legacyTypeScriptRawThreadReaderV1{entries: map[string]persistencefs.EntryRecord{}}
+	for _, name := range []string{"", "thread.json", "metadata.jsonl", "messages.jsonl"} {
+		path := filepath.Join(root, "threads", threadID, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		label := "durable/threads/" + threadID
+		entry := persistencefs.EntryRecord{Path: label, Type: "directory", Mode: uint32(info.Mode()), Size: info.Size()}
+		if name != "" {
+			entry.Path += "/" + name
+			entry.Type = "file"
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry.SHA256 = domainsecurity.SHA256Hex(body)
+		}
+		reader.entries[entry.Path] = entry
+	}
+	authority, err := persistencefs.FreezeRootAuthority(persistencefs.RootSet{DataDir: root, DurableDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newLegacyTypeScriptRawThreadReaderV1(context.Background(), authority, legacyLineageEntriesForTestV1(reader))
+}
+
+func legacyLineageEntriesForTestV1(reader legacyTypeScriptRawThreadReaderV1) []persistencefs.EntryRecord {
+	entries := make([]persistencefs.EntryRecord, 0, len(reader.entries))
+	for _, entry := range reader.entries {
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func TestLegacyTypeScriptRawThreadReaderSnapshotDriftDoesNotFallback(t *testing.T) {
+	for _, source := range []string{"thread.json", "metadata.jsonl", "messages.jsonl"} {
+		t.Run(source, func(t *testing.T) {
+			root := t.TempDir()
+			directory := filepath.Join(root, "threads", "thr_parent")
+			if err := os.MkdirAll(directory, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			thread := `{"id":"thr_parent","turns":[]}`
+			files := map[string]string{"metadata.jsonl": `{"kind":"thread_metadata","thread":` + thread + "}\n"}
+			if source == "thread.json" {
+				files[source] = thread
+			}
+			if source == "messages.jsonl" {
+				files[source] = ""
+			}
+			for name, body := range files {
+				if err := os.WriteFile(filepath.Join(directory, name), []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reader := legacyLineageReaderForTestV1(t, root, "thr_parent")
+			if _, err := reader.GetThread("thr_parent"); err != nil {
+				t.Fatalf("ordinary managed source modes were rejected: %v", err)
+			}
+			if err := os.Remove(filepath.Join(directory, source)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := reader.GetThread("thr_parent"); err == nil || errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("snapshot source disappearance became a fallback: %v", err)
+			}
+		})
+	}
+}
+
+func TestLegacyTypeScriptRawThreadReaderRejectsThreadsAncestorSymlink(t *testing.T) {
+	root := t.TempDir()
+	threads := filepath.Join(root, "threads")
+	directory := filepath.Join(threads, "thr_parent")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "thread.json"), []byte(`{"id":"thr_parent","turns":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reader := legacyLineageReaderForTestV1(t, root, "thr_parent")
+	retired := filepath.Join(t.TempDir(), "original-threads")
+	if err := os.Rename(threads, retired); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(retired, threads); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := reader.GetThread("thr_parent"); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("threads ancestor redirection was accepted or treated as absent: %v", err)
+	}
+}
+
+func TestLegacyLineageJSONLRetainsSixteenMiBLineBound(t *testing.T) {
+	// A record above the ordinary snapshot scanner's 4 MiB line size remains
+	// legal in this private raw parser, subject to its existing string budget.
+	if _, err := readLegacyLineageJSONLV1([]byte(`{"value":"` + strings.Repeat("x", 5<<20) + "\"}\n")); err != nil {
+		t.Fatalf("legacy JSONL line below 16 MiB was rejected: %v", err)
+	}
+	if _, err := readLegacyLineageJSONLV1([]byte(strings.Repeat(" ", 16<<20) + "\n")); err == nil {
+		t.Fatal("legacy JSONL line at the scanner bound was accepted")
 	}
 }
 

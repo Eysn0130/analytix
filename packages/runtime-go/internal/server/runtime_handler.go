@@ -75,6 +75,7 @@ type runtimeServerHandler struct {
 	asyncTurnObserver           func(AsyncTurnObservationV1)
 	caseThreads                 casethreadapp.Authority
 	turnSecurity                turnsecurityapp.WorkspaceSecurityAuthority
+	workspaceReader             turnsecurityapp.WorkspaceReader
 	continuations               *continuationapp.Service
 	pendingWork                 *pendingworkapp.Service
 	checkpoints                 checkpointapp.SnapshotAuthority

@@ -35,6 +35,7 @@ type runtimeChildIdentityStartupV1 struct {
 	primaries             *runtimeOriginalPrimaryInventoryV1
 	originalCreates       *runtimeOriginalCreateStartupV1
 	originalRegistryTrust *runtimeOriginalRegistryTrustV2
+	legacyLineageWitness  *jobs.FrozenLegacyTypeScriptLineageWitnessV1
 }
 
 // runtimeRetiredTypeScriptAuditMigrationContextKeyV1 is an in-process
@@ -72,12 +73,17 @@ func isRuntimeSemanticStageAccessV1(access finalauthority.SecurePrivateCASRecove
 	return ok && marker.IsSemanticStagePrivateCASAccessAuthority()
 }
 
-// runtimeRetiredTypeScriptAuditParentIDsV1 derives the only parent IDs that
+type runtimeRetiredTypeScriptAuditLineageV1 struct {
+	parentIDs map[string]struct{}
+	witness   *jobs.FrozenLegacyTypeScriptLineageWitnessV1
+}
+
+// prepareRuntimeRetiredTypeScriptAuditLineageV1 derives the only parent IDs that
 // the retired audit inventory may temporarily tolerate from the same exact
 // source inventory that the semantic child-run witness verifies. The second
 // observation closes the small gap between the witness' private observation
 // and this planning value; a changed source inventory fails closed.
-func runtimeRetiredTypeScriptAuditParentIDsV1(ctx context.Context, roots persistencefs.RootSet) (map[string]struct{}, error) {
+func prepareRuntimeRetiredTypeScriptAuditLineageV1(ctx context.Context, roots persistencefs.RootSet, authority *persistencefs.RootAuthority, entries []persistencefs.EntryRecord) (*runtimeRetiredTypeScriptAuditLineageV1, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -89,9 +95,10 @@ func runtimeRetiredTypeScriptAuditParentIDsV1(ctx context.Context, roots persist
 	if err != nil || len(observation.Entries) == 0 {
 		return nil, errors.Join(pendingworkapp.ErrChildProducerInventoryIncomplete, err)
 	}
-	if _, err := newFrozenLegacyTypeScriptChildLineageWitnessV1(
-		childRunRoot, newLegacyTypeScriptRawThreadReaderV1(roots.DurableDir),
-	); err != nil {
+	witness, err := newFrozenLegacyTypeScriptChildLineageWitnessV1(
+		childRunRoot, newLegacyTypeScriptRawThreadReaderV1(ctx, authority, entries),
+	)
+	if err != nil {
 		return nil, err
 	}
 	current, err := jobs.BuildLegacyTypeScriptLineageObservationV1(childRunRoot)
@@ -112,7 +119,7 @@ func runtimeRetiredTypeScriptAuditParentIDsV1(ctx context.Context, roots persist
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return parentIDs, nil
+	return &runtimeRetiredTypeScriptAuditLineageV1{parentIDs: parentIDs, witness: witness}, nil
 }
 
 // validateRuntimeRetiredTypeScriptAuditLineageBeforeMutationV1 performs the
@@ -123,6 +130,8 @@ func runtimeRetiredTypeScriptAuditParentIDsV1(ctx context.Context, roots persist
 func validateRuntimeRetiredTypeScriptAuditLineageBeforeMutationV1(
 	ctx context.Context,
 	roots persistencefs.RootSet,
+	authority *persistencefs.RootAuthority,
+	entries []persistencefs.EntryRecord,
 ) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -137,7 +146,7 @@ func validateRuntimeRetiredTypeScriptAuditLineageBeforeMutationV1(
 	if !jobSnapshot.HasLegacyTypeScript {
 		return nil
 	}
-	_, err = runtimeRetiredTypeScriptAuditParentIDsV1(ctx, roots)
+	_, err = prepareRuntimeRetiredTypeScriptAuditLineageV1(ctx, roots, authority, entries)
 	return err
 }
 
@@ -286,16 +295,28 @@ func prepareRuntimeChildIdentityStartupV1(ctx context.Context, roots persistence
 		return nil, pendingworkapp.ErrChildProducerInventoryIncomplete
 	}
 	var retiredParentIDs map[string]struct{}
+	var legacyLineageWitness *jobs.FrozenLegacyTypeScriptLineageWitnessV1
 	if jobSnapshot.HasLegacyTypeScript && allowsRuntimeRetiredTypeScriptAuditMigrationV1(ctx) {
-		retiredParentIDs, err = runtimeRetiredTypeScriptAuditParentIDsV1(ctx, roots)
+		lineage, err := prepareRuntimeRetiredTypeScriptAuditLineageV1(ctx, roots, rootAuthority, snapshot.Entries)
 		if err != nil {
 			return nil, err
 		}
+		retiredParentIDs, legacyLineageWitness = lineage.parentIDs, lineage.witness
 		if isRuntimeSemanticStageAccessV1(access) {
 			snapshot, err = materializeRuntimeRetiredAuditPrimariesV1(ctx, roots, snapshot, retiredParentIDs)
 			if err != nil {
 				return nil, err
 			}
+		}
+	}
+	if legacyLineageWitness == nil && isRuntimeSemanticStageAccessV1(access) {
+		// Keep the empty-inventory guard too: a legacy source appearing after
+		// preparation must not bypass the stage's original manifest binding.
+		legacyLineageWitness, err = newFrozenLegacyTypeScriptChildLineageWitnessV1(
+			filepath.Join(roots.DataDir, "child-runs"), newLegacyTypeScriptRawThreadReaderV1(ctx, rootAuthority, snapshot.Entries),
+		)
+		if err != nil {
+			return nil, err
 		}
 	}
 	var primaries *runtimeOriginalPrimaryInventoryV1
@@ -329,7 +350,7 @@ func prepareRuntimeChildIdentityStartupV1(ctx context.Context, roots persistence
 			return nil, err
 		}
 	}
-	prepared := &runtimeChildIdentityStartupV1{roots: roots, snapshot: snapshot, jobs: jobSnapshot.Inventory, jobRecords: jobSnapshot.Records, pending: pending, emptyPending: emptyPending, revalidateKey: revalidateKey, floors: floors, pendingInventory: trusted, pendingSemantic: pendingSemantic, verification: verification, access: access, primaries: primaries, originalCreates: original}
+	prepared := &runtimeChildIdentityStartupV1{roots: roots, snapshot: snapshot, jobs: jobSnapshot.Inventory, jobRecords: jobSnapshot.Records, pending: pending, emptyPending: emptyPending, revalidateKey: revalidateKey, floors: floors, pendingInventory: trusted, pendingSemantic: pendingSemantic, verification: verification, access: access, primaries: primaries, originalCreates: original, legacyLineageWitness: legacyLineageWitness}
 	if err := prepared.revalidate(ctx); err != nil {
 		return nil, err
 	}

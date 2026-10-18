@@ -1340,11 +1340,12 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if simulation {
 		startupPhase = "legacy-lineage-witness"
 		diagnosticPhase = startupPhase
-		legacyTypeScriptLineageWitness, err = newFrozenLegacyTypeScriptChildLineageWitnessV1(
-			filepath.Join(config.DataDir, "child-runs"), newLegacyTypeScriptRawThreadReaderV1(persistenceRoots.DurableDir),
-		)
-		if err != nil {
-			return nil, err
+		// The stage already proved raw lineage before materialization and parent
+		// repairs. Reuse that source-bound witness; the jobs constructor validates
+		// its complete child-run manifest again before semantic migration.
+		legacyTypeScriptLineageWitness = childIdentityStartup.legacyLineageWitness
+		if legacyTypeScriptLineageWitness == nil {
+			return nil, errors.New("semantic stage legacy lineage witness is unavailable")
 		}
 		startupPhase = "semantic-content-migration"
 		diagnosticPhase = startupPhase
@@ -1947,6 +1948,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		Memories:            memoryStore,
 		CaseFinalizer:       caseFinalizer,
 		CaseThreads:         caseThreads,
+		WorkspaceReader:     filestore.CaseBindingReader{},
 		TurnSecurity: turnsecurityapp.WorkspaceSecurityAuthority{
 			Observer:            filestore.CaseBindingReader{},
 			Identity:            identityAuthority,
