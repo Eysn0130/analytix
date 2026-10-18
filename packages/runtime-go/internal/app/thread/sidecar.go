@@ -312,6 +312,12 @@ func ValidatePublicHistory(thread map[string]any) error {
 	if err != nil {
 		return err
 	}
+	// Validate the original archive/live tuple before constructing any scan
+	// view. Compacted archive entries do not need a surviving live turn.
+	authorities, err := domainturnterminal.GeneralTerminalProjectionAuthoritiesV1(thread)
+	if err != nil {
+		return err
+	}
 	// The exact workspace path is host execution authority for every thread.
 	// Keep it byte-stable in durable state and validate only ordinary content;
 	// TrustedPublicProjector applies the public workspace projection later.
@@ -324,7 +330,7 @@ func ValidatePublicHistory(thread map[string]any) error {
 		// history. Validate each entry against the same public record policy
 		// before applying the fixed limits to ordinary content below.
 		for _, commit := range archive.Commits {
-			if err := domainevent.ValidatePublicRecord(domainturnterminal.GeneralTerminalPublicationCommitV1Map(commit)); err != nil {
+			if _, err := appturn.GeneralTerminalPublicationCommitValidationViewV1(domainturnterminal.GeneralTerminalPublicationCommitV1Map(commit)); err != nil {
 				return err
 			}
 		}
@@ -343,6 +349,25 @@ func ValidatePublicHistory(thread map[string]any) error {
 			}
 			view = contracts.CloneMap(turn)
 			delete(view, domainprocess.SettledHistoryFieldV1)
+		}
+		if rawCommit, present := turn["generalTerminalPublication"]; present {
+			authority := authorities[stringField(turn, "id")]
+			if !authority.Terminal {
+				return errors.New("public history terminal outbox has no canonical authority")
+			}
+			if err := appturn.ValidateGeneralTerminalPublicationCommitForThreadV1(thread, stringField(turn, "id"), authority.Commit); err != nil {
+				return err
+			}
+			commitView, err := appturn.GeneralTerminalPublicationCommitValidationViewV1(rawCommit)
+			if err != nil {
+				return err
+			}
+			validationTurn := make(map[string]any, len(view))
+			for key, value := range view {
+				validationTurn[key] = value
+			}
+			validationTurn["generalTerminalPublication"] = commitView
+			view = validationTurn
 		}
 		publicTurns = append(publicTurns, view)
 	}

@@ -406,40 +406,40 @@ export function createMaintenanceActions(
       set({ error: i18n.t('common:runtimeFeatureUnsupported') })
       return
     }
-    const current = (): boolean => {
+    const authorityCurrent = (): boolean => {
       const snapshot = sourceSnapshot()
-      return navigationCurrent() && get().activeThreadId === activeThreadId && get().route === route &&
+      return get().activeThreadId === activeThreadId && get().route === route &&
         (!expected || expected.isCurrent()) &&
         binding.generation === generation && binding.submissionGeneration === submissionGeneration &&
         get().runtimeConnection === 'ready' && getProvider() === p && snapshot !== null && !snapshot.busy
     }
+    const current = (): boolean => navigationCurrent() && authorityCurrent()
     if (!current()) return
     try {
-      const parentThread =
-        get().threads.find((thread) => thread.id === sourceThreadId) ?? {
-          id: sourceThreadId,
-          title: initialSnapshot.title ?? sourceThreadId.slice(0, 8)
-        }
+      const parent = get().threads.find((thread) => thread.id === sourceThreadId)
+      const parentThread = { id: sourceThreadId, title: parent?.title ?? initialSnapshot.title ?? sourceThreadId.slice(0, 8) }
+      const fallbackBlocks = turnId ? forkBlocksThroughTurn(initialSnapshot.blocks, turnId) : initialSnapshot.blocks
+      const messageCount = forkedMessageCount(fallbackBlocks)
+      const turnCount = forkedTurnCount(fallbackBlocks)
       const forked = turnId
         ? await p.forkThread(sourceThreadId, { turnId, ...(source?.endSeq !== undefined ? { endSeq: source.endSeq } : {}) })
         : await p.forkThread(sourceThreadId)
-      // A created Host fork survives owner retirement; never retry it automatically.
-      if (!current()) return
-      const sourceBlocks = sourceSnapshot()!.blocks
-      const fallbackBlocks = turnId ? forkBlocksThroughTurn(sourceBlocks, turnId) : sourceBlocks
+      // IME cancellation only retires navigation; retain the completed Host fork's
+      // lineage while its authority is current. Never retry the fork automatically.
+      if (!authorityCurrent()) return
       saveThreadForkRegistry(
         markThreadFork(
           forked.id,
           parentThread,
           {
             createdAt: forked.forkedAt ?? new Date().toISOString(),
-            forkedFromMessageCount: forked.forkedFromMessageCount ?? forkedMessageCount(fallbackBlocks),
-            forkedFromTurnCount: forked.forkedFromTurnCount ?? forkedTurnCount(fallbackBlocks)
+            forkedFromMessageCount: forked.forkedFromMessageCount ?? messageCount,
+            forkedFromTurnCount: forked.forkedFromTurnCount ?? turnCount
           },
           readThreadForkRegistry()
         )
       )
-      if (expected) await get().refreshThreads({ isCurrent: current })
+      if (expected) await get().refreshThreads({ isCurrent: authorityCurrent })
       else await get().refreshThreads()
       if (!current()) return
       await get().selectThread(forked.id)

@@ -38,7 +38,8 @@ export const runtimeExternalDiagnostics = [
   { test: 'TestRuntimeOptionalPublicFixturePathV1', reason: 'Explicit Owner task directory and fixture activation required.' },
   { test: 'TestRuntimeOptionalPluginPublicConsumerV1', reason: 'Explicit Owner public-consumer acceptance and isolated corpus/profile required.' },
   { test: 'TestRuntimeOptionalPluginUnauthorizedFirstMCPTerminalDiagnosticV1', reason: 'Explicit Owner terminal diagnostic and evidence output authority required.' },
-  { test: 'TestLocalNonPublishablePackageInspectionWhenExplicitlyProvided', reason: 'Explicit exact packaged executable and local Funds data required.' }
+  { test: 'TestLocalNonPublishablePackageInspectionWhenExplicitlyProvided', reason: 'Explicit exact packaged executable and local Funds data required.' },
+  { test: 'TestRuntimeStartupOpaqueMCPManualCaptureLifecycle', reason: 'macOS, explicit qualified Office assets and the task-owned synthetic DOCX required.' }
 ]
 
 export function runtimeShardIndex(value) {

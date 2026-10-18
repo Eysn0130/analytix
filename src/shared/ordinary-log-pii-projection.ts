@@ -503,6 +503,11 @@ function projectPIIIdentifiers(text: string): string {
   return '[ACCOUNT]'
 }
 
+// Identifier-only projection keeps the source spelling outside matched spans.
+// Ordinary presentation owners share this pure classifier without applying
+// the log/public-text layers for source locators, secrets or restricted evidence.
+export { projectPIIIdentifiers as projectOrdinaryPIIIdentifiers }
+
 /**
  * Canonical lossy projection for ordinary UI, SSE-adjacent renderer state,
  * logs, history, transcripts, and non-controlled exports. Exact restricted

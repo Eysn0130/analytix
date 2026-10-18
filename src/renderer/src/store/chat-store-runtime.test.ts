@@ -952,7 +952,7 @@ describe('thread event sink binding', () => {
     const questionCard: ChatBlock = { kind: 'user_input', id: 'item_input_be9075e1e243f5304e7617fe7d1e0e1c117968a28c7d49fb5c530fda42e17e25', requestId: 'input_be9075e1e243f5304e7617fe7d1e0e1c117968a28c7d49fb5c530fda42e17e25',
       questions: [{ id: 'input_be9075e1e243f5304e7617fe7d1e0e1c117968a28c7d49fb5c530fda42e17e25_1', header: 'BUSY', question: 'Choose Alpha and Beta.', options: [] }],
       status: 'continued', meta: { turnId } }
-    const original = (): ChatBlock => ({ kind: 'user', id: originalId, text: 'QA_NATIVE_V2_BUSY', meta: { turnId } })
+    const original = (): ChatBlock => ({ kind: 'user', id: originalId, text: 'QA_NATIVE_V2_BUSY', meta: { turnId, activeSkillIds: [] } })
     const pending = (which: 'question' | 'ordinary'): ChatBlock => ({
       kind: 'user', id: which === 'question' ? questionClient : ordinaryClient,
       text: which === 'question' ? questionReply : ordinaryText,
@@ -1946,7 +1946,7 @@ describe('thread event sink binding', () => {
       })
       reconnected.onUserMessage({
         itemId: nextTurn.items[0].id, turnId: 'turn-next',
-        text: nextTurn.items[0].text, createdAt: timestamp, meta: { turnId: 'turn-next' }
+        text: nextTurn.items[0].text, createdAt: timestamp, meta: { turnId: 'turn-next', activeSkillIds: [] }
       })
       // The provider advances the ordinary SSE cursor after dispatching non-terminal events.
       reconnected.onSeq(31)
@@ -2084,7 +2084,8 @@ describe('thread event sink binding', () => {
     expect(serialized).not.toContain('providerAuthSecret123456')
   })
 
-  it('preserves provider retry attempts on runtime status rows', () => {
+  it('preserves provider retry attempts on runtime status rows', async () => {
+    await i18n.changeLanguage('en')
     const { getState, set, get } = makeSinkHarness({
       activeThreadId: 'thread-current', currentTurnId: 'turn_1',
       blocks: []
@@ -2113,7 +2114,7 @@ describe('thread event sink binding', () => {
     expect(getState().blocks[0]).toMatchObject({
       kind: 'system',
       id: 'runtime_status_turn_1_provider_retrying_2',
-      text: '模型服务正在重试',
+      text: 'Provider request is retrying',
       meta: {
         providerError: {
           providerId: 'custom-openai',

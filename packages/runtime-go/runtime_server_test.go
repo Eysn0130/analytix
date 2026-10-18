@@ -42,9 +42,12 @@ import (
 	domaincheckpoint "analytix.local/runtime-go/internal/domain/checkpointauthority"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainidentity "analytix.local/runtime-go/internal/domain/identity"
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
+	domainprocessdisplay "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsecretprojection "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	"analytix.local/runtime-go/internal/jobs"
@@ -5575,12 +5578,12 @@ func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAtt
 	)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + firstReasoningSentinel + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + firstReasoningSentinel + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_read","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + secondReasoningSentinel + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + secondReasoningSentinel + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_glob","type":"function","function":{"name":"glob","arguments":"{\"pattern\":\"*.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
@@ -5620,14 +5623,14 @@ func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAtt
 		t.Fatalf("expected first turn to execute tool and continue, got %d requests", provider.RequestCount())
 	}
 	readCallID := providerHostToolCallIDForName(t, provider.Body(1), "read")
-	if !strings.Contains(provider.Body(1), `"reasoning_content":"`+firstReasoningSentinel+`"`) ||
+	if !strings.Contains(provider.Body(1), `"reasoning_content":"fixture reasoning preview\n`+firstReasoningSentinel+`"`) ||
 		!strings.Contains(provider.Body(1), `"tool_call_id":"`+readCallID+`"`) ||
 		strings.Count(provider.Body(1), firstReasoningSentinel) != 1 {
 		t.Fatalf("DeepSeek continuation should bind exact reasoning once to its tool pairing:\n%s", provider.Body(1))
 	}
 	globCallID := providerHostToolCallIDForName(t, provider.Body(2), "glob")
-	if !strings.Contains(provider.Body(2), `"reasoning_content":"`+firstReasoningSentinel+`"`) ||
-		!strings.Contains(provider.Body(2), `"reasoning_content":"`+secondReasoningSentinel+`"`) ||
+	if !strings.Contains(provider.Body(2), `"reasoning_content":"fixture reasoning preview\n`+firstReasoningSentinel+`"`) ||
+		!strings.Contains(provider.Body(2), `"reasoning_content":"fixture reasoning preview\n`+secondReasoningSentinel+`"`) ||
 		!strings.Contains(provider.Body(2), `"tool_call_id":"`+readCallID+`"`) ||
 		!strings.Contains(provider.Body(2), `"tool_call_id":"`+globCallID+`"`) ||
 		strings.Count(provider.Body(2), firstReasoningSentinel) != 1 ||
@@ -5635,16 +5638,15 @@ func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAtt
 		t.Fatalf("DeepSeek continuation must replay every exact reasoning segment still in the tool chain:\n%s", provider.Body(2))
 	}
 	firstReplay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	if strings.Contains(firstReplay, firstReasoningSentinel) || strings.Contains(firstReplay, secondReasoningSentinel) {
+	if strings.Contains(firstReplay, firstReasoningSentinel) || strings.Contains(firstReplay, secondReasoningSentinel) || strings.Contains(firstReplay, "fixture reasoning preview") {
 		t.Fatalf("DeepSeek reasoning must not enter public SSE replay:\n%s", firstReplay)
 	}
 	firstThread := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
 	if encoded, _ := json.Marshal(firstThread); strings.Contains(string(encoded), firstReasoningSentinel) ||
-		strings.Contains(string(encoded), secondReasoningSentinel) {
+		strings.Contains(string(encoded), secondReasoningSentinel) || strings.Contains(string(encoded), "fixture reasoning preview") {
 		t.Fatalf("DeepSeek reasoning must not enter thread history: %s", encoded)
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, firstReasoningSentinel, secondReasoningSentinel)
-	assertRuntimeFilesExcludeValues(t, durableRoot, firstReasoningSentinel, secondReasoningSentinel)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{firstReasoningSentinel, secondReasoningSentinel})
 
 	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"prompt":          "Summarize the prior tool result.",
@@ -5664,13 +5666,13 @@ func TestRuntimeServerDeepSeekToolContinuationReplaysReasoningOnlyWithinExactAtt
 	}
 	if strings.Contains(followUpBody, firstReasoningSentinel) ||
 		strings.Contains(followUpBody, secondReasoningSentinel) ||
+		strings.Contains(followUpBody, "fixture reasoning preview") ||
 		strings.Contains(followUpBody, `"reasoning_content"`) ||
 		strings.Contains(followUpBody, `"tool_calls"`) ||
 		strings.Contains(followUpBody, `"tool_call_id"`) {
 		t.Fatalf("reasoning must not cross the turn boundary:\n%s", followUpBody)
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, firstReasoningSentinel, secondReasoningSentinel)
-	assertRuntimeFilesExcludeValues(t, durableRoot, firstReasoningSentinel, secondReasoningSentinel)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{firstReasoningSentinel, secondReasoningSentinel})
 }
 
 func TestRuntimeServerCommandSeparatesGeneralOnlyFromHostPolicyCaseBoundary(t *testing.T) {
@@ -12834,7 +12836,7 @@ func TestRuntimeServerPlanModeAdvertisesAndExecutesCreatePlan(t *testing.T) {
 	}
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + reasoningSentinel + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + reasoningSentinel + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_plan","type":"function","function":{"name":"create_plan","arguments":"{\"markdown\":\"# Generated plan\\n\\nValidation nonce: 30\",\"operation\":\"draft\",\"source_request\":\"Add auth\",\"title\":\"Auth\",\"plan_id\":\"plan-auth\",\"plan_relative_path\":\".analytixsdd/plan/auth.md\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
@@ -12895,7 +12897,7 @@ func TestRuntimeServerPlanModeAdvertisesAndExecutesCreatePlan(t *testing.T) {
 		t.Fatalf("create_plan wrote unexpected content: %q", string(rawPlan))
 	}
 	body := provider.Body(1)
-	if !strings.Contains(body, `"reasoning_content":"`+reasoningSentinel+`"`) ||
+	if !strings.Contains(body, `"reasoning_content":"fixture reasoning preview\n`+reasoningSentinel+`"`) ||
 		strings.Count(body, reasoningSentinel) != 1 {
 		t.Fatalf("DeepSeek plan continuation lost exact private reasoning across the catalog transition: %s", body)
 	}
@@ -12932,8 +12934,10 @@ func TestRuntimeServerPlanModeAdvertisesAndExecutesCreatePlan(t *testing.T) {
 	if !strings.Contains(replay, planContentHash) {
 		t.Fatal("create_plan digest was not byte-stable through the public SSE seam")
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, reasoningSentinel)
-	assertRuntimeFilesExcludeValues(t, durableRoot, reasoningSentinel)
+	if strings.Contains(replay, "fixture reasoning preview") || bytes.Contains(mustJSON(t, threadState), []byte("fixture reasoning preview")) {
+		t.Fatal("reasoning preview entered public plan history")
+	}
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{reasoningSentinel})
 }
 
 func TestMaterializedCreatePlanUsesExactBuiltinScopeWithLiveMCP(t *testing.T) {
@@ -12946,7 +12950,7 @@ func TestMaterializedCreatePlanUsesExactBuiltinScopeWithLiveMCP(t *testing.T) {
 	const reasoningSentinel = "DEEPSEEK_PRIVATE_HOST_MATERIALIZED_PLAN_REASONING"
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + reasoningSentinel + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + reasoningSentinel + `"}}]}`,
 			`data: {"choices":[{"delta":{"content":"## Plan\nUse the verified implementation path."}}]}`,
 			`data: [DONE]`,
 		},
@@ -12998,13 +13002,13 @@ func TestMaterializedCreatePlanUsesExactBuiltinScopeWithLiveMCP(t *testing.T) {
 	if !strings.Contains(secondBody, "Analytix host-selected prior tool activity") ||
 		!strings.Contains(secondBody, ".analytixsdd/plan/live-mcp.md") ||
 		strings.Contains(secondBody, reasoningSentinel) ||
+		strings.Contains(secondBody, "fixture reasoning preview") ||
 		strings.Contains(secondBody, `"reasoning_content"`) ||
 		strings.Contains(secondBody, `"tool_calls"`) ||
 		strings.Contains(secondBody, `"tool_call_id"`) {
 		t.Fatalf("host-materialized DeepSeek plan was not recompiled into safe semantic history: %s", secondBody)
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, reasoningSentinel)
-	assertRuntimeFilesExcludeValues(t, durableRoot, reasoningSentinel)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{reasoningSentinel})
 }
 
 func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHistory(t *testing.T) {
@@ -13022,7 +13026,7 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":12}}}`,
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`,
-			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinkingSentinel + `"}}`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"fixture reasoning preview\n` + thinkingSentinel + `"}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + signatureSentinel + `"}}`,
 			`data: {"type":"content_block_stop","index":0}`,
 			`data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
@@ -13088,6 +13092,7 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 	}
 	for _, forbidden := range []string{
 		thinkingSentinel,
+		"fixture reasoning preview",
 		signatureSentinel,
 		`"type":"thinking"`,
 		`"type":"tool_use"`,
@@ -13117,6 +13122,7 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 	}
 	for _, forbidden := range []string{
 		thinkingSentinel,
+		"fixture reasoning preview",
 		signatureSentinel,
 		`"type":"thinking"`,
 		`"type":"tool_use"`,
@@ -13129,14 +13135,13 @@ func TestRuntimeServerImplicitAnthropicMaterializedPlanClosesCurrentAndRestartHi
 	replay := liveSSE(t, restarted.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
 	threadState := assertLiveJSON(t, restarted.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
 	encodedThread, _ := json.Marshal(threadState)
-	for _, forbidden := range []string{thinkingSentinel, signatureSentinel, "privateProtocolObserved"} {
+	for _, forbidden := range []string{thinkingSentinel, "fixture reasoning preview", signatureSentinel, "privateProtocolObserved"} {
 		if strings.Contains(replay, forbidden) || bytes.Contains(encodedThread, []byte(forbidden)) {
 			t.Fatalf("materialized-plan public history exposed %q: replay=%s thread=%s",
 				forbidden, replay, encodedThread)
 		}
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, thinkingSentinel, signatureSentinel)
-	assertRuntimeFilesExcludeValues(t, durableRoot, thinkingSentinel, signatureSentinel)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{thinkingSentinel}, signatureSentinel)
 }
 
 func TestUnsafeProviderPlanDraftIsNeverMaterializedOrPublished(t *testing.T) {
@@ -13668,7 +13673,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 		},
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":20}}}`,
-			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + secondThinkingSentinel + `"}}`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"fixture reasoning preview\n` + secondThinkingSentinel + `"}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + secondSignatureSentinel + `"}}`,
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_read","name":"read","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"alpha.txt\"}"}}`,
@@ -13777,7 +13782,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 	for _, expected := range []string{
 		`"thinking":""`,
 		`"signature":"` + firstSignatureSentinel + `"`,
-		`"thinking":"` + secondThinkingSentinel + `"`,
+		`"thinking":"fixture reasoning preview\n` + secondThinkingSentinel + `"`,
 		`"signature":"` + secondSignatureSentinel + `"`,
 	} {
 		if !strings.Contains(thirdBody, expected) {
@@ -13797,6 +13802,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 	for _, forbidden := range []string{
 		firstSignatureSentinel,
 		secondThinkingSentinel,
+		"fixture reasoning preview",
 		secondSignatureSentinel,
 		`"type":"thinking"`,
 		`"type":"tool_use"`,
@@ -13809,6 +13815,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 	privateValues := []string{
 		firstSignatureSentinel,
 		secondThinkingSentinel,
+		"fixture reasoning preview",
 		secondSignatureSentinel,
 	}
 	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
@@ -13825,8 +13832,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 			t.Fatalf("Anthropic private protocol bytes entered thread history: %s", encodedThread)
 		}
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, privateValues...)
-	assertRuntimeFilesExcludeValues(t, durableRoot, privateValues...)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{secondThinkingSentinel}, firstSignatureSentinel, secondSignatureSentinel)
 	fork := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/fork", DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"relation": "fork",
 		"title":    "Anthropic private protocol fork",
@@ -13842,6 +13848,7 @@ func TestRuntimeServerAnthropicMessagesToolLoopExecutesAndContinues(t *testing.T
 	for _, forbidden := range []string{
 		firstSignatureSentinel,
 		secondThinkingSentinel,
+		"fixture reasoning preview",
 		secondSignatureSentinel,
 		`"type":"thinking"`,
 		`"type":"tool_use"`,
@@ -13987,7 +13994,7 @@ func testCompletedMessagesPrivateToolRestart(t *testing.T, protocol string) {
 	frames := [][]string{
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":8}}}`,
-			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinkingSentinel + `"}}`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"fixture reasoning preview\n` + thinkingSentinel + `"}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + signatureSentinel + `"}}`,
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_restart_ls","name":"ls","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}`,
@@ -14010,7 +14017,7 @@ func testCompletedMessagesPrivateToolRestart(t *testing.T, protocol string) {
 	}
 	if protocol != "" {
 		for i := 1; i < len(frames); i++ {
-			frames[i] = append([]string{frames[i][0], `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinkingSentinel + `"}}`}, frames[i][1:]...)
+			frames[i] = append([]string{frames[i][0], `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"fixture reasoning preview\n` + thinkingSentinel + `"}}`}, frames[i][1:]...)
 		}
 	}
 	provider := newCompleteProviderServer(t, frames)
@@ -14067,6 +14074,7 @@ func testCompletedMessagesPrivateToolRestart(t *testing.T, protocol string) {
 	}
 	for _, forbidden := range []string{
 		thinkingSentinel,
+		"fixture reasoning preview",
 		signatureSentinel,
 		`"type":"thinking"`,
 		`"type":"tool_use"`,
@@ -14079,17 +14087,17 @@ func testCompletedMessagesPrivateToolRestart(t *testing.T, protocol string) {
 	replay := liveSSE(t, restarted.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
 	threadState := assertLiveJSON(t, restarted.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
 	encodedThread, _ := json.Marshal(threadState)
-	for _, forbidden := range []string{thinkingSentinel, signatureSentinel, "privateProtocolObserved"} {
+	for _, forbidden := range []string{thinkingSentinel, "fixture reasoning preview", signatureSentinel, "privateProtocolObserved"} {
 		if strings.Contains(replay, forbidden) || bytes.Contains(encodedThread, []byte(forbidden)) {
 			t.Fatalf("completed Anthropic restart exposed private state %q: replay=%s thread=%s", forbidden, replay, encodedThread)
 		}
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, thinkingSentinel, signatureSentinel)
-	assertRuntimeFilesExcludeValues(t, durableRoot, thinkingSentinel, signatureSentinel)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{thinkingSentinel}, signatureSentinel)
 }
 
 func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 	dataDir := workspacetest.New(t)
+	durableRoot := t.TempDir()
 	workspace := filepath.Join(dataDir, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -14102,7 +14110,7 @@ func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":8}}}`,
-			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinkingSentinel + `"}}`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"fixture reasoning preview\n` + thinkingSentinel + `"}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + signatureSentinel + `"}}`,
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_approval_ls","name":"ls","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}`,
@@ -14118,7 +14126,7 @@ func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 		},
 	})
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
-		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), Host: "127.0.0.1", Port: 0, DataDir: dataDir,
+		RuntimeToken: DefaultRuntimeToken, DurableTempDir: durableRoot, Host: "127.0.0.1", Port: 0, DataDir: dataDir,
 		ModelProvidersJSON: testModelProvidersJSONWithEndpoint(provider.URL(), "anthropic-approval-provider", "claude-approval-model", "messages"),
 	}))
 	defer server.Close()
@@ -14152,6 +14160,7 @@ func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 	}
 	for _, forbidden := range []string{
 		thinkingSentinel,
+		"fixture reasoning preview",
 		signatureSentinel,
 		`"type":"thinking"`,
 		`"type":"tool_use"`,
@@ -14161,7 +14170,7 @@ func TestRuntimeServerAnthropicApprovalUsesSafeSemanticHistory(t *testing.T) {
 			t.Fatalf("approved Anthropic continuation replayed pause-private wire %q: %s", forbidden, secondBody)
 		}
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, thinkingSentinel, signatureSentinel)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{thinkingSentinel}, signatureSentinel)
 }
 
 func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t *testing.T) {
@@ -14181,7 +14190,7 @@ func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t
 	provider := newCompleteProviderServer(t, [][]string{
 		{
 			`data: {"type":"message_start","message":{"usage":{"input_tokens":8}}}`,
-			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinkingSentinel + `"}}`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"fixture reasoning preview\n` + thinkingSentinel + `"}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + signatureSentinel + `"}}`,
 			`data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_approval_ls","name":"ls","input":{}}}`,
 			`data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\".\"}"}}`,
@@ -14240,6 +14249,7 @@ func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t
 	}
 	for _, forbidden := range []string{
 		thinkingSentinel,
+		"fixture reasoning preview",
 		signatureSentinel,
 		`"type":"tool_use"`,
 		`"type":"tool_result"`,
@@ -14249,16 +14259,15 @@ func TestRuntimeServerAnthropicMultiToolApprovalResumesWithSafeSemanticHistory(t
 		}
 	}
 	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	if strings.Contains(replay, thinkingSentinel) || strings.Contains(replay, signatureSentinel) {
+	if strings.Contains(replay, thinkingSentinel) || strings.Contains(replay, signatureSentinel) || strings.Contains(replay, "fixture reasoning preview") {
 		t.Fatalf("Anthropic multi-tool approval leaked private protocol bytes into SSE: %s", replay)
 	}
 	threadState := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
 	encodedThread, _ := json.Marshal(threadState)
-	if bytes.Contains(encodedThread, []byte(thinkingSentinel)) || bytes.Contains(encodedThread, []byte(signatureSentinel)) {
+	if bytes.Contains(encodedThread, []byte(thinkingSentinel)) || bytes.Contains(encodedThread, []byte(signatureSentinel)) || bytes.Contains(encodedThread, []byte("fixture reasoning preview")) {
 		t.Fatalf("Anthropic multi-tool approval leaked private protocol bytes into thread history: %s", encodedThread)
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, thinkingSentinel, signatureSentinel)
-	assertRuntimeFilesExcludeValues(t, durableRoot, thinkingSentinel, signatureSentinel)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{thinkingSentinel}, signatureSentinel)
 }
 
 func TestRuntimeServerAnthropicApprovalDenialClearsPrivateProtocolWithoutProvider(t *testing.T) {
@@ -14326,6 +14335,219 @@ func assertRuntimeFilesExcludeValues(t *testing.T, root string, values ...string
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Only these explicitly named fixture values may remain in a completed private
+// reasoning body. Every other file/field and every forbidden value stays closed.
+func assertRuntimeFilesExcludeValuesExceptSettledReasoning(t *testing.T, dataDir, durableRoot, threadID string, reasoningValues []string, forbidden ...string) {
+	t.Helper()
+	forbidden = append(append([]string{}, forbidden...), runtimeServerSyntheticCredentialForTestV1)
+	for _, root := range []string{dataDir, durableRoot} {
+		assertRuntimeFilesExcludeValues(t, root, forbidden...)
+	}
+	key, err := finalauthority.OpenExistingFileAuthority(filepath.Join(dataDir, "private", "authority", "final-answer-ed25519-v1.json"))
+	if err != nil {
+		t.Fatalf("read isolated fixture installation authority: %v", err)
+	}
+	principal, err := domainidentity.NewPrincipalV1(key.KeyID(), domainidentity.LocalTenantID, domainidentity.LocalUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := finalauthority.NewAcceptedFinalCASReader(durableRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primary, err := reader.ReadPrimaryThreadSnapshotV1(context.Background(), threadID)
+	if err != nil {
+		t.Fatalf("read isolated fixture Primary thread: %v", err)
+	}
+	for _, root := range []string{dataDir, durableRoot} {
+		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil || entry.IsDir() {
+				return walkErr
+			}
+			payload, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, value := range reasoningValues {
+				if bytes.Contains(payload, []byte(value)) && !runtimeSettledReasoningFileAllowsValue(dataDir, path, payload, value, principal, primary.Thread, forbidden) {
+					return fmt.Errorf("private protocol value entered durable file %s", path)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func runtimeSettledReasoningFileAllowsValue(dataDir, path string, payload []byte, value string, principal domainidentity.PrincipalV1, primary map[string]any, forbidden []string) bool {
+	if value == "" || domainsecretprojection.ContainsCredentialV1(value) {
+		return false
+	}
+	for _, denied := range append(append([]string{}, forbidden...), runtimeServerSyntheticCredentialForTestV1) {
+		if denied != "" && bytes.Contains(payload, []byte(denied)) {
+			return false
+		}
+	}
+	digest := domainsecurity.SHA256Hex(payload)
+	if path != filepath.Join(dataDir, "private", "process-history-v1", digest[:2], digest+".json") {
+		return false
+	}
+	record, err := domainprocessdisplay.ParseSettledHistoryV1(payload)
+	if err != nil || domainthread.ValidatePrimaryIdentityV1(record.ThreadID, primary) != nil || !domainidentity.SamePrincipalV1(record.Principal, principal) || stringField(primary, "status") == "deleted" {
+		return false
+	}
+	var turn map[string]any
+	for _, raw := range anyList(primary["turns"]) {
+		candidate, _ := raw.(map[string]any)
+		if stringField(candidate, "id") == record.TurnID {
+			turn = candidate
+		}
+	}
+	frozen, contextErr := appturn.FrozenSecurityContextForTurn(primary, record.TurnID)
+	anchor, anchorErr := domainprocessdisplay.ParseSettledHistoryAnchorV1(turn[domainprocessdisplay.SettledHistoryFieldV1])
+	actual, actualErr := domainprocessdisplay.SettledHistoryAnchorForV1(record)
+	if turn == nil || contextErr != nil || anchorErr != nil || actualErr != nil || anchor != actual || !reflect.DeepEqual(record.Original, frozen) {
+		return false
+	}
+	terminal := domainprocessdisplay.TerminalWitnessV1{Status: stringField(turn, "status"), FinishedAt: stringField(turn, "finishedAt")}
+	general, _ := turn["generalTerminalPublication"].(map[string]any)
+	accepted, _ := turn["acceptedFinal"].(map[string]any)
+	if general != nil && accepted == nil {
+		terminal.AuthorityDigest = stringField(general, "commitDigest")
+	} else if accepted != nil && general == nil {
+		terminal.AuthorityDigest = stringField(accepted, "recordDigest")
+	}
+	sources := []any{}
+	for _, raw := range anyList(turn["items"]) {
+		item, _ := raw.(map[string]any)
+		if stringField(item, "kind") != "tool_call" && stringField(item, "kind") != "tool_result" {
+			continue
+		}
+		metadata := map[string]any{}
+		for _, key := range []string{"id", "kind", "threadId", "turnId", "callId", "toolName", "status", "contextDigest", "contextEpoch", "executionGrant", "executionGrantId"} {
+			if value, present := item[key]; present {
+				metadata[key] = value
+			}
+		}
+		sources = append(sources, metadata)
+	}
+	sourceBody, err := json.Marshal(sources)
+	terminal.SourceDigest = domainsecurity.SHA256Hex(sourceBody)
+	if err != nil || terminal != record.Terminal {
+		return false
+	}
+	// Remove only the exact allowed body text, then scan the complete record
+	// again. Preview, title, other body fields, sources and identity stay strict.
+	found := false
+	for i := range record.Blocks {
+		block := &record.Blocks[i].Display
+		if block.Kind == "native_reasoning" && block.State == "completed" && block.Body != nil && strings.Contains(block.Body.Text, value) {
+			found = true
+			block.Body.Text = strings.ReplaceAll(block.Body.Text, value, "")
+		}
+	}
+	remainder, err := json.Marshal(record)
+	return found && err == nil && !bytes.Contains(remainder, []byte(value))
+}
+
+func TestRuntimeSettledReasoningFileAllowanceStaysBoundToBodyAndPrimary(t *testing.T) {
+	const sentinel = "SETTLED_REASONING_BODY_SENTINEL"
+	const signature = "sig_settled_reasoning_private"
+	principal, err := domainidentity.NewPrincipalV1(strings.Repeat("1", 64), "local", "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	for _, fault := range []string{"healthy", "wrong root", "wrong shard", "wrong digest", "noncanonical", "unknown field", "duplicate field", "preview", "title", "other body field", "signature", "credential", "incomplete reasoning", "wrong principal", "wrong context", "wrong terminal", "wrong terminal authority", "wrong tool inventory", "missing anchor", "wrong anchor", "duplicate turn"} {
+		t.Run(fault, func(t *testing.T) {
+			original := domainsecurity.NewTurnSecurityContext(domainsecurity.TurnSecurityContextInput{ThreadID: "thread-reasoning-oracle", TurnID: "turn-reasoning-oracle", WorkspaceRealPath: "/synthetic/workspace", TenantID: "local", UserID: "local"})
+			record := domainprocessdisplay.SettledHistoryV1{
+				SchemaVersion: domainprocessdisplay.SettledHistorySchemaV1, ThreadID: original.ThreadID, TurnID: original.TurnID, Principal: principal, Original: original,
+				Terminal: domainprocessdisplay.TerminalWitnessV1{Status: "completed", FinishedAt: "2026-10-14T01:00:00Z", AuthorityDigest: strings.Repeat("a", 64), SourceDigest: domainsecurity.SHA256Hex([]byte("[]"))},
+				Units:    []domainprocessdisplay.UnitV2{{UnitID: "unit-oracle", ProducerID: "producer-oracle", ProviderSequence: "1", Placement: "unit_only", Calls: []domainprocessdisplay.CallAnchorV2{}, PrecedingCalls: []domainprocessdisplay.CallAnchorV2{}}},
+				Blocks:   []domainprocessdisplay.SettledBlockV1{{Display: domainprocessdisplay.BlockV1{BlockID: strings.Repeat("2", 32), Kind: "native_reasoning", State: "completed", Attempt: 1, Source: domainprocessdisplay.SourceV2{Kind: "provider_reasoning", UnitID: "unit-oracle", ProducerID: "producer-oracle", ProviderSequence: "1", Attempt: 1, SourceOrdinal: "1"}, Classification: "source_exact_local", Preview: "fixture reasoning preview", Body: &domainprocessdisplay.BodyV1{Text: "fixture reasoning preview\n" + sentinel}}}},
+			}
+			block := &record.Blocks[0].Display
+			switch fault {
+			case "preview":
+				block.Preview = sentinel
+			case "title":
+				block.Title = sentinel
+			case "other body field":
+				block.Body.Before = sentinel
+			case "signature":
+				block.Body.Text += signature
+			case "credential":
+				block.Body.Text += " Authorization: Bearer " + runtimeServerSyntheticCredentialForTestV1
+			case "incomplete reasoning":
+				block.State = "failed"
+			case "wrong principal":
+				record.Principal, err = domainidentity.NewPrincipalV1(strings.Repeat("3", 64), "local", "local")
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			block.CaptureDigest = domainprocessdisplay.CaptureDigestV1(*block)
+			// Encode malformed candidates too, so the classifier must reject them.
+			encoded := mustJSON(t, record)
+			decoded, err := domainsecurity.DecodeCanonicalJSONValue(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload := mustJSON(t, decoded)
+			if fault == "noncanonical" {
+				payload = append([]byte(" "), payload...)
+			} else if fault == "unknown field" {
+				payload = bytes.Replace(payload, []byte(`"blocks":`), []byte(`"unknown":true,"blocks":`), 1)
+			} else if fault == "duplicate field" {
+				payload = bytes.Replace(payload, []byte(`"threadId":`), []byte(`"threadId":"duplicate","threadId":`), 1)
+			}
+			digest := domainsecurity.SHA256Hex(payload)
+			path := filepath.Join(dataDir, "private", "process-history-v1", digest[:2], digest+".json")
+			anchor := domainprocessdisplay.SettledHistoryAnchorV1{SchemaVersion: domainprocessdisplay.SettledHistoryAnchorSchemaV1, ThreadID: record.ThreadID, TurnID: record.TurnID, ContextDigest: original.ContextDigest, Terminal: record.Terminal, Availability: "available", RecordDigest: digest}
+			anchorMap, err := domainprocessdisplay.SettledHistoryAnchorMapV1(anchor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var frozen map[string]any
+			if err := json.Unmarshal(mustJSON(t, original), &frozen); err != nil {
+				t.Fatal(err)
+			}
+			turn := map[string]any{"id": record.TurnID, "threadId": record.ThreadID, "status": record.Terminal.Status, "finishedAt": record.Terminal.FinishedAt, "securityContext": frozen, "generalTerminalPublication": map[string]any{"commitDigest": record.Terminal.AuthorityDigest}, "items": []any{}, domainprocessdisplay.SettledHistoryFieldV1: anchorMap}
+			primary := map[string]any{"id": record.ThreadID, "turns": []any{turn}}
+			switch fault {
+			case "wrong root":
+				path = filepath.Join(dataDir, "private", "another-history", digest[:2], digest+".json")
+			case "wrong shard":
+				path = filepath.Join(dataDir, "private", "process-history-v1", "zz", digest+".json")
+			case "wrong digest":
+				path = filepath.Join(dataDir, "private", "process-history-v1", "00", strings.Repeat("0", 64)+".json")
+			case "wrong context":
+				other := domainsecurity.NewTurnSecurityContext(domainsecurity.TurnSecurityContextInput{ThreadID: record.ThreadID, TurnID: record.TurnID, WorkspaceRealPath: "/synthetic/other", TenantID: "local", UserID: "local"})
+				if err := json.Unmarshal(mustJSON(t, other), &frozen); err != nil {
+					t.Fatal(err)
+				}
+			case "wrong terminal":
+				turn["finishedAt"] = "2026-10-14T02:00:00Z"
+			case "wrong terminal authority":
+				turn["generalTerminalPublication"] = map[string]any{"commitDigest": strings.Repeat("b", 64)}
+			case "wrong tool inventory":
+				turn["items"] = []any{map[string]any{"kind": "tool_result", "callId": "unexpected"}}
+			case "missing anchor":
+				delete(turn, domainprocessdisplay.SettledHistoryFieldV1)
+			case "wrong anchor":
+				anchorMap["recordDigest"] = strings.Repeat("f", 64)
+			case "duplicate turn":
+				primary["turns"] = []any{turn, turn}
+			}
+			if allowed := runtimeSettledReasoningFileAllowsValue(dataDir, path, payload, sentinel, principal, primary, []string{signature}); allowed != (fault == "healthy") {
+				t.Fatalf("settled reasoning body allowance = %t for %s", allowed, fault)
+			}
+		})
 	}
 }
 
@@ -14693,7 +14915,7 @@ func TestRuntimeServerDeepSeekMultiToolApprovalResumesWithSafeSemanticHistory(t 
 	const reasoningSentinel = "DEEPSEEK_PRIVATE_MULTI_TOOL_APPROVAL_REASONING"
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + reasoningSentinel + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + reasoningSentinel + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_read","type":"function","function":{"name":"read","arguments":"{\"path\":\"approval.txt\"}"}},{"index":1,"id":"call_glob","type":"function","function":{"name":"glob","arguments":"{\"pattern\":\"*.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
@@ -14747,13 +14969,12 @@ func TestRuntimeServerDeepSeekMultiToolApprovalResumesWithSafeSemanticHistory(t 
 			t.Fatalf("DeepSeek approval continuation missing %q: %s", expected, secondBody)
 		}
 	}
-	for _, forbidden := range []string{reasoningSentinel, `"reasoning_content"`, `"tool_calls"`, `"tool_call_id"`} {
+	for _, forbidden := range []string{reasoningSentinel, "fixture reasoning preview", `"reasoning_content"`, `"tool_calls"`, `"tool_call_id"`} {
 		if strings.Contains(secondBody, forbidden) {
 			t.Fatalf("DeepSeek approval continuation retained private or incomplete wire protocol %q: %s", forbidden, secondBody)
 		}
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, reasoningSentinel)
-	assertRuntimeFilesExcludeValues(t, durableRoot, reasoningSentinel)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{reasoningSentinel})
 }
 
 func TestUnboundAmountEntityFactCannotUseGeneralOutput(t *testing.T) {
@@ -21100,5 +21321,120 @@ func runtimeMCPInitializeResult(name string, optionalCapabilities ...string) map
 		"protocolVersion": "2025-11-25",
 		"serverInfo":      map[string]any{"name": name, "version": "1.0.0"},
 		"capabilities":    capabilities,
+	}
+}
+
+func TestRuntimeServerGoalClearHistorySurvivesRestart(t *testing.T) {
+	for _, counted := range []bool{false, true} {
+		name, operation := "legacy", "legacy_clear"
+		if counted {
+			name, operation = "counted", "clear"
+		}
+		t.Run(name, func(t *testing.T) {
+			config := RuntimeServerContractConfig{
+				RuntimeToken: DefaultRuntimeToken, Host: "127.0.0.1",
+				DataDir: t.TempDir(), DurableTempDir: t.TempDir(),
+			}
+			firstHandler := newRuntimeServerTestHandler(t, config)
+			server := httptest.NewServer(firstHandler)
+			defer server.Close()
+			created := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken,
+				mustJSON(t, map[string]any{"title": "Goal clear persistence", "workspace": workspacetest.New(t)}), http.StatusCreated)
+			threadID := stringField(created, "id")
+			// Seed through the existing atomic store while no turn is active.
+			// A counted goal must stay disarmed so this persistence regression
+			// does not start an unrelated automatic Provider round.
+			store, err := newTempDurableEventSessionStore(config.DurableTempDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			patch := map[string]any{"objective": "Verify goal clear persistence"}
+			if counted {
+				patch["operation"], patch["maxGoalRounds"] = "create", 2
+			}
+			goal, err := store.SetGoal(threadID, patch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			goalPath := "/v1/threads/" + threadID + "/goal"
+			before := assertLiveJSON(t, server.URL, http.MethodGet, goalPath, DefaultRuntimeToken, nil, http.StatusOK)
+			if mapField(t, before, "goal")["objective"] != patch["objective"] {
+				t.Fatal("seeded goal is not publicly readable", before)
+			}
+			method := http.MethodDelete
+			var body json.RawMessage
+			if counted {
+				method = http.MethodPost
+				body = mustJSON(t, map[string]any{"operation": "clear", "ref": map[string]any{"id": goal["id"], "revision": goal["revision"]}})
+			}
+			cleared := assertLiveJSON(t, server.URL, method, goalPath, DefaultRuntimeToken, body, http.StatusOK)
+			if cleared["cleared"] != true {
+				t.Fatal("clear did not report its committed effect", cleared)
+			}
+			assertCleared := func(baseURL string) []any {
+				t.Helper()
+				state := assertLiveJSON(t, baseURL, http.MethodGet, goalPath, DefaultRuntimeToken, nil, http.StatusOK)
+				if state["goal"] != nil || state["activation"] != nil {
+					t.Fatal("clear retained a goal or activation", state)
+				}
+				history, ok := state["history"].([]any)
+				if !ok || len(history) != 2 {
+					t.Fatal("clear did not preserve both lifecycle entries", state)
+				}
+				entry, ok := history[1].(map[string]any)
+				if !ok || entry["operation"] != operation {
+					t.Fatal("clear lifecycle entry is missing", state)
+				}
+				if snapshot, present := entry["goal"]; !present || snapshot != nil {
+					t.Fatal("clear history snapshot is not null", entry)
+				}
+				if counted {
+					ref := mapField(t, entry, "ref")
+					if ref["id"] != goal["id"] || jsonIntField(t, ref, "revision") != jsonIntField(t, goal, "revision")+1 {
+						t.Fatal("clear history lost its counted reference", entry)
+					}
+				} else if _, present := entry["ref"]; present {
+					t.Fatal("legacy clear invented a counted reference", entry)
+				}
+				thread := assertLiveJSON(t, baseURL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
+				if thread["goal"] != nil || !reflect.DeepEqual(thread["goalHistory"], history) {
+					t.Fatal("thread detail disagrees with cleared goal history", thread)
+				}
+				return history
+			}
+			history := assertCleared(server.URL)
+			server.Close()
+			shutdownRuntimeTestHandler(t, firstHandler)
+			restarted := httptest.NewServer(newRuntimeServerTestHandler(t, config))
+			defer restarted.Close()
+			if after := assertCleared(restarted.URL); !reflect.DeepEqual(after, history) {
+				t.Fatal("restart changed committed clear history", after)
+			}
+		})
+	}
+}
+
+func TestRuntimeServerGoalHistoryNullSnapshotDoesNotAdmitInvalidObjects(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		snapshot any
+		valid    bool
+	}{
+		{name: "clear null", snapshot: nil, valid: true},
+		{name: "empty object", snapshot: map[string]any{}},
+		{name: "invalid object", snapshot: map[string]any{"threadId": "thread-goal", "objective": "Verify clear", "status": "invalid"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			thread := map[string]any{
+				"id": "thread-goal", "title": "Goal history projection", "status": "idle", "turns": []any{},
+				"goalHistory": []any{map[string]any{
+					"id": "goal-change", "operation": "clear", "createdAt": "2026-10-18T00:00:00Z", "goal": test.snapshot,
+				}},
+			}
+			_, err := threadapp.ProjectPublicThread(thread)
+			if (err == nil) != test.valid {
+				t.Fatalf("history snapshot projection error = %v, want valid=%v", err, test.valid)
+			}
+		})
 	}
 }

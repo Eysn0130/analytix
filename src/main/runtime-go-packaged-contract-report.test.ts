@@ -1261,6 +1261,21 @@ process.exit(91)
         collectKunCredentialsLocatorAllowed: true,
         inspectKunSettingsFileComparisonAllowed: true,
         cleanupKunSettingsFileComparisonAllowed: true,
+        protectedLatestKunSourceComparisonAllowed: true,
+        protectedFreshKunSourceComparisonAllowed: true,
+        kunComparisonInAnotherFileRejected: true,
+        kunComparisonWithDifferentSourceRejected: true,
+        protectedRuntimeBindingsCurrent: true,
+        dedicatedCopyBindingAllowed: true,
+        genericCopyFallbackRejected: true,
+        missingCopyAdmissionRejected: true,
+        rawCopyPayloadRejected: true,
+        unusedCopyClosureRejected: true,
+        shadowedInvalidatedWrapperRejected: true,
+        unknownRuntimeApiRejected: true,
+        genericRuntimeApiRejected: true,
+        directSettingsReadRejected: true,
+        rendererTestTsxExcluded: true,
         privateLegacyMigrationLocatorAllowed: true,
         anotherPathStillRejected: true,
         ordinaryAgentsKunUseStillRejected: true,
@@ -1292,6 +1307,7 @@ process.exit(91)
       runInNewContext(readFileSync('scripts/scan-product-sovereignty.cjs', 'utf8'), {
         require: (id: string) => {
           if (id === './native-component-contract.cjs') return require('../../scripts/native-component-contract.cjs')
+          if (id === 'typescript') return require('typescript')
           if (id === 'node:fs') return {
             ...fs,
             existsSync: (path: string) => Object.hasOwn(sources, path) ? sources[path] !== null : existsSync(path),
@@ -1601,8 +1617,7 @@ if (args.includes('--reporter=./scripts/runtime-go-shared-vitest-reporter.mjs'))
     'other-file-failed-pending', 'run-state-missing', 'interrupted-other-file-failed',
     'other-file-hook-failed', 'second-shared-missing', 'second-shared-pending',
     'second-shared-duplicate', 'preload-retained-file-failed'
-  ])
-    ('shares each overlapping Vitest file once with %s evidence without losing named gates', (scenario) => {
+  ])('shares each overlapping Vitest file once with %s evidence without losing named gates', (scenario) => {
       const dir = mkdtempSync(join(tmpdir(), 'analytix-product-regression-shared-vitest-'))
       try {
         const fakeGo = join(dir, process.platform === 'win32' ? 'go.cmd' : 'go')

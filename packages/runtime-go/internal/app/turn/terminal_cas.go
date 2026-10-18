@@ -10,6 +10,7 @@ import (
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 )
 
 var ErrTerminalCASTurnNotFound = errors.New("terminal CAS turn does not exist")
@@ -62,8 +63,15 @@ func PrepareTerminalCASMutation(input PrepareTerminalCASInput) (PreparedTerminal
 	if err != nil {
 		return PreparedTerminalCAS{}, err
 	}
-	for _, record := range append([]map[string]any{input.Fields}, input.AppendItems...) {
+	fieldsView, err := terminalCASPublicFieldsValidationViewV1(input, hasAcceptedFinal)
+	if err != nil {
+		return PreparedTerminalCAS{}, err
+	}
+	for index, record := range append([]map[string]any{input.Fields}, input.AppendItems...) {
 		view := record
+		if index == 0 {
+			view = fieldsView
+		}
 		if hasAcceptedFinal && record["acceptedFinal"] != nil {
 			view = shallowAcceptedFinalMapV1(record)
 			view["acceptedFinal"] = acceptedFinalBinaryValidationViewV1(record["acceptedFinal"].(map[string]any))
@@ -112,6 +120,52 @@ func PrepareTerminalCASMutation(input PrepareTerminalCASInput) (PreparedTerminal
 		Thread: result.Thread, CurrentStatus: result.CurrentStatus,
 		Applied: result.Applied, HasAcceptedFinal: hasAcceptedFinal,
 	}, nil
+}
+
+// terminalCASPublicFieldsValidationViewV1 qualifies canonical outbox authority
+// before substituting its content-scanning view in a copy of ordinary fields.
+// The original outbox remains intact for CAS and persistence; no generic nested
+// record receives the root usage event's validation treatment.
+func terminalCASPublicFieldsValidationViewV1(input PrepareTerminalCASInput, hasAcceptedFinal bool) (map[string]any, error) {
+	commitValue, present := input.Fields["generalTerminalPublication"]
+	if hasAcceptedFinal || !present {
+		return input.Fields, nil
+	}
+	if input.ThreadID != stringField(input.Thread, "id") {
+		return nil, errors.New("general terminal CAS thread identity differs")
+	}
+	// Reject non-JSON original values before either authority path can marshal
+	// the outbox. The view is used only after all canonical authority checks.
+	commitView, err := GeneralTerminalPublicationCommitValidationViewV1(commitValue)
+	if err != nil {
+		return nil, err
+	}
+	currentStatus, found, terminal, err := InspectTerminalAuthorityV1(input.Thread, input.TurnID)
+	if !found {
+		return nil, ErrTerminalCASTurnNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if terminal {
+		// The prospective-update validator requires an active target. A replay
+		// must instead match the existing canonical winner before receiving the
+		// same scanner view; ordinary replay fields are still scanned below.
+		commit, commitErr := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(commitValue)
+		binding, bindingErr := domainturnterminal.ParseGeneralTerminalCASBindingV1(input.Fields["generalTerminalCASBinding"])
+		if commitErr != nil || bindingErr != nil || input.Status != currentStatus ||
+			commit.TerminalStatus != input.Status || binding.BindingDigest != commit.AuthorityDigest ||
+			ValidateGeneralTerminalPublicationCommitForThreadV1(input.Thread, input.TurnID, commit) != nil {
+			return nil, errors.New("general terminal CAS replay outbox is detached")
+		}
+	} else if err := ValidateGeneralTerminalPublicationUpdateV1(
+		input.Thread, input.TurnID, input.Status, input.AppendItems, input.Fields,
+	); err != nil {
+		return nil, err
+	}
+	view := shallowAcceptedFinalMapV1(input.Fields)
+	view["generalTerminalPublication"] = commitView
+	return view, nil
 }
 
 func terminalCASThreadFields(input PrepareTerminalCASInput) (map[string]any, error) {

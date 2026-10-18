@@ -290,6 +290,11 @@ describe('V2 mounted protected inline process', () => {
     api.readProcessPane.mockResolvedValue({ ...snapshot(), units: [unit()], blocks: [a] })
     const props = { policy: presentationPolicyFor('standard'), processBlocks: [publicTool('b')] }
     await render(props)
+    // A real public-group expansion admits ordinary discovery before unit-a exists.
+    const publicGroup = container.querySelector<HTMLElement>('[data-process-group="public:public-b"] > div:first-child button')!
+    await act(async () => publicGroup.click())
+    expect(api.readProcessPane).toHaveBeenCalledWith({ viewerId: viewer, waitMs: 0 })
+    await act(async () => publicGroup.click())
     await act(async () => container.querySelector<HTMLElement>('[data-process-group="unit:unit-a"] > div:first-child button')!.click())
     expect(container.textContent).toContain('VISIBLE_A_PREVIEW')
     api.readProcessPane.mockResolvedValue({ ...snapshot(), units: [unit(), otherUnit], blocks: [a, b] })
@@ -568,6 +573,13 @@ describe('V2 mounted protected inline process', () => {
     api.readProcessPane.mockResolvedValue({ ...snapshot(), units: [unit(), otherUnit], blocks: [a, b] })
     await render({ policy: presentationPolicyFor('standard'), processBlocks: [publicTool('b')] })
     expect(container.textContent).not.toContain('VISIBLE_A'); expect(container.textContent).not.toContain('HIDDEN_B')
+    // Discover both real units through an explicit expansion, then retire B on folding.
+    const publicGroup = container.querySelector<HTMLElement>('[data-process-group="public:public-b"] > div:first-child button')!
+    await act(async () => publicGroup.click())
+    expect(api.readProcessPane).toHaveBeenCalledWith({ viewerId: viewer, waitMs: 0 })
+    await act(async () => publicGroup.click())
+    expect(container.textContent).not.toContain('VISIBLE_A'); expect(container.textContent).not.toContain('HIDDEN_B')
+    expect(container.textContent).not.toContain('/synthetic/hidden-b')
     const group = container.querySelector<HTMLElement>('[data-process-group="unit:unit-a"] [data-disclosure-row]')!
     expect(group).not.toBeNull()
     await act(async () => group.click())
@@ -1502,11 +1514,11 @@ describe('actual protected Pane live reasoning, dispatch and preparation consume
     expect(container.textContent).not.toContain('LIVE_REASONING_PREVIEW_1')
     const publicCompleted = { ...publicRunning, status: 'success' as const }
     await render({ policy: presentationPolicyFor('standard'), processBlocks: [publicCompleted] }); await tick()
-    // Public completion does not refresh folded private reasoning state.
-    expect(header(publicGroupKey).textContent).toContain(i18n.t('common:dshStepProcess.done.write'))
-    expect(header(publicGroupKey).textContent).not.toContain(i18n.t('common:dshStepProcess.live.thinking'))
+    // Tool completion leaves the processing turn live without refreshing folded private reasoning.
+    expect(header(publicGroupKey).textContent).toContain(i18n.t('common:dshStepProcess.live.thinking'))
+    expect(header(publicGroupKey).textContent).not.toContain(i18n.t('common:dshStepProcess.done.write'))
     expect(header(publicGroupKey).getAttribute('aria-expanded')).toBe('false')
-    expect(header(publicGroupKey).querySelector('[data-shimmer]')).toBeNull()
+    expect(header(publicGroupKey).querySelector('[data-shimmer]')).not.toBeNull()
     expect(header(publicGroupKey).textContent).not.toContain('LIVE_REASONING_PREVIEW_1')
     expect(header(publicGroupKey).closest('[hidden]')).toBeNull(); expect(header(publicGroupKey).disabled).toBe(false)
     await act(async () => header(publicGroupKey).click()); await tick()

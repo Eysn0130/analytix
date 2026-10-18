@@ -1,11 +1,18 @@
 package turn
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	appusage "analytix.local/runtime-go/internal/app/usage"
 	contracts "analytix.local/runtime-go/internal/contracts"
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 )
@@ -420,4 +427,302 @@ func publicationFixtureTurn(thread map[string]any) map[string]any {
 
 func publicationFixtureAssistant(thread map[string]any) map[string]any {
 	return publicationFixtureTurn(thread)["items"].([]any)[0].(map[string]any)
+}
+
+func generalTerminalTelemetryCASInputV1(t *testing.T) PrepareTerminalCASInput {
+	t.Helper()
+	thread, previous, _, binding := pendingGeneralTerminalPublicationFixture(t, GeneralProviderFinalQuarantinedText)
+	frozen, err := domainsecurity.ParseTurnSecurityContext(thread["securityState"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	telemetry := appusage.NewTerminalTelemetryV1(domainmodel.Usage{
+		PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7,
+	}, map[string]any{
+		"providerAttemptTelemetrySchema":   appusage.ProviderAttemptTelemetrySchemaV1,
+		"providerAttemptTelemetryValid":    false,
+		"providerAttemptTelemetryError":    "invalid_or_incomplete",
+		"providerAttemptInventoryComplete": false,
+	})
+	record := BuildCompletionRecord(CompletionRecordInput{
+		ThreadID: frozen.ThreadID, TurnID: frozen.TurnID, Model: "test-model",
+		AssistantText: GeneralProviderFinalQuarantinedText, CreatedAt: previous.CommittedAt, FinishedAt: previous.CommittedAt,
+		Usage: telemetry.PublicUsageMap(), CacheDiagnostics: telemetry.PublicCacheDiagnosticsMap(),
+	})
+	record.AssistantItem["generalTerminalCASBinding"] = domainturnterminal.GeneralTerminalCASBindingV1Map(binding)
+	record.ItemCompletedEvent = AssistantItemCompletedEvent(record.AssistantItem)
+	record.ItemCompletedEvent["timestamp"] = previous.CommittedAt
+	record.UsageEvent["timestamp"] = previous.CommittedAt
+	record.TurnCompletedEvent["timestamp"] = previous.CommittedAt
+	record.TurnCompletedEvent["terminalReason"] = "success"
+	record.TurnCompletedEvent["generalTerminalCASBindingDigest"] = binding.BindingDigest
+	commit, err := BuildGeneralTerminalPublicationCommitV1(frozen, binding, record, previous.CommittedAt, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return PrepareTerminalCASInput{
+		Thread: thread, ThreadID: frozen.ThreadID, TurnID: frozen.TurnID, Status: "completed",
+		AppendItems: []map[string]any{record.AssistantItem},
+		Fields: map[string]any{
+			"generalTerminalCASBinding":  domainturnterminal.GeneralTerminalCASBindingV1Map(binding),
+			"generalTerminalPublication": domainturnterminal.GeneralTerminalPublicationCommitV1Map(commit),
+		},
+		Now:                       time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC),
+		LoadGeneralTerminalEvents: func() ([]map[string]any, error) { return nil, nil },
+	}
+}
+
+func TestGeneralTerminalCASTelemetryScanViewPreservesActiveAndReplayPayloadV1(t *testing.T) {
+	input := generalTerminalTelemetryCASInputV1(t)
+	if err := domainevent.ValidatePublicRecord(input.Fields); !errors.Is(err, domainevent.ErrRawFailurePersistence) {
+		t.Fatalf("generic nested outbox scanner no longer reproduces the boundary: %v", err)
+	}
+	before, err := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := PrepareTerminalCASMutation(input)
+	if err != nil || !prepared.Applied || prepared.HasAcceptedFinal {
+		t.Fatalf("validated active outbox was rejected: applied=%t err=%v", prepared.Applied, err)
+	}
+	after, err := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields})
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("terminal CAS preparation changed its original payload")
+	}
+	winner := publicationFixtureTurn(prepared.Thread)
+	winnerPublication, winnerOK := winner["generalTerminalPublication"].(map[string]any)
+	inputPublication, inputOK := input.Fields["generalTerminalPublication"].(map[string]any)
+	if !winnerOK || !inputOK || !canonicalJSONEqual(winnerPublication, inputPublication) {
+		t.Fatal("prepared CAS changed the private outbox")
+	}
+	input.Thread = prepared.Thread
+	replayBefore, _ := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields})
+	replay, err := PrepareTerminalCASMutation(input)
+	if err != nil || replay.Applied || replay.CurrentStatus != "completed" {
+		t.Fatalf("exact terminal replay did not remain a no-op: applied=%t err=%v", replay.Applied, err)
+	}
+	replayAfter, err := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields})
+	if err != nil || !bytes.Equal(replayBefore, replayAfter) {
+		t.Fatal("terminal replay changed its original payload")
+	}
+}
+
+func TestGeneralTerminalCASTelemetryScanViewRejectsDetachedOrUnsafeFieldsV1(t *testing.T) {
+	for name, mutate := range map[string]func(*PrepareTerminalCASInput){
+		"missing binding": func(input *PrepareTerminalCASInput) { delete(input.Fields, "generalTerminalCASBinding") },
+		"unknown outbox field": func(input *PrepareTerminalCASInput) {
+			input.Fields["generalTerminalPublication"].(map[string]any)["unexpected"] = true
+		},
+		"pseudo envelope": func(input *PrepareTerminalCASInput) {
+			input.Fields["generalTerminalPublication"] = map[string]any{"usageEvent": map[string]any{
+				"kind": "usage", "cacheDiagnostics": map[string]any{"providerAttemptTelemetryError": "invalid_or_incomplete"},
+			}}
+		},
+		"wrong thread": func(input *PrepareTerminalCASInput) { input.ThreadID = "other-thread" },
+		"wrong status": func(input *PrepareTerminalCASInput) { input.Status = "failed" },
+		"changed frozen context": func(input *PrepareTerminalCASInput) {
+			changed := turnSecurityContextRecord(generalTerminalTestContext(t, input.ThreadID, input.TurnID, 3))
+			input.Thread["securityState"] = changed
+			publicationFixtureTurn(input.Thread)["securityContext"] = changed
+		},
+		"raw sibling":        func(input *PrepareTerminalCASInput) { input.Fields["lastError"] = "PRIVATE_PROVIDER_FAILURE" },
+		"credential sibling": func(input *PrepareTerminalCASInput) { input.Fields["extra"] = "api_key=sk-test-private-value" },
+		"nested outbox": func(input *PrepareTerminalCASInput) {
+			input.Fields["wrapper"] = contracts.CloneValue(input.Fields["generalTerminalPublication"])
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, replay := range []bool{false, true} {
+				input := generalTerminalTelemetryCASInputV1(t)
+				if replay {
+					prepared, err := PrepareTerminalCASMutation(input)
+					if err != nil || !prepared.Applied {
+						t.Fatalf("exact active fixture could not prepare replay: %v", err)
+					}
+					input.Thread = prepared.Thread
+				}
+				mutate(&input)
+				before, _ := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields})
+				prepared, err := PrepareTerminalCASMutation(input)
+				if err == nil || prepared.Applied {
+					t.Fatalf("unsafe outbox received scan-view qualification: replay=%t applied=%t err=%v", replay, prepared.Applied, err)
+				}
+				after, err := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields})
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatal("outbox rejection changed its original payload")
+				}
+			}
+		})
+	}
+}
+
+func TestGeneralTerminalPublicationValidationViewPreservesClosedTelemetryV1(t *testing.T) {
+	input := generalTerminalTelemetryCASInputV1(t)
+	original := input.Fields["generalTerminalPublication"].(map[string]any)
+	before, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := domainevent.ValidatePublicRecord(original); !errors.Is(err, domainevent.ErrRawFailurePersistence) {
+		t.Fatalf("generic nested commit scanner no longer reproduces the boundary: %v", err)
+	}
+	view, err := GeneralTerminalPublicationCommitValidationViewV1(original)
+	if err != nil {
+		t.Fatalf("canonical fixed-error telemetry commit was rejected: %v", err)
+	}
+	if _, present := view["usageEvent"]; present {
+		t.Fatal("separately validated root usage remained nested in the scan view")
+	}
+	want := contracts.CloneMap(original)
+	delete(want, "usageEvent")
+	if !canonicalJSONEqual(view, want) {
+		t.Fatal("scan view changed fields outside its separately validated usage event")
+	}
+	if err := domainevent.ValidatePublicRecord(view); err != nil {
+		t.Fatalf("remaining complete commit fields failed ordinary scanning: %v", err)
+	}
+	view["terminalEvent"].(map[string]any)["status"] = "failed"
+	after, err := json.Marshal(original)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("validation view changed or shared mutable content with the original commit")
+	}
+	if _, err := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(original); err != nil {
+		t.Fatalf("original persisted digest no longer validates: %v", err)
+	}
+}
+
+func TestGeneralTerminalPublicationValidationViewRejectsUnsafeRootUsageV1(t *testing.T) {
+	for name, test := range map[string]struct {
+		mutate func(map[string]any)
+		want   error
+	}{
+		"unknown diagnostic with fixed error": {
+			mutate: func(usage map[string]any) {
+				usage["cacheDiagnostics"].(map[string]any)["outputPreview"] = "PRIVATE_PROVIDER_SENTINEL"
+			},
+			want: domainevent.ErrRawFailurePersistence,
+		},
+		"noncanonical telemetry pair": {
+			mutate: func(usage map[string]any) { usage["usage"].(map[string]any)["totalTokens"] = 1 },
+			want:   domainevent.ErrRawFailurePersistence,
+		},
+		"raw diagnostic error": {
+			mutate: func(usage map[string]any) {
+				usage["cacheDiagnostics"].(map[string]any)["providerAttemptTelemetryError"] = "PRIVATE_PROVIDER_FAILURE"
+			},
+			want: domainevent.ErrRawFailurePersistence,
+		},
+		"credential in usage": {
+			mutate: func(usage map[string]any) { usage["model"] = "api_key=sk-test-private-value" },
+			want:   domainevent.ErrCredentialProjection,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// This uses the domain constructor, bypassing the app builder's root
+			// telemetry check. Envelope and digest validity alone are insufficient.
+			original := generalTerminalValidationViewDomainCommitV1(t, test.mutate)
+			before, _ := json.Marshal(original)
+			view, err := GeneralTerminalPublicationCommitValidationViewV1(original)
+			if view != nil || !errors.Is(err, test.want) {
+				t.Fatalf("unsafe root usage received a scan view: view=%t err=%v", view != nil, err)
+			}
+			after, err := json.Marshal(original)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("root usage rejection changed the original commit")
+			}
+		})
+	}
+}
+
+func TestGeneralTerminalPublicationValidationViewRejectsInvalidEnvelopeAndBudgetsV1(t *testing.T) {
+	for name, mutate := range map[string]func(map[string]any){
+		"unknown field":       func(commit map[string]any) { commit["unexpected"] = true },
+		"incomplete envelope": func(commit map[string]any) { delete(commit, "terminalEvent") },
+		"digest mismatch":     func(commit map[string]any) { commit["commitDigest"] = strings.Repeat("0", 64) },
+		"non JSON type":       func(commit map[string]any) { commit["extra"] = acceptedFinalMarshalSentinelV1{} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			original := generalTerminalTelemetryCASInputV1(t).Fields["generalTerminalPublication"].(map[string]any)
+			mutate(original)
+			if view, err := GeneralTerminalPublicationCommitValidationViewV1(original); err == nil || view != nil {
+				t.Fatal("invalid original envelope received a scan view")
+			}
+		})
+	}
+	for _, aggregate := range []bool{false, true} {
+		original := generalTerminalTelemetryCASInputV1(t).Fields["generalTerminalPublication"].(map[string]any)
+		// The marshaler must not run even when another field exceeds the budget.
+		original["untrusted"] = acceptedFinalMarshalSentinelV1{}
+		if aggregate {
+			original["oversized"] = []any{strings.Repeat("x", 1<<20), strings.Repeat("x", 1<<20),
+				strings.Repeat("x", 1<<20), strings.Repeat("x", 1<<20), strings.Repeat("x", 1<<20),
+				strings.Repeat("x", 1<<20), strings.Repeat("x", 1<<20), strings.Repeat("x", 1<<20)}
+		} else {
+			original["oversized"] = strings.Repeat("x", (1<<20)+1)
+		}
+		if view, err := GeneralTerminalPublicationCommitValidationViewV1(original); view != nil || !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+			t.Fatalf("original complete budget did not precede parsing: aggregate=%t err=%v", aggregate, err)
+		}
+	}
+}
+
+func generalTerminalValidationViewDomainCommitV1(t *testing.T, mutate func(map[string]any)) map[string]any {
+	t.Helper()
+	input := generalTerminalTelemetryCASInputV1(t)
+	previous, err := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(input.Fields["generalTerminalPublication"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := domainsecurity.ParseTurnSecurityContext(input.Thread["securityState"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := domainturnterminal.ParseGeneralTerminalCASBindingV1(input.Fields["generalTerminalCASBinding"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := contracts.CloneMap(previous.UsageEvent)
+	mutate(usage)
+	itemEvent := AssistantItemCompletedEvent(input.AppendItems[0])
+	itemEvent["timestamp"] = previous.CommittedAt
+	commit, err := domainturnterminal.NewGeneralTerminalPublicationCommitV1(context, binding, previous.CommittedAt,
+		[]domainturnterminal.GeneralTerminalPublicationDraftV1{
+			{Slot: "terminal-item", Draft: itemEvent},
+			{Slot: "usage", Draft: usage},
+			{Slot: "terminal", Draft: contracts.CloneMap(previous.TerminalEvent)},
+		})
+	if err != nil {
+		t.Fatalf("domain fixture must retain valid envelope/digest with open usage diagnostics: %v", err)
+	}
+	value := domainturnterminal.GeneralTerminalPublicationCommitV1Map(commit)
+	if _, err := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(value); err != nil {
+		t.Fatalf("domain fixture did not pass strict commit parsing: %v", err)
+	}
+	return value
+}
+
+func TestGeneralTerminalCASRejectsNonJSONOutboxBeforeAuthorityParsingV1(t *testing.T) {
+	for name, replay := range map[string]bool{"active": false, "replay": true} {
+		t.Run(name, func(t *testing.T) {
+			input := generalTerminalTelemetryCASInputV1(t)
+			if replay {
+				prepared, err := PrepareTerminalCASMutation(input)
+				if err != nil || !prepared.Applied {
+					t.Fatalf("exact active fixture could not prepare replay: %v", err)
+				}
+				input.Thread = prepared.Thread
+			}
+			commit := input.Fields["generalTerminalPublication"].(map[string]any)
+			// Do not marshal this input: the existing sentinel panics if any
+			// authority parser reaches it before the original JSON type guard.
+			commit["unexpected"] = acceptedFinalMarshalSentinelV1{}
+			prepared, err := PrepareTerminalCASMutation(input)
+			if err == nil || prepared.Applied {
+				t.Fatal("non-JSON outbox reached canonical authority qualification")
+			}
+			if _, present := commit["unexpected"].(acceptedFinalMarshalSentinelV1); !present {
+				t.Fatal("non-JSON rejection changed the original outbox")
+			}
+		})
+	}
 }

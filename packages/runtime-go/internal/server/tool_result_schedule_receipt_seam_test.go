@@ -159,7 +159,7 @@ func scheduleReceiptTransportResultV1(operation, status string, isError bool, om
 	return result
 }
 
-func scheduleReceiptProductionManagerV1(t *testing.T, result map[string]any, protectedRoots []string) *mcp.ProductionManager {
+func scheduleReceiptProductionManagerV1(t *testing.T, h *runtimeServerHandler, result map[string]any, protectedRoots []string) *mcp.ProductionManager {
 	t.Helper()
 	entry := filepath.Join(t.TempDir(), scheduleReceiptFixtureEntryV1)
 	fixture := map[string]any{}
@@ -184,6 +184,13 @@ func scheduleReceiptProductionManagerV1(t *testing.T, result map[string]any, pro
 	}
 	manager := mcp.NewProductionManagerWithOptions(mcp.BindHostScheduleMCPServerV1([]mcp.ServerSpec{spec}, &spec), mcp.ProductionManagerOptions{ProtectedReadDirs: roots})
 	t.Cleanup(manager.Disconnect)
+	// Share the fixture's runtime editing authority, as production composition does.
+	if h.managedEditing == nil {
+		t.Fatal("isolated Schedule editing authority is unavailable")
+	}
+	if err := manager.BindEffectAdmission(h.managedEditing.BeginOpaque); err != nil {
+		t.Fatal("bind isolated Schedule effect admission", err)
+	}
 	manager.RefreshCatalog()
 	if _, live := manager.ToolConnectionEpoch("mcp__gui_schedule__gui_schedule_create"); !live {
 		t.Fatalf("synthetic native stdio transport did not connect: %v", manager.ServerDiagnostics())
@@ -237,7 +244,7 @@ func TestNativeScheduleActualTransportSettlementPrivateHTTPAndRestartV1(t *testi
 	for _, operation := range []string{"create", "update", "delete"} {
 		t.Run(operation, func(t *testing.T) {
 			h, initial, durable, root := protectedSeamFixtureV1(t, "read", map[string]any{"path": "unused.go"})
-			manager := scheduleReceiptProductionManagerV1(t, scheduleReceiptTransportResultV1(operation, "success", false, true), []string{root, durable})
+			manager := scheduleReceiptProductionManagerV1(t, h, scheduleReceiptTransportResultV1(operation, "success", false, true), []string{root, durable})
 			h.mcp = manager
 			pending := scheduleReceiptPendingV1(t, h, manager, initial, operation)
 			var actual map[string]any
@@ -347,7 +354,7 @@ func (store *scheduleReceiptCancelAfterCASV1) Put(ctx context.Context, snapshot 
 
 func TestNativeScheduleCancellationAfterCASLeavesUnreadableOrphanV1(t *testing.T) {
 	h, initial, durable, root := protectedSeamFixtureV1(t, "read", map[string]any{"path": "unused.go"})
-	manager := scheduleReceiptProductionManagerV1(t, scheduleReceiptTransportResultV1("create", "success", false, true), []string{root, durable})
+	manager := scheduleReceiptProductionManagerV1(t, h, scheduleReceiptTransportResultV1("create", "success", false, true), []string{root, durable})
 	h.mcp = manager
 	pending := scheduleReceiptPendingV1(t, h, manager, initial, "create")
 	realStore := h.toolSnapshots
@@ -399,7 +406,7 @@ func TestNativeScheduleActualFailureAndInconsistentTransportV1(t *testing.T) {
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			h, initial, durable, root := protectedSeamFixtureV1(t, "read", map[string]any{"path": "unused.go"})
-			manager := scheduleReceiptProductionManagerV1(t, scheduleReceiptTransportResultV1("create", fixture.status, fixture.isError, false), []string{root, durable})
+			manager := scheduleReceiptProductionManagerV1(t, h, scheduleReceiptTransportResultV1("create", fixture.status, fixture.isError, false), []string{root, durable})
 			h.mcp = manager
 			pending := scheduleReceiptPendingV1(t, h, manager, initial, "create")
 			var actual map[string]any
@@ -428,7 +435,7 @@ func TestNativeScheduleActualFailureAndInconsistentTransportV1(t *testing.T) {
 
 func TestNativeScheduleFinalSettlementFailureCannotSealSuccessfulCaptureV1(t *testing.T) {
 	h, initial, durable, root := protectedSeamFixtureV1(t, "read", map[string]any{"path": "unused.go"})
-	manager := scheduleReceiptProductionManagerV1(t, scheduleReceiptTransportResultV1("create", "success", false, false), []string{root, durable})
+	manager := scheduleReceiptProductionManagerV1(t, h, scheduleReceiptTransportResultV1("create", "success", false, false), []string{root, durable})
 	h.mcp = manager
 	pending := scheduleReceiptPendingV1(t, h, manager, initial, "create")
 	transformed := false

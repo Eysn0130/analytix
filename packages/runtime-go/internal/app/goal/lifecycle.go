@@ -148,16 +148,16 @@ func AppendHistoryV1(thread map[string]any, previous, next map[string]any, opera
 		ref, known = domaingoal.RefFromRecordV1(previous)
 		ref.Revision++
 	}
-	var snapshot map[string]any
+	entry := map[string]any{"id": contracts.NewOpaqueUUIDV4("goal-change", contracts.StringField(thread, "id"), time.Now().UTC()), "operation": operation, "goal": nil, "createdAt": now}
 	if next != nil {
-		snapshot = map[string]any{}
+		snapshot := map[string]any{}
 		for _, key := range []string{"id", "revision", "maxGoalRounds", "roundsStarted", "threadId", "objective", "status", "tokenBudget", "tokensUsed", "timeUsedSeconds", "blockedReason", "createdAt", "updatedAt"} {
 			if value, present := next[key]; present {
 				snapshot[key] = contracts.CloneValue(value)
 			}
 		}
+		entry["goal"] = snapshot
 	}
-	entry := map[string]any{"id": contracts.NewOpaqueUUIDV4("goal-change", contracts.StringField(thread, "id"), time.Now().UTC()), "operation": operation, "goal": snapshot, "createdAt": now}
 	if known {
 		entry["ref"] = map[string]any{"id": ref.ID, "revision": ref.Revision}
 	}

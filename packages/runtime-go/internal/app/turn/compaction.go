@@ -874,7 +874,20 @@ func sanitizeCompactionTailTurn(value any, authoritySets ...map[string]domaintur
 	} else if original["generalTerminalPublication"] != nil || original["generalTerminalCASBinding"] != nil {
 		return nil, false
 	}
-	if domainevent.ValidatePublicRecord(turn) != nil {
+	if domainevent.ValidateQuestionReplyResourceLimitsV1(turn) != nil {
+		return nil, false
+	}
+	validationTurn := contracts.CloneMap(turn)
+	if commitValue, present := turn["generalTerminalPublication"]; present {
+		// The authority above validates the exact winner. Stage only its usage
+		// event for root-level scanning; retain the complete persisted outbox.
+		commitView, err := GeneralTerminalPublicationCommitValidationViewV1(commitValue)
+		if err != nil {
+			return nil, false
+		}
+		validationTurn["generalTerminalPublication"] = commitView
+	}
+	if domainevent.ValidatePublicRecord(validationTurn) != nil {
 		return nil, false
 	}
 	return turn, true

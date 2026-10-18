@@ -51,7 +51,7 @@ describe('main Conversation width boundary', () => {
     expect(workbench).toContain('useSyncExternalStore(subscribeImageThreadNavigation, isImageThreadNavigationFrozen')
     expect(workbench).toContain('summaryBlank: activeThread?.messageCount === 0')
     expect(controls).not.toContain('input.running')
-    expect(threadActions).toContain('selectThread: async (id) => withImageThreadNavigation')
+    expect(threadActions).toContain('selectThread: async (id, options) => withImageThreadNavigation')
     expect(threadActions).toContain('subscribeThreadEventsLive: async (threadId) => withImageThreadNavigation')
     expect(controls).toContain("if (container === null || phase !== 'active') return null")
     expect(controls).not.toContain('runtimeConnection')
@@ -73,8 +73,8 @@ describe('main Conversation width boundary', () => {
     expect(css).toContain(':has([data-conversation-composer-overlay])')
     expect(css).toContain('display: none')
   })
-  it('uses the elected Records marker for a full-bleed scroller and measured floating composer without changing ordinary chat', () => {
-    expect(timeline).toContain("data-conversation-composer-overlay={recordsMode ? '' : undefined}")
+  it('uses the Records and Inspect marker for a full-bleed scroller and measured floating composer without changing ordinary chat', () => {
+    expect(timeline).toContain("data-conversation-composer-overlay={viewMode !== 'conversation' ? '' : undefined}")
     expect(workbench).toContain('data-analytix-conversation-view')
     expect(workbench).toContain("'--ax-conversation-composer-height': `${composerHeight}px`")
     expect(rule(shellCss, '.ds-chat-stage [data-analytix-message-timeline-scroller]')).toContain('scrollbar-gutter: stable both-edges')

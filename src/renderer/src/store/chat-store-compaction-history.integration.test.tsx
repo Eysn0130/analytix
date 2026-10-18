@@ -102,13 +102,20 @@ it('restores publicly authorized ordinary history after production compaction an
     runtimeRequestViaHost: (settings: AppSettingsV1, path: string, init: { method?: string; body?: string },
       ensure: () => Promise<void>) => Promise<{ ok: boolean; status: number; body: string }>
   }>('../../../main/runtime/analytix-adapter')
-  if (!proc.env.ANALYTIX_DEV_CACHE_ROOT || !proc.env.GOCACHE) throw new Error('Source use-analytix-cache.sh before this integration test.')
-  let fixtureRoot = '', stateRoot = '', dataDir = '', workspaceRoot = '', executable = '', binaryRoot = ''
-  const receipt: Record<string, unknown> = { sourceInputSha256: proc.env.ANALYTIX_HISTORY_GO_SOURCE_SHA256,
-    buildTags: ['analytix_prod'], runtimePids: [], runtimeUrls: [] }
-  if (typeof receipt.sourceInputSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(receipt.sourceInputSha256)) {
-    throw new Error('Provide the verified Go source input digest for this fixture.')
+  const sourceInputSha256 = proc.env.ANALYTIX_HISTORY_GO_SOURCE_SHA256
+  const goInputsPath = proc.env.ANALYTIX_HISTORY_GO_INPUT_MANIFEST
+  const validationReceiptPath = proc.env.ANALYTIX_HISTORY_VALIDATION_RECEIPT
+  const reusePath = proc.env.ANALYTIX_HISTORY_REUSE_BUILD_RECEIPT
+  const qualificationInputs = [sourceInputSha256, goInputsPath, validationReceiptPath, reusePath]
+  const qualifiedBuild = qualificationInputs.some(value => value !== undefined)
+  if (qualifiedBuild && (qualificationInputs.some(value => value !== undefined && !value.trim()) ||
+    typeof sourceInputSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sourceInputSha256) ||
+    !goInputsPath || !(validationReceiptPath || reusePath))) {
+    throw new Error('Qualified fixture retention or reuse requires a verified source digest, Go input manifest, and retention or reuse receipt path.')
   }
+  let fixtureRoot = '', stateRoot = '', dataDir = '', workspaceRoot = '', executable = '', binaryRoot = ''
+  const receipt: Record<string, unknown> = { sourceInputSha256,
+    buildTags: ['analytix_prod'], runtimePids: [], runtimeUrls: [] }
   const goDir = `${proc.cwd()}/packages/runtime-go`
   const token = 'isolated-compaction-history-runtime'
   const providerRequests: string[] = []
@@ -164,7 +171,7 @@ it('restores publicly authorized ordinary history after production compaction an
     stateRoot = await fs.mkdtemp(proc.platform === 'darwin'
       ? '/private/tmp/analytix-compaction-history-state-' : `${tmpdir()}/analytix-compaction-history-state-`)
     dataDir = `${stateRoot}/data`; workspaceRoot = `${fixtureRoot}/workspace`
-    if (!proc.env.ANALYTIX_HISTORY_REUSE_BUILD_RECEIPT) {
+    if (!reusePath) {
       binaryRoot = await fs.mkdtemp(`${tmpdir()}/analytix-compaction-history-build-`)
       executable = `${binaryRoot}/runtime-server${proc.platform === 'win32' ? '.exe' : ''}`
     }
@@ -188,15 +195,15 @@ it('restores publicly authorized ordinary history after production compaction an
     const buildArgs = ['build', '-v', '-x', '-tags', 'analytix_prod', '-o', executable, './cmd/runtime-server']
     receipt.goBinary = go; receipt.buildCwd = goDir
     receipt.goBinarySha256 = createHash('sha256').update(await fs.readFile(go)).digest('hex')
-    const goInputsPath = proc.env.ANALYTIX_HISTORY_GO_INPUT_MANIFEST
-    if (!goInputsPath) throw new Error('Provide the verified Go input manifest for retained fixture output.')
-    const goInputsBytes = await fs.readFile(goInputsPath)
-    const goInputs = record(JSON.parse(new TextDecoder().decode(goInputsBytes)))
-    if (goInputs.sourceInputSha256 !== receipt.sourceInputSha256 || goInputs.platform !== proc.platform) {
-      throw new Error('Fixture Go input digest or platform mismatch.')
+    let goInputs: Record<string, unknown> | undefined
+    if (qualifiedBuild) {
+      const goInputsBytes = await fs.readFile(goInputsPath!)
+      goInputs = record(JSON.parse(new TextDecoder().decode(goInputsBytes)))
+      if (goInputs.sourceInputSha256 !== receipt.sourceInputSha256 || goInputs.platform !== proc.platform) {
+        throw new Error('Fixture Go input digest or platform mismatch.')
+      }
+      receipt.goInputManifestSha256 = createHash('sha256').update(goInputsBytes).digest('hex')
     }
-    receipt.goInputManifestSha256 = createHash('sha256').update(goInputsBytes).digest('hex')
-    const reusePath = proc.env.ANALYTIX_HISTORY_REUSE_BUILD_RECEIPT
     if (reusePath) {
       const previous = record(JSON.parse(new TextDecoder().decode(await fs.readFile(reusePath))))
       if (previous.sourceInputSha256 !== receipt.sourceInputSha256 ||
@@ -216,7 +223,7 @@ it('restores publicly authorized ordinary history after production compaction an
     } else {
       receipt.buildArgs = buildArgs
       const buildStartedAt = Date.now()
-      const buildLogPrefix = proc.env.ANALYTIX_HISTORY_VALIDATION_RECEIPT ?? fixtureRoot
+      const buildLogPrefix = validationReceiptPath ?? `${fixtureRoot}/go-build`
       const stdoutLog = `${buildLogPrefix}.build.stdout.log`, stderrLog = `${buildLogPrefix}.build.stderr.log`
       await fs.writeFile(stdoutLog, '', { mode: 0o600, flag: 'wx' })
       await fs.writeFile(stderrLog, '', { mode: 0o600, flag: 'wx' })
@@ -297,10 +304,12 @@ it('restores publicly authorized ordinary history after production compaction an
       }
       receipt.binarySha256 = createHash('sha256').update(await fs.readFile(executable)).digest('hex')
       receipt.binaryPath = executable
-      const inputsPath = `${binaryRoot}/inputs.json`
-      await fs.writeFile(inputsPath, JSON.stringify({ ...receipt, goInputs }, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
-      receipt.binaryInputsReceipt = inputsPath
-      receipt.binaryInputsReceiptSha256 = createHash('sha256').update(await fs.readFile(inputsPath)).digest('hex')
+      if (qualifiedBuild) {
+        const inputsPath = `${binaryRoot}/inputs.json`
+        await fs.writeFile(inputsPath, JSON.stringify({ ...receipt, goInputs }, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
+        receipt.binaryInputsReceipt = inputsPath
+        receipt.binaryInputsReceiptSha256 = createHash('sha256').update(await fs.readFile(inputsPath)).digest('hex')
+      }
     }
     acceptanceStartedAt = Date.now()
     receipt.acceptanceStartedAt = new Date(acceptanceStartedAt).toISOString()
@@ -310,16 +319,15 @@ it('restores publicly authorized ordinary history after production compaction an
         '--provider-id', 'deepseek', '--model', 'deepseek-chat', '--endpoint-format', 'chat_completions'],
       { cwd: goDir, env: goTestEnv({ ANALYTIX_RUNTIME_TOKEN: token }), stdio: ['ignore', 'pipe', 'pipe'] })
       ;(receipt.runtimePids as Array<number | undefined>).push(child.pid)
-      let exited = false
-      const exit = new Promise<void>(resolve => {
-        child.once('exit', () => { exited = true; resolve() })
-        child.once('error', () => { exited = true; resolve() })
+      let closed = false
+      const close = new Promise<void>(resolve => {
+        child.once('close', () => { closed = true; resolve() })
       })
       stopRuntime = async () => {
-        if (exited) return
+        if (closed) return
         child.kill('SIGTERM')
         const killTimer = setTimeout(() => child.kill('SIGKILL'), 2000)
-        await exit; clearTimeout(killTimer)
+        await close; clearTimeout(killTimer)
       }
       return new Promise<string>((resolve, reject) => {
         let output = '', ready = false
@@ -503,8 +511,8 @@ it('restores publicly authorized ordinary history after production compaction an
     }
     receipt.ownedBuildProcessClosed = buildClosed; receipt.ownedFixtureRootsRemoved = buildClosed
     receipt.qualifiedBinaryRetained = Boolean(receipt.binarySha256 && receipt.binaryInputsReceiptSha256)
-    if (proc.env.ANALYTIX_HISTORY_VALIDATION_RECEIPT) {
-      await fs.writeFile(proc.env.ANALYTIX_HISTORY_VALIDATION_RECEIPT,
+    if (validationReceiptPath) {
+      await fs.writeFile(validationReceiptPath,
         JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
     }
     console.info('COMPACTION_HISTORY_CLEANUP_RECEIPT', JSON.stringify(receipt))

@@ -1127,6 +1127,7 @@
         "analytix"
       ],
       "facadeDomains": [
+        "docxEditor",
         "canvas",
         "office",
         "packageHost",

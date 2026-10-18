@@ -523,6 +523,49 @@ func forkQuestionHistoryProductionV1(t *testing.T, acceptedHistory, acceptedAfte
 	}
 	afterEChildID := ""
 	if acceptedAfterE {
+		// Durable idle can precede the Host releasing the completed turn's tail.
+		// Use the production idle fence before making the single late-reply attempt.
+		func() {
+			lease := ""
+			release := func() {
+				heldLease := lease
+				lease = ""
+				released := jsonRequest(http.MethodPost, "/v1/runtime/quiescence", map[string]any{"operation": "release", "lease": heldLease}, false, http.StatusOK)
+				if released["released"] != true {
+					t.Fatal("fixture_idle_fence_release_invalid")
+				}
+			}
+			defer func() {
+				if lease != "" {
+					release()
+				}
+			}()
+			wait(func() bool {
+				status, body := request(http.MethodPost, "/v1/runtime/quiescence", map[string]any{"operation": "prepare"}, false)
+				var prepared map[string]any
+				if json.Unmarshal(body, &prepared) != nil || prepared == nil {
+					t.Fatal("fixture_idle_fence_response_invalid")
+				}
+				if status == http.StatusConflict && contracts.StringField(prepared, "code") == "conflict" {
+					return false
+				}
+				if status != http.StatusOK {
+					t.Fatalf("fixture_idle_fence_status=%d code=%s", status, contracts.StringField(prepared, "code"))
+				}
+				if preparedLease := contracts.StringField(prepared, "lease"); len(preparedLease) == 43 {
+					lease = preparedLease
+				}
+				if lease == "" || prepared["state"] != "idle" {
+					t.Fatal("fixture_idle_fence_not_ready")
+				}
+				return true
+			})
+			release()
+		}()
+		sourceAfter, err := os.ReadFile(primaryPath(threadID))
+		if err != nil || !bytes.Equal(sourceBefore, sourceAfter) {
+			t.Fatal("idle_fence_changed_original_signed_primary")
+		}
 		late := lateBody(selector)
 		late["lateReply"] = map[string]any{"clientUserMessageId": replyAttempt, "expectedTurnId": turnID}
 		late["answers"] = []any{map[string]any{"id": view.Questions[0].ID, "kind": "answer", "optionIds": []string{}, "customText": "Synthetic answer accepted after old E"}}
@@ -536,7 +579,17 @@ func forkQuestionHistoryProductionV1(t *testing.T, acceptedHistory, acceptedAfte
 			return actual.LateReply.State == "accepted" && actual.LateReply.ClientUserMessageID == replyAttempt && actual.LateReply.TurnID != turnID
 		})
 		wait(func() bool {
-			record := jsonRequest(http.MethodGet, "/v1/threads/"+threadID, nil, false, http.StatusOK)
+			status, encoded := request(http.MethodGet, "/v1/threads/"+threadID, nil, false)
+			var record map[string]any
+			if json.Unmarshal(encoded, &record) != nil || record == nil {
+				t.Fatal("fixture_response_invalid")
+			}
+			if status == http.StatusServiceUnavailable && contracts.StringField(record, "code") == "public_projection_pending" {
+				return false
+			}
+			if status != http.StatusOK {
+				t.Fatalf("fixture_response_status=%d expected=%d code=%s", status, http.StatusOK, contracts.StringField(record, "code"))
+			}
 			return record["status"] == "idle"
 		})
 		_, afterEvents := request(http.MethodGet, "/v1/threads/"+threadID+"/events?since_seq=0", nil, false)

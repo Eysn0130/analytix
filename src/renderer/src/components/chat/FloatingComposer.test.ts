@@ -909,7 +909,7 @@ describe('InputBar image transfer helpers', () => {
 })
 
 describe('InputBar capability controls', () => {
-  it('uses only the explicit speech UI preference, not copied Provider fields, to expose the Go-resolved attempt', () => {
+  it('uses the explicit speech UI preference and secondary-owner gate, not copied Provider fields, to expose the Go-resolved attempt', () => {
     const settingsWith = (enabled: boolean, baseUrl: string, model: string): Pick<AppSettingsV1, 'runtime'> => ({
       runtime: {
         speechToText: { enabled, baseUrl, model }
@@ -919,7 +919,8 @@ describe('InputBar capability controls', () => {
     expect(speechToTextPreferenceEnabled(settingsWith(true, '', ''))).toBe(true)
     expect(speechToTextPreferenceEnabled(settingsWith(true, 'https://stale.invalid/v1', 'stale-model'))).toBe(true)
     expect(speechToTextPreferenceEnabled(settingsWith(false, 'https://stale.invalid/v1', 'stale-model'))).toBe(false)
-    expect(floatingComposerSource).toContain('const showVoiceDictation = speechToTextEnabled')
+    expect(floatingComposerSource).toContain('const secondaryOwner = ownerThreadId !== undefined')
+    expect(floatingComposerSource).toContain('const showVoiceDictation = (voiceDictationEnabled ?? !secondaryOwner) && speechToTextEnabled')
     expect(floatingComposerSource).not.toMatch(/speechToTextSettings\.(?:baseUrl|model)/u)
     expect(floatingComposerSource).not.toContain('speechToText: speechToTextSettings')
   })

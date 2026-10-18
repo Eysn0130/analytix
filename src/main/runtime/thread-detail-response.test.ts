@@ -1372,7 +1372,21 @@ describe('ordinary child ledger HTTP contract', () => {
     expect(response(detail).ok).toBe(true)
     detail.workspace = '/synthetic/TestFixture1234567890/001/ordinary-workspace'
     expect(ThreadDetailResponseV1Schema.safeParse(detail).success).toBe(true)
-    expect(response(detail).ok).toBe(false)
+    const allowed = response(detail)
+    expect(allowed.ok).toBe(true)
+    expect(JSON.parse(allowed.body)).toEqual(detail)
+
+    for (const workspace of [
+      '/synthetic/account-1234567890/ordinary-workspace',
+      '/synthetic/13800138000/ordinary-workspace'
+    ]) {
+      detail.workspace = workspace
+      expect(ThreadDetailResponseV1Schema.safeParse(detail).success).toBe(true)
+      const rejected = response(detail)
+      expect(rejected.ok).toBe(false)
+      expect(rejected.status).toBe(502)
+      expect(rejected.body).not.toContain(workspace)
+    }
   })
   it.each(['unknown kind', 'raw payload', 'authority', 'parent binding', 'status mismatch'])('rejects %s after a valid control', (change) => {
     const detail = ordinaryChildLedgerDetail()

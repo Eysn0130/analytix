@@ -6,12 +6,9 @@ package eventlifecycle
 
 import (
 	"errors"
-	"regexp"
 	"strings"
-	"time"
 
-	"analytix.local/runtime-go/internal/contracts"
-
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainthread "analytix.local/runtime-go/internal/domain/thread"
 )
@@ -158,35 +155,12 @@ func validPipelineStageV1(stage string) bool {
 	return exactDynamicSuffixV1(stage, "background_job_", domainjob.TerminalStatusV1)
 }
 
-// Keep this new durable variant closed independently of the caller's
-// projection. The public ID grammar matches the desktop metadata boundary.
-var (
-	logicalStepPublicIDV1        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$`)
-	logicalStepPublicTimestampV1 = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$`)
-)
-
 func validateLogicalStepAssembledV1(event map[string]any) error {
-	seq, seqOK := contracts.NumericSeq(event["seq"])
-	threadID, threadOK := event["threadId"].(string)
-	turnID, turnOK := event["turnId"].(string)
-	timestamp, timestampOK := event["timestamp"].(string)
-	if len(event) != 8 || event["label"] != "Logical step assembled" ||
-		!seqOK || seq < 1 || uint64(seq) > 9007199254740991 ||
-		!threadOK || !logicalStepPublicIDV1.MatchString(threadID) ||
-		!turnOK || !logicalStepPublicIDV1.MatchString(turnID) ||
-		!timestampOK || len(timestamp) > 64 || !logicalStepPublicTimestampV1.MatchString(timestamp) {
+	if len(event) != 8 {
 		return invalidV1("logical step assembly envelope is not closed")
 	}
-	at, err := time.Parse(time.RFC3339Nano, timestamp)
-	if err != nil || at.IsZero() {
-		return invalidV1("logical step assembly timestamp is invalid")
-	}
-	details, detailsOK := event["details"].(map[string]any)
-	version, versionOK := contracts.NumericSeq(details["schemaVersion"])
-	id, idOK := details["logicalStepId"].(string)
-	if !detailsOK || len(details) != 2 || !versionOK || version != 1 ||
-		!idOK || id != strings.TrimSpace(id) || !contracts.IsCanonicalOpaqueUUIDV4(id) {
-		return invalidV1("logical step assembly details are not closed")
+	if _, ok := domainevent.ProjectClosedLogicalStepEventDetailsV1(event); !ok {
+		return invalidV1("logical step assembly envelope or details are not closed")
 	}
 	return nil
 }

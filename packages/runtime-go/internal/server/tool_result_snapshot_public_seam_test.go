@@ -293,6 +293,85 @@ func syntheticSpecializedSkillCatalogV1(t *testing.T, body string, runAs ...stri
 	return catalog
 }
 
+// Diagnostics expose only source-owned codes, never arbitrary output or errors.
+func protectedSeamClosedOutputCodeV1(output any) string {
+	record, ok := output.(map[string]any)
+	if !ok {
+		return "non_object"
+	}
+	code, _ := record["code"].(string)
+	switch code {
+	case "":
+		return "absent"
+	case "validation_error", "goal_exists", "goal_read_failed", "goal_create_failed",
+		"goal_round_required", "goal_prepared_authority_invalid", "goal_prepared_state_invalid",
+		"goal_prepared_state_stale", "goal_update_failed", "todo_read_failed", "todo_write_failed",
+		"tool_completed", "tool_failed", "tool_blocked", "tool_output_private":
+		return code
+	default:
+		return "unclassified"
+	}
+}
+
+// This auxiliary synchronous seam shares the ordinary loop/terminal owner with
+// the root public test. Its compatibility composition is narrower and does not
+// classify an error from the production-composed root HTTP test.
+func TestProtectedSeamSynchronousNormalTextTerminalDetailV1(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"plain ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\ndata: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+	h := NewRuntimeServerHandler(RuntimeServerConfig{
+		RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
+		ProviderID: "text-provider", BaseURL: upstream.URL + "/v1", APIKey: "test-placeholder",
+		EndpointFormat: "chat_completions", Model: "text-model",
+	}).(*runtimeServerHandler)
+	configureServerGeneralExecution(t, h)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := h.Shutdown(ctx); err != nil {
+			t.Error("synchronous normal-text fixture shutdown failed")
+		}
+	})
+	workspace := workspacetest.New(t)
+	thread, err := h.store.CreateThread(map[string]any{"workspace": workspace, "providerId": "text-provider", "model": "text-model"}, workspace)
+	if err != nil {
+		t.Fatal("synchronous normal-text fixture thread unavailable")
+	}
+	response, err := h.startRuntimeTurn(context.Background(), stringField(thread, "id"), startRuntimeTurnRequest{
+		Prompt: "Say hello without fixtures.", ProviderID: "text-provider", Model: "text-model",
+	})
+	t.Logf("auxiliary synchronous ordinary terminal error_class=%s detail_class=%s", asyncTurnErrorClassV1(err), turnapp.GeneralTerminalDetailClassV1(err))
+	if err != nil {
+		t.Fatal("auxiliary synchronous ordinary completion failed")
+	}
+	if stringField(response, "status") != "completed" {
+		t.Fatal("auxiliary synchronous ordinary completion did not become completed")
+	}
+	stored, err := h.store.GetThread(stringField(thread, "id"))
+	if err != nil {
+		t.Fatal("auxiliary synchronous ordinary terminal unavailable")
+	}
+	answerCount := 0
+	for _, rawTurn := range listAny(stored["turns"]) {
+		turn, _ := rawTurn.(map[string]any)
+		if stringField(turn, "id") != stringField(response, "turnId") {
+			continue
+		}
+		for _, rawItem := range listAny(turn["items"]) {
+			item, _ := rawItem.(map[string]any)
+			if stringField(item, "kind") == "assistant_text" && stringField(item, "status") == "completed" && stringField(item, "text") == "plain ok" {
+				answerCount++
+			}
+		}
+	}
+	if answerCount != 1 {
+		t.Fatal("auxiliary synchronous ordinary terminal lost its exact completed answer")
+	}
+}
+
 // These assertions use only existing public fixture APIs and JSON identities,
 // so the same test can falsify the missing producer on the exact base archive.
 func TestSpecializedActualGoalTodoSkillProductionSeamV1(t *testing.T) {
@@ -327,7 +406,13 @@ func TestSpecializedActualGoalTodoSkillProductionSeamV1(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if result, err := h.executeAndSettleRuntimeTool(context.Background(), pending, nil, nil); err != nil || result.IsError {
+			rawOutputCode := "not_observed"
+			result, err := h.executeAndSettleRuntimeTool(context.Background(), pending, nil, func(output any, isError bool) (any, bool, error) {
+				rawOutputCode = protectedSeamClosedOutputCodeV1(output)
+				return output, isError, nil
+			})
+			if err != nil || result.IsError {
+				t.Logf("actual production execution tool=%s raw_output_code=%s public_output_code=%s is_error=%t", tool, rawOutputCode, protectedSeamClosedOutputCodeV1(result.Output), result.IsError)
 				t.Fatal("actual production execution failed", err)
 			}
 			status, display, response := readProtectedSeamV1(t, h, pending)

@@ -86,13 +86,11 @@ describe('packaged desktop startup contract', () => {
     expect(lock).toBeGreaterThanOrEqual(0)
     expect(quit).toBeGreaterThan(lock)
     expect(ready).toBeGreaterThan(quit)
-    const readinessBranch = source.slice(
-      source.lastIndexOf('if (runningClawScheduleMcpServer)', ready),
-      ready + 'app.whenReady().then'.length
-    )
-    expect(readinessBranch).toContain(
-      '} else if (gotSingleInstanceLock) {\nregisterPackagedRendererScheme()\napp.whenReady().then'
-    )
+    const ownerBranch = source.indexOf('} else if (gotSingleInstanceLock) {', quit)
+    const register = source.indexOf('protocol.registerSchemesAsPrivileged([', ownerBranch)
+    expect(ownerBranch).toBeGreaterThan(quit)
+    expect(register).toBeGreaterThan(ownerBranch)
+    expect(ready).toBeGreaterThan(register)
     expect(source).not.toContain("traceStartup('app.whenReady:start')\n  if (!gotSingleInstanceLock) return")
 
     const lockLoserBody = source.slice(quit, source.indexOf('pendingDeepLinkThreadId =', quit))

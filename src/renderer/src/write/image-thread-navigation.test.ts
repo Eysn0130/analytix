@@ -30,7 +30,10 @@ function harness() {
   let state = { activeThreadId: 'thr-ime', runtimeConnection: 'ready', threads: [thread('thr-ime')], workspaceRoot: '/workspace',
     route: 'chat', blocks: [], clawChannels: [], busy: false, codeWorkspaceRoots: [], watchTurnCompletion: {}, unreadThreadIds: {},
     composerModel: '', composerProviderId: '', refreshThreads: vi.fn(async () => undefined), currentTurnId: null, currentTurnUserId: null,
-    lastSeq: 0, threadSearch: '', showArchivedThreads: false } as unknown as ChatState
+    lastSeq: 0, threadSearch: '', threadSearchResults: null, showArchivedThreads: false,
+    queuedMessages: [], queuedMessagePauses: {}, composerDrafts: {}, userInputDraftInterruptions: {}, deletedUserInputDraftThreadIds: {},
+    sideConversations: {}, sidePanel: { open: false, activeSideId: null }, caseProjectThreadsById: {},
+    threadHandoffOperations: [], activeThreadHandoffOperationId: null } as unknown as ChatState
   const set: ChatStoreSet = partial => { state = { ...state, ...(typeof partial === 'function' ? partial(state) : partial) } }
   const sseAbortRef = { current: new AbortController() as AbortController | null }
   const context = { set, get: () => state, sseAbortRef }
@@ -161,13 +164,47 @@ test.each(['acquisition', 'creation'] as const)('cancellation after worktree %s 
 })
 test('a completed fork keeps its registry even when composition cancels selecting it', async () => {
   const h = harness()
+  h.set({ threads: [{ ...thread('thr-ime'), title: 'Original parent' }], blocks: [
+    { kind: 'user', id: 'u-fork', text: 'original ask', meta: { turnId: 'turn-fork' } },
+    { kind: 'assistant', id: 'a-fork', text: 'original answer', meta: { turnId: 'turn-fork' } }
+  ] })
   let finish!: () => void
   provider.forkThread.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(thread('fork-registered')) }))
   const task = h.get().forkActiveThread()
-  composing(true); finish(); await task
-  expect(readThreadForkRegistry().forks['fork-registered']).toMatchObject({ parentThreadId: 'thr-ime' })
-  expect(h.get().refreshThreads).toHaveBeenCalled()
+  composing(true)
+  h.set({ threads: [{ ...thread('thr-ime'), title: 'Updated parent' }], blocks: [] })
+  finish(); await task
+  expect(provider.forkThread).toHaveBeenCalledExactlyOnceWith('thr-ime')
+  expect(readThreadForkRegistry().forks['fork-registered']).toMatchObject({ parentThreadId: 'thr-ime', parentTitle: 'Original parent',
+    forkedFromMessageCount: 2, forkedFromTurnCount: 1 })
+  expect(h.get().refreshThreads).toHaveBeenCalledOnce()
   expect(h.get().activeThreadId).toBe('thr-ime')
+  expect(provider.getThreadDetail).not.toHaveBeenCalled()
+  expect(useWriteWorkspaceStore.getState().imageRegionEditor?.note).toBe('保留组合输入')
+})
+test('a completed fork cannot restore revoked projection metadata after IME cancels navigation', async () => {
+  const h = harness(), id = 'thr-revoked-fork-ime'
+  h.set({ activeThreadId: id, threads: [{ ...thread(id), title: 'REVOKED_FORK_PARENT_TITLE', historyAuthority: 'case_boundary_only_v1' } as never],
+    blocks: [{ kind: 'assistant', id: 'a-revoked-fork', text: 'REVOKED_FORK_CONTENT' } as never] })
+  let finish!: () => void
+  provider.forkThread.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(thread('fork-after-revocation')) }))
+  const task = h.get().forkActiveThread()
+  expect(provider.forkThread).toHaveBeenCalledExactlyOnceWith(id)
+  composing(true)
+  const sink = buildThreadEventSink(h.set, h.get, { threadId: id })
+  await sink.onPublicProjectionRevoked?.({ schemaVersion: 1, kind: 'public_projection_revoked', threadId: id,
+    historyAuthority: 'case_boundary_only_v1', code: 'case_public_authority_rejected', action: 'purge_case_projection', terminal: true })
+  const revoked = h.get()
+  expect(revoked.activeThreadId).toBeNull()
+  expect(revoked.blocks).toEqual([])
+  expect(revoked.threads).toEqual([])
+  finish(); await task
+  expect(h.get()).toBe(revoked)
+  expect(readThreadForkRegistry().forks['fork-after-revocation']).toBeUndefined()
+  expect(h.get().refreshThreads).not.toHaveBeenCalled()
+  expect(provider.getThreadDetail).not.toHaveBeenCalled()
+  expect(provider.forkThread).toHaveBeenCalledOnce()
+  expect(useWriteWorkspaceStore.getState().imageRegionEditor?.note).toBe('保留组合输入')
 })
 test('completed deletion cleans registry and list while preserving the composing selection', async () => {
   const h = harness()

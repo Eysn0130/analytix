@@ -145,7 +145,14 @@ func ValidateTerminalPublicationIntent(intent TerminalPublicationIntent, termina
 	if _, err := time.Parse(time.RFC3339Nano, intent.CreatedAt); err != nil {
 		return errors.New("terminal publication createdAt is invalid")
 	}
-	if domainevent.ValidatePublicRecord(intent.Usage) != nil || domainevent.ValidatePublicRecord(intent.CacheDiagnostics) != nil {
+	// Budget the original maps before deriving any scan-only telemetry view.
+	// Legacy maps keep their existing validation when the exact pair is absent.
+	if domainevent.ValidateQuestionReplyResourceLimitsV1(intent.Usage) != nil ||
+		domainevent.ValidateQuestionReplyResourceLimitsV1(intent.CacheDiagnostics) != nil {
+		return errors.New("terminal publication intent contains restricted content")
+	}
+	diagnosticView := domainevent.ClosedTerminalTelemetryFailureValidationViewV1(intent.Usage, intent.CacheDiagnostics)
+	if domainevent.ValidatePublicRecord(intent.Usage) != nil || domainevent.ValidatePublicRecord(diagnosticView) != nil {
 		return errors.New("terminal publication intent contains restricted content")
 	}
 	if body, err := json.Marshal(intent); err != nil || len(body) == 0 {

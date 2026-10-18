@@ -12,10 +12,16 @@ import (
 	"testing"
 	"time"
 
+	appturn "analytix.local/runtime-go/internal/app/turn"
+	appusage "analytix.local/runtime-go/internal/app/usage"
+	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainterminaltelemetry "analytix.local/runtime-go/internal/domain/terminaltelemetry"
+	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 )
 
 func signedCollisionHistoryFixtureV1(t *testing.T) map[string]any {
@@ -761,5 +767,177 @@ func TestThreadTopLevelPrivateReasoningNeverLeavesRuntime(t *testing.T) {
 	}
 	if !strings.Contains(serialized, "literal") || !strings.Contains(serialized, "user example") || strings.Contains(serialized, "public answer") {
 		t.Fatalf("unbound assistant text survived or user-authored text was lost: %s", serialized)
+	}
+}
+
+// Rebuild the digest-bound fixture through the domain constructor so negative
+// telemetry cases have intact outbox/archive digests and reach public scanning.
+func canonicalGeneralTerminalTelemetryHistoryFixtureV1(t *testing.T, mutateUsage func(map[string]any)) map[string]any {
+	t.Helper()
+	thread, _, _ := canonicalGeneralTerminalPublicFixture(t, "completed", "success")
+	turn := thread["turns"].([]any)[0].(map[string]any)
+	context, err := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := domainturnterminal.ParseGeneralTerminalCASBindingV1(turn["generalTerminalCASBinding"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(turn["generalTerminalPublication"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	telemetry := appusage.NewTerminalTelemetryV1(domainmodel.Usage{TotalTokens: 3}, map[string]any{
+		"providerAttemptTelemetrySchema": domainterminaltelemetry.ProviderAttemptTelemetrySchemaV1,
+		"providerAttemptTelemetryValid":  false, "providerAttemptTelemetryError": "invalid_or_incomplete",
+	})
+	usage := contracts.CloneMap(prior.UsageEvent)
+	usage["usage"] = telemetry.PublicUsageMap()
+	usage["cacheDiagnostics"] = telemetry.PublicCacheDiagnosticsMap()
+	if usage["cacheDiagnostics"].(map[string]any)["providerAttemptTelemetryError"] != "invalid_or_incomplete" {
+		t.Fatal("fixture lost the closed telemetry error")
+	}
+	if mutateUsage != nil {
+		mutateUsage(usage)
+	}
+	item := turn["items"].([]any)[0].(map[string]any)
+	itemEvent := appturn.AssistantItemCompletedEvent(item)
+	itemEvent["timestamp"] = prior.CommittedAt
+	commit, err := domainturnterminal.NewGeneralTerminalPublicationCommitV1(context, binding, prior.CommittedAt,
+		[]domainturnterminal.GeneralTerminalPublicationDraftV1{
+			{Slot: "terminal-item", Draft: itemEvent},
+			{Slot: "usage", Draft: usage},
+			{Slot: "terminal", Draft: prior.TerminalEvent},
+		})
+	if err != nil {
+		t.Fatalf("digest-bound telemetry fixture: %v", err)
+	}
+	archive, err := domainturnterminal.NewGeneralTerminalPublicationArchiveV1([]domainturnterminal.GeneralTerminalPublicationCommitV1{commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn["generalTerminalPublication"] = domainturnterminal.GeneralTerminalPublicationCommitV1Map(commit)
+	thread[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1] = domainturnterminal.GeneralTerminalPublicationArchiveV1Map(archive)
+	return thread
+}
+
+func TestPublicHistoryClosedTerminalTelemetryPreservesLiveAndArchiveOnlyPayloads(t *testing.T) {
+	for _, archiveOnly := range []bool{false, true} {
+		name := "live"
+		if archiveOnly {
+			name = "archive_only"
+		}
+		t.Run(name, func(t *testing.T) {
+			thread := canonicalGeneralTerminalTelemetryHistoryFixtureV1(t, nil)
+			if archiveOnly {
+				thread["turns"] = []any{}
+			}
+			before, err := json.Marshal(thread)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidatePublicHistory(thread); err != nil {
+				t.Fatalf("closed telemetry history was rejected: %v", err)
+			}
+			after, err := json.Marshal(thread)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("validation changed the original terminal payload")
+			}
+		})
+	}
+}
+
+func TestPublicHistoryClosedTerminalTelemetryRejectsOpenDigestBoundUsage(t *testing.T) {
+	for name, mutate := range map[string]func(map[string]any){
+		"unknown diagnostics": func(usage map[string]any) {
+			usage["cacheDiagnostics"].(map[string]any)["unknown"] = "safe"
+		},
+		"unknown enum": func(usage map[string]any) {
+			usage["cacheDiagnostics"].(map[string]any)["providerAttemptTelemetryError"] = "unknown"
+		},
+		"missing usage pair": func(usage map[string]any) { delete(usage, "usage") },
+		"raw sibling": func(usage map[string]any) {
+			usage["cacheDiagnostics"].(map[string]any)["error"] = "RAW_FAILURE_SENTINEL"
+		},
+		"credential sibling": func(usage map[string]any) {
+			usage["cacheDiagnostics"].(map[string]any)["note"] = "sk-synthetic-private-token-123456"
+		},
+		"raw nested": func(usage map[string]any) {
+			usage["cacheDiagnostics"].(map[string]any)["wrapper"] = map[string]any{"error": "RAW_FAILURE_SENTINEL"}
+		},
+		"credential nested": func(usage map[string]any) {
+			usage["cacheDiagnostics"].(map[string]any)["wrapper"] = map[string]any{"note": "sk-synthetic-private-token-123456"}
+		},
+	} {
+		for _, archiveOnly := range []bool{false, true} {
+			suffix := "/live"
+			if archiveOnly {
+				suffix = "/archive_only"
+			}
+			t.Run(name+suffix, func(t *testing.T) {
+				thread := canonicalGeneralTerminalTelemetryHistoryFixtureV1(t, mutate)
+				if archiveOnly {
+					thread["turns"] = []any{}
+				}
+				if err := ValidatePublicHistory(thread); err == nil {
+					t.Fatal("open telemetry acquired a digest-bound history exemption")
+				}
+			})
+		}
+	}
+}
+
+func TestPublicHistoryTerminalScanViewKeepsTupleAndOrdinaryChecks(t *testing.T) {
+	for name, mutate := range map[string]func(map[string]any, map[string]any){
+		"missing archive": func(thread, turn map[string]any) {
+			delete(thread, domainturnterminal.GeneralTerminalPublicationArchiveFieldV1)
+		},
+		"binding mismatch": func(thread, turn map[string]any) {
+			context, err := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding, err := domainturnterminal.NewGeneralTerminalCASBindingForOutcomeV1(context, "success", "completed", "different safe answer")
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn["generalTerminalCASBinding"] = domainturnterminal.GeneralTerminalCASBindingV1Map(binding)
+		},
+		"live digest mismatch": func(thread, turn map[string]any) {
+			turn["generalTerminalPublication"].(map[string]any)["commitDigest"] = strings.Repeat("a", 64)
+		},
+		"unknown live outbox": func(thread, turn map[string]any) {
+			turn["generalTerminalPublication"].(map[string]any)["unknown"] = "safe"
+		},
+		"unknown archive": func(thread, turn map[string]any) {
+			thread[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1].(map[string]any)["unknown"] = "safe"
+		},
+		"raw root sibling":        func(thread, turn map[string]any) { thread["error"] = "RAW_FAILURE_SENTINEL" },
+		"raw turn sibling":        func(thread, turn map[string]any) { turn["error"] = "RAW_FAILURE_SENTINEL" },
+		"raw turn nested":         func(thread, turn map[string]any) { turn["wrapper"] = map[string]any{"error": "RAW_FAILURE_SENTINEL"} },
+		"credential root sibling": func(thread, turn map[string]any) { thread["title"] = "sk-synthetic-private-token-123456" },
+		"credential turn sibling": func(thread, turn map[string]any) { turn["note"] = "sk-synthetic-private-token-123456" },
+		"credential turn nested": func(thread, turn map[string]any) {
+			turn["wrapper"] = map[string]any{"note": "sk-synthetic-private-token-123456"}
+		},
+		"nested lookalike outbox": func(thread, turn map[string]any) {
+			turn["wrapper"] = map[string]any{"generalTerminalPublication": contracts.CloneMap(turn["generalTerminalPublication"].(map[string]any))}
+		},
+		"item raw sibling": func(thread, turn map[string]any) {
+			turn["items"].([]any)[0].(map[string]any)["error"] = "RAW_FAILURE_SENTINEL"
+		},
+		"item credential sibling": func(thread, turn map[string]any) {
+			turn["items"].([]any)[0].(map[string]any)["note"] = "sk-synthetic-private-token-123456"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			thread := canonicalGeneralTerminalTelemetryHistoryFixtureV1(t, nil)
+			turn := thread["turns"].([]any)[0].(map[string]any)
+			mutate(thread, turn)
+			if err := ValidatePublicHistory(thread); err == nil {
+				t.Fatal("terminal scan view bypassed tuple or ordinary content validation")
+			}
+		})
 	}
 }

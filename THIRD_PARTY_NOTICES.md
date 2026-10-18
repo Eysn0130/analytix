@@ -968,8 +968,8 @@ and only the running-indicator subset of `ChatView.module.css` (blob
 `ff121998a6ba3dad6df5583200750642066abea9`). Their local destinations are
 `RunningWhaleTail.tsx`, `running-whale@2x.png` and `TurnState.module.css`
 under `src/renderer/src/components/chat/presentation/chat/turn-state/`.
-The exact source, adaptations and validation boundary are recorded in the
-[running indicator intake](docs/analytix/upstreams/code-reuse-provenance.md#dsh-running-indicator-source-intake--2026-10-13-utc).
+The selected source files are available in the fixed-pin
+[upstream chat directory](https://github.com/deepseek-ai/deepseek-harness/tree/5badb15009ae1756c3afe0ae0cef1faafc290ccc/packages/client/ui-chat/src/client/chat).
 
 These selected source paths retain the upstream MIT source notice below.
 `CodeFileIcon`, `CODE_FILE_ARTWORK`, code-language icons and the
@@ -1042,8 +1042,8 @@ See the [source integration checkpoint](docs/analytix/upstreams/deepseek-harness
 
 The selected Excel parser/style/locale sources under
 `packages/client/ui-sidebar-documentpreview/src/client/excel/` retain that same
-pin and MIT source notice, with exact blobs/destinations in the
-[intake ledger](docs/analytix/upstreams/code-reuse-provenance.md#dsh-excel-parser-and-viewer-source-intake--2026-10-12-utc).
+pin and MIT source notice. The selected source files are available in the
+[fixed-pin upstream Excel directory](https://github.com/deepseek-ai/deepseek-harness/tree/5badb15009ae1756c3afe0ae0cef1faafc290ccc/packages/client/ui-sidebar-documentpreview/src/client/excel).
 FortuneSheet's full original MIT notice is additionally retained at
 [src/renderer/src/components/file-preview/excel/licenses/FortuneSheet.txt](src/renderer/src/components/file-preview/excel/licenses/FortuneSheet.txt).
 This source preparation has not installed or packaged FortuneSheet, ExcelJS or

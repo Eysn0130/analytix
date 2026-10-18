@@ -92,3 +92,38 @@ func TestGoalLifecycleCannotBypassCompletionEvidence(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendGoalClearHistoryUsesNilInterfaceSnapshot(t *testing.T) {
+	for _, counted := range []bool{false, true} {
+		name, operation := "legacy", "legacy_clear"
+		previous := map[string]any{"threadId": "thread-goal", "objective": "Imported objective", "status": "paused"}
+		if counted {
+			name, operation = "counted", "clear"
+			previous = lifecycleGoalV1(t)
+		}
+		t.Run(name, func(t *testing.T) {
+			thread := map[string]any{"id": "thread-goal"}
+			AppendHistoryV1(thread, previous, nil, operation, "2026-10-11T00:01:00Z")
+			history, ok := thread["goalHistory"].([]any)
+			if !ok || len(history) != 1 {
+				t.Fatal("clear did not append one history entry", thread)
+			}
+			entry, ok := history[0].(map[string]any)
+			if !ok {
+				t.Fatal("clear history entry is not a record")
+			}
+			if snapshot, present := entry["goal"]; !present || snapshot != nil {
+				t.Fatalf("clear snapshot must be a nil interface, got %T %#v", snapshot, snapshot)
+			}
+			if counted {
+				ref, valid := ExpectedRefV1(entry)
+				previousRef, _ := domaingoal.RefFromRecordV1(previous)
+				if !valid || ref.ID != previousRef.ID || ref.Revision != previousRef.Revision+1 {
+					t.Fatal("clear history lost the next counted reference", entry)
+				}
+			} else if _, present := entry["ref"]; present {
+				t.Fatal("legacy clear invented a counted reference", entry)
+			}
+		})
+	}
+}

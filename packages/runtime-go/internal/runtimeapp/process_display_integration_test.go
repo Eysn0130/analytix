@@ -336,6 +336,7 @@ func TestRuntimeAppProcessDisplayPreparedRegistryCredentialReachesShellRedaction
 	var sends atomic.Int64
 	var invalidAuthorization atomic.Bool
 	var displayCopyInRequest atomic.Bool
+	var sandboxUnavailable atomic.Bool
 	arguments, _ := json.Marshal(map[string]any{"command": "printf '%s\\n' '" + preparedKey + "'"})
 	encodedArguments, _ := json.Marshal(string(arguments))
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +352,40 @@ func TestRuntimeAppProcessDisplayPreparedRegistryCredentialReachesShellRedaction
 			if strings.Contains(string(requestBody), forbidden) {
 				displayCopyInRequest.Store(true)
 			}
+		}
+		if call == 2 && runtime.GOOS == "linux" {
+			// Observe only the actual settled tool result sent to this synthetic
+			// Provider. The display intentionally uses shell_start_failed instead.
+			var sent struct {
+				Messages []struct {
+					Content []struct {
+						Type    string `json:"type"`
+						Content string `json:"content"`
+					} `json:"content"`
+				} `json:"messages"`
+			}
+			count, matched := 0, false
+			if json.Unmarshal(requestBody, &sent) == nil {
+				for _, message := range sent.Messages {
+					for _, part := range message.Content {
+						if part.Type != "tool_result" {
+							continue
+						}
+						count++
+						var result struct {
+							Status      string  `json:"status"`
+							Error       string  `json:"error"`
+							Output      *string `json:"output"`
+							OutputBytes *int    `json:"outputBytes"`
+							ExitCode    *int    `json:"exitCode"`
+						}
+						matched = json.Unmarshal([]byte(part.Content), &result) == nil && result.Status == "failed" &&
+							result.Error == "process_sandbox_unavailable" && result.Output != nil && *result.Output == "" &&
+							result.OutputBytes != nil && *result.OutputBytes == 0 && result.ExitCode != nil && *result.ExitCode == -1
+					}
+				}
+			}
+			sandboxUnavailable.Store(count == 1 && matched)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		frames := []string{`data: {"type":"message_start","message":{"id":"msg_prepared_shell","model":"process-prepared-model","usage":{"input_tokens":4,"output_tokens":0}}}`}
@@ -490,8 +525,19 @@ func TestRuntimeAppProcessDisplayPreparedRegistryCredentialReachesShellRedaction
 	if block.Source.Kind != "tool" || block.Source.CallID == "" || block.Source.ToolCallItemID == "" || block.Source.ToolResultItemID == "" || block.Source.StartedEventSeq == "" || sourceUnit == nil || sourceUnit.ProviderSequence != "1" || sourceUnit.Placement != "anchored" || len(sourceUnit.Calls) != 1 || sourceUnit.Calls[0].CallID != block.Source.CallID || sourceUnit.Calls[0].ToolCallItemID != block.Source.ToolCallItemID || sourceUnit.Calls[0].ToolResultItemID != block.Source.ToolResultItemID || sourceUnit.Calls[0].StartedEventSeq != block.Source.StartedEventSeq {
 		t.Fatal("actual Bash settlement did not preserve its real persisted call/result and committed started anchor")
 	}
-	if block.State != "completed" || block.Body == nil || block.Body.Text != "<redacted>\n" || block.Classification != "credential_redacted" || strings.Contains(string(body), preparedKey) || strings.Contains(string(body), initialKey) {
+	if block.Classification != "credential_redacted" || strings.Contains(string(body), preparedKey) || strings.Contains(string(body), initialKey) {
 		t.Fatal("bare actual prepared Registry key survived Shell process projection")
+	}
+	if runtime.GOOS == "darwin" {
+		if block.State != "completed" || block.Body == nil || block.Body.Text != "<redacted>\n" {
+			t.Fatal("actual contained Shell did not complete with redacted output")
+		}
+	} else {
+		// Linux has no native deny-root implementation. Mandatory protected roots
+		// remain active and the actual invocation must fail before producing output.
+		if !sandboxUnavailable.Load() || block.State != "failed" || block.Body == nil || block.Body.Text != "" || block.Body.Error != "shell_start_failed" || block.ExitCode != nil {
+			t.Fatal("unsupported Shell containment did not fail closed with empty output")
+		}
 	}
 	for _, path := range []string{"/v1/threads/" + threadID, "/v1/threads/" + threadID + "/events?since_seq=0"} {
 		status, public := request(http.MethodGet, path, nil, false)

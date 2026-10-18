@@ -90,11 +90,21 @@ func ValidatePublicRecord(value any) error {
 
 // publicPrivacyValidationViewV1 keeps host-bound, closed plan/artifact digests
 // and timestamps, or closed tool-failure diagnostic hashes, out of prose PII
-// classification without weakening display fields.
+// classification without weakening display fields. Closed root logical-step
+// events likewise keep only their validated correlation ID out of prose scanning.
 // These are structural metadata: the canonical tool-result projection has
 // already validated their syntax, lifecycle, and host tool-call identity.
 // Lookalike maps and non-canonical tool results remain on the ordinary scanner.
 func publicPrivacyValidationViewV1(value any) any {
+	if record, ok := value.(map[string]any); ok {
+		if _, valid := ProjectClosedLogicalStepEventDetailsV1(record); valid {
+			projected := clonePublicRecordMapV1(record)
+			details := clonePublicRecordMapV1(record["details"].(map[string]any))
+			details["logicalStepId"] = "logical-step-id"
+			projected["details"] = details
+			value = projected
+		}
+	}
 	projected, changed := projectClosedPlanDigestForPrivacyValidationV1(value)
 	if !changed {
 		return value
@@ -107,7 +117,8 @@ func publicPrivacyValidationViewV1(value any) any {
 // result byte-stable. Each staged placeholder is path-bound and restored only if the
 // generic projector returns it unchanged; all plan display fields still pass
 // through the ordinary projector. The same bounded mechanism preserves the five
-// SHA-256 fields of exact tool_not_advertised failure records.
+// SHA-256 fields of exact tool_not_advertised failure records and the validated
+// logicalStepId of a closed root logical-step event. Nested lookalikes are prose.
 func ProjectPublicValuePreservingClosedPlanDigestV1(value any) (any, bool) {
 	if ValidateQuestionReplyResourceLimitsV1(value) != nil {
 		return nil, true
@@ -118,6 +129,7 @@ func ProjectPublicValuePreservingClosedPlanDigestV1(value any) (any, bool) {
 	}
 	entries := []closedPlanDigestProjectionEntryV1{}
 	staged := stageClosedPlanDigestsV1(value, nil, &entries)
+	staged = stageRootLogicalStepIDV1(staged, &entries)
 	for index := range entries {
 		entries[index].placeholder["total"] = float64(len(entries))
 		entries[index].stagedPlaceholder["total"] = float64(len(entries))
@@ -145,6 +157,32 @@ type closedPlanDigestProjectionEntryV1 struct {
 	digest            string
 	placeholder       map[string]any
 	stagedPlaceholder map[string]any
+}
+
+// This must run once at the publication root, never inside the recursive tool
+// metadata walker: a complete pipeline lookalike embedded in user content is
+// still ordinary prose. Only the exact details.logicalStepId path is staged.
+func stageRootLogicalStepIDV1(value any, entries *[]closedPlanDigestProjectionEntryV1) any {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	if _, valid := ProjectClosedLogicalStepEventDetailsV1(record); !valid {
+		return value
+	}
+	staged := clonePublicRecordMapV1(record)
+	details := clonePublicRecordMapV1(record["details"].(map[string]any))
+	placeholder := map[string]any{
+		"kind": "closed_logical_step_id_placeholder_v1", "ordinal": float64(len(*entries)),
+	}
+	stagedPlaceholder := clonePublicRecordMapV1(placeholder)
+	*entries = append(*entries, closedPlanDigestProjectionEntryV1{
+		path:   []closedPlanDigestProjectionPathV1{{kind: "key", key: "details"}, {kind: "key", key: "logicalStepId"}},
+		digest: details["logicalStepId"].(string), placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
+	})
+	details["logicalStepId"] = stagedPlaceholder
+	staged["details"] = details
+	return staged
 }
 
 func stageClosedPlanDigestsV1(

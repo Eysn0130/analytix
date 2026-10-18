@@ -8,7 +8,10 @@ import { useNativeReferenceStore } from './native-reference-store'
 import type { NativeOfficeActionMenu, NativeOfficeFormat, NativeOfficeMenuTarget, NativeOfficeRequest, NativeOfficeView, NativeOfficeSelection, NativeOfficePlayback } from '@shared/native-office'
 import { nativeOfficeActionChoiceSchema, nativeOfficeActionMenuSchema } from '@shared/native-office'
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('react-i18next', async importOriginal => ({
+  ...(await importOriginal<typeof import('react-i18next')>()),
+  useTranslation: () => ({ t: (key: string) => key })
+}))
 
 const view: NativeOfficeView = { objectId: 'a'.repeat(64), path: '/synthetic/report.docx', kind: 'docx', revision: 'b'.repeat(64), dirty: false, status: 'ready' }
 let root: Root | null, container: HTMLDivElement

@@ -4,12 +4,12 @@ import (
 	appcache "analytix.local/runtime-go/internal/app/cachetelemetry"
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainterminaltelemetry "analytix.local/runtime-go/internal/domain/terminaltelemetry"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	"errors"
 	"reflect"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -285,49 +285,12 @@ func addConversationUnsignedV1(target *uint64, value uint64) error {
 
 // LogicalStepMetricsVersionV1 marks executions whose event log can prove
 // logical closes. A signed provider attempt is billing evidence, not a close.
-const LogicalStepMetricsVersionV1 = 1
+const LogicalStepMetricsVersionV1 = domainevent.LogicalStepMetricsVersionV1
 
-// ProjectLogicalStepDetailsV1 is the single closed numeric/correlation grammar
-// used by the producer, public event projection and full-log usage fold.
+// ProjectLogicalStepDetailsV1 shares the domain-owned closed grammar with
+// event publication and lifecycle validation.
 func ProjectLogicalStepDetailsV1(stage string, details map[string]any) (map[string]any, bool) {
-	version, valid := logicalMetricNumberV1(details["schemaVersion"])
-	id, idOK := details["logicalStepId"].(string)
-	if !valid || version != LogicalStepMetricsVersionV1 || !idOK || id != strings.TrimSpace(id) || !contracts.IsCanonicalOpaqueUUIDV4(id) {
-		return nil, false
-	}
-	out := map[string]any{"schemaVersion": float64(version), "logicalStepId": id}
-	if stage == "logical_step_started" || stage == "logical_step_assembled" {
-		return out, len(details) == 2
-	}
-	if stage != "logical_step_closed" {
-		return nil, false
-	}
-	assembled, valid := details["assistantMessageAssembled"].(bool)
-	if !valid {
-		return nil, false
-	}
-	out["assistantMessageAssembled"] = assembled
-	for key, value := range details {
-		switch key {
-		case "schemaVersion", "logicalStepId", "assistantMessageAssembled":
-		case "llmMs", "ttftMs", "decodeMs", "decodeTokens":
-			number, ok := logicalMetricNumberV1(value)
-			if !assembled || !ok {
-				return nil, false
-			}
-			out[key] = float64(number)
-		default:
-			return nil, false
-		}
-	}
-	llm, hasLLM := out["llmMs"].(float64)
-	ttft, hasTTFT := out["ttftMs"].(float64)
-	decode, hasDecode := out["decodeMs"].(float64)
-	_, hasOutput := out["decodeTokens"].(float64)
-	if hasTTFT && (!hasLLM || ttft > llm) || hasDecode != hasOutput || hasDecode && (!hasTTFT || decode != llm-ttft) {
-		return nil, false
-	}
-	return out, true
+	return domainevent.ProjectLogicalStepDetailsV1(stage, details)
 }
 
 func logicalMetricNumberV1(value any) (uint64, bool) {

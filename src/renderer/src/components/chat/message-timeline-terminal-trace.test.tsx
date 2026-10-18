@@ -155,10 +155,10 @@ describe('actual terminal answer component trace', () => {
     const h = forkTrace(surface, negative)
     await act(async () => root.render(h.element()))
     const button = h.button('forkFromAssistantResponse')
-    if (negative === 'no-owner' || negative === 'running' || negative === 'unknown') expect(button).toBeUndefined()
+    if (negative === 'no-owner' || negative === 'unknown') expect(button).toBeUndefined()
     else {
       expect(button).toBeDefined()
-      if (negative === 'offline' || negative === 'failed') expect(button!.getAttribute('aria-disabled')).toBe('true')
+      if (negative === 'offline' || negative === 'running' || negative === 'failed') expect(button!.getAttribute('aria-disabled')).toBe('true')
       await act(async () => button!.click())
     }
     expect(h.fork).not.toHaveBeenCalled()

@@ -27,16 +27,44 @@ function cellText(cell: ExcelCopyCellV1 | undefined): string {
   return projected
 }
 
+// A cell boundary is meaningful selection topology, not ordinary free text.
+// Inspect only one neighbouring pair at a time; never flatten a row, column,
+// merge shadow or intervening empty cell into an unbounded digit sequence.
+function numericFragment(text: string): string | undefined {
+  const value = text.replace(/\p{Cf}/gu, '').trim()
+  return /^\p{Nd}{1,11}$/u.test(value) ? value : undefined
+}
+function compactDate(value: string): boolean {
+  const digits = value.normalize('NFKC')
+  if (!/^(?:19|20|21)\d{6}$/.test(digits)) return false
+  const year = Number(digits.slice(0, 4)), month = Number(digits.slice(4, 6)), day = Number(digits.slice(6, 8))
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+function checkNumericPair(left: string | undefined, right: string | undefined): void {
+  if (!left || !right || Array.from(left).length + Array.from(right).length < 12) return
+  // Two complete compact calendar dates remain two dates at this boundary.
+  if (compactDate(left) && compactDate(right)) return
+  const joined = left + right
+  if (projectOrdinaryToolExportTextV1(joined) !== joined) throw new Error('Unsupported selection content.')
+}
+
 /** Existing explicit TSV text MIME; browser innerText/textContent parity remains unverified. */
 export function excelSelectionTextV1(frame: ExcelCopyFrameV1): string {
   const cells = new Map(frame.cells.map(([r, c, cell]) => [`${r}:${c}`, cell]))
   const { rows: rowIndices, columns: columnIndices } = axes(frame)
   const rows: string[] = []
   let bytes = 0
+  let previousRow: Array<string | undefined> = []
   for (const [rowPosition, r] of rowIndices.entries()) {
     const columns: string[] = []
+    const fragments: Array<string | undefined> = []
     for (const [columnPosition, c] of columnIndices.entries()) {
       const projected = cellText(cells.get(`${r}:${c}`))
+      const fragment = numericFragment(projected)
+      checkNumericPair(fragments[columnPosition - 1], fragment)
+      checkNumericPair(previousRow[columnPosition], fragment)
+      fragments.push(fragment)
       const field = /["\t\r\n]/.test(projected) ? `"${projected.replaceAll('"', '""')}"` : projected
       bytes += Buffer.byteLength(field, 'utf8') + (columnPosition ? 1 : 0)
       if (bytes > TEXT_MAX_BYTES) throw new Error('Unsupported selection size.')
@@ -45,6 +73,7 @@ export function excelSelectionTextV1(frame: ExcelCopyFrameV1): string {
     bytes += rowPosition ? 1 : 0
     if (bytes > TEXT_MAX_BYTES) throw new Error('Unsupported selection size.')
     rows.push(columns.join('\t'))
+    previousRow = fragments
   }
   const combined = rows.join('\n')
   const projected = projectOrdinaryToolExportTextV1(combined)

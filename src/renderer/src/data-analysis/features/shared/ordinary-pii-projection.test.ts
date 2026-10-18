@@ -114,17 +114,22 @@ describe("ordinary restricted PII projection", () => {
     expect(cell.text).toBe("320***********123X");
   });
 
-  it("uses the same masked projection for ordinary copy-like detected values", () => {
+  it("uses shared detector placeholders while retaining typed-field masks", () => {
     expect(projectOrdinaryClipboardValue("card_no", "0000123456789012")).toBe("0000********9012");
-    expect(projectDetectedOrdinaryRestrictedPii("0000123456789012")).toBe("0000********9012");
+    expect(projectDetectedOrdinaryRestrictedPii("0000123456789012")).toBe("[ACCOUNT]");
     expect(projectDetectedOrdinaryRestrictedPii("账号 0000123456789012，IP 192.168.10.24")).toBe(
-      "账号 0000********9012，IP 192.168.*.*"
+      "账号 [ACCOUNT]，IP [IP]"
     );
     expect(projectOrdinaryFieldValue("remark", "联系 13800138000，账号 0000123456789012")).toBe(
-      "联系 138****8000，账号 0000********9012"
+      "联系 [PHONE]，账号 [ACCOUNT]"
     );
     expect(projectDetectedOrdinaryRestrictedPii("plain node label")).toBe("plain node label");
     expect(projectOrdinaryFieldValue("txn_time", "2026-07-15")).toBe("2026-07-15");
+  });
+
+  it("retains bare IPv6 coverage while using the shared MAC classifier", () => {
+    expect(projectDetectedOrdinaryRestrictedPii("2001:db8:abcd::1234")).toBe("2001:db8:*::*");
+    expect(projectDetectedOrdinaryRestrictedPii("AA:BB:CC:DD:EE:FF")).toBe("[DEVICE]");
   });
 
   it("uses exact aliases after Unicode and camelCase tokenization", () => {
@@ -139,18 +144,18 @@ describe("ordinary restricted PII projection", () => {
   });
 
   it("does not let untrusted field labels exempt account-like values", () => {
-    expect(projectOrdinaryFieldValue("amount", "6214600780000579708")).toBe("6214***********9708");
+    expect(projectOrdinaryFieldValue("amount", "6214600780000579708")).toBe("[ACCOUNT]");
     expect(projectOrdinaryFieldValue("totalAmount", "6.2146007800005797e+18")).toBe("6.2146007800005797e+18");
     expect(projectOrdinaryFieldValue("txnTime", "2026-07-15 12:34:56")).toBe("2026-07-15 12:34:56");
-    expect(projectOrdinaryFieldValue("availableBalance", "6214600780000579708")).toBe("6214***********9708");
+    expect(projectOrdinaryFieldValue("availableBalance", "6214600780000579708")).toBe("[ACCOUNT]");
     expect(projectOrdinaryFieldValue("lastTxnTime", "20260715123456")).toBe("20260715123456");
     expect(projectOrdinaryFieldValue("description", "记录 6214600780000579708 元")).toBe(
-      "记录 6214***********9708 元"
+      "记录 [ACCOUNT] 元"
     );
-    expect(projectOrdinaryFieldValue("description", "6214600780000579708")).toBe("6214***********9708");
+    expect(projectOrdinaryFieldValue("description", "6214600780000579708")).toBe("[ACCOUNT]");
     expect(projectOrdinaryFieldValue("lastTxnTime", "62146007800005")).not.toContain("62146007800005");
-    expect(projectDetectedOrdinaryRestrictedPii("6214600780000579708")).toBe("6214***********9708");
-    expect(projectDetectedOrdinaryRestrictedPii("图6214600780000579708")).toBe("图6214***********9708");
+    expect(projectDetectedOrdinaryRestrictedPii("6214600780000579708")).toBe("[ACCOUNT]");
+    expect(projectDetectedOrdinaryRestrictedPii("图6214600780000579708")).toBe("图[ACCOUNT]");
     expect(projectDetectedOrdinaryRestrictedPii("6.2146007800005797e+18")).toBe("6.2146007800005797e+18");
     expect(projectDetectedOrdinaryRestrictedPii("金额：6.2146007800005797e+18")).toBe(
       "金额：6.2146007800005797e+18"
@@ -194,7 +199,7 @@ describe("ordinary restricted PII projection", () => {
     expect(projectOrdinaryStructuredValue(raw)).toEqual({
       account_no: "0000********9012",
       nested: {
-        nodeId: "账号 6214***********9708",
+        nodeId: "账号 [ACCOUNT]",
         metrics: 123456789,
       },
     });

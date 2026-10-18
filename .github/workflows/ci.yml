@@ -333,6 +333,8 @@ jobs:
           cache-dependency-path: packages/runtime-go/go.sum
       - run: npm ci
       - name: Build the current-source schedule MCP entrypoint without packaging
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build
       - name: Execute synthetic lifecycle and contained schedule contracts
         working-directory: packages/runtime-go

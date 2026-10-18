@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
+	domainterminaltelemetry "analytix.local/runtime-go/internal/domain/terminaltelemetry"
 )
 
 func TestTerminalPublicationIntentCanonicalizesNumericTelemetry(t *testing.T) {
@@ -80,5 +83,86 @@ func TestPublicationIntentOutputCapIsOptionalAndTerminalBound(t *testing.T) {
 	input.EndReason.Kind = "private-provider-reason"
 	if _, err := NewTerminalPublicationIntent(input, "success"); err == nil {
 		t.Fatal("unknown cap vocabulary accepted")
+	}
+}
+
+func TestTerminalPublicationIntentAcceptsClosedAttemptTelemetryPairWithoutPayloadChanges(t *testing.T) {
+	telemetry := domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}, map[string]any{
+		"providerAttemptTelemetrySchema": domainterminaltelemetry.ProviderAttemptTelemetrySchemaV1,
+		"providerAttemptTelemetryValid":  false, "providerAttemptTelemetryError": "invalid_or_incomplete", "providerAttemptInventoryComplete": false,
+	})
+	input := TerminalPublicationIntentInput{CreatedAt: "2026-10-18T01:02:03Z", TerminalStatus: "completed", Usage: telemetry.PublicUsageMap(), CacheDiagnostics: telemetry.PublicCacheDiagnosticsMap()}
+	before, err := json.Marshal([]any{input.Usage, input.CacheDiagnostics})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := NewTerminalPublicationIntent(input, "success")
+	if err != nil || ValidateTerminalPublicationIntent(intent, "success") != nil {
+		t.Fatalf("closed real telemetry pair was rejected: %v", err)
+	}
+	persisted, err := json.Marshal([]any{intent.Usage, intent.CacheDiagnostics})
+	if err != nil || !bytes.Equal(before, persisted) || intent.CacheDiagnostics["providerAttemptTelemetryError"] != "invalid_or_incomplete" {
+		t.Fatal("scan-only view changed terminal publication payload")
+	}
+	after, err := json.Marshal([]any{input.Usage, input.CacheDiagnostics})
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("terminal publication mutated its original input maps")
+	}
+}
+
+func TestTerminalPublicationIntentRejectsUnsafeAttemptTelemetryAndOriginalBudgetOverflow(t *testing.T) {
+	for _, fault := range []string{"wrong usage", "unknown usage", "unknown diagnostic", "raw enum", "raw sibling", "credential usage", "credential diagnostics", "reasoning usage", "reasoning diagnostics", "nested diagnostics", "usage string budget", "diagnostic string budget", "diagnostic node budget", "diagnostic depth budget"} {
+		t.Run(fault, func(t *testing.T) {
+			telemetry := domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}, map[string]any{
+				"providerAttemptTelemetrySchema": domainterminaltelemetry.ProviderAttemptTelemetrySchemaV1,
+				"providerAttemptTelemetryValid":  false, "providerAttemptTelemetryError": "invalid_or_incomplete", "providerAttemptInventoryComplete": false,
+			})
+			input := TerminalPublicationIntentInput{CreatedAt: "2026-10-18T01:02:03Z", TerminalStatus: "completed", Usage: telemetry.PublicUsageMap(), CacheDiagnostics: telemetry.PublicCacheDiagnosticsMap()}
+			switch fault {
+			case "wrong usage":
+				input.Usage["totalTokens"] = 1
+			case "unknown usage":
+				input.Usage["unrecognized"] = true
+			case "unknown diagnostic":
+				input.CacheDiagnostics["unrecognized"] = true
+			case "raw enum":
+				input.CacheDiagnostics["providerAttemptTelemetryError"] = "PRIVATE_PROVIDER_FAILURE"
+			case "raw sibling":
+				input.CacheDiagnostics["lastError"] = "PRIVATE_PROVIDER_FAILURE"
+			case "credential usage":
+				input.Usage["apiKey"] = "sk-test-private-value"
+			case "credential diagnostics":
+				input.CacheDiagnostics["apiKey"] = "sk-test-private-value"
+			case "reasoning usage":
+				input.Usage["details"] = "<think>PRIVATE_REASONING</think>"
+			case "reasoning diagnostics":
+				input.CacheDiagnostics["details"] = "<think>PRIVATE_REASONING</think>"
+			case "nested diagnostics":
+				input.CacheDiagnostics = map[string]any{"nested": input.CacheDiagnostics}
+			case "usage string budget":
+				input.Usage["oversized"] = strings.Repeat("x", (1<<20)+1)
+			case "diagnostic string budget":
+				input.CacheDiagnostics["oversized"] = strings.Repeat("x", (1<<20)+1)
+			case "diagnostic node budget":
+				input.CacheDiagnostics["oversized"] = make([]any, 10_001)
+			case "diagnostic depth budget":
+				var nested any = "leaf"
+				for depth := 0; depth < 65; depth++ {
+					nested = map[string]any{"nested": nested}
+				}
+				input.CacheDiagnostics["oversized"] = nested
+			}
+			before, err := json.Marshal([]any{input.Usage, input.CacheDiagnostics})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := NewTerminalPublicationIntent(input, "success"); err == nil {
+				t.Fatal("unsafe or oversized telemetry acquired a publication exception")
+			}
+			after, err := json.Marshal([]any{input.Usage, input.CacheDiagnostics})
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("rejected telemetry validation changed its original input maps")
+			}
+		})
 	}
 }

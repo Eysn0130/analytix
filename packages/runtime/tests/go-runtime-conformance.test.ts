@@ -9036,14 +9036,39 @@ describe('Go runtime kernel conformance manifest', () => {
     for (const route of contract.routes) {
       const h = buildG2Harness()
       await seedG2Setup(h, route.setup)
-      const response = await dispatchRequest(h.router, requestFromRoute(route, contract.runtimeToken))
+      if (route.id === 'thread-archive-patch') {
+        // This historical replay predates the Go-owned archive intent. The
+        // diagnostic TypeScript oracle rejects both writes without mutating state.
+        const before = structuredClone(await h.threadStore.get('thr_g2_beta'))
+        expect(before).not.toBeNull()
+        expect(route.body, route.id).toEqual({ status: 'archived' })
+        const legacyStatus = await dispatchRequest(h.router, requestFromRoute(route, contract.runtimeToken))
+        expect(legacyStatus.status, route.id).toBe(400)
+        expect(await readJson(legacyStatus), route.id).toEqual({
+          code: 'validation_error',
+          message: 'The request did not satisfy the runtime contract.'
+        })
+        expect(await h.threadStore.get('thr_g2_beta'), route.id).toEqual(before)
 
-      expect(response.status, route.id).toBe(route.response.status)
-      if (route.responseKind === 'sse') {
-        expect(response.headers.get('content-type'), route.id).toContain('text/event-stream')
-        expect(await readSseEvents(response), route.id).toEqual(route.sseFrames ?? [])
+        const archiveIntent = await dispatchRequest(h.router, requestFromRoute({
+          ...route,
+          body: { archived: true }
+        }, contract.runtimeToken))
+        expect(archiveIntent.status, route.id).toBe(409)
+        expect(await readJson(archiveIntent), route.id).toEqual({
+          code: 'thread_archive_unavailable',
+          message: 'thread archive intent requires the Go runtime'
+        })
+        expect(await h.threadStore.get('thr_g2_beta'), route.id).toEqual(before)
       } else {
-        expect(await readJson(response), route.id).toEqual(route.response.body)
+        const response = await dispatchRequest(h.router, requestFromRoute(route, contract.runtimeToken))
+        expect(response.status, route.id).toBe(route.response.status)
+        if (route.responseKind === 'sse') {
+          expect(response.headers.get('content-type'), route.id).toContain('text/event-stream')
+          expect(await readSseEvents(response), route.id).toEqual(route.sseFrames ?? [])
+        } else {
+          expect(await readJson(response), route.id).toEqual(route.response.body)
+        }
       }
     }
   })
@@ -9067,6 +9092,7 @@ describe('Go runtime kernel conformance manifest', () => {
       repoSource('packages/runtime-go/internal/server/durable_recovery.go'),
       repoSource('packages/runtime-go/internal/adapters/outbound/eventlog/store.go'),
     ].join('\n')
+    const durableReplaySource = repoSource('packages/runtime-go/internal/adapters/outbound/eventlog/replay.go')
     const durableTestSource = repoSource('packages/runtime-go/durable_replay_contract_test.go')
     const durableCommandSource = repoSource('packages/runtime-go/cmd/contract-sidecar/main.go')
     const durableSidecarTestSource = repoSource('packages/runtime/tests/go-durable-sidecar-conformance.test.ts')
@@ -9156,8 +9182,13 @@ describe('Go runtime kernel conformance manifest', () => {
     expect(durableStoreSource).toContain('events.jsonl')
     expect(durableStoreSource).toContain('candidateDigest := sha256.New()')
     expect(durableStoreSource).toContain('candidateWriter := io.MultiWriter(temp, candidateDigest)')
-    expect(durableStoreSource).toContain('json.NewEncoder(candidateWriter)')
-    expect(durableStoreSource).toContain('encoder.Encode(event)')
+    expect(durableStoreSource).toContain('frame, err := EncodeEventJSONLFrameV1(event)')
+    expect(durableStoreSource).toContain('candidateWriter.Write(frame)')
+    expect(durableStoreSource).toContain('func EncodeEventJSONLFrameV1(event map[string]any) ([]byte, error)')
+    expect(durableStoreSource).toContain('encoded, err := json.Marshal(event)')
+    expect(durableStoreSource).toContain('if len(encoded)+1 > maxEventJSONLLineBytesV1')
+    expect(durableStoreSource).toContain("return append(encoded, '\\n'), nil")
+    expect(durableReplaySource).toContain('const maxEventJSONLLineBytesV1 = 4 << 20')
     expect(durableStoreSource).toContain('NewlineTerminated')
     expect(durableStoreSource).toContain('LoadEventsSince')
     expect(durableStoreSource).toContain('sort.SliceStable')

@@ -103,6 +103,35 @@ func BuildGeneralTerminalPublicationCommitForEventsV1(
 	return domainturnterminal.NewGeneralTerminalPublicationCommitV1(securityContext, binding, committedAt, drafts)
 }
 
+// GeneralTerminalPublicationCommitValidationViewV1 checks the complete private
+// outbox before producing a content-scanning view. Usage is checked as its real
+// root event; only that separately checked event is absent from the returned
+// copy. Callers must still validate canonical thread/CAS authority and must
+// never persist this view in place of the original commit.
+func GeneralTerminalPublicationCommitValidationViewV1(value any) (map[string]any, error) {
+	if err := domainevent.ValidateQuestionReplyResourceLimitsV1(value); err != nil {
+		return nil, errors.Join(domainevent.ErrCredentialProjection, err)
+	}
+	raw, ok := value.(map[string]any)
+	if !ok || raw == nil || !acceptedFinalPlainJSONV1(raw) {
+		return nil, errors.New("general terminal publication original JSON shape is invalid")
+	}
+	commit, err := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(raw)
+	if err != nil {
+		// Strict decoder errors can contain untrusted unknown field names.
+		return nil, errors.New("general terminal publication original commit integrity is invalid")
+	}
+	if err := domainevent.ValidatePublicRecord(commit.UsageEvent); err != nil {
+		return nil, err
+	}
+	view := domainturnterminal.GeneralTerminalPublicationCommitV1Map(commit)
+	delete(view, "usageEvent")
+	if err := domainevent.ValidatePublicRecord(view); err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
 // ValidateGeneralTerminalPublicationCommitForThreadV1 is the canonical CAS
 // readback check for an ordinary terminal outbox. The commit is an internal
 // durability authority only; it is never evidence or case-fact authority.

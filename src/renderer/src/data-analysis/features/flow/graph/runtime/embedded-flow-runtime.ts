@@ -20,7 +20,7 @@ import statsBaseCss from "../../runtime/embedded/analysis_stats/app.css?raw";
 import flowRuntimeCss from "../../runtime/embedded/analysis_flow/app.css?raw";
 import workbenchUiKitCss from "../../../../components/workbench-ui/workbench-ui-kit.css?raw";
 import txnDetailDialogCss from "../../../../components/txn-detail/txn-detail-dialog.css?raw";
-import { projectOrdinaryFieldValue } from "../../../shared/ordinary-pii-projection";
+import { ordinaryPiiProjection, projectOrdinaryFieldValue } from "../../../shared/ordinary-pii-projection";
 import {
   isDataAnalysisRuntimeEndpointAuthorityCurrent,
   resolveDataAnalysisRuntimeEndpointAuthority,
@@ -699,6 +699,7 @@ export interface EmbeddedFlowShellMounts {
 
 type EmbeddedFlowWindow = Window &
   typeof globalThis & {
+    __ANALYTIX_ORDINARY_PII_PROJECTION__?: typeof ordinaryPiiProjection;
     __ANALYTIX_VIZ_SHELL__?: EmbeddedFlowShellBridge;
     __ANALYTIX_FLOW_RUNTIME_BACKEND__?: unknown;
     __ANALYTIX_FLOW_RUNTIME_STORE__?: EmbeddedFlowRuntimeStore;
@@ -1620,8 +1621,17 @@ async function createEmbeddedFlowCanvasAdapter(
     graphStats: null,
     overlay: null,
   };
+  const requireOrdinaryPiiProjection = (target: EmbeddedFlowWindow): void => {
+    const projection = target.__ANALYTIX_ORDINARY_PII_PROJECTION__;
+    const methods = ["normalizeFieldName", "resolveKind", "projectRestricted", "projectField", "projectDetected"] as const;
+    if (projection !== ordinaryPiiProjection || methods.some((method) => typeof projection?.[method] !== "function")) {
+      throw new Error("ordinary PII host projection missing");
+    }
+  };
+
   const installRuntimeGlobals = (target: EmbeddedFlowWindow | null): void => {
     if (!target) return;
+    target.__ANALYTIX_ORDINARY_PII_PROJECTION__ = ordinaryPiiProjection;
     target.__ANALYTIX_FLOW_RUNTIME_BACKEND__ = runtimeStore?.getBackend?.() || null;
     target.__ANALYTIX_FLOW_RUNTIME_STORE__ = runtimeStore || undefined;
     target.__ANALYTIX_TASK__ = {
@@ -1879,8 +1889,10 @@ async function createEmbeddedFlowCanvasAdapter(
       runtimeHostMetrics.lastStage = "boot:store-ready";
 
       requireCurrentAuthority();
+      requireOrdinaryPiiProjection(liveIframeWindow);
       await loadRuntimeModule(liveIframeDocument, liveIframeWindow, page.runtimeLoaderUrl);
       requireCurrentAuthority();
+      requireOrdinaryPiiProjection(liveIframeWindow);
 
       if (currentCaseId) {
         runtimeStore.getBrowserBridge().__setCaseId?.(currentCaseId);

@@ -79,3 +79,30 @@ it.each(['horizontal', 'vertical'] as const)('refuses %s split identifiers for b
   expect(() => excelSelectionTextV1(value)).toThrow('Unsupported selection content.')
   expect(() => validateExcelCopyHtmlV1(value)).toThrow('Unsupported selection content.')
 })
+
+
+it.each(['horizontal', 'vertical'] as const)('preserves ordinary amount and date cells in %s selections', direction => {
+  const pairs: Cell[][] = [
+    [{ m: '12345678.90' }, { m: '87654321.00' }],
+    [{ m: '12345678 元' }, { m: '87654321 元' }],
+    [{ m: '2026-10-18' }, { m: '2026-10-19' }],
+    [{ m: '20261018' }, { m: '20261019' }],
+  ]
+  for (const pair of pairs) {
+    const value = frame(direction === 'horizontal' ? [pair] : pair.map(cell => [cell]))
+    expect(excelSelectionTextV1(value)).toBe(pair.map(cell => cell.m).join(direction === 'horizontal' ? '\t' : '\n'))
+    expect(validateExcelCopyHtmlV1(value)).toBe(value.html)
+  }
+})
+
+it('checks only neighbouring pairs without crossing empty cells, diagonals or longer sequences', () => {
+  for (const values of [
+    [[{ m: '62220202' }, {}, { m: '02020202' }]],
+    [[{ m: '62220202' }], [{}], [{ m: '02020202' }]],
+    [[{ m: '62220202' }, {}], [{}, { m: '02020202' }]],
+    [[{ m: '6222' }], [{ m: '0202' }], [{ m: '0202' }]],
+  ]) {
+    const value = frame(values)
+    expect(validateExcelCopyHtmlV1(value)).toBe(value.html)
+  }
+})
