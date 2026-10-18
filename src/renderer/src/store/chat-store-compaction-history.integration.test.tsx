@@ -3,6 +3,8 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { CompactResponse } from '../../../../packages/runtime/src/contracts/turns'
+import type { SseErrorPayload } from '@shared/analytix-api'
+import { isStrictPublicRuntimeSseErrorPayload } from '@shared/public-runtime-sse'
 import {
   defaultClawSettings, defaultKeyboardShortcuts, defaultAnalytixRuntimeSettings,
   defaultModelProviderSettings, defaultScheduleSettings, defaultWriteSettings, type AppSettingsV1
@@ -148,11 +150,18 @@ it('restores publicly authorized ordinary history after production compaction an
   const dataListeners = new Set<Parameters<RuntimeApi['onSseEvent']>[0]>()
   const endListeners = new Set<Parameters<RuntimeApi['onSseEnd']>[0]>()
   const errorListeners = new Set<Parameters<RuntimeApi['onSseError']>[0]>()
+  const sseErrorDiagnostics: Array<Pick<SseErrorPayload, 'code' | 'status' | 'reasonCode'>> = []
   const streams = new Set<string>()
   const sender = { id: 9001, isDestroyed: () => false, send: (channel: string, payload: unknown) => {
     if (channel === 'runtime:sse-event') dataListeners.forEach(fn => fn(payload as Parameters<typeof fn>[0]))
     if (channel === 'runtime:sse-end') endListeners.forEach(fn => fn(payload as Parameters<typeof fn>[0]))
-    if (channel === 'runtime:sse-error') errorListeners.forEach(fn => fn(payload as Parameters<typeof fn>[0]))
+    if (channel === 'runtime:sse-error') {
+      if (isStrictPublicRuntimeSseErrorPayload(payload)) {
+        const { code, status, reasonCode } = payload
+        sseErrorDiagnostics.push({ code, status, reasonCode })
+      }
+      errorListeners.forEach(fn => fn(payload as Parameters<typeof fn>[0]))
+    }
   } }
   const stopStreams = async () => {
     for (const streamId of streams) await handlers.get('runtime:sse:stop')?.({ sender }, streamId)
@@ -425,6 +434,8 @@ it('restores publicly authorized ordinary history after production compaction an
     const requestCount = providerRequests.length
     await act(async () => useChatStore.getState().selectThread(threadId))
     const displayed = useChatStore.getState()
+    expect(displayed.error, `Thread selection SSE diagnostics: ${JSON.stringify(sseErrorDiagnostics)}`).toBeNull()
+    expect(displayed.activeThreadId).toBe(threadId)
     expect(displayed.lastSeq).toBe(restartedPrimary.latestSeq)
     expect(displayed.blocks.filter(block => block.kind === 'compaction')).toHaveLength(1)
     const markerIndex = displayed.blocks.findIndex(block => block.kind === 'compaction')
