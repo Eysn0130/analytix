@@ -1,18 +1,23 @@
 package executiongrant
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"time"
 
 	appmodel "analytix.local/runtime-go/internal/app/model"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	"analytix.local/runtime-go/internal/contracts"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainpendingwork "analytix.local/runtime-go/internal/domain/pendingwork"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
+	finalauthorityport "analytix.local/runtime-go/internal/ports/finalauthority"
 )
 
 const maxRestartGrantSettlements = 1024
@@ -28,6 +33,12 @@ type RestartSettlementStore interface {
 type RestartGrantOutcomeAuthorityV1 struct {
 	Receipt     domainpendingwork.PendingWorkReceiptV1
 	Disposition domainpendingwork.PendingWorkDispositionV1
+	question    *questionRestartOutcomeV1
+}
+
+type questionRestartOutcomeV1 struct {
+	receipt     domaincontinuation.Receipt
+	disposition domaincontinuation.Disposition
 }
 
 type RestartGrantOutcomesV1 map[string]RestartGrantOutcomeAuthorityV1
@@ -109,7 +120,7 @@ func ReconcileOpenTurnGrantsOnRestart(
 		}
 		projection := toolcatalogapp.BuildPublicToolResultProjectionV1(call.Name, map[string]any{"code": "tool_cancelled"}, true)
 		if outcome, exists := outcomes[entry.Grant.GrantID]; exists {
-			if outcome.Disposition.Status == domainpendingwork.StatusOutcomeUnknown {
+			if outcome.question != nil || outcome.Disposition.Status == domainpendingwork.StatusOutcomeUnknown {
 				projection = domaintoolresult.OutcomeUnknownAfterRestartProjectionV1()
 			} else {
 				var valid bool
@@ -188,6 +199,20 @@ func validateRestartGrantOutcomes(
 	}
 	for grantID, authority := range outcomes {
 		grantID = strings.TrimSpace(grantID)
+		if authority.question != nil {
+			if authority.Receipt.ReceiptID != "" || authority.Disposition.DispositionID != "" {
+				return errors.New("mixed restart Question and write outcome authority")
+			}
+			proof := authority.question
+			if proof.receipt.Payload.ThreadID != threadID || proof.receipt.Payload.TurnID != turnID || proof.receipt.Payload.ExecutionGrant.GrantID != grantID || proof.disposition.ReceiptID != proof.receipt.ReceiptID || proof.disposition.GateID != proof.receipt.Payload.GateID {
+				return errors.New("restart Question outcome binding changed")
+			}
+			candidate, err := QuestionRestartSettlementCandidateV1(threadID, thread, proof.receipt)
+			if err != nil || !candidate {
+				return errors.New("restart Question outcome lacks exact original call authority")
+			}
+			continue
+		}
 		receipt, disposition := authority.Receipt, authority.Disposition
 		_, closedReport := ClosedReportRestartProjectionV1(receipt, disposition)
 		writeKindValid := len(receipt.GrantMembers) == 1 &&
@@ -240,11 +265,110 @@ func validateRestartGrantOutcomes(
 			continue
 		}
 		grantID := restartString(item, "executionGrantId")
-		if authority, found := outcomes[grantID]; !found || authority.Disposition.Status != domainpendingwork.StatusOutcomeUnknown {
+		if authority, found := outcomes[grantID]; !found || authority.question == nil && authority.Disposition.Status != domainpendingwork.StatusOutcomeUnknown {
 			return errors.New("restart outcome-unknown result lost its exact pending-work authority")
 		}
 	}
 	return nil
+}
+
+// NewQuestionRestartOutcomeAuthorityV1 pins both records to this installation
+// and makes the Question variant unforgeable by generic outcome-map callers.
+func NewQuestionRestartOutcomeAuthorityV1(ctx context.Context, authority finalauthorityport.Verifier, receipt domaincontinuation.Receipt, disposition domaincontinuation.Disposition) (RestartGrantOutcomeAuthorityV1, error) {
+	invalid := func() (RestartGrantOutcomeAuthorityV1, error) {
+		return RestartGrantOutcomeAuthorityV1{}, errors.New("restart Question outcome lacks current installation signature authority")
+	}
+	if ctx == nil || authority == nil || domaincontinuation.ValidateReceipt(receipt) != nil || domaincontinuation.ValidateDisposition(disposition) != nil || receipt.Payload.Kind != domaincontinuation.KindUserInput || receipt.Payload.UserInputReplyCapture != nil || receipt.Payload.UserInputDraft != nil || !domaincontinuation.HasExactProviderStepBinding(receipt.Payload) || disposition.Kind != receipt.Payload.Kind || disposition.GateID != receipt.Payload.GateID || disposition.ReceiptID != receipt.ReceiptID || disposition.UserInputReplySourceID != "" {
+		return invalid()
+	}
+	if disposition.Status == domaincontinuation.StatusContinued && !domaincontinuation.ValidUserInputContinuedReasonV1(receipt.Payload.UserInputTimedWait, disposition.ReasonCode) {
+		return invalid()
+	}
+	keyID, publicKey, signature, err := domaincontinuation.AuthorityMaterial(receipt)
+	if err != nil || keyID != authority.KeyID() || !bytes.Equal(publicKey, authority.PublicKey()) || authority.VerifyTrusted(ctx, keyID, publicKey, domaincontinuation.ReceiptSigningBytes(receipt), signature) != nil {
+		return invalid()
+	}
+	keyID, publicKey, signature, err = domaincontinuation.DispositionAuthorityMaterial(disposition)
+	if err != nil || keyID != authority.KeyID() || !bytes.Equal(publicKey, authority.PublicKey()) || authority.VerifyTrusted(ctx, keyID, publicKey, domaincontinuation.DispositionSigningBytes(disposition), signature) != nil {
+		return invalid()
+	}
+	issued, e1 := time.Parse(time.RFC3339Nano, receipt.Payload.IssuedAt)
+	disposed, e2 := time.Parse(time.RFC3339Nano, disposition.DisposedAt)
+	if e1 != nil || e2 != nil || disposed.Before(issued) {
+		return invalid()
+	}
+	// Detach all mutable private fields retained by this proof.
+	body, err := json.Marshal(questionRestartOutcomeV1JSON{Receipt: receipt, Disposition: disposition})
+	var detached questionRestartOutcomeV1JSON
+	if err != nil || json.Unmarshal(body, &detached) != nil {
+		return invalid()
+	}
+	return RestartGrantOutcomeAuthorityV1{question: &questionRestartOutcomeV1{receipt: detached.Receipt, disposition: detached.Disposition}}, nil
+}
+
+type questionRestartOutcomeV1JSON struct {
+	Receipt     domaincontinuation.Receipt
+	Disposition domaincontinuation.Disposition
+}
+
+// QuestionRestartSettlementCandidateV1 checks actual native dispatch authority.
+// Timed policy alone is never proof that a tool started or has an unknown result.
+// A normal existing completion is deliberately not an unknown candidate.
+func QuestionRestartSettlementCandidateV1(threadID string, thread map[string]any, receipt domaincontinuation.Receipt) (bool, error) {
+	p := receipt.Payload
+	if p.ExecutionGrant.ReadOnly {
+		return false, nil
+	}
+	if p.Kind != domaincontinuation.KindUserInput || p.UserInputReplyCapture != nil || p.UserInputDraft != nil || !domaincontinuation.HasExactProviderStepBinding(p) {
+		return false, nil
+	}
+	invalid := func() (bool, error) {
+		return false, errors.New("restart native Question original dispatch authority is invalid")
+	}
+	if domaincontinuation.ValidateReceipt(receipt) != nil || p.ThreadID != threadID || !toolcatalogapp.IsUserInputTool(p.ToolName) || p.ExecutionGrant.ServerIdentity != "host:builtin" || p.ExecutionGrant.ConnectionEpoch != 0 || p.ExecutionGrant.ApprovalState != "not_required" || p.ExecutionGrant.ReadOnly || ValidateExecutionGrantForCall(p.SecurityContext, p.ExecutionGrant, domainmodel.ToolCall{ID: p.CallID, Name: p.ToolName, Arguments: p.Arguments}) != nil {
+		return invalid()
+	}
+	turn, found := appmodel.TurnByID(thread, p.TurnID)
+	if !found {
+		return invalid()
+	}
+	securityContext, err := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
+	if err != nil || !reflect.DeepEqual(securityContext, p.SecurityContext) {
+		return invalid()
+	}
+	registry, err := RegistryFromThread(threadID, thread, p.TurnID)
+	if err != nil {
+		return invalid()
+	}
+	entry, found := domainsecurity.ExecutionGrantRegistryEntryByID(registry, p.ExecutionGrant.GrantID)
+	if !found || entry.Grant != p.ExecutionGrant || entry.ContextDigest != p.SecurityContext.ContextDigest || entry.ThreadID != p.ThreadID || entry.TurnID != p.TurnID {
+		return invalid()
+	}
+	count := 0
+	for _, raw := range restartItems(turn["items"]) {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			return invalid()
+		}
+		if restartString(item, "kind") != "tool_call" || restartString(item, "callId") != p.CallID {
+			continue
+		}
+		grant, err := domainsecurity.ParseExecutionGrant(item["executionGrant"])
+		if err != nil || grant != p.ExecutionGrant || restartString(item, "id") != p.ToolCallItemID || restartString(item, "toolName") != p.ToolName || restartString(item, "executionGrantId") != p.ExecutionGrant.GrantID || restartString(item, "contextDigest") != p.SecurityContext.ContextDigest {
+			return invalid()
+		}
+		count++
+	}
+	if count != 1 {
+		return invalid()
+	}
+	if entry.Status == domainsecurity.GrantRegistrySettled {
+		return restartOutcomeUnknownSettlementMatches(threadID, p.TurnID, thread, entry), nil
+	}
+	if entry.Status != domainsecurity.GrantRegistryActive {
+		return invalid()
+	}
+	return true, nil
 }
 
 func restartOutcomeReceiptMatchesRegistry(

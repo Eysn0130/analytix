@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createElement } from 'react'
+import { createElement, Fragment } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ChatBlock, NormalizedThread, ToolBlock } from '../../agent/types'
 import { useChatStore } from '../../store/chat-store'
@@ -13,8 +13,10 @@ import {
 } from './MessageTimeline'
 import { composeWritePrompt } from '../../write/quoted-selection'
 import { GeneratedFilesPanel, MessageBubble } from './message-timeline-bubbles'
-import { ProcessSectionRow, groupProcessSections } from './message-timeline-process'
-import { projectSubagentActionResponse, SubagentCallCard } from './SubagentCallCard'
+import { groupProcessSections, getProcessDetail, describeProcessBlock, type ProcessSection } from './presentation/chat/chat-view-model'
+import { PublicToolBody } from './presentation/chat/ToolViews'
+import { ToolCallTree } from './presentation/chat/ToolCallTree'
+import { projectSubagentActionResponse, SubagentDetailBody, isSubagentProcessBlock } from './SubagentCallCard'
 import { resolveInjectedMemoryTooltipLines } from './injected-memory-lookup'
 
 const labels: Record<string, string> = {
@@ -201,6 +203,23 @@ const labels: Record<string, string> = {
 const t = (key: string, opts?: Record<string, unknown>) => {
   const template = labels[key] ?? (key === 'toolActionCommand' ? 'Ran command' : key)
   return template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(opts?.[name] ?? `{{${name}}}`))
+}
+
+
+// SSR fixtures distinguish collapsed rows from the real authorized public body.
+// Click/open wiring is covered by the jsdom central/atomic-row regressions.
+function PublicDetailFixture({ block, processing = false }: { block: ChatBlock; processing?: boolean }) {
+  if (block.kind === 'tool' && block.meta?.localResult) return null
+  return createElement(PublicToolBody, { block, detail: getProcessDetail(block, describeProcessBlock(block, t)), processing })
+}
+function ProcessRowsFixture({ section, processing, expanded = false, composer = false }: {
+  section: ProcessSection; processing: boolean; expanded?: boolean; composer?: boolean; viewportRef?: unknown
+}) {
+  return createElement(Fragment, null,
+    createElement(ToolCallTree, { blocks: section.blocks, processing }),
+    expanded ? section.blocks.map(block => createElement(PublicDetailFixture, { key: block.id, block, processing })) : null,
+    composer ? section.blocks.filter(block => (block.kind === 'approval' || block.kind === 'user_input') && block.status === 'pending')
+      .map(block => createElement(MessageBubble, { key: block.id, block, threadId: 'thr_1' })) : null)
 }
 
 const activeThread: NormalizedThread = {
@@ -516,7 +535,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(MessageBubble, { block }))
+    const html = renderToStaticMarkup(createElement(PublicDetailFixture, { block }))
 
     expect(html).toContain('Attachments 1')
     expect(html).toContain('Skills 1')
@@ -606,7 +625,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: { id: 'execution-tool_1', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -664,15 +684,15 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-group', kind: 'execution', blocks: [childBlock, tool] },
         processing: false,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('Ran 1 child agent')
-    expect(html).toContain('Explored workspace')
+    expect(html).toContain('data-tool-view="subagent"'); expect(html).toContain('research'); expect(html).not.toContain('ds-subagent-mount')
+    expect(html).toContain('data-analytix-process-block-id')
   })
 
   it('renders grouped child-agent work as low-noise single-line process rows', () => {
@@ -720,7 +740,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
 
     const [section] = groupProcessSections([childBlock, secondChildBlock])
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: section!,
         processing: true,
         viewportRef: { current: null }
@@ -728,12 +749,14 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     )
 
     expect(section?.kind).toBe('subagent')
-    expect(html).toContain('ds-subagent-mount')
-    expect(html).toContain('Created 2 agents')
+    expect(html).toContain('data-dsh-subagent-details')
+    expect((html.match(/data-analytix-process-block-id=/g) ?? [])).toHaveLength(2)
+    expect(html).not.toContain('Created 2 agents')
     expect(html).toContain('research')
     expect(html).toContain('researcher')
-    expect(html).toContain('Created research (researcher) with: research workspace')
-    expect(html).toContain('Created audit (reviewer) with: audit message timeline')
+    expect(html).toContain('research'); expect(html).toContain('Completed')
+    expect(html).not.toContain('with: research workspace')
+    expect(html).toContain('audit'); expect(html).not.toContain('with: audit message timeline')
     expect(html).toContain('2 tools')
     expect(html).toContain('42 tokens')
     expect(html).toContain('cache 50%')
@@ -751,7 +774,10 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
         childThreadId: 'thr_child_real',
         input: 'inspect'
       }),
-      meta: { toolName: 'task' }
+      meta: { toolName: 'task', child: {
+        parentThreadId: 'thr_parent', parentTurnId: 'turn_parent',
+        childId: 'job_with_thread', childThreadId: 'thr_child_real', childStatus: 'completed'
+      } }
     })
     const withoutThread = toolBlock({
       id: 'tool_child_without_thread',
@@ -764,14 +790,16 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       meta: { toolName: 'task' }
     })
 
-    const withThreadHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: withThread }))
-    const withoutThreadHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: withoutThread }))
+    const withThreadHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: withThread }))
+    const withoutThreadHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: withoutThread }))
+    const legacyOnlyHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: { ...withThread, meta: { toolName: 'task' } } }))
 
     expect(withThreadHtml).toMatch(/subagentOpenSession|Open child session/)
     expect(withoutThreadHtml).not.toMatch(/subagentOpenSession|Open child session/)
+    expect(legacyOnlyHtml).not.toMatch(/subagentOpenSession|Open child session/)
   })
 
-  it('shows a steer affordance only for running background child jobs that can accept steer', () => {
+  it('offers child-session messaging for identifiable running and completed children', () => {
     const running = toolBlock({
       id: 'tool_child_steer_running',
       summary: 'task: inspect',
@@ -808,15 +836,29 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const runningHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: running }))
-    const completedHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: completed }))
+    const unidentified = toolBlock({
+      ...completed,
+      id: 'tool_child_without_session',
+      meta: {
+        ...completed.meta,
+        child: {
+          ...(completed.meta?.child as Record<string, unknown>),
+          childThreadId: undefined
+        }
+      }
+    })
+    const runningHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: running }))
+    const completedHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: completed }))
+    const unidentifiedHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: unidentified }))
 
-    expect(runningHtml).toMatch(/subagentSteerPlaceholder|Message child at next safe point/)
-    expect(runningHtml).toMatch(/subagentSteerSend|Send steer message/)
+    for (const html of [runningHtml, completedHtml]) {
+      expect(html).toMatch(/subagentMessagePlaceholder|Message child agent/)
+      expect(html).toMatch(/subagentSteerSend|Send child message/)
+    }
     expect(runningHtml).toContain('steer queued')
     expect(runningHtml).toMatch(/subagentSteerPending|1 steer queued/)
-    expect(completedHtml).not.toMatch(/subagentSteerPlaceholder|Message child at next safe point/)
-    expect(completedHtml).not.toMatch(/subagentSteerSend|Send steer message/)
+    expect(unidentifiedHtml).not.toMatch(/subagentMessagePlaceholder|Message child agent/)
+    expect(unidentifiedHtml).not.toMatch(/subagentSteerSend|Send child message/)
   })
 
   it('shows pause and resume controls only for eligible background child jobs', () => {
@@ -872,9 +914,9 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const runningHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: running }))
-    const pausedHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: paused }))
-    const completedHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: completed }))
+    const runningHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: running }))
+    const pausedHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: paused }))
+    const completedHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: completed }))
 
     expect(runningHtml).toMatch(/subagentPauseAction|Pause at safe boundary/)
     expect(runningHtml).toMatch(/subagentKillAction|Kill child run/)
@@ -927,8 +969,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const leaseHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: leaseExpired }))
-    const completedHtml = renderToStaticMarkup(createElement(SubagentCallCard, { block: completed }))
+    const leaseHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: leaseExpired }))
+    const completedHtml = renderToStaticMarkup(createElement(SubagentDetailBody, { block: completed }))
 
     expect(leaseHtml).not.toMatch(/subagentOutputAction|Inspect child output/)
     expect(leaseHtml).toMatch(/subagentRecoverAction|Recover child run/)
@@ -939,7 +981,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     expect(leaseHtml).toContain('lease expired')
     expect(leaseHtml).not.toMatch(/subagentPauseAction|Pause at safe boundary/)
     expect(leaseHtml).not.toMatch(/subagentResumeAction|Resume child run/)
-    expect(leaseHtml).not.toMatch(/subagentSteerPlaceholder|Message child at next safe point/)
+    expect(leaseHtml).toMatch(/subagentMessagePlaceholder|Message child agent/)
     expect(completedHtml).not.toMatch(/subagentRestartAction|Restart child run/)
     expect(completedHtml).not.toMatch(/subagentRecoveryKillAction|Kill expired child run/)
   })
@@ -975,7 +1017,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).toContain('isolated worktree')
     expect(html).toContain('codex/subagent/thr_parent/job_worktree')
@@ -1013,7 +1055,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).not.toContain('Inspect isolated diff')
     expect(html).not.toContain('Accept clean isolated diff')
@@ -1052,7 +1094,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).not.toContain('Inspect isolated diff')
     expect(html).not.toContain('Accept clean isolated diff')
@@ -1094,7 +1136,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).not.toContain('Record conflict report')
     expect(html).not.toContain('Paste a repair patch to dry-run against the parent workspace')
@@ -1134,7 +1176,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).not.toContain('Accept clean repair patch')
     expect(html).not.toContain('Repair check is dry-run only; Accept repair requires parent approval')
@@ -1170,7 +1212,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).not.toContain('Inspect isolated diff')
     expect(html).not.toContain('Accept clean isolated diff')
@@ -1210,7 +1252,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).toContain('accepted accept-1')
     expect(html).toContain('patch sha256:abc')
@@ -1250,7 +1292,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).toContain('cleanup cleanup-1')
     expect(html).not.toContain('Accept clean isolated diff')
@@ -1283,7 +1325,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).not.toContain('Inspect isolated diff')
   })
@@ -1339,7 +1381,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).toContain('3 child todos')
     expect(html).toContain('projection proposed')
@@ -1384,7 +1426,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).toContain('projection rejected')
     expect(html).not.toContain('Child todo projection is a proposal; parent approval is required')
@@ -1424,7 +1466,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
     expect(html).toContain('projection accepted')
     expect(html).toContain('decision accepted: 1 accepted, 0 skipped')
@@ -1501,8 +1543,9 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     const sections = groupProcessSections([firstRunning, interleavedTool, secondRunning, firstCompleted])
     const html = renderToStaticMarkup(
       createElement('div', null,
-        sections.map((section) => createElement(ProcessSectionRow, {
+        sections.map((section) => createElement(ProcessRowsFixture, {
           key: section.id,
+          expanded: true,
           section,
           processing: true,
           viewportRef: { current: null }
@@ -1512,14 +1555,16 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
 
     expect(sections.map((section) => section.kind)).toEqual(['subagent', 'execution'])
     expect(sections[0]?.blocks).toHaveLength(2)
-    expect(html).toContain('Running 2 agents')
+    expect((html.match(/data-analytix-process-block-id=/g) ?? [])).toHaveLength(3)
     expect(html).not.toContain('Running 1 agents')
-    expect(html).toContain('Created 文件结构优化 (design-reviewer) with: 文件结构优化 - 分析目录结构和存储优化方案')
-    expect(html).toContain('Running 深度安全威胁分析 (design-reviewer) with: 深度安全威胁分析 - 分析可疑 mp4.js 文件、系统安全风险')
+    expect(html).toContain('文件结构优化'); expect(html).toContain('Completed')
+    expect(html).not.toContain('分析目录结构和存储优化方案')
+    expect(html).toContain('深度安全威胁分析'); expect(html).toContain('Running')
+    expect(html).not.toContain('分析可疑 mp4.js 文件、系统安全风险')
     expect(html).toContain('Read README')
   })
 
-  it('renders a single aggregated parallel_tasks result as compact child-agent rows', () => {
+  it('keeps legacy parallel payloads unavailable without a Host capture or real native child metadata', () => {
     const block: ToolBlock = toolBlock({
       id: 'tool_parallel_tasks_done',
       summary: 'parallel_tasks',
@@ -1539,16 +1584,12 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       meta: { toolName: 'parallel_tasks' }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block }))
 
-    expect(html).toContain('Created 4 agents')
-    expect(html).not.toContain('Created 1 agents')
-    expect(html).toContain('Created Heisenberg (explorer) with: readonly audit Kun')
-    expect(html).toContain('Created Pascal (explorer) with: readonly audit Reasonix')
-    expect(html).toContain('Created Volta (explorer) with: readonly audit claw-code')
-    expect(html).toContain('Created Kuhn (explorer) with: readonly audit opencode')
-    expect(html).not.toContain('Input')
-    expect(html).not.toContain('Result')
+    expect((html.match(/data-dsh-subagent-details/g) ?? [])).toHaveLength(1)
+    expect(html).toContain('Receipt unavailable')
+    expect(html).not.toMatch(/Heisenberg|Pascal|Volta|Kuhn|readonly audit|Input|Result/)
+    expect(html).not.toContain('data-subagent-native-controls')
   })
 
   it('shows a single failed child-agent as expanded multi-line diagnostics', () => {
@@ -1577,7 +1618,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
 
     const [section] = groupProcessSections([childBlock])
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: section!,
         processing: false,
         viewportRef: { current: null }
@@ -1585,14 +1627,14 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     )
 
     expect(section?.kind).toBe('subagent')
-    expect(html).toContain('Failed to create 1 agents')
-    expect(html).toContain('Creation failed')
-    expect(html).toContain('Input')
-    expect(html).toContain('只读审计任务 A')
-    expect(html).toContain('Error')
-    expect(html).toContain('子任务执行失败')
+    expect(html).toMatch(/protectedToolFailed|Failed|失败/)
+    expect(html).toContain('task A')
+    expect(html).not.toContain('Input')
+    expect(html).not.toContain('只读审计任务 A')
+    expect(html).not.toContain('Error')
+    expect(html).not.toContain('子任务执行失败')
     expect(html).not.toContain('历史子代理数量已经到上限')
-    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('aria-expanded="false"') // Collapsed row and explicit body fixture are checked separately.
   })
 
   it('does not expose background completion output preview as child-agent result detail', () => {
@@ -1625,14 +1667,15 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(SubagentCallCard, { block: childBlock }))
+    const html = renderToStaticMarkup(createElement(SubagentDetailBody, { block: childBlock }))
 
     expect(html).not.toContain('Result')
     expect(html).not.toContain(privateOutputSentinel)
   })
 
   it('renders closed child-agent groups with the closed summary style', () => {
-    const closedBlocks: ToolBlock[] = ['Dirac', 'Franklin'].map((name, index) => toolBlock({
+    const names = ['Dirac', 'Franklin']
+    const closedBlocks: ToolBlock[] = names.map((name, index) => toolBlock({
       id: `tool_child_closed_${index}`,
       summary: `task: ${name}`,
       status: 'error',
@@ -1654,7 +1697,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
 
     const [section] = groupProcessSections(closedBlocks)
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: section!,
         processing: false,
         viewportRef: { current: null }
@@ -1662,9 +1706,21 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     )
 
     expect(section?.kind).toBe('subagent')
-    expect(html).toContain('Closed 2 agents')
-    expect(html).toContain('Closed Dirac (explorer)')
-    expect(html).toContain('Closed Franklin (explorer)')
+    expect((html.match(/data-analytix-process-block-id=/g) ?? [])).toHaveLength(2)
+    const renderedRows = html.split('data-analytix-process-block-id=')
+    closedBlocks.forEach((block, index) => {
+      const row = renderedRows.find(candidate => candidate.startsWith(`"${block.id}"`))
+      expect(row).toBeDefined()
+      expect(row).toContain('data-state="error"')
+      expect(row).not.toContain('Completed')
+      // The SSR fixture appends expanded details after all collapsed rows.
+      const detail = renderToStaticMarkup(createElement(PublicDetailFixture, { block, processing: false }))
+      expect(detail).toContain('data-dsh-subagent-details')
+      expect(detail).toContain(names[index])
+      expect(detail).toContain('explorer')
+      expect(detail).toContain('Killed')
+      expect(detail).not.toContain('Completed')
+    })
   })
 
   it('groups background shell child events into a background shell card section', () => {
@@ -1697,7 +1753,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
 
     const [section] = groupProcessSections([shellBlock])
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: section!,
         processing: true,
         viewportRef: { current: null }
@@ -1705,7 +1761,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     )
 
     expect(section?.kind).toBe('background_shell')
-    expect(html).toContain('ds-subagent-mount')
+    expect(html).toContain('data-analytix-process-block-id="tool_shell_background"')
+    expect(html).not.toContain('ds-subagent-mount')
     expect(html).toContain('npm test')
     expect(html).toContain('running')
     expect(html).not.toContain('output 2.0KB')
@@ -1732,7 +1789,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     ])
   })
 
-  it('auto-expands structured subagent and job diagnostics in the process timeline', () => {
+  it('preserves structured subagent and job diagnostics in the expanded public body', () => {
     const block: ToolBlock = toolBlock({
       id: 'tool_child_detail',
       summary: 'task: research',
@@ -1807,15 +1864,16 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: { id: 'execution-tool_child_detail', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('aria-expanded="true"')
-    expect(html).toContain('ds-work-timeline-detail')
+    expect(html).toContain('aria-expanded="false"') // Real click wiring is covered by the atomic interaction suite.
+    expect(html).not.toContain('ds-work-timeline-detail')
     expect(html).toMatch(/<dt[^>]*>run<\/dt><dd[^>]*>job_4<\/dd>/)
     expect(html).toMatch(/<dt[^>]*>job<\/dt><dd[^>]*>job_4<\/dd>/)
     expect(html).toMatch(/<dt[^>]*>parent<\/dt><dd[^>]*>thr_parent_4 · turn_parent_4 · call_parent_4<\/dd>/)
@@ -1850,13 +1908,15 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
   })
 
   it('renders provider diagnostics on runtime status bubbles and process rows', () => {
+    // Deterministic synthetic redaction fixture; never use a real credential.
+    const syntheticRedactionToken = 'sk-' + 'x'.repeat(24)
     const block: ChatBlock = {
       kind: 'system',
       id: 'runtime_status_turn_provider_error_1',
       text: 'Provider stream failed',
       meta: {
         providerError: {
-          providerId: 'deepseek-prod sk-providerSecret1234567890',
+          providerId: `deepseek-prod ${syntheticRedactionToken}`,
           endpointFormat: 'openai-chat',
           status: 401,
           kind: 'auth',
@@ -1869,7 +1929,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
 
     const bubbleHtml = renderToStaticMarkup(createElement(MessageBubble, { block }))
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-runtime_status_turn_provider_error_1', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -1913,7 +1973,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-success-runtime-meta', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -1921,8 +1981,9 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     )
 
     expect(html).toContain('aria-expanded="false"')
-    expect(html).toContain('delivery status delivered')
-    expect(html).toContain('delivery attempts 2')
+    expect(html).not.toContain('delivery status delivered')
+    expect(html).not.toContain('delivery attempts 2')
+    expect(html).toContain('aria-label="Open runtime diagnostics"')
     expect(html).not.toContain('ds-work-timeline-detail')
     expect(html).not.toMatch(/<dt[^>]*>delivery<\/dt>/)
   })
@@ -1951,7 +2012,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     expect(groupProcessSections([block])[0]?.kind).toBe('execution')
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: { id: 'execution-auto-started', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -1985,7 +2047,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     expect(summarizeToolBlock(block, t)).toBe('Background result did not auto-continue')
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: { id: 'execution-auto-skipped', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -2066,7 +2129,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     expect(summarizeToolBlock(block, t)).toBe('Background result delivered to the parent thread')
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: { id: 'execution-delivery-delivered', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -2112,14 +2176,15 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     )
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: { id: 'execution-delivery-dead-letter', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('text-orange')
+    expect(html).not.toContain('parent_thread_missing')
     expect(html).not.toContain('parent_thread_missing')
     expect(html).toContain('delivery status dead_letter')
     expect(html).toContain('dead-lettered at 2026-07-07T00:00:03.000Z')
@@ -2144,7 +2209,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     }
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-runtime_status_turn_provider_retrying_1', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -2173,7 +2238,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     }
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-runtime_status_turn_empty_final_recovered_1', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -2200,7 +2265,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     }
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-runtime_status_turn_empty_provider_error_2', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -2228,7 +2293,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       }
     })
 
-    const html = renderToStaticMarkup(createElement(MessageBubble, { block }))
+    const html = renderToStaticMarkup(createElement(PublicDetailFixture, { block }))
 
     expect(html).toContain('Child agent')
     expect(html).toContain('0 tools')
@@ -2246,7 +2311,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-tool_1', kind: 'execution', blocks: [block] },
         processing: true,
         viewportRef: { current: null }
@@ -2256,72 +2321,74 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     expect(html).toContain('Read')
     expect(html).toContain('/tmp/readme.md')
     expect(html).not.toContain('ds-work-logo')
-    expect(html).toContain('ds-shiny-text')
+    expect(html).toContain('data-shimmer')
     expect(html).not.toContain('partial tool output while running')
-    expect(html).toContain('ds-process-file-reference')
+    expect(html).toContain('data-tool-file-link')
   })
 
   it('keeps completed failed tool details collapsed by default', () => {
     const block: ChatBlock = toolBlock({
       summary: 'Recognize image recognize_image',
       status: 'error',
-      detail: 'model request failed with status 401',
+      detail: 'model request failed with status 401\nSynthetic diagnostic body',
       meta: { toolName: 'recognize_image' }
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-tool_error', kind: 'execution', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('Recognize image recognize_image')
-    expect(html).toContain('text-orange-700')
+    expect(html).toContain('model request failed with status 401')
+    expect(html).toMatch(/protectedToolFailed|Failed|失败/)
     expect(html).toContain('aria-expanded="false"')
-    expect(html).not.toContain('model request failed with status 401')
+    expect(html).not.toContain('Synthetic diagnostic body')
     expect(html).toContain('role="button"')
   })
 
-  it('keeps failed tool details visible while the turn is still processing', () => {
+  it('preserves failed tool public detail for explicit expansion while running', () => {
     const block: ChatBlock = toolBlock({
       summary: 'Recognize image recognize_image',
       status: 'error',
-      detail: 'model request failed with status 401',
+      detail: 'model request failed with status 401\nSynthetic diagnostic body',
       meta: { toolName: 'recognize_image' }
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        expanded: true,
         section: { id: 'execution-tool_error_live', kind: 'execution', blocks: [block] },
         processing: true,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('Recognize image recognize_image')
-    expect(html).toContain('text-orange-700')
-    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('model request failed with status 401')
+    expect(html).toMatch(/protectedToolFailed|Failed|失败/)
+    expect(html).toContain('aria-expanded="false"') // Body fixture asserts the content available to one real expansion.
     expect(html).toContain('model request failed with status 401')
   })
 
-  it('keeps completed failed tool bubbles collapsed and orange toned', () => {
+  it('keeps failed tool details collapsed with an accessible failure status', () => {
     const block: ChatBlock = toolBlock({
       summary: 'List ~/Desktop',
       status: 'error',
-      detail: 'tool failed with a long diagnostic payload',
+      detail: 'tool failed with a long diagnostic payload\nADDITIONAL_DIAGNOSTIC_BODY',
       meta: { toolName: 'ls' }
     })
 
     const html = renderToStaticMarkup(createElement(MessageBubble, { block }))
 
-    expect(html).toContain('List ~/Desktop')
-    expect(html).toContain('border-orange-300')
-    expect(html).not.toContain('tool failed with a long diagnostic payload')
+    expect(html).toContain('tool failed with a long diagnostic payload')
+    expect(html).toMatch(/protectedToolFailed|Failed|失败/)
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('ADDITIONAL_DIAGNOSTIC_BODY')
   })
 
-  it('renders assistant output process text directly without an output header', () => {
+  it('renders ordinary public process prose as an assistant message without a fake Think', () => {
     const block: ChatBlock = {
       kind: 'assistant',
       id: 'assistant_preface',
@@ -2329,7 +2396,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     }
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'output-assistant_preface', kind: 'output', blocks: [block] },
         processing: false,
         viewportRef: { current: null }
@@ -2338,9 +2405,9 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
 
     expect(html).toContain('Intermediate note before the final answer.')
     expect(html).not.toContain('processTextLabel')
-    expect(html).not.toContain('>Output<')
-    expect(html).not.toContain('>文本输出<')
-    expect(html).not.toContain('aria-expanded')
+    expect(html).toContain('ds-chat-answer')
+    expect(html).not.toContain('data-variant="think"')
+    expect(html).not.toContain('data-disclosure-row')
     expect(html).not.toContain('border-l-2')
   })
 
@@ -2361,17 +2428,17 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-batch', kind: 'execution', blocks: [readBlock, grepBlock] },
         processing: false,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('Explored workspace')
+    expect(html).toContain('data-analytix-process-block-id')
     expect(html).not.toContain('ds-work-stack')
-    expect(html).not.toContain('/tmp/readme.md')
-    expect(html).not.toContain('needle')
+    expect(html).toContain('/tmp/readme.md')
+    expect(html).toContain('needle')
     expect(html).not.toContain('read detail should stay tucked away')
     expect(html).not.toContain('grep detail should stay tucked away')
   })
@@ -2390,18 +2457,18 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-batch', kind: 'execution', blocks: [searchBlock, genericBlock] },
         processing: false,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('Explored workspace')
-    expect(html).toContain('Used 1 tool')
+    expect(html).toContain('data-analytix-process-block-id')
+    expect(html).toContain('Fetch url fetch')
   })
 
-  it('auto-expands pending request_user_input while keeping other tool details tucked away', () => {
+  it('withholds pending question and option bytes without Host authority while other details stay collapsed', () => {
     const readBlock: ChatBlock = toolBlock({
       id: 'tool_read',
       summary: 'read: file',
@@ -2430,16 +2497,19 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     }
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        composer: true,
         section: { id: 'execution-batch', kind: 'execution', blocks: [readBlock, inputBlock] },
         processing: true,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('ds-work-stack')
-    expect(html).toContain('What should we eat tonight?')
-    expect(html).toContain('Noodles')
+    expect(html).not.toContain('ds-work-stack')
+    expect(html).not.toContain('What should we eat tonight?')
+    expect(html).not.toContain('Noodles')
+    expect(html).toContain('Original question is unavailable.')
+    expect(html).not.toContain('<textarea')
     expect(html).not.toContain('read detail should stay tucked away')
   })
 
@@ -2461,16 +2531,17 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       summary: 'Write pending-output.txt'
     }
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-pending-write', kind: 'execution', blocks: [writeBlock, approvalBlock] },
         processing: true,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('1 file operation · 1 approval')
+    expect(html).toContain('pending-output.txt')
+    expect(html).toContain('data-gate-request-id="appr_write_pending"')
     expect(html).toMatch(/Approval required|需要审批|approvalTitle/)
-    expect(html).toMatch(/Allow|允许|approvalAllow/)
+    expect(html).not.toMatch(/>Allow<|>允许</)
     expect(html).not.toMatch(/Edited \d+ files?|修改了/)
   })
 
@@ -2480,18 +2551,18 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       toolBlock({ id: 'tool_edit', summary: 'edit', toolKind: 'file_change', status: 'error', meta: { toolName: 'edit' }, filePath: '/tmp/same-file.txt' })
     ]
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
         section: { id: 'execution-same-file', kind: 'execution', blocks },
         processing: false,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('2 file operations')
+    expect((html.match(/data-analytix-process-block-id=/g) ?? [])).toHaveLength(2)
     expect(html).not.toMatch(/Edited \d+ files?|修改了/)
   })
 
-  it('auto-expands pending approvals while keeping other tool details tucked away', () => {
+  it('presents pending approvals once in the composer with other details collapsed', () => {
     const readBlock: ChatBlock = toolBlock({
       id: 'tool_read',
       summary: 'read: file',
@@ -2509,21 +2580,22 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     }
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        composer: true,
         section: { id: 'execution-batch', kind: 'execution', blocks: [readBlock, approvalBlock] },
         processing: true,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('ds-work-stack')
+    expect(html).not.toContain('ds-work-stack')
     expect(html).toContain('Run edit(path=&quot;/tmp/app.ts&quot;)')
     expect(html).toMatch(/Approval required|需要审批|approvalTitle/)
     expect(html).toMatch(/Allow|允许|approvalAllow/)
     expect(html).not.toContain('read detail should stay tucked away')
   })
 
-  it('renders request_user_input without options as a freeform answer field', () => {
+  it('withholds a freeform question and editable answer field without Host authority', () => {
     const inputBlock: ChatBlock = {
       kind: 'user_input',
       id: 'ui_freeform',
@@ -2540,16 +2612,19 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     }
 
     const html = renderToStaticMarkup(
-      createElement(ProcessSectionRow, {
+      createElement(ProcessRowsFixture, {
+        composer: true,
         section: { id: 'execution-input', kind: 'execution', blocks: [inputBlock] },
         processing: true,
         viewportRef: { current: null }
       })
     )
 
-    expect(html).toContain('你更想去南方还是北方？')
-    expect(html).toContain('<textarea')
-    expect(html).not.toContain('userInputOther')
+    expect(html).not.toContain('你更想去南方还是北方？')
+    expect(html).not.toContain('<textarea')
+    expect(html).toContain('Original question is unavailable.')
+    expect(html).not.toContain('>Other<')
+    expect(html).not.toContain('userInputOtherPlaceholder')
     expect(html).not.toContain('其他')
   })
 
@@ -2558,13 +2633,14 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       {
         kind: 'user',
         id: 'user_1',
-        text: 'inspect this file'
+        text: 'inspect this file',
+        meta: { turnId: 'turn_1' }
       },
       toolBlock({
         summary: 'read: file',
         status: 'running',
         detail: 'running timeline detail should stay collapsed',
-        meta: { toolName: 'read' },
+        meta: { turnId: 'turn_1', toolName: 'read' },
         filePath: '/tmp/project/src/app.ts'
       })
     ]
@@ -2574,18 +2650,31 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       turnStartedAtByUserId: { user_1: Date.now() }
     })
 
-    const html = renderToStaticMarkup(
+    const render = (authoritativeTurnStatuses: Record<string, 'running'>) => renderToStaticMarkup(
       createElement(MessageTimeline, {
         blocks,
         live: '',
         activeThreadId: 'thr_1',
         runtimeConnection: 'ready',
+        runtimeStateOverride: {
+          busy: true,
+          currentTurnId: 'turn_1',
+          currentTurnUserId: 'user_1',
+          turnStartedAtByUserId: { user_1: Date.now() },
+          turnDurationByUserId: {},
+          authoritativeTurnTimings: {},
+          authoritativeTurnStatuses
+        },
         onRetryConnection: () => undefined,
         onOpenSettings: () => undefined
       })
     )
 
-    expect(html).toContain('aria-expanded="true"')
+    expect(render({})).not.toContain('data-analytix-live-progress')
+    const html = render({ turn_1: 'running' })
+
+    expect(html).toContain('data-analytix-live-progress')
+    expect(html).not.toContain('data-analytix-turn-process')
     expect(html).toContain('Read')
     expect(html).toContain('/tmp/project/src/app.ts')
     expect(html).not.toContain('running timeline detail should stay collapsed')
@@ -2650,6 +2739,8 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
         live: '',
         activeThreadId: 'thr_1',
         runtimeConnection: 'ready',
+        runtimeStateOverride: { busy: true, currentTurnId: null, currentTurnUserId: 'user_1',
+          turnStartedAtByUserId: { user_1: 1000 }, turnDurationByUserId: {} },
         onRetryConnection: () => undefined,
         onOpenSettings: () => undefined
       })
@@ -2732,7 +2823,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
 
   it('collapses completed Go tool work before the final answer by default', () => {
     const blocks: ChatBlock[] = [
-      { kind: 'user', id: 'user_1', text: 'Read the config' },
+      { kind: 'user', id: 'user_1', text: 'Read the config', meta: { turnId: 'turn_1' } },
       { kind: 'assistant', id: 'assistant_preface', text: 'I will inspect the file first.' },
       {
         kind: 'tool',
@@ -2761,22 +2852,28 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
         live: '',
         activeThreadId: 'thr_1',
         runtimeConnection: 'ready',
+        runtimeStateOverride: { busy: false, currentTurnId: null, currentTurnUserId: null,
+          turnStartedAtByUserId: {}, turnDurationByUserId: {}, authoritativeTurnTimings: {},
+          authoritativeTurnStatuses: { turn_1: 'completed' } },
         onRetryConnection: () => undefined,
         onOpenSettings: () => undefined
       })
     )
 
     expect(html).toContain('aria-expanded="false"')
-    expect(html).toContain('Work process (2 steps)')
-    expect(html).not.toContain('I will inspect the file first.')
-    expect(html).not.toContain('Read config')
+    const process = html.match(/<button[^>]*data-analytix-turn-process[^>]*>[\s\S]*?<\/button>/)?.[0] ?? ''
+    expect(process.replace(/<[^>]*>/g, '')).toBe('Completed')
+    expect(html).not.toContain('Work process (2 steps)')
+    expect(html).toContain('data-public-process-body')
+    expect(html).toMatch(/<button[^>]*data-analytix-turn-process[^>]*aria-expanded="false"/)
+    expect(html).toContain('data-chat-seat="tool_call_read"')
     expect(html).toContain('The config enables the requested feature.')
-    expect(html.indexOf('Work process (2 steps)')).toBeLessThan(html.indexOf('The config enables the requested feature.'))
+    expect(html.indexOf(process)).toBeLessThan(html.indexOf('The config enables the requested feature.'))
   })
 
   it('collapses completed failed tool work once the final answer is available', () => {
     const blocks: ChatBlock[] = [
-      { kind: 'user', id: 'user_1', text: 'List the desktop' },
+      { kind: 'user', id: 'user_1', text: 'List the desktop', meta: { turnId: 'turn_1' } },
       {
         kind: 'tool',
         id: 'tool_ls',
@@ -2804,14 +2901,20 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
         live: '',
         activeThreadId: 'thr_1',
         runtimeConnection: 'ready',
+        runtimeStateOverride: { busy: false, currentTurnId: null, currentTurnUserId: null,
+          turnStartedAtByUserId: {}, turnDurationByUserId: {}, authoritativeTurnTimings: {},
+          authoritativeTurnStatuses: { turn_1: 'completed' } },
         onRetryConnection: () => undefined,
         onOpenSettings: () => undefined
       })
     )
 
     expect(html).toContain('aria-expanded="false"')
-    expect(html).toContain('Work process (1 steps)')
-    expect(html).not.toContain('tool failed')
+    const process = html.match(/<button[^>]*data-analytix-turn-process[^>]*>[\s\S]*?<\/button>/)?.[0] ?? ''
+    expect(process.replace(/<[^>]*>/g, '')).toBe('Completed')
+    expect(html).not.toContain('Work process (1 steps)')
+    expect(html).toContain('data-public-process-body')
+    expect(html).toMatch(/<button[^>]*data-analytix-turn-process[^>]*aria-expanded="false"/)
     expect(html).toContain('I could not list that folder')
   })
 
@@ -2856,8 +2959,9 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     )
 
     expect(html).toContain('request failed with status 400')
-    expect(html).toContain('Code: http_400')
-    expect(html).toContain('providerId')
+    expect(html).toContain('http_400')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('providerId') // Detail is available only after the one explicit row expansion.
     expect(html).not.toContain('full provider body')
   })
 
@@ -2878,7 +2982,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       turnDurationByUserId: {},
     })
 
-    const html = renderToStaticMarkup(
+    const render = () => renderToStaticMarkup(
       createElement(MessageTimeline, {
         blocks: [],
         live: '',
@@ -2895,6 +2999,17 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
         onOpenSettings: () => undefined
       })
     )
+
+    const unconfirmed = render()
+    expect(unconfirmed).not.toContain('data-analytix-live-progress')
+    expect(unconfirmed).not.toContain('child inspector final answer')
+    appendActiveStreamDeltas({
+      threadId: 'thr_child',
+      turnId: 'turn_child_live',
+      lastSeq: 17,
+      runtimeRunning: true
+    })
+    const html = render()
 
     expect(html).not.toContain('child inspector thinking')
     expect(html).not.toContain('child inspector final answer')
@@ -2941,7 +3056,9 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
           currentTurnId: null,
           currentTurnUserId: null,
           turnStartedAtByUserId: {},
-          turnDurationByUserId: { user_child_done: 12_000 }
+          turnDurationByUserId: { user_child_done: 99_000 },
+          authoritativeTurnTimings: { turn_child_done: { turnId: 'turn_child_done', userItemId: 'user_child_done', startedAt: 1000, finishedAt: 13000 } },
+          authoritativeTurnStatuses: { turn_child_done: 'completed' }
         },
         onRetryConnection: () => undefined,
         onOpenSettings: () => undefined
@@ -2949,10 +3066,14 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     )
 
     expect(html).toContain('child persisted final answer')
-    expect(html).toContain('Processed 12s')
+    const process = html.match(/<button[^>]*data-analytix-turn-process[^>]*>[\s\S]*?<\/button>/)?.[0] ?? ''
+    const processText = process.replace(/<[^>]*>/g, '')
+    expect(processText).toBe('Completed in 12s')
+    expect(processText).not.toMatch(/\b(?:99\s*s|1\s*m\s*39\s*s)\b/)
     expect(html).not.toContain('Thought for')
     expect(html).toContain('aria-expanded="false"')
-    expect(html).not.toContain('列出 src/renderer')
+    expect(html).toContain('data-public-process-body')
+    expect(html).toMatch(/<button[^>]*data-analytix-turn-process[^>]*aria-expanded="false"/)
   })
 
   it('uses one bottom reading inset because the real goal is inside the measured composer', () => {
@@ -2989,7 +3110,7 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
     ).toBe(true)
   })
 
-  it('renders the workspace rollback action on completed assistant responses with a git checkpoint', () => {
+  it('withholds workspace tail mutations when SSR has no owning primary thread', () => {
     const blocks: ChatBlock[] = [
       {
         kind: 'user',
@@ -3021,10 +3142,9 @@ describe('MessageTimeline Analytix runtime metadata smoke', () => {
       })
     )
 
-    expect(html).toMatch(/rollbackWorkspace|Rollback commit|回滚提交/)
-    expect(html).toMatch(/rollbackWorkspaceFromAssistantResponse|Rollback this response&#x27;s Git commit|只回滚这条回答对应的 Git 提交/)
-    expect(html).toMatch(/forkResponse|Fork response|分叉回答/)
-    expect(html).toMatch(/forkFromAssistantResponse|Fork the conversation from this response|从这条回答分叉会话/)
+    expect(html).not.toMatch(/rollbackWorkspace|Rollback commit|回滚提交/)
+    expect(html).not.toMatch(/forkResponse|Fork response|分叉回答/)
+    expect(html).toContain('Copy message') // Server snapshot has no owning primary thread; real owner actions are verified in jsdom.
   })
 
   it('drops marker-free action response reason and error text', () => {

@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 import {
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_MODEL_PROVIDER_ID,
+  getAnalytixRuntimeSettings,
   getModelProviderSettings,
   getModelProviderPreset,
   isAnalytixRuntimeInsecure,
@@ -30,7 +31,8 @@ import {
 import {
   AnalytixConfigSchema,
   ModelProvidersConfigSchema,
-  RuntimeTuningConfigSchema
+  RuntimeTuningConfigSchema,
+  UserInputConfigSchemaV1
 } from '../../packages/runtime/src/config/analytix-config.js'
 import {
   McpCapabilityConfig,
@@ -486,7 +488,105 @@ async function startAnalytixChildOnce(
   startedLogCapture.logLifecycle({ code: 'ANALYTIX_CHILD_READY', port: runtime.port })
 }
 
+const guiConfigWriteTails = new Map<string, Promise<void>>()
+let readCurrentGuiSettings: (() => Promise<AppSettingsV1>) | undefined
+
+export function configureGuiManagedAnalytixSettingsReader(reader?: () => Promise<AppSettingsV1>): void {
+  // Admission reads the existing Host store; this is not another settings cache.
+  readCurrentGuiSettings = reader
+}
+
+export async function acquireGuiConfigWrite(dataDir: string): Promise<() => void> {
+  const key = resolve(dataDir)
+  const previous = guiConfigWriteTails.get(key) ?? Promise.resolve()
+  let unlock!: () => void
+  const gate = new Promise<void>(resolveGate => { unlock = resolveGate })
+  const tail = previous.then(() => gate)
+  guiConfigWriteTails.set(key, tail)
+  await previous
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    unlock()
+    if (guiConfigWriteTails.get(key) === tail) guiConfigWriteTails.delete(key)
+  }
+}
+
 export async function syncGuiManagedAnalytixConfig(
+  dataDir: string,
+  runtime: Parameters<typeof syncGuiManagedAnalytixConfigWithoutLock>[1],
+  options?: Parameters<typeof syncGuiManagedAnalytixConfigWithoutLock>[2]
+): Promise<{ hostScheduleMcpBindingV1: RuntimeHostScheduleMcpBindingV1 | null }> {
+  if (options?.scheduleMcp) {
+    const { settings, launch } = options.scheduleMcp
+    // Capture the caller's schedule inputs before waiting for the writer;
+    // the accepted-settings reader below still supersedes this snapshot.
+    options = { ...options, scheduleMcp: {
+      settings: { ...settings, schedule: { ...settings.schedule,
+        internal: { ...settings.schedule.internal }
+      } },
+      launch: { ...launch }
+    } }
+  }
+  const release = await acquireGuiConfigWrite(dataDir)
+  try {
+    if (readCurrentGuiSettings && options?.scheduleMcp) {
+      const current = await readCurrentGuiSettings()
+      if (resolve(resolveAnalytixDataDir(getAnalytixRuntimeSettings(current))) !== resolve(dataDir)) {
+        throw new Error('Runtime settings changed before configuration projection.')
+      }
+      runtime = getAnalytixRuntimeSettings(current)
+      options = { ...options, scheduleMcp: { ...options.scheduleMcp, settings: current } }
+    }
+    return await syncGuiManagedAnalytixConfigWithoutLock(dataDir, runtime, options)
+  } finally { release() }
+}
+
+/** Hold the config writer through the enclosing settings commit. */
+export async function prepareGuiManagedAnalytixSettingsTransition(
+  dataDir: string,
+  current: AppSettingsV1,
+  next: AppSettingsV1
+): Promise<() => void> {
+  const release = await acquireGuiConfigWrite(dataDir)
+  try {
+    const configPath = join(dataDir, 'config.json')
+    const state = await readStrictJsonObjectState(configPath, MAX_RUNTIME_CONFIG_JSON_BYTES)
+    if (state.status === 'missing') return release
+    if (state.status !== 'valid') throw new Error('Invalid GUI-managed runtime configuration.')
+    const existing = state.value
+    if (existing.capabilities !== undefined && (!existing.capabilities ||
+        typeof existing.capabilities !== 'object' || Array.isArray(existing.capabilities))) {
+      throw new Error('Invalid GUI-managed runtime configuration.')
+    }
+    const capabilities = objectValue(existing.capabilities)
+    if (!SubagentsCapabilityConfig.safeParse(capabilities.subagents === undefined ? {} : capabilities.subagents).success ||
+        !SkillsCapabilityConfig.safeParse(capabilities.skills === undefined ? {} : capabilities.skills).success) {
+      throw new Error('Invalid GUI-managed settings projection.')
+    }
+    const previousRuntime = getAnalytixRuntimeSettings(current)
+    const nextRuntime = getAnalytixRuntimeSettings(next)
+    const previousManaged = guiSkillManagedComparablePaths(current)
+    const nextActive = new Set((await guiSkillRootsForRuntime(next)).map(root => comparableSkillRootPath(root.path)))
+    const skills = objectValue(capabilities.skills)
+    const roots = stringArrayValue(skills.roots).filter(root =>
+      !previousManaged.has(comparableSkillRootPath(root)) || nextActive.has(comparableSkillRootPath(root)))
+    const projected = { ...existing, capabilities: { ...capabilities,
+      subagents: retireGuiManagedSubagents(nextRuntime.subagents, objectValue(capabilities.subagents), previousRuntime.subagents),
+      skills: { ...skills, roots }
+    } }
+    if (!SubagentsCapabilityConfig.safeParse(projected.capabilities.subagents).success ||
+        !SkillsCapabilityConfig.safeParse(projected.capabilities.skills).success) {
+      throw new Error('Invalid GUI-managed settings projection.')
+    }
+    const text = `${JSON.stringify(projected, null, 2)}\n`
+    if (text !== state.bytes.toString('utf8')) await atomicWriteFile(configPath, text, { mode: 0o600 })
+    return release
+  } catch (error) { release(); throw error }
+}
+
+async function syncGuiManagedAnalytixConfigWithoutLock(
   dataDir: string,
   runtime: Pick<
     AnalytixRuntimeSettingsV1,
@@ -504,6 +604,7 @@ export async function syncGuiManagedAnalytixConfig(
     }
     mcpConfigPath?: string
     bundledFundsMaterialization?: BundledFundsMaterializationBindingV1
+    previousGuiSettings?: AppSettingsV1
   }
 ): Promise<{ hostScheduleMcpBindingV1: RuntimeHostScheduleMcpBindingV1 | null }> {
   let hostScheduleMcpBindingV1: RuntimeHostScheduleMcpBindingV1 | null = null
@@ -576,10 +677,15 @@ export async function syncGuiManagedAnalytixConfig(
   const skillCapability = await skillCapabilityConfigForRuntime(
     skills,
     options?.scheduleMcp?.settings,
-    options?.bundledFundsMaterialization
+    options?.bundledFundsMaterialization,
+    options?.previousGuiSettings
   )
   const next = {
-    runtime: runtimeTuningConfigForRuntime(runtime.runtimeTuning, existingRuntimeTuning),
+    runtime: {
+      ...runtimeTuningConfigForRuntime(runtime.runtimeTuning, existingRuntimeTuning),
+      ...(runtime.userInput !== undefined ? { userInput: UserInputConfigSchemaV1.parse(runtime.userInput) }
+        : existingRuntimeTuning.userInput !== undefined ? { userInput: existingRuntimeTuning.userInput } : {})
+    },
     capabilities: {
       web: {
         ...web,
@@ -587,7 +693,8 @@ export async function syncGuiManagedAnalytixConfig(
         fetchEnabled: existingWebFetchExplicitlyDisabled ? false : true
       },
       skills: skillCapability,
-      subagents: subagentsConfigForRuntime(runtime.subagents, subagents),
+      subagents: subagentsConfigForRuntime(runtime.subagents, subagents,
+        options?.previousGuiSettings && getAnalytixRuntimeSettings(options.previousGuiSettings).subagents),
       visionBridge: visionBridgeConfigForRuntime(runtime),
       mcp: {
         ...mcp,
@@ -737,7 +844,7 @@ function builtInComputerUseMcpServerCandidateForRuntime(
         ANALYTIX_COMPUTER_USE_MANAGED_BY: 'analytix'
       },
       trustScope: 'user',
-        backgroundStart: false,
+        backgroundStart: true,
         timeoutMs: ANALYTIX_COMPUTER_USE_MCP_TIMEOUT_MS
       }
     }
@@ -791,13 +898,15 @@ function buildGuiScheduleAnalytixMcpServer(
 async function skillCapabilityConfigForRuntime(
   existing: Record<string, unknown>,
   settings?: AppSettingsV1,
-  bundledFundsMaterialization?: BundledFundsMaterializationBindingV1
+  bundledFundsMaterialization?: BundledFundsMaterializationBindingV1,
+  previousGuiSettings?: AppSettingsV1
 ): Promise<Record<string, unknown>> {
   // Carry over only the roots a user added by hand to the Analytix config file.
   // Drop previously-persisted GUI-managed roots so disabling a directory in
   // settings actually removes it — otherwise a toggled-off root would stick
   // around forever via `existing.roots`.
   const managed = guiSkillManagedComparablePaths(settings)
+  for (const path of guiSkillManagedComparablePaths(previousGuiSettings)) managed.add(path)
   const managedPrefixes = guiPluginSkillManagedComparablePrefixes()
   const runtimeSkillRoots = await guiSkillRootsForRuntime(
     settings,
@@ -1750,11 +1859,34 @@ function parseAnalytixConfigSection(
   return parsed.success ? objectValue(parsed.data) : {}
 }
 
+function retireGuiManagedSubagents(
+  next: AnalytixSubagentsSettingsV1,
+  existing: Record<string, unknown>,
+  previous: AnalytixSubagentsSettingsV1
+): Record<string, unknown> {
+  const profiles = { ...objectValue(existing.profiles) }
+  const removed = new Set(Object.keys(previous.profiles).filter(name => !Object.hasOwn(next.profiles, name)))
+  for (const name of removed) delete profiles[name.trim()]
+  const result: Record<string, unknown> = { ...existing, profiles }
+  const defaultProfile = typeof existing.defaultProfile === 'string' ? existing.defaultProfile.trim() : ''
+  if (removed.has(defaultProfile) || (defaultProfile && previous.defaultProfile.trim() === defaultProfile &&
+      next.defaultProfile.trim() !== defaultProfile)) delete result.defaultProfile
+  // Adding or editing waits for accepted settings. A failed settings write
+  // must not leave an uncommitted GUI profile looking like manual config.
+  return result
+}
+
 function subagentsConfigForRuntime(
   subagents: AnalytixSubagentsSettingsV1,
-  existing: Record<string, unknown>
+  existing: Record<string, unknown>,
+  previous?: AnalytixSubagentsSettingsV1
 ): Record<string, unknown> {
   const profiles: Record<string, unknown> = { ...objectValue(existing.profiles) }
+  // Only previous GUI settings establish ownership. Preserve manual profiles
+  // outside that set, including profiles with no current GUI counterpart.
+  for (const name of Object.keys(previous?.profiles ?? {})) {
+    if (!Object.hasOwn(subagents.profiles, name)) delete profiles[name.trim()]
+  }
   for (const name of Object.keys(subagents.profiles).sort()) {
     const trimmedName = name.trim()
     if (!trimmedName) continue
@@ -1772,7 +1904,9 @@ function subagentsConfigForRuntime(
   const existingDefaultProfile = typeof existing.defaultProfile === 'string'
     ? existing.defaultProfile.trim()
     : ''
-  const defaultProfile = requestedDefaultProfile || existingDefaultProfile
+  const previousDefault = previous?.defaultProfile.trim() ?? ''
+  const defaultProfile = requestedDefaultProfile ||
+    (previousDefault && previousDefault === existingDefaultProfile ? '' : existingDefaultProfile)
   const next: Record<string, unknown> = {
     ...existing,
     enabled: subagents.enabled,
@@ -1804,12 +1938,24 @@ function sanitizeAnalytixCapabilitiesConfig(value: unknown): Record<string, unkn
   return next
 }
 
+function parseProductionRuntimeConfigSection(value: unknown): Record<string, unknown> {
+  if (value === undefined) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid runtime config section.')
+  const raw = value as Record<string, unknown>
+  // Retired compatibility keys are deliberately projected out by this existing
+  // production writer. Invalid active fields fail closed before any file write.
+  const active = Object.fromEntries(['streamIdleTimeoutMs', 'stepLimits', 'userInput'].filter(key => Object.hasOwn(raw, key)).map(key => [key, raw[key]]))
+  const parsed = RuntimeTuningConfigSchema.safeParse(active)
+  if (!parsed.success) throw new Error('Invalid runtime config section.')
+  return parsed.data
+}
+
 function sanitizeProductionAnalytixConfig(
   existing: Record<string, unknown> | null
 ): Record<string, unknown> | null {
   if (!existing) return null
   return {
-    runtime: parseAnalytixConfigSection(RuntimeTuningConfigSchema, existing.runtime),
+    runtime: parseProductionRuntimeConfigSection(existing.runtime),
     capabilities: sanitizeAnalytixCapabilitiesConfig(existing.capabilities)
   }
 }

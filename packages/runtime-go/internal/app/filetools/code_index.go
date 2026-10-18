@@ -80,7 +80,17 @@ func FilterCodeIndexSymbols(symbols []CodeIndexSymbol, request CodeIndexRequest)
 	return out
 }
 
-func BuildCodeIndexToolOutput(input CodeIndexToolOutputInput) map[string]any {
+// One projection supplies both the established model reply and the protected
+// filesystem receipt. Filtering/limiting is not rerun by a UI capture adapter.
+type CodeIndexToolResult struct {
+	Input        CodeIndexToolOutputInput
+	Symbols      []CodeIndexSymbol
+	Truncated    bool
+	Text         string
+	LimitReached bool
+}
+
+func ProjectCodeIndexToolOutput(input CodeIndexToolOutputInput) CodeIndexToolResult {
 	request := input.Request
 	symbols := FilterCodeIndexSymbols(input.Symbols, request)
 	truncated := input.Truncated
@@ -88,6 +98,16 @@ func BuildCodeIndexToolOutput(input CodeIndexToolOutputInput) map[string]any {
 		symbols = symbols[:request.Limit]
 		truncated = true
 	}
+	return CodeIndexToolResult{Input: input, Symbols: symbols, Truncated: truncated,
+		Text: FormatCodeIndexSymbols(symbols, truncated), LimitReached: len(symbols) >= request.Limit}
+}
+
+func BuildCodeIndexToolOutput(input CodeIndexToolOutputInput) map[string]any {
+	return ProjectCodeIndexToolOutput(input).ModelOutput()
+}
+
+func (result CodeIndexToolResult) ModelOutput() map[string]any {
+	input, request, symbols := result.Input, result.Input.Request, result.Symbols
 	rows := make([]map[string]any, 0, len(symbols))
 	for _, symbol := range symbols {
 		rows = append(rows, map[string]any{
@@ -109,11 +129,11 @@ func BuildCodeIndexToolOutput(input CodeIndexToolOutputInput) map[string]any {
 		"limit":                request.Limit,
 		"symbols":              rows,
 		"symbol_count":         len(rows),
-		"text":                 FormatCodeIndexSymbols(symbols, truncated),
+		"text":                 result.Text,
 		"skipped_protected":    append([]string(nil), input.SkippedProtected...),
 		"skipped_directories":  append([]string(nil), input.SkippedDirs...),
-		"truncated":            truncated,
-		"result_limit_reached": len(symbols) >= request.Limit,
+		"truncated":            result.Truncated,
+		"result_limit_reached": result.LimitReached,
 	}
 }
 

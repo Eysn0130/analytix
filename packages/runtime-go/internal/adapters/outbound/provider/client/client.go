@@ -430,7 +430,27 @@ func (e *ProviderError) RetryAfterDelay() time.Duration {
 	return time.Duration(e.RetryAfterMs) * time.Millisecond
 }
 
-func (c *HTTPProviderClient) Stream(ctx context.Context, request domainmodel.Request) (domainmodel.Result, error) {
+func (c *HTTPProviderClient) Stream(ctx context.Context, request domainmodel.Request) (finalResult domainmodel.Result, finalErr error) {
+	maxReconnects := c.effectiveMaxStreamReconnects()
+	var pendingRetry *domainmodel.ProviderRetryV1
+	emitRetry := func(retry domainmodel.ProviderRetryV1) error {
+		if request.OnChunk == nil {
+			return nil
+		}
+		return request.OnChunk(domainmodel.Chunk{Kind: domainmodel.ChunkRetrying, RetryAttempt: retry.PhysicalAttempt, RetryMax: maxReconnects + 1, Retry: &retry})
+	}
+	defer func() {
+		if pendingRetry == nil {
+			return
+		}
+		retry := *pendingRetry
+		retry.Phase, retry.At = "cancelled", time.Now().UTC()
+		retry.DelayMs, retry.DeadlineUnixMs = nil, nil
+		retry.CancelReason = domainmodel.ProviderRetryCancelReasonV1(ctx.Err(), finalErr)
+		if err := emitRetry(retry); err != nil {
+			finalErr = errors.Join(finalErr, withProviderFailureContextV1(err, domaincache.ProviderDispatchStateNotSent, ProviderFailureStageCallbackProjection, retry.PhysicalAttempt))
+		}
+	}()
 	if err := domainmodel.ValidateReasoningEffortV1(request.ReasoningEffort); err != nil {
 		return domainmodel.Result{}, withProviderFailureContextV1(
 			err, domaincache.ProviderDispatchStateNotSent, ProviderFailureStageRequestValidation, 0,
@@ -458,7 +478,6 @@ func (c *HTTPProviderClient) Stream(ctx context.Context, request domainmodel.Req
 			err, domaincache.ProviderDispatchStateNotSent, ProviderFailureStageRequestBuild, 0,
 		)
 	}
-	maxReconnects := c.effectiveMaxStreamReconnects()
 	parseEndpointFormat := request.EndpointFormat
 	if domainmodel.NormalizeEndpointFormat(request.EndpointFormat) == "custom_endpoint" {
 		parseEndpointFormat = providercompat.CustomEndpointRequestShape(request.BaseURL)
@@ -466,6 +485,11 @@ func (c *HTTPProviderClient) Stream(ctx context.Context, request domainmodel.Req
 	var telemetry *providerCallTelemetry
 	for attempt := 0; ; attempt++ {
 		physicalAttempt := attempt + 1
+		if pendingRetry != nil {
+			if err := ctx.Err(); err != nil {
+				return domainmodel.Result{}, withProviderFailureContextV1(err, domaincache.ProviderDispatchStateNotSent, ProviderFailureStageCallbackProjection, physicalAttempt)
+			}
+		}
 		if request.BeforeSend != nil {
 			if err := request.BeforeSend(physicalAttempt); err != nil {
 				return domainmodel.Result{}, withProviderFailureContextV1(
@@ -496,7 +520,21 @@ func (c *HTTPProviderClient) Stream(ctx context.Context, request domainmodel.Req
 				beginErr, domaincache.ProviderDispatchStateNotSent, ProviderFailureStageTelemetryBegin, physicalAttempt,
 			)
 		}
-		result, emitted, dispatchState, err := c.streamOnce(ctx, request, parseEndpointFormat, endpoint, body, bodyBytes, headers, requestBuildStartedAt, physicalAttempt)
+		notifyProviderProcessFrameV1(request, domainmodel.ProcessFrameV1{Kind: "reset", Attempt: uint64(physicalAttempt)})
+		result, emitted, dispatchState, err := c.streamOnce(ctx, request, parseEndpointFormat, endpoint, body, bodyBytes, headers, requestBuildStartedAt, physicalAttempt, func() error {
+			if pendingRetry == nil {
+				return nil
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			retry := *pendingRetry
+			retry.Phase, retry.At = "started", time.Now().UTC()
+			retry.DelayMs, retry.DeadlineUnixMs = nil, nil
+			pendingRetry = nil
+			return emitRetry(retry)
+		})
+		notifyProviderProcessFrameV1(request, domainmodel.ProcessFrameV1{Kind: "terminal", Attempt: uint64(physicalAttempt)})
 		hostErr := ctx.Err()
 		settleCtx, cancelSettle := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		observations, settleErr := telemetry.settle(settleCtx, shape, result, emitted, err, hostErr, dispatchState, time.Now().UTC())
@@ -533,23 +571,31 @@ func (c *HTTPProviderClient) Stream(ctx context.Context, request domainmodel.Req
 		if emitted || attempt >= maxReconnects || !isPreOutputStreamReplayableError(err) {
 			return result, withProviderFailureContextV1(err, dispatchState, failureStage, physicalAttempt)
 		}
-		if request.OnChunk != nil {
-			if callbackErr := request.OnChunk(domainmodel.Chunk{
-				Kind:         domainmodel.ChunkRetrying,
-				Text:         err.Error(),
-				RetryAttempt: attempt + 2,
-				RetryMax:     maxReconnects + 1,
-			}); callbackErr != nil {
-				return result, withProviderFailureContextV1(
-					withProviderFailureStageV1(callbackErr, ProviderFailureStageCallbackProjection),
-					dispatchState, ProviderFailureStageCallbackProjection, physicalAttempt,
-				)
-			}
+		at := time.Now().UTC()
+		delayMs, deadlineMs := int64(0), at.UnixMilli()
+		retry := domainmodel.ProviderRetryV1{SchemaVersion: 1, Source: "transport_reconnect", Phase: "scheduled", PhysicalAttempt: physicalAttempt + 1, DelayMs: &delayMs, DeadlineUnixMs: &deadlineMs, At: at}
+		if request.PrivateProviderTelemetry != nil {
+			retry.LogicalSequence = request.PrivateProviderTelemetry.LogicalSequence
+			retry.OuterAttempt = int(request.PrivateProviderTelemetry.OuterAttempt)
 		}
+		if callbackErr := emitRetry(retry); callbackErr != nil {
+			return result, withProviderFailureContextV1(withProviderFailureStageV1(callbackErr, ProviderFailureStageCallbackProjection), dispatchState, ProviderFailureStageCallbackProjection, physicalAttempt)
+		}
+		pendingRetry = &retry
 	}
 }
 
-func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel.Request, parseEndpointFormat string, endpoint string, body map[string]any, bodyBytes []byte, headers map[string]string, requestBuildStartedAt time.Time, attempt int) (domainmodel.Result, bool, domaincache.ProviderDispatchStateV1, error) {
+// Process lifecycle notifications are private and best-effort. They never
+// replace the ordinary callback's failure or cancellation authority.
+func notifyProviderProcessFrameV1(request domainmodel.Request, frame domainmodel.ProcessFrameV1) {
+	if request.OnChunk == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	_ = request.OnChunk(domainmodel.Chunk{Kind: domainmodel.ChunkReasoning, ProcessFrame: &frame})
+}
+
+func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel.Request, parseEndpointFormat string, endpoint string, body map[string]any, bodyBytes []byte, headers map[string]string, requestBuildStartedAt time.Time, attempt int, beforeInvocation func() error) (domainmodel.Result, bool, domaincache.ProviderDispatchStateV1, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return domainmodel.Result{}, false, domaincache.ProviderDispatchStateNotSent,
@@ -586,6 +632,11 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 	}); err != nil {
 		return domainmodel.Result{}, false, domaincache.ProviderDispatchStateNotSent,
 			withProviderFailureStageV1(err, ProviderFailureStageCallbackProjection)
+	}
+	if beforeInvocation != nil {
+		if err := beforeInvocation(); err != nil {
+			return domainmodel.Result{}, false, domaincache.ProviderDispatchStateNotSent, withProviderFailureStageV1(err, ProviderFailureStageCallbackProjection)
+		}
 	}
 	// This timestamp is the bounded host instant immediately before invoking the
 	// transport. It is diagnostic latency metadata, not proof that request bytes
@@ -639,9 +690,27 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 	defer bodyReader.Close()
 	outputObservation := domainmodel.ProviderOutputObservationNoneV1
 	payloadObserved := false
-	chunks, usage, err := providerstream.ParseSSEWithCallbackAndPayloadObservation(parseEndpointFormat, bodyReader, func(chunk domainmodel.Chunk) error {
+	firstTokenAt := time.Time{}
+	observeFirstToken := func(at time.Time) {
+		if at.IsZero() {
+			at = time.Now().UTC()
+		}
+		if !at.Before(requestSentAt) && (firstTokenAt.IsZero() || at.Before(firstTokenAt)) {
+			firstTokenAt = at
+		}
+	}
+	chunks, usage, err := providerstream.ParseSSEWithPrivateDisplay(parseEndpointFormat, bodyReader, func(chunk domainmodel.Chunk) error {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if chunk.ProcessFrame != nil {
+			frame := *chunk.ProcessFrame
+			if frame.ToolPreparation != nil {
+				preparation := *frame.ToolPreparation
+				frame.ToolPreparation = &preparation
+			}
+			frame.Attempt = uint64(attempt)
+			chunk.ProcessFrame = &frame
 		}
 		if chunk.Trace.ProviderRequestSentAt.IsZero() {
 			chunk.Trace.ProviderRequestSentAt = requestSentAt
@@ -659,7 +728,16 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 	}, func(observation providerstream.PayloadObservation) {
 		payloadObserved = true
 		outputObservation = outputObservation.MergeV1(observation)
-	})
+	}, func(frame domainmodel.ProcessFrameV1) {
+		if ctx.Err() != nil || request.OnChunk == nil {
+			return
+		}
+		frame.Attempt = uint64(attempt)
+		// Callback-only, byte-free Chunk shell: observer errors cannot alter the
+		// provider result or transport retry decision.
+		defer func() { _ = recover() }()
+		_ = request.OnChunk(domainmodel.Chunk{Kind: domainmodel.ChunkReasoning, ProcessFrame: &frame})
+	}, observeFirstToken)
 	responseModel := ""
 	for _, chunk := range chunks {
 		if chunk.Kind == domainmodel.ChunkDone {
@@ -679,6 +757,7 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 		}
 		usage = providerusage.ApplyPricing(usage, request.Pricing)
 		return domainmodel.Result{
+			HostTiming:            domainmodel.ProviderTiming{FirstContentAt: firstTokenAt, FirstContentPresenceKnown: true},
 			ResponseObservedModel: responseModel,
 			ProviderID:            request.ProviderID,
 			Family:                request.Family,
@@ -693,6 +772,7 @@ func (c *HTTPProviderClient) streamOnce(ctx context.Context, request domainmodel
 	}
 	usage = providerusage.ApplyPricing(usage, request.Pricing)
 	return domainmodel.Result{
+		HostTiming:            domainmodel.ProviderTiming{FirstContentAt: firstTokenAt, FirstContentPresenceKnown: true},
 		ResponseObservedModel: responseModel,
 		ProviderID:            request.ProviderID,
 		Family:                request.Family,

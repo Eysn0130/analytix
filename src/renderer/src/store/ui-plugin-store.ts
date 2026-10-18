@@ -46,7 +46,6 @@ function uiPluginApi(): Window['analytix']['app'] | null {
 function applyUiModeDom(mode: string, runtime: UiPluginRuntime | null): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
-  root.removeAttribute('data-mascot-mode')
   if (runtime && mode === runtime.manifest.id) {
     root.setAttribute('data-ui-plugin', runtime.manifest.id)
   } else {
@@ -86,7 +85,7 @@ export const useUiPluginStore = create<UiPluginState>((set, get) => ({
       return
     }
     // Load the saved plugin through the existing desktop authority; failure resets to default.
-    applyUiModeDom(mode === UI_MODE_MASCOT ? UI_MODE_MASCOT : UI_MODE_DEFAULT, null)
+    applyUiModeDom(UI_MODE_DEFAULT, null)
     await get().activateUiMode(mode)
     void get().refreshUiPlugins()
   },
@@ -104,22 +103,16 @@ export const useUiPluginStore = create<UiPluginState>((set, get) => ({
 
   activateUiMode: async (mode: string) => {
     const normalized = mode.trim().toLowerCase()
-    if (normalized === UI_MODE_DEFAULT) {
-      writeUiModePreference(normalized)
-      set({ uiMode: normalized, activeRuntime: null, lastError: null })
-      applyUiModeDom(normalized, null)
+    if (normalized === UI_MODE_DEFAULT || normalized === UI_MODE_MASCOT) {
+      writeUiModePreference(UI_MODE_DEFAULT)
+      set({ uiMode: UI_MODE_DEFAULT, activeRuntime: null, lastError: null })
+      applyUiModeDom(UI_MODE_DEFAULT, null)
       return
     }
 
     // Plugin manifests and tokens continue to come from the existing desktop authority.
     const api = uiPluginApi()
     if (typeof api?.loadUiPlugin !== 'function') {
-      // Preserve the legacy mode compatibility without rendering decorative figures.
-      if (normalized === UI_MODE_MASCOT) {
-        writeUiModePreference(normalized)
-        set({ uiMode: normalized, activeRuntime: null, lastError: null })
-        applyUiModeDom(normalized, null)
-      }
       return
     }
     set({ busy: true })

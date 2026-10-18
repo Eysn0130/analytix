@@ -59,11 +59,13 @@ func TestNormalizeMCPToolOutcomeNeverPromotesSourceAuthority(t *testing.T) {
 
 func TestNormalizeMCPToolOutcomeKeepsJSONRPCAsTransportSuccessSemanticFailure(t *testing.T) {
 	context, grant, call, now := outcomeAuthorityForTest(t)
+	meta := map[string]any{"custom": "preserved", "jsonRpcError": "original"}
 	outcome, err := NormalizeMCPToolOutcome(NormalizeMCPToolOutcomeInput{
 		Context: context, Grant: grant, Call: call, At: now,
 		Raw: map[string]any{
 			"executed": false, "transportStatus": "success", "semanticStatus": "failure", "isError": true,
 			"code": "mcp_jsonrpc_invalid_params", "error": "MCP JSON-RPC request was rejected (invalid_params)",
+			"result": map[string]any{"_meta": meta},
 			"rpcError": map[string]any{
 				"code": -32602, "class": "invalid_params", "dataPresent": true,
 				"dataSHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -78,11 +80,18 @@ func TestNormalizeMCPToolOutcomeKeepsJSONRPCAsTransportSuccessSemanticFailure(t 
 	}
 	rpc := mapValue(outcome.UntrustedMeta["jsonRpcError"])
 	code, _ := rpc["code"].(json.Number)
-	if rpc["class"] != "invalid_params" || code.String() != "-32602" || rpc["dataPresent"] != true {
+	if len(rpc) != 4 || rpc["class"] != "invalid_params" || code.String() != "-32602" || rpc["dataPresent"] != true || rpc["dataSHA256"] != strings.Repeat("a", 64) {
 		t.Fatalf("bounded JSON-RPC metadata was lost: %#v", outcome.UntrustedMeta)
 	}
 	if _, leaked := rpc["message"]; leaked {
 		t.Fatalf("untrusted JSON-RPC message leaked into ToolOutcome: %#v", rpc)
+	}
+	if outcome.UntrustedMeta["custom"] != "preserved" || len(meta) != 2 || meta["jsonRpcError"] != "original" {
+		t.Fatalf("normalization lost metadata or changed the source map: outcome=%#v source=%#v", outcome.UntrustedMeta, meta)
+	}
+	outcome.UntrustedMeta["custom"] = "changed"
+	if meta["custom"] != "preserved" {
+		t.Fatalf("normalized metadata aliases the source map: %#v", meta)
 	}
 }
 

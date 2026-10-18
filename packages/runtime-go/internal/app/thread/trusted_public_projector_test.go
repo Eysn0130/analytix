@@ -18,11 +18,16 @@ import (
 	domaincachetelemetry "analytix.local/runtime-go/internal/domain/cachetelemetry"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainstartup "analytix.local/runtime-go/internal/domain/startup"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
+
+// This credential-shaped fixture is built only from a public hexadecimal alphabet.
+// Local synthetic test fixture; never sourced from an account.
+const syntheticTrustedProjectionTestCredentialV1 = "sk-0123456789abcdef0123456789abcdef"
 
 type projectionTestAuthority struct {
 	privateKey ed25519.PrivateKey
@@ -595,24 +600,32 @@ func TestTrustedPublicProjectorMasksOrdinaryThreadAndSSEContent(t *testing.T) {
 	if strings.Contains(threadBody, account) || !strings.Contains(threadBody, "[ACCOUNT]") {
 		t.Fatalf("ordinary thread privacy projection = %s", threadBody)
 	}
-	event, visible, err := projector.ProjectEvent("thread-ordinary-privacy", thread, map[string]any{
+	rawEvent := map[string]any{
 		"kind": "turn_steered", "threadId": "thread-ordinary-privacy", "turnId": "turn-ordinary-privacy",
 		"text": "继续核实卡号 " + account + "\nSource: " + privatePath,
-	})
+	}
+	rawBefore := contracts.CloneMap(rawEvent)
+	event, visible, err := projector.ProjectEvent("thread-ordinary-privacy", thread, rawEvent)
 	if err != nil || !visible {
 		t.Fatalf("ordinary event projection failed: event=%#v visible=%t err=%v", event, visible, err)
 	}
 	eventBody := string(mustProjectionJSON(t, event))
-	if strings.Contains(eventBody, privatePath) || !strings.Contains(eventBody, "[PRIVATE_PATH]") {
-		t.Fatal("public SSE retained a prose locator")
+	expectedEvent := map[string]any{
+		"kind": "turn_steered", "threadId": "thread-ordinary-privacy", "turnId": "turn-ordinary-privacy",
 	}
-	if strings.Contains(eventBody, account) || !strings.Contains(eventBody, "[ACCOUNT]") {
-		t.Fatalf("ordinary SSE privacy projection = %s", eventBody)
+	if !reflect.DeepEqual(event, expectedEvent) {
+		t.Fatalf("public steering SSE must omit prose rather than publishing a redacted copy: %s", eventBody)
+	}
+	if !reflect.DeepEqual(rawEvent, rawBefore) {
+		t.Fatal("public steering projection changed the original private event")
 	}
 }
 
 func TestTrustedStructuredProjectionDoesNotPromoteNestedContentKeysToAuthority(t *testing.T) {
-	const secret = "sk-ordinary-hostile-token"
+	const secret = syntheticTrustedProjectionTestCredentialV1
+	if !domainsecret.ContainsCredentialV1(secret) {
+		t.Fatal("synthetic credential fixture must exercise credential projection")
+	}
 	input := map[string]any{
 		"id": "thread-hostile-content", "status": "running",
 		"turns": []any{map[string]any{

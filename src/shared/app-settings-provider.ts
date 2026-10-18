@@ -40,6 +40,8 @@ import {
   type ModelProviderReasoningCapabilityV1,
   type ModelProviderProfilePatchV1,
   type ModelProviderProfileV1,
+  type ModelProviderPreferencesV1,
+  type ModelProviderModelPreferenceV1,
   type ModelProviderSettingsPatchV1,
   type ModelProviderSettingsV1,
   type NetworkProxySettingsV1,
@@ -107,6 +109,7 @@ export function normalizeModelProviderSettings(
   input: ModelProviderSettingsPatchV1 | undefined
 ): ModelProviderSettingsV1 {
   const defaults = defaultModelProviderSettings()
+  const modelPreferences = normalizeModelProviderPreferences(input?.modelPreferences)
   const hasTopLevelBaseUrl = typeof input?.baseUrl === 'string' && input.baseUrl.trim() !== ''
   const baseUrl = normalizeModelProviderBaseUrl(input?.baseUrl, defaults.baseUrl)
   const rawProviders = Array.isArray(input?.providers) ? input.providers : []
@@ -139,8 +142,171 @@ export function normalizeModelProviderSettings(
     activeProviderId,
     baseUrl: hasTopLevelBaseUrl ? baseUrl : normalizedDefaultProvider.baseUrl || baseUrl,
     proxy: normalizeNetworkProxySettings(input?.proxy),
-    providers
+    providers,
+    ...(modelPreferences.length > 0 ? { modelPreferences } : {})
   }
+}
+
+function hasModelPreferenceControls(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code < 0x20 || code === 0x7f) return true
+  }
+  return false
+}
+
+const preferenceIdPattern = /^[a-z0-9][a-z0-9._-]{0,95}$/
+const preferenceText = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 128 &&
+  value === value.trim() && !hasModelPreferenceControls(value)
+const preferenceRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+const preferenceKeys = (value: Record<string, unknown>, allowed: string[]): boolean =>
+  Object.keys(value).every((key) => allowed.includes(key))
+
+export function isModelProviderPreferenceBaseUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 2048 || hasModelPreferenceControls(value) || /[\s?#\\]/.test(value)) return false
+  try {
+    const url = new URL(value)
+    return ['http:', 'https:'].includes(url.protocol) && Boolean(url.host) &&
+      !url.username && !url.password && !url.search && !url.hash
+  } catch { return false }
+}
+
+function runtimeModelPreferenceByteLength(json: string): number {
+  // Match Go encoding/json so a Main-admitted payload fits CLI projection too.
+  const encoded = json.replace(/[<>&\u2028\u2029]/g, (value) =>
+    `\\u${value.charCodeAt(0).toString(16).padStart(4, '0')}`)
+  return new TextEncoder().encode(encoded).byteLength
+}
+
+/** Fail closed on malformed stored/IPC metadata rather than partially adopting it. */
+export function normalizeModelProviderPreferences(input: unknown): ModelProviderPreferencesV1[] {
+  if (!Array.isArray(input) || input.length > 128) return []
+  const seen = new Set<string>()
+  const output: ModelProviderPreferencesV1[] = []
+  for (const entry of input) {
+    if (!preferenceRecord(entry) || !preferenceKeys(entry, ['id', 'baseUrl', 'endpointFormat', 'modelProfiles']) ||
+      !['id', 'baseUrl', 'endpointFormat', 'modelProfiles'].every((key) => Object.hasOwn(entry, key)) ||
+      typeof entry.id !== 'string' || !preferenceIdPattern.test(entry.id) || seen.has(entry.id) ||
+      !isModelProviderPreferenceBaseUrl(entry.baseUrl) ||
+      typeof entry.endpointFormat !== 'string' ||
+      !['chat_completions', 'messages', 'responses', 'custom_endpoint'].includes(entry.endpointFormat) ||
+      !preferenceRecord(entry.modelProfiles) || Object.keys(entry.modelProfiles).length > 200) return []
+    const profiles: Record<string, ModelProviderModelPreferenceV1> = Object.create(null)
+    const modelKeys = new Set<string>()
+    for (const [model, value] of Object.entries(entry.modelProfiles)) {
+      if (!preferenceText(model) || modelKeys.has(model.toLowerCase()) || !preferenceRecord(value) ||
+        !preferenceKeys(value, ['aliases', 'reasoning'])) return []
+      modelKeys.add(model.toLowerCase())
+      const aliases = Object.hasOwn(value, 'aliases') ? value.aliases : undefined
+      if (aliases !== undefined && (!Array.isArray(aliases) || aliases.length > 50 ||
+        !aliases.every(preferenceText) || new Set(aliases).size !== aliases.length)) return []
+      const reasoning = Object.hasOwn(value, 'reasoning') ? value.reasoning : undefined
+      if (reasoning !== undefined && reasoning !== null) {
+        if (!preferenceRecord(reasoning) || !preferenceKeys(reasoning, ['supportedEfforts', 'defaultEffort', 'requestProtocol']) ||
+          !['supportedEfforts', 'defaultEffort', 'requestProtocol'].every((key) => Object.hasOwn(reasoning, key)) ||
+          !Array.isArray(reasoning.supportedEfforts) || reasoning.supportedEfforts.length < 1 || reasoning.supportedEfforts.length > 6 ||
+          !reasoning.supportedEfforts.every((effort) => MODEL_REASONING_EFFORTS.includes(effort)) ||
+          new Set(reasoning.supportedEfforts).size !== reasoning.supportedEfforts.length ||
+          !reasoning.supportedEfforts.includes(reasoning.defaultEffort) ||
+          !MODEL_REASONING_REQUEST_PROTOCOLS.includes(reasoning.requestProtocol as ModelProviderReasoningCapabilityV1['requestProtocol'])) return []
+      }
+      profiles[model] = {
+        ...(aliases !== undefined ? { aliases: [...aliases as string[]] } : {}),
+        ...(reasoning !== undefined ? { reasoning: reasoning === null ? null : {
+          supportedEfforts: [...reasoning.supportedEfforts as ModelProviderReasoningCapabilityV1['supportedEfforts']],
+          defaultEffort: reasoning.defaultEffort as ModelProviderReasoningCapabilityV1['defaultEffort'],
+          requestProtocol: reasoning.requestProtocol as ModelProviderReasoningCapabilityV1['requestProtocol']
+        } } : {})
+      }
+    }
+    seen.add(entry.id)
+    output.push({ id: entry.id, baseUrl: entry.baseUrl, endpointFormat: entry.endpointFormat as ModelEndpointFormat, modelProfiles: profiles })
+  }
+  const bytes = runtimeModelPreferenceByteLength(JSON.stringify({ providers: runtimeModelPreferenceProviders(output) }))
+  return bytes <= 1_048_576 ? output : []
+}
+
+export function modelProviderPreferenceIdentityMatches(
+  a: Pick<ModelProviderProfileV1, 'id' | 'baseUrl' | 'endpointFormat'>,
+  b: Pick<ModelProviderProfileV1, 'id' | 'baseUrl' | 'endpointFormat'>
+): boolean {
+  return a.id === b.id && a.baseUrl.replace(/\/+$/, '') === b.baseUrl.replace(/\/+$/, '') && a.endpointFormat === b.endpointFormat
+}
+
+export function applyModelProviderPreferences(
+  committed: ModelProviderProfileV1,
+  input: unknown
+): ModelProviderProfileV1 {
+  const preference = normalizeModelProviderPreferences(input).find((entry) => modelProviderPreferenceIdentityMatches(entry, committed))
+  if (!preference) return committed
+  const profiles: Record<string, ModelProviderModelProfileV1> = Object.assign(Object.create(null), committed.modelProfiles)
+  for (const model of committed.models) {
+    const preferenceProfile = preference.modelProfiles[model]
+    if (!preferenceProfile) continue
+    const key = normalizeModelKey(model)
+    const current = profiles[key] ?? profiles[model] ?? DEFAULT_TEXT_MODEL_PROFILE
+    const { reasoning: inheritedReasoning, ...withoutReasoning } = current
+    profiles[key] = {
+      ...withoutReasoning,
+      ...(preferenceProfile.aliases !== undefined ? { aliases: [...preferenceProfile.aliases] } : {}),
+      ...(preferenceProfile.reasoning === null ? {} :
+        preferenceProfile.reasoning !== undefined ? { reasoning: preferenceProfile.reasoning } :
+          inheritedReasoning ? { reasoning: inheritedReasoning } : {})
+    }
+  }
+  return { ...committed, modelProfiles: profiles }
+}
+
+function preferenceModelProfile(provider: ModelProviderProfileV1, model: string): ModelProviderModelProfileV1 | undefined {
+  const key = normalizeModelKey(model)
+  return Object.hasOwn(provider.modelProfiles, key) ? provider.modelProfiles[key] : undefined
+}
+
+/** Capture only changed aliases/reasoning for currently admitted canonical models. */
+export function captureModelProviderPreferences(
+  input: unknown,
+  committed: ModelProviderProfileV1,
+  edited: ModelProviderProfileV1,
+  before: ModelProviderProfileV1
+): ModelProviderPreferencesV1[] {
+  const preferences = normalizeModelProviderPreferences(input)
+  if (!modelProviderPreferenceIdentityMatches(committed, edited)) return preferences
+  const existing = preferences.find((entry) => modelProviderPreferenceIdentityMatches(entry, committed))
+  const profiles: Record<string, ModelProviderModelPreferenceV1> = Object.assign(Object.create(null),
+    Object.fromEntries(Object.entries(existing?.modelProfiles ?? {}).filter(([key]) => committed.models.includes(key))))
+  for (const model of committed.models) {
+    const next = preferenceModelProfile(edited, model)
+    const previous = preferenceModelProfile(before, model)
+    if (!next) continue
+    const choice = { aliases: next.aliases ?? [], reasoning: next.reasoning ?? null }
+    if (JSON.stringify(choice) !== JSON.stringify({ aliases: previous?.aliases ?? [], reasoning: previous?.reasoning ?? null })) {
+      profiles[model] = choice
+    }
+  }
+  return normalizeModelProviderPreferences([
+    ...preferences.filter((entry) => entry.id !== committed.id),
+    ...(Object.keys(profiles).length ? [{ id: committed.id, baseUrl: committed.baseUrl, endpointFormat: committed.endpointFormat, modelProfiles: profiles }] : [])
+  ])
+}
+
+function runtimeModelPreferenceProviders(preferences: ModelProviderPreferencesV1[]) {
+  return preferences
+    .filter((entry) => Object.keys(entry.modelProfiles).length > 0)
+    .map((entry) => ({ ...entry, modelProfiles: Object.fromEntries(Object.entries(entry.modelProfiles).map(([model, profile]) => [model, {
+      ...(profile.aliases !== undefined ? { aliases: profile.aliases } : {}),
+      ...(profile.reasoning === null ? { reasoning: { supportedEfforts: ['off'], defaultEffort: 'off', requestProtocol: 'none' } } :
+        profile.reasoning ? { reasoning: profile.reasoning } : {})
+    }])) }))
+}
+
+/** A finite metadata payload; Registry alone supplies execution route/catalog. */
+export function buildRuntimeModelPreferencesJSON(settings: AppSettingsV1): string {
+  const providers = runtimeModelPreferenceProviders(normalizeModelProviderPreferences(settings.provider.modelPreferences))
+  if (!providers.length) return ''
+  const json = JSON.stringify({ providers })
+  return runtimeModelPreferenceByteLength(json) <= 1_048_576 ? json : ''
 }
 
 export function mergeModelProviderSettings(

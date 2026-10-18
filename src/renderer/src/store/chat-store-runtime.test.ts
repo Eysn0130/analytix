@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const generatedPreview = vi.hoisted(() => ({ open: vi.fn(async () => true) }))
 vi.mock('../office/open-generated-artifact', () => ({ openGeneratedArtifact: generatedPreview.open }))
-import type { AcceptedFinalProjectionBatch, ChatBlock, GeneralTerminalProjectionBatch } from '../agent/types'
+import type { AcceptedFinalProjectionBatch, ChatBlock, GeneralTerminalProjectionBatch, ThreadEventSink, ThreadGoal, ThreadGoalStateV1 } from '../agent/types'
 import { dispatchAnalytixRuntimeEvent, dispatchAnalytixRuntimeEvents } from '../agent/analytix-mapper'
 import { AnalytixRuntimeProvider } from '../agent/analytix-runtime'
+import * as providerRegistry from '../agent/registry'
+import * as sddTranscript from '../sdd/sdd-chat-transcript'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import type { ThreadTraceEventPayload } from '@shared/thread-trace'
 import i18n from '../i18n'
+import { isStrictPublicRuntimeSseIpcPayload, projectPublicRuntimeSseBlock } from '@shared/public-runtime-sse'
+import { PublicRuntimeEventFilter } from '@shared/public-runtime-content'
 import { formatRuntimeError } from '../lib/format-runtime-error'
 import {
   isPublicProjectionRevoked,
+  markPublicProjectionRevoked,
   resetPublicProjectionRevocationsForTests
 } from '../lib/public-projection-revocation'
 import {
@@ -23,6 +28,7 @@ import {
   MAX_WATCHED_COMPLETION_NOTIFICATIONS,
   rememberPendingClawFeishuMirror,
   takePendingClawFeishuMirror,
+  syncTurnCompletionPoll,
   watchTurnCompletionNotification
 } from './chat-store-runtime'
 import {
@@ -30,13 +36,17 @@ import {
   readThreadWorktreeRegistry,
   saveThreadWorktreeRegistry
 } from '../lib/thread-worktree-registry'
-import { clearBusyWatchdog, resetBusyRecoveryAttempts } from './chat-store-schedulers'
-import type { ChatState, ChatStoreSet } from './chat-store-types'
+import { clearBusyWatchdog, resetBusyRecoveryAttempts, stopTurnCompletionPoll } from './chat-store-schedulers'
+import { markDeletedUserInputDraftThread } from './chat-store-runtime-helpers'
+import type { ChatState, ChatStoreSet, QueuedUserMessage } from './chat-store-types'
+import { queuedPauseReason } from './chat-store-queue'
 import {
   clearActiveStream,
   getActiveStreamSnapshot,
+  getActiveStreamSnapshotFor,
   pendingActiveStreamTurnId,
-  resetActiveStream
+  resetActiveStream,
+  subscribeActiveStream
 } from '../thread/streaming/active-stream-store'
 
 function memoryStorage(): Storage {
@@ -78,6 +88,7 @@ function makeSinkHarness(overrides: Partial<ChatState> = {}): {
     watchTurnCompletion: {},
     unreadThreadIds: {},
     queuedMessages: [],
+    queuedMessagePauses: {},
     threads: [],
     refreshThreads: vi.fn(async () => undefined),
     drainQueuedMessages: vi.fn(async () => undefined)
@@ -97,6 +108,37 @@ function makeSinkHarness(overrides: Partial<ChatState> = {}): {
     setSnapshots: () => snapshots
   }
 }
+
+function correlatedUserInputRequest(itemId: string, requestId: string): Parameters<ThreadEventSink['onUserInput']>[0] {
+  const questionId = `${requestId}_1`
+  return {
+    itemId,
+    requestId,
+    questions: [{
+      header: 'Mode',
+      id: questionId,
+      question: `Choose a mode for ${requestId}`,
+      multiSelect: false,
+      options: [{ id: `${questionId}_option_1`, label: 'Fast', description: 'Use the faster path' }]
+    }]
+  }
+}
+
+describe('actual conversation summary lifecycle', () => {
+  it('preserves one completed summary and its facts when an older start is replayed', () => {
+    const { set, get, getState } = makeSinkHarness({ busy: false })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    sink.onCompaction({ itemId: 'compaction', turnId: 'turn-compaction', summary: 'Compacting', status: 'running', auto: false })
+    expect(getState().busy).toBe(true)
+    sink.onCompaction({ itemId: 'compaction', turnId: 'turn-compaction', summary: 'Actual summary', summaryKind: 'conversation', detail: 'Actual summary', status: 'success', auto: false,
+      meta: { shadowedItemCount: 7, replacedTokens: 234, tokenCountKind: 'estimated', tokenEstimatorVersion: 1 } })
+    sink.onCompaction({ itemId: 'compaction', turnId: 'turn-compaction', summary: 'Compacting', status: 'running', auto: false })
+    expect(getState().busy).toBe(false)
+    const blocks = getState().blocks.filter(block => block.kind === 'compaction')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ id: 'compaction', status: 'success', detail: 'Actual summary', summaryKind: 'conversation', meta: { shadowedItemCount: 7, replacedTokens: 234 } })
+  })
+})
 
 describe('live generated artifact preview', () => {
   const artifact = { artifactId: 'a'.repeat(64), kind: 'docx', contentHash: 'b'.repeat(64), byteSize: 1000, savedAt: '2026-09-15T01:00:00Z' }
@@ -236,6 +278,31 @@ describe('thread event sink binding', () => {
     resetPublicProjectionRevocationsForTests()
   })
 
+  it.each(['disarmed', 'clear'] as const)('consumes %s before a pending Goal read and never restores old armed state after failure', async stop => {
+    const goal: ThreadGoal = { threadId: 'thread-current', id: 'goal-current', revision: 2, objective: 'Synthetic objective', status: 'active', maxGoalRounds: 8, roundsStarted: 1, tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: '2026-10-11T00:00:00Z', updatedAt: '2026-10-11T00:00:00Z' }
+    const armed = { id: 'goal-current', revision: 2, activation: 'armed' as const }
+    let resolve!: (state: ThreadGoalStateV1) => void
+    const read = vi.spyOn(AnalytixRuntimeProvider.prototype, 'getThreadGoalState')
+      .mockImplementationOnce(() => new Promise(done => { resolve = done }))
+      .mockRejectedValueOnce(new Error('Synthetic authority read unavailable'))
+    const detail = vi.spyOn(AnalytixRuntimeProvider.prototype, 'getThreadDetail').mockRejectedValue(new Error('Unrelated detail unavailable'))
+    try {
+      const h = makeSinkHarness({ activeThreadGoal: goal, activeGoalActivation: armed, goalStateEpoch: 0 })
+      const sink = buildThreadEventSink(h.set, h.get, { threadId: 'thread-current' })
+      expect(sink.onGoalActivation?.({ threadId: 'thread-current', activation: armed })).toBeUndefined()
+      expect(read).toHaveBeenCalledTimes(1)
+      const stopped = stop === 'clear' ? null : { ...armed, activation: 'disarmed' as const }
+      expect(sink.onGoalActivation?.({ threadId: 'thread-current', activation: stopped })).toBeUndefined()
+      expect(read).toHaveBeenCalledTimes(2)
+      expect(h.getState().activeGoalActivation).toEqual(stopped)
+      resolve({ goal, activation: armed, historyBlocks: [] })
+      for (let n = 0; n < 8; n++) await Promise.resolve()
+      expect(h.getState().activeGoalActivation).toEqual(stopped)
+      expect(h.getState().goalStateEpoch).toBe(2)
+      expect(detail).not.toHaveBeenCalled()
+    } finally { read.mockRestore(); detail.mockRestore() }
+  })
+
   it('ignores assistant deltas from a stream bound to a different active thread', () => {
     const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-new' })
     const controller = new AbortController()
@@ -339,6 +406,8 @@ describe('thread event sink binding', () => {
       threadId: 'thread-current',
       snapshot: { totalTokens: 13 }
     })
+    expect(committed.turnUsageById['turn-current']).toMatchObject({ threadId: batch.threadId, turnId: batch.turnId,
+      firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, snapshot: batch.usage })
     expect(committed.busy).toBe(false)
     expect(committed.currentTurnId).toBeNull()
     expect(committed.currentTurnUserId).toBeNull()
@@ -374,7 +443,9 @@ describe('thread event sink binding', () => {
     ])
     expect(committed.blocks.find((block) => block.id === 'item-general')).toMatchObject({
       kind: 'assistant',
-      text: 'ordinary general guidance'
+      text: 'ordinary general guidance',
+      generalTerminalProjectionReceipt: { schemaVersion: 1, batchDigest: batch.batchDigest,
+        threadId: batch.threadId, turnId: batch.turnId, itemId: 'item-general', firstSeq: 20, lastSeq: 22, status: 'completed' }
     })
     expect(JSON.stringify(committed.blocks)).not.toContain('acceptedFinal')
     expect(JSON.stringify(committed.blocks)).not.toContain('untrusted draft')
@@ -385,6 +456,8 @@ describe('thread event sink binding', () => {
       threadId: 'thread-current',
       snapshot: { totalTokens: 3 }
     })
+    expect(committed.turnUsageById['turn-current']).toMatchObject({ threadId: batch.threadId, turnId: batch.turnId,
+      firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, snapshot: batch.usage })
     expect(committed).toMatchObject({
       busy: false,
       currentTurnId: null,
@@ -393,6 +466,69 @@ describe('thread event sink binding', () => {
       unreadThreadIds: {}
     })
   })
+
+  it('removes usage and retires a rewound active turn even without matching visible blocks', async () => {
+    const batch = generalTerminalProjectionBatch(), entry = { threadId: batch.threadId, turnId: batch.turnId,
+      firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, snapshot: batch.usage }
+    const kept = { ...entry, turnId: 'older', firstSeq: 1, lastSeq: 3 }
+    const { getState, set, get } = makeSinkHarness({ blocks: [], lastSeq: 22,
+      turnUsageById: { 'turn-current': entry, older: kept } })
+    resetActiveStream(batch.threadId, { turnId: batch.turnId, liveAssistant: 'removed private buffer', lastSeq: 22 })
+    const sink = buildThreadEventSink(set, get, { threadId: batch.threadId })
+    sink.onThreadRewound?.({ threadId: batch.threadId, turnId: batch.turnId, removedTurnIds: [batch.turnId],
+      removedTurns: 1, remainingTurns: 1, seq: 23 })
+    expect(getState().turnUsageById).toEqual({ older: kept })
+    expect(getState()).toMatchObject({ lastSeq: 23, busy: false, currentTurnId: null, rewoundTurnIds: { 'turn-current': true } })
+    expect(getActiveStreamSnapshot().threadId).toBeNull()
+    sink.onTurnStarted?.({ turnId: batch.turnId, seq: 24 })
+    expect(getState().busy).toBe(false)
+    await expect(sink.onGeneralTerminalBatch?.(batch)).rejects.toThrow(/rewound/)
+    sink.onTurnStarted?.({ turnId: 'new-turn', seq: 24 })
+    expect(getState().currentTurnId).toBe('new-turn')
+  })
+
+  it.each([false, true])('does not revive a committed terminal item from old starts or late deltas (accepted: %s)', async accepted => {
+    const { getState, set, get, setSnapshots } = makeSinkHarness({ lastSeq: 19 })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    const batch = generalTerminalProjectionBatch()
+    if (accepted) await sink.onAcceptedFinalBatch?.(acceptedFinalProjectionBatch())
+    else await sink.onGeneralTerminalBatch?.(batch)
+    const committed = getState().blocks, writes = setSnapshots().length
+    for (const start of [{ turnId: batch.turnId, seq: 23 }, { turnId: 'old-different-turn', seq: 22 },
+      { turnId: 'unbound-cursor' }, { turnId: '', seq: 24 }]) sink.onTurnStarted?.(start)
+    sink.onDeltas([{ kind: 'agent_message', text: 'LATE_UNPUBLISHED_TEXT', seq: 23 }])
+    await expect(sink.onGeneralTerminalBatch?.(batch)).rejects.toThrow('could not be committed atomically')
+    expect(getState().blocks).toBe(committed)
+    expect(setSnapshots()).toHaveLength(writes)
+    expect(getState().blocks.filter(block => block.id === (accepted ? 'item-final' : 'item-general'))).toHaveLength(1)
+    expect(getState().lastSeq).toBe(22)
+    expect(getState().liveAssistant).toBe('')
+    expect(JSON.stringify(getState().blocks)).not.toContain('LATE_UNPUBLISHED_TEXT')
+    expect(getState().busy).toBe(false)
+    sink.onTurnStarted?.({ turnId: 'next-real-turn', seq: 24 })
+    expect(getState()).toMatchObject({ busy: true, currentTurnId: 'next-real-turn' })
+  })
+
+  it.each(['same', 'text', 'turn', 'cursor', 'time'] as const)(
+    'preserves ordinary atomic proof only for a matching fresh snapshot (%s)', async difference => {
+      const batch = generalTerminalProjectionBatch()
+      const item = batch.terminalItem as Extract<ChatBlock, { kind: 'assistant' }>
+      const incoming = { ...item,
+        ...(difference === 'text' ? { text: 'CHANGED_UNAUTHORIZED_PUBLIC_ITEM' } : {}),
+        ...(difference === 'turn' ? { meta: { turnId: 'other-turn' } } : {}),
+        ...(difference === 'time' ? { createdAt: '2026-07-20T04:00:00Z' } : {}) }
+      const getThreadDetail = vi.fn(async () => ({ blocks: [incoming], latestSeq: difference === 'cursor' ? 21 : 22,
+        threadStatus: 'idle', latestTurnId: batch.turnId }))
+      const { getState, set, get } = makeSinkHarness({ lastSeq: 19 })
+      const sink = buildThreadEventSink(set, get, { threadId: 'thread-current', getThreadDetail })
+      await sink.onGeneralTerminalBatch?.(batch)
+      const receipt = (getState().blocks.at(-1) as typeof item).generalTerminalProjectionReceipt
+      incoming.generalTerminalProjectionReceipt = { ...receipt!, turnId: 'FORGED_HISTORY_CONTROL' }
+      await sink.onSnapshotRequired?.({ threadId: batch.threadId, seq: 22, highestSeq: 22, replayEventCount: 1 })
+      const refreshed = getState().blocks.at(-1) as typeof item
+      expect(refreshed.text).toBe(difference === 'cursor' ? item.text : incoming.text)
+      expect(refreshed.generalTerminalProjectionReceipt).toEqual(difference === 'same' || difference === 'cursor' ? receipt : undefined)
+    })
 
   it('rejects a non-contiguous general terminal batch without exposing its assistant text', async () => {
     const { getState, set, get } = makeSinkHarness({
@@ -580,8 +716,13 @@ describe('thread event sink binding', () => {
       activeThreadTodos: { items: [{ content: 'PRIVATE_TODO' }] } as any,
       blocks: [{ kind: 'assistant', id: 'assistant-private', text: 'PRIVATE_CASE_FACT' } as any],
       liveAssistant: 'PRIVATE_CASE_DELTA',
+      queuedMessages: [{ threadId: 'thread-current', id: 'retired-queue', text: 'PRIVATE_QUEUE', sending: true },
+        { threadId: 'thread-derived', id: 'derived-queue', text: 'PRIVATE_DERIVED_QUEUE' },
+        { threadId: 'thread-cache-derived', id: 'cache-queue', text: 'PRIVATE_CACHE_QUEUE' },
+        { threadId: 'thread-safe', id: 'safe-queue', text: 'retain safe queue' }],
+      queuedMessagePauses: { 'thread-current': 'failed', 'thread-derived': 'interrupted', 'thread-cache-derived': 'failed', 'thread-safe': 'failed' },
       threads: [caseThread, derivedThread, safeThread],
-      caseProjectThreadsById: { case_one: [caseThread, derivedThread, safeThread] },
+      caseProjectThreadsById: { case_one: [caseThread, derivedThread, { ...derivedThread, id: 'thread-cache-derived' }, safeThread] },
       sideConversations: {
         'thread-derived': {
           threadId: 'thread-derived',
@@ -629,6 +770,8 @@ describe('thread event sink binding', () => {
     expect(getState().blocks).toEqual([])
     expect(getState().liveAssistant).toBe('')
     expect(getState().threads).toEqual([safeThread])
+    expect(getState().queuedMessages).toEqual([{ threadId: 'thread-safe', id: 'safe-queue', text: 'retain safe queue' }])
+    expect(getState().queuedMessagePauses).toEqual({ 'thread-safe': 'failed' })
     expect(getState().caseProjectThreadsById.case_one).toEqual([safeThread])
     expect(getState().sideConversations).toEqual({})
     expect(getState().sidePanel.activeSideId).toBeNull()
@@ -785,6 +928,159 @@ describe('thread event sink binding', () => {
     expect(getState().queuedMessages).toEqual([])
   })
 
+  describe('promoted user message identity', () => {
+    // Reduced from the c47 native synthetic sequence: items 4/38/39, admissions 30/31.
+    const threadId = 'thr_durable_5'
+    const turnId = 'turn_5'
+    const originalId = 'item_turn_5_user'
+    const questionClient = '79908121-f23c-4297-bc51-b53946822cb5'
+    const ordinaryClient = 'c93cd3bf-f2a3-413f-be12-dd42ab20d5e4'
+    const questionItem = 'item_steer_a86cb36396aac3a0c939f07da0ee55c83cb89e10c5a85b73d3a5c62f8b3c5244'
+    const ordinaryItem = 'item_steer_5fcd884c720e19cc01a7104146f33e5279510e6d7ba8b6a5ad0679500079b06e'
+    const questionReply = JSON.stringify({
+      kind: 'question_reply_content',
+      questions: [{ header: 'BUSY', question: 'Choose Alpha and Beta, then answer later using the synthetic custom answer.',
+        options: [{ label: 'Alpha', description: 'First synthetic branch.' }, { label: 'Beta', description: 'Second synthetic branch.' }], multiSelect: true }],
+      answers: [{ selected: ['Alpha', 'Beta'], custom: 'QA_NATIVE_V2_BUSY_ACCEPT' }]
+    })
+    const ordinaryText = 'Keep the final synthetic response brief.'
+    const questionTool: ChatBlock = {
+      kind: 'tool', id: 'item_tool_host_v1_0ccba29a8b0cb166a38b305018a7fb98a076efa3b3e2bc32832c5bf43f7af34a', summary: 'request_user_input', status: 'success',
+      meta: { turnId, toolName: 'request_user_input', toolCallIdentity: { threadId, turnId,
+        callId: 'call_host_a6d6661f7f284d8ccbafc168e539b75bc0a6c16e409e6aca715d14be985517d3', itemId: 'item_tool_host_v1_0ccba29a8b0cb166a38b305018a7fb98a076efa3b3e2bc32832c5bf43f7af34a' } }
+    }
+    const questionCard: ChatBlock = { kind: 'user_input', id: 'item_input_be9075e1e243f5304e7617fe7d1e0e1c117968a28c7d49fb5c530fda42e17e25', requestId: 'input_be9075e1e243f5304e7617fe7d1e0e1c117968a28c7d49fb5c530fda42e17e25',
+      questions: [{ id: 'input_be9075e1e243f5304e7617fe7d1e0e1c117968a28c7d49fb5c530fda42e17e25_1', header: 'BUSY', question: 'Choose Alpha and Beta.', options: [] }],
+      status: 'continued', meta: { turnId } }
+    const original = (): ChatBlock => ({ kind: 'user', id: originalId, text: 'QA_NATIVE_V2_BUSY', meta: { turnId, activeSkillIds: [] } })
+    const pending = (which: 'question' | 'ordinary'): ChatBlock => ({
+      kind: 'user', id: which === 'question' ? questionClient : ordinaryClient,
+      text: which === 'question' ? questionReply : ordinaryText,
+      meta: { turnId, clientUserMessageId: which === 'question' ? questionClient : ordinaryClient, steeringStatus: 'pending' }
+    })
+    const event = (which: 'original' | 'question' | 'ordinary', seq = which === 'original' ? 4 : which === 'question' ? 38 : 39): Parameters<typeof dispatchAnalytixRuntimeEvent>[0] => ({
+      kind: 'item_created', threadId, turnId, seq,
+      timestamp: '2026-10-10T19:35:49.224747Z',
+      item: { id: which === 'original' ? originalId : which === 'question' ? questionItem : ordinaryItem,
+        threadId, turnId, kind: 'user_message', role: 'user', status: 'completed',
+        text: which === 'original' ? 'QA_NATIVE_V2_BUSY' : which === 'question' ? questionReply : ordinaryText,
+        createdAt: '2026-10-10T19:34:47.584944Z',
+        ...(which !== 'original' ? { delivery: 'steer', clientUserMessageId: which === 'question' ? questionClient : ordinaryClient } : {}) }
+    })
+    const deliver = (sink: ThreadEventSink, which: 'original' | 'question' | 'ordinary', seq?: number): Promise<void> =>
+      dispatchAnalytixRuntimeEvent(event(which, seq), sink, async () => undefined)
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => { clearBusyWatchdog(); clearActiveStream(); vi.useRealTimers() })
+
+    it('preserves the native original question through both promotions, replay and late admission', async () => {
+      const { getState, set, get } = makeSinkHarness({ activeThreadId: threadId, currentTurnId: turnId,
+        currentTurnUserId: 'initial-client', blocks: [{ kind: 'user', id: 'initial-client', text: 'QA_NATIVE_V2_BUSY', meta: { turnId } }] })
+      const sink = buildThreadEventSink(set, get, { threadId })
+      const onUserMessage = vi.spyOn(sink, 'onUserMessage')
+      await deliver(sink, 'original')
+      expect(getState().blocks).toEqual([expect.objectContaining({ id: originalId, text: 'QA_NATIVE_V2_BUSY' })])
+      set({ blocks: [...getState().blocks, questionTool, questionCard, pending('question'), pending('ordinary')] })
+      sink.onTurnSteered?.({ turnId, clientUserMessageId: questionClient, admittedSeq: 30 })
+      sink.onTurnSteered?.({ turnId, clientUserMessageId: ordinaryClient, admittedSeq: 31 })
+      await deliver(sink, 'question')
+      await deliver(sink, 'ordinary')
+      expect(onUserMessage).toHaveBeenCalledWith(expect.objectContaining({ itemId: questionItem, seq: 38 }))
+      const users = getState().blocks.filter(b => b.kind === 'user')
+      expect(users.map(b => b.id)).toEqual([originalId, questionItem, ordinaryItem])
+      expect(users.map(b => b.kind === 'user' && b.text)).toEqual(['QA_NATIVE_V2_BUSY', questionReply, ordinaryText])
+      expect(users.slice(1)).toEqual([expect.objectContaining({ meta: expect.objectContaining({ steeringStatus: 'accepted' }) }),
+        expect.objectContaining({ meta: expect.objectContaining({ steeringStatus: 'accepted' }) })])
+      expect(getState().blocks.filter(b => b.kind !== 'user')).toEqual([questionTool, questionCard])
+      // latest-user identity is also the existing terminal snapshot contract.
+      expect(getState().currentTurnUserId).toBe(ordinaryItem)
+      const times = getState().turnStartedAtByUserId
+      await deliver(sink, 'original')
+      await deliver(sink, 'question')
+      await dispatchAnalytixRuntimeEvent({ ...event('ordinary'), kind: 'item_completed' }, sink, async () => undefined)
+      sink.onTurnSteered?.({ turnId, clientUserMessageId: questionClient, admittedSeq: 30 })
+      sink.onTurnSteered?.({ turnId, clientUserMessageId: ordinaryClient, admittedSeq: 31 })
+      expect(getState().blocks.filter(b => b.kind === 'user')).toEqual(users)
+      expect(getState()).toMatchObject({ busy: true, currentTurnId: turnId, currentTurnUserId: ordinaryItem,
+        turnStartedAtByUserId: times })
+    })
+
+    it('appends an accepted Question reply without a public pending user row', async () => {
+      const { getState, set, get } = makeSinkHarness({ activeThreadId: threadId, currentTurnId: turnId,
+        currentTurnUserId: originalId, blocks: [original(), questionTool, questionCard, pending('ordinary')] })
+      const sink = buildThreadEventSink(set, get, { threadId })
+      await deliver(sink, 'question')
+      await deliver(sink, 'ordinary')
+      await deliver(sink, 'question')
+      const users = getState().blocks.filter(b => b.kind === 'user')
+      expect(users).toHaveLength(3)
+      expect(users.find(b => b.id === originalId)).toMatchObject({ text: 'QA_NATIVE_V2_BUSY', meta: { turnId } })
+      expect(users.find(b => b.id === questionItem)).toMatchObject({ text: questionReply,
+        meta: { turnId, clientUserMessageId: questionClient, steeringStatus: 'accepted' } })
+      expect(users.find(b => b.id === ordinaryItem)).toMatchObject({ text: ordinaryText,
+        meta: { turnId, clientUserMessageId: ordinaryClient, steeringStatus: 'accepted' } })
+      expect(users.some(b => b.id === questionClient || b.id === ordinaryClient)).toBe(false)
+      expect(getState().blocks.filter(b => b.kind !== 'user')).toEqual([questionTool, questionCard])
+      expect(getState().currentTurnUserId).toBe(ordinaryItem)
+    })
+
+    it('uses Host sequence rather than arrival order when the earlier promotion arrives late', async () => {
+      const { getState, set, get } = makeSinkHarness({ activeThreadId: threadId, currentTurnId: turnId,
+        currentTurnUserId: originalId, blocks: [original(), pending('question'), pending('ordinary')] })
+      const sink = buildThreadEventSink(set, get, { threadId })
+      await deliver(sink, 'ordinary')
+      const times = getState().turnStartedAtByUserId
+      await deliver(sink, 'question')
+      expect(getState().blocks.filter(b => b.kind === 'user').map(b => b.id)).toEqual([originalId, questionItem, ordinaryItem])
+      expect(getState().currentTurnUserId).toBe(ordinaryItem)
+      expect(getState().turnStartedAtByUserId).toBe(times)
+    })
+
+    it.each(['next-turn', 'terminal'] as const)('updates only the matching historical row after %s', async (state) => {
+      const next: ChatBlock = { kind: 'user', id: 'item_next_user', text: 'The next question.', meta: { turnId: 'turn_next' } }
+      const { getState, set, get } = makeSinkHarness({ activeThreadId: threadId, busy: state === 'next-turn',
+        currentTurnId: state === 'next-turn' ? 'turn_next' : null,
+        currentTurnUserId: state === 'next-turn' ? next.id : null,
+        liveAssistant: 'Current draft.', turnStartedAtByUserId: { [next.id]: 2000 },
+        blocks: [original(), pending('ordinary'), next] })
+      const sink = buildThreadEventSink(set, get, { threadId })
+      await deliver(sink, 'ordinary')
+      await deliver(sink, 'original')
+      expect(getState()).toMatchObject({ busy: state === 'next-turn',
+        currentTurnId: state === 'next-turn' ? 'turn_next' : null,
+        currentTurnUserId: state === 'next-turn' ? next.id : null,
+        liveAssistant: 'Current draft.', turnStartedAtByUserId: { [next.id]: 2000 } })
+      expect(getState().blocks).toEqual([expect.objectContaining(original()), expect.objectContaining({ id: ordinaryItem, text: ordinaryText,
+        meta: expect.objectContaining({ turnId, steeringStatus: 'accepted' }) }), next])
+    })
+
+    it('rejects a crossed turn or already accepted item identity without guessing a matching row', async () => {
+      const { getState, set, get } = makeSinkHarness({ activeThreadId: threadId, currentTurnId: turnId,
+        currentTurnUserId: originalId, blocks: [original(), pending('ordinary')] })
+      const sink = buildThreadEventSink(set, get, { threadId })
+      const before = getState().blocks
+      const crossed = event('ordinary')
+      await dispatchAnalytixRuntimeEvent({ ...crossed, turnId: 'other-turn', item: { ...crossed.item!, turnId: 'other-turn' } }, sink, async () => undefined)
+      sink.onTurnSteered?.({ turnId: 'other-turn', clientUserMessageId: ordinaryClient, admittedSeq: 31 })
+      expect(getState().blocks).toBe(before)
+      await deliver(sink, 'ordinary')
+      const accepted = getState().blocks
+      await dispatchAnalytixRuntimeEvent({ ...crossed, seq: 40, item: { ...crossed.item!, id: 'different-item' } }, sink, async () => undefined)
+      expect(getState().blocks).toBe(accepted)
+      await dispatchAnalytixRuntimeEvent({ ...crossed, seq: 41, item: { ...crossed.item!, clientUserMessageId: questionClient } }, sink, async () => undefined)
+      expect(getState().blocks).toBe(accepted)
+      await dispatchAnalytixRuntimeEvent({ ...crossed, seq: 42, item: { ...crossed.item!, id: originalId } }, sink, async () => undefined)
+      expect(getState().blocks).toBe(accepted)
+    })
+
+    it('keeps the legacy initial ACK path without a sequence or steering metadata', () => {
+      const { getState, set, get } = makeSinkHarness({ blocks: [{ kind: 'user', id: 'user-current', text: 'Initial question.' }] })
+      buildThreadEventSink(set, get, { threadId: 'thread-current' }).onUserMessage({
+        itemId: 'item_original', turnId: 'turn-current', text: 'Initial question.' })
+      expect(getState().blocks).toEqual([expect.objectContaining({ id: 'item_original', text: 'Initial question.' })])
+      expect(getState().currentTurnUserId).toBe('item_original')
+    })
+  })
+
   it('recovers unaccepted steering text from the trusted snapshot into the explicit queue', async () => {
     const { getState, set, get } = makeSinkHarness({
       activeThreadId: 'thread-current',
@@ -817,7 +1113,7 @@ describe('thread event sink binding', () => {
         text: 'do not lose this'
       })
     ])
-    expect(getState().queuedMessagesPausedReason).toBe('failed')
+    expect(queuedPauseReason(getState())).toBe('failed')
   })
 
   it('replaces accumulated assistant deltas with the trusted terminal snapshot', async () => {
@@ -1016,7 +1312,7 @@ describe('thread event sink binding', () => {
     expect(getState().busy).toBe(false)
     expect(getState().currentTurnId).toBe('turn-current')
     expect(getState().error).toBe(i18n.t('common:runtimeFinalSnapshotUnavailable'))
-    expect(getState().queuedMessagesPausedReason).toBe('failed')
+    expect(queuedPauseReason(getState())).toBe('failed')
     expect(refreshThreads).not.toHaveBeenCalled()
     expect(drainQueuedMessages).not.toHaveBeenCalled()
   })
@@ -1220,6 +1516,71 @@ describe('thread event sink binding', () => {
     })
   })
 
+  it('rejects crossed user-input status identities before resolving either pending card', () => {
+    const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', busy: false })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    const first = correlatedUserInputRequest('item_input_a', 'input-a')
+    const second = correlatedUserInputRequest('item_input_b', 'input-b')
+    sink.onUserInput(first)
+    sink.onUserInput(second)
+    const pending = getState().blocks
+
+    sink.onUserInputStatus({ itemId: first.itemId, requestId: second.requestId, status: 'cancelled' })
+    expect(getState().blocks).toEqual(pending)
+
+    sink.onUserInputStatus({ itemId: first.itemId, requestId: first.requestId, status: 'cancelled' })
+    expect(getState().blocks.map(block => block.kind === 'user_input' ? block.status : null)).toEqual(['cancelled', 'pending'])
+    sink.onUserInputStatus({ itemId: second.itemId, requestId: second.requestId, status: 'cancelled' })
+    expect(getState().blocks.map(block => block.kind === 'user_input' ? block.status : null)).toEqual(['cancelled', 'cancelled'])
+  })
+
+  it.each(['item', 'request'] as const)('rejects a replayed user-input request with a conflicting %s identity', (identity) => {
+    const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', busy: false })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    const first = correlatedUserInputRequest('item_input_a', 'input-a')
+    sink.onUserInput(first)
+    const original = getState().blocks
+
+    sink.onUserInput(correlatedUserInputRequest(
+      identity === 'item' ? first.itemId : 'item_input_b',
+      identity === 'request' ? first.requestId : 'input-b'
+    ))
+
+    expect(getState().blocks).toEqual(original)
+  })
+
+  it.each(['submitted', 'cancelled'] as const)('does not reopen or flip a %s user-input card after late events', (status) => {
+    const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', busy: false })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    const request = { ...correlatedUserInputRequest('item_input_a', 'input-a'), turnId: 'turn_input_finished' }
+    sink.onUserInput(request)
+    sink.onUserInputStatus({ itemId: request.itemId, requestId: request.requestId, status })
+    set({ busy: false, currentTurnId: null })
+    sink.onUserInput(request)
+
+    expect(getState()).toMatchObject({ busy: false, currentTurnId: null })
+
+    expect(getState().blocks).toHaveLength(1)
+    expect(getState().blocks[0]).toMatchObject({ id: request.itemId, requestId: request.requestId, status })
+
+    sink.onUserInputStatus({ itemId: request.itemId, requestId: request.requestId, status: status === 'submitted' ? 'cancelled' : 'submitted' })
+    expect(getState().blocks[0]).toMatchObject({ id: request.itemId, requestId: request.requestId, status })
+  })
+
+  it('ignores an ambiguous legacy user-input status in restored blocks', () => {
+    const first = correlatedUserInputRequest('item_shared', 'input-a')
+    const second = correlatedUserInputRequest('item_shared', 'input-b')
+    const blocks: ChatBlock[] = [first, second].map(request => ({
+      kind: 'user_input', id: request.itemId, requestId: request.requestId, questions: request.questions, status: 'pending'
+    }))
+    const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', blocks, busy: false })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+
+    sink.onUserInputStatus({ itemId: 'item_shared', status: 'cancelled' })
+
+    expect(getState().blocks).toEqual(blocks)
+  })
+
   it('drops replayed deltas at or below the subscription floor', () => {
     const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', lastSeq: 100 })
     const sink = buildThreadEventSink(set, get, {
@@ -1364,6 +1725,77 @@ describe('thread event sink binding', () => {
     }
   )
 
+  it.each(['complete', 'error'] as const)('revokes delayed %s reconciliation across aborted bindings and A-B-A', async terminal => {
+    for (const returnToA of [false, true]) for (const rejectDetail of [false, true]) {
+      const controller = new AbortController()
+      const harness = makeSinkHarness({ activeThreadId: 'thread-a', lastSeq: 3 })
+      let resolve!: (detail: { blocks: ChatBlock[]; latestSeq: number; threadStatus: string }) => void
+      let reject!: (error: Error) => void
+      const getThreadDetail = vi.fn(() => new Promise<{ blocks: ChatBlock[]; latestSeq: number; threadStatus: string }>((done, fail) => {
+        resolve = done; reject = fail
+      }))
+      const sink = buildThreadEventSink(harness.set, harness.get, { threadId: 'thread-a', signal: controller.signal, getThreadDetail })
+      const pending = terminal === 'complete'
+        ? sink.onTurnComplete({ threadId: 'thread-a', turnId: 'turn-current', seq: 99 })
+        : sink.onError(new Error('Synthetic terminal failure'), { terminal: true, threadId: 'thread-a', turnId: 'turn-current', seq: 99, status: 'failed' })
+      expect(getThreadDetail).toHaveBeenCalledExactlyOnceWith('thread-a')
+      if (returnToA) harness.set({ activeThreadId: 'thread-b' })
+      controller.abort()
+      harness.set({ activeThreadId: 'thread-a', lastSeq: 7, busy: true, currentTurnId: 'turn-current',
+        blocks: [{ kind: 'user', id: 'current-user', text: 'current public turn' }] })
+      const current = harness.getState()
+      if (rejectDetail) reject(new Error('Synthetic retired read failure'))
+      else resolve({ blocks: [{ kind: 'assistant', id: 'obsolete', text: 'obsolete public snapshot' }], latestSeq: 99, threadStatus: 'idle' })
+      await pending
+      expect(harness.getState()).toEqual(current)
+    }
+  })
+
+  it('mirrors only primary blocks after an SDD terminal commit with restored display history', async () => {
+    const primary: ChatBlock[] = [{ kind: 'user', id: 'primary-user', text: 'current primary' }]
+    const getDetail = vi.spyOn(AnalytixRuntimeProvider.prototype, 'getThreadDetail').mockResolvedValue({ blocks: primary, latestSeq: 22, threadStatus: 'idle' })
+    const mirror = vi.spyOn(sddTranscript, 'notifySddChatTranscriptMirror').mockImplementation(() => undefined)
+    const harness = makeSinkHarness({ lastSeq: 19, threads: [{ id: 'thread-current', title: '.analytixsdd/requirements/draft',
+      updatedAt: '', model: '', mode: 'agent', workspace: '/workspace' }], blocks: [
+      { kind: 'user', id: 'old-display', text: 'compressed display history' },
+      { kind: 'compaction', id: 'compaction-old', summary: '安全说明', status: 'success', meta: { turnId: 'old-turn' } }
+    ] })
+    try {
+      await buildThreadEventSink(harness.set, harness.get, { threadId: 'thread-current' }).onGeneralTerminalBatch?.(generalTerminalProjectionBatch())
+      expect(getDetail).toHaveBeenCalledExactlyOnceWith('thread-current')
+      expect(mirror).toHaveBeenCalledOnce()
+      expect(mirror.mock.calls[0][0]().blocks).toBe(primary)
+      expect(harness.getState().blocks.some(block => block.id === 'old-display')).toBe(true)
+    } finally { getDetail.mockRestore(); mirror.mockRestore() }
+  })
+
+  it('preserves live progress past H while a same-binding snapshot-required read is pending', async () => {
+    const harness = makeSinkHarness({ activeThreadId: 'thread-a', lastSeq: 3, busy: true })
+    type Detail = { blocks: ChatBlock[]; latestSeq: number; threadStatus: string }
+    let resolve!: (detail: Detail) => void
+    const sink = buildThreadEventSink(harness.set, harness.get, { threadId: 'thread-a',
+      getThreadDetail: () => new Promise<Detail>(done => { resolve = done }) })
+    const pending = sink.onSnapshotRequired?.({ threadId: 'thread-a', seq: 99, highestSeq: 99, replayEventCount: 99 })
+    sink.onUserMessage({ itemId: 'live-user', text: 'live', turnId: 'live-turn' })
+    sink.onTurnStarted?.({ turnId: 'live-turn', seq: 100 }); sink.onSeq(100)
+    const current = harness.getState()
+    resolve({ blocks: [], latestSeq: 99, threadStatus: 'idle' })
+    await pending
+    expect(harness.getState()).toEqual(current)
+  })
+
+  it('retries whole-log usage after an accepted same-cursor snapshot while rejecting older snapshots', async () => {
+    const blocks: ChatBlock[] = [{ kind: 'user', id: 'user-current', text: 'unchanged', meta: { turnId: 'turn-current' } }]
+    const harness = makeSinkHarness({ activeThreadId: 'thread-current', lastSeq: 12, blocks, busy: false,
+      currentTurnId: null, currentTurnUserId: null, usageRefreshKey: 10 })
+    const getThreadDetail = vi.fn().mockResolvedValueOnce({ blocks, latestSeq: 12, threadStatus: 'idle' })
+      .mockResolvedValueOnce({ blocks: [], latestSeq: 11, threadStatus: 'idle' })
+    const sink = buildThreadEventSink(harness.set, harness.get, { threadId: 'thread-current', getThreadDetail })
+    await sink.onSnapshotRequired?.({ threadId: 'thread-current', seq: 12, highestSeq: 12 })
+    expect(harness.getState()).toMatchObject({ lastSeq: 12, busy: false, currentTurnId: null, usageRefreshKey: 11, blocks })
+    await sink.onSnapshotRequired?.({ threadId: 'thread-current', seq: 12, highestSeq: 12 })
+    expect(harness.getState()).toMatchObject({ lastSeq: 12, usageRefreshKey: 11, blocks })
+  })
   it('reconciles a snapshot-required replay gap from thread detail', async () => {
     const { getState, set, get } = makeSinkHarness({
       activeThreadId: 'thread-current',
@@ -1514,7 +1946,7 @@ describe('thread event sink binding', () => {
       })
       reconnected.onUserMessage({
         itemId: nextTurn.items[0].id, turnId: 'turn-next',
-        text: nextTurn.items[0].text, createdAt: timestamp, meta: { turnId: 'turn-next' }
+        text: nextTurn.items[0].text, createdAt: timestamp, meta: { turnId: 'turn-next', activeSkillIds: [] }
       })
       // The provider advances the ordinary SSE cursor after dispatching non-terminal events.
       reconnected.onSeq(31)
@@ -1554,29 +1986,28 @@ describe('thread event sink binding', () => {
         meta: { turnId: 'turn-next' } })
       expect(getState().blocks.at(-1)).not.toHaveProperty('acceptedFinalProjectionReceipt')
       const reloaded = await provider.getThreadDetail(threadId)
-      expect(reloaded.blocks).toEqual(getState().blocks)
+      const historyProjection = getState().blocks.map(block => block.kind === 'assistant'
+        ? Object.fromEntries(Object.entries(block).filter(([key]) => key !== 'generalTerminalProjectionReceipt')) : block)
+      expect(reloaded.blocks).toEqual(historyProjection)
       expect(reloaded.latestSeq).toBe(getState().lastSeq)
     } finally {
       request.mockRestore()
     }
   })
 
-  it('projects trusted provider progress through one existing status row without exposing event prose', async () => {
-    const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', blocks: [] })
+  it('keeps admitted neutral request telemetry out of the transcript without exposing wire prose', async () => {
+    const { getState, set, get } = makeSinkHarness({ activeThreadId: 'thread-current', currentTurnId: 'turn_1', blocks: [] })
     const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
     for (const [index, stage] of (['pre_send', 'post_send', 'response_received'] as const).entries()) {
-      await dispatchAnalytixRuntimeEvent({
-        kind: 'pipeline_stage', seq: index + 1, threadId: 'thread-current', turnId: 'turn_1',
-        stage, label: 'UNTRUSTED_PROVIDER_PROGRESS_PROSE', timestamp: '2026-09-26T00:00:00Z'
-      }, sink, async () => undefined)
-      expect(getState().blocks).toHaveLength(1)
-      expect(getState().blocks[0]).toMatchObject({ kind: 'system', id: 'runtime_status_turn_1_provider_progress' })
+      sink.onSeq(index + 1) // The existing transport advances the cursor before mapper dispatch.
+      await dispatchAnalytixRuntimeEvents([{ kind: 'pipeline_stage', seq: index + 1,
+        threadId: 'thread-current', turnId: 'turn_1', stage, label: 'UNTRUSTED_PROVIDER_PROGRESS_PROSE',
+        timestamp: '2026-09-26T00:00:00Z' }], sink, async () => undefined)
+      expect(getState().blocks).toEqual([])
+      expect(getState().lastSeq).toBe(index + 1)
       expect(JSON.stringify(getState().blocks)).not.toContain('UNTRUSTED_PROVIDER_PROGRESS_PROSE')
     }
-    expect(getState().blocks[0]).toMatchObject({ text: i18n.t('common:providerResponseReceivedStatus') })
-    expect(getState().busy).toBe(true)
-    expect(getState().liveAssistant).toBe('')
-    expect(getState().blocks.some(block => block.kind === 'assistant')).toBe(false)
+    expect(getState()).toMatchObject({ busy: true, liveAssistant: '', currentTurnId: 'turn_1' })
   })
 
   it('does not render blank runtime status rows for internal pipeline stages', () => {
@@ -1597,8 +2028,10 @@ describe('thread event sink binding', () => {
   })
 
   it('preserves safe provider diagnostics on runtime status rows', () => {
+    // Deterministic synthetic redaction fixture; never use a real credential.
+    const syntheticRedactionToken = 'sk-' + 'x'.repeat(24)
     const { getState, set, get } = makeSinkHarness({
-      activeThreadId: 'thread-current',
+      activeThreadId: 'thread-current', currentTurnId: 'turn_1',
       blocks: []
     })
     const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
@@ -1612,7 +2045,7 @@ describe('thread event sink binding', () => {
       meta: {
         details: {
           providerError: {
-            providerId: 'custom-openai sk-providerSecret1234567890',
+            providerId: `custom-openai ${syntheticRedactionToken}`,
             endpointFormat: 'openai-chat',
             status: 401,
             authStatus: 'token=providerAuthSecret123456',
@@ -1651,9 +2084,10 @@ describe('thread event sink binding', () => {
     expect(serialized).not.toContain('providerAuthSecret123456')
   })
 
-  it('preserves provider retry attempts on runtime status rows', () => {
+  it('preserves provider retry attempts on runtime status rows', async () => {
+    await i18n.changeLanguage('en')
     const { getState, set, get } = makeSinkHarness({
-      activeThreadId: 'thread-current',
+      activeThreadId: 'thread-current', currentTurnId: 'turn_1',
       blocks: []
     })
     const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
@@ -1680,7 +2114,7 @@ describe('thread event sink binding', () => {
     expect(getState().blocks[0]).toMatchObject({
       kind: 'system',
       id: 'runtime_status_turn_1_provider_retrying_2',
-      text: '模型服务正在重试',
+      text: 'Provider request is retrying',
       meta: {
         providerError: {
           providerId: 'custom-openai',
@@ -1697,7 +2131,7 @@ describe('thread event sink binding', () => {
 
   it('preserves provider recovery attempts on runtime status rows', () => {
     const { getState, set, get } = makeSinkHarness({
-      activeThreadId: 'thread-current',
+      activeThreadId: 'thread-current', currentTurnId: 'turn_1',
       blocks: []
     })
     const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
@@ -1737,7 +2171,7 @@ describe('thread event sink binding', () => {
   it('drops marker-free private text from runtime status and job diagnostics', () => {
     const privateSentinel = 'SOL_PRIVATE_REASONING_SENTINEL_7F3C'
     const { getState, set, get } = makeSinkHarness({
-      activeThreadId: 'thread-current',
+      activeThreadId: 'thread-current', currentTurnId: 'turn_1',
       blocks: []
     })
     const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
@@ -2276,7 +2710,7 @@ describe('busy watchdog re-arming on live ticks (#goal-recovering-banner)', () =
         { kind: 'assistant', id: 'assistant-draft', text: 'fabricated draft', meta: { turnId: 'turn-current' } }
       ],
       liveAssistant: 'fabricated live tail',
-      queuedMessages: [{ id: 'queued-1', text: 'next request' }]
+      queuedMessages: [{ threadId: 'thread-current', id: 'queued-1', text: 'next request' }]
     })
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -2289,7 +2723,7 @@ describe('busy watchdog re-arming on live ticks (#goal-recovering-banner)', () =
     expect(getState().currentTurnId).toBe('turn-current')
     expect(getState().liveAssistant).toBe('')
     expect(getState().blocks.filter((block) => block.kind === 'assistant')).toEqual([])
-    expect(getState().queuedMessagesPausedReason).toBe('failed')
+    expect(queuedPauseReason(getState())).toBe('failed')
     expect(drainQueuedMessages).not.toHaveBeenCalled()
   })
 
@@ -2625,4 +3059,662 @@ describe('watched completion notifications', () => {
     expect(completionNotificationDedupeKeyForWatchedThread('thread-1', 999)).toBe('watch:thread-1:999')
     expect(completionNotificationDedupeKeyForWatchedThread('thread-0', 999)).toBe('watch:thread-0:1000')
   })
+})
+
+
+describe('main Host retry wire consumption', () => {
+  afterEach(() => { clearBusyWatchdog(); clearActiveStream(); resetPublicProjectionRevocationsForTests(); vi.useRealTimers() })
+  const retry = { schemaVersion: 1, source: 'provider_retry', logicalSequence: 7, outerAttempt: 2 }
+  async function deliver(sink: ThreadEventSink, seq: number, phase: string, overrides: Record<string, unknown> = {}) {
+    const event = { kind: 'pipeline_stage', seq, threadId: 'thread-current', turnId: 'turn-current',
+      stage: 'provider_retrying', label: 'Retrying provider stream', timestamp: '2026-10-07T00:00:00.123456789Z',
+      attempt: 2, maxAttempt: 3, details: { retry: { ...retry, phase,
+        ...(phase === 'scheduled' ? { delayMs: 0, deadlineUnixMs: 1 } : {}),
+        ...(phase === 'cancelled' ? { cancelReason: 'context_cancelled' } : {}) },
+        providerError: { kind: 'network', status: 503, retryable: true } }, ...overrides }
+    const decision = projectPublicRuntimeSseBlock(`id: ${seq}\nevent: pipeline_stage\ndata: ${JSON.stringify(event)}`,
+      'thread-current', new PublicRuntimeEventFilter())
+    expect(decision?.status).toBe('emit')
+    if (decision?.status !== 'emit') throw new Error('invalid retry fixture')
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'main-retry', events: [decision.event] })).toBe(true)
+    await dispatchAnalytixRuntimeEvent(decision.event as Parameters<typeof dispatchAnalytixRuntimeEvent>[0], sink, async () => undefined)
+  }
+  it.each(['general', 'accepted', 'failed', 'aborted', 'waiting-aborted'] as const)('retires live retry rows in the terminal commit while preserving provider errors (%s)', async scenario => {
+    const mode = scenario === 'waiting-aborted' ? 'aborted' : scenario
+    const phase = scenario === 'waiting-aborted' ? 'scheduled' : 'started'
+    const { getState, set, get, setSnapshots } = makeSinkHarness({ lastSeq: 16 })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    await deliver(sink, 17, 'scheduled')
+    await deliver(sink, 18, phase)
+    await deliver(sink, 19, phase, { details: { retry: { ...retry, logicalSequence: 8, phase,
+      ...(phase === 'scheduled' ? { delayMs: 0, deadlineUnixMs: 1 } : {}) } } })
+    sink.onSeq(19)
+    expect(getState().blocks.filter(block => block.kind === 'system' && block.meta?.providerRetry)).toHaveLength(2)
+    expect(getState().busy).toBe(true)
+    const commits = setSnapshots().length
+    const batch = mode === 'accepted' ? acceptedFinalProjectionBatch() : generalTerminalProjectionBatch(
+      mode === 'failed' || mode === 'aborted' ? {
+        terminalItem: { kind: 'system', id: 'terminal-error', text: 'Actual terminal outcome',
+          severity: mode === 'failed' ? 'error' : 'info', code: mode, meta: { turnId: 'turn-current' } },
+        terminal: { status: mode, createdAt: '2026-07-20T03:00:00Z', terminalReason: mode === 'failed' ? 'provider_failure' : 'cancel' }
+      } : {}
+    )
+    if (mode === 'accepted') await sink.onAcceptedFinalBatch?.(batch as AcceptedFinalProjectionBatch)
+    else await sink.onGeneralTerminalBatch?.(batch as GeneralTerminalProjectionBatch)
+    expect(setSnapshots()).toHaveLength(commits + 1)
+    const terminal = getState()
+    expect(terminal.blocks.some(block => block.kind === 'system' && block.meta?.providerRetry)).toBe(false)
+    expect(terminal.blocks.find(block => block.kind === 'system' && block.meta?.providerError)).toMatchObject({
+      meta: { turnId: 'turn-current', providerError: { status: 503, retryable: true } }
+    })
+    expect(terminal.blocks.filter(block => block.kind === 'system')).toHaveLength(mode === 'failed' || mode === 'aborted' ? 2 : 1)
+    if (mode === 'failed' || mode === 'aborted') expect(terminal.blocks.at(-1)).toMatchObject({
+      id: 'terminal-error', text: 'Actual terminal outcome', code: mode
+    })
+    expect(terminal.blocks.some(block => block.kind === 'system' && block.text.includes('正在重试'))).toBe(false)
+    expect(terminal.turnUsageById['turn-current'].snapshot).toEqual(batch.usage)
+    expect(terminal.busy).toBe(false)
+    await deliver(sink, 23, 'scheduled')
+    expect(getState()).toBe(terminal)
+  })
+  it('updates one row across phases and ignores duplicate/out-of-order seq without erasing providerError', async () => {
+    const { getState, set, get } = makeSinkHarness()
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    await deliver(sink, 40, 'scheduled'); sink.onSeq(40)
+    const id = getState().blocks[0].id
+    await deliver(sink, 41, 'started'); sink.onSeq(41)
+    await deliver(sink, 40, 'scheduled'); await deliver(sink, 41, 'started')
+    expect(getState().blocks).toHaveLength(1)
+    expect(getState().blocks[0]).toMatchObject({ id, meta: { turnId: 'turn-current',
+      providerRetry: { attempt: 2, maxAttempt: 3, lifecycle: { ...retry, phase: 'started' } },
+      providerError: { kind: 'network', status: 503, retryable: true } } })
+    await deliver(sink, 42, 'cancelled')
+    expect(getState().blocks).toHaveLength(1)
+    expect(getState().blocks[0]).toMatchObject({ id, meta: { providerRetry: { lifecycle: { phase: 'cancelled', cancelReason: 'context_cancelled' } } } })
+    await deliver(sink, 43, 'scheduled')
+    expect(getState().blocks[0]).toMatchObject({ id, meta: { providerRetry: { lifecycle: { phase: 'scheduled' } } } })
+    expect(getState().busy).toBe(true)
+    expect(getState().blocks.some(block => block.kind === 'assistant' || block.kind === 'tool')).toBe(false)
+  })
+  it('never adopts an old turn, wrong thread, inactive stream or terminal late status; accepts the next started turn', async () => {
+    vi.useFakeTimers()
+    const { getState, set, get } = makeSinkHarness({ lastSeq: 19 })
+    const controller = new AbortController()
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current', signal: controller.signal })
+    await deliver(sink, 40, 'started', { turnId: 'old-turn' })
+    expect(getState().blocks).toEqual([])
+    sink.onRuntimeStatus?.({ kind: 'pipeline_stage', itemId: 'wrong-thread', threadId: 'other-thread', turnId: 'turn-current', stage: 'provider_retrying' })
+    expect(getState().currentTurnId).toBe('turn-current')
+    expect(vi.getTimerCount()).toBe(0)
+    await sink.onGeneralTerminalBatch?.(generalTerminalProjectionBatch())
+    const terminal = getState()
+    await deliver(sink, 43, 'scheduled')
+    expect(getState()).toBe(terminal); expect(getState().busy).toBe(false); expect(vi.getTimerCount()).toBe(0)
+    sink.onTurnStarted?.({ threadId: 'thread-current', turnId: 'next-turn', seq: 44 })
+    await deliver(sink, 45, 'started', { turnId: 'next-turn' })
+    expect(getState()).toMatchObject({ busy: true, currentTurnId: 'next-turn' })
+    expect(getState().blocks.at(-1)).toMatchObject({ meta: { turnId: 'next-turn', providerRetry: { lifecycle: { phase: 'started' } } } })
+    await deliver(sink, 46, 'started', { turnId: 'turn-current' })
+    expect(getState().blocks.at(-1)).toMatchObject({ meta: { turnId: 'next-turn' } })
+    set({ activeThreadId: 'switched-thread' }); const switched = getState()
+    await deliver(sink, 47, 'scheduled', { turnId: 'next-turn' }); expect(getState()).toBe(switched)
+    set({ activeThreadId: 'thread-current' }); controller.abort(); const aborted = getState()
+    await deliver(sink, 48, 'cancelled', { turnId: 'next-turn' }); expect(getState()).toBe(aborted)
+    clearBusyWatchdog(); vi.useRealTimers()
+  })
+  it('revalidates alternate sink metadata and keeps length observations nonterminal', async () => {
+    const { getState, set, get } = makeSinkHarness()
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    sink.onRuntimeStatus?.({ kind: 'pipeline_stage', itemId: 'unsafe', turnId: 'turn-current', stage: 'provider_retrying',
+      retry: { ...retry, phase: 'started', privateText: 'PRIVATE_ABC' } as never, message: 'PRIVATE_ABC' })
+    expect(JSON.stringify(getState().blocks)).not.toContain('PRIVATE_ABC')
+    const unsafe = getState().blocks[0]
+    expect(unsafe.kind === 'system' ? unsafe.meta?.providerRetry : undefined).toBeUndefined()
+    await deliver(sink, 40, 'started', { stage: 'response_received', label: 'Response Received', details: {
+      stopReason: 'length', streamCompleted: false, logicalSequence: 7
+    } })
+    expect(getState()).toMatchObject({ busy: true, currentTurnId: 'turn-current' })
+    expect(getState().blocks.some(block => block.kind === 'system' && block.meta?.stage === 'response_received')).toBe(false)
+    expect(getState().blocks.some(block => block.kind === 'assistant' && block.generalTerminalProjectionReceipt)).toBe(false)
+  })
+  it('preserves ordinary thread notices after completion without starting a turn or watchdog', async () => {
+    vi.useFakeTimers()
+    const { getState, set, get } = makeSinkHarness({ lastSeq: 19 })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    await sink.onGeneralTerminalBatch?.(generalTerminalProjectionBatch())
+    set({ error: 'retain existing error' })
+    sink.onRuntimeStatus?.({ kind: 'tool_catalog_changed', itemId: 'catalog', threadId: 'thread-current', seq: 23,
+      message: 'PRIVATE_TEXT' })
+    expect(getState()).toMatchObject({ busy: false, currentTurnId: null, error: 'retain existing error' })
+    expect(getState().blocks.at(-1)).toMatchObject({ id: 'catalog', kind: 'system' })
+    expect(JSON.stringify(getState().blocks)).not.toContain('PRIVATE_TEXT')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+})
+
+
+describe('committed output cap terminal metadata', () => {
+  it('commits an empty cap atomically on the existing user without an assistant block', async () => {
+    const user: ChatBlock = { kind: 'user', id: 'user-current', text: 'Review ordinary code.', createdAt: '2026-07-20T02:00:00Z', meta: { turnId: 'turn-current' } }
+    const { getState, set, get } = makeSinkHarness({ blocks: [user], lastSeq: 19 })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    await sink.onGeneralTerminalBatch?.(generalTerminalProjectionBatch({ terminalItem: undefined, lastSeq: 21,
+      terminal: { status: 'completed', createdAt: '2026-07-20T03:00:00Z', terminalReason: 'success', endReason: { kind: 'max-tokens' } } }))
+    expect(getState()).toMatchObject({ busy: false, lastSeq: 21, currentTurnId: null })
+    expect(getState().blocks).toHaveLength(1)
+    expect(getState().blocks[0]).toMatchObject({ kind: 'user', generalTerminalProjectionReceipt: {
+      threadId: 'thread-current', turnId: 'turn-current', itemId: 'user-current', firstSeq: 20, lastSeq: 21, endReason: { kind: 'max-tokens' }
+    } })
+    clearBusyWatchdog()
+  })
+  it('keeps the normal final item associated with the same capped terminal fact', async () => {
+    const { getState, set, get } = makeSinkHarness({ lastSeq: 19 })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    await sink.onGeneralTerminalBatch?.(generalTerminalProjectionBatch({ terminal: {
+      status: 'completed', createdAt: '2026-07-20T03:00:00Z', terminalReason: 'success', endReason: { kind: 'max-tokens' }
+    } }))
+    expect(getState().blocks.at(-1)).toMatchObject({ kind: 'assistant', generalTerminalProjectionReceipt: { endReason: { kind: 'max-tokens' } } })
+    clearBusyWatchdog()
+  })
+  it('rejects cap metadata on an alternate failed terminal sink', async () => {
+    const { set, get } = makeSinkHarness({ lastSeq: 19 })
+    const sink = buildThreadEventSink(set, get, { threadId: 'thread-current' })
+    await expect(sink.onGeneralTerminalBatch?.(generalTerminalProjectionBatch({ terminal: {
+      status: 'failed', createdAt: '2026-07-20T03:00:00Z', terminalReason: 'provider_failure', endReason: { kind: 'max-tokens' }
+    } }))).rejects.toThrow(/end reason/)
+    clearBusyWatchdog()
+  })
+})
+
+
+describe('Queue recovery stable intent ownership', () => {
+  afterEach(() => { clearActiveStream(); clearBusyWatchdog() })
+  it('deduplicates stable IDs, preserves edited drafts and all retry metadata, and retains an explicit Stop', async () => {
+    const draft: QueuedUserMessage = { threadId: 'thread-current', id: 'stable-steer', text: 'same text',
+      mode: 'agent', model: 'deepseek-v4-pro', providerId: 'deepseek', modelLabel: 'Synthetic model', reasoningEffort: 'high',
+      displayText: 'visible draft', attachmentIds: ['att-1'], attachments: [{ id: 'att-1', name: 'fixture.png', mimeType: 'image/png' }],
+      fileReferences: [{ path: '/workspace/fixture/a.ts', relativePath: 'a.ts', name: 'a.ts', kind: 'file' }] }
+    const ticket = { ...draft, sending: true }
+    const edited = { threadId: draft.threadId, id: 'edited-steer', text: 'edited after failure' }
+    const other = { threadId: 'thread-other', id: draft.id, text: 'another owner' }
+    const meta = { turnId: 'turn-current', clientUserMessageId: draft.id, steeringStatus: 'pending' as const, steeringQueue: draft }
+    const { getState, set, get } = makeSinkHarness({ queuedMessages: [ticket, edited, other],
+      queuedMessagePauses: { 'thread-current': 'interrupted', 'thread-other': 'failed' }, blocks: [
+        { kind: 'user', id: draft.id, text: draft.text, meta },
+        { kind: 'user', id: edited.id, text: 'same text', meta: { ...meta, clientUserMessageId: edited.id, steeringQueue: { ...draft, id: edited.id } } },
+        { kind: 'user', id: 'same-text-distinct-id', text: draft.text, meta: { ...meta, clientUserMessageId: 'same-text-distinct-id', steeringQueue: { ...draft, id: 'same-text-distinct-id' } } }
+      ] })
+    const sink = buildThreadEventSink(set, get, { threadId: draft.threadId,
+      getThreadDetail: async () => ({ blocks: getState().blocks, latestSeq: 20, latestTurnId: 'turn-current', threadStatus: 'completed' }) })
+    await sink.onTurnComplete()
+    expect(getState().queuedMessages).toEqual([expect.objectContaining({ ...draft, sending: false }), edited, other,
+      expect.objectContaining({ ...draft, id: 'same-text-distinct-id', sending: false })])
+    expect(getState().queuedMessages).not.toContain(ticket)
+    expect(getState().queuedMessagePauses).toEqual({ 'thread-current': 'interrupted', 'thread-other': 'failed' })
+    expect(getState().blocks).toEqual([])
+    const recovered = getState().queuedMessages
+    await sink.onTurnComplete()
+    expect(getState().queuedMessages).toEqual(recovered)
+    expect(queuedPauseReason(getState())).toBe('interrupted')
+  })
+})
+
+describe('actual watched completion poll ownership', () => {
+  type Detail = Awaited<ReturnType<AnalytixRuntimeProvider['getThreadDetail']>>
+  type RefreshOptions = { isCurrent?: () => boolean }
+
+  function deferredWatch<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(yes => { resolve = yes })
+    return { promise, resolve }
+  }
+
+  async function settleWatch() {
+    for (let step = 0; step < 20; step++) await Promise.resolve()
+  }
+
+  function detail(status: 'idle' | 'running'): Detail {
+    return { blocks: [], latestSeq: 1, threadStatus: status }
+  }
+
+  function harness(ids: string[], register = true) {
+    const provider = new AnalytixRuntimeProvider()
+    const read = vi.spyOn(provider, 'getThreadDetail').mockResolvedValue(detail('running'))
+    const providerOwner = vi.spyOn(providerRegistry, 'getProvider').mockReturnValue(provider)
+    const notification = vi.fn(async (_request: { threadId: string; title: string; body: string }) => ({ ok: true, shown: true }))
+    vi.stubGlobal('window', { analytix: { app: { showTurnCompleteNotification: notification } } })
+    const refresh = vi.fn(async (_options?: RefreshOptions): Promise<void> => undefined)
+    const state = makeSinkHarness({
+      activeThreadId: 'synthetic-current-unrelated', busy: false, runtimeConnection: 'ready',
+      currentTurnId: null, currentTurnUserId: null, lastSeq: 10,
+      threads: ids.map(id => ({ id, title: id, workspace: '/synthetic/watch-owner',
+        updatedAt: '2026-10-01T00:00:00Z', model: 'synthetic', mode: 'agent' })),
+      watchTurnCompletion: Object.fromEntries(ids.map(id => [id, true])),
+      unreadThreadIds: {}, deletedUserInputDraftThreadIds: {}, refreshThreads: refresh
+    })
+    if (register) for (const id of ids) watchTurnCompletionNotification(id)
+    return { ...state, provider, providerOwner, read, notification, refresh,
+      start: () => syncTurnCompletionPoll(state.set, state.get) }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-14T00:00:00Z'))
+    stopTurnCompletionPoll()
+    clearWatchedCompletionNotifications()
+    clearActiveStream()
+    resetPublicProjectionRevocationsForTests()
+  })
+  afterEach(() => {
+    stopTurnCompletionPoll()
+    clearWatchedCompletionNotifications()
+    clearActiveStream()
+    resetPublicProjectionRevocationsForTests()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('drops a terminal read whose thread was confirmed deleted while the actual poll was waiting', async () => {
+    const id = 'watch-deleted-ack', h = harness([id]), response = deferredWatch<Detail>()
+    h.read.mockImplementationOnce(() => response.promise)
+    resetActiveStream(id, { turnId: 'cached-deleted-turn', liveAssistant: 'Synthetic cached observation', lastSeq: 7 })
+    const stream = getActiveStreamSnapshotFor(id)
+    h.start()
+    expect(h.read).toHaveBeenCalledExactlyOnceWith(id)
+
+    clearWatchedCompletionNotification(id)
+    h.set(state => ({
+      threads: state.threads.filter(thread => thread.id !== id), watchTurnCompletion: {},
+      deletedUserInputDraftThreadIds: markDeletedUserInputDraftThread(state.deletedUserInputDraftThreadIds, id),
+      error: 'New state after confirmed deletion'
+    }))
+    const committed = h.getState()
+    response.resolve(detail('idle'))
+    await settleWatch()
+
+    expect(h.getState()).toBe(committed)
+    expect(h.getState().unreadThreadIds).toEqual({})
+    expect(h.notification).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(getActiveStreamSnapshotFor(id)).toBe(stream)
+  })
+
+  it('rejects an old A ticket re-created at the same timestamp while completing the unchanged B watch', async () => {
+    const a = 'watch-same-time-a', b = 'watch-same-time-b', h = harness([a, b], false)
+    const timestamp = Date.now(), oldA = deferredWatch<Detail>()
+    watchTurnCompletionNotification(a, timestamp)
+    watchTurnCompletionNotification(b, timestamp)
+    const oldDedupe = completionNotificationDedupeKeyForWatchedThread(a)
+    h.read.mockImplementation(async id => id === b ? detail('idle') : detail('running'))
+      .mockImplementationOnce(() => oldA.promise)
+    h.start()
+    expect(h.read.mock.calls).toEqual([[a]])
+
+    h.set(state => ({ watchTurnCompletion: { ...state.watchTurnCompletion, [a]: false } }))
+    clearWatchedCompletionNotification(a)
+    watchTurnCompletionNotification(a, timestamp)
+    h.set(state => ({ watchTurnCompletion: { ...state.watchTurnCompletion, [a]: true } }))
+    expect(completionNotificationDedupeKeyForWatchedThread(a)).toBe(oldDedupe)
+    resetActiveStream(a, { turnId: 'new-a-ticket-turn', liveAssistant: 'New A stream remains owned', lastSeq: 20 })
+    resetActiveStream(b, { turnId: 'b-completed-turn', liveAssistant: 'B finishes', lastSeq: 12 })
+    const newAStream = getActiveStreamSnapshotFor(a)
+    oldA.resolve(detail('idle'))
+    await settleWatch()
+
+    expect(h.read.mock.calls).toEqual([[a], [b]])
+    expect(h.notification.mock.calls.map(([request]) => request.threadId)).toEqual([b])
+    expect(h.getState().watchTurnCompletion).toEqual({ [a]: true })
+    expect(h.getState().unreadThreadIds).toEqual({ [b]: true })
+    expect(getActiveStreamSnapshotFor(a)).toBe(newAStream)
+    expect(getActiveStreamSnapshotFor(b).threadId).toBeNull()
+    expect(h.refresh).toHaveBeenCalledOnce()
+
+    h.read.mockResolvedValueOnce(detail('idle'))
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(h.notification.mock.calls.map(([request]) => request.threadId)).toEqual([b, a])
+    expect(h.getState().watchTurnCompletion).toEqual({})
+    expect(h.getState().unreadThreadIds).toEqual({ [a]: true, [b]: true })
+    expect(getActiveStreamSnapshotFor(a).threadId).toBeNull()
+    expect(h.refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not settle an old provider response into a replacement provider watch', async () => {
+    const id = 'watch-provider-replaced', h = harness([id]), response = deferredWatch<Detail>()
+    h.read.mockImplementationOnce(() => response.promise)
+    resetActiveStream(id, { turnId: 'provider-owner-turn', liveAssistant: 'Replacement context remains', lastSeq: 8 })
+    const stream = getActiveStreamSnapshotFor(id)
+    h.start()
+    expect(h.read).toHaveBeenCalledExactlyOnceWith(id)
+    const replacement = new AnalytixRuntimeProvider()
+    const replacementRead = vi.spyOn(replacement, 'getThreadDetail').mockResolvedValue(detail('running'))
+    h.providerOwner.mockReturnValue(replacement)
+    const before = h.getState()
+    response.resolve(detail('idle'))
+    await settleWatch()
+
+    expect(h.getState()).toBe(before)
+    expect(h.getState().watchTurnCompletion).toEqual({ [id]: true })
+    expect(h.getState().unreadThreadIds).toEqual({})
+    expect(replacementRead).not.toHaveBeenCalled()
+    expect(h.notification).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(getActiveStreamSnapshotFor(id)).toBe(stream)
+  })
+
+  it.each(['revoked', 'deleted-draft'] as const)('fails closed for %s before reading and after a pending read', async reason => {
+    const id = `watch-late-${reason}`, h = harness([id]), response = deferredWatch<Detail>()
+    h.read.mockImplementationOnce(() => response.promise)
+    resetActiveStream(id, { turnId: 'protected-watch-turn', liveAssistant: 'Synthetic protected observation', lastSeq: 9 })
+    const stream = getActiveStreamSnapshotFor(id)
+    h.start()
+    expect(h.read).toHaveBeenCalledExactlyOnceWith(id)
+    if (reason === 'revoked') markPublicProjectionRevoked(id)
+    else h.set(state => ({ deletedUserInputDraftThreadIds: markDeletedUserInputDraftThread(state.deletedUserInputDraftThreadIds, id) }))
+    const before = h.getState()
+    response.resolve(detail('idle'))
+    await settleWatch()
+    expect(h.getState()).toBe(before)
+    expect(h.getState().watchTurnCompletion).toEqual({ [id]: true })
+    expect(h.notification).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(getActiveStreamSnapshotFor(id)).toBe(stream)
+
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(h.read).toHaveBeenCalledOnce()
+    expect(h.getState()).toBe(before)
+    expect(h.getState().unreadThreadIds).toEqual({})
+  })
+
+  it('admits a fresh missing ticket before dispatch and completes only from that actual GET response', async () => {
+    const id = 'watch-unregistered-ticket', h = harness([id], false)
+    const response = deferredWatch<Detail>(), timestamp = Date.now()
+    h.read.mockImplementationOnce(() => response.promise)
+    resetActiveStream(id, { turnId: 'unregistered-watch-turn', liveAssistant: 'Pending actual watch', lastSeq: 3 })
+    const stream = getActiveStreamSnapshotFor(id), before = h.getState()
+    expect(completionNotificationDedupeKeyForWatchedThread(id, timestamp + 1)).toBe(`watch:${id}:${timestamp + 1}`)
+    h.start()
+    await settleWatch()
+    expect(h.read).toHaveBeenCalledExactlyOnceWith(id)
+    expect(completionNotificationDedupeKeyForWatchedThread(id, timestamp + 1)).toBe(`watch:${id}:${timestamp}`)
+    expect(h.getState()).toBe(before)
+    expect(h.getState().watchTurnCompletion).toEqual({ [id]: true })
+    expect(h.getState().unreadThreadIds).toEqual({})
+    expect(h.notification).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(getActiveStreamSnapshotFor(id)).toBe(stream)
+
+    response.resolve(detail('idle'))
+    await settleWatch()
+    expect(h.getState().watchTurnCompletion).toEqual({})
+    expect(h.getState().unreadThreadIds).toEqual({ [id]: true })
+    expect(h.notification.mock.calls.map(([request]) => request.threadId)).toEqual([id])
+    expect(h.refresh).toHaveBeenCalledOnce()
+    expect(getActiveStreamSnapshotFor(id).threadId).toBeNull()
+  })
+
+  it('re-admits a live watch evicted by more than the bounded notification-ticket capacity before its fresh GET', async () => {
+    const id = 'watch-cap-evicted-fresh', h = harness([id]), timestamp = Date.now()
+    for (let index = 0; index < MAX_WATCHED_COMPLETION_NOTIFICATIONS; index++) {
+      watchTurnCompletionNotification(`watch-cap-filler-${index}`, index)
+    }
+    expect(completionNotificationDedupeKeyForWatchedThread(id, timestamp + 1)).toBe(`watch:${id}:${timestamp + 1}`)
+    h.read.mockResolvedValueOnce(detail('idle'))
+    h.start()
+    await settleWatch()
+
+    expect(h.read).toHaveBeenCalledExactlyOnceWith(id)
+    expect(h.getState().watchTurnCompletion).toEqual({})
+    expect(h.getState().unreadThreadIds).toEqual({ [id]: true })
+    expect(h.notification.mock.calls.map(([request]) => request.threadId)).toEqual([id])
+    expect(h.refresh).toHaveBeenCalledOnce()
+    expect(completionNotificationDedupeKeyForWatchedThread('watch-cap-filler-0', timestamp + 1)).toBe(`watch:watch-cap-filler-0:${timestamp + 1}`)
+    expect(completionNotificationDedupeKeyForWatchedThread('watch-cap-filler-1', timestamp + 1)).toBe('watch:watch-cap-filler-1:1')
+  })
+
+  it.each(['cleared', 'cap-evicted'] as const)('never supplements a %s ticket on an already-dispatched terminal response', async retirement => {
+    const id = `watch-old-out-${retirement}`, h = harness([id]), response = deferredWatch<Detail>(), timestamp = Date.now()
+    h.read.mockImplementationOnce(() => response.promise)
+    resetActiveStream(id, { turnId: 'old-out-live-turn', lastSeq: 17 })
+    const stream = getActiveStreamSnapshotFor(id), before = h.getState()
+    h.start()
+    expect(h.read).toHaveBeenCalledExactlyOnceWith(id)
+    if (retirement === 'cleared') clearWatchedCompletionNotification(id)
+    else {
+      for (let index = 0; index < MAX_WATCHED_COMPLETION_NOTIFICATIONS; index++) {
+        watchTurnCompletionNotification(`watch-old-out-filler-${index}`, index)
+      }
+    }
+    const missingTicket = `watch:${id}:${timestamp + 1}`
+    expect(completionNotificationDedupeKeyForWatchedThread(id, timestamp + 1)).toBe(missingTicket)
+    response.resolve(detail('idle'))
+    await settleWatch()
+
+    expect(completionNotificationDedupeKeyForWatchedThread(id, timestamp + 1)).toBe(missingTicket)
+    expect(h.getState()).toBe(before)
+    expect(h.getState().watchTurnCompletion).toEqual({ [id]: true })
+    expect(h.getState().unreadThreadIds).toEqual({})
+    expect(getActiveStreamSnapshotFor(id)).toBe(stream)
+    expect(h.notification).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+
+    h.read.mockResolvedValueOnce(detail('idle'))
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(h.read.mock.calls).toEqual([[id], [id]])
+    expect(h.getState().watchTurnCompletion).toEqual({})
+    expect(h.getState().unreadThreadIds).toEqual({ [id]: true })
+    expect(h.notification.mock.calls.map(([request]) => request.threadId)).toEqual([id])
+    expect(h.refresh).toHaveBeenCalledOnce()
+    expect(getActiveStreamSnapshotFor(id).threadId).toBeNull()
+  })
+
+  it.each(['offline', 'revoked', 'deleted-draft'] as const)('does not admit a missing ticket or GET for an ineligible %s watch', async reason => {
+    const id = `watch-ineligible-fresh-${reason}`, h = harness([id], false), fallbackAt = Date.now() + 1
+    if (reason === 'offline') h.set({ runtimeConnection: 'offline' })
+    else if (reason === 'revoked') markPublicProjectionRevoked(id)
+    else h.set(state => ({ deletedUserInputDraftThreadIds: markDeletedUserInputDraftThread(state.deletedUserInputDraftThreadIds, id) }))
+    const before = h.getState()
+    h.start()
+    await settleWatch()
+    expect(h.read).not.toHaveBeenCalled()
+    expect(h.getState()).toBe(before)
+    expect(h.getState().watchTurnCompletion).toEqual({ [id]: true })
+    expect(h.getState().unreadThreadIds).toEqual({})
+    expect(h.notification).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(completionNotificationDedupeKeyForWatchedThread(id, fallbackAt)).toBe(`watch:${id}:${fallbackAt}`)
+  })
+
+  it('rechecks the ticket after an actual stream-clear listener replaces the watch at the same time', async () => {
+    const id = 'watch-stream-listener-replaced', h = harness([id]), timestamp = Date.now()
+    h.read.mockResolvedValueOnce(detail('idle'))
+    resetActiveStream(id, { turnId: 'old-listener-turn', lastSeq: 5 })
+    let replaced = false
+    const unsubscribe = subscribeActiveStream(() => {
+      if (replaced || getActiveStreamSnapshotFor(id).threadId !== null) return
+      replaced = true
+      clearWatchedCompletionNotification(id)
+      watchTurnCompletionNotification(id, timestamp)
+      h.set({ watchTurnCompletion: { [id]: true } })
+      resetActiveStream(id, { turnId: 'new-listener-turn', lastSeq: 25 })
+    })
+    try {
+      h.start()
+      await settleWatch()
+      expect(replaced).toBe(true)
+      expect(h.getState().watchTurnCompletion).toEqual({ [id]: true })
+      expect(h.getState().unreadThreadIds).toEqual({})
+      expect(getActiveStreamSnapshotFor(id).turnId).toBe('new-listener-turn')
+      expect(h.notification).not.toHaveBeenCalled()
+      expect(h.refresh).not.toHaveBeenCalled()
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('does not retire a fresh watch registered at the same time by the actual notification dispatch', async () => {
+    const id = 'watch-notification-replaced', h = harness([id]), timestamp = Date.now()
+    h.read.mockResolvedValueOnce(detail('idle'))
+    resetActiveStream(id, { turnId: 'old-notification-turn', lastSeq: 6 })
+    h.notification.mockImplementationOnce(async () => {
+      clearWatchedCompletionNotification(id)
+      watchTurnCompletionNotification(id, timestamp)
+      h.set({ watchTurnCompletion: { [id]: true } })
+      resetActiveStream(id, { turnId: 'new-notification-turn', lastSeq: 26 })
+      return { ok: true, shown: true }
+    })
+    h.start()
+    await settleWatch()
+    expect(h.notification).toHaveBeenCalledOnce()
+    expect(h.getState().watchTurnCompletion).toEqual({ [id]: true })
+    expect(h.getState().unreadThreadIds).toEqual({})
+    expect(getActiveStreamSnapshotFor(id).turnId).toBe('new-notification-turn')
+    expect(h.refresh).not.toHaveBeenCalled()
+    expect(completionNotificationDedupeKeyForWatchedThread(id)).toBe(`watch:${id}:${timestamp}`)
+  })
+
+  it('allows its own confirmed completion to retire the watch and still finish a guarded refresh', async () => {
+    const id = 'watch-own-completion-refresh', h = harness([id]), refreshed = deferredWatch<void>()
+    let refreshCurrent: (() => boolean) | undefined
+    h.read.mockResolvedValueOnce(detail('idle'))
+    h.refresh.mockImplementationOnce(async options => {
+      refreshCurrent = options?.isCurrent
+      await refreshed.promise
+      if (!options?.isCurrent?.()) return
+      h.set({ lastSeq: 41 })
+      setTimeout(() => {
+        if (options.isCurrent?.()) h.set({ lastSeq: 42 })
+      }, 1500)
+    })
+    resetActiveStream(id, { turnId: 'actual-completed-turn', liveAssistant: 'Finishes normally', lastSeq: 11 })
+    h.start()
+    await settleWatch()
+
+    expect(h.notification.mock.calls.map(([request]) => request.threadId)).toEqual([id])
+    expect(h.getState().watchTurnCompletion).toEqual({})
+    expect(h.getState().unreadThreadIds).toEqual({ [id]: true })
+    expect(getActiveStreamSnapshotFor(id).threadId).toBeNull()
+    expect(h.refresh).toHaveBeenCalledExactlyOnceWith({ isCurrent: expect.any(Function) })
+    expect(refreshCurrent?.()).toBe(true)
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(h.read).toHaveBeenCalledOnce()
+    expect(h.getState().watchTurnCompletion).toEqual({})
+    expect(refreshCurrent?.()).toBe(true)
+    h.start()
+    expect(refreshCurrent?.()).toBe(true)
+    refreshed.resolve(undefined)
+    await settleWatch()
+    expect(h.getState().lastSeq).toBe(41)
+    expect(h.notification).toHaveBeenCalledOnce()
+    expect(refreshCurrent?.()).toBe(true)
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(h.getState().lastSeq).toBe(42)
+    expect(h.notification).toHaveBeenCalledOnce()
+  })
+
+  it.each(['same-time-rewatch', 'provider', 'new-poll', 'new-error'] as const)('prevents a late completion refresh from replacing new state after %s', async replacement => {
+    const id = `watch-late-refresh-${replacement}`, h = harness([id]), refreshed = deferredWatch<void>()
+    const timestamp = Date.now()
+    let refreshCurrent: (() => boolean) | undefined
+    h.read.mockResolvedValueOnce(detail('idle'))
+    h.refresh.mockImplementationOnce(async options => {
+      refreshCurrent = options?.isCurrent
+      await refreshed.promise
+      if (!options?.isCurrent?.()) return
+      h.set({ lastSeq: 1, error: 'Stale completion refresh', unreadThreadIds: { [id]: true } })
+    })
+    h.start()
+    await settleWatch()
+    expect(refreshCurrent?.()).toBe(true)
+    expect(h.getState().watchTurnCompletion).toEqual({})
+    expect(h.notification).toHaveBeenCalledOnce()
+
+    if (replacement === 'same-time-rewatch') {
+      watchTurnCompletionNotification(id, timestamp)
+      h.set({ watchTurnCompletion: { [id]: true } })
+    } else if (replacement === 'provider') {
+      h.providerOwner.mockReturnValue(new AnalytixRuntimeProvider())
+    } else if (replacement === 'new-poll') {
+      const other = 'watch-new-poll-owner'
+      watchTurnCompletionNotification(other, timestamp)
+      h.set({ watchTurnCompletion: { [other]: true } })
+      stopTurnCompletionPoll()
+      h.start()
+      await settleWatch()
+    }
+    const newError = replacement === 'new-error' ? 'New current state' : null
+    h.set({ lastSeq: 73, error: newError, unreadThreadIds: {} })
+    resetActiveStream(id, { turnId: 'replacement-refresh-owner', liveAssistant: 'New stream survives late refresh', lastSeq: 73 })
+    const stream = getActiveStreamSnapshotFor(id), before = h.getState()
+    expect(refreshCurrent?.()).toBe(false)
+    refreshed.resolve(undefined)
+    await settleWatch()
+
+    expect(h.getState()).toBe(before)
+    expect(h.getState().lastSeq).toBe(73)
+    expect(h.getState().error).toBe(newError)
+    expect(h.getState().unreadThreadIds).toEqual({})
+    expect(getActiveStreamSnapshotFor(id)).toBe(stream)
+    expect(h.notification).toHaveBeenCalledOnce()
+    expect(h.refresh).toHaveBeenCalledOnce()
+  })
+
+  it.each(['same-time-rewatch', 'deleted', 'revoked', 'explicit-stop', 'cap-evicted', 'provider', 'new-error', 'offline-sync'] as const)(
+    'retires an admitted reader after the completion callback returned when %s replaces its owner', async retirement => {
+      const id = `watch-returned-reader-${retirement}`, h = harness([id]), reader = deferredWatch<void>()
+      const timestamp = Date.now()
+      let readerCurrent: (() => boolean) | undefined
+      h.read.mockResolvedValueOnce(detail('idle'))
+      h.refresh.mockImplementationOnce(async options => {
+        readerCurrent = options?.isCurrent
+        // This read is admitted during refresh but its result arrives after
+        // the completion callback has returned, like the existing index reader.
+        void reader.promise.then(() => {
+          if (options?.isCurrent?.()) h.set({ lastSeq: 1, error: 'Retired reader result', unreadThreadIds: { [id]: true } })
+        })
+      })
+      h.start()
+      await settleWatch()
+      expect(h.getState().watchTurnCompletion).toEqual({})
+      expect(h.getState().unreadThreadIds).toEqual({ [id]: true })
+      expect(h.notification).toHaveBeenCalledOnce()
+      expect(h.refresh).toHaveBeenCalledExactlyOnceWith({ isCurrent: expect.any(Function) })
+      expect(readerCurrent?.()).toBe(true)
+      expect(completionNotificationDedupeKeyForWatchedThread(id, timestamp + 1)).toBe(`watch:${id}:${timestamp}`)
+
+      if (retirement === 'same-time-rewatch') {
+        watchTurnCompletionNotification(id, timestamp)
+        h.set({ watchTurnCompletion: { [id]: true } })
+        expect(completionNotificationDedupeKeyForWatchedThread(id)).toBe(`watch:${id}:${timestamp}`)
+      } else if (retirement === 'deleted') {
+        clearWatchedCompletionNotification(id)
+        h.set(state => ({ deletedUserInputDraftThreadIds: markDeletedUserInputDraftThread(state.deletedUserInputDraftThreadIds, id) }))
+      } else if (retirement === 'revoked') markPublicProjectionRevoked(id)
+      else if (retirement === 'explicit-stop') stopTurnCompletionPoll()
+      else if (retirement === 'cap-evicted') {
+        for (let index = 0; index < MAX_WATCHED_COMPLETION_NOTIFICATIONS; index++) {
+          watchTurnCompletionNotification(`watch-returned-reader-filler-${index}`, index)
+        }
+      } else if (retirement === 'provider') h.providerOwner.mockReturnValue(new AnalytixRuntimeProvider())
+      else if (retirement === 'offline-sync') {
+        h.set({ runtimeConnection: 'offline' })
+        h.start()
+        h.set({ runtimeConnection: 'ready' })
+      }
+      const error = retirement === 'new-error' ? 'New reader owner error' : null
+      h.set({ lastSeq: 92, error, unreadThreadIds: {} })
+      const before = h.getState()
+      expect(readerCurrent?.()).toBe(false)
+      reader.resolve(undefined)
+      await settleWatch()
+      expect(h.getState()).toBe(before)
+      expect(h.getState().lastSeq).toBe(92)
+      expect(h.getState().error).toBe(error)
+      expect(h.getState().unreadThreadIds).toEqual({})
+      expect(h.read).toHaveBeenCalledOnce()
+      expect(h.notification).toHaveBeenCalledOnce()
+      expect(h.refresh).toHaveBeenCalledOnce()
+    }
+  )
 })

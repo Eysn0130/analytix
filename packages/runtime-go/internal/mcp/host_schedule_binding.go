@@ -183,3 +183,12 @@ func hostScheduleLoopbackPortV1(spec ServerSpec) uint16 {
 	}
 	return port
 }
+
+// Origin-bearing create additionally requires the authenticated helper startup
+// binding; the legacy originless transport remains available without a secret.
+func hostScheduleCreateOriginAllowedV1(spec ServerSpec, rawName string) bool {
+	return hostScheduleLoopbackPortV1(spec) != 0 && len(spec.Args) == 6 && (rawName == "gui_schedule_create" || rawName == "claw_schedule_create")
+}
+func hostScheduleCreateToolV1(toolName string) bool {
+	return toolName == "mcp__gui_schedule__gui_schedule_create" || toolName == "mcp__gui_schedule__claw_schedule_create"
+}

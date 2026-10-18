@@ -94,13 +94,6 @@ Analytix 探索的是“需求 -> 设计 -> 计划 -> 编码 -> 验证”的下�
 </p>
 <p align="center"><em>需求澄清、需求文档与计划演示</em></p>
 
-<p align="center">
-  <a href="src/asset/img/mascot-ui-plugin.mp4">
-    <img src="src/asset/img/mascot-ui-plugin.gif" width="680" alt="Mascot UI plugin demo">
-  </a>
-</p>
-<p align="center"><em>mascot / cameo UI 插件演示</em></p>
-
 ## 快速开始
 
 ### 下载发布版

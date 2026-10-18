@@ -1,36 +1,26 @@
 import { providerDisplayName, providerEndpointKind, providerModelDisplayName } from '@shared/provider-display'
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import type {
   AppSettingsPatch,
-  ImageGenerationProtocol,
   AnalytixRuntimeSettingsPatchV1,
   AnalytixRuntimeSettingsV1,
-  MusicGenerationProtocol,
   ModelEndpointFormat,
   ModelProviderImageCapabilityV1,
   ModelProviderModelProfileV1,
-  ModelProviderMusicCapabilityV1,
   ModelProviderProfileV1,
   ModelProviderSettingsV1,
-  ModelProviderSpeechCapabilityV1,
-  ModelProviderTextToSpeechCapabilityV1,
-  ModelProviderVideoCapabilityV1,
-  SpeechToTextProtocol,
-  TextToSpeechProtocol,
-  VideoGenerationProtocol
 } from '@shared/app-settings'
 import {
   DEFAULT_IMAGE_GENERATION_PROTOCOL,
-  DEFAULT_MUSIC_GENERATION_PROTOCOL,
   DEFAULT_MODEL_PROVIDER_ID,
-  DEFAULT_SPEECH_TO_TEXT_PROTOCOL,
-  DEFAULT_TEXT_TO_SPEECH_PROTOCOL,
-  DEFAULT_VIDEO_GENERATION_PROTOCOL,
   MODEL_ENDPOINT_FORMATS,
   MODEL_PROVIDER_PRESETS,
   TOKEN_PLAN_PROVIDER_ID_SUFFIX,
   defaultMiniMaxMediaGenerationAnalytixPatch,
   defaultModelProviderSettings,
+  applyModelProviderPreferences,
+  captureModelProviderPreferences,
+  normalizeModelProviderPreferences,
   getModelProviderPreset,
   modelProviderPresetProfile,
   modelSupportsImageInput,
@@ -57,8 +47,7 @@ import {
   Music2,
   PlugZap,
   Plus,
-  Trash2,
-  X
+  Trash2
 } from '../design/AnalytixUiIcons'
 import {
   InlineNoticeView,
@@ -71,6 +60,7 @@ import {
 import { providerModelListEntries } from './provider-model-editor'
 import { ProviderModelsManager } from './settings-section-provider-models'
 import { useChatStore } from '../store/chat-store'
+import { SETTINGS_CHANGED_EVENT } from '../lib/keyboard-shortcut-settings'
 import {
   credentialDraftAction,
   deleteProviderRegistryEntry,
@@ -85,30 +75,6 @@ const MODEL_ENDPOINT_FORMAT_LABEL_KEYS: Record<ModelEndpointFormat, string> = {
   responses: 'modelEndpointResponses',
   messages: 'modelEndpointMessages',
   custom_endpoint: 'modelEndpointCustomEndpoint'
-}
-
-const IMAGE_GENERATION_PROTOCOL_LABEL_KEYS: Record<ImageGenerationProtocol, string> = {
-  'openai-images': 'imageGenProtocolOpenAi',
-  'minimax-image': 'imageGenProtocolMiniMax'
-}
-
-const SPEECH_TO_TEXT_PROTOCOL_LABEL_KEYS: Record<SpeechToTextProtocol, string> = {
-  'openai-transcriptions': 'speechProtocolOpenAi',
-  'mimo-asr': 'speechProtocolMimoAsr'
-}
-
-const TEXT_TO_SPEECH_PROTOCOL_LABEL_KEYS: Record<TextToSpeechProtocol, string> = {
-  'openai-speech': 'textToSpeechProtocolOpenAi',
-  'minimax-t2a': 'textToSpeechProtocolMiniMax',
-  'mimo-tts': 'textToSpeechProtocolMimo'
-}
-
-const MUSIC_GENERATION_PROTOCOL_LABEL_KEYS: Record<MusicGenerationProtocol, string> = {
-  'minimax-music': 'musicGenerationProtocolMiniMax'
-}
-
-const VIDEO_GENERATION_PROTOCOL_LABEL_KEYS: Record<VideoGenerationProtocol, string> = {
-  'minimax-video': 'videoGenerationProtocolMiniMax'
 }
 
 export function modelProvidersSettingsPatch(input: {
@@ -152,7 +118,10 @@ function endpointFormatForRegistryKind(kind: string): ModelEndpointFormat {
   }
 }
 
-export function providerProfileFromRegistry(provider: ProviderRegistryPublicProvider): ModelProviderProfileV1 {
+export function providerProfileFromRegistry(
+  provider: ProviderRegistryPublicProvider,
+  preferences?: unknown
+): ModelProviderProfileV1 {
   const preset = getModelProviderPreset(provider.id)
   const catalog = preset
     ? modelProviderPresetProfile(preset)
@@ -183,7 +152,7 @@ export function providerProfileFromRegistry(provider: ProviderRegistryPublicProv
     ...(catalogImage?.models ?? []),
     ...provider.mediaModels.filter((model) => !classifiedMedia.has(model))
   ]
-  return {
+  return applyModelProviderPreferences({
     ...(catalog ?? {
       id: provider.id,
       name: provider.id,
@@ -213,7 +182,7 @@ export function providerProfileFromRegistry(provider: ProviderRegistryPublicProv
     textToSpeech,
     music,
     video
-  }
+  }, preferences)
 }
 
 type ProviderRegistrySnapshotResult = Extract<ProviderRegistryResult, { providers: unknown }>
@@ -364,38 +333,6 @@ function defaultImageCapability(baseUrl: string): ModelProviderImageCapabilityV1
   }
 }
 
-function defaultSpeechCapability(baseUrl: string): ModelProviderSpeechCapabilityV1 {
-  return {
-    protocol: DEFAULT_SPEECH_TO_TEXT_PROTOCOL,
-    baseUrl: baseUrl.trim(),
-    models: []
-  }
-}
-
-function defaultTextToSpeechCapability(baseUrl: string): ModelProviderTextToSpeechCapabilityV1 {
-  return {
-    protocol: DEFAULT_TEXT_TO_SPEECH_PROTOCOL,
-    baseUrl: baseUrl.trim(),
-    models: []
-  }
-}
-
-function defaultMusicCapability(baseUrl: string): ModelProviderMusicCapabilityV1 {
-  return {
-    protocol: DEFAULT_MUSIC_GENERATION_PROTOCOL,
-    baseUrl: baseUrl.trim(),
-    models: []
-  }
-}
-
-function defaultVideoCapability(baseUrl: string): ModelProviderVideoCapabilityV1 {
-  return {
-    protocol: DEFAULT_VIDEO_GENERATION_PROTOCOL,
-    baseUrl: baseUrl.trim(),
-    models: []
-  }
-}
-
 function profileForModel(
   provider: Pick<ModelProviderProfileV1, 'modelProfiles'>,
   model: string
@@ -403,69 +340,6 @@ function profileForModel(
   const trimmed = model.trim()
   if (!trimmed) return undefined
   return provider.modelProfiles[trimmed.toLowerCase()] ?? provider.modelProfiles[trimmed]
-}
-
-function presetImageCapability(providerId: string): ModelProviderImageCapabilityV1 | null {
-  const preset = getModelProviderPreset(providerId)
-  if (!preset?.image) return null
-  return { protocol: preset.image.protocol, baseUrl: preset.image.baseUrl, models: [...preset.image.models] }
-}
-
-function presetSpeechCapability(provider: ModelProviderProfileV1): ModelProviderSpeechCapabilityV1 | null {
-  const direct = getModelProviderPreset(provider.id)
-  if (direct?.speech) {
-    return { protocol: direct.speech.protocol, baseUrl: direct.speech.baseUrl, models: [...direct.speech.models] }
-  }
-  const tokenPlanSpeech = tokenPlanPresetForProfileId(provider.id)?.tokenPlan?.speech
-  if (tokenPlanSpeech) {
-    // 套餐端点自己提供 ASR,语音地址跟随该 profile 的服务地址。
-    return { protocol: tokenPlanSpeech.protocol, baseUrl: provider.baseUrl, models: [...tokenPlanSpeech.models] }
-  }
-  return null
-}
-
-function presetTextToSpeechCapability(provider: ModelProviderProfileV1): ModelProviderTextToSpeechCapabilityV1 | null {
-  const direct = getModelProviderPreset(provider.id)
-  if (direct?.textToSpeech) {
-    return {
-      protocol: direct.textToSpeech.protocol,
-      baseUrl: direct.textToSpeech.baseUrl,
-      models: [...direct.textToSpeech.models]
-    }
-  }
-  const tokenPlanTextToSpeech = tokenPlanPresetForProfileId(provider.id)?.tokenPlan?.textToSpeech
-  if (tokenPlanTextToSpeech) {
-    return {
-      protocol: tokenPlanTextToSpeech.protocol,
-      baseUrl: tokenPlanTextToSpeech.baseUrl ?? provider.baseUrl,
-      models: [...tokenPlanTextToSpeech.models]
-    }
-  }
-  return null
-}
-
-function presetMusicCapability(provider: ModelProviderProfileV1): ModelProviderMusicCapabilityV1 | null {
-  const direct = getModelProviderPreset(provider.id)
-  if (direct?.music) {
-    return { protocol: direct.music.protocol, baseUrl: direct.music.baseUrl, models: [...direct.music.models] }
-  }
-  const tokenPlanMusic = tokenPlanPresetForProfileId(provider.id)?.tokenPlan?.music
-  if (tokenPlanMusic) {
-    return { protocol: tokenPlanMusic.protocol, baseUrl: tokenPlanMusic.baseUrl, models: [...tokenPlanMusic.models] }
-  }
-  return null
-}
-
-function presetVideoCapability(provider: ModelProviderProfileV1): ModelProviderVideoCapabilityV1 | null {
-  const direct = getModelProviderPreset(provider.id)
-  if (direct?.video) {
-    return { protocol: direct.video.protocol, baseUrl: direct.video.baseUrl, models: [...direct.video.models] }
-  }
-  const tokenPlanVideo = tokenPlanPresetForProfileId(provider.id)?.tokenPlan?.video
-  if (tokenPlanVideo) {
-    return { protocol: tokenPlanVideo.protocol, baseUrl: tokenPlanVideo.baseUrl, models: [...tokenPlanVideo.models] }
-  }
-  return null
 }
 
 function isAcceptableHttpUrl(value: string): boolean {
@@ -640,86 +514,6 @@ function ProviderListGroup({
   )
 }
 
-function ModelChipsInput({
-  values,
-  onChange,
-  placeholder,
-  inputAriaLabel,
-  removeLabel
-}: {
-  values: string[]
-  onChange: (next: string[]) => void
-  placeholder: string
-  inputAriaLabel: string
-  removeLabel: (model: string) => string
-}): ReactElement {
-  const [draft, setDraft] = useState('')
-
-  const commit = (raw: string): void => {
-    const ids = raw.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean)
-    setDraft('')
-    if (ids.length === 0) return
-    const seen = new Set(values)
-    const next = [...values]
-    for (const id of ids) {
-      if (seen.has(id)) continue
-      seen.add(id)
-      next.push(id)
-    }
-    if (next.length !== values.length) onChange(next)
-  }
-
-  const removeAt = (index: number): void => {
-    onChange(values.filter((_, i) => i !== index))
-  }
-
-  return (
-    <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 rounded-xl border border-ds-border bg-ds-card px-2 py-1.5 shadow-sm focus-within:border-accent/40 focus-within:ring-1 focus-within:ring-accent/30">
-      {values.map((model, index) => (
-        <span
-          key={`${model}-${index}`}
-          className="inline-flex max-w-full items-center gap-1 rounded-full border border-ds-border-muted bg-ds-main/60 py-0.5 pl-2.5 pr-1 font-mono text-[12px] text-ds-ink"
-        >
-          <span className="truncate">{model}</span>
-          <button
-            type="button"
-            aria-label={removeLabel(model)}
-            onClick={() => removeAt(index)}
-            className="rounded-full p-0.5 text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
-          >
-            <X className="h-3 w-3" strokeWidth={2} />
-          </button>
-        </span>
-      ))}
-      <input
-        className="min-w-[150px] flex-1 bg-transparent px-1 py-1 font-mono text-[12.5px] font-normal text-ds-ink placeholder:text-ds-faint focus:outline-none"
-        value={draft}
-        placeholder={placeholder}
-        aria-label={inputAriaLabel}
-        spellCheck={false}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ',') {
-            e.preventDefault()
-            commit(draft)
-          } else if (e.key === 'Backspace' && !draft && values.length > 0) {
-            e.preventDefault()
-            removeAt(values.length - 1)
-          }
-        }}
-        onBlur={() => commit(draft)}
-        onPaste={(e) => {
-          const text = e.clipboardData.getData('text')
-          if (/[\s,]/.test(text)) {
-            e.preventDefault()
-            commit(`${draft} ${text}`)
-          }
-        }}
-      />
-    </div>
-  )
-}
-
 export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }): ReactElement {
   const {
     t,
@@ -727,14 +521,34 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     provider: providerFromContext,
     analytix,
     update,
+    saveModelPreferences,
     selectControlClass
   } = ctx
   const showTopNotice = useChatStore((s) => s.showTopNotice)
   const provider = providerFromContext ?? defaultModelProviderSettings()
   const [registrySnapshot, setRegistrySnapshot] = useState<ProviderRegistrySnapshotResult | null>(null)
+  const registrySnapshotRef = useRef<ProviderRegistrySnapshotResult | null>(null)
+  const modelPreferencesRef = useRef(normalizeModelProviderPreferences(
+    Object.hasOwn(ctx, 'modelPreferencesReadback') ? ctx.modelPreferencesReadback : provider.modelPreferences
+  ))
+  const providerDraftRevision = useRef(0)
+  const [providerSettingsSaving, setProviderSettingsSaving] = useState(false)
+  const [modelEditorOpen, setModelEditorOpen] = useState(false)
+  useEffect(() => {
+    // Form props may be optimistic drafts. Only normal successful readback
+    // events and this component's verified Save acknowledge durable choices.
+    const acknowledge = (event: Event): void => {
+      const settings = (event as CustomEvent<{ provider?: ModelProviderSettingsV1 }>).detail
+      if (settings?.provider) modelPreferencesRef.current = normalizeModelProviderPreferences(settings.provider.modelPreferences)
+    }
+    window.addEventListener(SETTINGS_CHANGED_EVENT, acknowledge)
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, acknowledge)
+  }, [])
   const [registryLoadState, setRegistryLoadState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
   const registryLoadSequence = useRef(0)
   const [modelProviders, setModelProviders] = useState<ModelProviderProfileV1[]>([])
+  // New providers remain local drafts until Add commits them.
+  const [draftProvider, setDraftProvider] = useState<ModelProviderProfileV1 | null>(null)
   const [routingDrafts, setRoutingDrafts] = useState<Record<string, ProviderRegistryRoutingDraft>>({})
   const [selectedProviderId, setSelectedProviderId] = useState<string>('')
   const [addMenuOpen, setAddMenuOpen] = useState(false)
@@ -792,21 +606,46 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     })
   }
   const selectProviderForEditing = (providerId: string): void => {
+    if (providerId !== selectedProviderId && providerDraftDirty) {
+      showTopNotice({ tone: 'info', message: t('modelProviderUnsavedChanges') })
+      return
+    }
     if (providerId !== selectedProviderId) invalidateCredentialEntry()
     setSelectedProviderId(providerId)
   }
   const beginCredentialOperation = (providerId: string) => ({
     entry: credentialEntryRevision.current,
     operation: ++credentialOperationRevision.current,
-    input: credentialInputRevisions.current[providerId] ?? 0
+    input: credentialInputRevisions.current[providerId] ?? 0,
+    draft: providerDraftRevision.current
   })
   const credentialOperationIsCurrent = (operation: ReturnType<typeof beginCredentialOperation>): boolean =>
     credentialInputMounted.current && operation.entry === credentialEntryRevision.current &&
-    operation.operation === credentialOperationRevision.current
+    operation.operation === credentialOperationRevision.current &&
+    operation.draft === providerDraftRevision.current
 
   const [credentialConfiguredProviderIds, setCredentialConfiguredProviderIds] = useState<Set<string>>(new Set())
   const [providerProxyDrafts, setProviderProxyDrafts] = useState<Record<string, string>>({})
   const [providerProxyEnabled, setProviderProxyEnabled] = useState<Record<string, boolean>>({})
+  const onProviderDraftDirtyChange = ctx.onProviderDraftDirtyChange as ((dirty: boolean) => void) | undefined
+  const providerDraftDirty = Boolean(draftProvider) || modelEditorOpen ||
+    Object.values(credentialDrafts).some((draft) => credentialDraftAction(draft).kind !== 'preserve') ||
+    Boolean(registrySnapshot && (
+      JSON.stringify(modelProviders) !== JSON.stringify(registrySnapshot.providers.map((entry) =>
+        providerProfileFromRegistry(entry, modelPreferencesRef.current))) ||
+      registrySnapshot.providers.some((entry) =>
+        JSON.stringify(routingDrafts[entry.id]) !== JSON.stringify(providerRegistryRoutingDraft(entry, registrySnapshot.providers)) ||
+        (providerProxyEnabled[entry.id] ? (providerProxyDrafts[entry.id] ?? '').trim() : '') !== (entry.proxy ?? ''))
+    ))
+  const providerDraftDirtyRef = useRef(providerDraftDirty)
+  providerDraftDirtyRef.current = providerDraftDirty
+  const hasUnsavedProviderChanges = (): boolean => {
+    if (!providerDraftDirtyRef.current) return false
+    showTopNotice({ tone: 'info', message: t('modelProviderUnsavedChanges') })
+    return true
+  }
+  useEffect(() => { onProviderDraftDirtyChange?.(providerDraftDirty) }, [providerDraftDirty, onProviderDraftDirtyChange])
+  useEffect(() => () => { onProviderDraftDirtyChange?.(false) }, [onProviderDraftDirtyChange])
   const [protectedRecoveryBusy, setProtectedRecoveryBusy] = useState<string | null>(null)
   const [protectedRecoveryStatus, setProtectedRecoveryStatus] = useState<string | null>(null)
 
@@ -826,10 +665,12 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     }
   }
 
-  const applyRegistrySnapshot = (snapshot: ProviderRegistrySnapshotResult): void => {
+  const applyRegistrySnapshot = useCallback((snapshot: ProviderRegistrySnapshotResult, preserveDraft = true): void => {
     setRegistryLoadState('ready')
+    registrySnapshotRef.current = snapshot
     setRegistrySnapshot(snapshot)
-    setModelProviders(snapshot.providers.map(providerProfileFromRegistry))
+    if (preserveDraft && providerDraftDirtyRef.current) return
+    setModelProviders(snapshot.providers.map((entry) => providerProfileFromRegistry(entry, modelPreferencesRef.current)))
     setRoutingDrafts(Object.fromEntries(
       snapshot.providers.map((provider) => [provider.id, providerRegistryRoutingDraft(provider, snapshot.providers)])
     ))
@@ -849,7 +690,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       if (snapshot.providers.some((provider) => provider.id === current)) return current
       return snapshot.selectedProviderId ?? snapshot.providers[0]?.id ?? ''
     })
-  }
+  }, [])
 
   const refreshRegistry = async (): Promise<ProviderRegistrySnapshotResult> => {
     const result = await window.analytix.providerRegistry.request({ schemaVersion: 1, operation: 'list' })
@@ -860,7 +701,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     return result
   }
 
-  const loadRegistry = async (): Promise<void> => {
+  const loadRegistry = useCallback(async (): Promise<void> => {
     const sequence = ++registryLoadSequence.current
     setRegistryLoadState('loading')
     try {
@@ -876,11 +717,11 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
         setRegistryLoadState('unavailable')
       }
     }
-  }
+  }, [applyRegistrySnapshot])
   useEffect(() => {
     void loadRegistry()
     return () => { registryLoadSequence.current += 1 }
-  }, [])
+  }, [loadRegistry])
   useEffect(() => {
     const expiries = Object.values(accountObservationStates)
       .filter((state) => state.status !== 'busy')
@@ -898,8 +739,6 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     }, Math.min(delay, 2_147_483_647))
     return () => window.clearTimeout(timeout)
   }, [accountObservationStates])
-  // 新增供应商先停留在本地草稿,点「添加」才写入设置,避免半配置状态被持久化。
-  const [draftProvider, setDraftProvider] = useState<ModelProviderProfileV1 | null>(null)
   const displayProviders = draftProvider ? [...modelProviders, draftProvider] : modelProviders
   const activeProvider =
     displayProviders.find((item) => item.id === selectedProviderId) ??
@@ -1000,6 +839,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
 
   const updateProviderProxy = (patch: Partial<typeof providerProxy>): void => {
     if (!activeProvider) return
+    ++providerDraftRevision.current
     if (patch.enabled !== undefined) {
       setProviderProxyEnabled((current) => ({ ...current, [activeProvider.id]: patch.enabled === true }))
     }
@@ -1010,6 +850,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
 
   const updateActiveRoutingDraft = (patch: Partial<ProviderRegistryRoutingDraft>): void => {
     if (!activeProvider || !activeRoutingDraft) return
+    ++providerDraftRevision.current
     setRoutingDrafts((current) => ({
       ...current,
       [activeProvider.id]: { ...activeRoutingDraft, ...patch }
@@ -1050,6 +891,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     providers: ModelProviderProfileV1[],
     analytixPatch?: AnalytixRuntimeSettingsPatchV1
   ): void => {
+    ++providerDraftRevision.current
     setModelProviders(providers)
     if (analytixPatch) {
       update(modelProvidersSettingsPatch({
@@ -1066,126 +908,38 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     transform: (item: ModelProviderProfileV1) => ModelProviderProfileV1
   ): void => {
     if (draftProvider && item.id === draftProvider.id) {
+      ++providerDraftRevision.current
       setDraftProvider(transform(draftProvider))
       return
     }
     updateModelProviders(modelProviders.map((existing) => existing.id === item.id ? transform(existing) : existing))
   }
 
+  const persistModelPreferencesForProfile = async (
+    committed: ModelProviderProfileV1,
+    edited: ModelProviderProfileV1,
+    before: ModelProviderProfileV1,
+    isCurrent: () => boolean
+  ): Promise<void> => {
+    if (!isCurrent()) throw new Error('Provider edit is no longer current.')
+    const preferences = captureModelProviderPreferences(modelPreferencesRef.current, committed, edited, before)
+    if (JSON.stringify(preferences) === JSON.stringify(modelPreferencesRef.current)) return
+    if (typeof saveModelPreferences !== 'function') throw new Error('Settings persistence is unavailable.')
+    const saved = await saveModelPreferences({ provider: { modelPreferences: preferences } })
+    if (!isCurrent()) throw new Error('Provider edit is no longer current.')
+    const readback = normalizeModelProviderPreferences(saved.provider.modelPreferences)
+    if (JSON.stringify(readback) !== JSON.stringify(preferences)) throw new Error('Model preferences were not saved.')
+    modelPreferencesRef.current = readback
+  }
+
+  const applyProviderModelProfile = (before: ModelProviderProfileV1, edited: ModelProviderProfileV1): void => {
+    patchProviderProfile(before, () => edited)
+  }
+
   const updateModelProvider = (id: string, patch: Partial<ModelProviderProfileV1>): void => {
     const target = displayProviders.find((item) => item.id === id)
     if (!target) return
     patchProviderProfile(target, (item) => ({ ...item, ...patch }))
-  }
-
-  const updateModelProviderImage = (id: string, patch: Partial<ModelProviderImageCapabilityV1>): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => ({
-      ...item,
-      image: {
-        ...(item.image ?? defaultImageCapability(item.baseUrl)),
-        ...patch
-      }
-    }))
-  }
-
-  const removeModelProviderImage = (id: string): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => {
-      const { image: _image, ...rest } = item
-      void _image
-      return rest
-    })
-  }
-
-  const updateModelProviderSpeech = (id: string, patch: Partial<ModelProviderSpeechCapabilityV1>): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => ({
-      ...item,
-      speech: {
-        ...(item.speech ?? defaultSpeechCapability(item.baseUrl)),
-        ...patch
-      }
-    }))
-  }
-
-  const removeModelProviderSpeech = (id: string): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => {
-      const { speech: _speech, ...rest } = item
-      void _speech
-      return rest
-    })
-  }
-
-  const updateModelProviderTextToSpeech = (id: string, patch: Partial<ModelProviderTextToSpeechCapabilityV1>): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => ({
-      ...item,
-      textToSpeech: {
-        ...(item.textToSpeech ?? defaultTextToSpeechCapability(item.baseUrl)),
-        ...patch
-      }
-    }))
-  }
-
-  const removeModelProviderTextToSpeech = (id: string): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => {
-      const { textToSpeech: _textToSpeech, ...rest } = item
-      void _textToSpeech
-      return rest
-    })
-  }
-
-  const updateModelProviderMusic = (id: string, patch: Partial<ModelProviderMusicCapabilityV1>): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => ({
-      ...item,
-      music: {
-        ...(item.music ?? defaultMusicCapability(item.baseUrl)),
-        ...patch
-      }
-    }))
-  }
-
-  const removeModelProviderMusic = (id: string): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => {
-      const { music: _music, ...rest } = item
-      void _music
-      return rest
-    })
-  }
-
-  const updateModelProviderVideo = (id: string, patch: Partial<ModelProviderVideoCapabilityV1>): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => ({
-      ...item,
-      video: {
-        ...(item.video ?? defaultVideoCapability(item.baseUrl)),
-        ...patch
-      }
-    }))
-  }
-
-  const removeModelProviderVideo = (id: string): void => {
-    const target = displayProviders.find((item) => item.id === id)
-    if (!target) return
-    patchProviderProfile(target, (item) => {
-      const { video: _video, ...rest } = item
-      void _video
-      return rest
-    })
   }
 
   const updateModelProviderId = (id: string, value: string): void => {
@@ -1209,6 +963,10 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const startProviderDraft = (profile: ModelProviderProfileV1): void => {
+    if (providerDraftDirty) {
+      showTopNotice({ tone: 'info', message: t('modelProviderUnsavedChanges') })
+      return
+    }
     invalidateCredentialEntry()
     if (draftProvider) clearCredentialDraft(draftProvider.id)
     clearCredentialDraft(profile.id)
@@ -1220,6 +978,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     profile: ModelProviderProfileV1,
     operation = beginCredentialOperation(profile.id)
   ): Promise<boolean> => {
+    setProviderSettingsSaving(false)
     const registryProvider = registrySnapshot?.providers.find((provider) => provider.id === profile.id)
     if (registryProvider?.tombstone) {
       showTopNotice({ tone: 'error', message: 'Disconnected Providers must be explicitly deleted before reconnecting.' })
@@ -1248,6 +1007,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       return false
     }
     const mediaModels = providerMediaModelIds(profile)
+    setProviderSettingsSaving(true)
     try {
       const result = await persistProviderSettingsDraft({
         profile,
@@ -1266,16 +1026,28 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
         }
       })
       if (!credentialOperationIsCurrent(operation)) return false
-      applyRegistrySnapshot(result.snapshot)
+      const committedProvider = result.snapshot.providers.find((candidate) => candidate.id === profile.id)
+      if (!committedProvider || committedProvider.tombstone) throw new Error('Provider readback is unavailable.')
+      const committed = providerProfileFromRegistry(committedProvider)
+      await persistModelPreferencesForProfile(
+        committed, profile, providerProfileFromRegistry(committedProvider, modelPreferencesRef.current),
+        () => credentialOperationIsCurrent(operation)
+      )
+      if (!credentialOperationIsCurrent(operation)) return false
+      applyRegistrySnapshot(result.snapshot, false)
       if ((credentialInputRevisions.current[profile.id] ?? 0) === operation.input) {
         clearCredentialDraft(profile.id)
       }
       return result.credentialConfigured
     } catch {
       if (credentialOperationIsCurrent(operation)) {
-        showTopNotice({ tone: 'error', message: 'Provider credential update failed.' })
+        showTopNotice({ tone: 'error', message: 'Provider settings update failed.' })
       }
       return false
+    } finally {
+      if (credentialInputMounted.current && operation.operation === credentialOperationRevision.current) {
+        setProviderSettingsSaving(false)
+      }
     }
   }
 
@@ -1306,7 +1078,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       return
     }
     if (!credentialOperationIsCurrent(operation)) return
-    applyRegistrySnapshot(selected)
+    applyRegistrySnapshot(selected, false)
     update(modelProvidersSettingsPatch({
       provider,
       providers: selected.providers.map(providerProfileFromRegistry),
@@ -1323,6 +1095,14 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     clearCredentialDraft(draftProvider.id)
     setDraftProvider(null)
     setSelectedProviderId(activeAnalytixProviderId)
+  }
+
+  const discardProviderChanges = (): void => {
+    if (!registrySnapshot || providerSettingsSaving || modelEditorOpen) return
+    ++providerDraftRevision.current
+    invalidateCredentialEntry()
+    for (const id of Object.keys(credentialDrafts)) clearCredentialDraft(id)
+    applyRegistrySnapshot(registrySnapshot, false)
   }
 
   const addModelProvider = (): void => {
@@ -1348,18 +1128,35 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     preset: ModelProviderPreset,
     mode: 'api' | 'token-plan' = 'api'
   ): Promise<void> => {
+    if (hasUnsavedProviderChanges()) return
     const presetProvider = mode === 'token-plan'
       ? modelProviderTokenPlanProfile(preset)
       : modelProviderPresetProfile(preset)
     if (!presetProvider) return
     const existingProvider = modelProviders.find((item) => item.id === presetProvider.id)
     if (existingProvider) {
+      const editingProviderId = activeProvider?.id ?? selectedProviderId
+      const confirmation = {
+        entry: credentialEntryRevision.current,
+        draft: providerDraftRevision.current,
+        operation: credentialOperationRevision.current,
+        input: credentialInputRevisions.current[editingProviderId] ?? 0,
+        snapshot: registrySnapshotRef.current
+      }
       const confirmed = await confirmAction({
         message: t('modelProviderUpdatePresetTitle', { name: presetProvider.name }),
         detail: t('modelProviderUpdatePresetDetail'),
         confirmLabel: t('modelProviderUpdatePresetAction'),
         cancelLabel: t('modelProviderCancel')
       })
+      if (!credentialInputMounted.current ||
+        confirmation.entry !== credentialEntryRevision.current ||
+        confirmation.draft !== providerDraftRevision.current ||
+        confirmation.operation !== credentialOperationRevision.current ||
+        confirmation.input !== (credentialInputRevisions.current[editingProviderId] ?? 0) ||
+        confirmation.snapshot?.registryRevision !== registrySnapshotRef.current?.registryRevision ||
+        confirmation.snapshot?.registryIncarnation !== registrySnapshotRef.current?.registryIncarnation) return
+      if (hasUnsavedProviderChanges()) return
       if (!confirmed) {
         selectProviderForEditing(presetProvider.id)
         return
@@ -1389,6 +1186,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const selectModelProvider = async (id: string): Promise<void> => {
+    if (hasUnsavedProviderChanges()) return
     try {
       const selected = await selectProviderRegistryEntry({
         providerId: id,
@@ -1411,6 +1209,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const disconnectModelProvider = async (id: string): Promise<void> => {
+    if (hasUnsavedProviderChanges()) return
     try {
       const wasSelected = registrySnapshot?.selectedProviderId === id
       const disconnected = await disconnectProviderRegistryEntry({
@@ -1432,6 +1231,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const removeModelProvider = async (id: string): Promise<void> => {
+    if (hasUnsavedProviderChanges()) return
     const target = modelProviders.find((item) => item.id === id)
     if (!target) return
     const usedByChat = activeAnalytixProviderId === id
@@ -1496,6 +1296,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const runProbe = async (target: ModelProviderProfileV1, mode: 'test' | 'fetch'): Promise<void> => {
+    if (mode === 'fetch' && hasUnsavedProviderChanges()) return
     const fingerprint = providerConnectionFingerprint(target)
     const registryProvider = registrySnapshot?.providers.find((provider) => provider.id === target.id)
     if (!registrySnapshot || !registryProvider || registryProvider.tombstone ||
@@ -1695,6 +1496,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const configureAccountObservation = async (remove: boolean): Promise<void> => {
+    if (hasUnsavedProviderChanges()) return
     if (!activeRegistryProvider || !canConfigureAccountObservation) return
     const endpoint = (accountObservationEndpointDrafts[activeRegistryProvider.id] ?? '').trim()
     if (!remove && endpoint === '') {
@@ -1769,22 +1571,17 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       })
     }
   })()
+  const activePreset = activeProvider ? getModelProviderPreset(activeProvider.id) : undefined
+  const activeCatalog = activePreset
+    ? modelProviderPresetProfile(activePreset)
+    : activeProvider && tokenPlanPresetForProfileId(activeProvider.id)
+      ? modelProviderTokenPlanProfile(tokenPlanPresetForProfileId(activeProvider.id)!)
+      : null
+  const classifiedMediaModelIds = new Set(activeCatalog ? providerMediaModelIds(activeCatalog) : [])
+  const activeUnclassifiedMediaModelIds = activeProvider
+    ? providerMediaModelIds(activeProvider).filter((model) => !classifiedMediaModelIds.has(model))
+    : []
   const activeBaseUrlInvalid = Boolean(activeProvider && !isAcceptableHttpUrl(activeProvider.baseUrl))
-  const activeImageBaseUrlInvalid = Boolean(
-    activeProvider?.image && !isAcceptableHttpUrl(activeProvider.image.baseUrl)
-  )
-  const activeSpeechBaseUrlInvalid = Boolean(
-    activeProvider?.speech && !isAcceptableHttpUrl(activeProvider.speech.baseUrl)
-  )
-  const activeTextToSpeechBaseUrlInvalid = Boolean(
-    activeProvider?.textToSpeech && !isAcceptableHttpUrl(activeProvider.textToSpeech.baseUrl)
-  )
-  const activeMusicBaseUrlInvalid = Boolean(
-    activeProvider?.music && !isAcceptableHttpUrl(activeProvider.music.baseUrl)
-  )
-  const activeVideoBaseUrlInvalid = Boolean(
-    activeProvider?.video && !isAcceptableHttpUrl(activeProvider.video.baseUrl)
-  )
   const activeTokenPlanRegions = activeProvider
     ? tokenPlanPresetForProfileId(activeProvider.id)?.tokenPlan?.regions ?? []
     : []
@@ -2009,10 +1806,17 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     {activeRegistryProvider && !activeRegistryProvider.tombstone && !isDraftActive ? (
                       <button
                         type="button"
+                        disabled={providerSettingsSaving}
                         onClick={() => void persistCredentialDraft(activeProvider)}
                         className="inline-flex h-8 items-center rounded-full border border-ds-border bg-ds-card px-3 text-[12px] font-medium text-ds-muted shadow-sm transition hover:bg-ds-hover hover:text-ds-ink"
                       >
                         {t('modelProviderSaveChanges')}
+                      </button>
+                    ) : null}
+                    {registrySnapshot && !isDraftActive && providerDraftDirty && !modelEditorOpen ? (
+                      <button type="button" disabled={providerSettingsSaving} onClick={discardProviderChanges}
+                        className="inline-flex h-8 items-center rounded-full border border-ds-border px-3 text-[12px] font-medium text-ds-muted hover:bg-ds-hover disabled:opacity-60">
+                        {t('modelProviderDiscardChanges')}
                       </button>
                     ) : null}
                     {activeRegistryProvider && !activeRegistryProvider.tombstone &&
@@ -2054,15 +1858,6 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                 {accountObservationNotice ? <InlineNoticeView notice={accountObservationNotice} /> : null}
                 <DetailSection title={t('modelProviderSectionBasics')}>
                   <div className="grid gap-3 md:grid-cols-2">
-                    <label className={fieldLabelClass}>
-                      {t('modelProviderName')}
-                      <input
-                        className={textInputClass}
-                        value={isDraftActive ? activeProvider.name : providerDisplayName(activeProvider.id, activeProvider.name)}
-                        readOnly={!isDraftActive}
-                        onChange={(e) => updateModelProvider(activeProvider.id, { name: e.target.value })}
-                      />
-                    </label>
                     <label className={fieldLabelClass}>
                       {t('modelProviderId')}
                       <span className="relative block">
@@ -2299,7 +2094,9 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     provider={activeProvider}
                     t={t}
                     selectControlClass={selectControlClass}
-                    onChange={(next) => patchProviderProfile(activeProvider, () => next)}
+                    onChange={(next) => applyProviderModelProfile(activeProvider, next)}
+                    unclassifiedMediaModelIds={activeUnclassifiedMediaModelIds}
+                    onEditingChange={setModelEditorOpen}
                   />
                 </DetailSection>
                 <DetailSection title={t('modelProviderRoutePool')}>
@@ -2355,327 +2152,6 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       )
                     })}
                   </div>
-                </DetailSection>
-                <DetailSection
-                  title={t('modelProviderImageCapability')}
-                  action={
-                    <Toggle
-                      aria-label={t('modelProviderImageCapability')}
-                      checked={Boolean(activeProvider.image)}
-                      onChange={(value) => {
-                        if (value) {
-                          updateModelProvider(activeProvider.id, {
-                            image: presetImageCapability(activeProvider.id) ?? defaultImageCapability(activeProvider.baseUrl)
-                          })
-                        } else {
-                          removeModelProviderImage(activeProvider.id)
-                        }
-                      }}
-                    />
-                  }
-                >
-                  <p className="text-[12px] leading-5 text-ds-faint">{t('modelProviderImageCapabilityDesc')}</p>
-                  {activeProvider.image ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className={fieldLabelClass}>
-                        {t('imageGenProtocol')}
-                        <select
-                          className={selectControlClass}
-                          value={activeProvider.image.protocol}
-                          onChange={(e) => updateModelProviderImage(activeProvider.id, {
-                            protocol: e.target.value as ImageGenerationProtocol
-                          })}
-                        >
-                          {Object.entries(IMAGE_GENERATION_PROTOCOL_LABEL_KEYS).map(([protocol, key]) => (
-                            <option key={protocol} value={protocol}>{t(key)}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={fieldLabelClass}>
-                        {t('imageGenBaseUrl')}
-                        <input
-                          className={textInputClass}
-                          value={activeProvider.image.baseUrl}
-                          placeholder={t('imageGenBaseUrlPlaceholder')}
-                          spellCheck={false}
-                          onChange={(e) => updateModelProviderImage(activeProvider.id, { baseUrl: e.target.value })}
-                        />
-                        {activeImageBaseUrlInvalid ? (
-                          <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
-                            {t('modelProviderInvalidUrl')}
-                          </span>
-                        ) : null}
-                      </label>
-                      <label className={`${fieldLabelClass} md:col-span-2`}>
-                        {t('imageGenModel')}
-                        <ModelChipsInput
-                          key={`${activeProvider.id}-image`}
-                          values={activeProvider.image.models}
-                          onChange={(models) => updateModelProviderImage(activeProvider.id, { models })}
-                          placeholder={t('modelProviderModelsPlaceholder')}
-                          inputAriaLabel={t('imageGenModel')}
-                          removeLabel={(model) => t('modelProviderModelRemove', { model })}
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                </DetailSection>
-                <DetailSection
-                  title={t('modelProviderSpeechCapability')}
-                  action={
-                    <Toggle
-                      aria-label={t('modelProviderSpeechCapability')}
-                      checked={Boolean(activeProvider.speech)}
-                      onChange={(value) => {
-                        if (value) {
-                          updateModelProvider(activeProvider.id, {
-                            speech: presetSpeechCapability(activeProvider) ?? defaultSpeechCapability(activeProvider.baseUrl)
-                          })
-                        } else {
-                          removeModelProviderSpeech(activeProvider.id)
-                        }
-                      }}
-                    />
-                  }
-                >
-                  <p className="text-[12px] leading-5 text-ds-faint">{t('modelProviderSpeechCapabilityDesc')}</p>
-                  {activeProvider.speech ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className={fieldLabelClass}>
-                        {t('speechToTextProtocol')}
-                        <select
-                          className={selectControlClass}
-                          value={activeProvider.speech.protocol}
-                          onChange={(e) => updateModelProviderSpeech(activeProvider.id, {
-                            protocol: e.target.value as SpeechToTextProtocol
-                          })}
-                        >
-                          {Object.entries(SPEECH_TO_TEXT_PROTOCOL_LABEL_KEYS).map(([protocol, key]) => (
-                            <option key={protocol} value={protocol}>{t(key)}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={fieldLabelClass}>
-                        {t('speechToTextBaseUrl')}
-                        <input
-                          className={textInputClass}
-                          value={activeProvider.speech.baseUrl}
-                          placeholder={t('baseUrlPlaceholder')}
-                          spellCheck={false}
-                          onChange={(e) => updateModelProviderSpeech(activeProvider.id, { baseUrl: e.target.value })}
-                        />
-                        {activeSpeechBaseUrlInvalid ? (
-                          <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
-                            {t('modelProviderInvalidUrl')}
-                          </span>
-                        ) : null}
-                      </label>
-                      <label className={`${fieldLabelClass} md:col-span-2`}>
-                        {t('speechToTextModels')}
-                        <ModelChipsInput
-                          key={`${activeProvider.id}-speech`}
-                          values={activeProvider.speech.models}
-                          onChange={(models) => updateModelProviderSpeech(activeProvider.id, { models })}
-                          placeholder={t('modelProviderModelsPlaceholder')}
-                          inputAriaLabel={t('speechToTextModels')}
-                          removeLabel={(model) => t('modelProviderModelRemove', { model })}
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                </DetailSection>
-                <DetailSection
-                  title={t('modelProviderTextToSpeechCapability')}
-                  action={
-                    <Toggle
-                      aria-label={t('modelProviderTextToSpeechCapability')}
-                      checked={Boolean(activeProvider.textToSpeech)}
-                      onChange={(value) => {
-                        if (value) {
-                          updateModelProvider(activeProvider.id, {
-                            textToSpeech: presetTextToSpeechCapability(activeProvider) ??
-                              defaultTextToSpeechCapability(activeProvider.baseUrl)
-                          })
-                        } else {
-                          removeModelProviderTextToSpeech(activeProvider.id)
-                        }
-                      }}
-                    />
-                  }
-                >
-                  <p className="text-[12px] leading-5 text-ds-faint">{t('modelProviderTextToSpeechCapabilityDesc')}</p>
-                  {activeProvider.textToSpeech ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className={fieldLabelClass}>
-                        {t('textToSpeechProtocol')}
-                        <select
-                          className={selectControlClass}
-                          value={activeProvider.textToSpeech.protocol}
-                          onChange={(e) => updateModelProviderTextToSpeech(activeProvider.id, {
-                            protocol: e.target.value as TextToSpeechProtocol
-                          })}
-                        >
-                          {Object.entries(TEXT_TO_SPEECH_PROTOCOL_LABEL_KEYS).map(([protocol, key]) => (
-                            <option key={protocol} value={protocol}>{t(key)}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={fieldLabelClass}>
-                        {t('textToSpeechBaseUrl')}
-                        <input
-                          className={textInputClass}
-                          value={activeProvider.textToSpeech.baseUrl}
-                          placeholder={t('textToSpeechBaseUrlPlaceholder')}
-                          spellCheck={false}
-                          onChange={(e) => updateModelProviderTextToSpeech(activeProvider.id, { baseUrl: e.target.value })}
-                        />
-                        {activeTextToSpeechBaseUrlInvalid ? (
-                          <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
-                            {t('modelProviderInvalidUrl')}
-                          </span>
-                        ) : null}
-                      </label>
-                      <label className={`${fieldLabelClass} md:col-span-2`}>
-                        {t('textToSpeechModel')}
-                        <ModelChipsInput
-                          key={`${activeProvider.id}-tts`}
-                          values={activeProvider.textToSpeech.models}
-                          onChange={(models) => updateModelProviderTextToSpeech(activeProvider.id, { models })}
-                          placeholder={t('modelProviderModelsPlaceholder')}
-                          inputAriaLabel={t('textToSpeechModel')}
-                          removeLabel={(model) => t('modelProviderModelRemove', { model })}
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                </DetailSection>
-                <DetailSection
-                  title={t('modelProviderMusicCapability')}
-                  action={
-                    <Toggle
-                      aria-label={t('modelProviderMusicCapability')}
-                      checked={Boolean(activeProvider.music)}
-                      onChange={(value) => {
-                        if (value) {
-                          updateModelProvider(activeProvider.id, {
-                            music: presetMusicCapability(activeProvider) ?? defaultMusicCapability(activeProvider.baseUrl)
-                          })
-                        } else {
-                          removeModelProviderMusic(activeProvider.id)
-                        }
-                      }}
-                    />
-                  }
-                >
-                  <p className="text-[12px] leading-5 text-ds-faint">{t('modelProviderMusicCapabilityDesc')}</p>
-                  {activeProvider.music ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className={fieldLabelClass}>
-                        {t('musicGenerationProtocol')}
-                        <select
-                          className={selectControlClass}
-                          value={activeProvider.music.protocol}
-                          onChange={(e) => updateModelProviderMusic(activeProvider.id, {
-                            protocol: e.target.value as MusicGenerationProtocol
-                          })}
-                        >
-                          {Object.entries(MUSIC_GENERATION_PROTOCOL_LABEL_KEYS).map(([protocol, key]) => (
-                            <option key={protocol} value={protocol}>{t(key)}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={fieldLabelClass}>
-                        {t('musicGenerationBaseUrl')}
-                        <input
-                          className={textInputClass}
-                          value={activeProvider.music.baseUrl}
-                          placeholder={t('musicGenerationBaseUrlPlaceholder')}
-                          spellCheck={false}
-                          onChange={(e) => updateModelProviderMusic(activeProvider.id, { baseUrl: e.target.value })}
-                        />
-                        {activeMusicBaseUrlInvalid ? (
-                          <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
-                            {t('modelProviderInvalidUrl')}
-                          </span>
-                        ) : null}
-                      </label>
-                      <label className={`${fieldLabelClass} md:col-span-2`}>
-                        {t('musicGenerationModel')}
-                        <ModelChipsInput
-                          key={`${activeProvider.id}-music`}
-                          values={activeProvider.music.models}
-                          onChange={(models) => updateModelProviderMusic(activeProvider.id, { models })}
-                          placeholder={t('modelProviderModelsPlaceholder')}
-                          inputAriaLabel={t('musicGenerationModel')}
-                          removeLabel={(model) => t('modelProviderModelRemove', { model })}
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                </DetailSection>
-                <DetailSection
-                  title={t('modelProviderVideoCapability')}
-                  action={
-                    <Toggle
-                      aria-label={t('modelProviderVideoCapability')}
-                      checked={Boolean(activeProvider.video)}
-                      onChange={(value) => {
-                        if (value) {
-                          updateModelProvider(activeProvider.id, {
-                            video: presetVideoCapability(activeProvider) ?? defaultVideoCapability(activeProvider.baseUrl)
-                          })
-                        } else {
-                          removeModelProviderVideo(activeProvider.id)
-                        }
-                      }}
-                    />
-                  }
-                >
-                  <p className="text-[12px] leading-5 text-ds-faint">{t('modelProviderVideoCapabilityDesc')}</p>
-                  {activeProvider.video ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className={fieldLabelClass}>
-                        {t('videoGenerationProtocol')}
-                        <select
-                          className={selectControlClass}
-                          value={activeProvider.video.protocol}
-                          onChange={(e) => updateModelProviderVideo(activeProvider.id, {
-                            protocol: e.target.value as VideoGenerationProtocol
-                          })}
-                        >
-                          {Object.entries(VIDEO_GENERATION_PROTOCOL_LABEL_KEYS).map(([protocol, key]) => (
-                            <option key={protocol} value={protocol}>{t(key)}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={fieldLabelClass}>
-                        {t('videoGenerationBaseUrl')}
-                        <input
-                          className={textInputClass}
-                          value={activeProvider.video.baseUrl}
-                          placeholder={t('videoGenerationBaseUrlPlaceholder')}
-                          spellCheck={false}
-                          onChange={(e) => updateModelProviderVideo(activeProvider.id, { baseUrl: e.target.value })}
-                        />
-                        {activeVideoBaseUrlInvalid ? (
-                          <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
-                            {t('modelProviderInvalidUrl')}
-                          </span>
-                        ) : null}
-                      </label>
-                      <label className={`${fieldLabelClass} md:col-span-2`}>
-                        {t('videoGenerationModel')}
-                        <ModelChipsInput
-                          key={`${activeProvider.id}-video`}
-                          values={activeProvider.video.models}
-                          onChange={(models) => updateModelProviderVideo(activeProvider.id, { models })}
-                          placeholder={t('modelProviderModelsPlaceholder')}
-                          inputAriaLabel={t('videoGenerationModel')}
-                          removeLabel={(model) => t('modelProviderModelRemove', { model })}
-                        />
-                      </label>
-                    </div>
-                  ) : null}
                 </DetailSection>
                 {isDraftActive ? (
                   <DetailSection title={t('modelProviderDraftSection')}>

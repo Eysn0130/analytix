@@ -368,6 +368,31 @@ describe('ThreadService.fork with side relation', () => {
 })
 
 describe('ThreadService goals', () => {
+  it('rejects Go lifecycle commands without changing the legacy Goal oracle', async () => {
+    const { service, sessionStore, threadStore } = buildService()
+    await service.create(
+      { workspace: '/tmp/p', model: 'deepseek-chat', mode: 'agent' },
+      { id: 'thr_goal_oracle', title: 'Goal oracle' }
+    )
+    await service.setGoal('thr_goal_oracle', { objective: 'Retain legacy evidence' })
+    const original = structuredClone(await threadStore.get('thr_goal_oracle'))
+    const events = structuredClone(await sessionStore.loadEventsSince('thr_goal_oracle', 0))
+    const ref = { id: 'goal-go-only', revision: 1 }
+    const commands = [
+      { operation: 'create', objective: 'Go lifecycle' },
+      { operation: 'edit', ref, objective: 'Go lifecycle' },
+      { operation: 'pause', ref },
+      { operation: 'resume', ref },
+      { operation: 'clear', ref }
+    ] as const
+
+    for (const command of commands) {
+      await expect(service.setGoal('thr_goal_oracle', command)).rejects.toThrow('Goal lifecycle commands require the Go runtime')
+      expect(await threadStore.get('thr_goal_oracle')).toEqual(original)
+      expect(await sessionStore.loadEventsSince('thr_goal_oracle', 0)).toEqual(events)
+    }
+  })
+
   it('sets, updates, and clears a thread goal', async () => {
     const { service, sessionStore } = buildService()
     await service.create(

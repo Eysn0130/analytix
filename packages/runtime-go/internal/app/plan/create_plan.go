@@ -311,7 +311,7 @@ func PlanModeToolAllowed(toolName string, _ int, createPlanToolName string) bool
 		return true
 	}
 	switch toolName {
-	case "read", "ls", "find", "glob", "code_index", "grep", "web_fetch", "user_input", "request_user_input", "get_goal", "todo_list":
+	case "read", "ls", "find", "glob", "code_index", "grep", "web_fetch", "user_input", "request_user_input", "exit_plan_mode", "get_goal", "todo_list":
 		return true
 	default:
 		return false

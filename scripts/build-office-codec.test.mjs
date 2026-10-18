@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import JSZip from 'jszip'
-import { assertOfficeCodecImports, buildOfficeCodec, OFFICE_CODEC_ENTRY, validateOfficeCodecDirectory } from './build-office-codec.mjs'
+import ExcelJS from 'exceljs'
+import { assertOfficeCodecImports, buildOfficeCodec, OFFICE_CODEC_ENTRY, EXCEL_PREVIEW_COPY_CODEC_ENTRY, validateOfficeCodecDirectory } from './build-office-codec.mjs'
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'analytix-office-codec-'))
@@ -24,10 +25,11 @@ test('directory admission rejects missing closure, wrong module type and symlink
   const root = fixture(t)
   writeFileSync(join(root, OFFICE_CODEC_ENTRY), 'require("node:fs")')
   assert.throws(() => validateOfficeCodecDirectory(root), /files-invalid/)
+  writeFileSync(join(root, EXCEL_PREVIEW_COPY_CODEC_ENTRY), 'require("node:buffer")')
   writeFileSync(join(root, 'package.json'), '{"type":"module"}\n')
   assert.throws(() => validateOfficeCodecDirectory(root), /module-type-invalid/)
   writeFileSync(join(root, 'package.json'), '{"type":"commonjs"}\n')
-  assert.equal(validateOfficeCodecDirectory(root).files.length, 2)
+  assert.equal(validateOfficeCodecDirectory(root).files.length, 3)
   writeFileSync(join(root, 'shared.js'), 'module.exports = 1')
   assert.throws(() => validateOfficeCodecDirectory(root), /files-invalid/)
   rmSync(join(root, 'shared.js'))
@@ -36,12 +38,12 @@ test('directory admission rejects missing closure, wrong module type and symlink
   assert.throws(() => validateOfficeCodecDirectory(root), /file-invalid/)
 })
 
-test('standalone bundle executes real DOCX and PPTX outside the source tree with only its two files', { timeout: 120000 }, async t => {
+test('standalone bundle executes real DOCX and PPTX outside the source tree with only its three files', { timeout: 120000 }, async t => {
   const root = fixture(t), outputDirectory = join(root, 'codec')
   const result = await buildOfficeCodec({ outputDirectory })
-  assert.equal(result.files.length, 2)
+  assert.equal(result.files.length, 3)
   assert.ok(result.watchFiles.some(file => file.endsWith('presentation-generation-codec.ts')))
-  assert.deepEqual(readdirSync(outputDirectory).sort(), [OFFICE_CODEC_ENTRY, 'package.json'].sort())
+  assert.deepEqual(readdirSync(outputDirectory).sort(), [OFFICE_CODEC_ENTRY, EXCEL_PREVIEW_COPY_CODEC_ENTRY, 'package.json'].sort())
   // A source-tree or ambient NODE_PATH fallback must not satisfy dependencies.
   const cwd = join(root, 'empty-cwd'); mkdirSync(cwd)
   const encode = input => {
@@ -80,4 +82,43 @@ test('standalone bundle executes real DOCX and PPTX outside the source tree with
   const rejected = spawnSync(process.execPath, [result.entryPath], { cwd, env: { ELECTRON_RUN_AS_NODE: '1' }, input: '{"kind":"unknown"}', timeout: 60000 })
   assert.equal(rejected.status, 1); assert.equal(rejected.stdout.length, 0); assert.equal(rejected.stderr.length, 0)
   assertOfficeCodecImports(readFileSync(result.entryPath, 'utf8'))
+  // Qualify the same single built payload's data-only Excel entry with no ambient modules.
+  const run = value => spawnSync(process.execPath, [join(outputDirectory, EXCEL_PREVIEW_COPY_CODEC_ENTRY)], {
+    cwd, env: { ELECTRON_RUN_AS_NODE: '1', LANG: 'C', TZ: 'UTC' }, input: JSON.stringify(value), timeout: 20000, maxBuffer: 16 << 20
+  })
+  const selection = { sheetIndex: 0, sheetId: '1', ranges: [{ row: [0, 1], column: [0, 1] }] }
+  const request = { schemaVersion: 1, op: 'excel-preview-copy-cells-v1', format: 'csv', selection,
+    dataBase64: Buffer.from('literal,=2+2\nzero,false').toString('base64') }
+  const child = run(request)
+  assert.equal(child.error, undefined); assert.equal(child.status, 0); assert.equal(child.stderr.length, 0)
+  const frame = JSON.parse(child.stdout.toString())
+  assert.equal(frame.sheetId, '1'); assert.equal(frame.cells[1][2].v, '=2+2')
+  assert.match(frame.html, /<table data-type="fortune-copy-action-table">/); assert.match(frame.html, /literal<\/td>/)
+  const saved = new ExcelJS.Workbook(), savedSheet = saved.addWorksheet('Saved')
+  savedSheet.getCell('A1').value = 1234.5; savedSheet.getCell('A1').numFmt = '#,##0.00'
+  savedSheet.getCell('B1').value = { formula: '1-1', result: 0 }
+  savedSheet.getCell('C1').value = { formula: '1=2', result: false }
+  savedSheet.getCell('D1').value = { formula: '1+1' }
+  const cached = run({ ...request, format: 'xlsx', selection: { sheetIndex: 0, sheetId: '1', ranges: [{ row: [0, 0], column: [0, 3] }] },
+    dataBase64: Buffer.from(await saved.xlsx.writeBuffer()).toString('base64') })
+  assert.equal(cached.error, undefined); assert.equal(cached.status, 0); assert.equal(cached.stderr.length, 0)
+  const cachedFrame = JSON.parse(cached.stdout.toString())
+  assert.equal(cachedFrame.cells.find(cell => cell[1] === 0)[2].m, '1,234.50')
+  assert.equal(cachedFrame.cells.find(cell => cell[1] === 1)[2].v, 0)
+  assert.equal(cachedFrame.cells.find(cell => cell[1] === 2)[2].v, false)
+  assert.equal(cachedFrame.cells.find(cell => cell[1] === 3)[2].m, '')
+  assert.equal(Object.hasOwn(cachedFrame.cells.find(cell => cell[1] === 3)[2], 'v'), false)
+  assert.match(cachedFrame.html, /1,234.50<\/td>/); assert.match(cachedFrame.html, />0<\/td>/); assert.match(cachedFrame.html, />false<\/td>/)
+  for (const invalid of [{ ...request, selection: { ...selection, sheetId: 'wrong' } }, { ...request, path: '/untrusted' }]) {
+    const rejected = run(invalid)
+    assert.equal(rejected.status, 1); assert.equal(rejected.stdout.length, 0); assert.equal(rejected.stderr.length, 0)
+  }
+})
+
+
+test('Excel Copy entry closes network builtin escape paths while generation closure keeps its contract', () => {
+  for (const name of ['http', 'node:https', 'node:http2', 'net', 'tls', 'dns/promises', 'dgram', 'node:child_process', 'worker_threads', 'vm']) {
+    assert.throws(() => assertOfficeCodecImports(`require(${JSON.stringify(name)})`, { allowNetwork: false }), /office-codec-/)
+  }
+  assertOfficeCodecImports('require("node:buffer"); require("node:stream")', { allowNetwork: false })
 })

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -146,5 +148,60 @@ func TestThreadSearchHTTPUsesClosedCaseLifecycleProjectionAndKeepsOrdinaryTextAd
 		if len(threads) != 1 || stringField(threads[0].(map[string]any), "id") != ordinaryThreadID {
 			t.Fatalf("ordinary search %q was not additive: %#v", ordinary, threads)
 		}
+	}
+}
+
+func TestThreadListHTTPPreservesEmptyModelFromNormalizedDurableThreads(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		modelJSON string
+		want      string
+	}{
+		{name: "empty", modelJSON: `,"model":""`}, {name: "omitted"},
+		{name: "configured", modelJSON: `,"model":"synthetic/model"`, want: "synthetic/model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, ok := NewRuntimeServerHandler(RuntimeServerConfig{RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(), Host: "127.0.0.1", Port: 0}).(*runtimeServerHandler)
+			if !ok {
+				t.Fatal("runtime server handler type mismatch")
+			}
+			t.Cleanup(func() { handler.runtimeSubagentState().CancelBackgroundJobsAndWait(2 * time.Second) })
+			server := httptest.NewServer(handler)
+			defer server.Close()
+			created := requestThreadSummaryJSON(t, server.URL, http.MethodPost, "/v1/threads", strings.NewReader(`{"title":"Local document","workspace":`+strconv.Quote(workspacetest.New(t))+tc.modelJSON+`}`), http.StatusCreated)
+			id := stringField(created, "id")
+			if id == "" {
+				t.Fatal("real thread creation returned no identity")
+			}
+			assertDurable := func() {
+				t.Helper()
+				durable, err := handler.store.GetThread(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				value, present := durable["model"]
+				if tc.want == "" && present {
+					t.Fatalf("expected existing missing-model durable shape, got %#v", value)
+				}
+				if tc.want != "" && value != tc.want {
+					t.Fatal("configured durable model changed")
+				}
+			}
+			assertDurable()
+			listed := requestThreadSummaryJSON(t, server.URL, http.MethodGet, "/v1/threads?limit=1", nil, http.StatusOK)
+			rows := listAny(listed["threads"])
+			if len(rows) != 1 {
+				t.Fatalf("thread count=%d, want 1", len(rows))
+			}
+			row := rows[0].(map[string]any)
+			model, present := row["model"]
+			if row["id"] != id || !present || model != tc.want {
+				t.Fatalf("model=%#v present=%v, want %q for the created thread", model, present, tc.want)
+			}
+			if _, present := row["providerId"]; present {
+				t.Fatal("local list invented a provider")
+			}
+			assertDurable()
+		})
 	}
 }

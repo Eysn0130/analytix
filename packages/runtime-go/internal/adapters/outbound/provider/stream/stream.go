@@ -13,6 +13,7 @@ import (
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainreasoningmarkup "analytix.local/runtime-go/internal/domain/reasoningmarkup"
+	streamframe "analytix.local/runtime-go/internal/domain/streamframe"
 )
 
 type Chunk = domainmodel.Chunk
@@ -52,21 +53,65 @@ func ParseSSEWithCallback(endpointFormat string, body io.Reader, onChunk func(Ch
 // to withhold text until a complete stream, while transport retry authority
 // must still distinguish private reasoning from public text and tool state.
 func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Reader, onChunk func(Chunk) error, onPayload func(PayloadObservation)) ([]Chunk, Usage, error) {
+	return ParseSSEWithPrivateDisplay(endpointFormat, body, onChunk, onPayload, nil)
+}
+
+// ParseSSEWithPrivateDisplay observes actual text deltas separately from the
+// transactional output parser. Draft/argument callbacks never change chunks,
+// parsing, replay admission or continuation and never observe native signatures.
+func ParseSSEWithPrivateDisplay(endpointFormat string, body io.Reader, onChunk func(Chunk) error, onPayload func(PayloadObservation), onDraft func(domainmodel.ProcessFrameV1), onFirstContent ...func(time.Time)) ([]Chunk, Usage, error) {
+	observePrivate := func(frame domainmodel.ProcessFrameV1) {
+		if onDraft == nil {
+			return
+		}
+		defer func() { _ = recover() }()
+		onDraft(frame)
+	}
+	observeDraft := func(text, classification string) {
+		if text == "" || onDraft == nil {
+			return
+		}
+		defer func() { _ = recover() }()
+		onDraft(domainmodel.ProcessFrameV1{Source: "assistant_draft", Kind: "delta", Text: text, ContentClassification: classification})
+	}
+	observeText := func(chunk Chunk) error {
+		if chunk.Kind == ChunkText {
+			observeDraft(chunk.Text, "provider_text")
+		}
+		if onChunk != nil {
+			return onChunk(chunk)
+		}
+		return nil
+	}
 	if endpointFormat == "messages" {
-		return parseAnthropicProviderSSEWithCallback(body, onChunk, onPayload)
+		return parseAnthropicProviderSSEWithPrivateDisplay(body, observeText, onPayload, observePrivate, onFirstContent...)
 	}
 	if endpointFormat == "responses" {
-		return parseResponsesProviderSSEWithCallback(body, onChunk, onPayload)
+		return parseResponsesProviderSSEWithPrivateDisplay(body, observeText, onPayload, observePrivate, onFirstContent...)
 	}
+	// Private preparation frames queued by the Chat payload parser share the
+	// parsed reasoning order, while retaining their callback-only route.
+	onChatChunk := func(chunk Chunk) error {
+		if chunk.ProcessFrame != nil && chunk.ProcessFrame.Source == "tool_preparation" {
+			observePrivate(*chunk.ProcessFrame)
+			return nil
+		}
+		if onChunk != nil {
+			return onChunk(chunk)
+		}
+		return nil
+	}
+	observeContent := nativeFirstContentObserverV1("chat_completions", onFirstContent)
 	chunks := []Chunk{}
-	usage := Usage{}
+	usage := Usage{UsagePresenceKnown: true}
 	usagePending := false
 	toolCalls := newToolCallAccumulator()
+	toolCalls.onPreparation = observePrivate
 	completed := false
 	responseModel := ""
 	modelInspected := false
 	terminalFinishReason := ""
-	thinkingTags := ThinkSplitter{}
+	thinkingTags := ThinkSplitter{onDraft: func(text string) { observeDraft(text, "unclassified_inline") }}
 	completeAtBoundary := func(rawSSEChunkAt time.Time, parsedAt time.Time) error {
 		usage.FinishReason = domainmodel.NormalizeFinishReason(terminalFinishReason)
 		if strings.TrimSpace(terminalFinishReason) == "" {
@@ -86,23 +131,30 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 			}
 			terminalToolChunks = flushed
 		}
+		if frame := thinkingTags.endProviderReasoningV1(); frame != nil {
+			notifyPrivateProcessChunkV1(onChatChunk, *frame)
+		}
 		publicChunks, err := thinkingTags.flushChunks()
 		if err != nil {
 			return err
 		}
-		if err := appendProviderChunks(&chunks, annotateProviderChunkTimes(publicChunks, rawSSEChunkAt, parsedAt), onChunk); err != nil {
+		if err := appendProviderChunks(&chunks, annotateProviderChunkTimes(publicChunks, rawSSEChunkAt, parsedAt), onChatChunk); err != nil {
 			return err
 		}
-		if err := appendProviderChunks(&chunks, annotateProviderChunkTimes(terminalToolChunks, rawSSEChunkAt, parsedAt), onChunk); err != nil {
+		if err := appendProviderChunks(&chunks, annotateProviderChunkTimes(terminalToolChunks, rawSSEChunkAt, parsedAt), onChatChunk); err != nil {
 			return err
 		}
 		if usagePending {
-			if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkUsage, Usage: usage}, rawSSEChunkAt, parsedAt), onChunk); err != nil {
+			if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkUsage, Usage: usage}, rawSSEChunkAt, parsedAt), onChatChunk); err != nil {
 				return err
 			}
 			usagePending = false
 		}
-		if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkDone, Trace: domainmodel.ChunkTrace{ProviderResponseModel: responseModel}}, rawSSEChunkAt, parsedAt), onChunk); err != nil {
+		done := Chunk{Kind: ChunkDone, Trace: domainmodel.ChunkTrace{ProviderResponseModel: responseModel}}
+		if usage.FinishReason == "length" {
+			done.DiscardedToolMaterial = toolCalls.discardedOutputMaterialV1()
+		}
+		if err := appendProviderChunk(&chunks, annotateProviderChunkTime(done, rawSSEChunkAt, parsedAt), onChatChunk); err != nil {
 			return err
 		}
 		completed = true
@@ -131,6 +183,7 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 			responseModel = responseModelFromEnvelope(data)
 			modelInspected = true
 		}
+		observeContent(data, rawSSEChunkAt)
 		observePayload(onPayload, PayloadObservationControl)
 		itemChunks, itemUsage, ok, finishReason, observation, err := parseOpenAIChatSSEPayloadAtObserved(data, toolCalls, &thinkingTags, rawSSEChunkAt)
 		parsedAt := time.Now()
@@ -146,7 +199,8 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 		}
 		if ok {
 			itemUsage.FinishReason = domainmodel.NormalizeFinishReason(terminalFinishReason)
-			usage = itemUsage
+			qualifyNativeUsageCountersV1(&itemUsage, terminalFinishReason != "")
+			usage = mergeNativeUsageCountersV1(usage, itemUsage)
 			usagePending = true
 		}
 		providerChunks := make([]Chunk, 0, len(itemChunks))
@@ -155,8 +209,8 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 				providerChunks = append(providerChunks, chunk)
 			}
 		}
-		if err := appendProviderChunks(&chunks, annotateProviderChunkTimes(providerChunks, rawSSEChunkAt, parsedAt), onChunk); err != nil {
-			return nil, Usage{}, err
+		if err := appendProviderChunks(&chunks, annotateProviderChunkTimes(providerChunks, rawSSEChunkAt, parsedAt), onChatChunk); err != nil {
+			return chunks, usage, err
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -174,8 +228,6 @@ func ParseSSEWithCallbackAndPayloadObservation(endpointFormat string, body io.Re
 
 func openAIChatTerminalFinishReasonError(value string) error {
 	switch domainmodel.NormalizeFinishReason(value) {
-	case "length":
-		return domainfailure.NewError(domainfailure.CodeProviderStreamInterrupted, nil)
 	case "content_filter":
 		return domainfailure.NewError(domainfailure.CodeProviderRequestRejected, nil)
 	case "unknown":
@@ -206,14 +258,52 @@ func openAIChatTerminalToolCallError(finishReason string, hasPendingToolCalls bo
 }
 
 type ThinkSplitter struct {
-	decoder            *domainreasoningmarkup.Decoder
-	parseErr           error
-	firstRawSSEChunkAt time.Time
-	lastRawSSEChunkAt  time.Time
-	finished           bool
+	providerReasoningOrdinal uint64
+	providerReasoningOpen    bool
+	onDraft                  func(string)
+	decoder                  *domainreasoningmarkup.Decoder
+	parseErr                 error
+	firstRawSSEChunkAt       time.Time
+	lastRawSSEChunkAt        time.Time
+	finished                 bool
+}
+
+// Chat Completions has reasoning_content deltas, not native block IDs. These
+// host segment ordinals belong only to this parser/call and never claim an
+// upstream native index. The original reasoning chunk remains unchanged.
+func (t *ThinkSplitter) providerReasoningV1(text string) []Chunk {
+	if text == "" {
+		return nil
+	}
+	chunks := []Chunk{}
+	if !t.providerReasoningOpen {
+		t.providerReasoningOrdinal++
+		t.providerReasoningOpen = true
+		chunks = append(chunks, Chunk{Kind: ChunkReasoning, ProcessFrame: &domainmodel.ProcessFrameV1{
+			Source: "provider_reasoning", Kind: "start", HostSegmentOrdinal: t.providerReasoningOrdinal,
+		}})
+	}
+	return append(chunks, Chunk{Kind: ChunkReasoning, Text: text, ProcessFrame: &domainmodel.ProcessFrameV1{
+		Source: "provider_reasoning", Kind: "delta", HostSegmentOrdinal: t.providerReasoningOrdinal, Text: text,
+	}})
+}
+
+func (t *ThinkSplitter) endProviderReasoningV1() *Chunk {
+	if !t.providerReasoningOpen {
+		return nil
+	}
+	t.providerReasoningOpen = false
+	return &Chunk{Kind: ChunkReasoning, ProcessFrame: &domainmodel.ProcessFrameV1{
+		Source: "provider_reasoning", Kind: "end", HostSegmentOrdinal: t.providerReasoningOrdinal,
+	}}
 }
 
 func (t *ThinkSplitter) push(value string, rawSSEChunkAt time.Time) error {
+	// Observation precedes classification and is confined to the explicitly
+	// unclassified private draft slot. It cannot publish a final answer.
+	if t.onDraft != nil {
+		t.onDraft(value)
+	}
 	if t.finished {
 		return domainreasoningmarkup.NewProtocolError(domainreasoningmarkup.ErrLifecycle)
 	}
@@ -262,13 +352,169 @@ func (t *ThinkSplitter) flushChunks() ([]Chunk, error) {
 }
 
 func appendProviderChunk(chunks *[]Chunk, chunk Chunk, onChunk func(Chunk) error) error {
-	*chunks = append(*chunks, chunk)
+	// Framing is callback-only. Preserve the exact pre-existing continuation
+	// chunks, without adding metadata chunks or retaining display frames.
+	processOnly := chunk.ProcessFrame != nil && (chunk.ProcessFrame.Kind != "delta" || chunk.ProcessFrame.Source == "tool_preparation" || chunk.ProcessFrame.ReasoningForm == "summary") && chunk.Kind == ChunkReasoning && chunk.Text == "" && chunk.Signature == ""
+	if !processOnly {
+		continuation := chunk
+		continuation.ProcessFrame = nil
+		*chunks = append(*chunks, continuation)
+	}
+	if processOnly {
+		notifyPrivateProcessChunkV1(onChunk, chunk)
+		return nil
+	}
 	if onChunk != nil {
 		if err := onChunk(chunk); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// A display observer cannot change provider parsing or continuation outcomes.
+func notifyPrivateProcessChunkV1(onChunk func(Chunk) error, chunk Chunk) {
+	if onChunk == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	_ = onChunk(chunk)
+}
+
+func nativeProcessChunkV1(kind string, index int, id string, text string) Chunk {
+	return Chunk{Kind: ChunkReasoning, ProcessFrame: &domainmodel.ProcessFrameV1{
+		Kind: kind, NativeIndex: index, NativeID: id, Text: text,
+	}}
+}
+
+// Native display identity is retained for the complete physical stream. A
+// conflicting, opaque or reused source index cannot become eligible again.
+// Continuation chunks remain independent of this display-only tracker.
+type nativeProcessIdentityV1 struct {
+	id             string
+	open, poisoned bool
+}
+
+type nativeProcessTrackerV1 struct {
+	items     map[int]nativeProcessIdentityV1
+	seenIDs   map[string]struct{}
+	exhausted bool
+}
+
+func newNativeProcessTrackerV1() *nativeProcessTrackerV1 {
+	return &nativeProcessTrackerV1{
+		items: map[int]nativeProcessIdentityV1{}, seenIDs: map[string]struct{}{},
+	}
+}
+
+// Remember every actual nonempty ID, including IDs supplied by conflicting
+// events at indexes that already exist. Index identity alone cannot retain all
+// conflicting IDs. Return the presence before this event and whether the ID
+// fits the bounded physical-stream budget. Empty Messages IDs stay index-only.
+func (tracker *nativeProcessTrackerV1) rememberID(id string) (bool, bool) {
+	if id == "" {
+		return false, true
+	}
+	if _, exists := tracker.seenIDs[id]; exists {
+		return true, true
+	}
+	if tracker.exhausted || len(id) > 256 || len(tracker.seenIDs) >= 256 {
+		tracker.exhausted = true
+		for index, value := range tracker.items {
+			if value.open {
+				value.open, value.poisoned = false, true
+				tracker.items[index] = value
+			}
+		}
+		return false, false
+	}
+	tracker.seenIDs[id] = struct{}{}
+	return false, true
+}
+
+func (tracker *nativeProcessTrackerV1) poison(index *int, id string) {
+	_, _ = tracker.rememberID(id)
+	hasIndex := index != nil && *index >= 0
+	for key, value := range tracker.items {
+		// A conflicting index/ID pair invalidates both possible sources.
+		matches := hasIndex && key == *index || id != "" && value.id == id || !hasIndex && id == "" && value.open
+		if matches {
+			value.open, value.poisoned = false, true
+			tracker.items[key] = value
+		}
+	}
+	if !hasIndex || tracker.exhausted {
+		return
+	}
+	if _, exists := tracker.items[*index]; exists {
+		return
+	}
+	if len(tracker.items) >= 256 {
+		tracker.exhausted = true
+		tracker.poison(nil, "")
+		return
+	}
+	if len(id) > 256 {
+		id = ""
+	}
+	// Retain bounded actual source IDs even when the first boundary was
+	// opaque or invalid, so reuse at another index cannot regain authority.
+	tracker.items[*index] = nativeProcessIdentityV1{id: id, poisoned: true}
+}
+
+func (tracker *nativeProcessTrackerV1) start(index *int, id string, eligible bool) bool {
+	seen, withinBudget := tracker.rememberID(id)
+	if index == nil || *index < 0 {
+		tracker.poison(index, "")
+		return false
+	}
+	if seen || !withinBudget {
+		tracker.poison(index, id)
+		return false
+	}
+	if _, exists := tracker.items[*index]; exists {
+		tracker.poison(index, id)
+		return false
+	}
+	if tracker.exhausted || len(tracker.items) >= 256 {
+		tracker.exhausted = true
+		tracker.poison(nil, "")
+		return false
+	}
+	if !eligible || len(id) > 256 {
+		tracker.poison(index, id)
+		return false
+	}
+	tracker.items[*index] = nativeProcessIdentityV1{id: id, open: true}
+	return true
+}
+
+func (tracker *nativeProcessTrackerV1) delta(index *int, id string, requireID bool) (string, bool) {
+	if tracker.exhausted || index == nil || *index < 0 || requireID && id == "" {
+		tracker.poison(index, id)
+		return "", false
+	}
+	value, exists := tracker.items[*index]
+	if !exists || !value.open || value.poisoned || requireID && value.id != id {
+		tracker.poison(index, id)
+		return "", false
+	}
+	return value.id, true
+}
+
+func (tracker *nativeProcessTrackerV1) end(index *int, id string, eligible, requireID bool) (string, bool) {
+	if !eligible {
+		tracker.poison(index, id)
+		return "", false
+	}
+	nativeID, ok := tracker.delta(index, id, requireID)
+	if !ok {
+		return "", false
+	}
+	value := tracker.items[*index]
+	value.open = false
+	tracker.items[*index] = value
+	return nativeID, true
 }
 
 func annotateProviderChunkTimes(chunks []Chunk, rawSSEChunkAt time.Time, parsedAt time.Time) []Chunk {
@@ -356,8 +602,10 @@ func observeAnthropicPayload(payloadType string, deltaType string, deltaValue st
 }
 
 type ToolCallAccumulator struct {
-	order []int
-	byKey map[int]*partialToolCall
+	deferredArgumentError error
+	order                 []int
+	byKey                 map[int]*partialToolCall
+	onPreparation         func(domainmodel.ProcessFrameV1)
 }
 
 type partialToolCall struct {
@@ -376,6 +624,7 @@ func (a *ToolCallAccumulator) add(index int, id string, name string, arguments s
 		index = len(a.order)
 	}
 	item := a.byKey[index]
+	firstObservation := item == nil
 	if item == nil {
 		item = &partialToolCall{}
 		a.byKey[index] = item
@@ -387,16 +636,26 @@ func (a *ToolCallAccumulator) add(index int, id string, name string, arguments s
 	if strings.TrimSpace(name) != "" {
 		item.Name = strings.TrimSpace(name)
 	}
+	if firstObservation {
+		a.observePreparationV1("start", index, item, "")
+	}
 	if arguments != "" {
 		item.Arguments.WriteString(arguments)
 	}
-	if item.Started || strings.TrimSpace(item.Name) == "" {
+	if item.Started {
+		a.observePreparationV1("delta", index, item, arguments)
+		return nil
+	}
+	if strings.TrimSpace(item.Name) == "" {
 		return nil
 	}
 	if strings.TrimSpace(item.ID) == "" {
 		item.ID = fmt.Sprintf("call_%d", index)
 	}
 	item.Started = true
+	// The first named observation includes fragments already accumulated before
+	// the name arrived. Subsequent observations remain actual incremental deltas.
+	a.observePreparationV1("delta", index, item, item.Arguments.String())
 	return []Chunk{{
 		Kind: ChunkToolCallStart,
 		ToolCall: ToolCall{
@@ -406,7 +665,34 @@ func (a *ToolCallAccumulator) add(index int, id string, name string, arguments s
 	}}
 }
 
+func (a *ToolCallAccumulator) observePreparationV1(kind string, index int, item *partialToolCall, arguments string) {
+	if a.onPreparation == nil || item == nil || kind != "start" && !item.Started {
+		return
+	}
+	name := item.Name
+	if kind == "start" {
+		// The actual slot's first observation is control only. A name and an
+		// execution identity may arrive later; neither is invented here.
+		name, arguments = "", ""
+	}
+	defer func() { _ = recover() }()
+	a.onPreparation(domainmodel.ProcessFrameV1{Source: "tool_preparation", Kind: kind,
+		ToolPreparation: &streamframe.ToolPreparationV1{Index: index, CallID: item.ID, ToolName: name, Arguments: arguments}})
+}
+
+// A Responses done item carries the authoritative full argument string, not
+// another delta. Replacing it also repairs a conflicting streamed prefix.
+func (a *ToolCallAccumulator) replaceArgumentsV1(index int, arguments string) {
+	if item := a.byKey[index]; item != nil {
+		item.Arguments.Reset()
+		item.Arguments.WriteString(arguments)
+	}
+}
+
 func (a *ToolCallAccumulator) flush() ([]Chunk, error) {
+	if a.deferredArgumentError != nil {
+		return nil, a.deferredArgumentError
+	}
 	if len(a.order) == 0 {
 		return nil, nil
 	}
@@ -432,6 +718,7 @@ func (a *ToolCallAccumulator) flush() ([]Chunk, error) {
 		if json.Unmarshal([]byte(args), &arguments) != nil || arguments == nil {
 			return nil, domainfailure.NewError(domainfailure.CodeProviderToolArgumentsInvalid, nil)
 		}
+		a.observePreparationV1("end", index, item, args)
 		chunks = append(chunks, Chunk{Kind: ChunkToolCall, ToolCall: ToolCall{
 			ID:        id,
 			Name:      name,
@@ -450,7 +737,7 @@ func (a *ToolCallAccumulator) flushIndex(index int) ([]Chunk, error) {
 	if item == nil {
 		return nil, nil
 	}
-	single := &ToolCallAccumulator{order: []int{index}, byKey: map[int]*partialToolCall{index: item}}
+	single := &ToolCallAccumulator{order: []int{index}, byKey: map[int]*partialToolCall{index: item}, onPreparation: a.onPreparation}
 	chunks, err := single.flush()
 	if err != nil {
 		return nil, err
@@ -465,6 +752,18 @@ func (a *ToolCallAccumulator) flushIndex(index int) ([]Chunk, error) {
 	return chunks, nil
 }
 
+func (a *ToolCallAccumulator) discardedOutputMaterialV1() string {
+	var material strings.Builder
+	for _, index := range a.order {
+		if item := a.byKey[index]; item != nil {
+			material.WriteString(item.ID)
+			material.WriteString(item.Name)
+			material.WriteString(item.Arguments.String())
+		}
+	}
+	return material.String()
+}
+
 func (a *ToolCallAccumulator) hasPending() bool {
 	return len(a.order) > 0
 }
@@ -474,81 +773,134 @@ func parseResponsesProviderSSE(body io.Reader) ([]Chunk, Usage, error) {
 }
 
 func parseResponsesProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) error, onPayload func(PayloadObservation)) ([]Chunk, Usage, error) {
+	return parseResponsesProviderSSEWithPrivateDisplay(body, onChunk, onPayload, nil)
+}
+
+func parseResponsesProviderSSEWithPrivateDisplay(body io.Reader, onChunk func(Chunk) error, onPayload func(PayloadObservation), onPrivate func(domainmodel.ProcessFrameV1), onFirstContent ...func(time.Time)) ([]Chunk, Usage, error) {
+	observeContent := nativeFirstContentObserverV1("responses", onFirstContent)
 	chunks := []Chunk{}
-	usage := Usage{}
+	usage := Usage{UsagePresenceKnown: true}
 	toolCalls := newToolCallAccumulator()
+	toolCalls.onPreparation = onPrivate
 	itemIndexes := map[string]int{}
+	reasoningItems := newNativeProcessTrackerV1()
+	summaryItems := newResponsesSummaryTrackerV1()
 	completed := false
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
+	// The first actual terminal seals this physical stream. Do not read more
+	// provider bytes: late frames, usage or read failures cannot reopen it.
+	for !completed && scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
+		rawAt := time.Now()
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "" {
 			continue
 		}
 		if data == "[DONE]" {
-			if completed {
-				continue
-			}
 			flushed, err := toolCalls.flush()
 			if err != nil {
 				return chunks, usage, err
 			}
 			if err := appendProviderChunks(&chunks, flushed, onChunk); err != nil {
-				return nil, Usage{}, err
+				return chunks, usage, err
 			}
 			if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkDone}, onChunk); err != nil {
-				return nil, Usage{}, err
+				return chunks, usage, err
 			}
 			completed = true
+			summaryItems.close()
 			continue
 		}
+		observeContent(data, rawAt)
 		observePayload(onPayload, PayloadObservationControl)
-		itemChunks, itemUsage, ok, observation, err := parseResponsesSSEPayload(data, toolCalls, itemIndexes)
+		itemChunks, itemUsage, ok, observation, err := parseResponsesSSEPayload(data, toolCalls, itemIndexes, reasoningItems, summaryItems)
 		observePayload(onPayload, observation)
 		if err != nil {
-			return nil, Usage{}, err
+			if ok {
+				// A real terminal usage report survives local display/tool errors.
+				return chunks, itemUsage, err
+			}
+			return chunks, usage, err
+		}
+		if ok {
+			usage = itemUsage
+		} else if itemUsage.FinishReason != "" {
+			usage.FinishReason = itemUsage.FinishReason
 		}
 		if err := appendProviderChunks(&chunks, itemChunks, onChunk); err != nil {
-			return nil, Usage{}, err
+			return chunks, usage, err
 		}
 		if hasChunkKind(itemChunks, ChunkDone) {
 			completed = true
+			summaryItems.close()
 		}
 		if ok {
 			usage = itemUsage
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, Usage{}, err
+	if err := scanner.Err(); err != nil && !completed {
+		return chunks, usage, err
 	}
 	if !completed {
-		if toolCalls.hasPending() {
-			return nil, Usage{}, fmt.Errorf("provider responses stream ended before completing tool calls: %w", io.ErrUnexpectedEOF)
+		if toolCalls.deferredArgumentError != nil {
+			return chunks, usage, toolCalls.deferredArgumentError
 		}
-		return nil, Usage{}, fmt.Errorf("provider responses stream ended before completion: %w", io.ErrUnexpectedEOF)
+		if toolCalls.hasPending() {
+			return chunks, usage, fmt.Errorf("provider responses stream ended before completing tool calls: %w", io.ErrUnexpectedEOF)
+		}
+		return chunks, usage, fmt.Errorf("provider responses stream ended before completion: %w", io.ErrUnexpectedEOF)
 	}
 	return chunks, usage, nil
 }
 
-func parseResponsesSSEPayload(data string, accumulator *ToolCallAccumulator, itemIndexes map[string]int) ([]Chunk, Usage, bool, PayloadObservation, error) {
+func parseResponsesSSEPayload(data string, accumulator *ToolCallAccumulator, itemIndexes map[string]int, reasoningItems *nativeProcessTrackerV1, summaryItems *responsesSummaryTrackerV1) ([]Chunk, Usage, bool, PayloadObservation, error) {
+	var summaryFields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &summaryFields); err != nil {
+		return nil, Usage{}, false, PayloadObservationControl, err
+	}
+	kind, _ := responsesSummaryStringV1(summaryFields["type"])
+	switch kind {
+	case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+		// Summary-only validation cannot fail a model response or turn a summary
+		// into retained reasoning continuation. Its raw counterpart stays closed.
+		id, _ := responsesSummaryStringV1(summaryFields["item_id"])
+		index := responsesSummaryIndexV1(summaryFields["output_index"])
+		if !summaryItems.rawSelected(index, id) {
+			reasoningItems.poison(index, id)
+		}
+		chunks := summaryItems.consume(kind, summaryFields)
+		observation := PayloadObservationControl
+		for _, chunk := range chunks {
+			if chunk.ProcessFrame != nil && chunk.ProcessFrame.Text != "" {
+				observation = PayloadObservationPrivateReasoning
+			}
+		}
+		return chunks, Usage{}, false, observation, nil
+	}
 	var payload struct {
 		Type        string `json:"type"`
 		Delta       string `json:"delta"`
 		ItemID      string `json:"item_id"`
-		OutputIndex int    `json:"output_index"`
+		OutputIndex *int   `json:"output_index"`
 		Item        *struct {
-			ID        string `json:"id"`
-			Type      string `json:"type"`
-			CallID    string `json:"call_id"`
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
+			ID               string          `json:"id"`
+			Type             string          `json:"type"`
+			CallID           string          `json:"call_id"`
+			Name             string          `json:"name"`
+			Arguments        *string         `json:"arguments"`
+			Summary          json.RawMessage `json:"summary"`
+			Status           json.RawMessage `json:"status"`
+			EncryptedContent json.RawMessage `json:"encrypted_content"`
+			Redacted         json.RawMessage `json:"redacted"`
 		} `json:"item"`
 		Response *struct {
+			IncompleteDetails *struct {
+				Reason string `json:"reason"`
+			} `json:"incomplete_details"`
 			Usage *struct {
 				InputTokens        int `json:"input_tokens"`
 				OutputTokens       int `json:"output_tokens"`
@@ -557,7 +909,7 @@ func parseResponsesSSEPayload(data string, accumulator *ToolCallAccumulator, ite
 					CachedTokens *int `json:"cached_tokens"`
 				} `json:"input_tokens_details"`
 				OutputTokensDetails *struct {
-					ReasoningTokens int `json:"reasoning_tokens"`
+					ReasoningTokens *int `json:"reasoning_tokens"`
 				} `json:"output_tokens_details"`
 			} `json:"usage"`
 		} `json:"response"`
@@ -565,22 +917,58 @@ func parseResponsesSSEPayload(data string, accumulator *ToolCallAccumulator, ite
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return nil, Usage{}, false, PayloadObservationControl, err
 	}
+	outputIndex := 0
+	if payload.OutputIndex != nil {
+		outputIndex = *payload.OutputIndex
+	}
 	switch payload.Type {
 	case "response.output_text.delta":
+		reasoningItems.poison(payload.OutputIndex, payload.ItemID)
+		summaryItems.poison(payload.OutputIndex, payload.ItemID)
 		return []Chunk{{Kind: ChunkText, Text: payload.Delta}}, Usage{}, false, PayloadObservationPublicText, nil
 	case "response.reasoning_text.delta":
-		return []Chunk{{Kind: ChunkReasoning, Text: payload.Delta}}, Usage{}, false, PayloadObservationPrivateReasoning, nil
+		chunk := Chunk{Kind: ChunkReasoning, Text: payload.Delta}
+		if id, ok := reasoningItems.delta(payload.OutputIndex, payload.ItemID, true); ok && payload.Delta != "" {
+			if first, allowed := summaryItems.rawDelta(payload.OutputIndex, payload.ItemID); allowed {
+				chunk.ProcessFrame = nativeProcessChunkV1("delta", outputIndex, id, payload.Delta).ProcessFrame
+				if first {
+					return []Chunk{nativeProcessChunkV1("start", outputIndex, id, ""), chunk}, Usage{}, false, PayloadObservationPrivateReasoning, nil
+				}
+			}
+		}
+		return []Chunk{chunk}, Usage{}, false, PayloadObservationPrivateReasoning, nil
+	case "response.reasoning_text.done":
+		// A mismatched text boundary cannot complete a previously opened source.
+		_, _ = reasoningItems.delta(payload.OutputIndex, payload.ItemID, true)
+		return []Chunk{}, Usage{}, false, PayloadObservationControl, nil
 	case "response.output_item.added":
+		// Track every native output index so cross-type reuse also poisons it.
+		if payload.Item != nil {
+			declaredSummary := summaryItems.begin(payload.OutputIndex, payload.Item.ID, payload.Item.Type, payload.Item.Summary)
+			eligible := payload.Item.Type == "reasoning" && payload.Item.ID != "" && len(payload.Item.EncryptedContent) == 0 && len(payload.Item.Redacted) == 0 && !(declaredSummary && summaryItems.closed)
+			if reasoningItems.start(payload.OutputIndex, payload.Item.ID, eligible) && !declaredSummary {
+				return []Chunk{nativeProcessChunkV1("start", outputIndex, payload.Item.ID, "")}, Usage{}, false, PayloadObservationPrivateReasoning, nil
+			}
+		} else {
+			summaryItems.poison(payload.OutputIndex, "")
+			reasoningItems.poison(payload.OutputIndex, "")
+		}
 		if payload.Item != nil && payload.Item.Type == "function_call" {
-			index := payload.OutputIndex
+			index := outputIndex
 			if payload.Item.ID != "" {
 				itemIndexes[payload.Item.ID] = index
 			}
-			return accumulator.add(index, firstNonEmpty(payload.Item.CallID, payload.Item.ID), payload.Item.Name, payload.Item.Arguments), Usage{}, false, PayloadObservationToolStarted, nil
+			arguments := ""
+			if payload.Item.Arguments != nil {
+				arguments = *payload.Item.Arguments
+			}
+			return accumulator.add(index, firstNonEmpty(payload.Item.CallID, payload.Item.ID), payload.Item.Name, arguments), Usage{}, false, PayloadObservationToolStarted, nil
 		}
 		return []Chunk{}, Usage{}, false, PayloadObservationControl, nil
 	case "response.function_call_arguments.delta":
-		index := payload.OutputIndex
+		reasoningItems.poison(payload.OutputIndex, payload.ItemID)
+		summaryItems.poison(payload.OutputIndex, payload.ItemID)
+		index := outputIndex
 		if payload.ItemID != "" {
 			if existing, ok := itemIndexes[payload.ItemID]; ok {
 				index = existing
@@ -590,20 +978,48 @@ func parseResponsesSSEPayload(data string, accumulator *ToolCallAccumulator, ite
 		}
 		return accumulator.add(index, payload.ItemID, "", payload.Delta), Usage{}, false, PayloadObservationToolStarted, nil
 	case "response.output_item.done":
+		if payload.Item != nil {
+			summaryChunks := summaryItems.finish(payload.OutputIndex, payload.Item.ID, payload.Item.Type, payload.Item.Status, payload.Item.Summary)
+			eligible := payload.Item.Type == "reasoning" && payload.Item.ID != "" && len(payload.Item.EncryptedContent) == 0 && len(payload.Item.Redacted) == 0
+			if id, ok := reasoningItems.end(payload.OutputIndex, payload.Item.ID, eligible, true); ok && (!summaryItems.declared(payload.OutputIndex, payload.Item.ID) || summaryItems.rawSelected(payload.OutputIndex, payload.Item.ID)) {
+				return []Chunk{nativeProcessChunkV1("end", outputIndex, id, "")}, Usage{}, false, PayloadObservationPrivateReasoning, nil
+			}
+			if len(summaryChunks) > 0 {
+				return summaryChunks, Usage{}, false, PayloadObservationPrivateReasoning, nil
+			}
+		} else {
+			summaryItems.poison(payload.OutputIndex, "")
+			reasoningItems.poison(payload.OutputIndex, "")
+		}
 		if payload.Item != nil && payload.Item.Type == "function_call" {
-			index := payload.OutputIndex
+			index := outputIndex
 			if payload.Item.ID != "" {
 				itemIndexes[payload.Item.ID] = index
 			}
-			started := accumulator.add(index, firstNonEmpty(payload.Item.CallID, payload.Item.ID), payload.Item.Name, payload.Item.Arguments)
-			flushed, err := accumulator.flush()
-			return append(started, flushed...), Usage{}, false, PayloadObservationToolStarted, err
+			started := accumulator.add(index, firstNonEmpty(payload.Item.CallID, payload.Item.ID), payload.Item.Name, "")
+			// Empty final arguments are an omitted full snapshot in existing
+			// Responses streams. Keep the real prefix so strict validation cannot
+			// turn a truncated call into an executable empty object.
+			if payload.Item.Arguments != nil && strings.TrimSpace(*payload.Item.Arguments) != "" {
+				accumulator.replaceArgumentsV1(index, *payload.Item.Arguments)
+			}
+			flushed, err := accumulator.flushIndex(index)
+			if err != nil {
+				accumulator.deferredArgumentError = err
+				return started, Usage{}, false, PayloadObservationToolStarted, nil
+			}
+			return append(started, flushed...), Usage{}, false, PayloadObservationToolStarted, nil
 		}
 		return []Chunk{}, Usage{}, false, PayloadObservationControl, nil
-	case "response.completed":
-		flushed, err := accumulator.flush()
-		if err != nil {
-			return nil, Usage{}, false, PayloadObservationControl, err
+	case "response.completed", "response.incomplete":
+		incomplete := payload.Type == "response.incomplete"
+		var flushed []Chunk
+		usage := Usage{}
+		if incomplete {
+			usage.FinishReason = "unknown"
+			if payload.Response != nil && payload.Response.IncompleteDetails != nil && payload.Response.IncompleteDetails.Reason == "max_output_tokens" {
+				usage.FinishReason = "length"
+			}
 		}
 		if payload.Response != nil && payload.Response.Usage != nil {
 			u := payload.Response.Usage
@@ -618,13 +1034,37 @@ func parseResponsesSSEPayload(data string, accumulator *ToolCallAccumulator, ite
 				miss = u.InputTokens - hit
 			}
 			reasoning := 0
-			if u.OutputTokensDetails != nil {
-				reasoning = u.OutputTokensDetails.ReasoningTokens
+			if u.OutputTokensDetails != nil && u.OutputTokensDetails.ReasoningTokens != nil {
+				reasoning = *u.OutputTokensDetails.ReasoningTokens
 			}
-			usage := providerUsage(u.InputTokens, u.OutputTokens, u.TotalTokens, reasoning, hit, miss, hasCacheTelemetry)
-			return append(flushed, Chunk{Kind: ChunkUsage, Usage: usage}, Chunk{Kind: ChunkDone}), usage, true, observeProviderChunks(flushed), nil
+			observed := providerUsage(u.InputTokens, u.OutputTokens, u.TotalTokens, reasoning, hit, miss, hasCacheTelemetry)
+			setProviderUsagePresenceV1(&observed, data, "input_tokens", "output_tokens", "response", "usage")
+			observed.HasReasoningTokens = u.OutputTokensDetails != nil && u.OutputTokensDetails.ReasoningTokens != nil
+			observed.HasCacheMiss = hasCacheTelemetry && observed.HasPromptTokens
+			qualifyNativeUsageCountersV1(&observed, true)
+			observed.FinishReason = usage.FinishReason
+			usage = observed
+
 		}
-		return append(flushed, Chunk{Kind: ChunkDone}), Usage{}, false, observeProviderChunks(flushed), nil
+		observed := payload.Response != nil && payload.Response.Usage != nil
+		if incomplete && usage.FinishReason != "length" {
+			return nil, usage, observed, PayloadObservationControl, domainfailure.NewError(domainfailure.CodeProviderStreamInterrupted, nil)
+		}
+		var err error
+		if !incomplete {
+			flushed, err = accumulator.flush()
+		}
+		if err != nil {
+			return nil, usage, observed, PayloadObservationControl, err
+		}
+		done := Chunk{Kind: ChunkDone}
+		if incomplete {
+			done.DiscardedToolMaterial = accumulator.discardedOutputMaterialV1()
+		}
+		if observed {
+			return append(flushed, Chunk{Kind: ChunkUsage, Usage: usage}, done), usage, true, observeProviderChunks(flushed), nil
+		}
+		return append(flushed, done), usage, false, observeProviderChunks(flushed), nil
 	default:
 		itemChunks, itemUsage, ok, err := parseOpenAISSEPayload(data)
 		if err != nil {
@@ -642,11 +1082,19 @@ func parseAnthropicProviderSSE(body io.Reader) ([]Chunk, Usage, error) {
 }
 
 func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) error, onPayload func(PayloadObservation)) ([]Chunk, Usage, error) {
+	return parseAnthropicProviderSSEWithPrivateDisplay(body, onChunk, onPayload, nil)
+}
+
+func parseAnthropicProviderSSEWithPrivateDisplay(body io.Reader, onChunk func(Chunk) error, onPayload func(PayloadObservation), onPrivate func(domainmodel.ProcessFrameV1), onFirstContent ...func(time.Time)) ([]Chunk, Usage, error) {
+	observeContent := nativeFirstContentObserverV1("messages", onFirstContent)
 	chunks := []Chunk{}
 	usage := Usage{UsagePresenceKnown: true}
 	inTok, outTok, cacheCreate, cacheRead := 0, 0, 0, 0
 	hasInput, hasOutput, hasCreate, hasRead := false, false, false, false
+	outputFinality := domaincache.ProviderOutputTokensFinalityV1("")
 	toolCalls := newToolCallAccumulator()
+	toolCalls.onPreparation = onPrivate
+	thinkingBlocks := newNativeProcessTrackerV1()
 	completed := false
 	stopReason := ""
 	responseModel := ""
@@ -663,6 +1111,7 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 		usage = providerUsage(prompt, outTok, prompt+outTok, 0, hit, miss, known)
 		usage.FinishReason = domainmodel.NormalizeFinishReason(stopReason)
 		usage.UsagePresenceKnown, usage.HasPromptTokens, usage.HasCompletionTokens = true, known, hasOutput
+		usage.OutputTokensFinality = outputFinality
 		usage.MessagesInput = domaincache.MessagesInputV1{SchemaVersion: "messages-input.v1", Uncached: domaincache.TokenCountV1{Known: hasInput, Value: uint64(inTok)}, Read: domaincache.TokenCountV1{Known: hasRead, Value: uint64(cacheRead)}, Created: domaincache.TokenCountV1{Known: hasCreate, Value: uint64(cacheCreate)}}
 		return nil
 	}
@@ -678,6 +1127,7 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 		if data == "" {
 			continue
 		}
+		observeContent(data, rawAt)
 		observePayload(onPayload, PayloadObservationControl)
 		var payload struct {
 			Type    string `json:"type"`
@@ -701,7 +1151,7 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 			Usage *struct {
 				OutputTokens *int `json:"output_tokens"`
 			} `json:"usage"`
-			Index        int `json:"index"`
+			NativeIndex  *int `json:"index"`
 			ContentBlock *struct {
 				Type      string          `json:"type"`
 				ID        string          `json:"id"`
@@ -714,6 +1164,10 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 		}
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			return chunks, usage, err
+		}
+		index := 0
+		if payload.NativeIndex != nil {
+			index = *payload.NativeIndex
 		}
 		if completed && payload.Type != "ping" {
 			return chunks, usage, domainfailure.NewError(domainfailure.CodeProviderRequestRejected, nil)
@@ -746,6 +1200,7 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 				if payload.Message.Usage.OutputTokens != nil {
 					outTok = *payload.Message.Usage.OutputTokens
 					hasOutput = true
+					outputFinality = domaincache.ProviderOutputTokensProvisionalV1
 				}
 				if payload.Message.Usage.CacheCreationInputTokens != nil {
 					cacheCreate = *payload.Message.Usage.CacheCreationInputTokens
@@ -763,6 +1218,10 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 			if payload.ContentBlock != nil {
 				block := payload.ContentBlock
 				var initial []Chunk
+				eligible := block.Type == "thinking"
+				if thinkingBlocks.start(payload.NativeIndex, block.ID, eligible) {
+					initial = append(initial, nativeProcessChunkV1("start", index, block.ID, ""))
+				}
 				switch block.Type {
 				case "text":
 					if block.Text != "" {
@@ -770,12 +1229,18 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 					}
 				case "thinking":
 					if block.Thinking != "" || block.Signature != "" {
-						initial = []Chunk{{Kind: ChunkReasoning, Text: block.Thinking, Signature: block.Signature}}
+						chunk := Chunk{Kind: ChunkReasoning, Text: block.Thinking, Signature: block.Signature}
+						if id, ok := thinkingBlocks.delta(payload.NativeIndex, "", false); ok && block.Thinking != "" {
+							chunk.ProcessFrame = nativeProcessChunkV1("delta", index, id, block.Thinking).ProcessFrame
+						}
+						initial = append(initial, chunk)
 					}
 				}
 				if err := appendProviderChunks(&chunks, annotateProviderChunkTimes(initial, rawAt, time.Now()), onChunk); err != nil {
 					return chunks, usage, err
 				}
+			} else {
+				thinkingBlocks.poison(payload.NativeIndex, "")
 			}
 			if payload.ContentBlock != nil && payload.ContentBlock.Type == "tool_use" {
 				hasToolCalls = true
@@ -786,7 +1251,7 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 						args = rawInput
 					}
 				}
-				if err := appendProviderChunks(&chunks, toolCalls.add(payload.Index, payload.ContentBlock.ID, payload.ContentBlock.Name, args), onChunk); err != nil {
+				if err := appendProviderChunks(&chunks, toolCalls.add(index, payload.ContentBlock.ID, payload.ContentBlock.Name, args), onChunk); err != nil {
 					return chunks, usage, err
 				}
 			}
@@ -794,27 +1259,44 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 			if payload.Delta != nil {
 				switch payload.Delta.Type {
 				case "text_delta":
+					thinkingBlocks.poison(payload.NativeIndex, "")
 					if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkText, Text: payload.Delta.Text}, rawAt, time.Now()), onChunk); err != nil {
 						return chunks, usage, err
 					}
 				case "thinking_delta":
-					if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkReasoning, Text: payload.Delta.Thinking}, rawAt, time.Now()), onChunk); err != nil {
+					chunk := Chunk{Kind: ChunkReasoning, Text: payload.Delta.Thinking}
+					if id, ok := thinkingBlocks.delta(payload.NativeIndex, "", false); ok {
+						chunk.ProcessFrame = nativeProcessChunkV1("delta", index, id, payload.Delta.Thinking).ProcessFrame
+					}
+					if err := appendProviderChunk(&chunks, annotateProviderChunkTime(chunk, rawAt, time.Now()), onChunk); err != nil {
 						return chunks, usage, err
 					}
 				case "signature_delta":
+					_, _ = thinkingBlocks.delta(payload.NativeIndex, "", false)
 					if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkReasoning, Signature: payload.Delta.Signature}, onChunk); err != nil {
 						return chunks, usage, err
 					}
 				case "input_json_delta":
-					if err := appendProviderChunks(&chunks, toolCalls.add(payload.Index, "", "", payload.Delta.PartialJSON), onChunk); err != nil {
+					thinkingBlocks.poison(payload.NativeIndex, "")
+					if err := appendProviderChunks(&chunks, toolCalls.add(index, "", "", payload.Delta.PartialJSON), onChunk); err != nil {
 						return chunks, usage, err
 					}
+				default:
+					thinkingBlocks.poison(payload.NativeIndex, "")
 				}
+			} else {
+				thinkingBlocks.poison(payload.NativeIndex, "")
 			}
 		case "content_block_stop":
-			flushed, err := toolCalls.flushIndex(payload.Index)
+			if id, ok := thinkingBlocks.end(payload.NativeIndex, "", true, false); ok {
+				if err := appendProviderChunk(&chunks, nativeProcessChunkV1("end", index, id, ""), onChunk); err != nil {
+					return chunks, usage, err
+				}
+			}
+			flushed, err := toolCalls.flushIndex(index)
 			if err != nil {
-				return chunks, usage, err
+				toolCalls.deferredArgumentError = err
+				continue
 			}
 			if err := appendProviderChunks(&chunks, flushed, onChunk); err != nil {
 				return chunks, usage, err
@@ -825,6 +1307,10 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 			}
 			if payload.Usage != nil && payload.Usage.OutputTokens != nil {
 				hasOutput = true
+				outputFinality = domaincache.ProviderOutputTokensProvisionalV1
+				if stopReason != "" {
+					outputFinality = domaincache.ProviderOutputTokensFinalV1
+				}
 				outTok = *payload.Usage.OutputTokens
 			}
 			if err := updateUsage(); err != nil {
@@ -844,20 +1330,28 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 			if err := openAIChatTerminalToolCallError(stopReason, hasToolCalls); err != nil {
 				return chunks, usage, err
 			}
-			flushed, err := toolCalls.flush()
-			if err != nil {
-				return chunks, usage, err
-			}
-			if err := appendProviderChunks(&chunks, flushed, onChunk); err != nil {
-				return chunks, usage, err
+			if domainmodel.NormalizeFinishReason(stopReason) != "length" {
+				flushed, err := toolCalls.flush()
+				if err != nil {
+					return chunks, usage, err
+				}
+				if err := appendProviderChunks(&chunks, flushed, onChunk); err != nil {
+					return chunks, usage, err
+				}
 			}
 			if err := updateUsage(); err != nil {
 				return chunks, usage, err
 			}
-			if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkUsage, Usage: usage}, onChunk); err != nil {
-				return chunks, usage, err
+			if hasInput || hasOutput || hasCreate || hasRead {
+				if err := appendProviderChunk(&chunks, Chunk{Kind: ChunkUsage, Usage: usage}, onChunk); err != nil {
+					return chunks, usage, err
+				}
 			}
-			if err := appendProviderChunk(&chunks, annotateProviderChunkTime(Chunk{Kind: ChunkDone, Trace: domainmodel.ChunkTrace{ProviderResponseModel: responseModel}}, rawAt, time.Now()), onChunk); err != nil {
+			done := Chunk{Kind: ChunkDone, Trace: domainmodel.ChunkTrace{ProviderResponseModel: responseModel}}
+			if domainmodel.NormalizeFinishReason(stopReason) == "length" {
+				done.DiscardedToolMaterial = toolCalls.discardedOutputMaterialV1()
+			}
+			if err := appendProviderChunk(&chunks, annotateProviderChunkTime(done, rawAt, time.Now()), onChunk); err != nil {
 				return chunks, usage, err
 			}
 			completed = true
@@ -867,6 +1361,9 @@ func parseAnthropicProviderSSEWithCallback(body io.Reader, onChunk func(Chunk) e
 		return chunks, usage, err
 	}
 	if !completed {
+		if domainmodel.NormalizeFinishReason(stopReason) != "length" && toolCalls.deferredArgumentError != nil {
+			return chunks, usage, toolCalls.deferredArgumentError
+		}
 		if toolCalls.hasPending() {
 			return chunks, usage, fmt.Errorf("provider messages stream ended before completing tool calls: %w", io.ErrUnexpectedEOF)
 		}
@@ -892,7 +1389,7 @@ func parseOpenAISSEPayload(data string) ([]Chunk, Usage, bool, error) {
 			PromptCacheMissTokens   *int                      `json:"prompt_cache_miss_tokens"`
 			PromptTokensDetails     *openAIPromptTokenDetails `json:"prompt_tokens_details"`
 			CompletionTokensDetails *struct {
-				ReasoningTokens int `json:"reasoning_tokens"`
+				ReasoningTokens *int `json:"reasoning_tokens"`
 			} `json:"completion_tokens_details"`
 		} `json:"usage"`
 	}
@@ -911,8 +1408,10 @@ func parseOpenAISSEPayload(data string) ([]Chunk, Usage, bool, error) {
 	if payload.Usage == nil {
 		return chunks, Usage{}, false, nil
 	}
-	hit, miss, hasCacheTelemetry, cacheErr := openAICacheUsage(
-		payload.Usage.PromptTokens,
+	presence := Usage{}
+	setProviderUsagePresenceV1(&presence, data, "prompt_tokens", "completion_tokens", "usage")
+	hit, miss, hasCacheTelemetry, cacheErr := openAICacheUsageWithPresenceV1(
+		payload.Usage.PromptTokens, presence.HasPromptTokens,
 		payload.Usage.PromptCacheHitTokens,
 		payload.Usage.PromptCacheMissTokens,
 		payload.Usage.PromptTokensDetails,
@@ -924,10 +1423,15 @@ func parseOpenAISSEPayload(data string) ([]Chunk, Usage, bool, error) {
 		miss = payload.Usage.PromptTokens - hit
 	}
 	reasoning := 0
-	if payload.Usage.CompletionTokensDetails != nil {
-		reasoning = payload.Usage.CompletionTokensDetails.ReasoningTokens
+	if payload.Usage.CompletionTokensDetails != nil && payload.Usage.CompletionTokensDetails.ReasoningTokens != nil {
+		reasoning = *payload.Usage.CompletionTokensDetails.ReasoningTokens
 	}
 	usage := providerUsage(payload.Usage.PromptTokens, payload.Usage.CompletionTokens, payload.Usage.TotalTokens, reasoning, hit, miss, hasCacheTelemetry)
+	setProviderUsagePresenceV1(&usage, data, "prompt_tokens", "completion_tokens", "usage")
+	usage.HasReasoningTokens = payload.Usage.CompletionTokensDetails != nil && payload.Usage.CompletionTokensDetails.ReasoningTokens != nil
+	usage.HasCacheHit = hasCacheTelemetry || payload.Usage.PromptCacheHitTokens != nil || payload.Usage.PromptTokensDetails != nil && payload.Usage.PromptTokensDetails.CachedTokens != nil
+	usage.HasCacheMiss = hasCacheTelemetry || payload.Usage.PromptCacheMissTokens != nil
+	qualifyNativeUsageCountersV1(&usage, false)
 	chunks = append(chunks, Chunk{Kind: ChunkUsage, Usage: usage})
 	return chunks, usage, true, nil
 }
@@ -967,7 +1471,7 @@ func parseOpenAIChatSSEPayloadAtObserved(data string, accumulator *ToolCallAccum
 			PromptCacheMissTokens   *int                      `json:"prompt_cache_miss_tokens"`
 			PromptTokensDetails     *openAIPromptTokenDetails `json:"prompt_tokens_details"`
 			CompletionTokensDetails *struct {
-				ReasoningTokens int `json:"reasoning_tokens"`
+				ReasoningTokens *int `json:"reasoning_tokens"`
 			} `json:"completion_tokens_details"`
 		} `json:"usage"`
 	}
@@ -975,18 +1479,35 @@ func parseOpenAIChatSSEPayloadAtObserved(data string, accumulator *ToolCallAccum
 		return nil, Usage{}, false, "", PayloadObservationControl, err
 	}
 	chunks := []Chunk{}
+	// add() observes named preparation synchronously. Queue those private
+	// frames among this payload's reasoning chunks instead of overtaking them.
+	observePreparation := accumulator.onPreparation
+	if observePreparation != nil {
+		accumulator.onPreparation = func(frame domainmodel.ProcessFrameV1) {
+			chunks = append(chunks, Chunk{Kind: ChunkReasoning, ProcessFrame: &frame})
+		}
+		defer func() { accumulator.onPreparation = observePreparation }()
+	}
 	finishReason := ""
 	finishReasonSet := false
 	observation := PayloadObservationControl
 	for _, choice := range payload.Choices {
 		if choice.Delta.ReasoningContent != "" {
 			observation = observation.MergeV1(PayloadObservationPrivateReasoning)
-			chunks = append(chunks, Chunk{Kind: ChunkReasoning, Text: choice.Delta.ReasoningContent})
+			chunks = append(chunks, thinkingTags.providerReasoningV1(choice.Delta.ReasoningContent)...)
 		}
 		if choice.Delta.Content != "" {
+			if end := thinkingTags.endProviderReasoningV1(); end != nil {
+				chunks = append(chunks, *end)
+			}
 			observation = observation.MergeV1(PayloadObservationPublicText)
 			if err := thinkingTags.push(choice.Delta.Content, rawSSEChunkAt); err != nil {
 				return nil, Usage{}, false, "", observation, err
+			}
+		}
+		if len(choice.Delta.ToolCalls) > 0 {
+			if end := thinkingTags.endProviderReasoningV1(); end != nil {
+				chunks = append(chunks, *end)
 			}
 		}
 		for _, toolCall := range choice.Delta.ToolCalls {
@@ -997,7 +1518,8 @@ func parseOpenAIChatSSEPayloadAtObserved(data string, accumulator *ToolCallAccum
 				name = toolCall.Function.Name
 				args = toolCall.Function.Arguments
 			}
-			chunks = append(chunks, accumulator.add(toolCall.Index, toolCall.ID, name, args)...)
+			started := accumulator.add(toolCall.Index, toolCall.ID, name, args)
+			chunks = append(chunks, started...)
 		}
 		if choice.FinishReason != nil {
 			nextFinishReason := *choice.FinishReason
@@ -1013,8 +1535,10 @@ func parseOpenAIChatSSEPayloadAtObserved(data string, accumulator *ToolCallAccum
 	if payload.Usage == nil {
 		return chunks, Usage{}, false, finishReason, observation, nil
 	}
-	hit, miss, hasCacheTelemetry, cacheErr := openAICacheUsage(
-		payload.Usage.PromptTokens,
+	presence := Usage{}
+	setProviderUsagePresenceV1(&presence, data, "prompt_tokens", "completion_tokens", "usage")
+	hit, miss, hasCacheTelemetry, cacheErr := openAICacheUsageWithPresenceV1(
+		payload.Usage.PromptTokens, presence.HasPromptTokens,
 		payload.Usage.PromptCacheHitTokens,
 		payload.Usage.PromptCacheMissTokens,
 		payload.Usage.PromptTokensDetails,
@@ -1026,10 +1550,15 @@ func parseOpenAIChatSSEPayloadAtObserved(data string, accumulator *ToolCallAccum
 		miss = payload.Usage.PromptTokens - hit
 	}
 	reasoning := 0
-	if payload.Usage.CompletionTokensDetails != nil {
-		reasoning = payload.Usage.CompletionTokensDetails.ReasoningTokens
+	if payload.Usage.CompletionTokensDetails != nil && payload.Usage.CompletionTokensDetails.ReasoningTokens != nil {
+		reasoning = *payload.Usage.CompletionTokensDetails.ReasoningTokens
 	}
 	usage := providerUsage(payload.Usage.PromptTokens, payload.Usage.CompletionTokens, payload.Usage.TotalTokens, reasoning, hit, miss, hasCacheTelemetry)
+	setProviderUsagePresenceV1(&usage, data, "prompt_tokens", "completion_tokens", "usage")
+	usage.HasReasoningTokens = payload.Usage.CompletionTokensDetails != nil && payload.Usage.CompletionTokensDetails.ReasoningTokens != nil
+	usage.HasCacheHit = hasCacheTelemetry || payload.Usage.PromptCacheHitTokens != nil || payload.Usage.PromptTokensDetails != nil && payload.Usage.PromptTokensDetails.CachedTokens != nil
+	usage.HasCacheMiss = hasCacheTelemetry || payload.Usage.PromptCacheMissTokens != nil
+	qualifyNativeUsageCountersV1(&usage, false)
 	chunks = append(chunks, Chunk{Kind: ChunkUsage, Usage: usage})
 	return chunks, usage, true, finishReason, observation, nil
 }
@@ -1106,6 +1635,81 @@ func parseAnthropicSSEPayload(data string) ([]Chunk, Usage, bool, error) {
 
 type openAIPromptTokenDetails struct {
 	CachedTokens *int `json:"cached_tokens"`
+}
+
+// Numeric native counters remain usable when a comparison input is absent.
+// Complete-prompt reports still pass the unchanged cache-consistency gate.
+func openAICacheUsageWithPresenceV1(prompt int, hasPrompt bool, nativeHit *int, nativeMiss *int, details *openAIPromptTokenDetails) (int, int, bool, error) {
+	if prompt < 0 {
+		return 0, 0, false, fmt.Errorf("provider cache usage prompt tokens are invalid")
+	}
+	if hasPrompt {
+		return openAICacheUsage(prompt, nativeHit, nativeMiss, details)
+	}
+	hit, miss := 0, 0
+	if nativeHit != nil {
+		hit = *nativeHit
+	}
+	if nativeMiss != nil {
+		miss = *nativeMiss
+	}
+	if hit < 0 || miss < 0 {
+		return 0, 0, false, fmt.Errorf("provider cache usage native counters are invalid")
+	}
+	if details != nil && details.CachedTokens != nil {
+		nested := *details.CachedTokens
+		if nested < 0 || nativeHit != nil && nested != hit {
+			return 0, 0, false, fmt.Errorf("provider cache usage native and nested counters conflict")
+		}
+		hit = nested
+	}
+	return hit, miss, false, nil
+}
+
+func qualifyNativeUsageCountersV1(usage *Usage, terminalReport bool) {
+	qualification := domaincache.ProviderOutputTokensProvisionalV1
+	if terminalReport {
+		qualification = domaincache.ProviderOutputTokensFinalV1
+	}
+	if usage.HasCompletionTokens {
+		usage.OutputTokensFinality = qualification
+	}
+	if usage.HasReasoningTokens {
+		usage.ReasoningTokensFinality = qualification
+	}
+}
+
+// Provider snapshots are cumulative. Preserve absent fields, replace each
+// actually reported field, and never add snapshots or upgrade on Done alone.
+func mergeNativeUsageCountersV1(previous, next Usage) Usage {
+	result := previous
+	result.UsagePresenceKnown = next.UsagePresenceKnown
+	result.FinishReason = next.FinishReason
+	if next.HasPromptTokens {
+		result.PromptTokens, result.HasPromptTokens = next.PromptTokens, true
+	}
+	if next.HasCompletionTokens {
+		result.CompletionTokens, result.HasCompletionTokens, result.OutputTokensFinality = next.CompletionTokens, true, next.OutputTokensFinality
+	}
+	if next.HasReasoningTokens {
+		result.ReasoningTokens, result.HasReasoningTokens, result.ReasoningTokensFinality = next.ReasoningTokens, true, next.ReasoningTokensFinality
+	}
+	if next.HasCacheHit {
+		result.CacheHitTokens, result.HasCacheHit = next.CacheHitTokens, true
+	}
+	if next.HasCacheMiss {
+		result.CacheMissTokens, result.HasCacheMiss = next.CacheMissTokens, true
+	}
+	if next.TotalTokens > result.TotalTokens {
+		result.TotalTokens = next.TotalTokens
+	}
+	if result.TotalTokens < result.PromptTokens+result.CompletionTokens {
+		result.TotalTokens = result.PromptTokens + result.CompletionTokens
+	}
+	if result.CacheHitTokens+result.CacheMissTokens > 0 {
+		result.CacheHitRate = float64(result.CacheHitTokens) / float64(result.CacheHitTokens+result.CacheMissTokens)
+	}
+	return result
 }
 
 func openAICacheUsage(prompt int, nativeHit *int, nativeMiss *int, details *openAIPromptTokenDetails) (int, int, bool, error) {
@@ -1229,4 +1833,115 @@ func responseModelFromEnvelope(data string) string {
 		return boundedResponseModel(envelope.Response.Model)
 	}
 	return boundedResponseModel(envelope.Model)
+}
+
+// Presence is read from the native payload before normalized integer defaults.
+// A missing or null usage counter is not a provider-reported zero.
+func setProviderUsagePresenceV1(usage *Usage, body, inputKey, outputKey string, path ...string) {
+	var raw json.RawMessage = []byte(body)
+	for _, key := range path {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil {
+			return
+		}
+		raw = fields[key]
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return
+	}
+	known := func(key string) bool {
+		value, exists := fields[key]
+		if !exists || string(value) == "null" {
+			return false
+		}
+		var count int
+		return json.Unmarshal(value, &count) == nil && count >= 0
+	}
+	usage.UsagePresenceKnown = true
+	usage.HasPromptTokens = known(inputKey)
+	usage.HasCompletionTokens = known(outputKey)
+}
+
+// This numeric observer reads native nonempty content only. Retry lifecycle
+// flags deliberately include control frames and cannot establish token timing.
+func nativeFirstContentObserverV1(endpoint string, observers []func(time.Time)) func(string, time.Time) {
+	observed := false
+	return func(body string, at time.Time) {
+		if observed || len(observers) == 0 || !nativePayloadHasContentV1(endpoint, body) {
+			return
+		}
+		observed = true
+		for _, observer := range observers {
+			if observer != nil {
+				func() { defer func() { _ = recover() }(); observer(at) }()
+			}
+		}
+	}
+}
+
+func nativePayloadHasContentV1(endpoint, body string) bool {
+	var payload map[string]json.RawMessage
+	if json.Unmarshal([]byte(body), &payload) != nil {
+		return false
+	}
+	text := func(fields map[string]json.RawMessage, key string) string {
+		var value string
+		_ = json.Unmarshal(fields[key], &value)
+		return value
+	}
+	object := func(raw json.RawMessage) map[string]json.RawMessage {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		return fields
+	}
+	switch endpoint {
+	case "responses":
+		switch text(payload, "type") {
+		case "response.output_text.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta", "response.function_call_arguments.delta":
+			return text(payload, "delta") != ""
+		case "response.output_item.added", "response.output_item.done":
+			item := object(payload["item"])
+			return text(item, "type") == "function_call" && (text(item, "name") != "" || strings.TrimSpace(text(item, "arguments")) != "")
+		}
+	case "messages":
+		switch text(payload, "type") {
+		case "content_block_start":
+			block := object(payload["content_block"])
+			if text(block, "type") == "tool_use" {
+				return text(block, "name") != "" || len(object(block["input"])) > 0
+			}
+			return (text(block, "type") == "text" && text(block, "text") != "") || (text(block, "type") == "thinking" && text(block, "thinking") != "")
+		case "content_block_delta":
+			delta := object(payload["delta"])
+			switch text(delta, "type") {
+			case "text_delta":
+				return text(delta, "text") != ""
+			case "thinking_delta":
+				return text(delta, "thinking") != ""
+			case "input_json_delta":
+				return text(delta, "partial_json") != ""
+			}
+		}
+	default:
+		var choices []map[string]json.RawMessage
+		if json.Unmarshal(payload["choices"], &choices) != nil {
+			return false
+		}
+		for _, choice := range choices {
+			delta := object(choice["delta"])
+			if text(delta, "content") != "" || text(delta, "reasoning_content") != "" {
+				return true
+			}
+			var calls []map[string]json.RawMessage
+			_ = json.Unmarshal(delta["tool_calls"], &calls)
+			for _, call := range calls {
+				function := object(call["function"])
+				if text(function, "name") != "" || text(function, "arguments") != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

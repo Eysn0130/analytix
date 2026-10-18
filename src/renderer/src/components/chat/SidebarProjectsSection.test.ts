@@ -103,6 +103,18 @@ function renderSidebarProjectsSection(
 }
 
 describe('SidebarProjectsSection groups', () => {
+  it('keeps runtime body-search hits whose title and preview do not contain the query', () => {
+    const match = thread({
+      id: 'body-hit', title: 'Ordinary title', preview: 'Unrelated summary',
+      workspace: '/synthetic/body-search'
+    })
+    const groups = buildSidebarWorkspaceGroups({
+      threads: [match], searchQuery: 'needle-in-message-body', showArchived: false,
+      workspaceRoot: '', workspaceRoots: []
+    })
+    expect(groups).toEqual([['/synthetic/body-search', [match]]])
+  })
+
   it('keeps the project scrollbar aligned near the sidebar divider', () => {
     expect(sidebarProjectsSectionSource).toContain('ds-sidebar-projects-scroll')
   })
@@ -128,6 +140,14 @@ describe('SidebarProjectsSection groups', () => {
     expect(groups[1]?.[1]).toEqual([])
     expect(groups[2]?.[1]).toEqual([])
 	  })
+
+  it('keeps the active workspace first even when its name sorts after other workspaces', () => {
+    const groups = buildSidebarWorkspaceGroups({
+      threads: [], searchQuery: '', showArchived: false,
+      workspaceRoot: '/synthetic/c', workspaceRoots: ['/synthetic/b', '/synthetic/a', '/synthetic/c']
+    })
+    expect(groups.map(([workspace]) => workspace)).toEqual(['/synthetic/c', '/synthetic/a', '/synthetic/b'])
+  })
 
   it('builds case project parent groups without requiring global thread rows', () => {
     const groups = buildSidebarCaseProjectGroups({

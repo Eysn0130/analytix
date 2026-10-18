@@ -20,6 +20,7 @@ import type {
   BoundaryAcceptedFinalRecordV5,
   EvidenceAuthorityWitnessBindingV1,
   FactFinalWitnessAdmissionV1,
+  UserInputTurnItem,
   WitnessedFactAcceptedFinalRecordV4,
   WitnessedFactAcceptedFinalRecordV5
 } from '../../../../packages/runtime/src/contracts/items.js'
@@ -40,8 +41,11 @@ import type {
   CaseProjectThreadsResponseV1
 } from '../../../../packages/runtime/src/contracts/case-projects.js'
 import type {
-  AcceptedFinalDeliveryBatchV2
+  AcceptedFinalDeliveryBatchV2,
+  PipelineStage
 } from '../../../../packages/runtime/src/contracts/events.js'
+
+import type { SteeringEntry, TurnEndReason } from '../../../../packages/runtime/src/contracts/turns.js'
 
 export type CoreThreadStatus = 'idle' | 'running' | 'archived' | 'deleted'
 export type CoreTurnStatus = 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
@@ -91,6 +95,7 @@ export type CoreCaseProjectThreadsResponseJson = CaseProjectThreadsResponseV1
 export type CoreCaseProjectDetailResponseJson = CaseProjectDetailResponseV1
 
 export type CoreThreadJson = CoreThreadSummaryJson & {
+  goalHistory?: Array<{ id: string; operation: string; ref?: { id: string; revision: number }; goal: CoreThreadGoalJson | null; createdAt: string }>
   turns?: CoreTurnJson[]
   latestSeq?: number
   usage?: CoreUsageSnapshotJson
@@ -361,6 +366,10 @@ export type CoreThreadGoalResearchJson = {
 }
 
 export type CoreThreadGoalJson = {
+  id?: string
+  revision?: number
+  maxGoalRounds?: number
+  roundsStarted?: number
   threadId: string
   objective: string
   status: CoreThreadGoalStatusJson
@@ -382,6 +391,8 @@ export type CoreThreadGoalJson = {
 
 export type CoreThreadGoalResponseJson = {
   goal: CoreThreadGoalJson | null
+  activation?: import('../../../../packages/runtime/src/contracts/goal').GoalActivationV1 | null
+  history?: NonNullable<CoreThreadJson['goalHistory']>
 }
 
 export type CoreClearThreadGoalResponseJson = {
@@ -718,12 +729,14 @@ export type CoreTurnJson = {
   id: string
   threadId: string
   status: CoreTurnStatus
+  endReason?: TurnEndReason
   prompt: string
   model?: string
   createdAt: string
   startedAt?: string
   finishedAt?: string
   items?: CoreTurnItemJson[]
+  steering?: Array<string | SteeringEntry>
   /** Complete signed AcceptedFinalRecord V5 is host-private and never enters renderer state. */
   acceptedFinal?: never
   acceptedFinalView?: CoreAcceptedFinalPublicViewJson
@@ -746,6 +759,7 @@ export type CoreTurnItemJson = {
   kind: string
   text?: string
   displayText?: string
+  source?: import('../../../../packages/runtime/src/contracts/goal').GoalRoundSourceV1
   delivery?: 'steer' | string
   clientUserMessageId?: string
   toolName?: string
@@ -757,12 +771,8 @@ export type CoreTurnItemJson = {
   approvalId?: string
   inputId?: string
   prompt?: string
-  questions?: Array<{
-    header: string
-    id: string
-    question: string
-    options: Array<{ label: string; description: string }>
-  }>
+  questions?: UserInputTurnItem['questions']
+  timedWait?: UserInputTurnItem['timedWait']
   summary?: string
   replacedTokens?: number
   auto?: boolean
@@ -770,13 +780,20 @@ export type CoreTurnItemJson = {
   sourceDigest?: string
   digestMarker?: string
   sourceItemIds?: string[]
-  schemaVersion?: 2 | 3 | 4
+  schemaVersion?: 2 | 3 | 4 | 5
+  compactionId?: string
+  summaryKind?: 'conversation'
+  summaryDigest?: string
+  checkpointDigest?: string
+  shadowedItemCount?: number
+  tokenCountKind?: 'estimated'
+  tokenEstimatorVersion?: 1
   reasoningExcluded?: true
   reasoningExclusionProof?: string
   assistantProseExcluded?: true
   toolPayloadsExcluded?: true
   caseFactsExcluded?: true
-  providerHistoryProjectionVersion?: 1 | 2
+  providerHistoryProjectionVersion?: 1 | 2 | 3
   caseHistoryProjectionVersion?: 1 | 2
   message?: string
   code?: string
@@ -929,6 +946,14 @@ export type CoreUsageSnapshotJson = {
 }
 
 export type CoreCacheDiagnosticsJson = {
+  providerLogicalCallCount?: number
+  providerAttemptTelemetryValid?: boolean
+  providerAttemptStatuses?: import('./types').ProviderAttemptStatuses
+  providerAttemptInputTokens?: import('./types').ProviderAttemptTokenAggregate
+  providerAttemptOutputTokens?: import('./types').ProviderAttemptTokenAggregate
+  providerAttemptCacheHitTokens?: import('./types').ProviderAttemptTokenAggregate
+  providerAttemptCacheMissTokens?: import('./types').ProviderAttemptTokenAggregate
+  providerAttemptCacheRate?: { known: boolean; numerator: number; denominator: number }
   dynamicStateCheck?: 'not_checked'
   toolSchemaEstimator?: 'utf8_bytes_div4'
   responseModelObservation?: 'not_reported' | 'matches_resolved' | 'differs_resolved'
@@ -1003,8 +1028,10 @@ export const CORE_RUNTIME_EVENT_KINDS = [
   'user_input_resolved',
   'compaction_started',
   'compaction_completed',
+  'compaction_failed',
   'goal_updated',
   'goal_cleared',
+  'goal_activation_changed',
   'goal_evidence_audit',
   'todos_updated',
   'todos_cleared',
@@ -1021,6 +1048,16 @@ export const CORE_RUNTIME_EVENT_KINDS = [
 export type CoreRuntimeEventKind = typeof CORE_RUNTIME_EVENT_KINDS[number]
 
 export type CoreRuntimeEventJson = {
+  activation?: import('../../../../packages/runtime/src/contracts/goal').GoalActivationV1 | null
+  compactionId?: string
+  summaryKind?: 'conversation'
+  summaryDigest?: string
+  checkpointDigest?: string
+  shadowedItemCount?: number
+  tokenCountKind?: 'estimated'
+  tokenEstimatorVersion?: 1
+  startedAt?: string
+  finishedAt?: string
   kind?: CoreRuntimeEventKind
   seq?: number
   sinceSeq?: number
@@ -1030,6 +1067,7 @@ export type CoreRuntimeEventJson = {
   replayEventCount?: number
   replay_event_count?: number
   reason?: string
+  endReason?: TurnEndReason
   timestamp?: string
   threadId?: string
   thread_id?: string
@@ -1112,46 +1150,22 @@ export type CoreRuntimeEventJson = {
   title?: string
   attempt?: number
   maxAttempt?: number
-  stage?:
-    | 'setup'
-    | 'pre_start'
-    | 'post_start'
-    | 'input_received'
-    | 'input_cached'
-    | 'input_routed'
-    | 'input_compressed'
-    | 'input_remembered'
-    | 'pre_send'
-    | 'post_send'
-    | 'response_received'
-    | 'subagent_running'
-    | 'subagent_completed'
-    | 'subagent_failed'
-    | 'subagent_killed'
-    | 'subagent_aborted'
-    | 'subagent_interrupted'
-    | 'provider_retrying'
-    | 'provider_error'
-    | 'empty_final_recovered'
+  stage?: PipelineStage
   label?: string
   details?: unknown
   summary?: string
   prompt?: string
   inputId?: string
   input_id?: string
-  questions?: Array<{
-    header: string
-    id: string
-    question: string
-    options: Array<{ label: string; description: string }>
-  }>
+  questions?: UserInputTurnItem['questions']
+  timedWait?: UserInputTurnItem['timedWait']
   replacedTokens?: number
   auto?: boolean
   pinnedConstraints?: string[]
   sourceDigest?: string
   digestMarker?: string
   sourceItemIds?: string[]
-  schemaVersion?: 2
+  schemaVersion?: 2 | 3
   reasoningExcluded?: true
   reasoningExclusionProof?: string
   usage?: CoreUsageSnapshotJson

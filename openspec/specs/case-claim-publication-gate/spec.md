@@ -247,7 +247,7 @@ case-scoped entity reference is unchanged.
 - **THEN** recovery remains boundary-only and cannot request the model to complete the case analysis
 
 ### Requirement: High-Risk Draft Isolation
-Provider-originated high-risk factual text SHALL be held as untrusted proposal material until final acceptance and SHALL NOT enter SSE, UI, disk events, thread history, compaction, reports, or exports before the gate.
+Provider-originated high-risk factual text SHALL be held as untrusted proposal material until final acceptance and SHALL NOT enter generic SSE/UI, disk events, thread history, compaction, reports, or exports before the gate. The protected process-local native reasoning sink defined below is the sole exception for its completed native source copy. That copy remains untrusted process material; it SHALL NOT publish a case answer, change claim support, create evidence, or satisfy Final Gate.
 
 #### Scenario: Model streams a fabricated amount before calling a tool
 - **WHEN** a high-risk turn receives a text delta containing an amount or other case fact
@@ -261,15 +261,71 @@ Provider-originated high-risk factual text SHALL be held as untrusted proposal m
   typed sink
 
 ### Requirement: Reasoning Is Ephemeral And Non-Exportable
-Provider reasoning/thinking content SHALL NOT enter UI, SSE, event logs, thread items, tool items, provider durable history, compaction, reports, logs, traces, or exports on success or failure paths.
+Provider reasoning/thinking content SHALL NOT enter generic UI or renderer
+events, SSE, event logs, thread items, tool items, provider durable history,
+compaction, reports, logs, traces, or exports on success or failure paths. Only
+the protected process-local completed native block sink below MAY return a
+separate bounded plaintext display copy. This scoped exception SHALL NOT
+change provider continuation bytes, final publication, evidence, execution
+grants, or any generic zero-byte boundary.
 
 #### Scenario: Provider emits reasoning and a tool call
 - **WHEN** reasoning is required transiently for a current provider protocol continuation
-- **THEN** it remains bounded in memory for that continuation and is discarded before any durable or user-visible boundary
+- **THEN** it remains bounded in memory for that continuation and is discarded before any durable boundary; any local display copy uses only the separate protected native block sink and never a fabricated tool call or grant
 
 #### Scenario: Turn fails or is recovered
 - **WHEN** reasoning was received before failure, cancellation, timeout, recovery, or restart
-- **THEN** zero reasoning bytes appear in persisted/replayed/exported artifacts and renderer events
+- **THEN** zero reasoning bytes appear in persisted/replayed/exported artifacts and generic renderer events; incomplete native blocks expose metadata only, and restart cannot reconstruct a process-local display body
+
+### Requirement: Protected Process-Local Native Block Display
+A typed protected local POST read MAY return a separate display copy of a
+completed actual plaintext native reasoning block from the original-own turn.
+Delivery SHALL require fresh current principal, workspace and own-scope
+validation, valid original security context, and the current native viewer's
+runtime/document/pane/session binding. Fork-inherited material, expired or
+revoked viewers, and stale original or current authority SHALL fail closed.
+This sink SHALL NOT use generic SSE, public product events, arbitrary history
+reads, source reconstruction, a new history/authority system, or a reasoning
+ToolCall/ExecutionGrant.
+
+The producer SHALL identify the physical attempt and actual native source
+index or ID under the host's provider-call generation. Only a real matching
+native end MAY complete the body; markup, orphan deltas, partial blocks,
+conflicting or reused identities, encrypted-only or redacted items SHALL NOT
+manufacture a completed plaintext block. A genuine empty plaintext native
+block MAY complete as empty. A source identity conflict SHALL prevent further
+native frames from completing or reviving that source's open builder. A copy
+already completed by a real matching end before the later conflict MAY remain
+available for its bounded protected local lifetime; the conflict SHALL NOT
+concatenate new bytes into it. Retry and termination SHALL invalidate or
+supersede unfinished builders without combining attempts.
+
+Raw builders and completed copies SHALL remain process-local and bounded by
+byte, count, producer-idle and terminal lifetime limits. Reads SHALL NOT renew
+producer lifetime. Expiry, scope/lease loss and runtime shutdown SHALL deny
+further delivery; viewer revocation SHALL clear that viewer's copies. Restart
+and durable history reopen SHALL report the body unavailable and SHALL NOT
+persist or recover it through CAS, events, thread history or provider capsules.
+A wait SHALL release the scope read gate and owner mutex, then freshly validate
+authority before taking the locked response copy.
+
+The complete capture SHALL be classified and credential-projected before any
+title, preview, path, body or diff bound. Host-known runtime credentials and
+actual prepared Provider keys from all attempts of that turn SHALL be covered
+for native and subsequent tool captures, including attempts without reasoning.
+Overflow or an unclassifiable capture SHALL withhold all sensitive fields.
+Classification SHALL truthfully distinguish `source_exact_local`,
+`credential_redacted` and `withheld`; presentation bounds SHALL NOT replace
+classification. Signatures, encrypted/redacted protocol content, private
+continuation capsules and credential material SHALL never enter this sink.
+
+#### Scenario: A complete native block is expanded under a current viewer
+- **WHEN** a real plaintext native start/delta/end sequence completes and both original source context and fresh current native viewer authority validate
+- **THEN** only the separately projected local copy is delivered, while generic UI/SSE/history/export channels remain zero-byte and claim/evidence/final-publication authority is unchanged
+
+#### Scenario: A block is incomplete, opaque, stale or over budget
+- **WHEN** a native identity conflicts, only signature/encrypted/redacted material exists, completion is missing, a quota is exceeded, or original/current/viewer authority no longer validates
+- **THEN** no source body or partial preview is delivered; bounded metadata may state unavailable or withheld without inventing text, source identity, tool settlement or evidence
 
 ### Requirement: Deterministic Host Rendering
 The host SHALL render accepted case answers from verified claim records and allowed wording. A model SHALL NOT be called to turn unavailable, partial, or verified claims into final case prose.

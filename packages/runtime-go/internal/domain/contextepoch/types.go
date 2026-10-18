@@ -116,6 +116,8 @@ type State struct {
 }
 
 type ProviderFragment struct {
+	SourceID string
+	Kind     string
 	Boundary PromptBoundary
 	Content  string
 }

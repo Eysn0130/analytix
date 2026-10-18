@@ -43,3 +43,21 @@ func Supports(codec Codec, kind string) bool {
 	}
 	return kind == "docx"
 }
+
+// Only the explicit user blank-DOCX path needs an empty markdown property.
+// Existing nonempty Agent inputs and every other format retain their bytes.
+func (input Input) MarshalJSON() ([]byte, error) {
+	type legacy Input
+	if input.Kind != "docx" || input.Markdown != "" {
+		return json.Marshal(legacy(input))
+	}
+	return json.Marshal(struct {
+		SchemaVersion int             `json:"schemaVersion"`
+		Kind          string          `json:"kind"`
+		Markdown      string          `json:"markdown"`
+		Title         string          `json:"title,omitempty"`
+		Images        []Image         `json:"images,omitempty"`
+		Workbook      json.RawMessage `json:"workbook,omitempty"`
+		Presentation  json.RawMessage `json:"presentation,omitempty"`
+	}{input.SchemaVersion, input.Kind, "", input.Title, input.Images, input.Workbook, input.Presentation})
+}

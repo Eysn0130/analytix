@@ -5,6 +5,12 @@ import { createRuntimeStatusPublicV1 } from '@shared/analytix-runtime-status'
 import { runtimeErrorToError } from '@shared/runtime-error'
 import i18n from '../i18n'
 import type { ChatState, ChatStoreGet, ChatStoreSet } from './chat-store-types'
+import { getThreadBinding } from './chat-store-thread-binding'
+import { stopTurnCompletionPoll } from './chat-store-schedulers'
+import * as navigationRuntime from './chat-store-runtime'
+import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
+import { readThreadForkRegistry, saveThreadForkRegistry } from '../lib/thread-fork-registry'
+import { readWriteThreadRegistry, saveWriteThreadRegistry } from '../write/write-thread-registry'
 
 const registryMock = vi.hoisted(() => ({
   getProvider: vi.fn(),
@@ -37,7 +43,7 @@ function thread(overrides: Partial<NormalizedThread> & Pick<NormalizedThread, 'i
   }
 }
 
-function buildHarness(overrides: Partial<ChatState> = {}): {
+function buildHarness(overrides: Partial<ChatState> = {}, sseAbortRef: { current: AbortController | null } = { current: null }): {
   actions: ReturnType<typeof createNavigationActions>
   state: ChatState
   createThread: ReturnType<typeof vi.fn>
@@ -45,6 +51,7 @@ function buildHarness(overrides: Partial<ChatState> = {}): {
   loadComposerModels: ReturnType<typeof vi.fn>
   selectThread: ReturnType<typeof vi.fn>
   setCalls: Partial<ChatState>[]
+  sseAbortRef: { current: AbortController | null }
 } {
   const createThread = vi.fn(async () => undefined)
   const refreshThreads = vi.fn(async () => undefined)
@@ -53,9 +60,19 @@ function buildHarness(overrides: Partial<ChatState> = {}): {
   const setCalls: Partial<ChatState>[] = []
   let state = {
     activeThreadId: 'thr_default',
+    queuedMessages: [],
+    queuedMessagePauses: {},
     blocks: [],
     busy: false,
     clawChannels: [],
+    caseProjects: [],
+    caseProjectThreadsById: {},
+    caseProjectLoadingById: {},
+    caseProjectErrorsById: {},
+    caseProjectExpandedById: {},
+    composerDrafts: {},
+    userInputDraftInterruptions: {},
+    deletedUserInputDraftThreadIds: {},
     codeWorkspaceRoots: ['~/.analytix/default_workspace'],
     createThread,
     currentTurnId: null,
@@ -67,6 +84,9 @@ function buildHarness(overrides: Partial<ChatState> = {}): {
     route: 'chat',
     runtimeConnection: 'ready',
     selectThread,
+    threadSearch: '',
+    threadSearchResults: null,
+    showArchivedThreads: false,
     threads: [
       thread({
         id: 'thr_default',
@@ -91,7 +111,7 @@ function buildHarness(overrides: Partial<ChatState> = {}): {
     actions: createNavigationActions({
       set,
       get,
-      sseAbortRef: { current: null }
+      sseAbortRef
     }),
     get state() {
       return state
@@ -100,7 +120,8 @@ function buildHarness(overrides: Partial<ChatState> = {}): {
     refreshThreads,
     loadComposerModels,
     selectThread,
-    setCalls
+    setCalls,
+    sseAbortRef
   }
 }
 
@@ -378,8 +399,9 @@ describe('chat-store navigation workspace selection', () => {
         error: '已保存的连接暂时不可用。请重试，或打开设置检查供应商。原配置已保留。'
       }
     }
-  ])('routes a $name without probing the model runtime', async ({ registry, expected }) => {
-    const provider = { connect: vi.fn(async () => undefined) }
+  ])('routes a $name and loads local history without probing the model runtime', async ({ registry, expected }) => {
+    const localThread = thread({ id: 'thr_local_history', model: '', workspace: '/synthetic/local-history' })
+    const provider = { connect: vi.fn(async () => undefined), listThreads: vi.fn(async () => [localThread]) }
     registryMock.getProvider.mockReturnValue(provider)
     vi.stubGlobal('document', {
       documentElement: {
@@ -418,6 +440,7 @@ describe('chat-store navigation workspace selection', () => {
       applyI18nFromSettings: vi.fn(async (locale: string) => { await i18n.changeLanguage(locale) })
     } as unknown as Partial<ChatState>)
     harness.state.probeRuntime = harness.actions.probeRuntime
+    harness.state.refreshThreads = harness.actions.refreshThreads
 
     await expect(harness.actions.boot()).resolves.toBeUndefined()
 
@@ -426,9 +449,11 @@ describe('chat-store navigation workspace selection', () => {
     expect(harness.state.settingsSection).toBe(expected.settingsSection)
     expect(harness.state.error).toBe(expected.error)
     expect(harness.state.runtimeConnection).toBe('idle')
-    expect(provider.connect).not.toHaveBeenCalled()
+    expect(provider.connect).toHaveBeenCalledOnce()
+    expect(provider.listThreads).toHaveBeenCalledOnce()
+    expect(harness.state.threads).toContainEqual(localThread)
+    expect(harness.createThread).not.toHaveBeenCalled()
     expect(harness.loadComposerModels).not.toHaveBeenCalled()
-    expect(harness.refreshThreads).not.toHaveBeenCalled()
     expect(JSON.stringify({
       error: harness.state.error,
       runtimeErrorDetail: harness.state.runtimeErrorDetail
@@ -448,13 +473,75 @@ describe('chat-store navigation workspace selection', () => {
       settings: { getSettings: vi.fn(async () => ({ workspaceRoot: '/workspace/fixture', runtime: {} })) },
       providerRegistry: { request: vi.fn() }
     } })
-    const harness = buildHarness()
+    const harness = buildHarness({ route: 'write', settingsSection: 'general', initialSetupOpen: false, initialSetupMode: 'required' })
     await harness.actions.probeRuntime('user')
     expect(harness.state.runtimeConnection).toBe('offline')
+    expect(harness.state.route).toBe('settings')
+    expect(harness.state.settingsSection).toBe('providers')
+    expect(harness.state.initialSetupOpen).toBe(false)
+    expect(harness.state.initialSetupMode).toBe('required')
     expect(harness.state.error).toBe(expected)
     expect(harness.state.runtimeErrorDetail).toBeNull()
     expect(registryMock.checkCredentialReadiness).toHaveBeenCalledTimes(1)
     expect(harness.loadComposerModels).not.toHaveBeenCalled()
+  })
+
+  it('keeps background credential recovery on the current page without reopening setup', async () => {
+    vi.useFakeTimers()
+    registryMock.getProvider.mockReturnValue({ connect: vi.fn(async () => undefined) })
+    registryMock.checkCredentialReadiness.mockResolvedValue({ kind: 'recovery', reason: 'saved_connection_unavailable' })
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ workspaceRoot: '/workspace/fixture', runtime: {} })) },
+      providerRegistry: { request: vi.fn() }
+    } })
+    const harness = buildHarness({ route: 'write', settingsSection: 'general', initialSetupOpen: false, initialSetupMode: 'required' })
+    await harness.actions.probeRuntime('background')
+    expect(registryMock.checkCredentialReadiness).toHaveBeenCalledTimes(1)
+    expect(harness.state.runtimeConnection).toBe('offline')
+    expect(harness.state.error).toBeTruthy()
+    expect(harness.state.route).toBe('write')
+    expect(harness.state.settingsSection).toBe('general')
+    expect(harness.state.initialSetupOpen).toBe(false)
+    expect(harness.state.initialSetupMode).toBe('required')
+  })
+
+  it('ignores an old user credential recovery after a newer user probe is ready', async () => {
+    let finishOld!: (value: { kind: 'recovery'; reason: 'saved_connection_unavailable' }) => void
+    const oldReadiness = new Promise<{ kind: 'recovery'; reason: 'saved_connection_unavailable' }>(resolve => { finishOld = resolve })
+    registryMock.getProvider.mockReturnValue({ connect: vi.fn(async () => undefined) })
+    registryMock.checkCredentialReadiness.mockImplementationOnce(() => oldReadiness)
+      .mockResolvedValueOnce({ kind: 'ready', providerId: 'deepseek', model: 'deepseek-chat' })
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ workspaceRoot: '/workspace/fixture', runtime: {} })) },
+      providerRegistry: { request: vi.fn() }
+    } })
+    const harness = buildHarness({ route: 'write', settingsSection: 'general', initialSetupOpen: false })
+    const oldProbe = harness.actions.probeRuntime('user')
+    await vi.waitFor(() => expect(registryMock.checkCredentialReadiness).toHaveBeenCalledTimes(1))
+    await harness.actions.probeRuntime('user')
+    finishOld({ kind: 'recovery', reason: 'saved_connection_unavailable' })
+    await oldProbe
+    expect(harness.state.runtimeConnection).toBe('ready')
+    expect(harness.state.route).toBe('write')
+    expect(harness.state.settingsSection).toBe('general')
+    expect(harness.state.error).toBeNull()
+    expect(harness.state.initialSetupOpen).toBe(false)
+  })
+
+  it('does not route a setup result through Provider recovery', async () => {
+    registryMock.getProvider.mockReturnValue({ connect: vi.fn(async () => undefined) })
+    registryMock.checkCredentialReadiness.mockResolvedValue({ kind: 'setup' })
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings: vi.fn(async () => ({ workspaceRoot: '/workspace/fixture', runtime: {} })) },
+      providerRegistry: { request: vi.fn() }
+    } })
+    const harness = buildHarness({ initialSetupOpen: true, initialSetupMode: 'required', settingsSection: 'general' })
+    await harness.actions.probeRuntime('user')
+    expect(harness.state.runtimeConnection).toBe('offline')
+    expect(harness.state.route).toBe('chat')
+    expect(harness.state.settingsSection).toBe('general')
+    expect(harness.state.initialSetupOpen).toBe(true)
+    expect(harness.state.initialSetupMode).toBe('required')
   })
 
   it('does not let a stale background probe failure overwrite a newer ready result', async () => {
@@ -1638,5 +1725,548 @@ describe('case-index continuation across actual runtime reconnection', () => {
     expect(harness.state.caseProjectIndexStatus).toBe('ready')
     await vi.advanceTimersByTimeAsync(1500)
     expect(listCaseProjects).toHaveBeenCalledTimes(2)
+  })
+})
+
+
+function navigationMemoryStorage() {
+  const values = new Map<string, string>()
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value) },
+    removeItem: (key: string) => { values.delete(key) }
+  }
+}
+
+describe('Queue workspace deletion receipts', () => {
+  beforeEach(() => {
+    registryMock.getProvider.mockReset()
+    vi.stubGlobal('window', { analytix: {}, localStorage: navigationMemoryStorage() })
+  })
+  afterEach(() => { stopTurnCompletionPoll(); vi.unstubAllGlobals() })
+  it.each(['all', 'second-rejected'] as const)('retires only confirmed deletion receipts when %s', async outcome => {
+    const keep = { threadId: 'thr_default', id: 'same-id', text: 'retain default', sending: true }
+    const harness = buildHarness({ threads: [thread({ id: 'thr_default', workspace: '/workspace/keep' }),
+      thread({ id: 'delete-first', workspace: '/workspace/delete' }), thread({ id: 'delete-second', workspace: '/workspace/delete' })],
+      queuedMessages: [keep, { threadId: 'delete-first', id: 'same-id', text: 'first', sending: true },
+        { threadId: 'delete-second', id: 'same-id', text: 'second' }],
+      queuedMessagePauses: { thr_default: 'interrupted', 'delete-first': 'failed', 'delete-second': 'failed' } })
+    const deleteThread = vi.fn(async (id: string) => { if (outcome === 'second-rejected' && id === 'delete-second') throw new Error('Synthetic deletion rejected') })
+    registryMock.getProvider.mockReturnValue({ deleteThread, listThreads: vi.fn(async () => [...harness.state.threads]) })
+    await harness.actions.deleteWorkspace('/workspace/delete')
+    expect(deleteThread.mock.calls).toEqual([['delete-first'], ['delete-second']])
+    expect(harness.state.queuedMessages).toEqual(outcome === 'all' ? [keep] : [keep,
+      { threadId: 'delete-second', id: 'same-id', text: 'second' }])
+    expect(harness.state.queuedMessagePauses).toEqual(outcome === 'all' ? { thr_default: 'interrupted' }
+      : { thr_default: 'interrupted', 'delete-second': 'failed' })
+  })
+})
+
+describe('thread inventory projections and workspace deletion owners', () => {
+  const root = '/synthetic/navigation-delete'
+  const keepRoot = '/synthetic/navigation-keep'
+  const namedThread = (id: string, workspace = root, overrides: Partial<NormalizedThread> = {}) =>
+    thread({ id, title: 'Synthetic ' + id, workspace, ...overrides })
+  const warningKey = (id: string) => {
+    const requestId = 'input_' + 'a'.repeat(64)
+    return JSON.stringify({ threadId: id, turnId: 'turn-' + id, itemId: 'item_' + requestId, requestId })
+  }
+  const fixtures: ReturnType<typeof buildHarness>[] = []
+  function ownedHarness(overrides: Partial<ChatState> = {}, controller: AbortController | null = null) {
+    const harness = buildHarness({ workspaceRoot: keepRoot, codeWorkspaceRoots: [keepRoot, root],
+      activeThreadId: 'keep', threads: [namedThread('keep', keepRoot)], ...overrides }, { current: controller })
+    fixtures.push(harness)
+    return harness
+  }
+  function realRefresh(harness: ReturnType<typeof buildHarness>) {
+    Object.assign(harness.state, harness.actions)
+  }
+  beforeEach(() => {
+    vi.useFakeTimers()
+    registryMock.getProvider.mockReset()
+    vi.stubGlobal('window', { localStorage: navigationMemoryStorage(),
+      analytix: { settings: { setSettings: vi.fn() } } })
+    vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue({
+      write: { defaultWorkspaceRoot: '', activeWorkspaceRoot: '', workspaces: [] }
+    } as unknown as Awaited<ReturnType<typeof rendererRuntimeClient.getSettings>>)
+  })
+  afterEach(async () => {
+    for (const harness of fixtures.splice(0)) {
+      Object.assign(harness.state, { runtimeConnection: 'offline' })
+      harness.actions.setThreadSearch('')
+    }
+    stopTurnCompletionPoll()
+    vi.clearAllTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('keeps search a pure projection and a limited inventory page preserves unloaded registries', async () => {
+    const a = namedThread('keep', keepRoot), c = namedThread('unread', keepRoot)
+    const match = namedThread('match', keepRoot), fork = namedThread('fork-match', keepRoot, { relation: 'fork', parentThreadId: a.id })
+    saveThreadForkRegistry({ version: 1, forks: {
+      'fork-match': { parentThreadId: a.id }, 'unloaded-fork': { parentThreadId: 'unloaded-parent' }
+    } })
+    saveWriteThreadRegistry({ version: 1, workspaces: {
+      '/synthetic/unloaded-write': { activeThreadId: 'unloaded-write', threadIds: ['unloaded-write'] }
+    } })
+    const forks = readThreadForkRegistry(), writes = readWriteThreadRegistry()
+    const inventory = [a, c]
+    const harness = ownedHarness({ threads: inventory, threadSearch: 'needle',
+      unreadThreadIds: { unread: true }, watchTurnCompletion: { unread: true }, busy: true })
+    realRefresh(harness)
+    const provider = { listThreads: vi.fn().mockResolvedValueOnce([
+      match, fork, namedThread('side', keepRoot, { relation: 'side', parentThreadId: a.id }),
+      namedThread('nonfork-child', keepRoot, { parentThreadId: a.id })
+    ]).mockResolvedValue([match]) }
+    registryMock.getProvider.mockReturnValue(provider)
+    await harness.actions.refreshThreads()
+    expect(harness.state.threadSearchResults?.query).toBe('needle')
+    expect(harness.state.threadSearchResults?.threads.map(item => item.id)).toEqual([match.id, fork.id])
+    expect(harness.state.threads).toBe(inventory)
+    expect(harness.state.activeThreadId).toBe(a.id)
+    expect(harness.state.unreadThreadIds).toEqual({ unread: true })
+    expect(harness.state.watchTurnCompletion).toEqual({ unread: true })
+    expect(readThreadForkRegistry()).toEqual(forks)
+    expect(readWriteThreadRegistry()).toEqual(writes)
+    harness.actions.setThreadSearch('')
+    await vi.advanceTimersByTimeAsync(0)
+    await settleReceipt()
+    expect(provider.listThreads).toHaveBeenLastCalledWith({ limit: 50, search: undefined, includeArchived: true })
+    expect(harness.state.threadSearchResults).toBeNull()
+    expect(harness.state.threads.map(item => item.id)).toEqual(expect.arrayContaining([a.id, c.id, match.id]))
+    expect(harness.state.unreadThreadIds.unread).toBe(true)
+    expect(harness.state.watchTurnCompletion.unread).toBe(true)
+    expect(readThreadForkRegistry().forks['unloaded-fork']).toEqual(forks.forks['unloaded-fork'])
+    expect(readWriteThreadRegistry().workspaces['/synthetic/unloaded-write']).toEqual(writes.workspaces['/synthetic/unloaded-write'])
+  })
+
+  it.each(['resolved', 'rejected', 'ABA', 'clear', 'provider-swap', 'current-failure'] as const)(
+    'owns debounced query receipts and never substitutes unfiltered results when %s', async mode => {
+      const old = deferredReceipt<NormalizedThread[]>(), latest = deferredReceipt<NormalizedThread[]>()
+      const provider = { listThreads: vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise),
+        connect: vi.fn(async () => undefined) }
+      const replacement = { listThreads: vi.fn(() => latest.promise), connect: vi.fn(async () => undefined) }
+      registryMock.getProvider.mockReturnValue(provider)
+      const harness = ownedHarness()
+      realRefresh(harness)
+      const inventory = harness.state.threads
+      harness.actions.setThreadSearch('A')
+      await vi.advanceTimersByTimeAsync(250)
+      expect(provider.listThreads).toHaveBeenCalledOnce()
+      if (mode === 'current-failure') {
+        old.reject(new Error('Synthetic current search failure'))
+        await settleReceipt()
+        expect(provider.listThreads).toHaveBeenCalledOnce()
+        expect(provider.connect).toHaveBeenCalledOnce()
+        expect(harness.state.threadSearchResults).toBeNull()
+        expect(harness.state.threads).toBe(inventory)
+        expect(harness.state.error).toBeTruthy()
+        return
+      }
+      if (mode === 'provider-swap') {
+        registryMock.getProvider.mockReturnValue(replacement)
+        void harness.actions.refreshThreads()
+      } else if (mode === 'clear') {
+        harness.actions.setThreadSearch('')
+        await vi.advanceTimersByTimeAsync(0)
+      } else {
+        harness.actions.setThreadSearch('B')
+        if (mode === 'ABA') harness.actions.setThreadSearch('A')
+        await vi.advanceTimersByTimeAsync(250)
+      }
+      const fresh = namedThread('fresh-result', keepRoot)
+      latest.resolve([fresh])
+      await settleReceipt()
+      const snapshot = harness.state, writes = harness.setCalls.length
+      if (mode === 'clear') {
+        expect(snapshot.threadSearchResults).toBeNull()
+        expect(snapshot.threads.some(item => item.id === fresh.id)).toBe(true)
+      } else {
+        expect(snapshot.threadSearchResults).toEqual({ query: mode === 'ABA' || mode === 'provider-swap' ? 'A' : 'B', threads: [fresh] })
+        expect(snapshot.threads).toBe(inventory)
+      }
+      if (mode === 'rejected') old.reject(new Error('Synthetic obsolete search failure'))
+      else old.resolve([namedThread('obsolete-result', keepRoot)])
+      await settleReceipt()
+      expect(harness.state).toBe(snapshot)
+      expect(harness.setCalls).toHaveLength(writes)
+      expect(provider.connect).not.toHaveBeenCalled()
+      expect(provider.listThreads).toHaveBeenCalledTimes(mode === 'provider-swap' ? 1 : 2)
+      if (mode === 'provider-swap') expect(replacement.listThreads).toHaveBeenCalledOnce()
+    })
+
+  it.each(['inventory-first', 'query-first'] as const)('does not let refresh and query steal the latest receipt when %s', async order => {
+    const old = deferredReceipt<NormalizedThread[]>(), latest = deferredReceipt<NormalizedThread[]>()
+    const listThreads = vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise)
+    registryMock.getProvider.mockReturnValue({ listThreads })
+    const harness = ownedHarness({ threadSearch: order === 'query-first' ? 'needle' : '' })
+    realRefresh(harness)
+    const pending = harness.actions.refreshThreads()
+    harness.actions.setThreadSearch(order === 'query-first' ? '' : 'needle')
+    await vi.advanceTimersByTimeAsync(order === 'query-first' ? 0 : 250)
+    latest.resolve([namedThread('latest', keepRoot)])
+    await settleReceipt()
+    const snapshot = harness.state, writes = harness.setCalls.length
+    old.resolve([namedThread('obsolete', keepRoot)])
+    await pending
+    expect(harness.state).toBe(snapshot)
+    expect(harness.setCalls).toHaveLength(writes)
+    expect(harness.state.threadSearchResults).toEqual(order === 'query-first' ? null
+      : { query: 'needle', threads: [namedThread('latest', keepRoot)] })
+    expect(harness.state.threads.some(item => item.id === 'obsolete')).toBe(false)
+    expect(listThreads).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['all', 'first-rejected', 'second-rejected'] as const)(
+    'uses complete workspace inventory and retires only confirmed owners when %s', async outcome => {
+      const a = namedThread('delete-a'), b = namedThread('delete-b')
+      const archived = namedThread('unloaded-archived', root, { status: 'archived', archived: true })
+      const fork = namedThread('delete-fork', root, { relation: 'fork', parentThreadId: a.id })
+      const side = namedThread('side', root, { relation: 'side', parentThreadId: a.id })
+      const child = namedThread('nonfork-child', root, { parentThreadId: a.id })
+      const keep = namedThread('keep', keepRoot), controller = new AbortController()
+      const ids = [a.id, b.id, archived.id, fork.id]
+      const draft = { ...emptyComposerDraft, input: 'Private synthetic draft', inputRevision: 1 }
+      const harness = ownedHarness({ activeThreadId: a.id, busy: true, currentTurnId: 'turn-a',
+        threads: [keep, a, b, fork, side, child],
+        queuedMessages: [...ids, keep.id].map(threadId => ({ threadId, id: 'shared-intent', text: threadId, sending: true })),
+        queuedMessagePauses: Object.fromEntries([...ids, keep.id].map(id => [id, 'failed' as const])),
+        unreadThreadIds: Object.fromEntries([...ids, keep.id].map(id => [id, true])),
+        watchTurnCompletion: Object.fromEntries([...ids, keep.id].map(id => [id, true])),
+        composerDrafts: Object.fromEntries([...ids, keep.id].map(id => [composerDraftKey(id === keep.id ? keepRoot : root, id), draft])),
+        userInputDraftInterruptions: Object.fromEntries([...ids, keep.id].map(id => [warningKey(id), { revision: null, unsent: true }])),
+        userInputPanel: { threadId: a.id, requestId: null },
+        threadSearchResults: { query: 'delete', threads: [a, b, archived, fork, keep] }
+      }, controller)
+      saveThreadForkRegistry({ version: 1, forks: { [fork.id]: { parentThreadId: a.id }, keep: { parentThreadId: 'keep-parent' } } })
+      saveWriteThreadRegistry({ version: 1, workspaces: { [root]: { activeThreadId: a.id, threadIds: [a.id, b.id] },
+        [keepRoot]: { activeThreadId: keep.id, threadIds: [keep.id] } } })
+      const notification = vi.spyOn(navigationRuntime, 'clearWatchedCompletionNotification')
+      const deleteThread = vi.fn(async (id: string) => {
+        if (outcome === 'first-rejected' && id === a.id || outcome === 'second-rejected' && id === b.id) {
+          throw new Error('Synthetic deletion rejected')
+        }
+      })
+      const listThreads = vi.fn(async () => [keep, a, b, archived, fork, side, child])
+      registryMock.getProvider.mockReturnValue({ listThreads, deleteThread })
+      await harness.actions.deleteWorkspace(root)
+      expect(listThreads).toHaveBeenCalledWith({ limit: 0, includeArchived: true })
+      expect(deleteThread.mock.calls.map(([id]) => id)).toEqual(outcome === 'all' ? ids
+        : outcome === 'first-rejected' ? [a.id] : [a.id, b.id])
+      const deleted = outcome === 'all' ? ids : outcome === 'second-rejected' ? [a.id] : []
+      for (const id of [...ids, keep.id]) {
+        const retained = !deleted.includes(id)
+        expect(harness.state.queuedMessages.some(item => item.threadId === id)).toBe(retained)
+        expect(harness.state.queuedMessagePauses[id]).toBe(retained ? 'failed' : undefined)
+        expect(harness.state.unreadThreadIds[id]).toBe(retained ? true : undefined)
+        expect(harness.state.watchTurnCompletion[id]).toBe(retained ? true : undefined)
+        expect(harness.state.composerDrafts[composerDraftKey(id === keep.id ? keepRoot : root, id)]).toBe(retained ? draft : undefined)
+        expect(harness.state.userInputDraftInterruptions?.[warningKey(id)]).toEqual(retained ? { revision: null, unsent: true } : undefined)
+        expect(harness.state.deletedUserInputDraftThreadIds?.[id]).toBe(retained ? undefined : true)
+      }
+      expect(notification.mock.calls.map(([id]) => id)).toEqual(deleted)
+      expect(harness.state.threadSearchResults?.threads.map(item => item.id)).toEqual([a, b, archived, fork, keep].filter(item => !deleted.includes(item.id)).map(item => item.id))
+      expect(harness.state.threads.map(item => item.id)).toEqual([keep, a, b, fork, side, child].filter(item => !deleted.includes(item.id)).map(item => item.id))
+      expect(readThreadForkRegistry().forks[fork.id]).toEqual(outcome === 'all' ? undefined : { parentThreadId: a.id })
+      expect(readThreadForkRegistry().forks.keep).toEqual({ parentThreadId: 'keep-parent' })
+      expect(readWriteThreadRegistry().workspaces[keepRoot]).toEqual({ activeThreadId: keep.id, threadIds: [keep.id] })
+      expect(readWriteThreadRegistry().workspaces[root]).toEqual(outcome === 'all' ? undefined
+        : { activeThreadId: outcome === 'second-rejected' ? b.id : a.id,
+          threadIds: outcome === 'second-rejected' ? [b.id] : [a.id, b.id] })
+      expect(controller.signal.aborted).toBe(outcome !== 'first-rejected')
+      expect(harness.state.activeThreadId).toBe(outcome === 'first-rejected' ? a.id : null)
+      expect(harness.state.busy).toBe(outcome === 'first-rejected')
+      if (outcome === 'first-rejected') {
+        expect(harness.sseAbortRef.current).toBe(controller)
+        expect(harness.state.userInputPanel?.threadId).toBe(a.id)
+      } else expect(harness.state.userInputPanel).toBeUndefined()
+      expect(harness.state.codeWorkspaceRoots.includes(root)).toBe(outcome !== 'all')
+      if (outcome !== 'all') expect(harness.state.error).toBeTruthy()
+    })
+
+  it.each(['new-thread', 'ABA', 'later-dispatch', 'natural-EOF'] as const)('detaches only the owner captured at each DELETE dispatch when %s', async mode => {
+    const first = deferredReceipt<void>(), second = deferredReceipt<void>()
+    const a = namedThread('delete-a'), b = namedThread('delete-b'), original = new AbortController(), replacement = new AbortController()
+    const harness = ownedHarness({ activeThreadId: mode === 'later-dispatch' ? 'keep' : a.id,
+      busy: true, currentTurnId: 'original-turn', threads: [a, b, namedThread('keep', keepRoot)] }, original)
+    const binding = getThreadBinding(harness.sseAbortRef)
+    const deleteThread = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    registryMock.getProvider.mockReturnValue({ listThreads: vi.fn(async () => mode === 'later-dispatch' ? [a, b] : [a]), deleteThread })
+    const pending = harness.actions.deleteWorkspace(root)
+    await settleReceipt()
+    expect(deleteThread).toHaveBeenCalledWith(a.id)
+    if (mode === 'natural-EOF') {
+      binding.naturallyRetired.add(original)
+      harness.sseAbortRef.current = null
+    } else {
+      binding.generation += 1
+      Object.assign(harness.state, { activeThreadId: b.id, currentTurnId: 'new-turn', busy: true })
+      harness.sseAbortRef.current = replacement
+      if (mode === 'ABA') {
+        binding.generation += 1
+        binding.submissionGeneration += 1
+        Object.assign(harness.state, { activeThreadId: a.id, currentTurnId: 'replacement-a-turn' })
+        harness.sseAbortRef.current = original
+      }
+    }
+    first.resolve()
+    await settleReceipt()
+    expect(original.signal.aborted).toBe(mode === 'natural-EOF')
+    expect(replacement.signal.aborted).toBe(false)
+    if (mode === 'later-dispatch') {
+      expect(deleteThread.mock.calls).toEqual([[a.id], [b.id]])
+      expect(harness.state.activeThreadId).toBe(b.id)
+      second.resolve()
+      await pending
+      expect(replacement.signal.aborted).toBe(true)
+      expect(harness.sseAbortRef.current).toBeNull()
+      expect(harness.state.activeThreadId).toBeNull()
+      expect(harness.state.busy).toBe(false)
+    } else if (mode === 'natural-EOF') {
+      await pending
+      expect(harness.state.activeThreadId).toBeNull()
+      expect(harness.state.busy).toBe(false)
+      expect(harness.sseAbortRef.current).toBeNull()
+    } else {
+      await pending
+      expect(harness.state.activeThreadId).toBe(mode === 'ABA' ? a.id : b.id)
+      expect(harness.state.busy).toBe(true)
+      expect(harness.sseAbortRef.current).toBe(mode === 'ABA' ? original : replacement)
+      expect(harness.state.codeWorkspaceRoots).toContain(root)
+      expect(harness.refreshThreads).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(['resolved', 'rejected'] as const)('keeps a newer same-root deletion error and root after an old DELETE is %s', async outcome => {
+    const receipt = deferredReceipt<void>()
+    const a = namedThread('delete-a')
+    const harness = ownedHarness({ threads: [a, namedThread('keep', keepRoot)] })
+    const listThreads = vi.fn().mockResolvedValueOnce([a]).mockRejectedValueOnce(new Error('Synthetic newer inventory failure'))
+    const deleteThread = vi.fn(() => receipt.promise)
+    registryMock.getProvider.mockReturnValue({ listThreads, deleteThread })
+    const old = harness.actions.deleteWorkspace(root)
+    await settleReceipt()
+    await harness.actions.deleteWorkspace(root)
+    const newerError = harness.state.error
+    expect(newerError).toBeTruthy()
+    if (outcome === 'resolved') receipt.resolve()
+    else receipt.reject(new Error('Synthetic obsolete deletion failure'))
+    await old
+    expect(harness.state.error).toBe(newerError)
+    expect(harness.state.codeWorkspaceRoots).toContain(root)
+    expect(harness.refreshThreads).not.toHaveBeenCalled()
+    expect(harness.state.threads.some(item => item.id === a.id)).toBe(outcome === 'rejected')
+  })
+
+  it.each(['ready', 'later-delete'] as const)('owns the post-delete building index lifecycle when %s', async mode => {
+    const a = namedThread('delete-a'), keep = namedThread('keep', keepRoot)
+    const laterListing = deferredReceipt<NormalizedThread[]>()
+    let fullListings = 0
+    const listThreads = vi.fn((options?: { limit?: number }) => {
+      if (options?.limit === 0) {
+        fullListings += 1
+        return fullListings === 1 ? Promise.resolve([a]) : laterListing.promise
+      }
+      return Promise.resolve([keep])
+    })
+    const listCaseProjects = vi.fn()
+      .mockResolvedValueOnce({ caseProjects: [], indexStatus: 'building' })
+      .mockResolvedValue({ caseProjects: [], indexStatus: 'ready' })
+    const deleteThread = vi.fn(async () => undefined)
+    registryMock.getProvider.mockReturnValue({ listThreads, listCaseProjects, deleteThread })
+    const harness = ownedHarness({ threads: [keep, a], caseProjectIndexStatus: 'ready' })
+    realRefresh(harness)
+    let laterIntent: Promise<void> | undefined
+    try {
+      await harness.actions.deleteWorkspace(root)
+      expect(deleteThread.mock.calls).toEqual([[a.id]])
+      expect(harness.state.codeWorkspaceRoots).not.toContain(root)
+      expect(listCaseProjects).toHaveBeenCalledOnce()
+      expect(harness.state.caseProjectIndexStatus).toBe('building')
+      if (mode === 'later-delete') {
+        laterIntent = harness.actions.deleteWorkspace(root)
+        await settleReceipt()
+        expect(fullListings).toBe(2)
+        expect(listThreads).toHaveBeenLastCalledWith({ limit: 0, includeArchived: true })
+      }
+      const writes = harness.setCalls.length
+      await vi.advanceTimersByTimeAsync(1500)
+      await settleReceipt()
+      expect(listCaseProjects).toHaveBeenCalledTimes(mode === 'ready' ? 2 : 1)
+      expect(harness.state.caseProjectIndexStatus).toBe(mode === 'ready' ? 'ready' : 'building')
+      if (mode === 'later-delete') expect(harness.setCalls).toHaveLength(writes)
+    } finally {
+      laterListing.resolve([])
+      if (laterIntent) await laterIntent
+    }
+  })
+
+  it.each(['rejected', 'late-workspace-switch'] as const)('preserves current workspace configuration while SETTINGS is %s', async outcome => {
+    const settings = deferredReceipt<Awaited<ReturnType<typeof rendererRuntimeClient.setSettings>>>()
+    const setSettings = vi.spyOn(rendererRuntimeClient, 'setSettings').mockReturnValue(settings.promise)
+    const a = namedThread('delete-a')
+    const harness = ownedHarness({ workspaceRoot: root, workspaceLabel: 'navigation-delete',
+      threads: [a, namedThread('keep', keepRoot)] })
+    registryMock.getProvider.mockReturnValue({ listThreads: vi.fn(async () => [a]), deleteThread: vi.fn(async () => undefined) })
+    const pending = harness.actions.deleteWorkspace(root)
+    await settleReceipt()
+    expect(setSettings).toHaveBeenCalledWith({ workspaceRoot: '' })
+    if (outcome === 'rejected') settings.reject(new Error('Synthetic settings failure'))
+    else {
+      getThreadBinding(harness.sseAbortRef).generation += 1
+      Object.assign(harness.state, { workspaceRoot: '/synthetic/new-owner', workspaceLabel: 'new-owner',
+        route: 'write', error: 'New workspace error', runtimeErrorDetail: 'New workspace detail' })
+      settings.resolve({ workspaceRoot: '' } as Awaited<ReturnType<typeof rendererRuntimeClient.setSettings>>)
+    }
+    await pending
+    expect(harness.state.threads.some(item => item.id === a.id)).toBe(false)
+    expect(harness.state.codeWorkspaceRoots).toEqual([keepRoot, root])
+    expect(harness.state.workspaceRoot).toBe(outcome === 'rejected' ? root : '/synthetic/new-owner')
+    expect(harness.state.workspaceLabel).toBe(outcome === 'rejected' ? 'navigation-delete' : 'new-owner')
+    expect(harness.state.error).toBeTruthy()
+    if (outcome !== 'rejected') {
+      expect(harness.state.error).toBe('New workspace error')
+      expect(harness.state.runtimeErrorDetail).toBe('New workspace detail')
+      expect(harness.state.route).toBe('write')
+    }
+    expect(harness.refreshThreads).not.toHaveBeenCalled()
+  })
+
+  it.each(['delete', 'settings', 'workspace-delete-reject'] as const)('does not overwrite a newer error owner after pending %s completes', async boundary => {
+    const receipt = deferredReceipt<void>()
+    const settings = deferredReceipt<Awaited<ReturnType<typeof rendererRuntimeClient.setSettings>>>()
+    const setSettings = vi.spyOn(rendererRuntimeClient, 'setSettings').mockImplementation(patch => boundary === 'settings'
+      ? settings.promise : Promise.resolve({ workspaceRoot: patch.workspaceRoot ?? '' } as Awaited<ReturnType<typeof rendererRuntimeClient.setSettings>>))
+    const a = namedThread('delete-a')
+    const harness = ownedHarness({ workspaceRoot: root, workspaceLabel: 'navigation-delete',
+      activeThreadId: boundary === 'workspace-delete-reject' ? null : 'keep', threads: [a] })
+    registryMock.getProvider.mockReturnValue({ listThreads: vi.fn(async () => [a]),
+      deleteThread: vi.fn(() => boundary === 'settings' ? Promise.resolve() : receipt.promise) })
+    const pending = harness.actions.deleteWorkspace(root)
+    await settleReceipt()
+    if (boundary === 'settings') expect(setSettings).toHaveBeenCalledOnce()
+    if (boundary === 'workspace-delete-reject') {
+      await harness.actions.selectWorkspaceRoot(keepRoot)
+      expect(harness.state.activeThreadId).toBeNull()
+      expect(harness.state.route).toBe('chat')
+      expect(harness.state.workspaceRoot).toBe(keepRoot)
+    }
+    Object.assign(harness.state, { error: 'Newer error owner', runtimeErrorDetail: 'Newer detail owner' })
+    const writes = harness.setCalls.length
+    const refreshes = harness.refreshThreads.mock.calls.length
+    if (boundary === 'workspace-delete-reject') receipt.reject(new Error('Synthetic obsolete workspace deletion failure'))
+    else if (boundary === 'delete') receipt.resolve()
+    else settings.resolve({ workspaceRoot: '' } as Awaited<ReturnType<typeof rendererRuntimeClient.setSettings>>)
+    await pending
+    expect(harness.state.threads.some(item => item.id === a.id)).toBe(boundary === 'workspace-delete-reject')
+    expect(harness.state.error).toBe('Newer error owner')
+    expect(harness.state.runtimeErrorDetail).toBe('Newer detail owner')
+    expect(harness.state.workspaceRoot).toBe(boundary === 'workspace-delete-reject' ? keepRoot : '')
+    expect(harness.state.codeWorkspaceRoots).toEqual(boundary === 'workspace-delete-reject' ? [keepRoot, root] : [keepRoot])
+    expect(harness.refreshThreads).toHaveBeenCalledTimes(refreshes)
+    expect(setSettings).toHaveBeenCalledOnce()
+    if (boundary === 'workspace-delete-reject') expect(harness.setCalls).toHaveLength(writes)
+  })
+})
+
+
+describe('local Core history without Provider readiness', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    registryMock.getProvider.mockReset()
+    registryMock.checkCredentialReadiness.mockResolvedValue({ kind: 'setup' })
+    vi.stubGlobal('window', { localStorage: navigationMemoryStorage(), analytix: {} })
+    vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue({
+      write: { defaultWorkspaceRoot: '', activeWorkspaceRoot: '', workspaces: [] }
+    } as unknown as Awaited<ReturnType<typeof rendererRuntimeClient.getSettings>>)
+  })
+  afterEach(() => {
+    stopTurnCompletionPoll()
+    vi.clearAllTimers()
+    rendererRuntimeClient.invalidateSettings()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it.each(['idle', 'offline'] as const)('loads, searches and shows archived local history while %s', async runtimeConnection => {
+    const localThread = thread({ id: 'thr_local_inventory', model: '', workspace: '/synthetic/local-history' })
+    const provider = { connect: vi.fn(async () => undefined), listThreads: vi.fn(async () => [localThread]) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ runtimeConnection, threads: [], activeThreadId: null })
+    Object.assign(harness.state, harness.actions)
+    await harness.actions.refreshThreads()
+    expect(harness.state.threads).toEqual([localThread])
+    harness.actions.setThreadSearch('local')
+    await vi.advanceTimersByTimeAsync(250)
+    expect(harness.state.threadSearchResults).toEqual({ query: 'local', threads: [localThread] })
+    expect(provider.listThreads).toHaveBeenLastCalledWith({ limit: 50, search: 'local', includeArchived: true })
+    harness.actions.setThreadSearch('')
+    await vi.advanceTimersByTimeAsync(0)
+    harness.actions.setShowArchivedThreads(true)
+    await settleReceipt()
+    expect(provider.listThreads).toHaveBeenLastCalledWith({ limit: 200, search: undefined, includeArchived: true })
+    expect(harness.state.runtimeConnection).toBe(runtimeConnection)
+    expect(harness.setCalls.some(call => call.runtimeConnection === 'ready')).toBe(false)
+    expect(harness.createThread).not.toHaveBeenCalled()
+    expect(harness.loadComposerModels).not.toHaveBeenCalled()
+  })
+
+  it('loads the existing case history owner without Provider readiness', async () => {
+    const localThread = thread({ id: 'thr_local_case', model: '', workspace: '/synthetic/local-case' })
+    const provider = { connect: vi.fn(async () => undefined), listThreads: vi.fn(async () => []),
+      listCaseProjects: vi.fn(async () => ({ caseProjects: [], indexStatus: 'ready' })),
+      listCaseProjectThreads: vi.fn(async () => [localThread]) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ runtimeConnection: 'offline', activeThreadId: null, threads: [] })
+    Object.assign(harness.state, harness.actions)
+    await harness.actions.refreshThreads()
+    expect(provider.listCaseProjects).toHaveBeenCalledOnce()
+    await harness.actions.loadCaseProjectThreads('local-case')
+    expect(harness.state.caseProjectThreadsById['local-case']).toEqual([localThread])
+    expect(harness.state.caseProjectLoadingById['local-case']).toBe(false)
+    expect(harness.state.runtimeConnection).toBe('offline')
+  })
+
+  it('refreshes local history after a successful Core probe with missing Provider setup', async () => {
+    const provider = { connect: vi.fn(async () => undefined) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ runtimeConnection: 'idle' })
+    await harness.actions.probeRuntime('user')
+    expect(provider.connect).toHaveBeenCalledOnce()
+    expect(harness.refreshThreads).toHaveBeenCalledExactlyOnceWith({ isCurrent: expect.any(Function) })
+    expect(harness.state.runtimeConnection).toBe('offline')
+    expect(harness.loadComposerModels).not.toHaveBeenCalled()
+  })
+
+  it.each(['revoked', 'provider-swap', 'disconnected'] as const)('ignores a local inventory connect after %s', async reason => {
+    const connection = deferredReceipt<void>()
+    const provider = { connect: vi.fn(() => connection.promise), listThreads: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ runtimeConnection: 'idle' })
+    let current = true
+    const pending = harness.actions.refreshThreads({ isCurrent: () => current })
+    if (reason === 'revoked') current = false
+    if (reason === 'provider-swap') registryMock.getProvider.mockReturnValue({})
+    if (reason === 'disconnected') Object.assign(harness.state, { runtimeConnection: 'offline' })
+    const before = harness.state
+    connection.resolve()
+    await pending
+    expect(provider.listThreads).not.toHaveBeenCalled()
+    expect(harness.state).toBe(before)
+    expect(harness.setCalls).toEqual([])
+  })
+
+  it('does not list local history when Core connection is unavailable', async () => {
+    const provider = { connect: vi.fn(async () => { throw new Error('Synthetic Core unavailable') }), listThreads: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ runtimeConnection: 'idle' })
+    await harness.actions.refreshThreads()
+    expect(provider.listThreads).not.toHaveBeenCalled()
+    expect(harness.state.runtimeConnection).toBe('offline')
+    expect(harness.state.error).toBeTruthy()
+    expect(harness.createThread).not.toHaveBeenCalled()
   })
 })

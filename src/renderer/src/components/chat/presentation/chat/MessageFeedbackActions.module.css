@@ -1,0 +1,14 @@
+/* Adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md. */
+.host { display: inline-flex; align-items: center; }
+.action { display: inline-flex; align-items: center; justify-content: center; width: calc(28px + var(--dsh-content-font-delta, 0px)); height: calc(28px + var(--dsh-content-font-delta, 0px)); padding: 6px; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.action svg { width: calc(15px + var(--dsh-content-font-delta, 0px)); height: calc(15px + var(--dsh-content-font-delta, 0px)); }
+.action:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); }
+.action:disabled { cursor: default; opacity: .4; }
+.action[data-active] { color: var(--dsw-alias-label-tertiary); }
+.failure { padding-left: 4px; color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 20px; }
+.toast { position: fixed; top: 40px; z-index: 1200; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(640px, calc(100vw - 48px)); padding: 12px 16px; border-radius: var(--dsw-radius-lg); background: var(--dsw-alias-toast-bg, #2d3349); color: var(--dsw-alias-toast-label, #fff); box-shadow: var(--dsw-shadow-lv3, 0 4px 24px #0002); font-size: 14px; line-height: 22px; transform: translateX(-50%); transition: opacity 1s ease; pointer-events: none; }
+.noticeIcon { display: grid; place-items: center; flex: none; color: var(--dsw-alias-state-warn-label, #f2c078); }
+.noticeIcon[data-success] { color: var(--dsw-alias-state-success-primary, #73c9a2); }
+.toast[data-fading] { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }

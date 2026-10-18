@@ -6,20 +6,21 @@ import enSettings from './locales/en/settings.json'
 import zhSettings from './locales/zh/settings.json'
 import enCanvas from './locales/en/canvas.json'
 import zhCanvas from './locales/zh/canvas.json'
+import { en as enExcel, zh as zhExcel } from './components/file-preview/excel/locales'
 
 const initialLanguage = import.meta.env.MODE === 'test' ? 'en' : 'zh'
 
 void i18n.use(initReactI18next).init({
   resources: {
-    en: { common: enCommon, settings: enSettings, canvas: enCanvas },
-    zh: { common: zhCommon, settings: zhSettings, canvas: zhCanvas }
+    en: { common: enCommon, settings: enSettings, canvas: enCanvas, excel: enExcel },
+    zh: { common: zhCommon, settings: zhSettings, canvas: zhCanvas, excel: zhExcel }
   },
   lng: initialLanguage,
   fallbackLng: initialLanguage,
   initImmediate: false,
   interpolation: { escapeValue: false },
   defaultNS: 'common',
-  ns: ['common', 'settings', 'canvas']
+  ns: ['common', 'settings', 'canvas', 'excel']
 })
 
 export default i18n

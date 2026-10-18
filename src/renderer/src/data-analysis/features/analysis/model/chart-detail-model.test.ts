@@ -74,7 +74,7 @@ describe("ordinary chart detail projection", () => {
 
     expect(csv).toContain('"0000********9012"');
     expect(csv).toContain('"192.168.*.*"');
-    expect(csv).toContain('"复核账号 6214***********9708"');
+    expect(csv).toContain('"复核账号 [ACCOUNT]"');
     expect(csv).toContain('"\'=HYPERLINK(""https://example.invalid"")"');
     expect(csv).not.toContain("0000123456789012");
     expect(csv).not.toContain("192.168.10.24");

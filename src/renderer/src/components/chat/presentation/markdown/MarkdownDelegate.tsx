@@ -10,21 +10,10 @@ import type { ReactNode } from 'react'
  */
 export type MarkdownExternalLinkHandler = (href: string) => void
 
-/** Navigation capabilities supplied by the nearest Markdown owner. */
+/** Ordinary external-link activation supplied by the nearest Markdown owner. */
 export interface MarkdownDelegate {
-  /** Image previews for decoded local paths in this owner's workspace. */
-  readonly fileImages?: {
-    resolve: (path: string) => string | undefined
-    labels: { close?: string; download?: string; open: string; loading: string; failed: string }
-  } | undefined
   /** Ordinary HTTP(S) activation; absent handlers retain native anchor behavior. */
   readonly openExternalLink?: MarkdownExternalLinkHandler | undefined
-  /**
-   * Open a decoded local destination from settled Markdown; absent handlers leave plain text.
-   * @param path - Absolute or workspace-relative file path.
-   * @param options - First line to reveal when the destination specifies a line or range.
-   */
-  readonly openFile?: ((path: string, options?: { line?: number }) => void) | undefined
 }
 
 const MarkdownDelegateContext = createContext<MarkdownDelegate>({})
@@ -37,16 +26,14 @@ export interface MarkdownDelegateProviderProps extends MarkdownDelegate {
 /**
  * Scope Markdown navigation without threading callbacks through renderers.
  * Nested providers replace the enclosing capabilities. Handler changes reach cached links.
- * @param props - Child tree and its file and HTTP(S) link handlers.
+ * @param props - Child tree and its ordinary HTTP(S) link handler.
  * @returns the scoped child tree.
  */
 export function MarkdownDelegateProvider({
   children,
   openExternalLink,
-  openFile,
-  fileImages,
 }: MarkdownDelegateProviderProps): ReactNode {
-  const delegate = useMemo(() => ({ openExternalLink, openFile, fileImages }), [openExternalLink, openFile, fileImages])
+  const delegate = useMemo(() => ({ openExternalLink }), [openExternalLink])
   return (
     <MarkdownDelegateContext.Provider value={delegate}>
       {children}

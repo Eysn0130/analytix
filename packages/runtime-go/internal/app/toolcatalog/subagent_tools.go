@@ -110,7 +110,7 @@ func JobToolSchemas() []domainmodel.ToolSchema {
 		},
 		{
 			Name:        "restart_job",
-			Description: "Restart a terminal sub-agent job owned by the current parent thread using its persisted prompt, model, tool policy, and workspace. Use this after a failed, killed, canceled, or timed-out child job when the same task should be retried.",
+			Description: "Compatibility operation for eligible legacy terminal sub-agent jobs owned by the current parent thread. Current security-bound and Host-input runs require a new authorized input and are rejected by restart_job.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string"},"jobId":{"type":"string"},"id":{"type":"string"}},"additionalProperties":false}`),
 			Source:      "job",
 		},

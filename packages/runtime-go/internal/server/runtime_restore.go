@@ -111,6 +111,35 @@ func (h *runtimeServerHandler) restoreRuntimeState() error {
 				return err
 			}
 		}
+		// First pin actual native Question dispatches with no normal result. A
+		// crash closes the old waiter as unknown; it never manufactures timeout.
+		questionCandidates := []domaincontinuation.Receipt{}
+		for _, receipt := range gateReceiptsByThread[threadID] {
+			if h.pendingWork.OwnsRestartTurnV1(threadID, receipt.Payload.TurnID) {
+				continue
+			}
+			candidate, err := executiongrantapp.QuestionRestartSettlementCandidateV1(threadID, thread, receipt)
+			if err != nil {
+				return err
+			}
+			if !candidate {
+				if existing, found := continuationInventory.Dispositions[receipt.Payload.GateID]; found && existing.ReasonCode == domaincontinuation.ReasonUserInputOutcomeUnknownAfterRestartV1 {
+					return errors.New("signed Question unknown disposition conflicts with its durable outcome")
+				}
+				continue
+			}
+			questionCandidates = append(questionCandidates, receipt)
+			if _, disposed := continuationInventory.Dispositions[receipt.Payload.GateID]; !disposed && receipt.Payload.UserInputTimedWait != nil {
+				if err := h.continuations.DisposeHost(receipt.Payload.GateID, domaincontinuation.StatusContinued, domaincontinuation.ReasonUserInputOutcomeUnknownAfterRestartV1, time.Now().UTC()); err != nil {
+					return err
+				}
+				_, disposition, err := h.continuations.ResolveTrustedDispositionForAudit(context.Background(), receipt.Payload.GateID)
+				if err != nil {
+					return err
+				}
+				continuationInventory.Dispositions[receipt.Payload.GateID] = disposition
+			}
+		}
 		if err := restartGateInventory.ReconcileThreadExceptOwnedV1(
 			threadID, thread, gateReceiptsByThread[threadID], continuationInventory.Dispositions, h.pendingWork,
 		); err != nil {
@@ -119,6 +148,22 @@ func (h *runtimeServerHandler) restoreRuntimeState() error {
 		thread, err = h.store.GetThread(threadID)
 		if err != nil {
 			return err
+		}
+		// Gate CAS and its original public repair are complete. Carry their
+		// signed authority into the existing stale-turn grant settlement path.
+		for _, receipt := range questionCandidates {
+			proof, err := h.continuations.QuestionRestartOutcomeHostV1(context.Background(), receipt.Payload.GateID)
+			if err != nil {
+				return err
+			}
+			key := controlapp.TurnKey(threadID, receipt.Payload.TurnID)
+			if restartGrantOutcomes[key] == nil {
+				restartGrantOutcomes[key] = executiongrantapp.RestartGrantOutcomesV1{}
+			}
+			if _, exists := restartGrantOutcomes[key][receipt.Payload.ExecutionGrant.GrantID]; exists {
+				return errors.New("Question restart outcome overlaps write outcome authority")
+			}
+			restartGrantOutcomes[key][receipt.Payload.ExecutionGrant.GrantID] = proof
 		}
 		result, err := h.store.LoadEventsSince(threadID, 0)
 		if err != nil {

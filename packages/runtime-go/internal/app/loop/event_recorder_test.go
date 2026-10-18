@@ -180,3 +180,22 @@ func TestRuntimeEventRecorderRejectsMissingRecorder(t *testing.T) {
 		t.Fatal("expected missing recorder error")
 	}
 }
+
+func TestRuntimeRetryRecorderProjectsClosedLifecycle(t *testing.T) {
+	events := &runtimeLoopEventRecorderStub{}
+	recorder := NewRuntimeEventRecorder(events)
+	at := time.Unix(1700000000, 123456789).UTC()
+	delay := int64(0)
+	deadline := at.UnixMilli()
+	retry := domainmodel.ProviderRetryV1{SchemaVersion: 1, Source: "transport_reconnect", Phase: "scheduled", LogicalSequence: 8, OuterAttempt: 2, PhysicalAttempt: 3, DelayMs: &delay, DeadlineUnixMs: &deadline, At: at}
+	if err := recorder.ProviderRetrying("thread", "turn", 3, 4, errors.New("PRIVATE_RETRY_BODY api_key=PRIVATE_SYNTHETIC_KEY"), retry); err != nil {
+		t.Fatal(err)
+	}
+	if len(events.events) != 1 || events.events[0]["timestamp"] != at.Format(time.RFC3339Nano) || events.events[0]["details"].(map[string]any)["retry"] == nil {
+		t.Fatal("retry not projected with owner timestamp")
+	}
+	retry.CancelReason = "private_unknown_reason"
+	if err := recorder.ProviderRetrying("thread", "turn", 3, 4, nil, retry); err == nil || len(events.events) != 1 {
+		t.Fatal("non-closed lifecycle persisted")
+	}
+}

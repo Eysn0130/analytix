@@ -1,0 +1,51 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+/* Portal surface: fixed in the viewport, left/top supplied inline from the
+   anchored-position clamp so the panel keeps its 12px viewport margin instead
+   of hanging off the trigger and clipping at the window edge. Portaled panels
+   layer above modal overlays (z 1000). */
+.panel {
+  --dsw-radius-lg: 16px;
+  --dsw-alias-label-primary: rgb(15, 17, 21);
+  --dsw-alias-label-secondary: rgb(97, 102, 107);
+  --dsw-alias-label-tertiary: rgb(129, 133, 140);
+  --dsw-specific-menu: rgba(248, 249, 250, 0.58);
+  --dsw-menu-backdrop-filter: blur(40px) saturate(150%);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-elevation-stroke: 0 0 0 0.5px var(--dsw-elevation-stroke-color);
+  --dsw-elevation-prominent: var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05);
+  position: fixed;
+  z-index: 1100;
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* Size to the widest row so provider/model stays on one line, within a cap.
+     Both bounds yield to a viewport narrower than themselves (12px margins),
+     so a fixed floor cannot push the panel past the placement clamp. */
+  width: max-content;
+  min-width: min(300px, calc(100vw - 24px));
+  max-width: min(440px, calc(100vw - 24px));
+  padding: 16px;
+  border: 0;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: default;
+}
+
+:global([data-theme='dark']) .panel {
+  --dsw-alias-label-primary: rgb(249, 250, 251);
+  --dsw-alias-label-secondary: rgb(207, 211, 214);
+  --dsw-alias-label-tertiary: rgb(173, 178, 184);
+  --dsw-specific-menu: rgba(67, 69, 74, 0.45);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+}
+:global(html[data-platform='darwin']) .panel { --dsw-specific-menu: rgba(248, 249, 250, 0.94); }
+:global(html[data-theme='dark'][data-platform='darwin']) .panel { --dsw-specific-menu: rgba(48, 49, 54, 0.94); }

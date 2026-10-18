@@ -66,6 +66,8 @@ func (h *runtimeServerHandler) executeBashRuntimeTool(ctx context.Context, pendi
 	toolContext.ProtectedReadDirs = filestore.EffectiveProcessProtectedRoots(h.protectedReadDirs, toolContext.SandboxMode)
 	if boolField(args, "run_in_background") || boolField(args, "runInBackground") {
 		toolContext.ParentGoalID, toolContext.ParentGoalObjective = h.parentGoalForSubagent(pending.ThreadID)
+	} else {
+		h.registerProcessShellInputV1(ctx, pending)
 	}
 	return h.runtimeTerminalService().ExecuteBashTool(ctx, terminalapp.BashToolRunRequest{
 		Context: toolContext,
@@ -107,6 +109,7 @@ func (h *runtimeServerHandler) runtimeTerminalService() *terminalapp.Service {
 
 func (h *runtimeServerHandler) runtimeBashToolCallbacks(pending runtimePendingToolCall) terminalapp.BashToolCallbacks {
 	return terminalapp.BashToolCallbacks{
+		CaptureProtectedOutput:   h.runtimeProtectedJobOutputProducerV1(pending),
 		AuthorizeBackgroundStart: h.authorizeRuntimeJobStart,
 		RegisterBoundBackgroundJob: func(jobID string, binding *domainjob.SecurityBinding, cancel context.CancelFunc) (*subagentapp.BackgroundJobStartBarrier, bool) {
 			return h.runtimeSubagentState().RegisterBoundBackgroundJobWithStartBarrier(jobID, binding, cancel)

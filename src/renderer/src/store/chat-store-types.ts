@@ -1,6 +1,9 @@
 import type {
 	  AttachmentReference,
 	  ChatBlock,
+  AcceptedFinalProjectionReceiptV1,
+  AcceptedFinalProjectionTerminalV1,
+  GeneralTerminalProjectionReceiptV1,
 	  NormalizedCaseProject,
 	  NormalizedThread,
 	  RuntimeConnectionStatus,
@@ -11,8 +14,9 @@ import type {
   ThreadTodoList,
   ThreadTodoStatus,
   ThreadUsageSnapshot,
+  TurnUsageById,
   UserFileReference,
-  UserInputAnswer
+  UserInputSubmission
 } from '../agent/types'
 import type { AnalytixRuntimeStatusPayload } from '@shared/analytix-api'
 import type { ThreadHandoffOperation, ThreadHandoffRequest } from '@shared/thread-handoff'
@@ -28,10 +32,46 @@ import type { ModelProviderModelGroup } from '@shared/analytix-api'
 import type { ModelReasoningEffort } from '@shared/app-settings'
 import type { ComposerDraft } from './composer-drafts'
 
+/** Unconfirmed Question save metadata only; original bytes stay in the private leaf/Host. */
+export type UserInputDraftInterruption = { revision: string | null; unsent: boolean }
+
+/** A completed renderer selection; its owner can never be revived by ID reuse. */
+export type ThreadSelectionReceipt = { threadId: string; isCurrent: () => boolean }
+
+/** Renderer owner fence; a committed endSeq also binds the Host event prefix. */
+export type TurnForkBoundary = {
+  threadId: string
+  turnId: string
+  finalItemId: string
+  status: 'completed' | 'aborted'
+  /** Only a committed terminal receipt supplies this cursor; never a Host CAS. */
+  endSeq?: number
+  proof: { kind: 'general'; receipt: GeneralTerminalProjectionReceiptV1 } |
+    { kind: 'accepted'; receipt: AcceptedFinalProjectionReceiptV1; terminal: AcceptedFinalProjectionTerminalV1 } | null
+}
+export type TurnForkSnapshot = {
+  blocks: ChatBlock[]
+  busy: boolean
+  latestSeq: number
+  title?: string
+  rewoundTurnIds?: Record<string, true>
+}
+export type TurnForkOwner = {
+  isCurrent: () => boolean
+  getSnapshot: () => TurnForkSnapshot | null
+}
+export type TurnForkSource = TurnForkBoundary & TurnForkOwner
+
+export type QueuedMessagePauseReason = 'interrupted' | 'failed' | null
+
 export type QueuedUserMessage = {
+  threadId: string
+  /** A local receipt owns this entry while dispatch is pending. Never persisted. */
+  sending?: boolean
   id: string
   text: string
   displayText?: string
+  requestedSkillIds?: string[]
   mode?: string
   model?: string
   providerId?: string
@@ -71,6 +111,8 @@ export type GuiPlanMessageContext = {
 }
 
 export type SendMessageOverrides = {
+  /** One renderer submission; steering remains best-effort and Host-authorized. */
+  deliveryIntent?: 'queue' | 'steer'
   /** Renderer-local, one-submission fence. Core remains the authority. Never
    * serialize this callback, forward it to a Provider, or retain it in a queue. */
   submissionGuard?: {
@@ -83,6 +125,7 @@ export type SendMessageOverrides = {
   modelLabel?: string
   reasoningEffort?: ModelReasoningEffort
   displayText?: string
+  requestedSkillIds?: string[]
   guiPlan?: GuiPlanMessageContext
   attachmentIds?: string[]
   attachments?: AttachmentReference[]
@@ -152,6 +195,10 @@ export type SideConversation = {
   error: string | null
   /** Usage committed atomically with the latest accepted-final side batch. */
   lastTurnUsage?: ThreadUsageSnapshot | null
+  /** Verified terminal usage indexed by the original runtime turn, within this side owner. */
+  turnUsageById?: TurnUsageById
+  /** Host-proven removals fence in-flight history within this owner. */
+  rewoundTurnIds?: Record<string, true>
 }
 
 export type SidePanelState = {
@@ -179,9 +226,12 @@ export type ChatState = {
 	  caseProjectExpandedById: Record<string, boolean>
 	  threads: NormalizedThread[]
   threadSearch: string
+  threadSearchResults: { query: string; threads: NormalizedThread[] } | null
   showArchivedThreads: boolean
   activeThreadId: string | null
   activeThreadGoal: ThreadGoal | null
+  activeGoalActivation?: import('../../../../packages/runtime/src/contracts/goal').GoalActivationV1 | null
+  goalStateEpoch?: number
   activeThreadTodos: ThreadTodoList | null
   blocks: ChatBlock[]
   liveAssistant: string
@@ -193,6 +243,10 @@ export type ChatState = {
    * occupies the window. Null until a live turn reports usage.
    */
   lastTurnUsage: { threadId: string; snapshot: ThreadUsageSnapshot } | null
+  /** Display projection only; each entry retains its original thread and batch cursor. */
+  turnUsageById: TurnUsageById
+  /** Cleared on thread-owner changes; never inferred from a rejected candidate. */
+  rewoundTurnIds?: Record<string, true>
   busy: boolean
   error: string | null
   topNotice: TopNotice | null
@@ -204,6 +258,11 @@ export type ChatState = {
   inspectorSelectedId: string | null
   composerModel: string
   pendingGateResolutionIds: Record<string, true>
+  userInputPanel?: { threadId: string; requestId: string | null; view?: 'review' }
+  selectUserInputPanel: (requestId: string | null, view?: 'review') => void
+  userInputDraftInterruptions?: Record<string, UserInputDraftInterruption>
+  deletedUserInputDraftThreadIds?: Record<string, true>
+  setUserInputDraftInterruption: (key: string, value: UserInputDraftInterruption | null) => void
   composerDrafts: Record<string, ComposerDraft>
   updateComposerDraft: (key: string, update: (draft: ComposerDraft) => ComposerDraft) => void
   composerProviderId: string
@@ -211,7 +270,7 @@ export type ChatState = {
   composerModelGroups: ModelProviderModelGroup[]
   disabledSkillIds: string[]
   queuedMessages: QueuedUserMessage[]
-  queuedMessagesPausedReason: 'interrupted' | 'failed' | null
+  queuedMessagePauses: Record<string, Exclude<QueuedMessagePauseReason, null>>
   threadHandoffOperations: ThreadHandoffOperation[]
   activeThreadHandoffOperationId: string | null
   watchTurnCompletion: Record<string, boolean>
@@ -276,10 +335,16 @@ export type ChatState = {
     forceNew?: boolean
     /** Internal callers that need a persisted thread before the first prompt. */
     materialize?: boolean
+    /** Local Word ownership needs Core connectivity, without model credentials. */
+    localDocument?: boolean
+    /** Renderer intake may only select while its originating draft is current. */
+    isCurrent?: () => boolean
+    onSelected?: (receipt: ThreadSelectionReceipt) => void
+    beforeSelect?: (target: { threadId: string; workspace: string }) => boolean
     /** When true, acquire a worktree pool slot as the thread workspace. */
     useWorktreePool?: boolean
   }) => Promise<void>
-  selectThread: (id: string) => Promise<void>
+  selectThread: (id: string, options?: { onSelected?: (receipt: ThreadSelectionReceipt) => void; localDocument?: boolean; isCurrent?: () => boolean }) => Promise<void>
   /**
    * Subscribe to a live thread immediately before fetching persisted history.
    * Used by Connect Phone streaming so deltas are visible without waiting for
@@ -289,13 +354,13 @@ export type ChatState = {
   recoverActiveTurn: () => Promise<boolean>
   sendMessage: (text: string, mode?: string, overrides?: SendMessageOverrides) => Promise<boolean>
   reviewActiveThread: (target: ReviewTarget) => Promise<boolean>
-  drainQueuedMessages: () => Promise<void>
-  editQueuedMessage: (id: string, text: string) => void
-  removeQueuedMessage: (id: string) => void
-  reorderQueuedMessages: (ids: string[]) => void
-  sendQueuedMessageNow: (id: string) => Promise<boolean>
-  resumeInterruptedQueue: () => void
-  setQueuedMessagesPausedReason: (reason: ChatState['queuedMessagesPausedReason']) => void
+  drainQueuedMessages: (threadId?: string) => Promise<void>
+  editQueuedMessage: (threadId: string, id: string, text: string) => void
+  removeQueuedMessage: (threadId: string, id: string) => void
+  reorderQueuedMessages: (threadId: string, ids: string[]) => void
+  sendQueuedMessageNow: (threadId: string, id: string) => Promise<boolean>
+  resumeInterruptedQueue: (threadId: string) => void
+  setQueuedMessagesPausedReason: (reason: QueuedMessagePauseReason, threadId?: string) => void
   startThreadHandoff: (request: ThreadHandoffRequest) => Promise<boolean>
   retryThreadHandoff: (operationId: string) => Promise<boolean>
   cancelThreadHandoff: (operationId: string) => Promise<void>
@@ -310,11 +375,11 @@ export type ChatState = {
   renameThread: (threadId: string, title: string) => Promise<void>
   archiveThread: (threadId: string, archived: boolean) => Promise<void>
   compactActiveThread: (reason?: string) => Promise<void>
-  forkActiveThread: () => Promise<void>
-  forkThreadFromTurn: (turnId: string) => Promise<void>
+  forkActiveThread: (expected?: ThreadSelectionReceipt) => Promise<void>
+  forkThreadFromTurn: (turnId: string, source?: TurnForkSource) => Promise<void>
   setActiveThreadGoal: (
     objective: string,
-    options?: { research?: boolean; requirements?: string[] }
+    options?: { research?: boolean; requirements?: string[]; maxGoalRounds?: number }
   ) => Promise<boolean>
   setActiveThreadGoalStatus: (status: ThreadGoalStatus) => Promise<boolean>
   clearActiveThreadGoal: () => Promise<boolean>
@@ -356,8 +421,8 @@ export type ChatState = {
   deleteThread: (threadId: string) => Promise<void>
   resolveApproval: (blockId: string, decision: 'allow' | 'deny') => Promise<void>
   resolveUserInput: (
-    blockId: string,
-    action: { kind: 'submit'; answers: UserInputAnswer[] } | { kind: 'cancel' }
+    target: { itemId: string; requestId: string; threadId: string | null; turnId: string | null },
+    action: { kind: 'submit'; answers: UserInputSubmission[] } | { kind: 'cancel' } | { kind: 'late'; answers: UserInputSubmission[]; clientUserMessageId: string; expectedTurnId: string }
   ) => Promise<void>
   selectInspectorItem: (id: string | null) => void
   applyI18nFromSettings: (locale: 'en' | 'zh') => Promise<void>

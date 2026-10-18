@@ -88,9 +88,10 @@ type accountFlowHostDisposer interface {
 }
 
 type PreparedToolSettlement struct {
-	Output  any
-	IsError bool
-	Marker  *domainevidence.HostEvidenceSettlementMarker
+	SettlementAuthorized bool
+	Output               any
+	IsError              bool
+	Marker               *domainevidence.HostEvidenceSettlementMarker
 }
 
 func PrepareToolSettlement(ctx context.Context, authority any, securityAuthority turnsecurityapp.WorkspaceSecurityAuthority, workspaceReader turnsecurityapp.WorkspaceReader, grantStore grantregistryport.Reader, source runtimeports.MCPToolAdvertisementSource, pending appmodel.PendingToolCall, output any, isError bool) (PreparedToolSettlement, error) {
@@ -99,12 +100,14 @@ func PrepareToolSettlement(ctx context.Context, authority any, securityAuthority
 		expectedApprovalState = "pending"
 	}
 	grantRegistry := domainsecurity.ExecutionGrantRegistry{}
+	settlementAuthorized := false
 	output, isError = executiongrantapp.SettlementOutput(output, isError, pending.ExecutionGrant, pending.Call.Name, expectedApprovalState, func() error {
 		var err error
 		grantRegistry, err = executiongrantapp.AuthorizePendingRegistry(ctx, securityAuthority, workspaceReader, grantStore, source, pending, expectedApprovalState, time.Now().UTC())
+		settlementAuthorized = err == nil && expectedApprovalState == ""
 		return err
 	})
-	settlement := PreparedToolSettlement{Output: output, IsError: isError}
+	settlement := PreparedToolSettlement{Output: output, IsError: isError, SettlementAuthorized: settlementAuthorized}
 	toolAuthority, ok := authority.(ToolEvidenceAuthority)
 	if !ok || expectedApprovalState != "" || grantRegistry.Version == 0 {
 		return settlement, nil

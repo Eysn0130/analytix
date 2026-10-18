@@ -5,6 +5,7 @@ let startupRuntimeProbeTimer: ReturnType<typeof setTimeout> | null = null
 let busyWatchdogTimer: ReturnType<typeof setTimeout> | null = null
 let busyRecoveryAttempts = 0
 let turnCompletionPollTimer: ReturnType<typeof setInterval> | null = null
+let turnCompletionPollGeneration = 0
 
 type BusyWatchdogOptions = {
   timeoutMs: number
@@ -16,6 +17,7 @@ type BusyWatchdogOptions = {
 }
 
 type TurnCompletionPollOptions = {
+  captureThreadOwner: (state: ChatState, threadId: string) => (() => boolean) | null
   loadThreadState: (
     state: ChatState,
     threadId: string
@@ -25,7 +27,8 @@ type TurnCompletionPollOptions = {
     doneIds: string[],
     state: ChatState,
     set: ChatStoreSet,
-    get: ChatStoreGet
+    get: ChatStoreGet,
+    isOwnerCurrent: (threadId: string) => boolean
   ) => void | Promise<void>
 }
 
@@ -77,11 +80,17 @@ export function armBusyWatchdog(
   }, options.timeoutMs)
 }
 
-export function stopTurnCompletionPoll(): void {
+function clearTurnCompletionPollTimer(): void {
+  // An idle timer does not retire an already claimed completion's guarded refresh.
   if (turnCompletionPollTimer) {
     clearInterval(turnCompletionPollTimer)
     turnCompletionPollTimer = null
   }
+}
+
+export function stopTurnCompletionPoll(): void {
+  turnCompletionPollGeneration += 1
+  clearTurnCompletionPollTimer()
 }
 
 export function syncTurnCompletionPoll(
@@ -89,15 +98,20 @@ export function syncTurnCompletionPoll(
   get: ChatStoreGet,
   options: TurnCompletionPollOptions
 ): void {
+  if (get().runtimeConnection !== 'ready') {
+    stopTurnCompletionPoll()
+    return
+  }
   const ids = Object.keys(get().watchTurnCompletion).filter((id) => get().watchTurnCompletion[id])
   if (ids.length === 0) {
-    stopTurnCompletionPoll()
+    clearTurnCompletionPollTimer()
     return
   }
   if (turnCompletionPollTimer != null) return
 
+  const generation = ++turnCompletionPollGeneration
   const tick = (): void => {
-    void pollTurnCompletionWatch(set, get, options)
+    void pollTurnCompletionWatch(set, get, options, generation)
   }
 
   turnCompletionPollTimer = setInterval(tick, 2500)
@@ -107,8 +121,13 @@ export function syncTurnCompletionPoll(
 async function pollTurnCompletionWatch(
   set: ChatStoreSet,
   get: ChatStoreGet,
-  options: TurnCompletionPollOptions
+  options: TurnCompletionPollOptions,
+  generation: number
 ): Promise<void> {
+  const pollCurrent = (): boolean => (
+    generation === turnCompletionPollGeneration && get().runtimeConnection === 'ready'
+  )
+  if (generation !== turnCompletionPollGeneration) return
   const state = get()
   if (state.runtimeConnection !== 'ready') {
     stopTurnCompletionPoll()
@@ -117,15 +136,27 @@ async function pollTurnCompletionWatch(
 
   const ids = Object.keys(state.watchTurnCompletion).filter((id) => state.watchTurnCompletion[id])
   if (ids.length === 0) {
-    stopTurnCompletionPoll()
+    clearTurnCompletionPollTimer()
     return
   }
 
   const doneIds: string[] = []
+  const owners = new Map<string, () => boolean>()
+  const isOwnerCurrent = (threadId: string): boolean => (
+    pollCurrent() && owners.get(threadId)?.() === true
+  )
   for (const threadId of ids) {
+    if (!pollCurrent()) return
     try {
+      const owner = options.captureThreadOwner(state, threadId)
+      if (!owner) continue
+      owners.set(threadId, owner)
+      if (!isOwnerCurrent(threadId) || !get().watchTurnCompletion[threadId]) continue
       const { blocks, threadStatus } = await options.loadThreadState(state, threadId)
-      if (!options.threadLooksRunning(blocks, threadStatus)) {
+      if (
+        isOwnerCurrent(threadId) && get().watchTurnCompletion[threadId] &&
+        !options.threadLooksRunning(blocks, threadStatus)
+      ) {
         doneIds.push(threadId)
       }
     } catch {
@@ -133,11 +164,17 @@ async function pollTurnCompletionWatch(
     }
   }
 
-  if (doneIds.length > 0) {
-    await options.onCompletedThreads(doneIds, state, set, get)
+  const currentDoneIds = doneIds.filter((threadId) => (
+    isOwnerCurrent(threadId) && get().watchTurnCompletion[threadId]
+  ))
+  if (currentDoneIds.length > 0) {
+    await options.onCompletedThreads(currentDoneIds, state, set, get, isOwnerCurrent)
   }
 
-  if (Object.keys(get().watchTurnCompletion).filter((id) => get().watchTurnCompletion[id]).length === 0) {
-    stopTurnCompletionPoll()
+  if (
+    pollCurrent() &&
+    Object.keys(get().watchTurnCompletion).filter((id) => get().watchTurnCompletion[id]).length === 0
+  ) {
+    clearTurnCompletionPollTimer()
   }
 }

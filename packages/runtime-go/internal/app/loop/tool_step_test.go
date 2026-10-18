@@ -96,6 +96,24 @@ func TestPendingToolCallRetainsExactLiveProviderStep(t *testing.T) {
 	}
 }
 
+func TestPendingToolCallKeepsModelVisibleDefinitionSeparateFromGrantContractV1(t *testing.T) {
+	modelSchema := domainmodel.ToolSchema{Name: "read", Description: "actual model-visible request definition", Parameters: json.RawMessage(`{"type":"object"}`)}
+	definitions := domainmodel.FreezeModelVisibleToolDefinitionsV1([]domainmodel.ToolSchema{modelSchema})
+	input := ToolStepInput{ToolSchemas: []domainmodel.ToolSchema{{Name: "read", Description: "later Host execution definition", Parameters: json.RawMessage(`{"type":"object","properties":{"private":{"type":"string"}}}`)}}, ModelVisibleToolDefinitions: definitions}
+	pending := pendingToolCallForStep(input, domainmodel.ToolCall{Name: "read"}, "", nil, domainsecurity.ExecutionGrant{})
+	if pending.ModelVisibleToolDefinition == nil || pending.ModelVisibleToolDefinition.SchemaJSON != definitions["read"].SchemaJSON || strings.Contains(pending.ModelVisibleToolDefinition.SchemaJSON, "later Host") {
+		t.Fatal("Inspect definition came from grant schema")
+	}
+	definitions["read"].SchemaJSON = "changed after request"
+	if pending.ModelVisibleToolDefinition.SchemaJSON == "changed after request" {
+		t.Fatal("pending retained a mutable request definition")
+	}
+	legacy := pendingToolCallForStep(ToolStepInput{ToolSchemas: []domainmodel.ToolSchema{modelSchema}}, domainmodel.ToolCall{Name: "read"}, "", nil, domainsecurity.ExecutionGrant{})
+	if legacy.ModelVisibleToolDefinition != nil {
+		t.Fatal("missing request definition was reconstructed from current execution schemas")
+	}
+}
+
 func TestHostGeneralOnlyRiskBlocksFundsEffectBeforePersistenceOrExecution(t *testing.T) {
 	workspace := "/workspace/no-case-marker"
 	securityContext, err := securitycontexttest.HostGeneralOnlyExecutionContextV2(domainsecurity.TurnSecurityContextInput{
@@ -1918,4 +1936,28 @@ func loopTestMCPIdentity(t *testing.T, serverID, observedName, observedVersion s
 		t.Fatal(err)
 	}
 	return identity
+}
+
+func TestProcessToolReadyReportsActualPersistedAnchorBeforeBlockedExecutionV2(t *testing.T) {
+	for _, parallel := range []bool{false, true} {
+		t.Run(fmt.Sprint(parallel), func(t *testing.T) {
+			driver := &toolStepDriverStub{parallel: map[string]bool{"read": parallel}, readOnly: map[string]bool{"read": true}, preflight: map[string]toolStepPreflight{"read": {output: map[string]any{"code": "fixture_blocked"}, isError: true, blocked: true}}}
+			var observed []appmodel.PendingToolCall
+			_, err := runSecureToolStep(t, context.Background(), ToolStepInput{ThreadID: "thr_process", TurnID: "turn_process", ProviderID: "provider_test", EffectiveMaxModelSteps: 2, ApprovalPolicy: "never", SandboxMode: "read-only", ToolCalls: []domainmodel.ToolCall{{ID: "call_process", Name: "read"}}, ToolSchemas: zeroArgumentToolSchemas("read"), AdvertisedTools: advertisedToolNames("read"), Driver: driver,
+				ProcessToolReady: func(p appmodel.PendingToolCall) {
+					if len(driver.ready) != 1 || p.ToolCallItemID != "item_"+p.Call.ID {
+						t.Fatal("callback ran before actual persistence")
+					}
+					observed = append(observed, p)
+				}})
+			if err != nil || len(observed) != 1 {
+				t.Fatalf("call-ready callback missing: count=%d err=%v", len(observed), err)
+			}
+		})
+	}
+	driver := &toolStepDriverStub{}
+	_, err := runSecureToolStep(t, context.Background(), ToolStepInput{ThreadID: "thr_process_panic", TurnID: "turn_process_panic", ProviderID: "provider_test", EffectiveMaxModelSteps: 2, ApprovalPolicy: "never", SandboxMode: "read-only", ToolCalls: []domainmodel.ToolCall{{ID: "call_process_panic", Name: "read"}}, ToolSchemas: zeroArgumentToolSchemas("read"), AdvertisedTools: advertisedToolNames("read"), Driver: driver, ProcessToolReady: func(appmodel.PendingToolCall) { panic("display unavailable") }})
+	if err != nil {
+		t.Fatal("display callback changed execution")
+	}
 }

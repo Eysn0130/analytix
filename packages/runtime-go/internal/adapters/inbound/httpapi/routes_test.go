@@ -22,6 +22,8 @@ func TestMatchRuntimeRoutePreservesAnalytixProductionSurface(t *testing.T) {
 		{path: "/v1/memory/diagnostics", route: RouteMemoryDiagnostics},
 		{path: "/v1/memory/mem_1", route: RouteMemoryRecordPath},
 		{path: "/v1/workspace/status", route: RouteWorkspaceStatus},
+		{path: ProcessLocalDisplayReadPathV1, route: RouteLocalDisplay},
+		{path: ProcessLocalDisplayTargetPathV1, route: RouteLocalDisplay},
 		{path: LocalDisplayImportMappingPathV1, route: RouteLocalDisplay},
 		{path: LocalDisplayCleaningDiffPathV1, route: RouteLocalDisplay},
 		{path: LocalDisplayDirectPreviewPathV1, route: RouteLocalDisplay},
@@ -61,6 +63,19 @@ func TestMatchRuntimeRouteRejectsUpstreamProductRoutes(t *testing.T) {
 	} {
 		if match := MatchRuntimeRoute(path); match.Found() {
 			t.Fatalf("upstream route %q should not match production surface: %#v", path, match)
+		}
+	}
+}
+
+func TestProcessLocalDisplayRoutesMatchOnlyClosedCanonicalPaths(t *testing.T) {
+	for _, path := range []string{
+		"/v1/local-display/process", "/v1/local-display/process/", "/v1/local-display/process/read/",
+		"/v1/local-display/process/read/capture", "/v1/local-display/process/target/",
+		"/v1/local-display/process/readiness", "/v1/local-display/Process/read",
+		"/v1/local-display/process/%72ead", "/v1/local-display/process/open_capture",
+	} {
+		if match := MatchRuntimeRoute(path); match.Found() {
+			t.Fatalf("noncanonical process route matched private owner: %q", path)
 		}
 	}
 }

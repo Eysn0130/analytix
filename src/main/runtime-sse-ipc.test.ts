@@ -5,8 +5,12 @@ import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AcceptedFinalDeliveryBatchV1Schema,
+  GeneralTerminalDeliveryBatchV1Schema,
   GENERAL_PROVIDER_FINAL_QUARANTINED_TEXT
 } from '../../packages/runtime/src/contracts/events'
+import { ToolCallTurnItem } from '../../packages/runtime/src/contracts/items'
+import { PublicRuntimeEventFilter } from '../shared/public-runtime-content'
+import { isStrictPublicRuntimeSseErrorPayload, isStrictPublicRuntimeSseIpcPayload } from '../shared/public-runtime-sse'
 import {
   defaultClawSettings,
   defaultKeyboardShortcuts,
@@ -17,10 +21,12 @@ import {
   type AppSettingsV1
 } from '../shared/app-settings'
 import { registerRuntimeSseIpc } from './runtime-sse-ipc'
+import { sseAckPayloadSchema } from './ipc/app-ipc-schemas'
 import type { ThreadTraceEventPayload } from '../shared/thread-trace'
 import {
   acceptedFinalPublicationEventId,
-  acceptedFinalPublicationPayloadDigest
+  acceptedFinalPublicationPayloadDigest,
+  verifiedAcceptedFinalDeliveryBatch
 } from './accepted-final-publication'
 
 type IpcHandler = (event: { sender: WebContents }, args?: unknown) => Promise<unknown>
@@ -78,7 +84,7 @@ function registerHarness(
   vi.stubGlobal('fetch', fetchImpl)
   const ensureRuntime = overrides.ensureRuntime ?? vi.fn(async () => undefined)
   const store = overrides.store ?? { load: vi.fn(async () => settingsForPort(9988)) }
-  registerRuntimeSseIpc({
+  const waitForWorkers = registerRuntimeSseIpc({
     ipcMain,
     store: store as never,
     ensureRuntime,
@@ -91,7 +97,7 @@ function registerHarness(
         }
       : {})
   })
-  return { handlers, logError, ensureRuntime, store }
+  return { handlers, logError, ensureRuntime, store, waitForWorkers }
 }
 
 function makeSender(isDestroyed = false, id = 1) {
@@ -298,6 +304,22 @@ function strictFrame(id: number, event: string, data: Record<string, unknown>): 
     '',
     ''
   ].join('\n')
+}
+
+function diagnosticToolCallEvent(seq: number, threadId: string): Record<string, unknown> {
+  const timestamp = '2026-07-14T00:00:00.000Z'
+  return {
+    kind: 'item_created', seq, timestamp, threadId, turnId: 'turn-diagnostic', itemId: 'item-diagnostic',
+    item: {
+      id: 'item-diagnostic', threadId, turnId: 'turn-diagnostic', role: 'tool', status: 'running',
+      createdAt: timestamp, kind: 'tool_call', toolName: 'read_file', callId: 'call-diagnostic', toolKind: 'tool_call',
+      arguments: {
+        schemaVersion: 1, projectionKind: 'withheld', disclosure: 'metadata_only',
+        messageKey: 'tool_arguments_withheld', privatePayloadWithheld: true,
+        factAnswerAllowed: false, evidenceAuthority: false
+      }
+    }
+  }
 }
 
 function acceptedFinalPair() {
@@ -700,6 +722,35 @@ afterEach(() => {
 })
 
 describe('registerRuntimeSseIpc', () => {
+  it.each(['provider_retry', 'transport_reconnect'])('delivers exact %s numeric retry facts through the Main sender', async source => {
+    const retry = { schemaVersion: 1, source, phase: 'scheduled', logicalSequence: 7,
+      outerAttempt: 2, ...(source === 'transport_reconnect' ? { physicalAttempt: 3 } : {}),
+      delayMs: 0, deadlineUnixMs: 1700000000000 }
+    const event = { kind: 'pipeline_stage', seq: 15, timestamp: '2026-10-10T00:00:00.123456789Z',
+      threadId: 'thread-retry-epoch', turnId: 'turn-retry-epoch', stage: 'provider_retrying',
+      label: 'Retrying provider stream', attempt: source === 'transport_reconnect' ? 3 : 2,
+      maxAttempt: 3, details: { retry } }
+    const next = { kind: 'heartbeat', seq: 16, timestamp: event.timestamp, threadId: event.threadId }
+    const controlled = controlledStream([
+      strictFrame(15, event.kind, event), strictFrame(16, next.kind, next)
+    ])
+    const fetchMock = vi.fn(async () => new Response(controlled.stream, {
+      status: 200, headers: { 'content-type': 'text/event-stream' }
+    }))
+    const { handlers, logError } = registerHarness(fetchMock as typeof fetch)
+    const sender = makeSender()
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId: event.threadId, sinceSeq: 14, streamId: 'stream-retry-epoch'
+    })
+    await waitForCondition(() => sseEventCalls(sender).flatMap(([, payload]) => payload.events).length === 2)
+    expect(sseEventCalls(sender).flatMap(([, payload]) => payload.events)).toEqual([event, next])
+    expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+    expect(logError).not.toHaveBeenCalled()
+    await handlers.get('runtime:sse:stop')?.({ sender }, 'stream-retry-epoch')
+    controlled.close()
+    await flushAsync()
+  })
+
   it('generates stream ids and starts on the analytix-owned SSE route', async () => {
     const seenUrls: URL[] = []
     const seenLastEventId: Array<string | undefined> = []
@@ -710,7 +761,7 @@ describe('registerRuntimeSseIpc', () => {
       expect(requestHeader(init?.headers, 'Authorization')).toBe('Bearer runtime-token')
       return new Response('missing', { status: 404 })
     })
-    const { handlers } = registerHarness(fetchMock as typeof fetch)
+    const { handlers, logError, waitForWorkers } = registerHarness(fetchMock as typeof fetch)
     const sender = makeSender()
 
     const result = await handlers.get('runtime:sse:start')?.({
@@ -733,6 +784,10 @@ describe('registerRuntimeSseIpc', () => {
     expect(sender.send).toHaveBeenCalledWith('runtime:sse-error', {
       streamId,
       status: 404
+    })
+    await waitForWorkers()
+    expect(logError).toHaveBeenCalledWith('sse', 'SSE first failure', {
+      role: 'live', phase: 'connect', reason: 'http_status', statusCode: 404, elapsedMs: expect.any(Number)
     })
   })
 
@@ -839,46 +894,89 @@ describe('registerRuntimeSseIpc', () => {
     await waitForCondition(() => fetchSignal?.aborted === true)
   })
 
-  it('binds start, ack, and stop to one WebContents owner and caps ACK at the delivered cursor', async () => {
+  it.each([false, true])('binds start, ack, and stop to one WebContents owner and caps ACK at the delivered cursor (ACK logger throws: %s)', async logThrows => {
     const controlled = controlledStream([eventFrame(1, 'one', 'thread-owner')])
     const fetchMock = vi.fn(async () => new Response(controlled.stream, {
       status: 200,
       headers: { 'content-type': 'text/event-stream' }
     }))
-    const { handlers } = registerHarness(fetchMock as typeof fetch)
+    const { handlers, logError } = registerHarness(fetchMock as typeof fetch)
+    if (logThrows) logError.mockImplementation(() => { throw new Error('synthetic ACK logger failure') })
     const owner = makeSender(false, 101)
     const other = makeSender(false, 101)
 
-    await handlers.get('runtime:sse:start')?.({ sender: owner }, {
-      threadId: 'thread-owner',
-      sinceSeq: 0,
-      streamId: 'stream-owner'
+    try {
+      await expect(handlers.get('runtime:sse:ack')?.({ sender: owner }, {
+        streamId: 'stream-owner-absent', seq: 1
+      })).resolves.toBe(false)
+      await handlers.get('runtime:sse:start')?.({ sender: owner }, {
+        threadId: 'thread-owner',
+        sinceSeq: 0,
+        streamId: 'stream-owner'
+      })
+      await waitForCondition(() => sseEventCalls(owner).length === 1)
+
+      await expect(handlers.get('runtime:sse:ack')?.({ sender: other }, {
+        streamId: 'stream-owner',
+        seq: 1
+      })).resolves.toBe(false)
+      await expect(handlers.get('runtime:sse:ack')?.({ sender: owner }, {
+        streamId: 'stream-owner',
+        seq: 2
+      })).resolves.toBe(false)
+      await expect(handlers.get('runtime:sse:ack')?.({ sender: owner }, {
+        streamId: 'stream-owner', seq: 1, batchId: 'a'.repeat(64),
+        threadId: 'thread-owner', turnId: 'turn-thread-owner', publicationCommitId: 'b'.repeat(64)
+      })).resolves.toBe(false)
+      expect(logError.mock.calls).toEqual([
+        'stream_unavailable', 'owner_mismatch', 'undelivered_sequence', 'unexpected_accepted_final_receipt'
+      ].map(reasonCode => ['sse', 'SSE acknowledgement rejected', { code: 'sse_ack_rejected', reasonCode }]))
+      await expect(handlers.get('runtime:sse:stop')?.({ sender: other }, 'stream-owner')).resolves.toBe(false)
+      await expect(handlers.get('runtime:sse:start')?.({ sender: other }, {
+        threadId: 'thread-owner',
+        sinceSeq: 0,
+        streamId: 'stream-owner'
+      })).rejects.toThrow('sse_stream_owner_mismatch')
+      await expect(handlers.get('runtime:sse:ack')?.({ sender: owner }, {
+        streamId: 'stream-owner',
+        seq: 1
+      })).resolves.toBe(true)
+      expect(logError).toHaveBeenCalledTimes(4)
+      await expect(handlers.get('runtime:sse:stop')?.({ sender: owner }, 'stream-owner')).resolves.toBe(true)
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      await handlers.get('runtime:sse:stop')?.({ sender: owner }, 'stream-owner')
+      controlled.close()
+      await flushAsync()
+    }
+  })
+
+  it.each([false, true])('rethrows the original ACK schema error with only a fixed reason (ACK logger throws: %s)', async logThrows => {
+    const fetchMock = vi.fn(async () => responseFor([]))
+    const { handlers, logError } = registerHarness(fetchMock as typeof fetch)
+    if (logThrows) logError.mockImplementation(() => { throw new Error('PRIVATE_ACK_LOG_FAILURE_CANARY') })
+    const originalParse = sseAckPayloadSchema.parse.bind(sseAckPayloadSchema)
+    let parseFailure: unknown
+    vi.spyOn(sseAckPayloadSchema, 'parse').mockImplementation((value, options) => {
+      try { return originalParse(value, options) }
+      catch (error) { parseFailure = error; throw error }
     })
-    await waitForCondition(() => sseEventCalls(owner).length === 1)
+    const pending = handlers.get('runtime:sse:ack')!({ sender: makeSender() }, {
+      streamId: 'stream-invalid-ack', seq: -1, detail: 'PRIVATE_ACK_REQUEST_CANARY'
+    })
 
-    await expect(handlers.get('runtime:sse:ack')?.({ sender: other }, {
-      streamId: 'stream-owner',
-      seq: 1
-    })).resolves.toBe(false)
-    await expect(handlers.get('runtime:sse:ack')?.({ sender: owner }, {
-      streamId: 'stream-owner',
-      seq: 2
-    })).resolves.toBe(false)
-    await expect(handlers.get('runtime:sse:stop')?.({ sender: other }, 'stream-owner')).resolves.toBe(false)
-    await expect(handlers.get('runtime:sse:start')?.({ sender: other }, {
-      threadId: 'thread-owner',
-      sinceSeq: 0,
-      streamId: 'stream-owner'
-    })).rejects.toThrow('sse_stream_owner_mismatch')
-    await expect(handlers.get('runtime:sse:ack')?.({ sender: owner }, {
-      streamId: 'stream-owner',
-      seq: 1
-    })).resolves.toBe(true)
-    await expect(handlers.get('runtime:sse:stop')?.({ sender: owner }, 'stream-owner')).resolves.toBe(true)
-
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    controlled.close()
-    await flushAsync()
+    await expect(pending).rejects.toMatchObject({ name: 'ZodError' })
+    expect(parseFailure).toBeDefined()
+    await expect(pending).rejects.toBe(parseFailure)
+    expect(logError).toHaveBeenCalledExactlyOnceWith('sse', 'SSE acknowledgement rejected', {
+      code: 'sse_ack_rejected', reasonCode: 'invalid_ack_request'
+    })
+    const recorded = JSON.stringify(logError.mock.calls)
+    expect(recorded).not.toContain('stream-invalid-ack')
+    expect(recorded).not.toContain('PRIVATE_ACK_REQUEST_CANARY')
+    expect(recorded).not.toContain('PRIVATE_ACK_LOG_FAILURE_CANARY')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('cancels an active reader and releases stream ownership when WebContents is destroyed', async () => {
@@ -1369,6 +1467,136 @@ describe('registerRuntimeSseIpc', () => {
     await flushAsync()
   })
 
+  it.each(['block', 'EOF tail'])('logs only first-validation metadata for a rejected %s', async (ending) => {
+    vi.stubEnv('ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK', '1')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const parse = vi.spyOn(ToolCallTurnItem, 'safeParse')
+    const push = vi.spyOn(PublicRuntimeEventFilter.prototype, 'push')
+    const threadId = 'thread-decoder-diagnostic'
+    const event = diagnosticToolCallEvent(7, threadId)
+    const item = event.item as Record<string, unknown>
+    const args = item.arguments as Record<string, unknown>
+    // Deterministic synthetic bearer fixture; never use a real credential.
+    const syntheticPrivateBearer = 'Bearer ' + 'x'.repeat(20)
+    args.PRIVATE_UNKNOWN_FIELD = {
+      text: 'PRIVATE_RESPONSE_BODY', file: '/tmp/PRIVATE_FILE_VALUE', secret: syntheticPrivateBearer
+    }
+    const raw = strictFrame(7, 'item_created', event)
+    const fetchMock = vi.fn(async () => responseFor([ending === 'block' ? raw : raw.trimEnd()]))
+    const { handlers, logError } = registerHarness(fetchMock as typeof fetch)
+    const sender = makeSender()
+    try {
+      await handlers.get('runtime:sse:start')?.({ sender }, {
+        threadId, sinceSeq: 0, streamId: 'stream-decoder-diagnostic'
+      })
+      await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error'))
+      await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-end'))
+      expect(parse).toHaveBeenCalledTimes(1)
+      expect(push).not.toHaveBeenCalled()
+      const diagnostic = {
+        validation: 'input', stage: 'item_schema', reason: 'unknown_fields', fieldPaths: ['item.arguments']
+      }
+      expect(logError).toHaveBeenCalledWith('sse', 'SSE event rejected', {
+        code: 'sse_event_rejected', reasonCode: 'invalid_public_projection', diagnostic
+      })
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith('[packaged-sse-schema] ' + JSON.stringify({
+        reasonCode: 'invalid_public_projection', diagnostic
+      }))
+      expect(sender.send).toHaveBeenCalledWith('runtime:sse-error', {
+        streamId: 'stream-decoder-diagnostic', code: 'sse_event_rejected',
+        message: 'Runtime request failed (sse_event_rejected).', reasonCode: 'invalid_public_projection'
+      })
+      expect(sseEventCalls(sender)).toHaveLength(0)
+      expect(sender.send.mock.calls.filter(([channel]) => channel === 'runtime:sse-end')).toEqual([
+        ['runtime:sse-end', { streamId: 'stream-decoder-diagnostic' }]
+      ])
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
+        streamId: 'stream-decoder-diagnostic', seq: 7
+      })).toBe(false)
+      const serialized = JSON.stringify({ sends: sender.send.mock.calls, logs: logError.mock.calls, console: consoleError.mock.calls })
+      expect(serialized).not.toContain('PRIVATE_')
+      expect(serialized).not.toContain('/tmp/')
+      expect(serialized).not.toContain('Bearer ')
+      expect(serialized).not.toContain('stack')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('preserves the emitted prefix and stops at the original rejected seq without diagnosing twice', async () => {
+    const threadId = 'thread-diagnostic-prefix'
+    const timestamp = '2026-07-14T00:00:00.000Z'
+    const first = { kind: 'heartbeat', seq: 1, timestamp, threadId }
+    const later = { ...first, seq: 3 }
+    const invalid = diagnosticToolCallEvent(2, threadId)
+    const item = invalid.item as Record<string, unknown>
+    const args = item.arguments as Record<string, unknown>
+    args.privatePayloadWithheld = false
+    const parse = vi.spyOn(ToolCallTurnItem, 'safeParse')
+    const push = vi.spyOn(PublicRuntimeEventFilter.prototype, 'push')
+    const fetchMock = vi.fn(async () => responseFor([
+      strictFrame(1, 'heartbeat', first), strictFrame(2, 'item_created', invalid), strictFrame(3, 'heartbeat', later)
+    ]))
+    const { handlers, logError } = registerHarness(fetchMock as typeof fetch)
+    const sender = makeSender()
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId, sinceSeq: 0, streamId: 'stream-diagnostic-prefix'
+    })
+    await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error'))
+    await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-end'))
+    expect(sseEventCalls(sender)).toEqual([['runtime:sse-event', {
+      streamId: 'stream-diagnostic-prefix', events: [first]
+    }]])
+    expect(push).toHaveBeenCalledExactlyOnceWith(first)
+    expect(parse).toHaveBeenCalledTimes(1)
+    expect(logError).toHaveBeenCalledExactlyOnceWith('sse', 'SSE event rejected', {
+      code: 'sse_event_rejected', reasonCode: 'invalid_public_projection',
+      diagnostic: {
+        validation: 'input', stage: 'item_schema', reason: 'schema_invalid_value',
+        fieldPaths: ['item.arguments.privatePayloadWithheld']
+      }
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(sender.send.mock.calls.filter(([channel]) => channel === 'runtime:sse-end')).toEqual([
+      ['runtime:sse-end', { streamId: 'stream-diagnostic-prefix' }]
+    ])
+  })
+
+  it('uses the first batch schema result without re-parsing rejected content for soak diagnostics', async () => {
+    vi.stubEnv('ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK', '1')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const threadId = 'thread-diagnostic-batch'
+    const batch = generalTerminalDeliveryBatch(threadId, 'turn-diagnostic-batch', 2)
+    batch.PRIVATE_UNKNOWN_BATCH_FIELD = 'PRIVATE_BATCH_BODY'
+    const parse = vi.spyOn(GeneralTerminalDeliveryBatchV1Schema, 'safeParse')
+    const push = vi.spyOn(PublicRuntimeEventFilter.prototype, 'push')
+    const fetchMock = vi.fn(async () => responseFor([
+      strictFrame(batch.lastSeq as number, 'general_terminal_batch', batch)
+    ]))
+    const { handlers, logError } = registerHarness(fetchMock as typeof fetch)
+    const sender = makeSender()
+    try {
+      await handlers.get('runtime:sse:start')?.({ sender }, {
+        threadId, sinceSeq: 0, streamId: 'stream-diagnostic-batch'
+      })
+      await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error'))
+      expect(parse).toHaveBeenCalledTimes(1)
+      expect(push).not.toHaveBeenCalled()
+      expect(logError).toHaveBeenCalledExactlyOnceWith('sse', 'SSE event rejected', {
+        code: 'sse_event_rejected', reasonCode: 'invalid_public_projection',
+        diagnostic: { validation: 'input', stage: 'event_schema', reason: 'unknown_fields', fieldPaths: ['$'] }
+      })
+      const serialized = JSON.stringify({ logs: logError.mock.calls, console: consoleError.mock.calls })
+      expect(serialized).not.toContain('PRIVATE_')
+      expect(serialized).not.toContain('issueKeys')
+      expect(serialized).not.toContain('nestedKinds')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('rejects a hostile tool-result payload before SSE crosses Electron IPC', async () => {
     const sentinel = 'PRIVATE_SSE_TOOL_RESULT_SENTINEL'
     const controlled = controlledStream([
@@ -1499,7 +1727,7 @@ describe('registerRuntimeSseIpc', () => {
       status: 200,
       headers: { 'content-type': 'text/event-stream' }
     }))
-    const { handlers } = registerHarness(fetchMock as typeof fetch, { authorityPin: pin, recordThreadTrace })
+    const { handlers, logError } = registerHarness(fetchMock as typeof fetch, { authorityPin: pin, recordThreadTrace })
     const sender = makeSender()
 
     await handlers.get('runtime:sse:start')?.({ sender }, {
@@ -1533,6 +1761,9 @@ describe('registerRuntimeSseIpc', () => {
       turnId: batch.turnId,
       publicationCommitId: '0'.repeat(64)
     })).toBe(false)
+    expect(logError.mock.calls).toEqual([
+      'undelivered_sequence', 'accepted_final_receipt_mismatch', 'accepted_final_receipt_mismatch'
+    ].map(reasonCode => ['sse', 'SSE acknowledgement rejected', { code: 'sse_ack_rejected', reasonCode }]))
     await new Promise((resolve) => setTimeout(resolve, 550))
     expect(sender.send).not.toHaveBeenCalledWith('runtime:sse-end', expect.anything())
     expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
@@ -1544,8 +1775,64 @@ describe('registerRuntimeSseIpc', () => {
       publicationCommitId: batch.publicationCommitId
     })).toBe(true)
 
+    expect(logError).toHaveBeenCalledTimes(3)
+
     controlled.close()
     await flushAsync()
+  })
+
+  it.each([false, true])('keeps accepted-final authority pending after an ACK on an earlier delivered boundary (ACK logger throws: %s)', async logThrows => {
+    const { batch, pin, privateKey } = acceptedFinalDeliveryBatch()
+    // The earlier ACK must pass the delivered-cursor guard to exercise the
+    // final-sequence guard. Re-sign the existing complete fixture after moving it.
+    for (const event of batch.events) event.seq = Number(event.seq) + 1
+    batch.seq += 1
+    batch.firstSeq += 1
+    batch.lastSeq += 1
+    Object.assign(batch.publicationAuthority, { firstSeq: batch.firstSeq, lastSeq: batch.lastSeq })
+    resignAcceptedFinalDeliveryBatch(batch, privateKey)
+    const prefix = { ...runtimeEvent(1, 'prefix', batch.threadId), turnId: batch.turnId, timestamp: batch.timestamp }
+    const controlled = controlledStream([
+      strictFrame(1, 'tool_progress', prefix),
+      strictFrame(batch.lastSeq, 'accepted_final_batch', batch)
+    ])
+    const fetchMock = vi.fn(async () => new Response(controlled.stream, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' }
+    }))
+    const { handlers, logError } = registerHarness(fetchMock as typeof fetch, { authorityPin: pin })
+    if (logThrows) logError.mockImplementation(() => { throw new Error('synthetic ACK logger failure') })
+    const sender = makeSender()
+    const streamId = 'stream-final-ack-prefix'
+    try {
+      await handlers.get('runtime:sse:start')?.({ sender }, {
+        threadId: batch.threadId, sinceSeq: 0, streamId
+      })
+      await waitForCondition(() => sseEventCalls(sender).length === 2)
+      expect(sseEventCalls(sender).map(([, payload]) => payload.events)).toEqual([[prefix], [batch]])
+      await expect(handlers.get('runtime:sse:ack')?.({ sender }, {
+        streamId, seq: 1, batchId: batch.batchId, threadId: batch.threadId,
+        turnId: batch.turnId, publicationCommitId: batch.publicationCommitId
+      })).resolves.toBe(false)
+      expect(logError).toHaveBeenCalledExactlyOnceWith('sse', 'SSE acknowledgement rejected', {
+        code: 'sse_ack_rejected', reasonCode: 'accepted_final_sequence_invalid'
+      })
+      await expect(handlers.get('runtime:sse:ack')?.({ sender }, { streamId, seq: 1 })).resolves.toBe(true)
+      await flushAsync()
+      expect(sender.send).not.toHaveBeenCalledWith('runtime:sse-end', expect.anything())
+      await expect(handlers.get('runtime:sse:ack')?.({ sender }, {
+        streamId, seq: batch.lastSeq, batchId: batch.batchId, threadId: batch.threadId,
+        turnId: batch.turnId, publicationCommitId: batch.publicationCommitId
+      })).resolves.toBe(true)
+      await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-end'))
+      expect(logError).toHaveBeenCalledTimes(1)
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      await handlers.get('runtime:sse:stop')?.({ sender }, streamId)
+      controlled.close()
+      await flushAsync()
+    }
   })
 
   it('rejects the frozen V1 audit batch from the current generic SSE consumer', async () => {
@@ -1970,57 +2257,99 @@ describe('registerRuntimeSseIpc', () => {
       runtimePid: staleRuntime.pin.runtimePid + 1,
       generation: staleRuntime.pin.generation + 1
     }
+    expect(isStrictPublicRuntimeSseIpcPayload({
+      streamId: 'stream-stale-connection-pin', events: [freshRuntime.batch]
+    })).toBe(true)
+    expect(verifiedAcceptedFinalDeliveryBatch(freshRuntime.batch, freshPin)).not.toBeNull()
     const overrides = { authorityPin: staleRuntime.pin }
     const encoder = new TextEncoder()
-    let staleController: ReadableStreamDefaultController<Uint8Array> | undefined
-    const staleStream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        staleController = controller
+    const controlledConnection = () => {
+      let controller!: ReadableStreamDefaultController<Uint8Array>
+      const stream = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+      return {
+        stream,
+        enqueue(frame: string) { controller.enqueue(encoder.encode(frame)) },
+        close() {
+          try { controller.close() } catch { /* The reader may already have cancelled the stream. */ }
+        }
       }
-    })
+    }
+    const staleConnection = controlledConnection()
+    const freshConnection = controlledConnection()
+    const deferred = () => {
+      let resolve!: () => void
+      const promise = new Promise<void>(done => { resolve = done })
+      return { promise, resolve }
+    }
+    const firstFetch = deferred(), secondFetch = deferred(), firstEvent = deferred()
+    let rejectSse!: (error: Error) => void
+    const sseError = new Promise<never>((_, reject) => { rejectSse = reject })
+    const waitForBarrier = (barrier: ReturnType<typeof deferred>) => Promise.race([barrier.promise, sseError])
     const seenSinceSeq: string[] = []
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       seenSinceSeq.push(new URL(String(input)).searchParams.get('since_seq') ?? '')
       if (fetchMock.mock.calls.length === 1) {
-        return new Response(staleStream, {
+        firstFetch.resolve()
+        return new Response(staleConnection.stream, {
           status: 200,
           headers: { 'content-type': 'text/event-stream' }
         })
       }
-      return responseFor([
-        strictFrame(freshRuntime.batch.lastSeq, 'accepted_final_batch', freshRuntime.batch)
-      ])
+      secondFetch.resolve()
+      return new Response(freshConnection.stream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' }
+      })
     })
     const { handlers } = registerHarness(fetchMock as typeof fetch, overrides)
     const sender = makeSender()
-
-    await handlers.get('runtime:sse:start')?.({ sender }, {
-      threadId: staleRuntime.batch.threadId,
-      sinceSeq: 0,
-      streamId: 'stream-stale-connection-pin'
+    sender.send.mockImplementation((channel: string, payload: unknown) => {
+      if (channel === 'runtime:sse-error') {
+        const diagnostic = isStrictPublicRuntimeSseErrorPayload(payload)
+          ? { code: payload.code, status: payload.status, reasonCode: payload.reasonCode } : {}
+        rejectSse(new Error(`Stale-pin SSE diagnostics: ${JSON.stringify(diagnostic)}`))
+      }
+      if (channel === 'runtime:sse-event') firstEvent.resolve()
     })
-    await waitForCondition(() => fetchMock.mock.calls.length === 1)
-    overrides.authorityPin = freshPin
-    staleController?.enqueue(encoder.encode(
-      strictFrame(staleRuntime.batch.lastSeq, 'accepted_final_batch', staleRuntime.batch)
-    ))
-    await waitForCondition(() => sseEventCalls(sender).length === 1)
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(seenSinceSeq).toEqual(['0', '0'])
-    expect(sseEventCalls(sender)[0]?.[1]).toEqual({
-      streamId: 'stream-stale-connection-pin',
-      events: [freshRuntime.batch]
-    })
-    expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
-    expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
-      streamId: 'stream-stale-connection-pin',
-      seq: freshRuntime.batch.lastSeq,
-      batchId: freshRuntime.batch.batchId,
-      threadId: freshRuntime.batch.threadId,
-      turnId: freshRuntime.batch.turnId,
-      publicationCommitId: freshRuntime.batch.publicationCommitId
-    })).toBe(true)
+    try {
+      await handlers.get('runtime:sse:start')?.({ sender }, {
+        threadId: staleRuntime.batch.threadId,
+        sinceSeq: 0,
+        streamId: 'stream-stale-connection-pin'
+      })
+      await waitForBarrier(firstFetch)
+      overrides.authorityPin = freshPin
+      staleConnection.enqueue(strictFrame(staleRuntime.batch.lastSeq, 'accepted_final_batch', staleRuntime.batch))
+      await waitForBarrier(secondFetch)
+      expect(sseEventCalls(sender)).toHaveLength(0)
+      expect(seenSinceSeq).toEqual(['0', '0'])
+      freshConnection.enqueue(strictFrame(freshRuntime.batch.lastSeq, 'accepted_final_batch', freshRuntime.batch))
+      await waitForBarrier(firstEvent)
+
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(seenSinceSeq).toEqual(['0', '0'])
+      expect(sseEventCalls(sender)[0]?.[1]).toEqual({
+        streamId: 'stream-stale-connection-pin',
+        events: [freshRuntime.batch]
+      })
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
+        streamId: 'stream-stale-connection-pin',
+        seq: freshRuntime.batch.lastSeq,
+        batchId: freshRuntime.batch.batchId,
+        threadId: freshRuntime.batch.threadId,
+        turnId: freshRuntime.batch.turnId,
+        publicationCommitId: freshRuntime.batch.publicationCommitId
+      })).toBe(true)
+    } finally {
+      try {
+        await handlers.get('runtime:sse:stop')?.({ sender }, 'stream-stale-connection-pin')
+      } finally {
+        staleConnection.close()
+        freshConnection.close()
+      }
+    }
   })
 
   it.each(['separate', 'coalesced'])('delivers an ordinary general terminal batch alone and waits for its atomic renderer ACK (%s)', async (chunking) => {
@@ -2069,6 +2398,130 @@ describe('registerRuntimeSseIpc', () => {
 
     controlled.close()
     await flushAsync()
+  })
+
+  it.each(['live', 'replay'] as const)('delivers a typed queued user file reference before its atomic terminal batch (%s)', async mode => {
+    const threadId = 'thread-queued-file-reference'
+    const turnId = 'turn-queued-file-reference'
+    const streamId = `stream-queued-file-reference-${mode}`
+    const timestamp = '2026-07-20T03:00:00Z'
+    const userEvent = {
+      kind: 'item_created', seq: 22, timestamp, threadId, turnId,
+      itemId: 'item-queued-file-reference',
+      trace: { sse_sent_at: 1784516400000, sse_live_emitted_at: 1784516400000 },
+      item: {
+        id: 'item-queued-file-reference', threadId, turnId, role: 'user',
+        status: 'completed', createdAt: timestamp, kind: 'user_message',
+        text: 'Synthetic queued message with a file reference.',
+        fileReferences: [{
+          path: '/synthetic/workspace/queue-fixture.txt',
+          relativePath: 'queue-fixture.txt', name: 'queue-fixture.txt', kind: 'file'
+        }]
+      }
+    }
+    const batch = generalTerminalDeliveryBatch(threadId, turnId, 23, { includeTerminalItem: true })
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => responseFor([
+      strictFrame(userEvent.seq, userEvent.kind, userEvent) +
+        strictFrame(batch.lastSeq as number, 'general_terminal_batch', batch)
+    ]))
+    const { handlers } = registerHarness(fetchMock as typeof fetch)
+    const sender = makeSender()
+
+    try {
+      await handlers.get('runtime:sse:start')?.({ sender }, {
+        threadId, sinceSeq: 21, streamId,
+        ...(mode === 'replay' ? { replayThroughSeq: batch.lastSeq } : {})
+      })
+      await waitForCondition(() => sseEventCalls(sender).length >= 1)
+      expect(sseEventCalls(sender)[0]?.[1]).toEqual({ streamId, events: [userEvent] })
+      expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
+        streamId, seq: userEvent.seq
+      })).toBe(true)
+      await waitForCondition(() => sseEventCalls(sender).length === 2)
+      expect(sseEventCalls(sender).map(([, payload]) => payload)).toEqual([
+        { streamId, events: [userEvent] },
+        { streamId, events: [batch] }
+      ])
+      expect(new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.has('live')).toBe(mode === 'live')
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      expect(sender.send).not.toHaveBeenCalledWith('runtime:sse-end', expect.anything())
+      expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
+        streamId, seq: batch.lastSeq
+      })).toBe(true)
+      await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-end'))
+      expect(sender.send.mock.calls.filter(([channel]) => channel === 'runtime:sse-end')).toEqual([
+        ['runtime:sse-end', { streamId }]
+      ])
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      await handlers.get('runtime:sse:stop')?.({ sender }, streamId)
+    }
+  })
+
+  it('replays coalesced terminal batches through a finite snapshot boundary with one ACK per atomic unit', async () => {
+    const threadId = 'finite-history'
+    const first = generalTerminalDeliveryBatch(threadId, 'first-turn', 1)
+    const second = generalTerminalDeliveryBatch(threadId, 'second-turn', 3)
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => responseFor([
+      strictFrame(2, 'general_terminal_batch', first) + strictFrame(4, 'general_terminal_batch', second)
+    ]))
+    const { handlers } = registerHarness(fetchMock as typeof fetch)
+    const sender = makeSender()
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId, sinceSeq: 0, streamId: 'finite', replayThroughSeq: 4
+    })
+    await waitForCondition(() => sseEventCalls(sender).length === 1)
+    expect(new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.has('live')).toBe(false)
+    expect(sseEventCalls(sender)[0]?.[1]).toEqual({ streamId: 'finite', events: [first] })
+    await flushAsync()
+    expect(sseEventCalls(sender)).toHaveLength(1)
+    expect(await handlers.get('runtime:sse:ack')?.({ sender }, { streamId: 'finite', seq: 2 })).toBe(true)
+    await waitForCondition(() => sseEventCalls(sender).length === 2)
+    expect(sseEventCalls(sender)[1]?.[1]).toEqual({ streamId: 'finite', events: [second] })
+    expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-end')).toBe(false)
+    expect(await handlers.get('runtime:sse:ack')?.({ sender }, { streamId: 'finite', seq: 4 })).toBe(true)
+    await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-end'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+  })
+
+  it.each(['split-terminal', 'zero-seq-setup-error'] as const)('rejects finite replay %s without treating EOF as successful history', async violation => {
+    const threadId = 'finite-rejected'
+    const batch = generalTerminalDeliveryBatch(threadId, 'turn', 1)
+    const frame = violation === 'split-terminal'
+      ? strictFrame(2, 'general_terminal_batch', batch)
+      : strictFrame(0, 'error', { threadId, seq: 0, kind: 'error', timestamp: '2026-10-08T00:00:00Z',
+        code: 'sse_setup_error', message: 'SSE setup failed', terminal: true })
+    const fetchMock = vi.fn(async () => responseFor([frame]))
+    const { handlers } = registerHarness(fetchMock as typeof fetch)
+    const sender = makeSender()
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId, sinceSeq: 0, streamId: 'finite-rejected', replayThroughSeq: 1
+    })
+    await waitForCondition(() => sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error'))
+    expect(sseEventCalls(sender)).toHaveLength(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels finite replay between terminal batches without delivering the remainder', async () => {
+    const threadId = 'finite-cancelled'
+    const first = generalTerminalDeliveryBatch(threadId, 'first', 1)
+    const second = generalTerminalDeliveryBatch(threadId, 'second', 3)
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => responseFor([
+      strictFrame(2, 'general_terminal_batch', first) + strictFrame(4, 'general_terminal_batch', second)
+    ]))
+    const { handlers } = registerHarness(fetchMock as typeof fetch)
+    const sender = makeSender()
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId, sinceSeq: 0, streamId: 'finite-cancelled', replayThroughSeq: 4
+    })
+    await waitForCondition(() => sseEventCalls(sender).length === 1)
+    expect(await handlers.get('runtime:sse:stop')?.({ sender }, 'finite-cancelled')).toBe(true)
+    await flushAsync()
+    expect(sseEventCalls(sender)).toHaveLength(1)
+    expect(await handlers.get('runtime:sse:ack')?.({ sender }, { streamId: 'finite-cancelled', seq: 2 })).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('delivers a Go-compatible three-slot child terminal batch with bounded child metadata', async () => {
@@ -2130,6 +2583,11 @@ describe('registerRuntimeSseIpc', () => {
       'SSE event rejected',
       expect.objectContaining({ reasonCode: 'general_terminal_batch_integrity_invalid' })
     )
+    // This is the existing Main authority verifier, after decoder acceptance.
+    // It must not be relabeled with a decoder/schema diagnostic.
+    expect(logError).toHaveBeenCalledWith('sse', 'SSE event rejected', {
+      code: 'sse_event_rejected', reasonCode: 'general_terminal_batch_integrity_invalid'
+    })
     expect(sender.send).toHaveBeenCalledWith('runtime:sse-error', {
       streamId: 'stream-general-terminal-forged',
       code: 'sse_event_rejected',
@@ -2329,22 +2787,21 @@ describe('registerRuntimeSseIpc', () => {
   })
 
   it('redacts secrets before forwarding SSE errors to renderer and logs', async () => {
+    // Deterministic synthetic redaction fixture; never use a real credential.
+    const syntheticRedactionToken = 'sk-' + 'x'.repeat(25)
     const fetchMock = vi.fn(async () => {
-      throw new Error('upstream rejected Authorization: Bearer sk-liveSecretValue1234567890')
+      throw new Error(`upstream rejected Authorization: Bearer ${syntheticRedactionToken}`)
     })
-    const { handlers, logError } = registerHarness(fetchMock as typeof fetch)
+    const { handlers, logError, waitForWorkers } = registerHarness(fetchMock as typeof fetch)
     const sender = makeSender()
 
     await handlers.get('runtime:sse:start')?.({
       sender
     }, { threadId: 'thread-secret', sinceSeq: 0, streamId: 'stream-secret' })
 
-    await waitForCondition(() =>
-      sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')
-    )
+    await waitForWorkers()
     const errorCall = sender.send.mock.calls.find(([channel]) => channel === 'runtime:sse-error')
-    const logCall = logError.mock.calls.find(([scope]) => scope === 'sse')
-    const serialized = JSON.stringify({ errorCall, logCall })
+    const serialized = JSON.stringify({ errorCall, logs: logError.mock.calls })
 
     expect(errorCall).toEqual([
       'runtime:sse-error',
@@ -2354,8 +2811,139 @@ describe('registerRuntimeSseIpc', () => {
         message: 'Runtime request failed (sse_stream_error).'
       }
     ])
-    expect(serialized).not.toContain('sk-liveSecretValue1234567890')
+    expect(serialized).not.toContain(syntheticRedactionToken)
     expect(serialized).not.toContain('Bearer sk-')
+  })
+
+  it.each([
+    { stage: 'connect', message: 'sse start timeout', name: 'Error', causeCode: 'PRIVATE_CAUSE',
+      reason: 'start_timeout', expectedCause: 'other' },
+    { stage: 'connect', message: 'fetch failed', name: 'TypeError', causeCode: 'ECONNREFUSED',
+      reason: 'fetch_failed', expectedCause: 'ECONNREFUSED' },
+    { stage: 'read', message: 'terminated', name: 'TypeError', causeCode: 'UND_ERR_SOCKET',
+      reason: 'body_terminated', expectedCause: 'UND_ERR_SOCKET' },
+    { stage: 'read', message: 'PRIVATE_RESPONSE_CONTENT', name: 'PRIVATE_ERROR_NAME', causeCode: 'PRIVATE_CAUSE',
+      reason: 'exception', expectedCause: 'other' },
+    { stage: 'connect', message: 'PRIVATE_OUTER_WORKER_CONTENT', name: 'Error', causeCode: 'PRIVATE_CAUSE',
+      reason: 'exception', expectedCause: 'other', outerWorker: true }
+  ])('records closed $stage failure categories without exposing exception content ($reason)', async testCase => {
+    const error = new Error(testCase.message)
+    error.name = testCase.name
+    error.stack = 'PRIVATE_STACK_WITH_URL_AND_CREDENTIAL'
+    Object.assign(error, { cause: { code: testCase.causeCode, message: 'PRIVATE_CAUSE_CONTENT' } })
+    const fetchMock = vi.fn(async () => {
+      if (testCase.stage === 'connect') throw error
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { controller.error(error) } }),
+        { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    })
+    const outerWorker = 'outerWorker' in testCase && testCase.outerWorker === true
+    const settings = settingsForPort(9988)
+    if (outerWorker) Object.defineProperty(settings.runtime!, 'baseUrl', { get: () => { throw error } })
+    const { handlers, logError, waitForWorkers } = registerHarness(fetchMock as typeof fetch,
+      outerWorker ? { store: { load: async () => settings } } : {})
+    const sender = makeSender()
+    let endedBeforeClassification = false
+    if (outerWorker) sender.send.mockImplementation(channel => {
+      if (channel === 'runtime:sse-end') {
+        endedBeforeClassification = !logError.mock.calls.some(([, message]) => message === 'SSE first failure')
+      }
+    })
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId: 'thread-diagnostic', sinceSeq: 0, streamId: 'stream-diagnostic', replayThroughSeq: 1
+    })
+    await waitForWorkers()
+    expect(fetchMock).toHaveBeenCalledTimes(outerWorker ? 0 : 1)
+    expect(sender.send.mock.calls.find(([channel]) => channel === 'runtime:sse-error')).toEqual([
+      'runtime:sse-error', { streamId: 'stream-diagnostic', code: 'sse_stream_error',
+        message: 'Runtime request failed (sse_stream_error).' }
+    ])
+    expect(logError).toHaveBeenCalledWith('sse', 'SSE first failure', {
+      role: 'replay', phase: testCase.stage,
+      elapsedMs: expect.any(Number), reason: testCase.reason,
+      errorName: testCase.name.startsWith('PRIVATE_') ? 'other' : testCase.name,
+      causeCode: testCase.expectedCause
+    })
+    if (outerWorker) {
+      expect(endedBeforeClassification).toBe(true)
+      expect(logError).toHaveBeenCalledWith('sse', 'SSE worker crashed', { code: 'sse_worker_error' })
+      const channels = sender.send.mock.calls.map(([channel]) => channel)
+      expect(channels.indexOf('runtime:sse-end')).toBeLessThan(channels.indexOf('runtime:sse-error'))
+    }
+    expect(JSON.stringify(logError.mock.calls)).not.toContain('PRIVATE_')
+  })
+
+  it('validates a single captured exception name before logging it', async () => {
+    const error = new Error('PRIVATE_RESPONSE_CONTENT')
+    let nameReads = 0
+    Object.defineProperty(error, 'name', { get: () => ++nameReads === 1 ? 'Error' : 'PRIVATE_ERROR_NAME' })
+    const { handlers, logError, waitForWorkers } = registerHarness(vi.fn(async () => { throw error }) as typeof fetch)
+    await handlers.get('runtime:sse:start')?.({ sender: makeSender() }, {
+      threadId: 'thread-diagnostic-getter', sinceSeq: 0, streamId: 'stream-diagnostic-getter', replayThroughSeq: 1
+    })
+    await waitForWorkers()
+    expect(nameReads).toBe(1)
+    expect(logError).toHaveBeenCalledWith('sse', 'SSE first failure', expect.objectContaining({
+      role: 'replay', phase: 'connect', reason: 'exception', errorName: 'Error', causeCode: 'other'
+    }))
+    expect(JSON.stringify(logError.mock.calls)).not.toContain('PRIVATE_')
+  })
+
+  it('records the first live failure before retry and waits for the worker after stop returns', async () => {
+    vi.useFakeTimers()
+    let releaseEnsure!: () => void
+    const ensureGate = new Promise<void>(resolve => { releaseEnsure = resolve })
+    let markReconnectEnsureStarted!: () => void
+    const reconnectEnsureStarted = new Promise<void>(resolve => { markReconnectEnsureStarted = resolve })
+    const ensureRuntime = vi.fn(async () => {
+      if (ensureRuntime.mock.calls.length === 2) {
+        markReconnectEnsureStarted()
+        await ensureGate
+      }
+    })
+    const error = new TypeError('fetch failed')
+    Object.assign(error, { cause: { code: 'ECONNREFUSED', message: 'PRIVATE_CAUSE_CONTENT' } })
+    const fetchMock = vi.fn(async () => { throw error })
+    const { handlers, logError, waitForWorkers } = registerHarness(fetchMock as typeof fetch, { ensureRuntime })
+    let markFirstFailure!: () => void
+    const firstFailure = new Promise<void>(resolve => { markFirstFailure = resolve })
+    logError.mockImplementation((_category, message) => {
+      if (message === 'SSE first failure') markFirstFailure()
+    })
+    const sender = makeSender()
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId: 'thread-diagnostic-retry', sinceSeq: 0, streamId: 'stream-diagnostic-retry'
+    })
+    try {
+      await firstFailure
+      expect(logError).toHaveBeenCalledWith('sse', 'SSE first failure', {
+        role: 'live', phase: 'connect', reason: 'fetch_failed', errorName: 'TypeError',
+        causeCode: 'ECONNREFUSED', elapsedMs: expect.any(Number)
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(ensureRuntime).toHaveBeenCalledTimes(1)
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      await vi.advanceTimersByTimeAsync(749)
+      expect(ensureRuntime).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await reconnectEnsureStarted
+      expect(ensureRuntime).toHaveBeenCalledTimes(2)
+      let workerSettled = false
+      const barrier = waitForWorkers().then(() => { workerSettled = true })
+      await expect(handlers.get('runtime:sse:stop')?.({ sender }, 'stream-diagnostic-retry')).resolves.toBe(true)
+      await flushAsync()
+      expect(workerSettled).toBe(false)
+      releaseEnsure()
+      await barrier
+      expect(workerSettled).toBe(true)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(logError.mock.calls.filter(([, message]) => message === 'SSE first failure')).toHaveLength(1)
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      expect(JSON.stringify(logError.mock.calls)).not.toContain('PRIVATE_')
+    } finally {
+      releaseEnsure()
+      await handlers.get('runtime:sse:stop')?.({ sender }, 'stream-diagnostic-retry')
+      await waitForWorkers()
+    }
   })
 
   it('stops safely when the renderer is destroyed before forwarding events', async () => {

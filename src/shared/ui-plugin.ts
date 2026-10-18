@@ -82,8 +82,6 @@ const UI_PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,39}$/
  */
 const UI_PLUGIN_RESERVED_IDS = new Set(['default', 'analytix', 'on', 'off', 'none'])
 
-/** 旧版兼容形象包 id。 */
-export const UI_PLUGIN_BUNDLED_MASCOT_ID = 'mascot'
 const UI_PLUGIN_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][\w.-]{0,40})?$/
 const UI_PLUGIN_FIGURE_PATH_PATTERN = /^[\w][\w./-]{0,200}$/
 const UI_PLUGIN_FIGURE_EXTENSIONS = new Set(['png', 'webp', 'jpg', 'jpeg', 'gif'])

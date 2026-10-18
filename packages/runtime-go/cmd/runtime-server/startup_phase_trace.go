@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
+
+	"analytix.local/runtime-go/internal/runtimeapp"
 )
 
 const startupOwnerPhasePrefixV1 = "ANALYTIX_STARTUP_OWNER_PHASE_V1 "
@@ -35,7 +38,10 @@ func emitStartupOwnerPhaseV1(output io.Writer, started time.Time, phase startupO
 		startupGoLeaseAcquiredV1, startupGoSemanticPreparedV1, startupGoListenerBoundV1,
 		startupGoActivatedV1, startupGoHostProbedV1, startupGoReadyBuiltV1:
 	default:
-		return
+		code, failure := strings.CutPrefix(string(phase), "go_prepare_failed_")
+		if !failure || !runtimeapp.IsRuntimeStartupPreparationFailureCodeV1(code) {
+			return
+		}
 	}
 	elapsed := time.Since(started).Milliseconds()
 	if elapsed < 0 || elapsed > int64((30*time.Minute)/time.Millisecond) {
@@ -44,4 +50,12 @@ func emitStartupOwnerPhaseV1(output io.Writer, started time.Time, phase startupO
 	// This opt-in diagnostic has a fixed phase and integer duration only. It is
 	// never part of the readiness or package authority protocol.
 	_, _ = fmt.Fprintf(output, "%s%s %d\n", startupOwnerPhasePrefixV1, phase, elapsed)
+}
+
+func emitStartupPrepareFailureV1(output io.Writer, started time.Time, err error) {
+	if err == nil || os.Getenv("ANALYTIX_STARTUP_TRACE") != "1" {
+		return
+	}
+	phase := startupOwnerPhaseV1("go_prepare_failed_" + runtimeapp.RuntimeStartupPreparationFailureCodeV1(err))
+	emitStartupOwnerPhaseV1(output, started, phase)
 }

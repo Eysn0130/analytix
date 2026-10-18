@@ -388,3 +388,33 @@ func assertProviderLedgerParseFailsV1(t *testing.T, parse func([]byte) error, bo
 		t.Fatalf("expected provider ledger parse failure for %s", body)
 	}
 }
+
+// Frozen synthetic bytes use the pre-addition V1 field ordering and the existing
+// deterministic test key. The read path must retain their signatures verbatim.
+func TestLegacySignedProviderRecordsKeepExactBytesWithMissingAdditiveFields(t *testing.T) {
+	const oldIntent = `{"schemaVersion":"provider-attempt-intent.v1","purpose":"analytix.provider-attempt-intent/v1","intentId":"c49290035b8b1abbbca333ef956a5fbb52112308dcd97dd763c86ee5828116c2","turnBindingHmac":"14d59c7e868ecc4ab3df75bcfd155328b6302fe5eaa95e91a63cd03d311d0aaa","usageSource":"turn","childRunHmac":"9d2e77574f72c61b0652663a8a32db22007b95e12c629d92adac80db81601bf0","channel":"primary","channelOrdinal":1,"logicalCallOrdinal":1,"shape":{"schemaVersion":"cache-visible-shape.v1","logicalCallHmac":"ddf9138f5d4cbf4201180fa43135a94b71e4c542a3d26245a27a9f4c5c51a958","attempt":1,"providerFamily":"deepseek","modelHmac":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","endpointFormat":"chat_completions","endpointHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","wireBodyHmac":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","credentialScopeHmac":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","providerConfigHmac":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","digestEpoch":1,"startedAt":"2026-07-14T00:00:00Z"},"wireHeadersHmac":"8377e23e24f79f830c3f4cb6d04c254f2b5dcaffd9dcf8e8c77c2bc5c738e47f","issuedAt":"2026-07-14T00:00:00Z","authorityAlgorithm":"Ed25519","authorityKeyId":"790901b82a89fe505b5f98e2b7bf28e3a74f9a40f1a561c9d353f85f61cc36a2","authorityPublicKey":"DXVQdU4IAKXSN-71gmA1dmubPloVhoqUCrKJlYeI47A","authoritySignature":"06E2DFDixGCSPvoVxONjt_ib4keag76iM2eLDF5c1OjPKUn7VmdSVk76CorWMD90qcaufFH4bAvqpFi4iZYxCw"}`
+	const oldSettlement = `{"schemaVersion":"provider-attempt-settlement.v1","purpose":"analytix.provider-attempt-settlement/v1","settlementId":"fa535e2dfa381f215a50e4577323b16bd0d24542547bc77f1830f4b3b6ad7cce","intentId":"c49290035b8b1abbbca333ef956a5fbb52112308dcd97dd763c86ee5828116c2","turnBindingHmac":"14d59c7e868ecc4ab3df75bcfd155328b6302fe5eaa95e91a63cd03d311d0aaa","dispatchState":"sent","observation":{"schemaVersion":"provider-call-observation.v1","shape":{"schemaVersion":"cache-visible-shape.v1","logicalCallHmac":"ddf9138f5d4cbf4201180fa43135a94b71e4c542a3d26245a27a9f4c5c51a958","attempt":1,"providerFamily":"deepseek","modelHmac":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","endpointFormat":"chat_completions","endpointHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","wireBodyHmac":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","credentialScopeHmac":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","providerConfigHmac":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","digestEpoch":1,"startedAt":"2026-07-14T00:00:00Z"},"status":"succeeded","usage":{"inputTokens":{"known":true,"value":100},"outputTokens":{"known":true,"value":20},"cacheHitTokens":{"known":true,"value":90},"cacheMissTokens":{"known":true,"value":10},"reasoningTokens":{"known":false,"value":0}},"settledAt":"2026-07-14T00:00:01Z"},"safeReasonCode":"provider_succeeded","authorityAlgorithm":"Ed25519","authorityKeyId":"790901b82a89fe505b5f98e2b7bf28e3a74f9a40f1a561c9d353f85f61cc36a2","authorityPublicKey":"DXVQdU4IAKXSN-71gmA1dmubPloVhoqUCrKJlYeI47A","authoritySignature":"F73nXNZhMUK-X24mmXv29HNrIN-Bh-igqdHjare0IvYfYn1Q-oaBNbVHLGmZ1xTSMomw9ZgRXWgFJ9wcWQ1uDw"}`
+
+	intent, err := ParseProviderAttemptIntentV1([]byte(oldIntent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement, err := ParseProviderAttemptSettlementV1([]byte(oldSettlement))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateProviderAttemptSettlementForIntentV1(settlement, intent); err != nil {
+		t.Fatal(err)
+	}
+	if intent.Shape.StepBindingHMAC != "" || intent.Shape.StepStartedAt != "" || intent.Shape.PublicAttribution != (ProviderPublicAttributionV1{}) || settlement.Observation.FirstTokenAt != "" {
+		t.Fatal("historical missing fields were invented")
+	}
+	intentBytes, err := ProviderAttemptIntentV1Bytes(intent)
+	if err != nil || string(intentBytes) != oldIntent {
+		t.Fatalf("old signed intent bytes changed: err=%v", err)
+	}
+	settlementBytes, err := ProviderAttemptSettlementV1Bytes(settlement)
+	if err != nil || string(settlementBytes) != oldSettlement {
+		t.Fatalf("old signed settlement bytes changed: err=%v", err)
+	}
+}

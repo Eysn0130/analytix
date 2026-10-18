@@ -353,3 +353,53 @@ func TestRegistryMissingFileObservationsFailClosed(t *testing.T) {
 		t.Fatal("missing file observations restricted uncaptured tools")
 	}
 }
+
+func TestRegistryManualCaptureAfterOpaquePreservesStrictAndMutationGuards(t *testing.T) {
+	r, coordinator, _, path := fixture(t)
+	ctx := context.Background()
+	if err := r.BeginOpaque(ctx); err != nil {
+		t.Fatal(err)
+	}
+	strictRead := false
+	if release, err := r.WithCapture(ctx, "strict", path, func() error { strictRead = true; return nil }); release != nil || !errors.Is(err, ErrUncontainedExecution) || strictRead {
+		t.Fatal("strict opaque barrier changed")
+	}
+	manualRead := false
+	release, err := r.WithManualCapture(ctx, "manual", path, func() error { manualRead = r.HasCaptures(); return nil })
+	if err != nil || release == nil || !manualRead {
+		t.Fatal("explicit optimistic manual admission failed", err)
+	}
+	if !errors.Is(checkMutation(t, r, coordinator, path), ErrMutationBlocked) || !errors.Is(r.BeginOpaque(ctx), ErrCaptureActive) {
+		t.Fatal("manual lease lost shared mutation/activation guard")
+	}
+	release()
+	if r.HasCaptures() {
+		t.Fatal("manual lease leaked")
+	}
+	if release, err := r.Capture(ctx, "strict-again", path); release != nil || !errors.Is(err, ErrUncontainedExecution) {
+		t.Fatal("manual completion cleared opaque state")
+	}
+	if release, err := r.WithManualCapture(ctx, "failed-manual", path, func() error { return errors.New("private baseline") }); release != nil || !errors.Is(err, ErrCaptureFailed) || r.HasCaptures() {
+		t.Fatal("failed manual baseline retained lease")
+	}
+}
+
+func TestRegistryCapturePurposesCannotShareFileAuthority(t *testing.T) {
+	r, _, _, path := fixture(t)
+	ctx := context.Background()
+	manual, err := r.WithManualCapture(ctx, "manual", path, func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"manual", "other-strict-session"} {
+		if release, err := r.WithCapture(ctx, id, path, func() error { t.Fatal("purpose upgrade reached baseline"); return nil }); release != nil || err == nil {
+			t.Fatal("strict capture inherited manual file authority")
+		}
+	}
+	manual()
+	strict := captureFile(t, r, "strict", path)
+	if release, err := r.WithManualCapture(ctx, "other-manual-session", path, func() error { t.Fatal("strict lease downgraded"); return nil }); release != nil || err == nil {
+		t.Fatal("manual transaction reused live strict file authority")
+	}
+	strict()
+}

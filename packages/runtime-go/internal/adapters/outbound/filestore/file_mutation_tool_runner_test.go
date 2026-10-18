@@ -7,11 +7,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	domaincheckpoint "analytix.local/runtime-go/internal/domain/checkpointauthority"
 	domaincheckpointref "analytix.local/runtime-go/internal/domain/checkpointref"
+	processdisplay "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	securitytest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
@@ -571,5 +573,290 @@ func TestPreparedDeleteSymbolIdentityDoesNotDependOnLineNumber(t *testing.T) {
 	}
 	if projections[0] != projections[1] {
 		t.Fatalf("delete_symbol line drift changed semantic identity: %#v", projections)
+	}
+}
+
+func processDisplayMutationInputV1(ctx context.Context, workspace, tool, after string) MutationToolInput {
+	args := map[string]any{"path": "document.txt", "content": after}
+	if tool == "edit" {
+		args = map[string]any{"path": "document.txt", "oldText": "before", "newText": after}
+	}
+	return MutationToolInput{Context: ctx, Workspace: workspace, ToolName: tool, Args: args}
+}
+
+func executeProcessDisplayMutationV1(input MutationToolInput) (any, bool) {
+	if input.ToolName == "edit" {
+		return ExecuteEditTextTool(input)
+	}
+	return ExecuteWriteTextTool(input)
+}
+
+func TestMutationProcessDisplayFreezesActualBeforeAfterInsideMutationLease(t *testing.T) {
+	for _, tool := range []string{"write", "edit"} {
+		t.Run(tool, func(t *testing.T) {
+			workspace := t.TempDir()
+			path := filepath.Join(workspace, "document.txt")
+			if err := os.WriteFile(path, []byte("before"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+			input := processDisplayMutationInputV1(ctx, workspace, tool, "after\r\n")
+			active := false
+			var captured processdisplay.RawCaptureV1
+			var present bool
+			input.AcquireMutation = func(context.Context) (func(), error) {
+				active = true
+				return func() {
+					// Capture must already exist while the actual mutation lease is held.
+					captured, present = processdisplay.ConsumeV1(ctx)
+					active = false
+				}, nil
+			}
+			input.Checkpoint = MutationCheckpointHooks{
+				Prepare: func(resolved string) (MutationCheckpointDraft, error) {
+					if !active || resolved != path {
+						t.Fatal("before capture escaped mutation lease or resolved path")
+					}
+					return MutationCheckpointDraft{Enabled: true}, nil
+				},
+				Complete: func(MutationCheckpointDraft, string) error {
+					if !active {
+						t.Fatal("settlement escaped mutation lease")
+					}
+					return nil
+				},
+			}
+			output, isError := executeProcessDisplayMutationV1(input)
+			actual, err := os.ReadFile(path)
+			if isError || err != nil || string(actual) != "after\r\n" || active || !present || !captured.Complete || captured.Kind != tool || captured.Path != path || captured.Before != "before" || captured.After != string(actual) || captured.EffectApplied == nil || !*captured.EffectApplied || captured.Status != "completed" || captured.SettlementStatus != "completed" || captured.DurationMs < 0 {
+				t.Fatal("capture did not describe the actual leased mutation and settlement")
+			}
+			if captured.AddedLines != 1 || captured.RemovedLines != 1 || captured.Approximate || !strings.Contains(captured.Diff, "--- a/document.txt") || !strings.Contains(captured.Diff, "-before") || !strings.Contains(captured.Diff, "+after\r") {
+				t.Fatal("display diff and counts did not come from actual frozen text")
+			}
+			record, _ := output.(map[string]any)
+			for _, forbidden := range []string{"processDisplay", "displayCapture", "effectApplied", "settlementStatus", "before", "after"} {
+				if _, found := record[forbidden]; found {
+					t.Fatal("volatile display entered tool result map")
+				}
+			}
+		})
+	}
+}
+
+func TestMutationProcessDisplayDistinguishesPrepareAndPostApplySettlementFailure(t *testing.T) {
+	for _, tool := range []string{"write", "edit"} {
+		for _, stage := range []string{"prepare", "complete"} {
+			t.Run(tool+"_"+stage, func(t *testing.T) {
+				workspace := t.TempDir()
+				path := filepath.Join(workspace, "document.txt")
+				if err := os.WriteFile(path, []byte("before"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+				input := processDisplayMutationInputV1(ctx, workspace, tool, "after")
+				completions := 0
+				input.Checkpoint = MutationCheckpointHooks{
+					Prepare: func(string) (MutationCheckpointDraft, error) {
+						if stage == "prepare" {
+							return MutationCheckpointDraft{}, errors.New("synthetic prepare refusal")
+						}
+						return MutationCheckpointDraft{Enabled: true}, nil
+					},
+					Complete: func(MutationCheckpointDraft, string) error {
+						completions++
+						return errors.New("synthetic terminal persistence refusal")
+					},
+				}
+				output, isError := executeProcessDisplayMutationV1(input)
+				capture, ok := processdisplay.ConsumeV1(ctx)
+				actual, err := os.ReadFile(path)
+				record, _ := output.(map[string]any)
+				if !isError || record["code"] != "checkpoint_unavailable" || !ok || err != nil || capture.Status != "failed" || capture.SettlementStatus != "failed" || capture.EffectApplied == nil {
+					t.Fatal("checkpoint failure lost host effect truth")
+				}
+				if stage == "prepare" {
+					if *capture.EffectApplied || capture.After != "" || capture.Diff != "" || capture.AddedLines != 0 || capture.RemovedLines != 0 || string(actual) != "before" || completions != 0 {
+						t.Fatal("prepare failure claimed or performed a mutation")
+					}
+				} else if !*capture.EffectApplied || capture.After != "after" || string(actual) != "after" || completions != 1 {
+					t.Fatal("terminal failure concealed confirmed physical write or retried settlement")
+				}
+			})
+		}
+	}
+}
+
+func TestMutationProcessDisplayApplyErrorLeavesPhysicalEffectUnknown(t *testing.T) {
+	for _, tool := range []string{"write", "edit"} {
+		t.Run(tool, func(t *testing.T) {
+			workspace := t.TempDir()
+			path := filepath.Join(workspace, "document.txt")
+			if err := os.WriteFile(path, []byte("before"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+			input := processDisplayMutationInputV1(ctx, workspace, tool, "after")
+			aborts := 0
+			input.Checkpoint = MutationCheckpointHooks{
+				Prepare: func(string) (MutationCheckpointDraft, error) {
+					// Force real expected-before validation to fail, without faking Apply.
+					if err := os.WriteFile(path, []byte("external replacement"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					return MutationCheckpointDraft{Enabled: true}, nil
+				},
+				Abort: func(MutationCheckpointDraft) error { aborts++; return nil },
+			}
+			_, isError := executeProcessDisplayMutationV1(input)
+			capture, ok := processdisplay.ConsumeV1(ctx)
+			actual, err := os.ReadFile(path)
+			if !isError || !ok || err != nil || string(actual) != "external replacement" || capture.EffectApplied != nil || capture.Before != "before" || capture.After != "" || capture.Diff != "" || capture.AddedLines != 0 || capture.RemovedLines != 0 || !capture.Approximate || capture.Status != "failed" || capture.SettlementStatus != "aborted" || aborts != 1 {
+				t.Fatal("Apply error was presented as false or as a successful intended after image")
+			}
+		})
+	}
+}
+
+func TestMutationProcessDisplayPreservesQuarantinedCheckpointAfterActualWrite(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "document.txt")
+	ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+	input := processDisplayMutationInputV1(ctx, workspace, "write", "after")
+	settlements := 0
+	input.Checkpoint = MutationCheckpointHooks{
+		BeginOperation: func([]MutationOperationPath) (MutationOperationDraft, error) {
+			return MutationOperationDraft{Enabled: true}, nil
+		},
+		SettleOperation: func(_ MutationOperationDraft, succeeded bool) (string, error) {
+			settlements++
+			if !succeeded {
+				t.Fatal("actual successful Apply was reclassified before settlement")
+			}
+			return "quarantined", nil
+		},
+	}
+	output, isError := ExecuteWriteTextTool(input)
+	capture, ok := processdisplay.ConsumeV1(ctx)
+	actual, err := os.ReadFile(path)
+	record, _ := output.(map[string]any)
+	if !isError || record["code"] != "checkpoint_unavailable" || !ok || err != nil || string(actual) != "after" || capture.EffectApplied == nil || !*capture.EffectApplied || capture.SettlementStatus != "quarantined" || capture.Status != "failed" || settlements != 1 {
+		t.Fatal("quarantine lost actual write or changed the existing settlement result")
+	}
+}
+
+func TestMutationProcessDisplayAggregateOverflowDoesNotChangeFileEffect(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "document.txt")
+	before := strings.Repeat("a", processdisplay.RawCaptureByteLimitV1/2+1)
+	after := strings.Repeat("b", processdisplay.RawCaptureByteLimitV1/2+1)
+	if err := os.WriteFile(path, []byte(before), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+	_, isError := ExecuteWriteTextTool(processDisplayMutationInputV1(ctx, workspace, "write", after))
+	capture, ok := processdisplay.ConsumeV1(ctx)
+	actual, err := os.ReadFile(path)
+	if isError || !ok || err != nil || string(actual) != after || capture.Complete || !capture.Overflow || capture.Body != "" || capture.Title != "" || capture.Path != "" || capture.Before != "" || capture.After != "" || capture.Error != "" || capture.Diff != "" || capture.AddedLines != 0 || capture.RemovedLines != 0 || !capture.Approximate || capture.EffectApplied == nil || !*capture.EffectApplied {
+		t.Fatal("display quota altered the tool or retained unclassifiable partial content")
+	}
+}
+
+func TestMutationProcessDisplayDoesNotInventBinaryBeforeTextDiff(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "document.txt")
+	if err := os.WriteFile(path, []byte{0, 1, 2}, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+	output, isError := ExecuteWriteTextTool(processDisplayMutationInputV1(ctx, workspace, "write", "after"))
+	capture, ok := processdisplay.ConsumeV1(ctx)
+	actual, err := os.ReadFile(path)
+	record, _ := output.(map[string]any)
+	if isError || !ok || err != nil || string(actual) != "after" || capture.Complete || capture.Before != "" || capture.After != "" || capture.Diff != "" || capture.AddedLines != 0 || capture.RemovedLines != 0 || !capture.Approximate || capture.EffectApplied == nil || !*capture.EffectApplied {
+		t.Fatal("binary overwrite was fabricated as complete before/after text")
+	}
+	if _, present := record["diff"]; present {
+		t.Fatal("display changed legacy binary overwrite output")
+	}
+}
+
+func TestMutationProcessDisplayLargeChangeCountsRemainExplicitlyApproximate(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "document.txt")
+	before := strings.Repeat("before\n", 2010)
+	after := strings.Repeat("after\n", 2010)
+	if err := os.WriteFile(path, []byte(before), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+	input := processDisplayMutationInputV1(ctx, workspace, "write", after)
+	// Provider-shaped arguments must not invent a diff or exact line counts.
+	input.Args["diff"], input.Args["added"], input.Args["removed"] = "fabricated diff", float64(0), float64(0)
+	_, isError := ExecuteWriteTextTool(input)
+	capture, ok := processdisplay.ConsumeV1(ctx)
+	actual, err := os.ReadFile(path)
+	if isError || !ok || err != nil || string(actual) != after || !capture.Complete || capture.Overflow || !capture.Approximate || capture.AddedLines != 2010 || capture.RemovedLines != 2010 || !strings.Contains(capture.Diff, "diff omitted: change too large") || strings.Contains(capture.Diff, "fabricated") {
+		t.Fatal("bounded diff summary hid approximation or adopted arguments")
+	}
+}
+
+func TestMutationProcessDisplayCountsActualDecodedInputUtf16V1(t *testing.T) {
+	for _, tc := range []struct {
+		name, tool, arguments string
+		want                  *int64
+	}{
+		{"write decoded escapes", "write", `{"path":"document.txt","content":"\u4e2d\ud83d\ude00\n\"\\"}`, inputUnitsFixtureV1(6)},
+		{"write emoji threshold", "write", `{"path":"document.txt","content":"` + strings.Repeat("😀", 513) + `"}`, inputUnitsFixtureV1(1026)},
+		{"write empty", "write", `{"path":"document.txt","content":""}`, inputUnitsFixtureV1(0)},
+		{"write absent", "write", `{"path":"document.txt"}`, nil},
+		{"write null", "write", `{"path":"document.txt","content":null}`, nil},
+		{"write nonstring", "write", `{"path":"document.txt","content":123}`, nil},
+		{"edit decoded escapes", "edit", `{"path":"document.txt","old_string":"before","new_string":"\u4e2d\ud83d\ude00\n\"\\"}`, inputUnitsFixtureV1(12)},
+		{"edit deletion", "edit", `{"path":"document.txt","old_string":"before","new_string":""}`, inputUnitsFixtureV1(6)},
+		{"edit actual selected fields", "edit", `{"path":"document.txt","oldText":"before","old_string":"ignored","newText":"中😀","new_string":"ignored","content":"ignored"}`, inputUnitsFixtureV1(9)},
+		{"multiple edits", "edit", `{"path":"document.txt","old_string":"ignored","new_string":"ignored","edits":[{"oldText":"before","newText":"中😀"},{"old_text":"中😀","new_text":"z"}]}`, inputUnitsFixtureV1(13)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			if err := os.WriteFile(filepath.Join(workspace, "document.txt"), []byte("before"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var args map[string]any
+			if err := json.Unmarshal([]byte(tc.arguments), &args); err != nil {
+				t.Fatal(err)
+			}
+			ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+			output, failed := executeProcessDisplayMutationV1(MutationToolInput{Context: ctx, Workspace: workspace, ToolName: tc.tool, Args: args})
+			capture, ok := processdisplay.ConsumeV1(ctx)
+			if failed || !ok {
+				t.Fatalf("actual tool failed or capture absent: %v", failed)
+			}
+			if (capture.InputUtf16CodeUnits == nil) != (tc.want == nil) || tc.want != nil && *capture.InputUtf16CodeUnits != *tc.want {
+				t.Fatal("capture did not count the actual decoded UTF-16 input; missing/nonstring must remain unknown")
+			}
+			encoded, err := json.Marshal(capture)
+			if err != nil || string(encoded) != "{}" {
+				t.Fatal("raw capture entered generic JSON")
+			}
+			record, _ := output.(map[string]any)
+			if _, leaked := record["inputUtf16CodeUnits"]; leaked {
+				t.Fatal("protected size entered model-visible result")
+			}
+		})
+	}
+}
+
+func inputUnitsFixtureV1(value int64) *int64 { return &value }
+
+func TestMutationProcessDisplayInputSizeDoesNotImposeCaptureQuotaOnWriteV1(t *testing.T) {
+	workspace := t.TempDir()
+	content := strings.Repeat("x", processdisplay.RawCaptureByteLimitV1+1)
+	ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+	_, failed := ExecuteWriteTextTool(MutationToolInput{Context: ctx, Workspace: workspace, ToolName: "write", Args: map[string]any{"path": "large.txt", "content": content}})
+	capture, ok := processdisplay.ConsumeV1(ctx)
+	actual, err := os.ReadFile(filepath.Join(workspace, "large.txt"))
+	if failed || err != nil || string(actual) != content || !ok || !capture.Overflow || capture.InputUtf16CodeUnits == nil || *capture.InputUtf16CodeUnits != int64(len(content)) {
+		t.Fatal("input-size display changed legal write effect or lost actual larger input count")
 	}
 }

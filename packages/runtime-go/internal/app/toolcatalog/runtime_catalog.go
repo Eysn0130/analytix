@@ -21,6 +21,7 @@ type runtimeMCPSource interface {
 // provide current MCP, goal/todo and capability observations; this service
 // never treats a cached catalog as source liveness or execution authority.
 type RuntimeCatalog struct {
+	UserInputConfig            UserInputConfig
 	DocumentGeneration         bool
 	DocumentGenerationKinds    []string
 	NativeSelections           bool
@@ -102,6 +103,7 @@ func (catalog RuntimeCatalog) ToolSchemasWithMCPTools(
 	mcpTools []MCPToolSchema,
 ) []domainmodel.ToolSchema {
 	return MaterializeToolSchemas(MaterializeInput{
+		UserInputConfig:         catalog.UserInputConfig,
 		NativeSelections:        catalog.NativeSelections,
 		DocumentGeneration:      catalog.DocumentGeneration,
 		DocumentGenerationKinds: catalog.DocumentGenerationKinds,

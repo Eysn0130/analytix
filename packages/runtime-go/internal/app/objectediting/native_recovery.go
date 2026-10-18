@@ -175,3 +175,24 @@ func (s *Service) ValidateNativePresentation(ctx context.Context, id, base strin
 	}
 	return result, err
 }
+
+func (s *Service) PrepareNativeManual(ctx context.Context, id string, draft fileport.NativeManualDraft) (fileport.NativeChangeStatus, error) {
+	if s == nil {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return fileport.NativeChangeStatus{}, err
+	}
+	files, ok := s.files.(fileport.NativeManualFiles)
+	if !ok {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	result, err := files.PrepareNativeManual(ctx, fileport.NativeManualInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, Draft: draft})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	return result, err
+}

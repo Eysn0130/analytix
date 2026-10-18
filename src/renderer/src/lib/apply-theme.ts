@@ -56,6 +56,9 @@ export function applyUiFontScale(scale: UiFontScale): void {
         ? '1'
         : '0.88'
   root.style.setProperty('--ds-ui-scale', factor)
+  // DSH has a 14px content baseline rather than these three preference tiers.
+  // Retain Analytix's existing ratios and saved selection; small is its default.
+  root.style.setProperty('--dsh-content-font-size', `${14 * Number(factor) / 0.82}px`)
 }
 
 export function applyCursorSpotlight(enabled: boolean): void {

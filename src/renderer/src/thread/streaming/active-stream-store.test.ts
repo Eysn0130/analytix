@@ -127,3 +127,21 @@ describe('active-stream-store', () => {
     expect(getActiveStreamSnapshotFor('thread-a', 'turn-b').threadId).toBeNull()
   })
 })
+
+
+it('keeps local sends, queued buffers and deltas separate from admitted runtime running authority', () => {
+  clearActiveStream()
+  const pending = pendingActiveStreamTurnId('thread', 'user')
+  resetActiveStream('thread', { turnId: pending, startedAt: 1000 })
+  appendActiveStreamDeltas({ threadId: 'thread', turnId: pending, lastSeq: 1, assistant: 'draft' })
+  expect(getActiveStreamSnapshotFor('thread', pending).runtimeRunning).toBe(false)
+  migrateActiveStreamTurn('thread', pending, 'actual-turn')
+  appendActiveStreamDeltas({ threadId: 'thread', turnId: 'actual-turn', lastSeq: 2, startedAt: 2000, runtimeRunning: true })
+  expect(getActiveStreamSnapshotFor('thread', 'actual-turn')).toMatchObject({ runtimeRunning: true, startedAt: 2000 })
+  appendActiveStreamDeltas({ threadId: 'thread', turnId: 'actual-turn', lastSeq: 3 })
+  expect(getActiveStreamMetricsFor('thread', 'actual-turn')).toMatchObject({ runtimeRunning: true, startedAt: 2000 })
+  clearActiveStream('thread', 'actual-turn')
+  expect(getActiveStreamSnapshotFor('thread', 'actual-turn').runtimeRunning).toBe(false)
+  resetActiveStream('thread', { turnId: 'next-turn', startedAt: 3000 })
+  expect(getActiveStreamSnapshotFor('thread', 'next-turn').runtimeRunning).toBe(false)
+})

@@ -333,6 +333,8 @@ jobs:
           cache-dependency-path: packages/runtime-go/go.sum
       - run: npm ci
       - name: Build the current-source schedule MCP entrypoint without packaging
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build
       - name: Execute synthetic lifecycle and contained schedule contracts
         working-directory: packages/runtime-go
@@ -348,6 +350,30 @@ jobs:
           export ANALYTIX_TEST_SCHEDULE_MCP_ENTRYPOINT_V1="$GITHUB_WORKSPACE/out/main/claw-schedule-mcp-node-entry.js"
           test -f "$ANALYTIX_TEST_SCHEDULE_MCP_ENTRYPOINT_V1"
           node ../../scripts/go-ci-shards.mjs platform
+      - name: Execute native schedule transport settlement contracts
+        working-directory: packages/runtime-go
+        env:
+          TEST_TAGS: ${{ matrix.tags }}
+        run: |
+          set -eo pipefail
+          umask 077
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
+          go_args=(-json -count=1 -p 1 -parallel 2 -timeout 20m)
+          if [ -n "$TEST_TAGS" ]; then
+            go_args+=(-tags "$TEST_TAGS")
+          fi
+          # Each anchored group includes all child scenarios. The JSON gate
+          # requires its execution and package pass, rejecting any skip/fail.
+          for test_name in \
+            TestNativeScheduleActualTransportSettlementPrivateHTTPAndRestartV1 \
+            TestNativeScheduleCancellationAfterCASLeavesUnreadableOrphanV1 \
+            TestNativeScheduleActualFailureAndInconsistentTransportV1 \
+            TestNativeScheduleFinalSettlementFailureCannotSealSuccessfulCaptureV1; do
+            go test "${go_args[@]}" -run "^${test_name}$" ./internal/server | \
+              node ../../scripts/go-test-selection.mjs analytix.local/runtime-go/internal/server "$test_name"
+          done
       - name: Execute root protected-process positives in their own package
         if: ${{ matrix.tags == '' }}
         working-directory: packages/runtime-go

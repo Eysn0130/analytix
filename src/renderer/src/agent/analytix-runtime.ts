@@ -1,4 +1,7 @@
+import { trajectorySource } from '../components/trajectory/trajectory-source'
+import { authoritativeTurnStatuses, authoritativeTurnTimings } from '../components/chat/presentation/chat/turn-timing'
 import type {
+  AuthoritativeTurnStatuses, AuthoritativeTurnTimings,
   AgentProvider,
   AcceptedFinalProjectionBatch,
   ChatBlock,
@@ -9,13 +12,18 @@ import type {
   ThreadEventSink,
   ThreadListOptions,
   ThreadUsageSnapshot,
-  UserInputAnswer
+  TurnUsageById,
+  UserInputSubmission, UserInputWaitState, UserInputWaitControls
 } from './types'
 import {
   getAnalytixRuntimeSettings,
   resolveModelProviderRequestSelection,
   type AppSettingsV1
 } from '@shared/app-settings'
+import { UserInputActionSelectorSchemaV1, type UserInputActionSelectorV1, UserInputLateReplyResponseSchemaV1, UserInputWaitScheduledResponseSchemaV1, UserInputMetadataResolutionResponse, UserInputResolutionResponse } from '../../../../packages/runtime/src/contracts/approvals'
+import { userInputLocalSelectorSchemaV1, type UserInputLocalSelectorV1 } from '../../../../packages/runtime/src/contracts/user-input-local-display'
+import { CompactResponse } from '../../../../packages/runtime/src/contracts/turns'
+import type { UserInputWaitOwnerStateV1 } from '@shared/analytix-api'
 import { validateOptionalModelReasoningEffortV1 } from '@shared/model-reasoning-effort'
 import {
   ANALYTIX_ATTACHMENT_DIAGNOSTICS_PATH,
@@ -85,7 +93,6 @@ import type {
   CoreThreadGoalResponseJson,
   CoreThreadJson,
   CoreTurnJson,
-  CoreTurnItemJson,
   CoreThreadSummaryResponseJson,
   CoreThreadSummaryTaskMutationResponseJson,
   CoreThreadSummaryTaskOutputResponseJson,
@@ -97,15 +104,21 @@ import {
   acceptedFinalProjectionBatchFromRuntime,
   caseProjectFromCore,
   chatBlockFromItem,
+  createOrdinaryHistoryReplay,
   dispatchAnalytixRuntimeEvents,
   goalFromCore,
+  goalHistoryBlocksFromCore,
+  mergeGoalHistoryBlocks,
   mergeChatBlocks,
   todosFromCore,
   threadFromCore,
-  usageFromCore
+  usageFromCore,
+  mergeTurnUsageById,
+  turnUsageEntryFromBatch
 } from './analytix-mapper'
 import { rendererRuntimeClient } from './runtime-client'
 import { isPublicSseIpcPayload } from '@shared/public-runtime-content'
+import { isStrictPublicRuntimeSseIpcPayload } from '@shared/public-runtime-sse'
 import {
   AssistantTextTurnItem,
   AcceptedFinalPublicViewV3Schema,
@@ -130,8 +143,18 @@ import { RuntimeSkillsResponseV2 as RuntimeSkillsResponseSchema } from '../../..
 import type { ZodType } from 'zod'
 import {
   filterRevokedPublicProjectionThreads,
-  isPublicProjectionRevoked
+  isPublicProjectionRevoked,
+  markPublicProjectionRevoked
 } from '../lib/public-projection-revocation'
+
+function userInputActionSelector(inputId: string, selector?: UserInputActionSelectorV1): UserInputActionSelectorV1 | undefined {
+  // The absent form is the explicit original-owner compatibility command.
+  // A supplied tuple must never fall back to that form after validation fails.
+  if (selector === undefined) return undefined
+  const parsed = UserInputActionSelectorSchemaV1.safeParse(selector)
+  if (!parsed.success || parsed.data.requestId !== inputId) throw new Error('Question action owner is unavailable.')
+  return parsed.data
+}
 
 function createSseStreamId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `sse-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -250,6 +273,17 @@ function validStringArray(value: unknown): string[] | undefined {
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
 }
 
+// Public cancellation metadata describes one historical attempt. It carries
+// no Host Question association, accepted reply, or executable composer state.
+function discardedReplyHistoryBlocks(threadId: string, turn: CoreTurnJson): ChatBlock[] {
+  return (turn.steering ?? []).flatMap(entry => {
+    if (typeof entry === 'string' || entry.status !== 'cancelled' || entry.cancelReason !== 'user_input_discarded' ||
+        !entry.id || !entry.cancelledAt || !Number.isFinite(Date.parse(entry.cancelledAt))) return []
+    return [{ kind: 'system' as const, id: 'history:discard:' + JSON.stringify([threadId, turn.id, entry.id]),
+      createdAt: entry.cancelledAt, text: '', code: 'history_user_input_discarded', meta: { turnId: turn.id } }]
+  })
+}
+
 type ThreadTimingMaps = {
   turnDurationByUserId: Record<string, number>
 }
@@ -258,13 +292,6 @@ function timestampMs(value: unknown): number | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function timelineItemsFromThreadItems(items: CoreTurnItemJson[]): CoreTurnItemJson[] {
-  return items.flatMap((item) => {
-    if (item.kind === 'assistant_reasoning') return []
-    return [{ ...item }]
-  })
 }
 
 function deriveThreadTimingMaps(
@@ -325,13 +352,13 @@ function applyPendingGateProjection(
     }
     if (block.kind === 'user_input' && hasUserInputProjection) {
       const live = pendingInputs.has(block.requestId) || pendingInputs.has(block.id)
-      if (live && block.status !== 'pending') {
+      if (live && block.status === 'error') {
         changed = true
         return { ...block, status: 'pending' }
       }
       if (!live && block.status === 'pending') {
         changed = true
-        return { ...block, status: 'cancelled' }
+        return { ...block, status: 'error', errorMessage: 'User input outcome is unavailable.' }
       }
     }
     return block
@@ -401,7 +428,174 @@ function requestModelSelectionFromSettings(options: {
  * reconnection, and approval policy decisions. DTO and chat-block
  * mapping live in `analytix-contract.ts` and `analytix-mapper.ts`.
  */
+type WaitBinding = {
+  selector: UserInputLocalSelectorV1; state: UserInputWaitState; deadline: number | null
+  listeners: Set<(state: UserInputWaitState) => void>; timer?: ReturnType<typeof setTimeout>; epoch: number
+  focusIntent: boolean; engageIntent: boolean; holdIntent: boolean; closing: boolean
+}
 export class AnalytixRuntimeProvider implements AgentProvider {
+  // Request metadata belongs to this existing provider, independent of which
+  // thread/card is mounted. It never retains private question/answer bytes.
+  private userInputWaits = new Map<string, WaitBinding>()
+  private waitOff?: () => void
+  private publishWait(binding: WaitBinding): void {
+    for (const listener of binding.listeners) listener({ ...binding.state })
+  }
+  private stopWaitClock(binding: WaitBinding): void {
+    clearTimeout(binding.timer)
+    binding.timer = undefined
+    if (binding.deadline !== null) binding.state.remainingMs = Math.max(0, binding.deadline - Date.now())
+    binding.deadline = null
+  }
+  private runWaitClock(binding: WaitBinding): void {
+    clearTimeout(binding.timer)
+    if (binding.state.phase !== 'counting' || binding.deadline === null) return
+    binding.state.remainingMs = Math.max(0, binding.deadline - Date.now())
+    this.publishWait(binding)
+    if (binding.state.remainingMs === 0) {
+      binding.deadline = null
+      binding.state.phase = 'continuing'
+      this.publishWait(binding)
+      const epoch = binding.epoch, key = JSON.stringify(binding.selector)
+      const current = () => this.userInputWaits.get(key) === binding && binding.epoch === epoch && binding.state.phase === 'continuing'
+      void this.continueUserInput(binding.selector.requestId, binding.selector).then(() => {
+        if (!current()) return
+        binding.state.phase = 'scheduled'; this.publishWait(binding)
+      }).catch(() => {
+        if (!current()) return
+        binding.state.phase = 'error'; this.publishWait(binding)
+      })
+      return
+    }
+    binding.timer = setTimeout(() => this.runWaitClock(binding), Math.min(1000, binding.state.remainingMs))
+  }
+  private acceptWait(binding: WaitBinding, wait: UserInputWaitOwnerStateV1): void {
+    // Selector-only EOF belongs to the old held reader until native close confirms.
+    if (binding.closing) return
+    if (wait.state === 'waiting') {
+      // A repeat/remount frame cannot reset an engaged or scheduled claim.
+      if (binding.state.phase !== 'connecting') return
+      const phase = binding.engageIntent ? 'editing' : binding.holdIntent || wait.snapshot.remainingMs === null ? 'waiting' : binding.focusIntent ? 'focused' : 'counting'
+      binding.state = { phase, remainingMs: binding.holdIntent ? null : wait.snapshot.remainingMs }
+      binding.deadline = phase !== 'counting' || wait.snapshot.remainingMs === null ? null : wait.observedAt + wait.snapshot.remainingMs
+      this.runWaitClock(binding)
+    } else if (wait.state === 'ended' || wait.state === 'unavailable') {
+      this.stopWaitClock(binding)
+      binding.state.phase = wait.state === 'ended' ? 'ended' : 'error'
+    }
+    this.publishWait(binding)
+    if ((wait.state === 'ended' || wait.state === 'unavailable') && !binding.listeners.size) {
+      this.userInputWaits.delete(JSON.stringify(binding.selector))
+      if (!this.userInputWaits.size) { this.waitOff?.(); this.waitOff = undefined }
+    }
+  }
+  observeUserInputWait(selector: UserInputLocalSelectorV1, listener: (state: UserInputWaitState) => void): UserInputWaitControls {
+    const parsed = userInputLocalSelectorSchemaV1.safeParse(selector)
+    const none = { focus() {}, blur() {}, engage() {}, takeTime() {}, retry() {}, unsubscribe() {} }
+    if (!parsed.success) { listener({ phase: 'error', remainingMs: null }); return none }
+    const key = JSON.stringify(parsed.data)
+    if (!this.waitOff) this.waitOff = rendererRuntimeClient.onUserInputWaitChanged(event => {
+      const current = this.userInputWaits.get(JSON.stringify(event.selector))
+      if (current) this.acceptWait(current, event.wait)
+    })
+    let binding = this.userInputWaits.get(key)
+    if (!binding) {
+      if (this.userInputWaits.size >= 32) { listener({ phase: 'error', remainingMs: null }); return none }
+      binding = { selector: parsed.data, state: { phase: 'connecting', remainingMs: null }, deadline: null, listeners: new Set(), epoch: 0, focusIntent: false, engageIntent: false, holdIntent: false, closing: false }
+      this.userInputWaits.set(key, binding)
+      const attached = binding, epoch = binding.epoch
+      void rendererRuntimeClient.openUserInputWait(parsed.data).then(wait => {
+        if (this.userInputWaits.get(key) === attached && attached.epoch === epoch) this.acceptWait(attached, wait)
+      }).catch(() => {
+        if (this.userInputWaits.get(key) === attached && attached.epoch === epoch) this.acceptWait(attached, { state: 'unavailable' })
+      })
+    }
+    const selected = binding
+    selected.listeners.add(listener)
+    listener({ ...selected.state })
+    const current = () => this.userInputWaits.get(key) === selected
+    return {
+      focus: () => {
+        if (!current()) return
+        selected.focusIntent = true
+        if (selected.state.phase !== 'counting') return
+        this.stopWaitClock(selected); selected.state.phase = 'focused'; this.publishWait(selected)
+      },
+      blur: () => {
+        if (!current()) return
+        selected.focusIntent = false
+        if (selected.state.phase !== 'focused') return
+        selected.state.phase = 'counting'
+        selected.deadline = Date.now() + (selected.state.remainingMs ?? 0)
+        this.runWaitClock(selected)
+      },
+      engage: () => {
+        if (!current() || !['connecting', 'counting', 'focused', 'waiting'].includes(selected.state.phase)) return
+        selected.engageIntent = true
+        if (selected.state.phase === 'connecting') return
+        this.stopWaitClock(selected); selected.state.phase = 'editing'; this.publishWait(selected)
+      },
+      takeTime: () => {
+        if (!current() || !['connecting', 'counting', 'focused', 'editing', 'waiting'].includes(selected.state.phase)) return
+        selected.holdIntent = true
+        if (selected.state.phase === 'connecting') return
+        this.stopWaitClock(selected); selected.state.phase = 'waiting'; selected.state.remainingMs = null; this.publishWait(selected)
+      },
+      retry: () => {
+        if (!current() || !['error', 'ended'].includes(selected.state.phase)) return
+        const epoch = ++selected.epoch
+        selected.closing = true
+        selected.state = { phase: 'connecting', remainingMs: null }; this.publishWait(selected)
+        void (async () => {
+          await rendererRuntimeClient.closeUserInputWait(selected.selector)
+          if (!current() || selected.epoch !== epoch) return
+          selected.closing = false
+          const wait = await rendererRuntimeClient.openUserInputWait(selected.selector)
+          if (current() && selected.epoch === epoch) this.acceptWait(selected, wait)
+        })().catch(() => {
+          if (current() && selected.epoch === epoch) { selected.closing = false; this.acceptWait(selected, { state: 'unavailable' }) }
+        })
+      },
+      unsubscribe: () => {
+        selected.listeners.delete(listener)
+        if (!selected.listeners.size && ['ended', 'error'].includes(selected.state.phase)) {
+          this.userInputWaits.delete(key)
+          if (!this.userInputWaits.size) { this.waitOff?.(); this.waitOff = undefined }
+        }
+      }
+    }
+  }
+  settleUserInputWait(selector: UserInputLocalSelectorV1): void {
+    const key = JSON.stringify(selector), binding = this.userInputWaits.get(key)
+    if (!binding) return
+    this.userInputWaits.delete(key); binding.epoch++; this.stopWaitClock(binding)
+    binding.state.phase = 'ended'; this.publishWait(binding)
+    void rendererRuntimeClient.closeUserInputWait(selector).catch(() => undefined)
+    if (!this.userInputWaits.size) { this.waitOff?.(); this.waitOff = undefined }
+  }
+  async continueUserInput(inputId: string, selector?: UserInputActionSelectorV1): Promise<void> {
+    const response = await rendererRuntimeClient.runtimeRequest(analytixUserInputPath(inputId), 'POST', JSON.stringify({ action: 'continue', selector: userInputActionSelector(inputId, selector) }))
+    const scheduled = UserInputWaitScheduledResponseSchemaV1.safeParse(response.ok ? readRuntimeJson<unknown>(response.body, 'invalid wait acknowledgement') : null)
+    if (!response.ok || response.status !== 202 || !scheduled.success || scheduled.data.inputId !== inputId) throw new Error('Question continuation could not be scheduled.')
+    // Scheduling is not a terminal outcome. Keep the claim until real settlement.
+  }
+  async submitUserInputLateReply(inputId: string, answers: UserInputSubmission[], lateReply: import('../../../../packages/runtime/src/contracts/approvals').UserInputLateReplyRequestV1, selector?: UserInputActionSelectorV1): Promise<import('../../../../packages/runtime/src/contracts/approvals').UserInputLateReplyDeliveryV1> {
+    const response = await rendererRuntimeClient.runtimeRequest(analytixUserInputPath(inputId), 'POST', JSON.stringify({ answers, lateReply, selector: userInputActionSelector(inputId, selector) }))
+    if (!response.ok) {
+      const error = readRuntimeError(response.body, 'Late answer could not be scheduled.')
+      const failure = runtimeErrorToError(error)
+      const tooLarge = response.status === 409 && error.code === 'user_input_late_reply_too_large'
+      // A validation/size rejection precedes admission. Transport uncertainty
+      // and conflicts retain the attempt identity for idempotent reconciliation.
+      throw Object.assign(failure, { userInputLateReplyUnadmitted: response.status === 400 || response.status === 413 || tooLarge, userInputLateReplyTooLarge: tooLarge })
+    }
+    const result = UserInputLateReplyResponseSchemaV1.safeParse(readRuntimeJson<unknown>(response.body, 'invalid late answer response'))
+    if (response.status !== 200 || !result.success || result.data.inputId !== inputId ||
+        result.data.lateReply.clientUserMessageId !== lateReply.clientUserMessageId) throw new Error('Runtime returned an unrelated late answer.')
+    // expectedTurnId is a compare-and-set anchor. Idle admission may return a
+    // new durable target; only the authenticated closed Host receipt owns it.
+    return result.data.lateReply
+  }
   readonly id = 'analytix' as const
   readonly displayName = 'Analytix'
 
@@ -513,14 +707,16 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     mode?: AnalytixThreadMode
     model?: string
     providerId?: string
+    localDocument?: boolean
   }): Promise<NormalizedThread> {
     const settings = await rendererRuntimeClient.getSettings()
     const runtime = getAnalytixRuntimeSettings(settings)
-    const rawModel = input.model?.trim() || runtime.model
-    const selection = requestModelSelectionFromSettings({
+    // Local ownership uses the existing Core thread contract, without selecting
+    // or checking a model. The internal purpose never crosses HTTP.
+    const selection = input.localDocument ? {} : requestModelSelectionFromSettings({
       settings,
       explicitProviderId: input.providerId,
-      model: rawModel,
+      model: input.model?.trim() || runtime.model,
       runtimeProviderId: runtime.providerId
     })
     const response = await rendererRuntimeClient.runtimeRequest(
@@ -530,8 +726,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
         workspace: input.workspace || settings.workspaceRoot || '~',
         title: input.title,
         autoTitle: input.autoTitle,
-        model: selection.model,
-        providerId: selection.providerId,
+        ...selection,
         mode: normalizeThreadMode(input.mode),
         approvalPolicy: runtime.approvalPolicy,
         sandboxMode: runtime.sandboxMode
@@ -554,9 +749,13 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     latestTurnId?: string
     latestUserMessageId?: string
     turnDurationByUserId?: Record<string, number>
+    authoritativeTurnTimings?: AuthoritativeTurnTimings
+  authoritativeTurnStatuses?: AuthoritativeTurnStatuses
     pendingApprovalIds?: string[]
     pendingUserInputIds?: string[]
     usage?: ThreadUsageSnapshot
+    turnUsageById?: TurnUsageById
+    turnUsageThroughSeq?: number
     goal?: NormalizedThread['goal']
     todos?: NormalizedThread['todos']
     historyAuthority?: CoreThreadJson['historyAuthority']
@@ -587,7 +786,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     if (isPublicProjectionRevoked(threadId)) {
       throw new Error('Public case projection authority was revoked.')
     }
-    const items = turns.flatMap((turn) =>
+    const itemsWithContext = turns.flatMap((turn) =>
       (turn.items ?? [])
         .filter((item) => {
           if (!caseBound || item.kind !== 'assistant_text' ||
@@ -601,45 +800,65 @@ export class AnalytixRuntimeProvider implements AgentProvider {
             ordinary.data.turnId === turn.id
         })
         .map((item) => ({
-          ...item,
-          workspaceCheckpointId: item.workspaceCheckpointId ?? turn.workspaceCheckpointId,
-          attachmentIds: turn.attachmentIds,
-          activeSkillIds: turn.activeSkillIds,
-          injectedMemoryIds: turn.injectedMemoryIds,
-          skillInjectionBytes: turn.skillInjectionBytes
+          item,
+          ownerTurnId: turn.id,
+          rendererContext: {
+            workspaceCheckpointId: item.workspaceCheckpointId ?? turn.workspaceCheckpointId,
+            attachmentIds: turn.attachmentIds,
+            activeSkillIds: turn.activeSkillIds,
+            injectedMemoryIds: turn.injectedMemoryIds,
+            skillInjectionBytes: turn.skillInjectionBytes
+          }
         }))
     )
-    const timelineItems = timelineItemsFromThreadItems(items)
+    const items = itemsWithContext.map(({ item }) => item)
+    const timelineItems = itemsWithContext.filter(({ item }) => item.kind !== 'assistant_reasoning')
     const timingMaps = deriveThreadTimingMaps(turns)
-    const rawBlocks = mergeChatBlocks(timelineItems.flatMap((item) => {
-      const projection = item.turnId ? acceptedProjectionByTurn.get(item.turnId) : undefined
-      if (projection?.assistant.id === item.id) {
-        return [{
-          ...projection.assistant,
-          meta: { ...projection.assistant.meta, ...(retainedFactTurns.has(item.turnId!) ? { factHistoryState: 'retained_snapshot' } : {}) },
-          acceptedFinalProjectionReceipt: projection.receipt,
-          acceptedFinalProjectionTerminal: projection.terminal
-        }]
-      }
-      const block = chatBlockFromItem(item)
-      return block ? [block] : []
-    }))
+    const timelineItemsByTurn = new Map<string, typeof timelineItems>()
+    for (const entry of timelineItems) {
+      const group = timelineItemsByTurn.get(entry.ownerTurnId) ?? []
+      group.push(entry)
+      timelineItemsByTurn.set(entry.ownerTurnId, group)
+    }
+    const rawBlocks = mergeChatBlocks(turns.flatMap(turn => [
+      ...(timelineItemsByTurn.get(turn.id) ?? []).flatMap<ChatBlock>(({ item, rendererContext }) => {
+        const projection = item.turnId ? acceptedProjectionByTurn.get(item.turnId) : undefined
+        if (projection?.assistant.id === item.id) {
+          return [{
+            ...projection.assistant,
+            meta: { ...projection.assistant.meta, ...(retainedFactTurns.has(item.turnId!) ? { factHistoryState: 'retained_snapshot' } : {}) },
+            acceptedFinalProjectionReceipt: projection.receipt,
+            acceptedFinalProjectionTerminal: projection.terminal
+          }]
+        }
+        const block = chatBlockFromItem(item, undefined, rendererContext)
+        return block ? [block] : []
+      }),
+      ...discardedReplyHistoryBlocks(threadId, turn)
+    ]))
     const pendingApprovalIds = validStringArray(thread.pendingApprovalIds)
     const pendingUserInputIds = validStringArray(thread.pendingUserInputIds)
-    const blocks = applyPendingGateProjection(rawBlocks, pendingApprovalIds, pendingUserInputIds)
+    const snapshotBlocks = applyPendingGateProjection(rawBlocks, pendingApprovalIds, pendingUserInputIds)
+    const latestSeq = thread.latestSeq ?? 0
+    const blocks = mergeGoalHistoryBlocks(snapshotBlocks,goalHistoryBlocksFromCore(thread))
+    if (isPublicProjectionRevoked(threadId)) throw new Error('Public case projection authority was revoked.')
     const latestTurn = turns.at(-1)
     const latestUserMessageId = [...items].reverse().find((item) => item.kind === 'user_message')?.id
     return {
       thread: threadFromCore(thread),
       blocks,
-      latestSeq: thread.latestSeq ?? 0,
+      latestSeq,
       threadStatus: thread.status ?? latestTurn?.status,
       latestTurnId: latestTurn?.id,
       latestUserMessageId,
       ...timingMaps,
+      authoritativeTurnTimings: authoritativeTurnTimings(turns),
+      authoritativeTurnStatuses: authoritativeTurnStatuses(turns),
       pendingApprovalIds,
       pendingUserInputIds,
       usage: thread.usage ? usageFromCore(thread.usage) : undefined,
+      turnUsageById: Object.fromEntries([...acceptedProjectionByTurn].map(([turnId, projection]) =>
+        [turnId, turnUsageEntryFromBatch(projection)])),
       goal: thread.goal ? goalFromCore(thread.goal) : null,
       todos: thread.todos ? todosFromCore(thread.todos) : null,
       historyAuthority: thread.historyAuthority,
@@ -647,6 +866,137 @@ export class AnalytixRuntimeProvider implements AgentProvider {
         latestTurn && acceptedProjectionByTurn.has(latestTurn.id)
           ? acceptedProjectionByTurn.get(latestTurn.id)?.publicationCommitId
           : undefined
+    }
+  }
+
+  /** UI-only projection. The generic getter remains the current primary for model/workflow consumers. */
+  async restoreThreadDisplayHistory(
+    threadId: string,
+    detail: Awaited<ReturnType<AgentProvider['getThreadDetail']>>,
+    signal?: AbortSignal
+  ): Promise<Awaited<ReturnType<AgentProvider['getThreadDetail']>>> {
+    if (signal?.aborted) throw new Error('Public history replay was cancelled.')
+    if (detail.thread && detail.thread.id !== threadId) throw new Error('Runtime thread response identity mismatch.')
+    if (isPublicProjectionRevoked(threadId)) {
+      trajectorySource.revoke(threadId)
+      throw new Error('Public case projection authority was revoked.')
+    }
+    const releaseTrajectory = trajectorySource.retainThread(threadId)
+    trajectorySource.setHistoryReader(threadId, detail.historyAuthority === 'case_boundary_only_v1' ? undefined
+      : (throughSeq, accept, replaySignal) => this.replayPublicHistory(threadId, throughSeq, accept, replaySignal, 'trajectory-window'), detail.latestSeq)
+    try {
+      if (detail.historyAuthority === 'case_boundary_only_v1' || detail.latestSeq <= 0) {
+        trajectorySource.bindThread(threadId)
+        return detail
+      }
+      const needsHistoricalBlocks = detail.blocks.some(block => block.kind === 'compaction')
+      try {
+        const restored = await this.restoreOrdinaryHistory(threadId, detail.latestSeq, detail.blocks, signal, needsHistoricalBlocks)
+        if (isPublicProjectionRevoked(threadId)) throw new Error('Public case projection authority was revoked.')
+        if (!signal?.aborted) trajectorySource.bindThread(threadId)
+        return { ...detail, blocks: restored.blocks,
+          turnUsageById: mergeTurnUsageById(threadId, restored.turnUsageById, detail.turnUsageById),
+          turnUsageThroughSeq: detail.latestSeq }
+      } catch (error) {
+        // Receipt/usage replay is optional. Preserve the primary history when it is
+        // unavailable, without publishing an estimate or reviving revoked state.
+        if (needsHistoricalBlocks || signal?.aborted || isPublicProjectionRevoked(threadId)) throw error
+        trajectorySource.bindThread(threadId)
+        return detail
+      }
+    } finally { releaseTrajectory() }
+  }
+
+  /** A separate finite stream: no chat dispatch, live binding, or shared ACK cursor. */
+  private async replayPublicHistory(threadId: string, throughSeq: number, accept: (events: unknown[]) => void, signal?: AbortSignal, purpose: 'ordinary' | 'trajectory-window' = 'ordinary'): Promise<void> {
+    const streamId = createSseStreamId()
+    await new Promise<void>((resolve, reject) => {
+      let settled = false
+      let chain = Promise.resolve()
+      let cursor = 0
+      const finish = (error?: unknown): void => {
+        if (settled) return
+        settled = true
+        offData(); offEnd(); offError()
+        signal?.removeEventListener('abort', onAbort)
+        void rendererRuntimeClient.stopSse(streamId).catch(() => undefined)
+        if (error) reject(error)
+        else resolve()
+      }
+      const offData = rendererRuntimeClient.onSseEvent(payload => {
+        if (payload.streamId !== streamId || settled) return
+        if (!isStrictPublicRuntimeSseIpcPayload(payload) || purpose === 'trajectory-window' && payload.events.some(event => event.threadId !== threadId)) {
+          finish(new Error('Invalid public history delivery.'))
+          return
+        }
+        chain = chain.then(async () => {
+          if (settled) return
+          // This terminal control has no seq. Validate/bind it before the ordinary
+          // replay parser, and never let optional replay fallback revive its data.
+          if (payload.events.some(event => event.kind === 'public_projection_revoked')) {
+            const revoked = payload.events.length === 1
+              ? PublicProjectionRevokedEventSchema.safeParse(payload.events[0])
+              : null
+            if (!revoked?.success || revoked.data.threadId !== threadId) {
+              throw new Error('Invalid public history delivery.')
+            }
+            markPublicProjectionRevoked(threadId)
+            trajectorySource.revoke(threadId)
+            throw new Error('Public case projection authority was revoked.')
+          }
+          let next = payload.events.reduce<number>((max, event) => Math.max(max, (event as CoreRuntimeEventJson).seq ?? 0), 0)
+          if (purpose === 'trajectory-window') {
+            if (isPublicProjectionRevoked(threadId)) throw new Error('Public case projection authority was revoked.')
+            next = cursor
+            for (const event of payload.events) {
+              const seq = (event as CoreRuntimeEventJson).seq
+              if (event.kind === 'accepted_final_batch' || event.kind === 'snapshot_required' ||
+                  typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq <= next || seq > throughSeq ||
+                  'firstSeq' in event && typeof event.firstSeq === 'number' && event.firstSeq <= next) {
+                throw new Error('Invalid public history delivery.')
+              }
+              next = seq
+            }
+          }
+          accept(payload.events)
+          if (purpose === 'trajectory-window' && (settled || signal?.aborted)) return
+          if (next > 0 && !await rendererRuntimeClient.ackSseEvent(streamId, next)) {
+            throw new Error('Public history acknowledgement was rejected.')
+          }
+          cursor = next
+        }).catch(finish)
+      })
+      const offError = rendererRuntimeClient.onSseError(payload => {
+        if (payload.streamId === streamId) finish(new Error('Public history replay is unavailable.'))
+      })
+      const offEnd = rendererRuntimeClient.onSseEnd(payload => {
+        if (payload.streamId === streamId) void chain.then(() => finish(purpose !== 'trajectory-window' || cursor === throughSeq ? undefined : new Error('Public history replay is incomplete.')), finish)
+      })
+      const onAbort = (): void => finish(new Error('Public history replay was cancelled.'))
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) { onAbort(); return }
+      void rendererRuntimeClient.startSse(threadId, 0, streamId, { replayThroughSeq: throughSeq }).then(() => {
+        // Cancellation can win while Main still awaits settings, before it owns
+        // a controller. Stop again when that late start finally creates one.
+        if (settled || signal?.aborted) void rendererRuntimeClient.stopSse(streamId).catch(() => undefined)
+      }).catch(finish)
+    })
+  }
+
+  private async restoreOrdinaryHistory(threadId: string, throughSeq: number, snapshot: ChatBlock[], signal?: AbortSignal, includeHistoricalBlocks = true): Promise<{ blocks: ChatBlock[]; turnUsageById: TurnUsageById }> {
+    const projection = createOrdinaryHistoryReplay(threadId, throughSeq)
+    const trajectoryReplay = trajectorySource.beginReplay(threadId, throughSeq)
+    try {
+      await this.replayPublicHistory(threadId, throughSeq, events => {
+        projection.accept(events)
+        trajectoryReplay.accept(events)
+      }, signal)
+      const restored = { blocks: projection.mergeSnapshot(snapshot, { threadId, includeHistoricalBlocks }), turnUsageById: projection.turnUsage() }
+      trajectoryReplay.complete()
+      return restored
+    } catch (error) {
+      trajectoryReplay.fail()
+      throw error
     }
   }
 
@@ -773,6 +1123,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       reasoningEffort?: import('@shared/app-settings').ModelReasoningEffort
       riskIntent?: 'case'
       displayText?: string
+      requestedSkillIds?: string[]
       guiPlan?: {
         operation: 'draft' | 'refine'
         workspaceRoot: string
@@ -811,6 +1162,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     if (reasoningEffort) {
       body.reasoningEffort = reasoningEffort
     }
+    if (options?.requestedSkillIds?.length) body.requestedSkillIds = [...options.requestedSkillIds]
     if (options?.riskIntent === 'case') {
       body.riskIntent = 'case'
     }
@@ -1063,14 +1415,14 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     }
   }
 
-  async updateThreadRelation(threadId: string, relation: NonNullable<NormalizedThread['relation']>): Promise<void> {
+  async promoteSideThread(threadId: string): Promise<void> {
     const response = await rendererRuntimeClient.runtimeRequest(
       analytixThreadPath(threadId),
       'PATCH',
-      JSON.stringify({ relation })
+      JSON.stringify({ promoteSide: true })
     )
     if (!response.ok) {
-      throw runtimeErrorToError(readRuntimeError(response.body, 'update thread relation failed'))
+      throw runtimeErrorToError(readRuntimeError(response.body, 'promote Side thread failed'))
     }
   }
 
@@ -1078,7 +1430,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     const response = await rendererRuntimeClient.runtimeRequest(
       analytixThreadPath(threadId),
       'PATCH',
-      JSON.stringify({ status: archived ? 'archived' : 'idle' })
+      JSON.stringify({ archived })
     )
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'archive thread failed'))
@@ -1101,9 +1453,14 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'compact thread failed'))
     }
+    readRuntimeSchema(response.body, 'Invalid compaction response.', CompactResponse)
   }
 
   async getThreadGoal(threadId: string): Promise<NonNullable<NormalizedThread['goal']> | null> {
+    return (await this.getThreadGoalState(threadId)).goal
+  }
+
+  async getThreadGoalState(threadId: string): Promise<import('./types').ThreadGoalStateV1> {
     const response = await rendererRuntimeClient.runtimeRequest(
       analytixThreadGoalPath(threadId),
       'GET'
@@ -1115,12 +1472,16 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       response.body,
       'runtime returned an invalid thread goal response'
     )
-    return body.goal ? goalFromCore(body.goal) : null
+    return { goal: body.goal ? goalFromCore(body.goal) : null, activation: body.activation ?? null,
+      historyBlocks: goalHistoryBlocksFromCore({goalHistory:body.history}) }
   }
 
   async setThreadGoal(
     threadId: string,
     patch: {
+      operation?: 'create' | 'edit' | 'pause' | 'resume'
+      ref?: import('../../../../packages/runtime/src/contracts/goal').GoalRefV1
+      maxGoalRounds?: number
       objective?: string
       status?: NonNullable<NormalizedThread['goal']>['status']
       tokenBudget?: number | null
@@ -1152,10 +1513,11 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     return goalFromCore(body.goal)
   }
 
-  async clearThreadGoal(threadId: string): Promise<boolean> {
+  async clearThreadGoal(threadId: string, ref?: import('../../../../packages/runtime/src/contracts/goal').GoalRefV1): Promise<boolean> {
     const response = await rendererRuntimeClient.runtimeRequest(
       analytixThreadGoalPath(threadId),
-      'DELETE'
+      ref ? 'POST' : 'DELETE',
+      ref ? JSON.stringify({operation:'clear',ref}) : undefined
     )
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'failed to clear thread goal'))
@@ -1234,25 +1596,37 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     }
   }
 
-  async submitUserInputResponse(inputId: string, answers: UserInputAnswer[]): Promise<void> {
+  async submitUserInputResponse(inputId: string, answers: UserInputSubmission[], selector?: UserInputActionSelectorV1): Promise<void> {
     const response = await rendererRuntimeClient.runtimeRequest(
       analytixUserInputPath(inputId),
       'POST',
-      JSON.stringify({ answers })
+      JSON.stringify({ answers, selector: userInputActionSelector(inputId, selector) })
     )
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'request_user_input response failed'))
     }
+    const schema = answers.some(answer => 'kind' in answer)
+      ? UserInputMetadataResolutionResponse : UserInputResolutionResponse
+    const resolution = schema.safeParse(readRuntimeJson<unknown>(response.body, 'invalid user input response'))
+    if (!resolution.success || resolution.data.inputId !== inputId || resolution.data.status !== 'submitted') {
+      throw new Error('runtime returned an unrelated user input resolution')
+    }
   }
 
-  async cancelUserInput(inputId: string): Promise<void> {
+  async cancelUserInput(inputId: string, selector?: UserInputActionSelectorV1): Promise<void> {
     const response = await rendererRuntimeClient.runtimeRequest(
       analytixUserInputPath(inputId),
       'POST',
-      JSON.stringify({ cancelled: true })
+      JSON.stringify({ cancelled: true, selector: userInputActionSelector(inputId, selector) })
     )
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'request_user_input cancel failed'))
+    }
+    const resolution = UserInputMetadataResolutionResponse.safeParse(
+      readRuntimeJson<unknown>(response.body, 'invalid user input cancellation')
+    )
+    if (!resolution.success || resolution.data.inputId !== inputId || resolution.data.status !== 'cancelled') {
+      throw new Error('runtime returned an unrelated user input cancellation')
     }
   }
 
@@ -1441,12 +1815,13 @@ export class AnalytixRuntimeProvider implements AgentProvider {
 
   async forkThread(
     threadId: string,
-    options?: { relation?: 'primary' | 'fork' | 'side'; title?: string; turnId?: string }
+    options?: { relation?: 'primary' | 'fork' | 'side'; title?: string; turnId?: string; endSeq?: number }
   ): Promise<NormalizedThread> {
     const body: Record<string, unknown> = {}
     if (options?.relation) body.relation = options.relation
     if (options?.title) body.title = options.title
     if (options?.turnId) body.turnId = options.turnId
+    if (options?.endSeq !== undefined) body.endSeq = options.endSeq
     const url = analytixThreadForkPath(threadId)
     const response =
       Object.keys(body).length > 0
@@ -1501,6 +1876,8 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     sink: ThreadEventSink,
     signal: AbortSignal
   ): Promise<void> {
+    if (!signal.aborted) trajectorySource.bindThread(threadId)
+    const releaseTrajectory = signal.aborted ? () => undefined : trajectorySource.retainThread(threadId)
     const streamId = createSseStreamId()
     await new Promise<void>(async (resolve) => {
       let settled = false
@@ -1521,6 +1898,13 @@ export class AnalytixRuntimeProvider implements AgentProvider {
           ...(status !== undefined ? { details: { status } } : {}),
           severity: 'error'
         })), { terminal: false })
+      }
+      const reportSseRejection = (kind: 'event' | 'ack_false' | 'ack_transport'): void => {
+        const lifecycle = signal.aborted ? 'aborted' : settled ? 'closed' : 'active'
+        try {
+          void window.analytix?.logs?.error(`sse-${kind}-${lifecycle}`, 'SSE renderer rejection')
+            .catch(() => undefined)
+        } catch { /* Diagnostics must not change dispatch, error or finish behavior. */ }
       }
       const finish = (): void => {
         if (settled) return
@@ -1544,6 +1928,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
             ? PublicProjectionRevokedEventSchema.safeParse(rawEvents[0])
             : null
           if (!parsed?.success || parsed.data.threadId !== threadId) {
+            reportSseRejection('event')
             emitSseTransportError(
               'Runtime request failed (sse_event_rejected).',
               'sse_event_rejected'
@@ -1553,6 +1938,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
           }
           const task = dispatchChain.then(async () => {
             try {
+              trajectorySource.revoke(threadId)
               await sink.onPublicProjectionRevoked?.(parsed.data)
             } finally {
               finish()
@@ -1573,6 +1959,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
           (entry as { kind?: unknown }).kind === 'general_terminal_batch'
         )
         if ((containsAcceptedFinalBatch || containsGeneralTerminalBatch) && rawEvents.length !== 1) {
+          reportSseRejection('event')
           emitSseTransportError(
             'Runtime request failed (sse_event_rejected).',
             'sse_event_rejected'
@@ -1614,20 +2001,26 @@ export class AnalytixRuntimeProvider implements AgentProvider {
             if (containsAcceptedFinalBatch && signal.aborted) return
             if (maxSeq !== null) {
               if (!containsAcceptedFinalBatch) sink.onSeq(maxSeq)
+              let ackTransportRejected = false
               const acknowledged = await rendererRuntimeClient.ackSseEvent(
                 streamId,
                 maxSeq,
                 acceptedFinalAck
-              ).catch(() => false)
+              ).catch(() => { ackTransportRejected = true; return false })
               if (!acknowledged) {
+                reportSseRejection(ackTransportRejected ? 'ack_transport' : 'ack_false')
                 emitSseTransportError(
                   'Runtime request failed (sse_ack_rejected).',
                   'sse_ack_rejected'
                 )
                 finish()
+              } else {
+                // This observer owns no dispatch/ACK authority and retains only public facts.
+                trajectorySource.observe(threadId, batch)
               }
             }
           } catch {
+            reportSseRejection('event')
             emitSseTransportError(
               'Runtime request failed (sse_event_rejected).',
               'sse_event_rejected'
@@ -1668,7 +2061,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
         emitSseTransportError(error instanceof Error ? error.message : String(error), 'sse_start_failed')
         finish()
       }
-    })
+    }).finally(releaseTrajectory)
     void rendererRuntimeClient.stopSse(streamId)
   }
 
@@ -1713,3 +2106,15 @@ export class AnalytixRuntimeProvider implements AgentProvider {
 }
 
 export { analytixThreadEventsPath }
+
+/** Enrich a primary detail only at an explicit UI store call site; never cache the enlarged transcript. */
+export function restoreThreadDisplayHistory(
+  provider: AgentProvider,
+  threadId: string,
+  detail: Awaited<ReturnType<AgentProvider['getThreadDetail']>>,
+  signal?: AbortSignal
+): Promise<Awaited<ReturnType<AgentProvider['getThreadDetail']>>> {
+  return provider instanceof AnalytixRuntimeProvider
+    ? provider.restoreThreadDisplayHistory(threadId, detail, signal)
+    : Promise.resolve(detail)
+}

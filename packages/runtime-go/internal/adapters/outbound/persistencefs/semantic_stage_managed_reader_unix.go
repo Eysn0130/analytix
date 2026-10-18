@@ -170,3 +170,59 @@ func readSemanticStageManagedFileWithHook(
 	}
 	return body, nil
 }
+
+func readLegacyTypeScriptLineageManagedSourceV1(
+	ctx context.Context,
+	authority *RootAuthority,
+	durableDir, relative string,
+	expected domainstartup.SemanticEntryStateV1,
+) (body []byte, present bool, resultErr error) {
+	if expected.Type == domainstartup.ManagedEntryTypeFile {
+		fd, _, err := secureOpenManagedParent(authority, durableDir, "threads")
+		if err != nil {
+			return nil, false, err
+		}
+		identity, err := unixOpenedDirectoryIdentity(fd)
+		if err != nil {
+			return nil, false, errors.Join(err, unix.Close(fd))
+		}
+		root := &startupPrivateDirectory{fd: fd, identity: identity}
+		defer func() {
+			resultErr = errors.Join(resultErr, root.Close())
+			if resultErr != nil {
+				clear(body)
+				body, present = nil, false
+			}
+		}()
+		body, err = readSemanticStageManagedFile(ctx, root, relative, expected)
+		return body, err == nil, err
+	}
+	parent, name, err := secureOpenManagedParent(authority, durableDir, relative)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, unix.Close(parent)) }()
+	identity, err := unixOpenedDirectoryIdentity(parent)
+	if err != nil {
+		return nil, false, err
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		var mapped unix.Stat_t
+		if err := unix.Fstatat(parent, name, &mapped, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, unix.ENOENT) {
+			return nil, false, errors.New("legacy lineage absent source appeared or became unsafe")
+		}
+		reopened, _, err := secureOpenManagedParent(authority, durableDir, relative)
+		if err != nil {
+			return nil, false, err
+		}
+		reopenedIdentity, identityErr := unixOpenedDirectoryIdentity(reopened)
+		closeErr := unix.Close(reopened)
+		if identityErr != nil || reopenedIdentity != identity || closeErr != nil {
+			return nil, false, errors.Join(errors.New("legacy lineage absent source parent changed"), identityErr, closeErr)
+		}
+	}
+	return nil, false, nil
+}

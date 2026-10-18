@@ -977,6 +977,123 @@ func TestG5ControlExecutableOutputMatchesTypeScriptContract(t *testing.T) {
 	}
 }
 
+func TestG5DesktopPromotionMirrorRejectsContractDrift(t *testing.T) {
+	fixture := loadG5FullLoopContract(t)
+	fixtureJSON, err := json.Marshal(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay := func(t *testing.T, mutate func(map[string]any)) map[string]any {
+		t.Helper()
+		var input map[string]any
+		if err := json.Unmarshal(fixtureJSON, &input); err != nil {
+			t.Fatal(err)
+		}
+		desktop := input["controlExecutableCases"].(map[string]any)["desktopSovereignty"].(map[string]any)
+		if mutate != nil {
+			mutate(desktop)
+		}
+		raw, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var contract G5FullLoopConformanceContract
+		if err := json.Unmarshal(raw, &contract); err != nil {
+			t.Fatal(err)
+		}
+		return decodeToMap(t, BuildG5ControlExecutableOutput(contract.ControlExecutableCases).DesktopSovereignty)
+	}
+	const promotionMatrix = "sideConversationPromotionContractMatrix"
+	const optional = "sideConversationPromotionContractOptionalProvider"
+	const promotes = "sideConversationPromotionPromotesThroughProvider"
+	const readsBack = "sideConversationPromotionReadsBackAndCloses"
+	const rejectsBridge = "sideConversationPromotionRejectsDirectBridge"
+	const scanGuard = "sideConversationPromotionScanGuardPresent"
+	const unitEvidence = "sideConversationPromotionUnitEvidencePresent"
+	promotionFields := []string{optional, promotes, readsBack, rejectsBridge, scanGuard, unitEvidence}
+	baseline := replay(t, nil)
+	expected := decodeToMap(t, fixture.ControlExecutableCases.DesktopSovereignty.Expected)
+	for _, key := range append(append([]string{}, promotionFields...), "rendererProviderFacadeSealCoversSidePromotion", "rendererProviderFacadeSealUnitEvidencePresent") {
+		if baseline[key] != true || expected[key] != true {
+			t.Fatalf("current promotion field must decode and replay as true: %s", key)
+		}
+	}
+	for _, key := range []string{
+		"rendererProviderFacadeSealCoversRelationPatch",
+		"sideConversationRelationContractOptionalProvider", "sideConversationRelationPromotesThroughProvider",
+		"sideConversationRelationRefreshesAndCloses", "sideConversationRelationRejectsDirectBridge",
+		"sideConversationRelationScanGuardPresent", "sideConversationRelationUnitEvidencePresent",
+	} {
+		if _, exists := baseline[key]; exists {
+			t.Fatalf("retired relation output key remains in the mirror: %s", key)
+		}
+	}
+	for _, tc := range []struct {
+		name, matrix, field string
+		value               any
+		rejected            string
+	}{
+		{"generic facade mutation", "rendererProviderFacadeSealMatrix", "sealedMethods", []string{"archiveThread", "updateThreadRelation"}, "rendererProviderFacadeSealUnitEvidencePresent"},
+		{"missing promotion source", "rendererProviderFacadeSealMatrix", "promotionSourceEvidencePresent", false, "rendererProviderFacadeSealCoversSidePromotion"},
+		{"generic provider mutation", promotionMatrix, "providerMethod", "updateThreadRelation", optional},
+		{"wrong store action", promotionMatrix, "storeAction", "updateThreadRelation", unitEvidence},
+		{"non-fork relation", promotionMatrix, "relation", "primary", promotes},
+		{"multiple intents", promotionMatrix, "soleIntent", false, promotes},
+		{"changed lineage", promotionMatrix, "lineagePreserved", false, promotes},
+		{"missing provider contract", promotionMatrix, "providerContractOptional", false, optional},
+		{"provider bypass", promotionMatrix, "providerImplementationUsesRuntimeClient", false, optional},
+		{"store bypass", promotionMatrix, "storeUsesProviderContract", false, promotes},
+		{"unverified readback", promotionMatrix, "storeVerifiesReadbackAndCloses", false, readsBack},
+		{"direct bridge", promotionMatrix, "storeRejectsDirectRuntimeBridge", false, rejectsBridge},
+		{"missing scan guard", promotionMatrix, "scanGuardPresent", false, scanGuard},
+		{"missing unit evidence", promotionMatrix, "unitEvidencePresent", false, unitEvidence},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := replay(t, func(input map[string]any) {
+				input[tc.matrix].(map[string]any)[tc.field] = tc.value
+			})
+			if actual[tc.rejected] != false {
+				t.Fatalf("promotion drift was not rejected by %s", tc.rejected)
+			}
+		})
+	}
+	for _, tc := range []struct{ current, retired, rejected string }{
+		{"side-conversation-promotion-provider-contract", "side-conversation-relation-provider-contract", optional},
+		{"side-conversation-promotion-store-evidence", "side-conversation-relation-store-evidence", promotes},
+		{"side-conversation-direct-bypass-scan-evidence", "", rejectsBridge},
+	} {
+		t.Run("missing "+tc.current, func(t *testing.T) {
+			actual := replay(t, func(input map[string]any) {
+				ids := input["evidenceIds"].([]any)
+				retained := make([]any, 0, len(ids))
+				for _, id := range ids {
+					if id != tc.current {
+						retained = append(retained, id)
+					}
+				}
+				if tc.retired != "" {
+					retained = append(retained, tc.retired)
+				}
+				input["evidenceIds"] = retained
+			})
+			if actual[tc.rejected] != false {
+				t.Fatalf("current evidence ID is required for %s", tc.rejected)
+			}
+		})
+	}
+	t.Run("retired relation matrix cannot stand in for promotion", func(t *testing.T) {
+		actual := replay(t, func(input map[string]any) {
+			input["sideConversationRelationContractMatrix"] = input[promotionMatrix]
+			delete(input, promotionMatrix)
+		})
+		for _, key := range promotionFields {
+			if actual[key] != false {
+				t.Fatalf("retired relation matrix supplied promotion evidence for %s", key)
+			}
+		}
+	})
+}
+
 func assertRoute(t *testing.T, handler http.Handler, method string, path string, token string, contract g1ContractResponse) {
 	t.Helper()
 	recorder := httptest.NewRecorder()

@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +20,9 @@ import (
 	httpmcp "analytix.local/runtime-go/internal/adapters/outbound/mcp/http"
 	mcpprotocol "analytix.local/runtime-go/internal/adapters/outbound/mcp/protocol"
 	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	"analytix.local/runtime-go/internal/testsupport/toolidentity"
 )
 
@@ -30,7 +33,7 @@ func init() {
 }
 
 func TestProductionManagerEmptyConfigDoesNotLoadFixtureSpec(t *testing.T) {
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.Connect()
 	defer manager.Disconnect()
 
@@ -53,8 +56,8 @@ func TestProductionManagerEmptyConfigDoesNotLoadFixtureSpec(t *testing.T) {
 }
 
 func TestVerifiedMCPIdentityChangesAcrossManagerInstancesAtSameNumericEpoch(t *testing.T) {
-	first := NewProductionManager(nil)
-	second := NewProductionManager(nil)
+	first := newAdmissionTestManager(nil)
+	second := newAdmissionTestManager(nil)
 	observed := domainmcp.ServerIdentity{Name: "docs-server", Version: "1.0.0", ProtocolVersion: mcpprotocol.ProtocolVersion}
 	firstIdentity := verifiedMCPServerIdentity("docs", observed, first.connectionInstanceID, 1)
 	secondIdentity := verifiedMCPServerIdentity("docs", observed, second.connectionInstanceID, 1)
@@ -69,7 +72,7 @@ func TestVerifiedMCPIdentityChangesAcrossManagerInstancesAtSameNumericEpoch(t *t
 }
 
 func TestVerifiedMCPIdentityBindsNegotiatedCompatibleRevision(t *testing.T) {
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	observed := domainmcp.ServerIdentity{Name: "docs-server", Version: "1.0.0", ProtocolVersion: "2025-06-18"}
 	identity := verifiedMCPServerIdentity("docs", observed, manager.connectionInstanceID, 1)
 	parsed, err := domainsecurity.ParseVerifiedMCPServerIdentity(identity)
@@ -92,7 +95,7 @@ func TestMCPToolAdvertisementSnapshotFreezesSchemaPolicyEpochAndIdentityAtomical
 	identity := mcpTestVerifiedIdentity(t, serverID, "docs-server", "1.0.0", 9)
 	closed := json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 	client := &failingCallClient{}
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{{ID: serverID, ReadOnlyToolNames: map[string]bool{rawName: true}}}
 	manager.clients[serverID] = client
 	manager.connectionEpochs[serverID] = 9
@@ -225,7 +228,7 @@ func TestReservedFundsMCPNamespaceIsQuarantinedBeforeProcessCreation(t *testing.
 		specs[0].Command != "" || len(specs[0].Args) != 0 || specs[0].CWD != "" || len(specs[0].Env) != 0 {
 		t.Fatalf("reserved funds MCP retained external execution authority: %#v", specs)
 	}
-	manager := NewProductionManager(specs)
+	manager := newAdmissionTestManager(specs)
 	manager.Connect()
 	defer manager.Disconnect()
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
@@ -304,7 +307,7 @@ func TestLoadMCPJSONDocumentAppliesWorkspaceTrustScope(t *testing.T) {
 		t.Fatalf("trusted workspace MCP normalization mismatch: %#v", trusted)
 	}
 
-	manager := NewProductionManager(specs)
+	manager := newAdmissionTestManager(specs)
 	diagnostics := manager.ServerDiagnostics()
 	trustedDiagnostic := mcpServerDiagnosticByID(t, diagnostics, "trusted-mcp")
 	if mcpStringField(trustedDiagnostic, "trustScope") != "workspace" ||
@@ -327,7 +330,7 @@ func TestWorkspaceScopedMCPRequiresFrozenTurnWorkspaceAtAdvertisementAndExecutio
 	identity := mcpTestVerifiedIdentity(t, serverID, "workspace-docs", "1.0.0", 1)
 	client := &failingCallClient{}
 	closed := json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{{
 		ID: serverID, TrustScope: "workspace", TrustedWorkspaceRoots: []string{"/workspace/allowed"},
 	}}
@@ -503,7 +506,7 @@ func TestProductionManagerHTTPListCallReconnectAndRedaction(t *testing.T) {
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "http-server",
 		Transport: "http",
 		URL:       server.URL + "?token=contract-secret-token",
@@ -521,7 +524,18 @@ func TestProductionManagerHTTPListCallReconnectAndRedaction(t *testing.T) {
 	if mcpBoolField(denied, "executed") || mcpStringField(denied, "code") != "approval_denied" {
 		t.Fatalf("denied MCP call should not execute: %#v", denied)
 	}
-	called := manager.CallTool(toolName, true, map[string]any{"query": "needle"})
+	credentialContext := domainprocess.WithKnownSecretsV1(context.Background())
+	defer domainprocess.ClearKnownSecretsV1(credentialContext)
+	called := manager.CallToolContext(credentialContext, toolName, true, map[string]any{"query": "needle"})
+	foundCredential := false
+	for _, value := range domainprocess.KnownSecretsV1(credentialContext) {
+		if value == "contract-secret-token" {
+			foundCredential = true
+		}
+	}
+	if !foundCredential {
+		t.Fatal("actual request credential was not recorded")
+	}
 	if !mcpBoolField(called, "executed") || mcpResultText(called) != "http result: needle" || !mcpBoolField(called, "readOnlyHint") {
 		t.Fatalf("unexpected approved MCP call result: %#v", called)
 	}
@@ -603,7 +617,7 @@ func TestProductionManagerQuarantinesSchemaInvalidSiblingWithoutExecutionSurface
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID: "quarantine-server", Transport: "http", URL: server.URL,
 	}})
 	manager.Connect()
@@ -700,7 +714,7 @@ func TestProductionManagerLiveCatalogCorruptionCannotHideBehindCachedSchema(t *t
 	}); err != nil {
 		t.Fatalf("save cached schema: %v", err)
 	}
-	manager := NewProductionManagerWithCache([]ServerSpec{spec}, cacheDir)
+	manager := newAdmissionTestManagerWithCache([]ServerSpec{spec}, cacheDir)
 	manager.Connect()
 	defer manager.Disconnect()
 
@@ -741,7 +755,7 @@ func TestProductionManagerPureTransportOutageRetainsOnlyNonExecutableCacheHint(t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	manager := NewProductionManagerWithCache([]ServerSpec{spec}, cacheDir)
+	manager := newAdmissionTestManagerWithCache([]ServerSpec{spec}, cacheDir)
 	manager.Connect()
 	defer manager.Disconnect()
 
@@ -797,7 +811,7 @@ func TestProductionManagerIdentityMismatchCannotHideBehindCachedSchema(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
-	manager := NewProductionManagerWithCache([]ServerSpec{spec}, cacheDir)
+	manager := newAdmissionTestManagerWithCache([]ServerSpec{spec}, cacheDir)
 	manager.Connect()
 	defer manager.Disconnect()
 
@@ -811,7 +825,7 @@ func TestProductionManagerIdentityMismatchCannotHideBehindCachedSchema(t *testin
 }
 
 func TestServerCatalogFingerprintIsIsolatedFromOtherServerQuarantine(t *testing.T) {
-	manager := NewProductionManager([]ServerSpec{{ID: "server-a"}, {ID: "server-b"}})
+	manager := newAdmissionTestManager([]ServerSpec{{ID: "server-a"}, {ID: "server-b"}})
 	closed := json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 	for _, serverID := range []string{"server-a", "server-b"} {
 		rawName := "lookup"
@@ -872,7 +886,7 @@ func TestProductionManagerHTTPCallToolContextCancelsInFlightRequest(t *testing.T
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "http-cancel",
 		Transport: "http",
 		URL:       server.URL,
@@ -935,7 +949,7 @@ func TestProductionManagerHTTPFailureRedactsResponseSecrets(t *testing.T) {
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "http-failing-server",
 		Transport: "http",
 		URL:       server.URL + "?access_token=" + configuredSecret,
@@ -999,7 +1013,7 @@ func TestProductionManagerHTTPCallFailureRedactsResponseSecrets(t *testing.T) {
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "http-call-failing-server",
 		Transport: "http",
 		URL:       server.URL + "?token=" + configuredSecret,
@@ -1034,7 +1048,7 @@ func TestProductionManagerHTTPTransportRejectsConfiguredProxyWithoutDirectFallba
 	}))
 	defer proxy.Close()
 
-	manager := NewProductionManagerWithOptions([]ServerSpec{{
+	manager := newAdmissionTestManagerWithOptions([]ServerSpec{{
 		ID:        "proxied-http-server",
 		Transport: "http",
 		URL:       "http://mcp.example.test/rpc",
@@ -1108,7 +1122,7 @@ func TestProductionManagerHTTPPromptsAndResourcesCatalog(t *testing.T) {
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "catalog-server",
 		Transport: "http",
 		URL:       server.URL,
@@ -1201,7 +1215,7 @@ func TestProductionManagerSlowPromptResourcesDoNotBlockToolsCatalog(t *testing.T
 	defer server.Close()
 	defer close(resourcesGate)
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "slow-catalog",
 		Transport: "http",
 		URL:       server.URL,
@@ -1281,7 +1295,7 @@ func TestProductionManagerHTTPSendsInitializedNotificationBeforeListingTools(t *
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "strict-http",
 		Transport: "http",
 		URL:       server.URL,
@@ -1351,7 +1365,7 @@ func TestProductionManagerRetriesTransientCallFailureAfterReconnect(t *testing.T
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:                "retry-server",
 		Transport:         "http",
 		URL:               server.URL,
@@ -1431,7 +1445,8 @@ func TestFatalTransportFailureRevokesServerIdentityAndLiveAuthority(t *testing.T
 			toolName := "mcp__docs__lookup"
 			identity := mcpTestVerifiedIdentity(t, "docs", "docs-server", "1.0.0", 1)
 			manager := &ProductionManager{
-				specs: []ServerSpec{{ID: "docs"}}, clients: map[string]mcpTransportClient{"docs": client},
+				effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
+				specs:           []ServerSpec{{ID: "docs"}}, clients: map[string]mcpTransportClient{"docs": client},
 				tools: map[string]managedTool{toolName: {
 					ServerID: "docs", Name: toolName, RawName: "lookup",
 					Tool: ToolSpec{InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`), OutputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
@@ -1463,8 +1478,9 @@ func TestWriteToolTransportAbortNeverRetries(t *testing.T) {
 	client := &failingCallClient{err: &httpmcp.StatusError{Method: "tools/call", StatusCode: http.StatusBadGateway}}
 	toolName := "mcp__docs__write_report"
 	manager := &ProductionManager{
-		specs:   []ServerSpec{{ID: "docs", ReadOnlyToolNames: map[string]bool{}}},
-		clients: map[string]mcpTransportClient{"docs": client},
+		effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
+		specs:           []ServerSpec{{ID: "docs", ReadOnlyToolNames: map[string]bool{}}},
+		clients:         map[string]mcpTransportClient{"docs": client},
 		tools: map[string]managedTool{toolName: {
 			ServerID: "docs", Name: toolName, RawName: "write_report",
 			Tool: ToolSpec{ReadOnlyHint: true},
@@ -1523,7 +1539,7 @@ func TestProductionManagerDoesNotRetryJSONRPCToolErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "jsonrpc-error-server",
 		Transport: "http",
 		URL:       server.URL,
@@ -1589,7 +1605,7 @@ func TestProductionManagerRejectsHTTPOutputSchemaMismatchAfterExecution(t *testi
 		}
 	}))
 	defer server.Close()
-	manager := NewProductionManager([]ServerSpec{{ID: "output-mismatch", Transport: "http", URL: server.URL}})
+	manager := newAdmissionTestManager([]ServerSpec{{ID: "output-mismatch", Transport: "http", URL: server.URL}})
 	manager.Connect()
 	defer manager.Disconnect()
 	result := manager.CallTool(CanonicalToolName("output-mismatch", "lookup"), true, map[string]any{})
@@ -1610,7 +1626,7 @@ func TestProductionManagerRemoteMCPAuthDiagnostics(t *testing.T) {
 	}))
 	defer unauthorized.Close()
 
-	manager := NewProductionManager([]ServerSpec{
+	manager := newAdmissionTestManager([]ServerSpec{
 		{
 			ID:              "lazy-remote",
 			Transport:       "streamable-http",
@@ -1719,7 +1735,7 @@ func TestProductionManagerHTTPTransportAcceptsSSEJSONRPCResponses(t *testing.T) 
 	}))
 	defer server.Close()
 
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "sse-server",
 		Transport: "sse",
 		URL:       server.URL,
@@ -1792,7 +1808,7 @@ func TestProductionManagerBackgroundStartIsLazyUntilRefresh(t *testing.T) {
 	background := newServer("background")
 	defer background.Close()
 
-	manager := NewProductionManager([]ServerSpec{
+	manager := newAdmissionTestManager([]ServerSpec{
 		{ID: "foreground", Transport: "http", URL: foreground.URL},
 		{ID: "background", Transport: "http", URL: background.URL, LowPriority: true, BackgroundStart: true},
 	})
@@ -1895,7 +1911,7 @@ func TestProductionManagerLazyPlaceholderConnectsCacheMissOnFirstUse(t *testing.
 		URL:             server.URL,
 		BackgroundStart: true,
 	}
-	manager := NewProductionManagerWithCache([]ServerSpec{spec}, t.TempDir())
+	manager := newAdmissionTestManagerWithCache([]ServerSpec{spec}, t.TempDir())
 	manager.Connect()
 	defer manager.Disconnect()
 
@@ -1955,7 +1971,7 @@ func TestProductionManagerLazyPlaceholderConnectsCacheMissOnFirstUse(t *testing.
 
 func TestRemoteReadOnlyHintCannotAuthorizeEvidenceGrant(t *testing.T) {
 	spec := ServerSpec{ID: "docs", ReadOnlyToolNames: map[string]bool{}}
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{spec}
 	manager.registerToolsNoLock(spec, []ToolSpec{{Name: "query", ReadOnlyHint: true, InputSchema: json.RawMessage(`{"type":"object"}`)}})
 	toolName := CanonicalToolName(spec.ID, "query")
@@ -1973,7 +1989,7 @@ func TestRemoteReadOnlyHintCannotAuthorizeEvidenceGrant(t *testing.T) {
 
 func TestCodegraphServerIDCannotMintHostReadOnlyAuthority(t *testing.T) {
 	spec := ApplyKnownOverrides(ServerSpec{ID: "codegraph"}, "/workspace")
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{spec}
 	manager.registerToolsNoLock(spec, []ToolSpec{{Name: "search", ReadOnlyHint: true, InputSchema: json.RawMessage(`{"type":"object"}`)}})
 	toolName := CanonicalToolName(spec.ID, "search")
@@ -1987,7 +2003,7 @@ func TestExactPinnedFundsIdentityCannotEscapeReservedNamespaceQuarantine(t *test
 		ID: "analytix_funds", ExpectedServerName: "analytix_funds", ExpectedServerVersion: "0.16.16",
 	})
 	spec = ApplyKnownOverrides(spec, "/workspace")
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{spec}
 	manager.registerToolsNoLock(spec, []ToolSpec{
 		{Name: "count_case_rows", ReadOnlyHint: false, InputSchema: json.RawMessage(`{"type":"object"}`)},
@@ -2083,7 +2099,7 @@ func TestProductionManagerUsesCachedSchemaForLazyCatalogAndFirstUseReconnect(t *
 		BackgroundStart:   true,
 		ReadOnlyToolNames: map[string]bool{"lookup": true},
 	}
-	warm := NewProductionManagerWithCache([]ServerSpec{spec}, cacheDir)
+	warm := newAdmissionTestManagerWithCache([]ServerSpec{spec}, cacheDir)
 	warm.RefreshCatalog()
 	warm.Disconnect()
 	if data, err := os.ReadFile(cachedSchemaPath(cacheDir, spec.ID)); err != nil {
@@ -2095,7 +2111,7 @@ func TestProductionManagerUsesCachedSchemaForLazyCatalogAndFirstUseReconnect(t *
 	mu.Lock()
 	methodCounts = map[string]int{}
 	mu.Unlock()
-	manager := NewProductionManagerWithCache([]ServerSpec{spec}, cacheDir)
+	manager := newAdmissionTestManagerWithCache([]ServerSpec{spec}, cacheDir)
 	manager.Connect()
 	defer manager.Disconnect()
 
@@ -2187,7 +2203,7 @@ func TestProductionManagerCachedSchemaInvalidatesOnSpecFingerprintChange(t *test
 	if SpecFingerprint(spec) == SpecFingerprint(changed) {
 		t.Fatalf("SpecFingerprint should change when load-bearing env changes")
 	}
-	manager := NewProductionManagerWithCache([]ServerSpec{changed}, cacheDir)
+	manager := newAdmissionTestManagerWithCache([]ServerSpec{changed}, cacheDir)
 	manager.Connect()
 	defer manager.Disconnect()
 	connectTool := CanonicalToolName(changed.ID, "connect")
@@ -2261,7 +2277,7 @@ func TestProductionManagerReportsStaleCachedSchemaWhenFirstUseToolDisappears(t *
 		t.Fatalf("save cached schema: %v", err)
 	}
 
-	manager := NewProductionManagerWithCache([]ServerSpec{spec}, cacheDir)
+	manager := newAdmissionTestManagerWithCache([]ServerSpec{spec}, cacheDir)
 	manager.Connect()
 	defer manager.Disconnect()
 
@@ -2356,6 +2372,7 @@ func TestProductionManagerCatalogFingerprintCanonicalizesSchemas(t *testing.T) {
 
 func TestProductionManagerToolContractsReturnDefensiveCopies(t *testing.T) {
 	manager := &ProductionManager{
+		effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
 		tools: map[string]managedTool{
 			"mcp__docs__lookup": {
 				Tool: ToolSpec{
@@ -2394,6 +2411,7 @@ func TestProductionManagerToolContractsReturnDefensiveCopies(t *testing.T) {
 
 func TestProductionManagerToolDescriptionReturnsConfiguredDescription(t *testing.T) {
 	manager := &ProductionManager{
+		effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
 		tools: map[string]managedTool{
 			"mcp__docs__lookup": {
 				Tool: ToolSpec{
@@ -2486,7 +2504,7 @@ func TestSecurityBoundCallAndCatalogRefreshAreLinearized(t *testing.T) {
 
 	t.Run("call wins and refresh waits", func(t *testing.T) {
 		client := &blockingConnectionEpochClient{started: make(chan struct{}), release: make(chan struct{})}
-		manager := NewProductionManager(nil)
+		manager := newAdmissionTestManager(nil)
 		manager.specs = []ServerSpec{{ID: "docs", ReadOnlyToolNames: map[string]bool{"lookup": true}}}
 		manager.clients["docs"] = client
 		manager.tools[toolName] = tool
@@ -2531,7 +2549,7 @@ func TestSecurityBoundCallAndCatalogRefreshAreLinearized(t *testing.T) {
 
 	t.Run("catalog wins and old transport stays unused", func(t *testing.T) {
 		client := &connectionEpochClient{}
-		manager := NewProductionManager(nil)
+		manager := newAdmissionTestManager(nil)
 		manager.specs = []ServerSpec{{ID: "docs", ReadOnlyToolNames: map[string]bool{"lookup": true}}}
 		manager.clients["docs"] = client
 		manager.tools[toolName] = tool
@@ -2604,7 +2622,7 @@ func TestSecurityBoundCallRejectsReadOnlyPolicyChangeAtTransport(t *testing.T) {
 				t.Fatal(err)
 			}
 			client := &connectionEpochClient{}
-			manager := NewProductionManager(nil)
+			manager := newAdmissionTestManager(nil)
 			manager.specs = []ServerSpec{{ID: "docs", ReadOnlyToolNames: map[string]bool{"lookup": test.currentReadOnly}}}
 			manager.clients["docs"] = client
 			manager.tools[toolName] = tool
@@ -2618,9 +2636,37 @@ func TestSecurityBoundCallRejectsReadOnlyPolicyChangeAtTransport(t *testing.T) {
 	}
 }
 
+func TestNativeScheduleReceiptRejectsEpochChangedDuringCallAndCanceledResponse(t *testing.T) {
+	for _, cancelResponse := range []bool{false, true} {
+		manager, client, input := scheduleReceiptManagerFixtureV1(t, scheduleReceiptRawV1("success", false))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		client.afterCall = func() {
+			if cancelResponse {
+				cancel()
+				return
+			}
+			manager.mu.Lock()
+			manager.connectionEpochs["gui_schedule"]++
+			manager.mu.Unlock()
+		}
+		envelope, err := domainmcp.NewHostContextEnvelope(input.SecurityContext, input.ExecutionGrant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output := manager.CallToolSecurityBoundContext(ctx, input.ToolName, true, envelope, input.Arguments)
+		if lossless, ok := output[domainmcp.HostRawToolResultKey].(domainmcp.LosslessToolResult); ok && lossless.HostPrivate != nil {
+			t.Fatal("late canceled/stale-epoch result minted native receipt")
+		}
+		if !cancelResponse && output["executed"] != false {
+			t.Fatal("epoch drift was not rejected at return boundary")
+		}
+	}
+}
+
 func TestTaskRequiredToolCannotEnterSynchronousAdmission(t *testing.T) {
 	client := &connectionEpochClient{}
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.clients["docs"] = client
 	manager.connectionEpochs["docs"] = 1
 	closed := json.RawMessage(`{"type":"object","additionalProperties":false}`)
@@ -2648,8 +2694,9 @@ func TestProductionManagerBoundCallRejectsStaleConnectionEpoch(t *testing.T) {
 	client := &connectionEpochClient{}
 	toolName := "mcp__docs__lookup"
 	manager := &ProductionManager{
-		specs:   []ServerSpec{{ID: "docs", TrustScope: "user"}},
-		clients: map[string]mcpTransportClient{"docs": client},
+		effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
+		specs:           []ServerSpec{{ID: "docs", TrustScope: "user"}},
+		clients:         map[string]mcpTransportClient{"docs": client},
 		tools: map[string]managedTool{toolName: {
 			ServerID: "docs", Name: toolName, RawName: "lookup",
 			Tool: ToolSpec{OutputSchema: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}`)},
@@ -2670,7 +2717,7 @@ func TestProductionManagerBoundCallRejectsStaleConnectionEpoch(t *testing.T) {
 }
 
 func TestRejectAmbiguousCanonicalMCPToolNamespace(t *testing.T) {
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	if err := manager.registerToolsNoLock(ServerSpec{ID: "foo"}, []ToolSpec{{Name: "bar__lookup"}}); err != nil {
 		t.Fatalf("valid SEP-986 operation containing repeated underscores was rejected: %v", err)
 	}
@@ -2685,7 +2732,7 @@ func TestRejectAmbiguousCanonicalMCPToolNamespace(t *testing.T) {
 func TestCanonicalBindingSetRejectsNormalizationAliases(t *testing.T) {
 	raw := "lookup!"
 	colliding := NormalizeName(raw)
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	if err := manager.registerToolsNoLock(ServerSpec{ID: "docs"}, []ToolSpec{{Name: raw}, {Name: colliding}}); err == nil {
 		t.Fatalf("normalized tool collision was accepted: %q and %q", raw, colliding)
 	}
@@ -2721,8 +2768,9 @@ func TestExecutionGrantServerIdentityMatchesDispatchedServer(t *testing.T) {
 	}
 	wrongClient := &connectionEpochClient{}
 	manager := &ProductionManager{
-		specs:   []ServerSpec{{ID: "foo__shadow", TrustScope: "user"}},
-		clients: map[string]mcpTransportClient{"foo__shadow": wrongClient},
+		effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
+		specs:           []ServerSpec{{ID: "foo__shadow", TrustScope: "user"}},
+		clients:         map[string]mcpTransportClient{"foo__shadow": wrongClient},
 		tools: map[string]managedTool{toolName: {
 			ServerID: "foo__shadow", Name: toolName, RawName: "lookup",
 			Tool: ToolSpec{OutputSchema: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}`)},
@@ -2762,7 +2810,8 @@ func TestProductionManagerPendingExecutionGrantNeverReachesTransport(t *testing.
 	}
 	client := &connectionEpochClient{}
 	manager := &ProductionManager{
-		clients: map[string]mcpTransportClient{"docs": client}, tools: map[string]managedTool{toolName: tool},
+		effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
+		clients:         map[string]mcpTransportClient{"docs": client}, tools: map[string]managedTool{toolName: tool},
 		connectionEpochs: map[string]uint64{"docs": 1}, serverIdentities: map[string]string{"docs": identity},
 	}
 	result := manager.CallToolSecurityBoundContext(context.Background(), toolName, true, envelope, map[string]any{})
@@ -2795,7 +2844,8 @@ func TestSecurityBoundMCPRejectsAuditOnlyTurnContextBeforeTransport(t *testing.T
 	}
 	client := &connectionEpochClient{}
 	manager := &ProductionManager{
-		clients: map[string]mcpTransportClient{"docs": client}, tools: map[string]managedTool{toolName: tool},
+		effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
+		clients:         map[string]mcpTransportClient{"docs": client}, tools: map[string]managedTool{toolName: tool},
 		connectionEpochs: map[string]uint64{"docs": 1}, serverIdentities: map[string]string{"docs": identity},
 	}
 	result := manager.CallToolSecurityBoundContext(context.Background(), toolName, true, domainmcp.HostContextEnvelope{}, map[string]any{})
@@ -2841,8 +2891,9 @@ func TestExecutionGrantRejectsCurrentSchemaChangeSameConnectionEpoch(t *testing.
 			mutate(&changed)
 			client := &connectionEpochClient{}
 			manager := &ProductionManager{
-				specs:   []ServerSpec{{ID: "docs", TrustScope: "user"}},
-				clients: map[string]mcpTransportClient{"docs": client}, tools: map[string]managedTool{toolName: changed},
+				effectAdmission: mcpEffectAdmission{begin: allowMCPTestEffect},
+				specs:           []ServerSpec{{ID: "docs", TrustScope: "user"}},
+				clients:         map[string]mcpTransportClient{"docs": client}, tools: map[string]managedTool{toolName: changed},
 				connectionEpochs: map[string]uint64{"docs": 1},
 				serverIdentities: map[string]string{"docs": grant.ServerIdentity},
 			}
@@ -2999,7 +3050,7 @@ func TestProductionManagerStdioListAndCall(t *testing.T) {
 		runStdioMCPHelper()
 		return
 	}
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "stdio-server",
 		Transport: "stdio",
 		Command:   os.Args[0],
@@ -3024,7 +3075,7 @@ func TestProductionManagerStdioReadsLargeJSONRPCLine(t *testing.T) {
 		runStdioMCPHelper()
 		return
 	}
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "large-stdio-server",
 		Transport: "stdio",
 		Command:   os.Args[0],
@@ -3053,7 +3104,7 @@ func TestProductionManagerStdioFailureIncludesRedactedStderrTail(t *testing.T) {
 		return
 	}
 	const secret = "stdio-contract-secret-token"
-	manager := NewProductionManager([]ServerSpec{{
+	manager := newAdmissionTestManager([]ServerSpec{{
 		ID:        "failing-stdio-server",
 		Transport: "stdio",
 		Command:   os.Args[0],
@@ -3289,4 +3340,66 @@ func mcpTestVerifiedIdentity(t *testing.T, serverID, observedName, observedVersi
 		t.Fatal(err)
 	}
 	return identity
+}
+
+func TestBasicActualRequestBareCredentialsCannotEnterProtectedSuccessTextV1(t *testing.T) {
+	// Deterministic synthetic Basic-auth fixture; never use a real credential.
+	syntheticBasicPasswordV1 := strings.Repeat("x", 25)
+
+	for _, test := range []struct {
+		name, user, password, header, body string
+		invalid                            bool
+	}{
+		{name: "password", user: "synthetic-user", password: syntheticBasicPasswordV1, body: syntheticBasicPasswordV1},
+		{name: "username api key", user: "opaque-username-key-9834", body: "opaque-username-key-9834"},
+		{name: "malformed", header: "Basic !!not-base64!!", body: "actual text", invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			header := test.header
+			if header == "" {
+				header = "Basic " + base64.StdEncoding.EncodeToString([]byte(test.user+":"+test.password))
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					ID     int    `json:"id"`
+					Method string `json:"method"`
+				}
+				if json.NewDecoder(r.Body).Decode(&request) != nil {
+					t.Fatal("invalid request")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch request.Method {
+				case "notifications/initialized":
+					w.WriteHeader(http.StatusAccepted)
+				case "initialize":
+					_ = json.NewEncoder(w).Encode(jsonRPCResult(request.ID, map[string]any{"serverInfo": map[string]any{"name": "synthetic-basic"}}))
+				case "tools/list":
+					_ = json.NewEncoder(w).Encode(jsonRPCResult(request.ID, map[string]any{"tools": []map[string]any{{"name": "lookup", "inputSchema": map[string]any{"type": "object"}, "annotations": map[string]any{"readOnlyHint": true}}}}))
+				case "tools/call":
+					if r.Header.Get("Authorization") != header {
+						t.Error("actual request header differed")
+					}
+					_ = json.NewEncoder(w).Encode(jsonRPCResult(request.ID, map[string]any{"content": []map[string]any{{"type": "text", "text": test.body}}}))
+				}
+			}))
+			defer server.Close()
+			manager := newAdmissionTestManager([]ServerSpec{{ID: "basic-docs", Transport: "http", URL: server.URL, Headers: map[string]string{"Authorization": header}}})
+			manager.Connect()
+			defer manager.Disconnect()
+			ctx := domainprocess.WithKnownSecretsV1(context.Background())
+			defer domainprocess.ClearKnownSecretsV1(ctx)
+			result := manager.CallToolContext(ctx, CanonicalToolName("basic-docs", "lookup"), true, map[string]any{})
+			if result["executed"] != true {
+				t.Fatal("actual synthetic transport did not execute")
+			}
+			projected := domaintoolresult.ProjectProtectedOutputTextV1(mcpResultText(result), domainprocess.KnownSecretsV1(ctx)...)
+			if test.invalid {
+				if projected == nil || projected.Availability != "unavailable" {
+					t.Fatal("malformed Basic reopened text authority")
+				}
+			} else if projected == nil || projected.Availability != "available" || projected.Classification != "credential_redacted" || strings.Contains(projected.Body, test.body) {
+				t.Fatal("bare actual credential entered snapshot text")
+			}
+		})
+	}
 }

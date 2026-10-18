@@ -341,6 +341,8 @@ func checkedAdd(left, right uint64) (uint64, bool) {
 func sameLogicalCallBinding(left, right domaincache.CacheVisibleShapeV1) bool {
 	return left.LogicalCallHMAC == right.LogicalCallHMAC &&
 		left.WireBodyHMAC == right.WireBodyHMAC &&
+		left.StepBindingHMAC == right.StepBindingHMAC && left.StepStartedAt == right.StepStartedAt &&
+		left.PublicAttribution == right.PublicAttribution &&
 		sameComparisonBinding(left, right)
 }
 
@@ -372,4 +374,176 @@ func (service *Service) poisonedErrorLocked() error {
 		return nil
 	}
 	return errors.Join(ErrLedgerPoisoned, service.poisoned)
+}
+
+// ReportedTokenCountV1 retains the reported subtotal even when other started
+// attempts have no usage. Complete is coverage, not a substitute for presence.
+type ReportedTokenCountV1 struct {
+	QualifiedAttemptCount uint64 `json:"-"`
+	ReportedValue         uint64 `json:"reportedValue"`
+	KnownAttemptCount     uint64 `json:"knownAttemptCount"`
+	AttemptCount          uint64 `json:"attemptCount"`
+	Complete              bool   `json:"complete"`
+}
+
+// ProviderBillingV1 is a numeric read projection of the existing signed ledger.
+// It does not establish a cache-comparable namespace or change legacy totals.
+type ProviderBillingV1 struct {
+	InventoryComplete   bool                                      `json:"inventoryComplete"`
+	Closed              bool                                      `json:"closed"`
+	AttemptCount        uint64                                    `json:"attemptCount"`
+	SettledAttemptCount uint64                                    `json:"settledAttemptCount"`
+	InputTokens         ReportedTokenCountV1                      `json:"inputTokens"`
+	OutputTokens        ReportedTokenCountV1                      `json:"outputTokens"`
+	UncachedInputTokens ReportedTokenCountV1                      `json:"uncachedInputTokens"`
+	CacheReadTokens     ReportedTokenCountV1                      `json:"cacheReadTokens"`
+	CacheWriteTokens    ReportedTokenCountV1                      `json:"cacheWriteTokens"`
+	ReasoningTokens     ReportedTokenCountV1                      `json:"reasoningTokens"`
+	TotalTokens         ReportedTokenCountV1                      `json:"totalTokens"`
+	Routes              []domaincache.ProviderPublicAttributionV1 `json:"routes,omitempty"`
+}
+
+// TurnInventoryV1 can only be authored by the durable service after a fresh,
+// installation-trusted inventory read. The zero value is unavailable, not a
+// verified empty ledger. No private identities have a public representation.
+type TurnInventoryV1 struct {
+	observed    bool
+	turnBinding string
+	threadID    string
+	turnID      string
+	intents     []domaincache.ProviderAttemptIntentV1
+	settlements []domaincache.ProviderAttemptSettlementV1
+	closure     domaincache.ProviderTurnClosureV1
+	closed      bool
+}
+
+func (inventory TurnInventoryV1) BillingV1() (ProviderBillingV1, error) {
+	if !inventory.observed {
+		return ProviderBillingV1{}, errors.New("provider billing inventory is unavailable")
+	}
+	if err := domaincache.ValidateProviderLedgerOpenInventoryV1(inventory.turnBinding, inventory.intents, inventory.settlements); err != nil {
+		return ProviderBillingV1{}, err
+	}
+	if inventory.closed {
+		if err := domaincache.ValidateProviderTurnClosureForInventoryV1(inventory.closure, inventory.intents, inventory.settlements); err != nil {
+			return ProviderBillingV1{}, err
+		}
+	}
+	n := uint64(len(inventory.intents))
+	result := ProviderBillingV1{InventoryComplete: true, Closed: inventory.closed, AttemptCount: n, SettledAttemptCount: uint64(len(inventory.settlements))}
+	seenRoutes := map[domaincache.ProviderPublicAttributionV1]bool{}
+	routesComplete := true
+	for _, intent := range inventory.intents {
+		route := intent.Shape.PublicAttribution
+		if route == (domaincache.ProviderPublicAttributionV1{}) {
+			routesComplete = false
+		}
+		if route != (domaincache.ProviderPublicAttributionV1{}) && !seenRoutes[route] {
+			seenRoutes[route] = true
+			result.Routes = append(result.Routes, route)
+		}
+	}
+	sort.Slice(result.Routes, func(i, j int) bool {
+		if result.Routes[i].Provider == result.Routes[j].Provider {
+			return result.Routes[i].Model < result.Routes[j].Model
+		}
+		return result.Routes[i].Provider < result.Routes[j].Provider
+	})
+	if !routesComplete {
+		result.Routes = nil
+	}
+	for _, settlement := range inventory.settlements {
+		usage := settlement.Observation.Usage
+		if usage.ReasoningTokens.Known && usage.OutputTokens.Known && usage.ReasoningTokens.Value > usage.OutputTokens.Value {
+			return ProviderBillingV1{}, errors.New("provider reasoning exceeds output tokens")
+		}
+		read := usage.MessagesInput.Read
+		if usage.MessagesInput.SchemaVersion == "" {
+			read = usage.CacheHitTokens
+		}
+		pairs := []struct {
+			target *ReportedTokenCountV1
+			source domaincache.TokenCountV1
+		}{
+			{&result.InputTokens, usage.InputTokens}, {&result.OutputTokens, usage.OutputTokens},
+			{&result.UncachedInputTokens, usage.MessagesInput.Uncached}, {&result.CacheReadTokens, read},
+			{&result.CacheWriteTokens, usage.MessagesInput.Created}, {&result.ReasoningTokens, usage.ReasoningTokens},
+		}
+		for _, pair := range pairs {
+			qualified := true
+			if pair.target == &result.OutputTokens {
+				qualified = usage.OutputTokensFinality == domaincache.ProviderOutputTokensFinalV1
+			}
+			if pair.target == &result.ReasoningTokens {
+				qualified = usage.ReasoningTokensFinality == domaincache.ProviderOutputTokensFinalV1
+			}
+			if err := addReportedTokenV1(pair.target, pair.source, qualified); err != nil {
+				return ProviderBillingV1{}, err
+			}
+		}
+		// The intersection is per attempt: independent input/output subtotals
+		// must not be paired across different attempts. Reasoning is a subset.
+		if usage.InputTokens.Known && usage.OutputTokens.Known {
+			if usage.InputTokens.Value > 9007199254740991-usage.OutputTokens.Value {
+				return ProviderBillingV1{}, ErrAggregateOverflow
+			}
+			if err := addReportedTokenV1(&result.TotalTokens, domaincache.TokenCountV1{Known: true, Value: usage.InputTokens.Value + usage.OutputTokens.Value}, usage.OutputTokensFinality == domaincache.ProviderOutputTokensFinalV1); err != nil {
+				return ProviderBillingV1{}, err
+			}
+		}
+	}
+	for _, count := range []*ReportedTokenCountV1{&result.InputTokens, &result.OutputTokens, &result.UncachedInputTokens, &result.CacheReadTokens, &result.CacheWriteTokens, &result.ReasoningTokens, &result.TotalTokens} {
+		count.AttemptCount = n
+		// A fresh open inventory can cover its current nonempty attempt set.
+		// Only an exact zero-intent closure establishes an explicitly empty turn.
+		count.Complete = count.QualifiedAttemptCount == n && (n > 0 || inventory.closed)
+	}
+	return result, nil
+}
+
+func addReportedTokenV1(target *ReportedTokenCountV1, source domaincache.TokenCountV1, qualified bool) error {
+	if !source.Known {
+		return nil
+	}
+	const maxPublicInteger uint64 = 9007199254740991
+	if source.Value > maxPublicInteger || target.ReportedValue > maxPublicInteger-source.Value {
+		return ErrAggregateOverflow
+	}
+	target.ReportedValue += source.Value
+	target.KnownAttemptCount++
+	if qualified {
+		target.QualifiedAttemptCount++
+	}
+	return nil
+}
+
+// VisitAttemptsV1 supplies internal metadata to a read projection. The visitor
+// receives copies, and a nil settlement explicitly marks a pending intent.
+func (inventory TurnInventoryV1) VisitAttemptsV1(visit func(domaincache.ProviderAttemptIntentV1, *domaincache.ProviderAttemptSettlementV1) error) error {
+	if visit == nil {
+		return errors.New("provider billing visitor is unavailable")
+	}
+	if _, err := inventory.BillingV1(); err != nil {
+		return err
+	}
+	settlements := make(map[string]domaincache.ProviderAttemptSettlementV1, len(inventory.settlements))
+	for _, settlement := range inventory.settlements {
+		settlements[settlement.IntentID] = settlement
+	}
+	for _, intent := range inventory.intents {
+		var settled *domaincache.ProviderAttemptSettlementV1
+		if value, ok := settlements[intent.IntentID]; ok {
+			copy := value
+			settled = &copy
+		}
+		if err := visit(intent, settled); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ProjectionScopeV1 is an internal membership proof, never a public DTO.
+func (inventory TurnInventoryV1) ProjectionScopeV1() (threadID, turnID, binding string, available bool) {
+	return inventory.threadID, inventory.turnID, inventory.turnBinding, inventory.observed
 }

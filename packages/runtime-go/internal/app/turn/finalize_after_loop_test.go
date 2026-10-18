@@ -263,3 +263,26 @@ func eventKinds(events []map[string]any) []string {
 	}
 	return kinds
 }
+
+func TestOutputCapCompletionUsesExistingEmptyTerminalBatch(t *testing.T) {
+	store := &finalizeStoreStub{status: "running", finishChanged: true}
+	committed, err := CommitCompletedTurn(CommitCompletionInput{
+		Store: store, SecurityContext: generalCompletionContext(t), ThreadID: "thr_1", TurnID: "turn_1", TerminalReason: "success",
+		FinishedAt: "2026-01-02T03:04:05Z", EndReason: &domainterminal.EndReason{Kind: domainterminal.EndReasonMaxTokens}, EmptyOutputCap: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store.atomicItems) != 0 || committed.CompletionRecord.AssistantItem != nil || len(committed.Publication.Events) != 2 || committed.Publication.TerminalItemID != "" ||
+		!domainterminal.ValidEndReasonRecord(committed.Publication.TerminalEvent) {
+		t.Fatalf("empty cap fabricated assistant or lost outbox fact: %#v", committed)
+	}
+	if committed.Publication.TerminalEvent["endReason"] == nil || store.bundleCalls != 1 {
+		t.Fatal("empty cap not committed/reconciled")
+	}
+	loser := &finalizeStoreStub{status: "completed", finishChanged: false}
+	result, err := CommitCompletedTurn(CommitCompletionInput{Store: loser, SecurityContext: generalCompletionContext(t), ThreadID: "thr_1", TurnID: "turn_1", EndReason: &domainterminal.EndReason{Kind: domainterminal.EndReasonMaxTokens}, EmptyOutputCap: true})
+	if err != nil || result.Changed || loser.bundleCalls != 0 {
+		t.Fatal("losing cap published a terminal bundle")
+	}
+}

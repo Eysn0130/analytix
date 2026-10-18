@@ -71,8 +71,10 @@ type ProviderTurnCloser interface {
 }
 
 type AuxiliaryProviderInput struct {
-	Request         domainmodel.Request
-	SecurityContext domainsecurity.TurnSecurityContext
+	Request             domainmodel.Request
+	SecurityContext     domainsecurity.TurnSecurityContext
+	RequireCompleteText bool
+	ContextWindowTokens int
 }
 
 type AuxiliaryProviderDependencies struct {
@@ -121,6 +123,7 @@ func RunAuxiliaryProvider(ctx context.Context, input AuxiliaryProviderInput, dep
 	stream, streamErr := StreamProviderWithRetry(ctx, ProviderStreamInput{
 		Provider: deps.Provider, Request: request, SecurityContext: input.SecurityContext, OrdinaryEffect: true,
 		MaxAttempts: 1, MaxOutputBytes: InlineCompletionMaxOutputBytes,
+		ContinuationAuthority: ProviderContinuationAuthorityInput{ProviderConfig: domainmodel.TurnConfig{ContextWindowTokens: input.ContextWindowTokens}},
 		Callbacks: ProviderStreamCallbacks{
 			AcquireProviderAttempt: deps.Acquire, PrepareProviderAttempt: deps.Prepare,
 			BeforeProviderInvocation: dispatch.before, AfterProviderAttempt: dispatch.after,
@@ -134,9 +137,19 @@ func RunAuxiliaryProvider(ctx context.Context, input AuxiliaryProviderInput, dep
 	if !stream.Result.StreamCompleted || stream.PartialToolStarted {
 		return "", ErrInlineCompletionUnavailable
 	}
+	if input.RequireCompleteText && (providerResultOutputCapped(stream.Result) || strings.TrimSpace(stream.Text) == "") {
+		return "", ErrInlineCompletionUnavailable
+	}
 	for _, chunk := range stream.Result.Chunks {
 		if chunk.Kind == domainmodel.ChunkToolCall || chunk.Kind == domainmodel.ChunkToolCallStart {
 			return "", ErrInlineCompletionUnavailable
+		}
+		if input.RequireCompleteText {
+			switch chunk.Kind {
+			case domainmodel.ChunkText, domainmodel.ChunkReasoning, domainmodel.ChunkUsage, domainmodel.ChunkRetrying, domainmodel.ChunkDone:
+			default:
+				return "", ErrInlineCompletionUnavailable
+			}
 		}
 	}
 	if err := deps.ValidateCurrent(ctx); err != nil {

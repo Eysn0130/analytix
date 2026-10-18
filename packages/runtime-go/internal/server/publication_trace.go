@@ -17,7 +17,7 @@ var publicationTraceMu sync.Mutex
 var publicationTracePending [][]byte
 var publicationTraceDraining bool
 
-// One bounded diagnostic per committed terminal, never one write per chunk.
+// One bounded diagnostic per committed terminal or returned loop failure, never one write per chunk.
 // The single drain worker exits when empty; no idle observer survives a cohort.
 // Saturation or a blocked diagnostics pipe drops observations rather than
 // delaying terminal publication, ACK, cancellation, or mandatory audit storage.
@@ -25,7 +25,56 @@ func recordRuntimePublicationTrace(threadID, turnID string, result apploop.Runti
 	if !runtimeThreadTraceEnabled() || timing.CommittedAt.IsZero() {
 		return
 	}
-	body := runtimePublicationTrace(threadID, turnID, result, validationStartedAt, timing)
+	enqueueRuntimeTrace(runtimePublicationTrace(threadID, turnID, result, validationStartedAt, timing))
+}
+
+func recordRuntimeProviderFailureTrace(threadID, turnID string, err error) {
+	if !runtimeThreadTraceEnabled() || err == nil {
+		return
+	}
+	stage, cause := apploop.ProviderFailureDiagnosticV1(err)
+	body, _ := json.Marshal(map[string]any{
+		"name": "thread.provider.loop_failure", "threadId": "ref-" + domainsecurity.SHA256Hex([]byte(threadID)),
+		"turnId": "ref-" + domainsecurity.SHA256Hex([]byte(turnID)),
+		"data":   map[string]any{"stage": stage, "cause": cause, "pid": os.Getpid()},
+	})
+	enqueueRuntimeTrace(body)
+}
+
+// These are private diagnostics on the existing owned stderr trace, not public events.
+func runtimeDocumentGenerationFailureTrace(threadID, turnID, stage, cause string) []byte {
+	valid := false
+	switch stage {
+	case "checkpoint_settlement":
+		valid = cause == "unavailable" || cause == "incomplete"
+	case "checkpoint_record":
+		valid = cause == "unavailable"
+	case "host_preconsume", "host_postconsume":
+		valid = cause == "context_canceled" || cause == "context_deadline_exceeded" || cause == "identity_invalid" || cause == "snapshot_unavailable"
+	case "generation_output":
+		valid = cause == "validation_invalid" || cause == "target_unavailable" || cause == "codec_invalid" || cause == "checkpoint_unavailable" || cause == "context_canceled" || cause == "other_unavailable"
+	}
+	if !valid {
+		return nil
+	}
+	body, _ := json.Marshal(map[string]any{
+		"name": "thread.tool.generation_failure", "threadId": "ref-" + domainsecurity.SHA256Hex([]byte(threadID)),
+		"turnId": "ref-" + domainsecurity.SHA256Hex([]byte(turnID)),
+		"data":   map[string]any{"stage": stage, "cause": cause, "pid": os.Getpid()},
+	})
+	return body
+}
+
+func recordRuntimeDocumentGenerationFailureTrace(threadID, turnID, stage, cause string) {
+	if !runtimeThreadTraceEnabled() {
+		return
+	}
+	if body := runtimeDocumentGenerationFailureTrace(threadID, turnID, stage, cause); len(body) > 0 {
+		enqueueRuntimeTrace(body)
+	}
+}
+
+func enqueueRuntimeTrace(body []byte) {
 	publicationTraceMu.Lock()
 	defer publicationTraceMu.Unlock()
 	if len(publicationTracePending) >= 64 {

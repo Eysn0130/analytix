@@ -1,112 +1,50 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import { ArchiveRestore, FolderOpen, Loader2 } from '../design/AnalytixUiIcons'
+import { useEffect, useState, type ReactElement } from 'react'
+import { Loader2 } from '../design/AnalytixUiIcons'
 import type { LegacySessionDetectResult } from '@shared/analytix-api'
 import { SettingsCard, SettingRow } from './settings-controls'
-import { useChatStore } from '../store/chat-store'
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string
-
-const buttonClass =
-  'inline-flex items-center gap-1.5 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[13px] font-medium text-ds-ink shadow-sm transition hover:bg-ds-hover disabled:cursor-not-allowed disabled:opacity-50'
 
 function sum(detection: LegacySessionDetectResult | null, key: 'threadCount' | 'newCount'): number {
   return detection?.sources.reduce((total, source) => total + source[key], 0) ?? 0
 }
 
 export function LegacySessionImportCard({
-  t,
-  tCommon
+  t
 }: {
   t: TranslateFn
   tCommon: TranslateFn
 }): ReactElement {
   const [detection, setDetection] = useState<LegacySessionDetectResult | null>(null)
   const [detecting, setDetecting] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [restarting, setRestarting] = useState(false)
-  const showTopNotice = useChatStore((s) => s.showTopNotice)
-
-  const refreshDetection = useCallback(async () => {
-    if (typeof window.analytix?.diagnostics?.detectLegacySessions !== 'function') {
-      setDetecting(false)
-      return
-    }
-    setDetecting(true)
-    try {
-      setDetection(await window.analytix.diagnostics.detectLegacySessions())
-    } catch (error) {
-      showTopNotice({ tone: 'error', message: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setDetecting(false)
-    }
-  }, [showTopNotice])
+  const [scanUnavailable, setScanUnavailable] = useState(false)
 
   useEffect(() => {
-    void refreshDetection()
-  }, [refreshDetection])
-
-  const runImport = useCallback(
-    async (sourceDir?: string) => {
-      if (typeof window.analytix?.diagnostics?.importLegacySessions !== 'function') return
-      setBusy(true)
-      try {
-        const result = await window.analytix.diagnostics.importLegacySessions(sourceDir)
-        if (!result.ok) {
-          showTopNotice({ tone: 'error', message: result.message })
-          return
-        }
-        if (result.total === 0) {
-          showTopNotice({ tone: 'info', message: t('legacyImportResultNone') })
-          return
-        }
-        showTopNotice({
-          tone: 'success',
-          message: t('legacyImportResult', { imported: result.imported, skipped: result.skipped })
-        })
-        await refreshDetection()
-        if (result.imported > 0 && typeof window.analytix?.app?.confirmDialog === 'function') {
-          const restart = await window.analytix.app.confirmDialog({
-            message: t('legacyImportRestartTitle'),
-            detail: t('legacyImportRestartDetail', { count: result.imported }),
-            confirmLabel: t('legacyImportRestartConfirm'),
-            cancelLabel: tCommon('cancel')
-          })
-          if (restart && typeof window.analytix?.runtime?.restartRuntime === 'function') {
-            setRestarting(true)
-            try {
-              await window.analytix.runtime.restartRuntime()
-            } finally {
-              setRestarting(false)
-            }
-          }
-        }
-      } catch (error) {
-        showTopNotice({ tone: 'error', message: error instanceof Error ? error.message : String(error) })
-      } finally {
-        setBusy(false)
-      }
-    },
-    [refreshDetection, showTopNotice, t, tCommon]
-  )
-
-  const pickAndImport = useCallback(async () => {
-    if (typeof window.analytix?.diagnostics?.pickLegacySessionDir !== 'function') return
-    try {
-      const picked = await window.analytix.diagnostics.pickLegacySessionDir()
-      if (picked.canceled || !picked.path) return
-      await runImport(picked.path)
-    } catch (error) {
-      showTopNotice({ tone: 'error', message: error instanceof Error ? error.message : String(error) })
-    }
-  }, [runImport, showTopNotice])
+    let active = true
+    const detect = window.analytix?.diagnostics?.detectLegacySessions
+    const pending = typeof detect === 'function'
+      ? Promise.resolve().then(() => detect())
+      : Promise.reject(new Error('Legacy source detection unavailable.'))
+    void pending.then((result) => {
+      if (!active) return
+      setDetection(result)
+      setDetecting(false)
+    }, () => {
+      if (!active) return
+      setScanUnavailable(true)
+      setDetecting(false)
+    })
+    return () => { active = false }
+  }, [])
 
   const totalNew = sum(detection, 'newCount')
   const totalFound = sum(detection, 'threadCount')
-  const working = busy || restarting
 
   const statusText = detecting
     ? t('legacyImportScanning')
-    : totalNew > 0
+    : scanUnavailable
+      ? t('legacyImportScanUnavailable')
+      : totalNew > 0
       ? t('legacyImportFound', { count: totalNew })
       : totalFound > 0
         ? t('legacyImportAllPresent')
@@ -144,30 +82,7 @@ export function LegacySessionImportCard({
               </ul>
             ) : null}
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className={buttonClass}
-                disabled={working || detecting || totalNew === 0}
-                onClick={() => void runImport()}
-              >
-                {busy && !restarting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ArchiveRestore className="h-4 w-4" />
-                )}
-                {restarting ? t('legacyImportRestarting') : t('legacyImportButton')}
-              </button>
-              <button
-                type="button"
-                className={buttonClass}
-                disabled={working}
-                onClick={() => void pickAndImport()}
-              >
-                <FolderOpen className="h-4 w-4" />
-                {t('legacyImportPick')}
-              </button>
-            </div>
+            <p className="text-[13px] text-ds-muted">{t('legacyImportUnavailable')}</p>
 
           </div>
         }

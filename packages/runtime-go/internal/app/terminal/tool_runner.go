@@ -33,6 +33,7 @@ type BashToolRunRequest struct {
 }
 
 type BashToolCallbacks struct {
+	CaptureProtectedOutput     func(context.Context, domainjob.Record, string, bool) *domainjob.ProtectedOutputSnapshotV1
 	RegisterBoundBackgroundJob func(jobID string, binding *domainjob.SecurityBinding, cancel context.CancelFunc) (*subagentapp.BackgroundJobStartBarrier, bool)
 	UnregisterBackgroundJob    func(jobID string)
 	OnBackgroundStarted        func(record JobRecord)
@@ -148,6 +149,7 @@ func (s *Service) executeBackgroundBashTool(pending BashToolContext, request Bas
 			RespectKilledStatus: true,
 			StartBarrier:        startBarrier,
 		}, BackgroundBashCallbacks{
+			CaptureProtectedOutput: callbacks.CaptureProtectedOutput,
 			OnOutput: func(record JobRecord, output string, truncated bool) {
 				if callbacks.OnBackgroundProgress != nil {
 					callbacks.OnBackgroundProgress(record, "running", fmt.Sprintf("background bash output: %d bytes", len([]byte(output))))

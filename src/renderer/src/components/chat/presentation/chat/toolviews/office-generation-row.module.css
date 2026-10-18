@@ -1,0 +1,10 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+/* The real receipt replaces DSH's declared-path summary; no path is inferred. */
+.summary { margin-left: 8px; display: flex; align-items: center; gap: 8px; min-width: 0; color: inherit; font-size: 12px; }
+.summary > :first-child { flex-shrink: 0; }
+.metadata { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inspect { align-self: flex-start; border: none; padding: 4px 0; background: transparent; color: var(--dsw-alias-link); font: inherit; font-size: 12px; cursor: pointer; }
+
+/* Shared Present row output uses the same pinned disclosure chrome. */
+.output { margin: 8px 0; padding: 12px; white-space: pre-wrap; font: inherit; font-size: 12px; }

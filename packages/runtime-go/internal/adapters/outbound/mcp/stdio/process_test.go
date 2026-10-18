@@ -20,6 +20,9 @@ import (
 	mcpprotocol "analytix.local/runtime-go/internal/adapters/outbound/mcp/protocol"
 	appmcp "analytix.local/runtime-go/internal/app/mcp"
 	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"analytix.local/runtime-go/internal/testsupport/toolidentity"
 )
 
 func TestTransportErrorSeparatesOutageFromProtocolCorruption(t *testing.T) {
@@ -521,5 +524,43 @@ func TestStdioTransportPreservesRawOutputForHostValidation(t *testing.T) {
 	}
 	if err := appmcp.ValidateToolResultOutput(lossless, tools[0].OutputSchema); err == nil {
 		t.Fatal("stdio output schema mismatch passed host validation")
+	}
+}
+
+type scheduleBufferWriterV1 struct{ bytes.Buffer }
+
+func (*scheduleBufferWriterV1) Close() error { return nil }
+func TestStdioScheduleOriginUsesPrivateSubsetWithoutProcessV1(t *testing.T) {
+	now := time.Now().UTC()
+	securityContext, e := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: "thread-schedule", TurnID: "turn-schedule", WorkspaceRealPath: "/workspace", CaseID: "case-schedule", CaseBindingHash: domainsecurity.SHA256Hex([]byte("binding")), DatasetSnapshotID: securitycontexttest.DatasetSnapshotID("schedule"), SourceManifestHash: domainsecurity.SHA256Hex([]byte("manifest")), ContextEpoch: 2, IssuedAt: now})
+	if e != nil {
+		t.Fatal(e)
+	}
+	identity, e := domainsecurity.NewVerifiedMCPServerIdentity("gui_schedule", "analytix-schedule", "0.1.0", domainsecurity.SHA256Hex([]byte("instance")), 1)
+	if e != nil {
+		t.Fatal(e)
+	}
+	grant := domainsecurity.NewExecutionGrant(domainsecurity.ExecutionGrantInput{Context: securityContext, Provider: "test", ServerIdentity: identity, ToolName: "mcp__gui_schedule__gui_schedule_create", ToolCallID: toolidentity.MustHostToolCallIDV1("schedule-stdio"), ConnectionEpoch: 1, ArgsHash: domainsecurity.SHA256Hex([]byte("args")), SchemaHash: domainsecurity.SHA256Hex([]byte("schema")), ScopeHash: domainsecurity.SHA256Hex([]byte("scope")), ApprovalState: "not_required", IssuedAt: now})
+	envelope, e := domainmcp.NewHostContextEnvelope(securityContext, grant)
+	if e != nil {
+		t.Fatal(e)
+	}
+	writer := &scheduleBufferWriterV1{}
+	client := &TransportClient{spec: domainmcp.ServerSpec{ID: "gui_schedule", IdentitySource: "host-schedule-binding-v1", ExpectedServerName: "analytix-schedule", ExpectedServerVersion: "0.1.0", Args: []string{"entry", "--gui-schedule-mcp-server", "--base-url", "http://127.0.0.1:1234", "--secret", "synthetic"}}, stdin: writer, stdout: bufio.NewReader(strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[]}}\n")), requestTimeout: time.Second}
+	if _, e = client.CallToolWithHostContext(context.Background(), "gui_schedule_create", map[string]any{"title": "task"}, envelope); e != nil {
+		t.Fatal(e)
+	}
+	var frame map[string]any
+	if json.Unmarshal(writer.Bytes(), &frame) != nil {
+		t.Fatal("invalid stdio frame")
+	}
+	meta := frame["params"].(map[string]any)["_meta"].(map[string]any)
+	if len(meta) != 1 || meta["analytixScheduleOriginV1"] == nil || meta["analytixRuntimeContext"] != nil {
+		t.Fatal("stdio sent full runtime authority")
+	}
+	client.spec.IdentitySource = ""
+	writer.Reset()
+	if _, e = client.CallToolWithHostContext(context.Background(), "gui_schedule_create", nil, envelope); e == nil || writer.Len() != 0 {
+		t.Fatal("unbound stdio sent origin")
 	}
 }

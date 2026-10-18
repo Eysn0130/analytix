@@ -1164,3 +1164,19 @@ func firstNonEmptyString(values ...any) string {
 	}
 	return ""
 }
+
+// ToolCallParamsWithScheduleOriginV1 never lifts origin from provider arguments
+// and never sends principal, workspace, case or dataset Host context.
+func ToolCallParamsWithScheduleOriginV1(name string, arguments map[string]any, envelope domainmcp.HostContextEnvelope) (map[string]any, error) {
+	_, g, e := envelope.Authority()
+	if e != nil || g.ToolName != "mcp__gui_schedule__"+name {
+		return nil, errors.New("native Schedule create authority is invalid")
+	}
+	origin, e := envelope.ScheduleOriginRecordV1()
+	if e != nil {
+		return nil, e
+	}
+	params := ToolCallParams(name, arguments)
+	params["_meta"] = map[string]any{"analytixScheduleOriginV1": origin}
+	return params, nil
+}

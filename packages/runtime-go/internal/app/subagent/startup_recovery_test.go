@@ -684,3 +684,53 @@ func TestBackgroundCompletionExactReplaySurvivesLaterCaseLineage(t *testing.T) {
 		})
 	}
 }
+
+func TestBackgroundCompletionItemProducerPreservesLegacyReplayAndRejectsForgery(t *testing.T) {
+	record, thread := startupRecoveryFixture(t)
+	record.Status, record.CompletionDeliveryStatus = "completed", "delivered"
+	record.FinishedAt, record.CompletionDeliveryAt = "2026-07-20T01:02:02Z", "2026-07-20T01:02:03Z"
+	record.CompletionDeliveryID = "delivery-synthetic"
+	events := BuildDurableJobLifecycleEventsV1(record.ParentThreadID, record.ParentTurnID, record.ParentToolItemID, record.ParentToolCallID, "task", record)
+	for _, event := range events {
+		if id := BackgroundJobCompletionItemID(record.ParentTurnID, event); id != "" {
+			record.CompletionDeliveryItemID = id
+		}
+	}
+	drafts := CanonicalBackgroundCompletionLifecycleEventsV1(events, record)
+	replay := make([]map[string]any, len(drafts))
+	found := false
+	for index, draft := range drafts {
+		replay[index] = cloneMap(draft)
+		replay[index]["seq"] = float64(index + 1)
+		if item, ok := draft["item"].(map[string]any); ok {
+			found = true
+			if backgroundStringField(item, "createdAt") != record.FinishedAt || backgroundStringField(draft, "timestamp") != record.CompletionDeliveryAt || backgroundStringField(item, "callId") != record.ParentToolCallID {
+				t.Fatal("notification producer fabricated timestamps or identity")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("normal completion bundle omitted its exact item")
+	}
+	if matched, err := matchBackgroundCompletionLifecycleReplayV1(thread, drafts, replay, record.ID); err != nil || !matched {
+		t.Fatalf("new exact replay: matched=%t err=%v", matched, err)
+	}
+	legacy := make([]map[string]any, len(replay))
+	for index, event := range replay {
+		legacy[index] = cloneMap(event)
+		delete(legacy[index], "item")
+	}
+	if matched, err := matchBackgroundCompletionLifecycleReplayV1(thread, drafts, legacy, record.ID); err != nil || !matched {
+		t.Fatalf("legacy exact metadata replay: matched=%t err=%v", matched, err)
+	}
+	for _, event := range replay {
+		if item, ok := event["item"].(map[string]any); ok {
+			forged := cloneMap(item)
+			forged["createdAt"] = record.CompletionDeliveryAt
+			event["item"] = forged
+		}
+	}
+	if matched, err := matchBackgroundCompletionLifecycleReplayV1(thread, drafts, replay, record.ID); err == nil || matched {
+		t.Fatal("forged item seed bypassed exact existing bundle validation")
+	}
+}

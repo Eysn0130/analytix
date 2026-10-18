@@ -25,3 +25,14 @@ func TestNormalizeFinishReasonUsesClosedVocabulary(t *testing.T) {
 		}
 	}
 }
+
+func TestNativePartialCacheNumbersDoNotEstablishLegacyComparison(t *testing.T) {
+	u := Usage{UsagePresenceKnown: true, HasCompletionTokens: true, CompletionTokens: 20, HasCacheHit: true, CacheHitTokens: 5}
+	if u.HasCacheTelemetry() || NormalizeUsage(u).HasCacheTelemetry() {
+		t.Fatal("partial native numbers became a comparable cache pair")
+	}
+	u.HasPromptTokens, u.PromptTokens, u.HasCacheMiss, u.CacheMissTokens = true, 10, true, 5
+	if !NormalizeUsage(u).HasCacheTelemetry() {
+		t.Fatal("complete native cache pair lost comparison")
+	}
+}

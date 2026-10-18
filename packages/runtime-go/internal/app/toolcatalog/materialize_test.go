@@ -272,3 +272,21 @@ func TestNativeSelectionToolsRequireHostCaptureAndStayOutOfDelegatedScopes(t *te
 		}
 	}
 }
+
+func TestPlanReviewCatalogRequiresRealRootPlanAndUserInputCapability(t *testing.T) {
+	for _, test := range []struct{ plan, disabled, child, want bool }{{true, false, false, true}, {false, false, false, false}, {true, true, false, false}, {true, false, true, false}} {
+		tools := MaterializeToolSchemas(MaterializeInput{PlanActive: test.plan, DisableUserInput: test.disabled, Subagent: test.child, ToolScope: []string{"read", "exit_plan_mode"}, PromptRoute: RouteToolAgent})
+		if containsName(toolNames(tools), ToolExitPlanModeName) != test.want {
+			t.Fatal("review was advertised without real plan/user Question scope")
+		}
+	}
+}
+
+func TestPresentReadonlyDeclarationRetainsSerializedExecutionV1(t *testing.T) {
+	if !HostAuthorizesReadOnly("present", false, false) || IsMutatingTool("present") || IsFileMutationTool("present") {
+		t.Fatal("existing-file declaration widened file mutation authority")
+	}
+	if CanRunInParallel("present", false, false) {
+		t.Fatal("readonly present declaration unexpectedly changed parallel scheduling")
+	}
+}

@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sort"
 	"strings"
 
 	domaincaseentity "analytix.local/runtime-go/internal/domain/caseentity"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
+	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainreasoningmarkup "analytix.local/runtime-go/internal/domain/reasoningmarkup"
 	domainrestrictedevidence "analytix.local/runtime-go/internal/domain/restrictedevidence"
 	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
@@ -33,6 +36,8 @@ var (
 )
 
 var privateGeneralTerminalSchemaValues = map[string]bool{
+	domainprocess.SettledHistorySchemaV1:               true,
+	domainprocess.SettledHistoryAnchorSchemaV1:         true,
 	"general-terminal-publication.v1":                  true,
 	"general-terminal-publication-archive.v1":          true,
 	"general-terminal-cas-binding.v1":                  true,
@@ -44,10 +49,25 @@ var privateGeneralTerminalSchemaValues = map[string]bool{
 var privateKeyNormalizer = strings.NewReplacer("_", "", "-", "", " ", "")
 
 func ValidatePublicRecord(value any) error {
+	if containsSettledProcessHistoryV1(value) {
+		return ErrPrivateReasoningPersistence
+	}
+	original := value
+	resource, err := QuestionReplyResourceViewV1(value)
+	if err != nil {
+		return err
+	}
+	if err := domainsecret.ValidateValueLimitsV1(resource); err != nil {
+		return errors.Join(ErrCredentialProjection, err)
+	}
+	value, _, err = StageQuestionReplyContentV1(value)
+	if err != nil {
+		return err
+	}
 	if err := domainrestrictedevidence.Validate(value); err != nil {
 		return errors.Join(ErrRestrictedEvidenceProjection, err)
 	}
-	if err := privateReasoningError(value, false); err != nil {
+	if err := privateReasoningError(original, false); err != nil {
 		return err
 	}
 	if err := validateClosedFailureProjectionV1(value); err != nil {
@@ -70,11 +90,21 @@ func ValidatePublicRecord(value any) error {
 
 // publicPrivacyValidationViewV1 keeps host-bound, closed plan/artifact digests
 // and timestamps, or closed tool-failure diagnostic hashes, out of prose PII
-// classification without weakening display fields.
+// classification without weakening display fields. Closed root logical-step
+// events likewise keep only their validated correlation ID out of prose scanning.
 // These are structural metadata: the canonical tool-result projection has
 // already validated their syntax, lifecycle, and host tool-call identity.
 // Lookalike maps and non-canonical tool results remain on the ordinary scanner.
 func publicPrivacyValidationViewV1(value any) any {
+	if record, ok := value.(map[string]any); ok {
+		if _, valid := ProjectClosedLogicalStepEventDetailsV1(record); valid {
+			projected := clonePublicRecordMapV1(record)
+			details := clonePublicRecordMapV1(record["details"].(map[string]any))
+			details["logicalStepId"] = "logical-step-id"
+			projected["details"] = details
+			value = projected
+		}
+	}
 	projected, changed := projectClosedPlanDigestForPrivacyValidationV1(value)
 	if !changed {
 		return value
@@ -87,16 +117,29 @@ func publicPrivacyValidationViewV1(value any) any {
 // result byte-stable. Each staged placeholder is path-bound and restored only if the
 // generic projector returns it unchanged; all plan display fields still pass
 // through the ordinary projector. The same bounded mechanism preserves the five
-// SHA-256 fields of exact tool_not_advertised failure records.
+// SHA-256 fields of exact tool_not_advertised failure records and the validated
+// logicalStepId of a closed root logical-step event. Nested lookalikes are prose.
 func ProjectPublicValuePreservingClosedPlanDigestV1(value any) (any, bool) {
+	if ValidateQuestionReplyResourceLimitsV1(value) != nil {
+		return nil, true
+	}
+	value, restoreQuestion, err := StageQuestionReplyContentV1(value)
+	if err != nil {
+		return nil, true
+	}
 	entries := []closedPlanDigestProjectionEntryV1{}
 	staged := stageClosedPlanDigestsV1(value, nil, &entries)
+	staged = stageRootLogicalStepIDV1(staged, &entries)
 	for index := range entries {
 		entries[index].placeholder["total"] = float64(len(entries))
 		entries[index].stagedPlaceholder["total"] = float64(len(entries))
 	}
 	projected, changed := domainprivacy.ProjectPublicValue(staged)
 	restored, ok := restoreClosedPlanDigestsV1(projected, entries)
+	if !ok {
+		return nil, true
+	}
+	restored, ok = restoreQuestion(restored)
 	if !ok {
 		return nil, true
 	}
@@ -114,6 +157,32 @@ type closedPlanDigestProjectionEntryV1 struct {
 	digest            string
 	placeholder       map[string]any
 	stagedPlaceholder map[string]any
+}
+
+// This must run once at the publication root, never inside the recursive tool
+// metadata walker: a complete pipeline lookalike embedded in user content is
+// still ordinary prose. Only the exact details.logicalStepId path is staged.
+func stageRootLogicalStepIDV1(value any, entries *[]closedPlanDigestProjectionEntryV1) any {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	if _, valid := ProjectClosedLogicalStepEventDetailsV1(record); !valid {
+		return value
+	}
+	staged := clonePublicRecordMapV1(record)
+	details := clonePublicRecordMapV1(record["details"].(map[string]any))
+	placeholder := map[string]any{
+		"kind": "closed_logical_step_id_placeholder_v1", "ordinal": float64(len(*entries)),
+	}
+	stagedPlaceholder := clonePublicRecordMapV1(placeholder)
+	*entries = append(*entries, closedPlanDigestProjectionEntryV1{
+		path:   []closedPlanDigestProjectionPathV1{{kind: "key", key: "details"}, {kind: "key", key: "logicalStepId"}},
+		digest: details["logicalStepId"].(string), placeholder: placeholder, stagedPlaceholder: stagedPlaceholder,
+	})
+	details["logicalStepId"] = stagedPlaceholder
+	staged["details"] = details
+	return staged
 }
 
 func stageClosedPlanDigestsV1(
@@ -466,7 +535,7 @@ func ContainsPrivateTerminalAuthority(value any) bool {
 			return true
 		}
 		for key, child := range typed {
-			if strings.HasPrefix(normalizePrivateKey(key), "generalterminal") || ContainsPrivateTerminalAuthority(child) {
+			if normalizePrivateKey(key) == "privateprocesshistory" || strings.HasPrefix(normalizePrivateKey(key), "generalterminal") || ContainsPrivateTerminalAuthority(child) {
 				return true
 			}
 		}
@@ -481,14 +550,24 @@ func ContainsPrivateTerminalAuthority(value any) bool {
 }
 
 func SanitizePublicValue(value any, allowUserText bool) (any, bool) {
+	original := value
+	staged, _, err := StageQuestionReplyContentV1(value)
+	if err != nil {
+		return nil, false
+	}
+	value = staged
 	if domainrestrictedevidence.Validate(value) != nil {
 		return nil, false
 	}
 	if hasInvalidPublicReasoningMetadataV1(value) {
 		return nil, false
 	}
-	public, ok := sanitizeValue(value, allowUserText, false)
-	if !ok || domaincaseentity.ValidatePublicValueWithoutReferenceV1(public) != nil {
+	public, ok := sanitizeValue(original, allowUserText, false)
+	if !ok || !sameQuestionReplyBodiesV1(original, public) {
+		return nil, false
+	}
+	scan, _, err := StageQuestionReplyContentV1(public)
+	if err != nil || domaincaseentity.ValidatePublicValueWithoutReferenceV1(scan) != nil {
 		return nil, false
 	}
 	return public, true
@@ -498,18 +577,34 @@ func SanitizePublicValue(value any, allowUserText bool) (any, bool) {
 // retains a validated host-issued execution grant for private registry replay.
 // It must never be used for HTTP, SSE, renderer, export, or report projection.
 func SanitizeDurableValue(value any, allowUserText bool) (any, bool) {
+	original := value
+	staged, _, err := StageQuestionReplyContentV1(value)
+	if err != nil {
+		return nil, false
+	}
+	value = staged
 	if domainrestrictedevidence.Validate(value) != nil {
 		return nil, false
 	}
 	if hasInvalidPublicReasoningMetadataV1(value) {
 		return nil, false
 	}
-	return sanitizeValue(value, allowUserText, true)
+	public, ok := sanitizeValue(original, allowUserText, true)
+	if !ok || !sameQuestionReplyBodiesV1(original, public) {
+		return nil, false
+	}
+	return public, true
 }
 
 func sanitizeValue(value any, allowUserText bool, privateDurable bool) (any, bool) {
 	switch typed := value.(type) {
 	case map[string]any:
+		// The exact Primary anchor key below has a separate strict metadata
+		// admission. Neither a full record nor an anchor under a neutral key is
+		// ordinary durable history, even when this is the private sanitizer.
+		if schema, _ := typed["schemaVersion"].(string); schema == domainprocess.SettledHistorySchemaV1 || schema == domainprocess.SettledHistoryAnchorSchemaV1 {
+			return nil, false
+		}
 		if !privateDurable && IsPrivateTerminalAuthorityObject(typed) {
 			return nil, false
 		}
@@ -540,6 +635,21 @@ func sanitizeValue(value any, allowUserText bool, privateDurable bool) (any, boo
 		out := make(map[string]any, len(typed))
 		for key, child := range typed {
 			normalizedKey := normalizePrivateKey(key)
+			if normalizedKey == "privateprocesshistory" {
+				if !privateDurable {
+					continue
+				}
+				anchor, err := domainprocess.ParseSettledHistoryAnchorV1(child)
+				if err != nil || key != domainprocess.SettledHistoryFieldV1 {
+					return nil, false
+				}
+				value, err := domainprocess.SettledHistoryAnchorMapV1(anchor)
+				if err != nil {
+					return nil, false
+				}
+				out[key] = value
+				continue
+			}
 			recognizedReasoningMetadata, validReasoningMetadata := validPublicReasoningMetadataV1(normalizedKey, child)
 			if recognizedReasoningMetadata {
 				if !validReasoningMetadata {
@@ -558,6 +668,18 @@ func sanitizeValue(value any, allowUserText bool, privateDurable bool) (any, boo
 				continue
 			}
 			childAllowsUserText := (allowUserText || userMessage) && normalizedKey == "text"
+			parsed, matched, err := questionReplySlotContentV1(typed, key)
+			if err != nil {
+				return nil, false
+			}
+			if matched && !childAllowsUserText {
+				public, ok := sanitizeValue(parsed, false, privateDurable)
+				if !ok || !reflect.DeepEqual(public, parsed) {
+					return nil, false
+				}
+				out[key] = child
+				continue
+			}
 			public, ok := sanitizeValue(child, childAllowsUserText, privateDurable)
 			if ok {
 				out[key] = public
@@ -587,6 +709,27 @@ func sanitizeValue(value any, allowUserText bool, privateDurable bool) (any, boo
 	}
 }
 
+func containsSettledProcessHistoryV1(value any) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		if schema, _ := v["schemaVersion"].(string); schema == domainprocess.SettledHistorySchemaV1 || schema == domainprocess.SettledHistoryAnchorSchemaV1 {
+			return true
+		}
+		for k, child := range v {
+			if normalizePrivateKey(k) == "privateprocesshistory" || containsSettledProcessHistoryV1(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if containsSettledProcessHistoryV1(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func privateReasoningError(value any, allowUserText bool) error {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -603,7 +746,7 @@ func privateReasoningError(value any, allowUserText bool) error {
 		}
 		if kind == "compaction" {
 			reasoningExcluded, _ := typed["reasoningExcluded"].(bool)
-			schemaVersion := numericValue(typed["schemaVersion"])
+			schemaVersion := compactionSchemaVersionV1(typed["schemaVersion"])
 			proof, _ := typed["reasoningExclusionProof"].(string)
 			if !reasoningExcluded || schemaVersion < 2 || proof == "" || proof != ReasoningExclusionProof(typed) {
 				return ErrPrivateReasoningPersistence
@@ -627,6 +770,16 @@ func privateReasoningError(value any, allowUserText bool) error {
 				return ErrPrivateReasoningPersistence
 			}
 			childAllowsUserText := (allowUserText || userMessage) && normalizedKey == "text"
+			parsed, matched, err := questionReplySlotContentV1(typed, key)
+			if err != nil {
+				return err
+			}
+			if matched && !childAllowsUserText {
+				if err := privateReasoningError(parsed, false); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := privateReasoningError(child, childAllowsUserText); err != nil {
 				return err
 			}
@@ -783,25 +936,299 @@ func isSHA256ProofV1(value string) bool {
 	return true
 }
 
-func numericValue(value any) float64 {
+// Preserve the existing typed schema representations while validating strict
+// integers. Other public numeric fields retain their own validators.
+func compactionSchemaVersionV1(value any) int {
 	switch typed := value.(type) {
-	case float64:
-		return typed
-	case float32:
-		return float64(typed)
-	case int:
-		return float64(typed)
-	case int64:
-		return float64(typed)
 	case int32:
-		return float64(typed)
-	default:
-		return 0
+		value = int(typed)
+	case float32:
+		value = float64(typed)
 	}
+	return generalCompactionNumeric(value)
 }
 
 func normalizePrivateKey(value string) string {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	normalized = privateKeyNormalizer.Replace(normalized)
 	return normalized
+}
+
+// This is the existing per-record resource budget, not a new per-answer limit.
+// A closed Question wrapper is decoded once; every real string remains subject
+// to the ordinary 1MiB scanner. Original encoded bytes count toward the 8MiB
+// record budget, including every durable/promoted copy.
+const MaxQuestionReplyRecordBytesV1 = 8 << 20
+
+var ErrQuestionReplyContentV1 = errors.New("closed Question content is invalid")
+
+func ValidateQuestionReplyContentV1(text string) error {
+	_, err := parseQuestionReplyContentV1(text)
+	return err
+}
+
+func parseQuestionReplyContentV1(text string) (map[string]any, error) {
+	if len(text) > MaxQuestionReplyRecordBytesV1 {
+		return nil, domainsecret.ErrProjectionLimitV1
+	}
+	value, err := domainjsonstrict.DecodeObject([]byte(text), domainjsonstrict.Options{RequireObject: true, MaxBytes: MaxQuestionReplyRecordBytesV1, MaxDepth: 6, MaxTokens: 100000, MaxStringBytes: MaxQuestionReplyRecordBytesV1})
+	if err != nil {
+		return nil, ErrQuestionReplyContentV1
+	}
+	if !questionReplyKeysV1(value, []string{"kind", "questions", "answers"}, nil) || value["kind"] != "question_reply_content" {
+		return nil, ErrQuestionReplyContentV1
+	}
+	questions, qok := value["questions"].([]any)
+	answers, aok := value["answers"].([]any)
+	if !qok || !aok || len(questions) < 1 || len(questions) > 3 || len(answers) != len(questions) {
+		return nil, ErrQuestionReplyContentV1
+	}
+	for index, raw := range questions {
+		question, ok := raw.(map[string]any)
+		if !ok || !questionReplyKeysV1(question, []string{"question", "header", "options", "multiSelect"}, []string{"detail"}) {
+			return nil, ErrQuestionReplyContentV1
+		}
+		if _, ok := question["question"].(string); !ok || question["question"] == "" {
+			return nil, ErrQuestionReplyContentV1
+		}
+		if _, ok := question["header"].(string); !ok {
+			return nil, ErrQuestionReplyContentV1
+		}
+		if detail, present := question["detail"]; present {
+			if _, ok := detail.(string); !ok {
+				return nil, ErrQuestionReplyContentV1
+			}
+		}
+		multi, mok := question["multiSelect"].(bool)
+		options, ook := question["options"].([]any)
+		if !mok || !ook || len(options) > 3 {
+			return nil, ErrQuestionReplyContentV1
+		}
+		labels := map[string]int{}
+		for _, rawOption := range options {
+			option, ok := rawOption.(map[string]any)
+			if !ok || !questionReplyKeysV1(option, []string{"label", "description"}, nil) {
+				return nil, ErrQuestionReplyContentV1
+			}
+			label, lok := option["label"].(string)
+			if _, dok := option["description"].(string); !lok || !dok {
+				return nil, ErrQuestionReplyContentV1
+			}
+			labels[label]++
+		}
+		answer, ok := answers[index].(map[string]any)
+		if !ok || !questionReplyKeysV1(answer, []string{"selected"}, []string{"custom"}) {
+			return nil, ErrQuestionReplyContentV1
+		}
+		selected, sok := answer["selected"].([]any)
+		custom := ""
+		if rawCustom, present := answer["custom"]; present {
+			var cok bool
+			custom, cok = rawCustom.(string)
+			if !cok {
+				return nil, ErrQuestionReplyContentV1
+			}
+		}
+		if !sok || len(selected) > len(options) || (!multi && (len(selected) > 1 || (len(selected) > 0 && custom != ""))) {
+			return nil, ErrQuestionReplyContentV1
+		}
+		for _, rawSelected := range selected {
+			label, ok := rawSelected.(string)
+			if !ok || labels[label] == 0 {
+				return nil, ErrQuestionReplyContentV1
+			}
+			labels[label]--
+		}
+	}
+	if err := domainsecret.ValidateValueLimitsV1(value); err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+func questionReplyKeysV1(value map[string]any, required, optional []string) bool {
+	for _, key := range required {
+		if _, ok := value[key]; !ok {
+			return false
+		}
+	}
+	for key := range value {
+		found := false
+		for _, allowed := range required {
+			found = found || key == allowed
+		}
+		for _, allowed := range optional {
+			found = found || key == allowed
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func questionReplyTextSlotV1(record map[string]any) bool {
+	if record["kind"] == "turn_steered" {
+		return record["clientUserMessageId"] != nil && record["threadId"] != nil && record["turnId"] != nil
+	}
+	if record["kind"] == "user_message" {
+		// Public message projection removes internal steering metadata. This is
+		// only a closed content/resource view; signature and source authority
+		// remain with the existing private steering entry.
+		return record["delivery"] == "steer"
+	}
+	return record["delivery"] == "steer" && record["userInputReplyIdentity"] != nil && record["userInputId"] != nil && record["userInputCaptureReceiptId"] != nil
+}
+
+// Only known Question carrier slots use the closed wire codec. Receipt and
+// signature authority is still verified at the steering owner; a content view
+// grants no admission, model authority or access to private data.
+func questionReplySlotContentV1(record map[string]any, key string) (map[string]any, bool, error) {
+	if (key != "text" && key != "displayText") || !questionReplyTextSlotV1(record) {
+		return nil, false, nil
+	}
+	text, ok := record[key].(string)
+	if !ok || !strings.HasPrefix(strings.TrimSpace(text), "{") {
+		return nil, false, nil
+	}
+	if len(text) > MaxQuestionReplyRecordBytesV1 {
+		return nil, false, domainsecret.ErrProjectionLimitV1
+	}
+	var marker struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(text), &marker) != nil || marker.Kind != "question_reply_content" {
+		return nil, false, nil
+	}
+	parsed, err := parseQuestionReplyContentV1(text)
+	return parsed, true, err
+}
+
+func ValidateQuestionReplyResourceLimitsV1(value any) error {
+	view, err := QuestionReplyResourceViewV1(value)
+	if err != nil {
+		return err
+	}
+	return domainsecret.ValidateValueLimitsV1(view)
+}
+
+// Chunks are exclusively a byte-accounting view. They must never enter any
+// credential, PII, restricted-evidence or case-reference scanner.
+func QuestionReplyResourceViewV1(value any) (any, error) {
+	budget := 100000
+	return questionReplyViewV1(value, nil, nil, true, &budget)
+}
+
+// A complete decoded AST preserves all original content, including serialized
+// JSON nested in a real string. The original scanners inspect that AST. Exact
+// path restoration succeeds only if the complete content remained unchanged.
+func StageQuestionReplyContentV1(value any) (any, func(any) (any, bool), error) {
+	entries := []closedPlanDigestProjectionEntryV1{}
+	budget := 100000
+	staged, err := questionReplyViewV1(value, nil, &entries, false, &budget)
+	return staged, func(projected any) (any, bool) { return restoreClosedPlanDigestsV1(projected, entries) }, err
+}
+
+func questionReplyViewV1(value any, path []closedPlanDigestProjectionPathV1, entries *[]closedPlanDigestProjectionEntryV1, resource bool, budget *int) (any, error) {
+	if *budget <= 0 {
+		return nil, domainsecret.ErrProjectionLimitV1
+	}
+	*budget--
+	if len(path) > 64 {
+		return nil, domainsecret.ErrProjectionLimitV1
+	}
+	switch current := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(current))
+		for key, child := range current {
+			childPath := append(append([]closedPlanDigestProjectionPathV1(nil), path...), closedPlanDigestProjectionPathV1{kind: "key", key: key})
+			parsed, matched, err := questionReplySlotContentV1(current, key)
+			if err != nil {
+				return nil, err
+			}
+			if matched {
+				text := child.(string)
+				if resource {
+					chunks := []any{}
+					for len(text) > 0 {
+						size := len(text)
+						if size > 1<<20 {
+							size = 1 << 20
+						}
+						chunks = append(chunks, text[:size])
+						text = text[size:]
+					}
+					out[key] = chunks
+				} else {
+					if err := domainsecret.ValidateValueV1(parsed); err != nil {
+						return nil, errors.Join(ErrCredentialProjection, err)
+					}
+					out[key] = parsed
+					*entries = append(*entries, closedPlanDigestProjectionEntryV1{path: childPath, digest: text, placeholder: cloneQuestionReplyASTV1(parsed).(map[string]any)})
+				}
+				continue
+			}
+			projected, err := questionReplyViewV1(child, childPath, entries, resource, budget)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = projected
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(current))
+		for index, child := range current {
+			childPath := append(append([]closedPlanDigestProjectionPathV1(nil), path...), closedPlanDigestProjectionPathV1{kind: "index", index: index})
+			projected, err := questionReplyViewV1(child, childPath, entries, resource, budget)
+			if err != nil {
+				return nil, err
+			}
+			out[index] = projected
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+
+// Bodies are returned unchanged for recovery completeness checks, not display.
+func QuestionReplyBodiesV1(value any) ([]string, error) {
+	entries := []closedPlanDigestProjectionEntryV1{}
+	budget := 100000
+	_, err := questionReplyViewV1(value, nil, &entries, false, &budget)
+	if err != nil {
+		return nil, err
+	}
+	texts := make([]string, len(entries))
+	for i, entry := range entries {
+		texts[i] = entry.digest
+	}
+	sort.Strings(texts)
+	return texts, nil
+}
+
+func sameQuestionReplyBodiesV1(left, right any) bool {
+	a, aerr := QuestionReplyBodiesV1(left)
+	b, berr := QuestionReplyBodiesV1(right)
+	return aerr == nil && berr == nil && reflect.DeepEqual(a, b)
+}
+
+// The expected AST never aliases the staged value given to a projector.
+func cloneQuestionReplyASTV1(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, child := range typed {
+			out[key] = cloneQuestionReplyASTV1(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, child := range typed {
+			out[index] = cloneQuestionReplyASTV1(child)
+		}
+		return out
+	default:
+		return value
+	}
 }

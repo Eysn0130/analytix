@@ -1,6 +1,5 @@
 import type { ReactElement } from 'react'
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import { sharedMarkdownFinalizationScheduler } from '../../thread/streaming/markdown-finalization-queue'
 import {
   createThreadTraceEvent,
@@ -21,10 +20,6 @@ const DEFER_MARKDOWN_CHARS = 6000
 const DEFER_MARKDOWN_CODE_FENCES = 4
 const DEFER_MARKDOWN_LINES = 200
 const DEFER_MARKDOWN_CODE_CHARS = 8000
-const LIGHTWEIGHT_MARKDOWN_CHARS = 24000
-const LIGHTWEIGHT_MARKDOWN_CODE_FENCES = 10
-const LIGHTWEIGHT_MARKDOWN_LINES = 700
-const LIGHTWEIGHT_MARKDOWN_CODE_CHARS = 16000
 const DEFERRED_FINALIZATION_DELAY_MS = 240
 const STREAM_PREFIX_CHARS = 24
 const CATCHUP_DIVISOR = 6
@@ -38,7 +33,7 @@ const graphemeSegmenter =
     ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
     : null
 
-export type MarkdownFinalizationMode = 'immediate' | 'defer' | 'lightweight'
+export type MarkdownFinalizationMode = 'immediate' | 'defer'
 
 export type MarkdownFinalizationPolicy = {
   mode: MarkdownFinalizationMode
@@ -62,15 +57,6 @@ export function getMarkdownFinalizationPolicy(text: string): MarkdownFinalizatio
   const codeFences = text.match(/```/g)?.length ?? 0
   const estimatedLines = text.length === 0 ? 0 : text.split(/\r\n|\r|\n/).length
   const codeBlockChars = countCodeBlockChars(text)
-
-  if (
-    chars > LIGHTWEIGHT_MARKDOWN_CHARS ||
-    codeFences >= LIGHTWEIGHT_MARKDOWN_CODE_FENCES ||
-    estimatedLines > LIGHTWEIGHT_MARKDOWN_LINES ||
-    codeBlockChars > LIGHTWEIGHT_MARKDOWN_CODE_CHARS
-  ) {
-    return { mode: 'lightweight', chars, codeFences, estimatedLines, codeBlockChars }
-  }
 
   if (
     chars > DEFER_MARKDOWN_CHARS ||
@@ -245,7 +231,6 @@ export function AssistantMarkdown({
   onFinalized?: () => void
 }): ReactElement {
   const bodyClassName = ['ds-assistant-markdown', className].filter(Boolean).join(' ')
-  const { t } = useTranslation('common')
   const finalizationPolicy = useMemo(() => (
     streaming ? null : getMarkdownFinalizationPolicy(text)
   ), [streaming, text])
@@ -284,17 +269,12 @@ export function AssistantMarkdown({
     const policy = finalizationPolicy
     if (!policy) return
     setFinalized(false)
-    if (policy.mode === 'lightweight') {
-      lastFinalizedTextRef.current = ''
-      hadStreamingRef.current = false
-      return
-    }
-
+    let cancelled = false
     const enqueue = (): (() => void) => sharedMarkdownFinalizationScheduler.enqueue({
       rowId: effectiveRowId,
       text,
       onFinalize: (job) => {
-        if (latestTextRef.current !== job.text) return
+        if (cancelled || latestTextRef.current !== job.text) return
         lastFinalizedTextRef.current = job.text
         hadStreamingRef.current = false
         setFinalized(true)
@@ -318,16 +298,21 @@ export function AssistantMarkdown({
         cancelQueuedJob = enqueue()
       })
       return () => {
+        cancelled = true
         cancelSchedule()
         cancelQueuedJob?.()
       }
     }
 
-    return enqueue()
+    const cancelQueuedJob = enqueue()
+    return () => {
+      cancelled = true
+      cancelQueuedJob()
+    }
   }, [effectiveRowId, finalizationPolicy, finalized, pacedPlainText.caughtUp, streaming, text])
 
   useEffect(() => {
-    if (!finalized || streaming || finalizationPolicy?.mode === 'lightweight' || !onFinalized || typeof window === 'undefined') return
+    if (!finalized || streaming || !onFinalized || typeof window === 'undefined') return
     let frame = 0
     let frameId: number | null = null
     const settle = (): void => {
@@ -343,34 +328,19 @@ export function AssistantMarkdown({
     }
   }, [finalizationPolicy, finalized, onFinalized, streaming, text])
 
-  // A single presentation leaf consumes only the already-public text. Its
-  // incremental parse stays active through pacing and queued finalization.
-  if ((shouldPacePlainText || !finalized) && getMarkdownFinalizationPolicy(text).mode !== 'lightweight') {
-    return <Suspense fallback={<div className={bodyClassName}><span className="whitespace-pre-wrap break-words">{pacedPlainText.text}</span></div>}>
-      <LazyDshAssistant text={shouldPacePlainText ? pacedPlainText.text : text} streaming={true} className={bodyClassName} />
-    </Suspense>
-  }
-
-  if (shouldPacePlainText || !finalized || finalizationPolicy?.mode === 'lightweight') {
-    return (
-      <div className={bodyClassName}>
-        <span className="whitespace-pre-wrap break-words">{shouldPacePlainText ? pacedPlainText.text : text}</span>
-        {!streaming && pacedPlainText.caughtUp && finalizationPolicy?.mode === 'lightweight' ? (
-          <p className="ds-markdown-fallback-note" role="note">{t('markdownPlainTextFallback')}</p>
-        ) : null}
-      </div>
-    )
-  }
+  // Cost controls when the settled parse runs, never whether Markdown renders.
+  // Keep one incremental presentation leaf through pacing and queue completion.
+  const visibleText = shouldPacePlainText ? pacedPlainText.text : text
 
   return (
     <Suspense
       fallback={
         <div className={bodyClassName}>
-          {text}
+          <span className="whitespace-pre-wrap break-words">{visibleText}</span>
         </div>
       }
     >
-      <LazyDshAssistant text={text} streaming={streaming} className={bodyClassName} />
+      <LazyDshAssistant text={visibleText} streaming={shouldPacePlainText || !finalized} className={bodyClassName} />
     </Suspense>
   )
 }

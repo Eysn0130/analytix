@@ -2,10 +2,13 @@ package eventlog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -179,5 +182,47 @@ func TestStoreReplayRejectsPreCancelledContext(t *testing.T) {
 	result, err := store.LoadSinceContext(ctx, "thr_cancelled", 0)
 	if !errors.Is(err, context.Canceled) || result.Events != nil || result.Diagnostics != nil {
 		t.Fatalf("pre-cancelled replay did not fail before filesystem work: result=%#v err=%v", result, err)
+	}
+}
+
+func TestExactEventSequenceV1Bounds(t *testing.T) {
+	maximum := int64(math.MaxInt)
+	if maximum > 1<<53-1 {
+		maximum = 1<<53 - 1
+	}
+	for _, test := range []struct {
+		name  string
+		value any
+		want  int
+		valid bool
+	}{
+		{"int", int(7), 7, true},
+		{"int64", int64(7), 7, true},
+		{"float64", float64(7), 7, true},
+		{"json_integer", json.Number("7"), 7, true},
+		{"zero", 0, 0, false},
+		{"negative", -1, 0, false},
+		{"fraction", 1.5, 0, false},
+		{"float32", float32(7), 0, false},
+		{"json_decimal", json.Number("7.0"), 0, false},
+		{"json_exponent", json.Number("7e1"), 0, false},
+		{"maximum_int64", maximum, int(maximum), true},
+		{"maximum_float", float64(maximum), int(maximum), true},
+		{"maximum_json", json.Number(strconv.FormatInt(maximum, 10)), int(maximum), true},
+		{"above_maximum", maximum + 1, 0, false},
+		{"above_maximum_json", json.Number(strconv.FormatInt(maximum+1, 10)), 0, false},
+		{"above_safe_integer", float64(1 << 53), 0, false},
+		{"host_int_upper", -float64(math.MinInt), 0, false},
+		{"nan", math.NaN(), 0, false},
+		{"positive_infinity", math.Inf(1), 0, false},
+		{"negative_infinity", math.Inf(-1), 0, false},
+		{"huge", 1e100, 0, false},
+		{"nil", nil, 0, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got, ok := exactEventSequenceV1(test.value); got != test.want || ok != test.valid {
+				t.Fatalf("sequence(%v) = %d, %v; want %d, %v", test.value, got, ok, test.want, test.valid)
+			}
+		})
 	}
 }

@@ -1,4 +1,7 @@
 import { z } from 'zod'
+import { GoalRefSchemaV1, GoalActivationSchemaV1 } from './goal.js'
+export { GoalRefSchemaV1, GoalActivationSchemaV1 } from './goal.js'
+export type { GoalRefV1, GoalActivationV1 } from './goal.js'
 import { TurnSchema } from './turns.js'
 import {
   ApprovalPolicySchema,
@@ -91,6 +94,9 @@ export type ThreadGoalResearch = z.infer<typeof ThreadGoalResearchSchema>
 export const ThreadGoalSchema = z.object({
   /** Durable Go goal identity; legacy imported goals may not carry it. */
   id: z.string().min(1).optional(),
+  revision: z.number().int().positive().safe().optional(),
+  maxGoalRounds: z.number().int().positive().safe().optional(),
+  roundsStarted: z.number().int().nonnegative().safe().optional(),
   threadId: z.string().min(1),
   objective: z.string().trim().min(1).max(MAX_THREAD_GOAL_OBJECTIVE_CHARS),
   status: ThreadGoalStatus,
@@ -110,6 +116,18 @@ export const ThreadGoalSchema = z.object({
   updatedAt: z.string()
 })
 export type ThreadGoal = z.infer<typeof ThreadGoalSchema>
+
+export function countedGoalRefV1(goal: ThreadGoal | null | undefined): import('./goal.js').GoalRefV1 | null {
+  return goal?.id && goal.revision !== undefined && goal.maxGoalRounds !== undefined &&
+    goal.roundsStarted !== undefined && goal.roundsStarted <= goal.maxGoalRounds ?
+    { id: goal.id, revision: goal.revision } : null
+}
+export const GoalHistoryEntrySchemaV1 = z.object({
+  id: z.string().trim().min(1),
+  operation: z.enum(['create', 'edit', 'pause', 'resume', 'clear', 'legacy_update', 'legacy_clear', 'evidence', 'model_update', 'round_limit', 'round_started']),
+  ref: GoalRefSchemaV1.optional(), goal: ThreadGoalSchema.nullable(), createdAt: z.string()
+}).strict()
+export type GoalHistoryEntryV1 = z.infer<typeof GoalHistoryEntrySchemaV1>
 
 export const ThreadTodoStatus = z.enum(['pending', 'in_progress', 'completed', 'failed', 'canceled'])
 export type ThreadTodoStatus = z.infer<typeof ThreadTodoStatus>
@@ -216,14 +234,6 @@ export const ThreadTodoListSchema = z.object({
   items: z.array(ThreadTodoItemSchema).max(MAX_THREAD_TODOS),
   updatedAt: z.string()
 }).strict().superRefine((value, ctx) => {
-  const inProgressCount = value.items.filter((item) => item.status === 'in_progress').length
-  if (inProgressCount > 1) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['items'],
-      message: 'at most one todo can be in_progress'
-    })
-  }
   const ids = new Set<string>()
   for (const item of value.items) {
     if (ids.has(item.id)) {
@@ -258,6 +268,7 @@ export const ThreadSchema = z.object({
   forkedFromTurnCount: z.number().int().nonnegative().optional(),
   runtimeStepLimits: ThreadRuntimeStepLimitsSchema.optional(),
   goal: ThreadGoalSchema.optional(),
+  goalHistory: z.array(GoalHistoryEntrySchemaV1).max(500).optional(),
   todos: ThreadTodoListSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -330,12 +341,19 @@ export const ForkThreadRequest = z
   .object({
     relation: ThreadRelation.default('fork'),
     title: z.string().optional(),
-    turnId: z.string().trim().min(1).optional()
+    turnId: z.string().trim().min(1).optional(),
+    // Captured committed terminal cursor, never the latest thread cursor.
+    endSeq: z.number().int().positive().safe().optional()
+  })
+  .superRefine((request, ctx) => {
+    if (request.endSeq !== undefined && !request.turnId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['turnId'], message: 'endSeq requires turnId' })
+    }
   })
   .optional()
 export type ForkThreadRequest = z.infer<typeof ForkThreadRequest>
 
-export const SetThreadGoalRequest = z
+const LegacyThreadGoalRequest = z
   .object({
     objective: z.string().trim().min(1).max(MAX_THREAD_GOAL_OBJECTIVE_CHARS).optional(),
     status: ThreadGoalStatus.optional(),
@@ -352,6 +370,7 @@ export const SetThreadGoalRequest = z
       requirements: z.array(z.string().trim().min(1).max(1_000)).max(50).optional()
     }).optional()
   })
+  .strict()
   .refine(
     (value) =>
       value.objective !== undefined ||
@@ -367,10 +386,28 @@ export const SetThreadGoalRequest = z
       value.research !== undefined,
     { message: 'goal request must change at least one field' }
   )
+export const GoalLifecycleRequestV1 = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('create'), objective: z.string().trim().min(1).max(MAX_THREAD_GOAL_OBJECTIVE_CHARS),
+    maxGoalRounds: z.number().int().positive().safe().optional(), tokenBudget: z.number().int().positive().nullable().optional(), strictCompletion: z.boolean().optional() }).strict(),
+  z.object({ operation: z.literal('edit'), ref: GoalRefSchemaV1,
+    objective: z.string().trim().min(1).max(MAX_THREAD_GOAL_OBJECTIVE_CHARS).optional(), maxGoalRounds: z.number().int().positive().safe().optional() }).strict()
+    .refine(value => value.objective !== undefined || value.maxGoalRounds !== undefined),
+  z.object({ operation: z.literal('pause'), ref: GoalRefSchemaV1 }).strict(),
+  z.object({ operation: z.literal('resume'), ref: GoalRefSchemaV1 }).strict(),
+  z.object({ operation: z.literal('clear'), ref: GoalRefSchemaV1 }).strict()
+])
+export const SetThreadGoalRequest = z.union([GoalLifecycleRequestV1, LegacyThreadGoalRequest])
 export type SetThreadGoalRequest = z.infer<typeof SetThreadGoalRequest>
 
 export const ThreadGoalResponse = z.object({
-  goal: ThreadGoalSchema.nullable()
+  goal: ThreadGoalSchema.nullable(),
+  activation: GoalActivationSchemaV1.nullable().optional(),
+  history: z.array(GoalHistoryEntrySchemaV1).max(500).optional(),
+  cleared: z.boolean().optional()
+}).strict().superRefine((value,ctx) => {
+  if (value.activation && (!value.goal || value.activation.id !== value.goal.id || value.activation.revision !== value.goal.revision || !countedGoalRefV1(value.goal))) {
+    ctx.addIssue({code:'custom',path:['activation'],message:'activation must match the counted Goal snapshot'})
+  }
 })
 export type ThreadGoalResponse = z.infer<typeof ThreadGoalResponse>
 
@@ -392,14 +429,6 @@ export const SetThreadTodosRequest = z.object({
   turnId: z.string().trim().min(1).optional(),
   todos: z.array(SetThreadTodoItemSchema).max(MAX_THREAD_TODOS)
 }).strict().superRefine((value, ctx) => {
-  const inProgressCount = value.todos.filter((item) => item.status === 'in_progress').length
-  if (inProgressCount > 1) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['todos'],
-      message: 'at most one todo can be in_progress'
-    })
-  }
   const ids = new Set<string>()
   for (const item of value.todos) {
     if (!item.id) continue
@@ -430,17 +459,20 @@ export const ResumeThreadResponse = z.object({
 }).strict()
 export type ResumeThreadResponse = z.infer<typeof ResumeThreadResponse>
 
-export const UpdateThreadRequest = z
+const UpdateThreadPatch = z
   .object({
     title: z.string().optional(),
     workspace: z.string().min(1).optional(),
     providerId: z.string().trim().min(1).max(128).nullable().optional(),
-    status: ThreadStatus.optional(),
+    status: z.never().optional(),
+    archived: z.boolean().optional(),
+    promoteSide: z.literal(true).optional(),
     approvalPolicy: ApprovalPolicySchema.optional(),
     sandboxMode: SandboxModeSchema.optional(),
     costBudgetUsd: z.number().positive().nullable().optional(),
     costBudgetWarningSent: z.boolean().optional(),
-    relation: ThreadRelation.optional(),
+    relation: z.never().optional(),
+    parentThreadId: z.never().optional(),
     runtimeStepLimits: ThreadRuntimeStepLimitsSchema.nullable().optional()
   })
   .refine(
@@ -448,15 +480,37 @@ export const UpdateThreadRequest = z
       value.title !== undefined ||
       value.workspace !== undefined ||
       value.providerId !== undefined ||
-      value.status !== undefined ||
+      value.archived !== undefined ||
+      value.promoteSide !== undefined ||
       value.approvalPolicy !== undefined ||
       value.sandboxMode !== undefined ||
       value.costBudgetUsd !== undefined ||
       value.costBudgetWarningSent !== undefined ||
-      value.relation !== undefined ||
       value.runtimeStepLimits !== undefined,
     { message: 'update request must change at least one field' }
   )
+
+export const UpdateThreadRequest = z.preprocess((value, ctx) => {
+  if (value && typeof value === 'object' && !Array.isArray(value) &&
+      (Object.prototype.hasOwnProperty.call(value, 'relation') || Object.prototype.hasOwnProperty.call(value, 'parentThreadId'))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'thread relation and parent are runtime-owned' })
+    return z.NEVER
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value) &&
+      Object.prototype.hasOwnProperty.call(value, 'promoteSide') &&
+      (Object.keys(value).length !== 1 || (value as Record<string, unknown>).promoteSide !== true)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'promoteSide must be the sole true field' })
+    return z.NEVER
+  }
+  // Check the original body so unknown fields cannot be stripped from an archive intent.
+  if (value && typeof value === 'object' && !Array.isArray(value) &&
+      Object.prototype.hasOwnProperty.call(value, 'archived') &&
+      Object.keys(value).some(key => key !== 'archived')) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'archive intent must not include other fields' })
+    return z.NEVER
+  }
+  return value
+}, UpdateThreadPatch)
 export type UpdateThreadRequest = z.infer<typeof UpdateThreadRequest>
 
 export const ListThreadsResponse = z.object({

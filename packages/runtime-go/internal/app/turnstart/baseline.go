@@ -22,15 +22,17 @@ type StartBaselineCompactorV1 interface {
 }
 
 type PrepareStartBaselineInputV1 struct {
-	Context             context.Context
-	Store               StartBaselineReaderV1
-	Compactor           StartBaselineCompactorV1
-	ThreadID            string
-	Prompt              string
-	MainThread          bool
-	Reserved            bool
-	ValidateReserved    func(map[string]any) error
-	ContextWindowTokens func(map[string]any) int
+	Reservation           *controlapp.ForegroundReservation
+	Context               context.Context
+	Store                 StartBaselineReaderV1
+	Compactor             StartBaselineCompactorV1
+	ThreadID              string
+	Prompt                string
+	MainThread            bool
+	Reserved              bool
+	ValidateReserved      func(map[string]any) error
+	ContextWindowTokens   func(map[string]any) int
+	AutoCompactionAllowed func(map[string]any) bool
 }
 
 func PrepareStartBaselineV1(input PrepareStartBaselineInputV1) (map[string]any, string, error) {
@@ -53,8 +55,13 @@ func PrepareStartBaselineV1(input PrepareStartBaselineInputV1) (map[string]any, 
 	if input.Compactor == nil || input.ContextWindowTokens == nil {
 		return nil, "", errors.New("automatic compaction authority is unavailable")
 	}
+	// This is an additional request preflight restriction, never new authority.
+	if input.AutoCompactionAllowed != nil && !input.AutoCompactionAllowed(thread) {
+		return thread, digest, nil
+	}
 	result, err := input.Compactor.AutoCompactBeforeTurnV1(input.Context, threadapp.AutoCompactionInputV1{
-		ThreadID: input.ThreadID, Prompt: input.Prompt, ContextWindowTokens: input.ContextWindowTokens(thread),
+		Reservation: input.Reservation,
+		ThreadID:    input.ThreadID, Prompt: input.Prompt, ContextWindowTokens: input.ContextWindowTokens(thread),
 		MainThread: input.MainThread,
 	})
 	if err != nil {

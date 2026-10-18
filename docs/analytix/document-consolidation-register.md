@@ -3,7 +3,7 @@
 Status: Operational / reference
 Applies to: 项目内 Markdown 的分类、入口、历史保留和碎片治理
 Current as of: 2026-10-03
-Source of truth: `docs/analytix/README.md` 的证据治理规则和当前文件树
+Source of truth: [文档地图](README.md)的证据治理规则和当前文件树
 Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并入口
 
 ## 1. 为什么不直接大规模移动
@@ -34,7 +34,6 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 | `docs/analytix/upstreams/` | Reference ledger | intake、审计、吸收和 benchmark 分开表达。 |
 | `docs/analytix/runtime/` | Operational/runtime reference | 当前命令和合同需重新核验。 |
 | `docs/legacy/` | Historical | 只作为迁移/来源历史，不作为当前实现。 |
-| `重构升级方案.md` | Historical decision ledger | 只读顶部 currentness；长编号章节不能覆盖代码/spec。 |
 | `plugins/*/references/` | Plugin reference | 不等于 production contract；重复副本需哈希核对。 |
 | `build/` 中被跟踪的 entitlements、icons、NSIS 脚本 | Maintained build source | 是安装包输入，不能作为缓存删除。 |
 | `build/` 中生成的 native/backend 资源、`dist*`、`output/`、`release/legacy/` | Generated/historical | 不是 maintained source；精确区分当前资源、可再生输出与需保留的历史证据。 |
@@ -46,14 +45,12 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 | 文件 | 约行数 | 风险 | 当前入口 |
 | --- | ---: | --- | --- |
-| `重构升级方案.md` | 14,742 | 多时期互相矛盾的阶段结论 | 只读顶部状态，并回到代码/spec |
 | `upstreams/reasonix-sync.md` | 12,888 | 长期同步流水和历史 pin | `upstreams/README.md` + 最新 marker |
 | `upstreams/conflict-decisions.md` | 12,214 | ADR 与历史决策混杂 | 按 decision id 查阅 |
 | `qa/release-evidence-gate-2026-06-21.md` | 11,278 | 文件名像最终门，但仅为日期证据 | `qa/README.md` |
 | `upstreams/go-runtime-conformance.md` | 8,814 | 含 Go cutover 前历史假设 | 当前 Go 代码/tests |
 | `specs/08-upstream-absorption-and-go-runtime.md` | 8,552 | 规范长、含历史解释 | 规范目标，不是 current pass |
 | `benchmarks/upstream-scorecard.md` | 8,223 | 多批次主观分数和旧结论 | 未来 CapabilityBenchmarkV1 |
-| `upstreams/kun-sync.md` | 7,362 | 历史同步流水 | 当前 source marker |
 | `upstreams/absorption-ledger.md` | 6,975 | 旧批次完成语气 | active OpenSpec tasks |
 | `specs/09-agent-quality-product-benchmark.md` | 6,715 | 目标 benchmark | 可执行 benchmark artifact |
 
@@ -69,7 +66,7 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
    命名。保留原始证据，但引用必须经过目录 README 的 currentness 规则。
 3. `docs/legacy/kun` 包含中英文历史材料。已增加 `docs/legacy/README.md`，
    不再让搜索结果看起来像当前 Analytix 规范。
-4. `.agents`、`.claude`、`.cursor`、`.kunsdd` 内的 Markdown 属于工具/工作流
+4. `.agents`、`.claude`、`.cursor` 内的 Markdown 属于工具/工作流
    配置，不应并入产品规范。
 5. 包内 `node_modules` 的 README/LICENSE 是依赖材料，不纳入产品文档数量和
    整理范围。
@@ -210,7 +207,6 @@ Historical evidence: [consolidation 170–177](documentation-delivery-review-202
 | 优先级 | 动作 | 最小完成证据 |
 | --- | --- | --- |
 | P0-doc | 为会被当作当前入口的旧 `final/closure` 报告加 historical banner | 无正文改写；链接检查通过 |
-| P1-doc | 把 `重构升级方案.md` 的 current-state 摘要拆为短索引，原文件保留 decision ledger | 所有旧 anchor 可追踪 |
 | P1-doc | 为 upstream 大 ledger 生成按 source/date/decision-id 的机器可读索引 | marker 与 commit 校验 |
 | 已完成本轮 | Funds references 单源生成/完整漂移检查 | 现有合同模块与 gate；完整 25 对字节保持，证据见本轮条目 |
 | P2-doc | 将 QA 证据元数据统一为 commit/platform/command/result/skips | checker 验证 |

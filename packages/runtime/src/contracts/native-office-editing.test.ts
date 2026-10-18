@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { nativeWorkbookSelectionSchema, nativeWorkbookPatchSchema, MaxNativeOfficeBytes, nativeOfficeCommitInputSchema, nativeOfficeStatusInputSchema, nativeOfficeSelectionCaptureInputSchema, nativeOfficeProposalRejectInputSchema, nativeOfficeProposalDecisionInputSchema, nativeOfficeSelectionResponseSchema, nativeOfficeProposalSchema, nativeOfficeReplacementSchema, nativeOfficeChangeSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema } from './native-office-editing'
 import { objectEditingRequestSchema, objectEditingResponseSchema } from './object-editing'
-import { nativeOfficeAnnotationSchema } from './native-office-editing'
+import { nativeOfficeCreateInputSchema, nativeOfficeManualBeginInputSchema, nativeOfficeManualAuthoritySchema, nativeOfficeAnnotationSchema } from './native-office-editing'
 import { nativeOfficeRequestSchema } from '../../../../src/shared/native-office'
 import { pluginPackageViewSchema } from './plugin-package-host'
 
@@ -28,8 +28,8 @@ describe('protected-local annotation drafts', () => {
   })
   it('bounds the expanded operation catalog for two finite annotation operations', () => {
     const operations = pluginPackageViewSchema.shape.operations
-    expect(operations.safeParse(Array.from({length:18},(_,i)=>'operation-'+i)).success).toBe(true)
-    expect(operations.safeParse(Array.from({length:19},(_,i)=>'operation-'+i)).success).toBe(false)
+    expect(operations.safeParse(Array.from({length:20},(_,i)=>'operation-'+i)).success).toBe(true)
+    expect(operations.safeParse(Array.from({length:21},(_,i)=>'operation-'+i)).success).toBe(false)
   })
 })
 
@@ -149,4 +149,32 @@ describe('finite typed workbook transport',()=>{
   for(const patch of [{kind:'number',value:2},{kind:'formula',formula:'SUM(A1:A2)'},{kind:'range',cells:[{rowOffset:0,columnOffset:0,type:'number',value:2}]}])expect(nativeWorkbookPatchSchema.safeParse(patch).success).toBe(true)
   for(const patch of [{kind:'number',value:'2'},{kind:'formula',formula:'1',value:1},{kind:'range',cells:[{rowOffset:0,columnOffset:0,type:'number',value:2,path:'/private'}]},{kind:'range',cells:[]}])expect(nativeWorkbookPatchSchema.safeParse(patch).success).toBe(false)
  })
+})
+
+
+describe('explicit user Word authority', () => {
+  const begin = { sessionId: 'a'.repeat(48), threadId: 'thread_main', operationId: 'manual_begin_001', baseRevision: 'b'.repeat(64) }
+  const authority = { version: 2, origin: 'manual', changeId: 'c'.repeat(64), baseRevision: begin.baseRevision, saveOperationId: 'native_save_001', undoOperationId: 'native_undo_001' }
+  it('admits a basename and current thread without caller workspace authority', () => {
+    const request = { threadId: begin.threadId, operationId: 'create_docx_001', fileName: '调研.docx' }
+    expect(nativeOfficeCreateInputSchema.safeParse(request).success).toBe(true)
+    for (const fileName of ['../调研.docx', '/tmp/new.docx', 'new.md', '.docx', ' bad.docx', 'bad\\name.docx', 'bad\u0000.docx', '中'.repeat(84) + '.docx']) {
+      expect(nativeOfficeCreateInputSchema.safeParse({ ...request, fileName }).success).toBe(false)
+    }
+    expect(nativeOfficeCreateInputSchema.safeParse({ ...request, workspace: '/private' }).success).toBe(false)
+    expect(nativeOfficeSelectionResponseSchema.safeParse({ ok: true, creation: { operationId: request.operationId, workspace: '/workspace', path: '/workspace/调研.docx', revision: 'd'.repeat(64), kind: 'docx', byteSize: 1024, savedAt: '2026-10-15T00:00:00Z' } }).success).toBe(true)
+  })
+  it('requires a tagged manual authority and retains strict legacy records', () => {
+    expect(nativeOfficeManualBeginInputSchema.safeParse(begin).success).toBe(true)
+    expect(nativeOfficeManualBeginInputSchema.safeParse({ ...begin, proposalId: 'p' }).success).toBe(false)
+    expect(nativeOfficeManualAuthoritySchema.safeParse(authority).success).toBe(true)
+    expect(nativeOfficeSelectionResponseSchema.safeParse({ ok: true, manual: authority }).success).toBe(true)
+    const manual = { ...authority, threadId: begin.threadId, revision: '', status: 'prepared', canUndo: false, canCancel: true, canRetryUndo: false, canResume: false, createdAt: '2026-10-15T00:00:00Z', savedAt: '' }
+    expect(nativeOfficeChangeSchema.safeParse(manual).success).toBe(true)
+    for (const extra of [{ proposalId: 'a'.repeat(48) }, { beforeText: '' }, { origin: 'proposal' }, { version: 1 }]) {
+      expect(nativeOfficeChangeSchema.safeParse({ ...manual, ...extra }).success).toBe(false)
+    }
+    const { version: _version, origin: _origin, ...untagged } = manual
+    expect(nativeOfficeChangeSchema.safeParse(untagged).success).toBe(false)
+  })
 })

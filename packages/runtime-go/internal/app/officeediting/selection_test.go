@@ -43,7 +43,7 @@ func selectionFixture(t *testing.T) (*Adapter, *fakeEditing, *nativeTestProjecto
 	projector := &nativeTestProjector{}
 	leases := new(int)
 	adapter := New("docx", &fakeNativeEditing{fakeEditing: fake}, func(context.Context) bool { return true })
-	if err := adapter.BindSelectionHost(projector, func(_ context.Context, id, path string, read func() error) (func(), error) {
+	capture := func(_ context.Context, id, path string, read func() error) (func(), error) {
 		if id != fake.document.SessionID || path != fake.document.Path {
 			t.Fatal("lease binding")
 		}
@@ -52,7 +52,11 @@ func selectionFixture(t *testing.T) (*Adapter, *fakeEditing, *nativeTestProjecto
 		}
 		*leases++
 		return func() { *leases-- }, nil
-	}); err != nil {
+	}
+	if err := adapter.BindSelectionHost(projector, capture); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.BindManualHost(capture); err != nil {
 		t.Fatal(err)
 	}
 	if out := invoke(t, adapter, validCall(t, "open-object", goodInput(t, "open-object"))); out["ok"] != true {

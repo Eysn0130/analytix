@@ -2,10 +2,70 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 )
+
+func TestForegroundAuxiliaryWitnessIsBoundRevocableAndNeverWireAuthority(t *testing.T) {
+	c := NewController(nil)
+	current := controlGeneralContext(t, "thread", "turn")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	witness, release, err := c.PrepareForegroundWithWitness(ctx, "thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := json.Marshal(witness); err == nil {
+		t.Fatal("reservation serialized")
+	}
+	if _, _, err := c.BeginAuxiliary(ctx, "thread"); err == nil {
+		t.Fatal("generic auxiliary bypassed reservation")
+	}
+	if _, _, err := c.BeginAuxiliaryForForeground(ctx, current, nil); err == nil {
+		t.Fatal("missing witness admitted")
+	}
+	if _, _, err := NewController(nil).BeginAuxiliaryForForeground(ctx, current, witness); err == nil {
+		t.Fatal("other controller admitted")
+	}
+	other := controlGeneralContext(t, "other", "turn")
+	if _, _, err := c.BeginAuxiliaryForForeground(ctx, other, witness); err == nil {
+		t.Fatal("other thread admitted")
+	}
+	_, finish, err := c.BeginAuxiliaryForForeground(ctx, current, witness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.BeginAuxiliaryForForeground(ctx, current, witness); err == nil {
+		t.Fatal("concurrent auxiliary admitted")
+	}
+	finish()
+	release()
+	if witness.Validate(ctx, "thread") == nil {
+		t.Fatal("released witness survived")
+	}
+	witness, release, err = c.PrepareForegroundWithWitness(ctx, "thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, releaseNext, err := c.PrepareForegroundWithWitness(ctx, "thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if witness.Validate(ctx, "thread") == nil || next.Validate(ctx, "thread") == nil {
+		t.Fatal("overlapping preparation admitted")
+	}
+	release()
+	if next.Validate(ctx, "thread") != nil {
+		t.Fatal("current sole reservation was lost")
+	}
+	cancel()
+	if next.Validate(context.Background(), "thread") == nil {
+		t.Fatal("canceled admission survived")
+	}
+	releaseNext()
+}
 
 func TestAuxiliaryReservationExcludesForegroundAndWaitsForClosure(t *testing.T) {
 	c := NewController(nil)

@@ -12,6 +12,7 @@ import (
 
 	"analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
+	contextepochapp "analytix.local/runtime-go/internal/app/contextepoch"
 	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	packagehostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
@@ -41,6 +42,24 @@ func (p runtimeObjectProjector) ResolveImageWorkspace(ctx context.Context, princ
 		return "", editingapp.ErrProjection
 	}
 	return workspace, nil
+}
+
+// A creation request supplies a thread and basename, never a workspace.
+// Return the existing mutation identity separately from trusted thread spelling;
+// presentation must not replace the identity used for authorization or replay.
+func (p runtimeObjectProjector) ResolveDocumentWorkspace(ctx context.Context, principal domainidentity.PrincipalV1, threadID string) (string, string, error) {
+	workspace, err := p.ResolveImageWorkspace(ctx, principal, threadID)
+	if err != nil {
+		return "", "", err
+	}
+	if p.ValidateCurrent(ctx, editingapp.ScopeAuthority{Principal: principal, ThreadID: threadID, Workspace: workspace, Path: "user-blank-docx", ObjectID: "user-blank-docx", Purpose: "edit"}) != nil {
+		return "", "", editingapp.ErrProjection
+	}
+	real, ok := filestore.ResolveMutationIdentityPath(workspace, workspace)
+	if !ok {
+		return "", "", editingapp.ErrProjection
+	}
+	return real, workspace, nil
 }
 
 func (p runtimeObjectProjector) ValidateCurrent(ctx context.Context, scope editingapp.ScopeAuthority) error {
@@ -196,8 +215,25 @@ func (p runtimeObjectProjector) selectionSecurityContext(ctx context.Context, th
 	}
 	// BuildThread emits no kind or ancestry/security metadata for a fresh main
 	// thread. Presence (even null) distinguishes an unsupported/recovered record.
-	for _, key := range []string{"kind", "parentThreadId", "forkedFromThreadId", "historyAuthority", "contextEpochState", "caseId", "caseProjectId", "caseBindingHash"} {
+	for _, key := range []string{"kind", "parentThreadId", "forkedFromThreadId", "historyAuthority", "caseId", "caseProjectId", "caseBindingHash"} {
 		if _, exists := thread[key]; exists {
+			return domainsecurity.TurnSecurityContext{}, editingapp.ErrProjection
+		}
+	}
+	// Restart restoration legitimately adds a default epoch to a primary thread
+	// before its first turn. Only that exact state can retain the fresh-thread
+	// path; an arbitrary valid epoch is never replacement security authority.
+	if raw, exists := thread["contextEpochState"]; exists {
+		state, err := domaincontextepoch.ParseState(raw)
+		if err != nil || state.ThreadID != scope.ThreadID {
+			return domainsecurity.TurnSecurityContext{}, editingapp.ErrProjection
+		}
+		acceptedAt, err := time.Parse(time.RFC3339Nano, state.AcceptedSnapshot.AcceptedAt)
+		if err != nil {
+			return domainsecurity.TurnSecurityContext{}, editingapp.ErrProjection
+		}
+		expected, err := contextepochapp.DefaultState(scope.ThreadID, 1, acceptedAt)
+		if err != nil || !reflect.DeepEqual(state, expected) {
 			return domainsecurity.TurnSecurityContext{}, editingapp.ErrProjection
 		}
 	}

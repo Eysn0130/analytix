@@ -1,9 +1,12 @@
 package cachetelemetry
 
 import (
+	cachetelemetryport "analytix.local/runtime-go/internal/ports/cachetelemetry"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -324,4 +327,49 @@ func testShape(logicalCallID string, attempt uint32, startedAt string) domaincac
 func testLogicalCallHMAC(value string) string {
 	digest := sha256.Sum256([]byte("cache-telemetry-service-test-hmac:" + value))
 	return hex.EncodeToString(digest[:])
+}
+
+func TestBillingRoutesRequireEveryAttemptAttributionV1(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		t.Run(fmt.Sprint(complete), func(t *testing.T) {
+			fixture := newDurableServiceFixtureV1(t)
+			service, err := NewDurableService(fixture.authority, fixture.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			for index, status := range []domaincache.ProviderCallStatusV1{domaincache.ProviderCallStatusFailed, domaincache.ProviderCallStatusSucceeded, domaincache.ProviderCallStatusCancelled} {
+				input := fixture.registration(t, uint64(index+1), 1, domaincache.ProviderChannelPrimary, "2026-07-14T00:00:00Z")
+				if index != 1 || complete {
+					input.PublicAttribution = domaincache.ProviderPublicAttributionV1{Provider: "deepseek", Model: "deepseek-chat"}
+				}
+				handle, err := service.BeginAttempt(ctx, input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				usage := domaincache.ProviderUsageV1{InputTokens: domaincache.TokenCountV1{Known: true, Value: 100}, OutputTokens: domaincache.TokenCountV1{Known: true, Value: 10}, OutputTokensFinality: domaincache.ProviderOutputTokensFinalV1}
+				reason := "provider_succeeded"
+				if status == domaincache.ProviderCallStatusFailed {
+					reason = "provider_failed"
+				}
+				if status == domaincache.ProviderCallStatusCancelled {
+					reason = "host_cancelled"
+				}
+				if err := service.SettleAttempt(ctx, cachetelemetryport.AttemptSettlementInputV1{Handle: handle, DispatchState: domaincache.ProviderDispatchStateSent, Status: status, Usage: usage, SafeReasonCode: reason, SettledAt: durableServiceTimeV1(t, "2026-07-14T00:00:01Z")}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			inventory, err := service.ObserveTurnInventoryV1(ctx, fixture.securityContext)
+			if err != nil {
+				t.Fatal(err)
+			}
+			billing, err := inventory.BillingV1()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (len(billing.Routes) > 0) != complete || billing.AttemptCount != 3 || billing.SettledAttemptCount != 3 || billing.InputTokens.ReportedValue != 300 || billing.OutputTokens.ReportedValue != 30 {
+				t.Fatalf("routing changed billing: %#v", billing)
+			}
+		})
+	}
 }

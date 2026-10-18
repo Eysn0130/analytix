@@ -7,8 +7,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	domainprivatecas "analytix.local/runtime-go/internal/domain/privatecastopology"
 	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
@@ -58,6 +60,104 @@ func TestCreateRecoveryNameInventoryReusesOnlyStableObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+}
+
+func TestCreateRecoveryNameInventoryReadOnlyRootAndAncestorReopenStayStable(t *testing.T) {
+	root, inventory := createRecoveryNameInventoryFixture(t)
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal("resolve isolated inventory root")
+	}
+	fd, present, openErr := inventory.openParent("private/owner/leaf")
+	var closeErr error
+	if fd >= 0 {
+		closeErr = unix.Close(fd)
+	}
+	observed, cached := inventory.parents["."]
+	t.Logf("phase=inventory_root_stable stage=cache open_ok=%t present=%t close_ok=%t root_cached=%t", openErr == nil, present, closeErr == nil, cached)
+	if openErr != nil || !present || closeErr != nil || !cached {
+		t.Fatal("cache isolated root and ancestors")
+	}
+	for _, stage := range []string{"root_reopen", "ancestor_reopen", "revalidate"} {
+		var stageErr error
+		switch stage {
+		case "root_reopen":
+			fd, stageErr = securePrivateOpenAbsoluteDirectory(root, false)
+			if fd >= 0 {
+				stageErr = errors.Join(stageErr, unix.Close(fd))
+			}
+		case "ancestor_reopen":
+			fd, present, stageErr = privateCASUnixOpenCreateRecoveryParent(inventory.dataDir, "private/owner/leaf", inventory.device)
+			if fd >= 0 {
+				stageErr = errors.Join(stageErr, unix.Close(fd))
+			}
+			if !present {
+				stageErr = errors.Join(stageErr, errors.New("isolated ancestor is absent"))
+			}
+		case "revalidate":
+			stageErr = inventory.revalidate()
+		}
+		before, beforeErr := inventory.identity(inventory.dataDir, ".")
+		names, namesErr := inventory.readNames(inventory.dataDir)
+		after, afterErr := inventory.identity(inventory.dataDir, ".")
+		beforeEqual := beforeErr == nil && before == observed.identity
+		namesEqual := namesErr == nil && slices.Equal(names, observed.names)
+		afterEqual := afterErr == nil && after == observed.identity
+		t.Logf("phase=inventory_root_stable stage=%s action_ok=%t before_ok=%t names_ok=%t after_ok=%t before_equal=%t names_equal=%t after_equal=%t", stage, stageErr == nil, beforeErr == nil, namesErr == nil, afterErr == nil, beforeEqual, namesEqual, afterEqual)
+		if stageErr != nil || !beforeEqual || !namesEqual || !afterEqual {
+			t.Fatal("read-only stage changed the isolated root observation")
+		}
+	}
+}
+
+func TestCreateRecoveryNameInventoryRejectsTransientRootEntryWithUnchangedNames(t *testing.T) {
+	root, inventory := createRecoveryNameInventoryFixture(t)
+	// Control mtime before caching, using the existing Chtimes test mechanism.
+	// A whole-second value in the past avoids depending on one timestamp tick;
+	// the create/remove sequence must itself change it, without sleep or repair.
+	baseline := time.Unix(1_600_000_000, 0)
+	if err := os.Chtimes(root, baseline, baseline); err != nil {
+		t.Fatal("set isolated root baseline mtime")
+	}
+	info, statErr := os.Stat(root)
+	controlled := statErr == nil && info.ModTime().Equal(baseline)
+	t.Logf("phase=inventory_root_transient stage=baseline stat_ok=%t mtime_controlled=%t", statErr == nil, controlled)
+	if !controlled {
+		t.Fatal("filesystem did not retain the controlled whole-second mtime")
+	}
+	_, cacheErr := inventory.names(inventory.dataDir, ".")
+	observed, cached := inventory.parents["."]
+	t.Logf("phase=inventory_root_transient stage=cache read_ok=%t root_cached=%t", cacheErr == nil, cached)
+	if cacheErr != nil || !cached {
+		t.Fatal("cache isolated root names")
+	}
+	temporary, createErr := os.CreateTemp(root, "inventory-transient-")
+	t.Logf("phase=inventory_root_transient stage=create create_ok=%t", createErr == nil)
+	if createErr != nil {
+		t.Fatal("create isolated transient entry")
+	}
+	closeErr := temporary.Close()
+	removeErr := os.Remove(temporary.Name())
+	t.Logf("phase=inventory_root_transient stage=remove close_ok=%t remove_ok=%t", closeErr == nil, removeErr == nil)
+	if closeErr != nil || removeErr != nil {
+		t.Fatal("close and remove isolated transient entry")
+	}
+	current, identityErr := inventory.identity(inventory.dataDir, ".")
+	names, namesErr := inventory.readNames(inventory.dataDir)
+	namesEqual := namesErr == nil && slices.Equal(names, observed.names)
+	stableFieldsEqual := identityErr == nil && current.directory == observed.identity.directory && current.links == observed.identity.links && current.size == observed.identity.size
+	mtimeChanged := identityErr == nil && [16]byte(current.times[:16]) != [16]byte(observed.identity.times[:16])
+	ctimeChanged := identityErr == nil && [16]byte(current.times[16:]) != [16]byte(observed.identity.times[16:])
+	t.Logf("phase=inventory_root_transient stage=compare identity_ok=%t names_ok=%t names_equal=%t stable_fields_equal=%t mtime_changed=%t ctime_changed=%t", identityErr == nil, namesErr == nil, namesEqual, stableFieldsEqual, mtimeChanged, ctimeChanged)
+	if !namesEqual || !stableFieldsEqual || !mtimeChanged {
+		t.Fatal("transient entry did not preserve names and stable fields while changing mtime")
+	}
+	err := inventory.revalidate()
+	rejected := err != nil && strings.Contains(err.Error(), "private CAS create-residue directory inventory changed")
+	t.Logf("phase=inventory_root_transient stage=revalidate rejected=%t", rejected)
+	if !rejected {
+		t.Fatal("unchanged names bypassed the root timestamp revalidation")
+	}
 }
 
 func TestCreateRecoveryNameInventoryRejectsMutationAfterReuse(t *testing.T) {

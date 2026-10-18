@@ -5,6 +5,7 @@ declare module 'pdfjs-dist/build/pdf.mjs' {
     width: number
     height: number
     scale: number
+    userUnit: number
     rotation: number
     rawDims?: {
       pageWidth: number
@@ -40,6 +41,7 @@ declare module 'pdfjs-dist/build/pdf.mjs' {
       viewport: PageViewport
     })
     render(): Promise<void>
+    cancel(): void
   }
   export function getDocument(options: unknown): PDFDocumentLoadingTask
 }

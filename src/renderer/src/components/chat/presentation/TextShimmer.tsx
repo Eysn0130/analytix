@@ -6,6 +6,10 @@ import clsx from 'clsx'
 import css from './TextShimmer.module.css'
 
 const DecorativeCopy = createContext<boolean | undefined>(undefined)
+/** Effect-bearing summaries use a static label in the existing highlight copy. */
+export function useTextShimmerDecorativeCopy(): boolean {
+  return useContext(DecorativeCopy) === true
+}
 
 /** Text and activity supplied by the owning row. */
 export interface TextShimmerProps {

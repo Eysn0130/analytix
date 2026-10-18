@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	workspacefs "analytix.local/runtime-go/internal/adapters/outbound/workspacefs"
@@ -20,6 +21,7 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	jobs "analytix.local/runtime-go/internal/jobs"
 	provider "analytix.local/runtime-go/internal/provider"
 )
@@ -35,17 +37,21 @@ type runtimeSubagentRunResult struct {
 
 func (h *runtimeServerHandler) executeRuntimeSubagentTask(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	if !h.subagents.Enabled {
-		return map[string]any{"code": "subagents_disabled", "error": "subagents are disabled in Analytix runtime settings"}, true
+		return runtimeSubagentSourceErrorV1(ctx, "subagents_disabled", "subagents are disabled in Analytix runtime settings")
 	}
 	request, err := subagentapp.TaskRequestFromArgs(pending.Call.Name, args)
 	if err != nil {
-		return map[string]any{"code": "validation_error", "error": err.Error()}, true
+		return runtimeSubagentSourceErrorV1(ctx, "validation_error", err.Error())
 	}
 	request, err = subagentapp.BindForegroundHandoffPendingRequest(pending, request)
 	if err != nil {
-		return map[string]any{"code": "validation_error", "error": err.Error()}, true
+		return runtimeSubagentSourceErrorV1(ctx, "validation_error", err.Error())
 	}
 	result := h.runRuntimeSubagentTask(ctx, pending, request)
+	if result.IsError {
+		captureRuntimeSubagentErrorsV1(ctx, []runtimeSubagentErrorObservationV1{{Err: result.Err, Record: result.Record}})
+	}
+	captureRuntimeTaskJobResultV1(ctx, "spawn", subagentapp.TaskJobServiceResult{Record: result.Record, IsError: result.IsError})
 	return result.Output, result.IsError
 }
 
@@ -96,27 +102,48 @@ func (h *runtimeServerHandler) resolveRuntimeSubagentSideEffectProjection(ctx co
 
 func (h *runtimeServerHandler) executeRuntimeParallelSubagents(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	if !h.subagents.Enabled {
-		return map[string]any{"code": "subagents_disabled", "error": "subagents are disabled in Analytix runtime settings"}, true
+		return runtimeSubagentSourceErrorV1(ctx, "subagents_disabled", "subagents are disabled in Analytix runtime settings")
 	}
 	tasks, err := subagentapp.ParallelTaskRequestsFromArgs(args)
 	if err != nil {
-		return map[string]any{"code": "validation_error", "error": err.Error()}, true
+		return runtimeSubagentSourceErrorV1(ctx, "validation_error", err.Error())
 	}
 	securityBinding, err := domainjob.NewSecurityBinding(pending.SecurityContext, pending.ExecutionGrant, pending.Call.ID)
 	if err != nil {
-		return map[string]any{"code": "validation_error", "error": "subagent job security binding is unavailable"}, true
+		return runtimeSubagentSourceErrorV1(ctx, "validation_error", "subagent job security binding is unavailable")
 	}
 	for index := range tasks {
 		bound, bindErr := h.bindRuntimeCaseDelegationRequest(ctx, pending, securityBinding, tasks[index].Request)
 		if bindErr != nil {
-			return map[string]any{"code": "validation_error", "error": bindErr.Error()}, true
+			return runtimeSubagentSourceErrorV1(ctx, "validation_error", bindErr.Error())
 		}
 		tasks[index].Request = bound
 	}
+	observedRecords := make([]jobs.Record, len(tasks))
+	observedErrors := make([]runtimeSubagentErrorObservationV1, len(tasks))
+	var observationsMu sync.Mutex
 	result := subagentapp.RunParallelTasks(ctx, tasks, time.Now().UTC(), func(ctx context.Context, request subagentapp.TaskRequest) subagentapp.RunResult {
 		child := h.runRuntimeSubagentTask(ctx, pending, request)
+		if request.ParallelIndex > 0 && request.ParallelIndex <= len(observedRecords) {
+			observationsMu.Lock()
+			observedRecords[request.ParallelIndex-1] = child.Record
+			if child.IsError {
+				observedErrors[request.ParallelIndex-1] = runtimeSubagentErrorObservationV1{Err: child.Err, Record: child.Record, ParallelIndex: request.ParallelIndex}
+			}
+			observationsMu.Unlock()
+		}
 		return subagentapp.RunResult{Output: child.Output, IsError: child.IsError}
 	})
+	produced := make([]jobs.Record, 0, len(observedRecords))
+	for _, record := range observedRecords {
+		if record.ID != "" {
+			produced = append(produced, record)
+		}
+	}
+	if result.IsError {
+		captureRuntimeSubagentErrorsV1(ctx, observedErrors)
+	}
+	captureRuntimeTaskJobResultV1(ctx, "spawn", subagentapp.TaskJobServiceResult{Records: produced, IsError: result.IsError})
 	return result.Output, result.IsError
 }
 
@@ -127,12 +154,21 @@ func (h *runtimeServerHandler) executeRuntimeRunSkill(ctx context.Context, pendi
 	}
 	skill, ok := h.runtimeSkillByName(name)
 	if !ok {
-		return map[string]any{"code": "unknown_skill", "error": "unknown skill: " + strings.TrimSpace(name), "available": h.runtimeSkillIDs()}, true
+		message := "unknown skill: " + strings.TrimSpace(name)
+		captureRuntimeSkillResultV1(ctx, subagentapp.SkillResultCaptureInputV1{RequestedName: name, IsError: true, ErrorCode: "unknown_skill", ErrorMessage: message})
+		return map[string]any{"code": "unknown_skill", "error": message, "available": h.runtimeSkillIDs()}, true
 	}
 	runAs := subagentapp.SkillRunAs(skill)
+	observation := subagentapp.SkillResultCaptureInputV1{RequestedName: name, Skill: skill, RunAs: runAs,
+		SecurityContext: pending.SecurityContext, ExecutionGrantID: pending.ExecutionGrant.GrantID, CallID: pending.Call.ID}
+	failure := func(code, message string) {
+		observation.IsError, observation.ErrorCode, observation.ErrorMessage = true, code, message
+		captureRuntimeSkillResultV1(ctx, observation)
+	}
 	if runAs == "subagent" {
 		prompt, promptErr := h.runtimeSkillSubagentPrompt(skill, subagentapp.SkillArguments(args))
 		if promptErr != nil {
+			failure("skill_snapshot_invalid", promptErr.Error())
 			return map[string]any{"code": "skill_snapshot_invalid", "error": promptErr.Error(), "skillId": stringField(skill, "id")}, true
 		}
 		request, err := subagentapp.SkillTaskRequestFromArgs(subagentapp.SkillTaskRequestInput{
@@ -141,19 +177,34 @@ func (h *runtimeServerHandler) executeRuntimeRunSkill(ctx context.Context, pendi
 			Prompt: prompt,
 		})
 		if err != nil {
+			failure("validation_error", err.Error())
 			return map[string]any{"code": "validation_error", "error": err.Error()}, true
 		}
 		result := h.runRuntimeSubagentTask(ctx, pending, request)
+		observation.Job, observation.IsError = &result.Record, result.IsError
+		captureRuntimeSkillResultV1(ctx, observation)
 		return subagentapp.RunSkillSubagentOutput(result.Output, skill), result.IsError
 	}
+	// The existing output producer defaults an undeclared runAs to inline.
+	observation.RunAs = "inline"
 	if subagentapp.SkillContinueOrForkRequested(args) {
+		failure("validation_error", "continue_from/fork_from are only valid for runAs=subagent skills")
 		return map[string]any{"code": "validation_error", "error": "continue_from/fork_from are only valid for runAs=subagent skills"}, true
 	}
 	body, err := h.runtimeSkillEntryBody(skill)
 	if err != nil {
+		failure("skill_snapshot_invalid", err.Error())
 		return map[string]any{"code": "skill_snapshot_invalid", "error": err.Error(), "skillId": stringField(skill, "id")}, true
 	}
+	observation.Instruction = body
+	captureRuntimeSkillResultV1(ctx, observation)
 	return subagentapp.InlineSkillOutput(skill, args, runAs, body), false
+}
+
+func captureRuntimeSkillResultV1(ctx context.Context, input subagentapp.SkillResultCaptureInputV1) {
+	if capture, ok := subagentapp.SkillResultCaptureV1(input); ok {
+		domaintoolresult.CaptureProtectedToolResultV1(ctx, capture)
+	}
 }
 
 func (h *runtimeServerHandler) runRuntimeSubagentTask(ctx context.Context, pending runtimePendingToolCall, request runtimeSubagentTaskRequest) runtimeSubagentRunResult {
@@ -172,23 +223,23 @@ func (h *runtimeServerHandler) runRuntimeSubagentTask(ctx context.Context, pendi
 	}
 	request, err := h.bindRuntimeCaseDelegationRequest(ctx, pending, securityBinding, request)
 	if err != nil {
-		return runtimeSubagentFailedOutput(request, err.Error())
+		return runtimeSubagentFailedOutput(request, err.Error(), err)
 	}
 	preparation, err := h.prepareRuntimeAdmittedChild(request, pending)
 	request, source := preparation.Request, preparation.Source
 	if err != nil {
 		if errors.Is(err, subagentapp.ErrSourceToolScopeMismatch) {
-			return runtimeSubagentRunResult{Output: subagentapp.SourceToolScopeMismatchOutput(request), IsError: true}
+			return runtimeSubagentRunResult{Output: subagentapp.SourceToolScopeMismatchOutput(request), IsError: true, Err: err}
 		}
 		if errors.Is(err, subagentapp.ErrSourceNotReplayable) {
-			return runtimeSubagentRunResult{Output: subagentapp.SourceNotReplayableOutput(request, source.ID, source.Status), IsError: true}
+			return runtimeSubagentRunResult{Output: subagentapp.SourceNotReplayableOutput(request, source.ID, source.Status), IsError: true, Err: err}
 		}
-		return runtimeSubagentFailedOutput(request, err.Error())
+		return runtimeSubagentFailedOutput(request, err.Error(), err)
 	}
 	defer preparation.ReleaseSourceLock()
 	childProducer, err := h.childProducerForRunV1(ctx, pending, preparation, producerRequest)
 	if err != nil {
-		return runtimeSubagentFailedOutput(request, err.Error())
+		return runtimeSubagentFailedOutput(request, err.Error(), err)
 	}
 	hasSource, execution, workspace, toolScope := preparation.HasSource, preparation.Execution, preparation.Workspace, preparation.ToolScope
 	providerID, model, endpointFormat, effort := execution.ProviderID, execution.Model, execution.EndpointFormat, execution.Effort
@@ -201,7 +252,7 @@ func (h *runtimeServerHandler) runRuntimeSubagentTask(ctx context.Context, pendi
 		},
 	})
 	if err != nil {
-		return runtimeSubagentFailedOutput(request, err.Error())
+		return runtimeSubagentFailedOutput(request, err.Error(), err)
 	}
 	failStartedRecord := func(record jobs.Record, cause error) runtimeSubagentRunResult {
 		if cause == nil {
@@ -211,7 +262,7 @@ func (h *runtimeServerHandler) runRuntimeSubagentTask(ctx context.Context, pendi
 			record = updated
 		}
 		h.recordRuntimeSubagentEvent(pending, record, string(domainjob.StatusFailed), cause.Error())
-		return runtimeSubagentRunResult{Output: subagentapp.RunOutput(record, "", nil, cause), Record: record, IsError: true}
+		return runtimeSubagentRunResult{Output: subagentapp.RunOutput(record, "", nil, cause), Record: record, IsError: true, Err: cause}
 	}
 	if record.CaseDelegation != nil && request.ForegroundHandoff &&
 		request.ForegroundHandoffKind == subagentapp.ForegroundHandoffCaseTypedV1 {
@@ -311,7 +362,7 @@ func (h *runtimeServerHandler) runRuntimeSubagentTask(ctx context.Context, pendi
 			record = updated
 		}
 		h.recordRuntimeSubagentEvent(pending, record, "aborted", slotErr.Error())
-		return runtimeSubagentRunResult{Output: subagentapp.RunOutput(record, "", nil, slotErr), Record: record, IsError: true}
+		return runtimeSubagentRunResult{Output: subagentapp.RunOutput(record, "", nil, slotErr), Record: record, IsError: true, Err: slotErr}
 	}
 	defer releaseSlot()
 	acquireSignal.Signal()
@@ -324,17 +375,22 @@ func (h *runtimeServerHandler) runRuntimeSubagentTask(ctx context.Context, pendi
 }
 
 func (h *runtimeServerHandler) prepareRuntimeAdmittedChild(request runtimeSubagentTaskRequest, pending runtimePendingToolCall) (subagentapp.TaskRunPreparation, error) {
+	return h.prepareRuntimeChildRunV1(request, subagentapp.ParentExecution{ProviderID: pending.ProviderID, Model: pending.Model, Effort: pending.Effort, Workspace: pending.Workspace}, pending.ThreadID, pending.SecurityContext)
+}
+
+// Host input and model delegation share preparation without fabricating a
+// parent pending tool call or importing historical execution authority.
+func (h *runtimeServerHandler) prepareRuntimeChildRunV1(request runtimeSubagentTaskRequest, parent subagentapp.ParentExecution, parentThreadID string, frozen domainsecurity.TurnSecurityContext) (subagentapp.TaskRunPreparation, error) {
 	return subagentapp.PrepareTaskRun(subagentapp.TaskRunPreparationInput{
 		Enabled: h.subagents.Enabled, Settings: h.subagents, Request: request, SystemPromptHint: apploop.LocalFilesystemHint(),
-		Parent:                  subagentapp.ParentExecution{ProviderID: pending.ProviderID, Model: pending.Model, Effort: pending.Effort, Workspace: pending.Workspace},
-		ParentWorkspaceRealPath: pending.SecurityContext.WorkspaceRealPath, ParentThreadID: pending.ThreadID, SecurityContext: pending.SecurityContext,
+		Parent: parent, ParentWorkspaceRealPath: frozen.WorkspaceRealPath, ParentThreadID: parentThreadID, SecurityContext: frozen,
 		Resolver: h.providerConfig, LockSource: h.jobs.LockChildRun, ResolveSource: h.resolveRuntimeSubagentSource,
 		ResolveSourceLabel: func(source domainjob.Record) string {
 			return threadsummaryapp.ResolveSubagentSourceDisplayLabel(source, h.store)
 		},
 		CanonicalizeWorkspace: workspacefs.ValidateSubagentWorkspace,
 		ResolveMCPAdvertisements: func() []toolcatalogapp.MCPToolAdvertisementV1 {
-			return toolcatalogapp.ValidMCPToolAdvertisementsForSecurityContextV1(h.mcp, pending.SecurityContext)
+			return toolcatalogapp.ValidMCPToolAdvertisementsForSecurityContextV1(h.mcp, frozen)
 		},
 		AllowedToolScope: h.runtimeSubagentAllowedToolScope,
 		ToolSchemas: func(scope []string, prompt string, advertisements []toolcatalogapp.MCPToolAdvertisementV1) []domainmodel.ToolSchema {
@@ -396,6 +452,8 @@ func (h *runtimeServerHandler) completeRuntimeSubagentTask(ctx context.Context, 
 		StartAuthority:       startAuthority,
 		CompletionAuthority:  h.childCompletions,
 		ForegroundAuthority:  h.foregroundHandoffs,
+
+		CaptureProtectedOutput: h.runtimeProtectedJobOutputProducerV1(pending),
 	})
 	return runtimeSubagentRunResult{Output: result.Output, Record: result.Record, IsError: result.IsError, Err: result.Err}
 }
@@ -419,8 +477,8 @@ func (h *runtimeServerHandler) restartRuntimeSubagentTaskJob(parentThreadID stri
 	if reason := h.runtimeJobSecurityAuthorizer().Blocker(record); reason != "" {
 		return subagentapp.TaskJobServiceResult{Response: subagentapp.TaskJobNotFoundResponse(jobID), IsError: true, ErrorCode: subagentapp.TaskJobErrorNotFound}
 	}
-	if record.SecurityBinding != nil {
-		return subagentapp.TaskJobServiceResult{Response: subagentapp.ValidationErrorResponse("security-bound task jobs must be restarted by a new authorized task tool call"), Record: record, IsError: true, ErrorCode: subagentapp.TaskJobErrorValidation}
+	if record.SecurityBinding != nil || record.HostChildInput != nil {
+		return subagentapp.TaskJobServiceResult{Response: subagentapp.ValidationErrorResponse("task job requires a new authorized input"), Record: record, IsError: true, ErrorCode: subagentapp.TaskJobErrorValidation}
 	}
 	thread, _ := h.store.GetThread(parentThreadID)
 	args := subagentapp.RestartTaskJobArguments(record)
@@ -627,7 +685,16 @@ func (h *runtimeServerHandler) recordRuntimeToolStarted(pending runtimePendingTo
 	})
 	if ok {
 		_ = h.store.PatchTurnItemStatus(pending.ThreadID, pending.TurnID, pending.ToolCallItemID, "running")
-		h.recordRuntimeBestEffortEvent(event, "tool started")
+		recorded, _, err := h.store.RecordEvent(event)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "[analytix] event=ANALYTIX_RUNTIME_EVENT_RECORD_FAILED")
+			return
+		}
+		item, _ := recorded["item"].(map[string]any)
+		seq, seqOK := numericSeq(recorded["seq"])
+		if seqOK && seq > 0 && stringField(recorded, "kind") == "tool_call_started" && stringField(recorded, "threadId") == pending.ThreadID && stringField(recorded, "turnId") == pending.TurnID && stringField(recorded, "itemId") == pending.ToolCallItemID && stringField(item, "id") == pending.ToolCallItemID && stringField(item, "callId") == pending.Call.ID {
+			h.registerProcessToolStartedV2(pending, uint64(seq))
+		}
 	}
 }
 
@@ -637,8 +704,12 @@ func (h *runtimeServerHandler) recordRuntimeBestEffortEvent(event map[string]any
 	}
 }
 
-func runtimeSubagentFailedOutput(request runtimeSubagentTaskRequest, message string) runtimeSubagentRunResult {
-	return runtimeSubagentRunResult{Output: subagentapp.FailedOutput(request, message), IsError: true}
+func runtimeSubagentFailedOutput(request runtimeSubagentTaskRequest, message string, sourceErr ...error) runtimeSubagentRunResult {
+	originalErr := error(errors.New(message))
+	if len(sourceErr) == 1 && sourceErr[0] != nil {
+		originalErr = sourceErr[0]
+	}
+	return runtimeSubagentRunResult{Output: subagentapp.FailedOutput(request, message), IsError: true, Err: originalErr}
 }
 
 func (h *runtimeServerHandler) runtimeBackgroundJobContextMessages(threadID string, subagentDepth int, securityContext domainsecurity.TurnSecurityContext) []provider.Message {
@@ -662,48 +733,59 @@ func (h *runtimeServerHandler) runtimeBackgroundJobContextMessages(threadID stri
 	return []provider.Message{{Role: "user", Content: note}}
 }
 
-func (h *runtimeServerHandler) executeRuntimeTaskJobWait(pending runtimePendingToolCall, args map[string]any) (any, bool) {
+func (h *runtimeServerHandler) executeRuntimeTaskJobWait(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	request := subagentapp.TaskJobWaitRequestFromArgs(args)
 	result := h.runtimeSubagentService().WaitTaskJobs(pending.ThreadID, request, true)
+	captureRuntimeTaskJobResultV1(ctx, "wait", result)
 	return result.Response, result.IsError
 }
 
-func (h *runtimeServerHandler) executeRuntimeTaskJobList(pending runtimePendingToolCall, args map[string]any) (any, bool) {
+func (h *runtimeServerHandler) executeRuntimeTaskJobList(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	request, validation, invalid := subagentapp.TaskJobListRequestFromArgs(args)
 	if invalid {
 		return validation, true
 	}
 	result := h.runtimeSubagentService().ListTaskJobViews(pending.ThreadID, request)
+	captureRuntimeTaskJobResultV1(ctx, "list", result)
 	return result.Response, result.IsError
 }
 
-func (h *runtimeServerHandler) executeRuntimeTaskJobOutput(pending runtimePendingToolCall, args map[string]any) (any, bool) {
+func (h *runtimeServerHandler) executeRuntimeTaskJobOutput(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	request, validation, invalid := subagentapp.TaskJobOutputRequestFromArgs(args)
 	if invalid {
 		return validation, true
 	}
-	result := h.runtimeSubagentService().OutputTaskJob(pending.ThreadID, request, true)
+	result := h.runtimeSubagentService().OutputTaskJobProtectedV1(ctx, pending.ThreadID, request)
+	captureRuntimeTaskJobResultV1(ctx, "output", result)
 	return result.Response, result.IsError
 }
 
-func (h *runtimeServerHandler) executeRuntimeTaskJobKill(pending runtimePendingToolCall, args map[string]any) (any, bool) {
+func (h *runtimeServerHandler) executeRuntimeTaskJobKill(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	request, validation, invalid := subagentapp.TaskJobKillRequestFromArgs(args)
 	if invalid {
 		return validation, true
 	}
 	result := h.runtimeSubagentService().KillTaskJob(pending.ThreadID, request)
+	captureRuntimeTaskJobResultV1(ctx, "cancel", result)
 	if !result.IsError && strings.TrimSpace(result.Record.ID) != "" {
 		h.recordRuntimeJobLifecycleEvent(result.Record, result.Record.Status, firstNonEmptyString(result.Record.Error, request.Reason))
 	}
 	return result.Response, result.IsError
 }
 
-func (h *runtimeServerHandler) executeRuntimeTaskJobRestart(pending runtimePendingToolCall, args map[string]any) (any, bool) {
+func captureRuntimeTaskJobResultV1(ctx context.Context, operation string, result subagentapp.TaskJobServiceResult) {
+	if capture, ok := subagentapp.TaskJobResultCaptureV1(operation, result); ok {
+		domaintoolresult.CaptureProtectedToolResultV1(ctx, capture)
+	}
+}
+
+func (h *runtimeServerHandler) executeRuntimeTaskJobRestart(ctx context.Context, pending runtimePendingToolCall, args map[string]any) (any, bool) {
 	request, validation, invalid := subagentapp.TaskJobRestartRequestFromArgs(args)
 	if invalid {
 		return validation, true
 	}
 	result := h.runtimeTaskJobHTTPService().RestartTaskJob(pending.ThreadID, request)
+	captureRuntimeTaskJobResultV1(ctx, "restart", result)
 	return result.Response, result.IsError
 }
 
@@ -744,6 +826,7 @@ func (h *runtimeServerHandler) executeRuntimeTaskJobResume(pending runtimePendin
 
 func (h *runtimeServerHandler) runtimeTaskJobHTTPService() subagentapp.TaskJobHTTPService {
 	return subagentapp.NewTaskJobHTTPService(subagentapp.TaskJobHTTPServiceDeps{
+		HostChildInput:      h.admitHostChildInputV1,
 		Service:             h.runtimeSubagentService(),
 		Jobs:                h.jobs,
 		Turns:               h.store,
@@ -764,4 +847,48 @@ func (h *runtimeServerHandler) beginRuntimeTaskJobSteerAuthority(
 		Jobs: h.jobs, ObserveFirstTurn: h.observeRuntimeChildFirstTurnV1, State: h.runtimeSubagentState(), Security: h.turnSecurity,
 		Control: h.runtimeControl(), Blocker: h.runtimeJobSecurityAuthorizer().Blocker,
 	}, record, message)
+}
+
+// These observations belong only to this still-owning parent call. Background
+// children never update a sealed spawn acceptance; later terminal facts keep
+// their existing child owner. ParallelIndex is the actual 1-based protocol.
+type runtimeSubagentErrorObservationV1 struct {
+	Err           error
+	Record        jobs.Record
+	ParallelIndex int
+}
+
+func captureRuntimeSubagentErrorsV1(ctx context.Context, observations []runtimeSubagentErrorObservationV1) {
+	entries := []domaintoolresult.ProtectedOutputErrorEntryV1{}
+	for _, observation := range observations {
+		if observation.Err == nil {
+			if observation.ParallelIndex > 0 {
+				domaintoolresult.CaptureProtectedToolErrorV1(ctx, &domaintoolresult.ProtectedOutputErrorV1{Availability: "unavailable", Reason: "missing"})
+				return
+			}
+			continue
+		}
+		if errors.Is(observation.Err, context.Canceled) || errors.Is(observation.Err, context.DeadlineExceeded) {
+			domaintoolresult.CaptureProtectedToolErrorV1(ctx, &domaintoolresult.ProtectedOutputErrorV1{Availability: "unavailable", Reason: "canceled"})
+			return
+		}
+		entry := domaintoolresult.ProtectedOutputErrorEntryV1{Message: observation.Err.Error()}
+		if observation.ParallelIndex > 0 {
+			index := observation.ParallelIndex
+			entry.ParallelIndex = &index
+		}
+		if observation.Record.ID != "" {
+			capture, ok := subagentapp.TaskJobResultCaptureV1("spawn", subagentapp.TaskJobServiceResult{Record: observation.Record})
+			if ok && len(capture.Job.Jobs) == 1 {
+				entry.JobID = capture.Job.Jobs[0].JobID
+			}
+		}
+		entries = append(entries, entry)
+	}
+	domaintoolresult.CaptureProtectedToolErrorV1(ctx, domaintoolresult.ProjectProtectedOutputErrorV1(entries))
+}
+
+func runtimeSubagentSourceErrorV1(ctx context.Context, code, message string) (any, bool) {
+	domaintoolresult.CaptureProtectedToolErrorV1(ctx, domaintoolresult.ProjectProtectedOutputErrorV1([]domaintoolresult.ProtectedOutputErrorEntryV1{{Message: message}}))
+	return map[string]any{"code": code, "error": message}, true
 }

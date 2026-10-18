@@ -245,6 +245,12 @@ func (service StartupRecoveryService) RecoverInterrupted(records []domainjob.Rec
 			return err
 		}
 		record = latest
+		if record.HostChildInput != nil {
+			if err := domainjob.ValidateHostChildInputRecordV1(record); err != nil {
+				return err
+			}
+			continue
+		}
 		if held, err := service.jobs.RestartPreservesChildRunV1(record); err != nil {
 			return err
 		} else if held {
@@ -299,6 +305,12 @@ func (service StartupRecoveryService) RecoverPendingDeliveries() error {
 		return nil
 	}
 	for _, record := range service.jobs.AllRecords() {
+		if record.HostChildInput != nil {
+			if err := domainjob.ValidateHostChildInputRecordV1(record); err != nil {
+				return err
+			}
+			continue
+		}
 		if held, err := service.jobs.RestartPreservesChildRunV1(record); err != nil {
 			return err
 		} else if held {
@@ -473,6 +485,12 @@ func (service StartupRecoveryService) recordLifecycle(record domainjob.Record, s
 		return err
 	}
 	record = latest
+	if record.HostChildInput != nil {
+		if err := domainjob.ValidateHostChildInputRecordV1(record); err != nil {
+			return err
+		}
+		return nil
+	}
 	status = strings.TrimSpace(record.Status)
 	message = startupLifecycleMessageV1(record)
 	threadID := strings.TrimSpace(record.ParentThreadID)
@@ -637,6 +655,9 @@ func RecordBackgroundJobLifecycleV1(
 		return BackgroundLifecycleRecordResultV1{Record: record}, err
 	}
 	record = latest
+	if record.HostChildInput != nil {
+		return BackgroundLifecycleRecordResultV1{Record: record}, domainjob.ValidateHostChildInputRecordV1(record)
+	}
 	if blocker := service.completionSecurityBlocker(record); blocker != "" {
 		return BackgroundLifecycleRecordResultV1{Record: record, Blocker: blocker}, nil
 	}
@@ -722,6 +743,12 @@ func AdmitBackgroundCompletionLifecycleV1(
 // from the durable post-admission record, including security-bound children.
 func CanonicalBackgroundCompletionLifecycleEventsV1(events []map[string]any, record domainjob.Record) []map[string]any {
 	out := make([]map[string]any, 0, len(events))
+	callID, toolName := "", ""
+	for _, event := range events {
+		if backgroundStringField(event, "kind") == "tool_progress" && backgroundLifecycleEventJobIDV1(event) == strings.TrimSpace(record.ID) {
+			callID, toolName = backgroundStringField(event, "callId"), backgroundStringField(event, "toolName")
+		}
+	}
 	for _, source := range events {
 		event := cloneMap(source)
 		if backgroundLifecycleEventJobIDV1(event) != strings.TrimSpace(record.ID) {
@@ -740,6 +767,16 @@ func CanonicalBackgroundCompletionLifecycleEventsV1(events []map[string]any, rec
 				delete(details, "deliveryReason")
 			}
 			event["details"] = details
+			if strings.TrimSpace(record.CompletionDeliveryStatus) == "delivered" && backgroundCompletionTimestamp(record) != "" {
+				item, ok := BuildBackgroundJobCompletionNotificationItem(BackgroundJobCompletionNotificationItemInput{
+					ThreadID: backgroundStringField(event, "threadId"), TurnID: backgroundStringField(event, "turnId"),
+					ItemID: BackgroundJobCompletionItemID(backgroundStringField(event, "turnId"), event),
+					CallID: callID, ToolName: toolName, CreatedAt: backgroundCompletionTimestamp(record), Event: event,
+				})
+				if ok {
+					event["item"] = item
+				}
+			}
 		}
 		if timestamp := firstNonEmptyAnyString(record.CompletionDeliveryAt, record.FinishedAt, record.UpdatedAt); timestamp != "" {
 			event["timestamp"] = timestamp
@@ -932,6 +969,12 @@ func matchBackgroundCompletionLifecycleReplayV1(thread map[string]any, drafts, r
 			sequence, ok := contracts.NumericSeq(observed["seq"])
 			delete(expected, "seq")
 			delete(observed, "seq")
+			// Legacy bundles lack the new exact item producer. Their original
+			// complete metadata remains byte-exact and inert on replay; they
+			// cannot supply missing item bytes to a later bounded Fork.
+			if _, present := observed["item"]; !present && backgroundStringField(expected, "kind") == "pipeline_stage" {
+				delete(expected, "item")
+			}
 			if !ok || previousSequence >= 0 && sequence != previousSequence+1 || !reflect.DeepEqual(expected, observed) {
 				return false, errors.New("background completion lifecycle replay bundle conflicts")
 			}

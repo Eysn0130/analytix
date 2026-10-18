@@ -61,7 +61,7 @@ func TestCompactionCancelsOrRejectsOldEpochJobs(t *testing.T) {
 	}
 	stateRecord, ok, err := contextepochapp.StateFromThread(reloaded)
 	if err != nil || !ok || stateRecord.AcceptedSnapshot.Epoch != current.ContextEpoch+1 ||
-		stateRecord.AcceptedSnapshot.RecoveryDigest != response["sourceDigest"] {
+		stateRecord.AcceptedSnapshot.RecoveryDigest != response["checkpointDigest"] {
 		t.Fatalf("compaction epoch authority mismatch: state=%#v ok=%t err=%v response=%#v", stateRecord, ok, err, response)
 	}
 	next, err := domainsecurity.ParseTurnSecurityContext(reloaded["securityState"])
@@ -107,6 +107,7 @@ func TestCompactionTransitionFailureAbortsWithoutDurableOrMemoryAuthority(t *tes
 	}
 	service := threadapp.NewService(threadapp.Dependencies{
 		Repository: handler.store, PublicProjector: handler.publicProjector,
+		SummarizeCompaction: epochSummaryForTest, ProjectCompactionHistory: handler.projectOrdinaryCompactionHistory,
 		WorkspaceReader: filestore.CaseBindingReader{},
 		BeginTransition: threadapp.AdaptBeginTransition(handler.runtimeSubagentState().BeginSecurityContextTransition), TransitionTimeout: 20 * time.Millisecond,
 	})
@@ -590,6 +591,7 @@ func TestCompactionRepositoryRechecksCaseAuthorityAtCAS(t *testing.T) {
 	handler.store.SetCaseThreadAuthority(authority)
 	service := threadapp.NewService(threadapp.Dependencies{
 		Repository: handler.store, PublicProjector: handler.publicProjector, CaseThreads: authority,
+		SummarizeCompaction: epochSummaryForTest, ProjectCompactionHistory: handler.projectOrdinaryCompactionHistory,
 		WorkspaceReader: filestore.CaseBindingReader{},
 		BeginTransition: threadapp.AdaptBeginTransition(handler.runtimeSubagentState().BeginSecurityContextTransition),
 	})
@@ -750,7 +752,7 @@ func newUnboundCompactionFixture(t *testing.T) (*runtimeServerHandler, string, d
 			"securityContext": turnsecurityapp.PublicRecord(frozen),
 			"items": []any{map[string]any{
 				"id": itemID, "turnId": frozen.TurnID, "threadId": threadID, "kind": "user_message", "role": "user",
-				"text": "message for compaction", "status": "completed",
+				"text": strings.Repeat("message for compaction ", 200), "status": "completed",
 			}},
 		}, "deepseek", map[string]any{
 			"securityState": turnsecurityapp.PublicRecord(frozen), "contextEpochState": contextepochapp.PublicState(epochState),
@@ -765,7 +767,14 @@ func newUnboundCompactionFixture(t *testing.T) (*runtimeServerHandler, string, d
 			t.Fatalf("commit compaction fixture turn %s: result=%#v err=%v", frozen.TurnID, result, err)
 		}
 	}
+	handler.threads = threadapp.NewService(threadapp.Dependencies{Repository: handler.store, PublicProjector: handler.publicProjector,
+		WorkspaceReader: filestore.CaseBindingReader{}, SummarizeCompaction: epochSummaryForTest, ProjectCompactionHistory: handler.projectOrdinaryCompactionHistory,
+		BeginTransition: threadapp.AdaptBeginTransition(handler.runtimeSubagentState().BeginSecurityContextTransition)})
 	return handler, threadID, current
+}
+
+func epochSummaryForTest(context.Context, threadapp.OrdinarySummaryInput) (string, error) {
+	return "Continue the compaction task.", nil
 }
 
 func compactionJobBinding(t *testing.T, current domainsecurity.TurnSecurityContext) *domainjob.SecurityBinding {

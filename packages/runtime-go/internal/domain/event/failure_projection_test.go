@@ -3,11 +3,16 @@ package event
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
+	contracts "analytix.local/runtime-go/internal/contracts"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
+	domainterminaltelemetry "analytix.local/runtime-go/internal/domain/terminaltelemetry"
 )
 
 func TestValidatePublicRecordRejectsRawFailureContentAtEveryNestingShape(t *testing.T) {
@@ -118,6 +123,211 @@ func TestValidatePublicRecordAllowsOnlyExactStagedHostTerminalFailure(t *testing
 			mutate(candidate)
 			if err := ValidatePublicRecord(candidate); !errors.Is(err, ErrRawFailurePersistence) {
 				t.Fatalf("non-canonical staged failure validation error=%v candidate=%#v", err, candidate)
+			}
+		})
+	}
+}
+
+func TestValidatePublicRecordAllowsClosedAttemptTelemetryOnlyAtUsageRoot(t *testing.T) {
+	newUsage := func() map[string]any {
+		telemetry := domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{
+			PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7,
+		}, map[string]any{
+			"providerAttemptTelemetrySchema":   domainterminaltelemetry.ProviderAttemptTelemetrySchemaV1,
+			"providerAttemptTelemetryValid":    false,
+			"providerAttemptTelemetryError":    "invalid_or_incomplete",
+			"providerAttemptInventoryComplete": false,
+		})
+		return map[string]any{
+			"kind": "usage", "threadId": "thread-usage", "turnId": "turn-usage", "model": "test-model",
+			"timestamp": "2026-10-18T01:02:03Z", "usage": telemetry.PublicUsageMap(),
+			"cacheDiagnostics": telemetry.PublicCacheDiagnosticsMap(),
+		}
+	}
+	for _, stage := range []string{"draft", "durable", "public"} {
+		t.Run(stage, func(t *testing.T) {
+			record := newUsage()
+			if stage == "durable" {
+				commitID := strings.Repeat("a", 64)
+				record["generalTerminalCommitId"] = commitID
+				record["generalTerminalEventId"] = GeneralTerminalDeliveryEventIDV1(commitID, "usage")
+				record["generalTerminalSlot"] = "usage"
+				record["generalTerminalAuthorityKind"] = GeneralTerminalCASAuthorityKind
+				record["generalTerminalAuthorityDigest"] = strings.Repeat("b", 64)
+			}
+			if stage != "draft" {
+				record["seq"] = float64(3)
+				record["usageFinalStatus"] = "completed"
+				record["usageSource"] = "fixture"
+				record["childRunId"] = "child-usage"
+			}
+			if stage == "durable" {
+				record["generalTerminalPayloadDigest"] = GeneralTerminalDeliveryPayloadDigestV1(record)
+			}
+			before, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidatePublicRecord(record); err != nil {
+				t.Fatalf("closed %s usage telemetry was rejected: %v", stage, err)
+			}
+			after, err := json.Marshal(record)
+			if err != nil || string(before) != string(after) {
+				t.Fatal("usage validation mutated the original record")
+			}
+		})
+	}
+	for name, mutate := range map[string]func(map[string]any) any{
+		"nested map": func(record map[string]any) any {
+			return map[string]any{"kind": "tool_progress", "payload": record}
+		},
+		"nested array":     func(record map[string]any) any { return []any{record} },
+		"bare diagnostics": func(record map[string]any) any { return record["cacheDiagnostics"] },
+		"wrong root":       func(record map[string]any) any { record["kind"] = "tool_progress"; return record },
+		"missing usage":    func(record map[string]any) any { delete(record, "usage"); return record },
+		"noncanonical pair": func(record map[string]any) any {
+			record["usage"].(map[string]any)["totalTokens"] = float64(1)
+			return record
+		},
+		"raw enum": func(record map[string]any) any {
+			record["cacheDiagnostics"].(map[string]any)["providerAttemptTelemetryError"] = "PRIVATE_PROVIDER_FAILURE"
+			return record
+		},
+		"object enum": func(record map[string]any) any {
+			record["cacheDiagnostics"].(map[string]any)["providerAttemptTelemetryError"] = map[string]any{"message": "PRIVATE_PROVIDER_FAILURE"}
+			return record
+		},
+		"telemetry lookalike": func(record map[string]any) any {
+			record["cacheDiagnostics"].(map[string]any)["providerAttemptTelemetrySchema"] = "other"
+			return record
+		},
+		"aliased error key": func(record map[string]any) any {
+			diagnostics := record["cacheDiagnostics"].(map[string]any)
+			delete(diagnostics, "providerAttemptTelemetryError")
+			diagnostics["provider_attempt_telemetry_error"] = "invalid_or_incomplete"
+			return record
+		},
+		"raw sibling": func(record map[string]any) any {
+			record["lastError"] = "PRIVATE_PROVIDER_FAILURE"
+			return record
+		},
+		"raw diagnostic sibling": func(record map[string]any) any {
+			record["cacheDiagnostics"].(map[string]any)["lastError"] = "PRIVATE_PROVIDER_FAILURE"
+			return record
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidatePublicRecord(mutate(contracts.CloneMap(newUsage()))); !errors.Is(err, ErrRawFailurePersistence) {
+				t.Fatalf("unsafe usage telemetry validation error=%v", err)
+			}
+		})
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"credential":        func(record map[string]any) { record["model"] = "api_key=sk-test-private-value" },
+		"private reasoning": func(record map[string]any) { record["model"] = "<think>PRIVATE_REASONING</think>" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			record := newUsage()
+			mutate(record)
+			if err := ValidatePublicRecord(record); err == nil {
+				t.Fatal("closed telemetry bypassed another public-record safety check")
+			}
+		})
+	}
+}
+
+func TestClosedTerminalTelemetryFailureValidationViewV1RequiresExactPairWithoutMutation(t *testing.T) {
+	newPair := func() (map[string]any, map[string]any) {
+		telemetry := domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}, map[string]any{
+			"providerAttemptTelemetrySchema": domainterminaltelemetry.ProviderAttemptTelemetrySchemaV1,
+			"providerAttemptTelemetryValid":  false, "providerAttemptTelemetryError": "invalid_or_incomplete", "providerAttemptInventoryComplete": false,
+		})
+		return telemetry.PublicUsageMap(), telemetry.PublicCacheDiagnosticsMap()
+	}
+	for _, fault := range []string{"healthy", "legacy pair", "wrong usage", "unknown usage", "unknown diagnostic", "raw enum", "object enum", "aliased enum", "wrong schema", "raw sibling", "credential", "reasoning", "nested diagnostics"} {
+		t.Run(fault, func(t *testing.T) {
+			usage, diagnostics := newPair()
+			switch fault {
+			case "legacy pair":
+				usage, diagnostics = map[string]any{"inputTokens": 7}, map[string]any{"hits": 17}
+			case "wrong usage":
+				usage["totalTokens"] = 1
+			case "unknown usage":
+				usage["unrecognized"] = true
+			case "unknown diagnostic":
+				diagnostics["unrecognized"] = true
+			case "raw enum":
+				diagnostics["providerAttemptTelemetryError"] = "PRIVATE_PROVIDER_FAILURE"
+			case "object enum":
+				diagnostics["providerAttemptTelemetryError"] = map[string]any{"message": "PRIVATE_PROVIDER_FAILURE"}
+			case "aliased enum":
+				delete(diagnostics, "providerAttemptTelemetryError")
+				diagnostics["provider_attempt_telemetry_error"] = "invalid_or_incomplete"
+			case "wrong schema":
+				diagnostics["providerAttemptTelemetrySchema"] = "other"
+			case "raw sibling":
+				diagnostics["lastError"] = "PRIVATE_PROVIDER_FAILURE"
+			case "credential":
+				diagnostics["apiKey"] = "sk-test-private-value"
+			case "reasoning":
+				diagnostics["details"] = "<think>PRIVATE_REASONING</think>"
+			case "nested diagnostics":
+				diagnostics = map[string]any{"nested": diagnostics}
+			}
+			before, err := json.Marshal([]any{usage, diagnostics})
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := ClosedTerminalTelemetryFailureValidationViewV1(usage, diagnostics)
+			if fault == "healthy" {
+				if _, present := view["providerAttemptTelemetryError"]; present || len(view) != len(diagnostics)-1 {
+					t.Fatal("exact pair did not classify only its fixed error enum")
+				}
+				if ValidatePublicRecord(usage) != nil || ValidatePublicRecord(view) != nil || ValidatePublicRecord(diagnostics) == nil {
+					t.Fatal("pair view changed the strict bare-diagnostic validation contract")
+				}
+				view["viewOnly"] = true
+				if _, present := diagnostics["viewOnly"]; present {
+					t.Fatal("pair view aliases the original diagnostic map")
+				}
+			} else if !reflect.DeepEqual(view, diagnostics) {
+				t.Fatal("noncanonical or legacy pair acquired a telemetry exception")
+			}
+			after, err := json.Marshal([]any{usage, diagnostics})
+			if err != nil || string(before) != string(after) {
+				t.Fatal("pair validation changed the original payload")
+			}
+		})
+	}
+}
+
+func TestValidatePublicRecordClosedAttemptTelemetryKeepsOriginalResourceBudget(t *testing.T) {
+	for _, fault := range []string{"model string", "usage string", "diagnostic string", "diagnostic nodes", "diagnostic depth"} {
+		t.Run(fault, func(t *testing.T) {
+			telemetry := domainterminaltelemetry.NewTerminalTelemetryV1(domainmodel.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7}, map[string]any{
+				"providerAttemptTelemetrySchema": domainterminaltelemetry.ProviderAttemptTelemetrySchemaV1,
+				"providerAttemptTelemetryValid":  false, "providerAttemptTelemetryError": "invalid_or_incomplete", "providerAttemptInventoryComplete": false,
+			})
+			usage, diagnostics := telemetry.PublicUsageMap(), telemetry.PublicCacheDiagnosticsMap()
+			record := map[string]any{"kind": "usage", "threadId": "thread-budget", "turnId": "turn-budget", "model": "test-model", "timestamp": "2026-10-18T01:02:03Z", "usage": usage, "cacheDiagnostics": diagnostics}
+			switch fault {
+			case "model string":
+				record["model"] = strings.Repeat("x", (1<<20)+1)
+			case "usage string":
+				usage["oversized"] = strings.Repeat("x", (1<<20)+1)
+			case "diagnostic string":
+				diagnostics["oversized"] = strings.Repeat("x", (1<<20)+1)
+			case "diagnostic nodes":
+				diagnostics["oversized"] = make([]any, 10_001)
+			case "diagnostic depth":
+				var nested any = "leaf"
+				for depth := 0; depth < 65; depth++ {
+					nested = map[string]any{"nested": nested}
+				}
+				diagnostics["oversized"] = nested
+			}
+			if err := ValidatePublicRecord(record); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+				t.Fatalf("original telemetry resource budget error = %v", err)
 			}
 		})
 	}

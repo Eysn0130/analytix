@@ -17,6 +17,7 @@ import (
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 	casecontextport "analytix.local/runtime-go/internal/ports/casecontext"
 	registryport "analytix.local/runtime-go/internal/ports/evidenceregistry"
 	authorityport "analytix.local/runtime-go/internal/ports/finalauthority"
@@ -27,6 +28,7 @@ type PersistCaseBoundaryInput struct {
 	Store             appturn.AcceptedFinalCompletionStore
 	Context           domainsecurity.TurnSecurityContext
 	TerminalReason    TerminalReason
+	EndReason         *domainterminal.EndReason
 	OrdinaryResult    *domainordinaryresult.ResultSlotV1
 	CaseSlotIntent    CaseSlotPublicationIntentV1
 	SourceUnavailable bool
@@ -409,12 +411,17 @@ func terminalPublicationIntentV1(
 	if createdAt == "" {
 		createdAt = acceptedAt.Format(time.RFC3339Nano)
 	}
+	endReason := input.EndReason
+	if strings.TrimSpace(boundary.Envelope.Blocker) != "" || !domainterminal.CandidateAllowedV1(boundary.Envelope.TerminalReason) ||
+		(boundary.Envelope.OrdinaryResult != nil && boundary.Envelope.OrdinaryResult.CandidateOrigin == domainordinaryresult.ResultSlotOriginHostFixedV1) {
+		endReason = nil
+	}
 	return domainevidence.NewTerminalPublicationIntent(domainevidence.TerminalPublicationIntentInput{
 		CreatedAt: createdAt, Model: input.Model, Usage: input.Telemetry.PublicUsageMap(),
 		CacheDiagnostics: input.Telemetry.PublicCacheDiagnosticsMap(), UsageSource: input.UsageSource, ChildRunID: input.ChildRunID,
 		TerminalStatus: disposition.Status, TerminalCode: disposition.Code, TerminalMessage: disposition.Message,
 		TerminalSeverity: disposition.Severity, Discard: input.Discard, Cancelled: input.Cancelled,
-		CancelledPendingGates: input.CancelledGates,
+		CancelledPendingGates: input.CancelledGates, EndReason: endReason,
 	}, boundary.Envelope.TerminalReason)
 }
 

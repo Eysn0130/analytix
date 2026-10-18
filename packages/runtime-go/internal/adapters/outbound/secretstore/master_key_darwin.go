@@ -334,25 +334,27 @@ func (provider *darwinMasterKeyProvider) LoadOrCreate(ctx context.Context) ([]by
 
 	if provider.developmentFile || provider.ordinaryFile {
 		authority, err := provider.readAuthority()
+		if (err != nil && !errors.Is(err, os.ErrNotExist)) || (err == nil && authority != darwinAuthorityFallback) {
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
+		// A retained marker does not authorize replacing a lost file key.
+		// Both ordinary and development profiles must preserve existing
+		// ciphertext rather than minting a key that cannot decrypt it.
+		fallbackKey, fallbackErr := provider.fallback.readWithBoundedInitializationWait()
+		if fallbackErr != nil && (!errors.Is(fallbackErr, os.ErrNotExist) ||
+			(provider.storePath != "" && !freshDarwinFileAuthorityProfile(provider.storePath))) {
+			clearBytes(fallbackKey)
+			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
 		if errors.Is(err, os.ErrNotExist) {
-			// A lost marker in a populated profile is not fresh provisioning.
-			// In particular, never create a file key over legacy Keychain
-			// ciphertext after an interrupted upgrade. The existing
-			// development file-authority route retains its prior behavior.
-			if provider.ordinaryFile && provider.storePath != "" {
-				fallbackKey, fallbackErr := provider.fallback.readWithBoundedInitializationWait()
-				clearBytes(fallbackKey)
-				if fallbackErr != nil && !errors.Is(fallbackErr, os.ErrNotExist) {
-					return nil, portsecretstore.ErrMasterKeyUnavailable
-				}
-				if errors.Is(fallbackErr, os.ErrNotExist) && !freshDarwinFileAuthorityProfile(provider.storePath) {
-					return nil, portsecretstore.ErrMasterKeyUnavailable
-				}
-			}
 			authority, err = provider.selectAuthority(darwinAuthorityFallback)
 		}
 		if err != nil || authority != darwinAuthorityFallback {
+			clearBytes(fallbackKey)
 			return nil, portsecretstore.ErrMasterKeyUnavailable
+		}
+		if fallbackErr == nil {
+			return fallbackKey, nil
 		}
 		return provider.fallback.LoadOrCreate(ctx)
 	}

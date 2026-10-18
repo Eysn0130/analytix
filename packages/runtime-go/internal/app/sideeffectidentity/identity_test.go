@@ -281,15 +281,147 @@ func TestSupportsHostToolV1CoversExecutedNonReadOnlyBuiltins(t *testing.T) {
 	for _, name := range []string{
 		"bash", "write", "write_file", "edit", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol",
 		"task", "delegate_task", "parallel_tasks", "run_skill", "kill_shell", "restart_job", "create_goal", "complete_step",
-		"update_goal", "todo_write", "todo_ops", "todo_patch", "create_plan",
+		"update_goal", "todo_write", "todo_ops", "todo_patch", "create_plan", "native_selection_propose",
 	} {
 		if !SupportsHostToolV1(name) {
 			t.Fatalf("executed non-read-only host tool %q lacks a V1 semantic canonicalizer", name)
 		}
 	}
-	for _, name := range []string{"read", "wait", "list_jobs", "bash_output", "stage_case_report", "future_host_writer"} {
+	for _, name := range []string{"read", "wait", "list_jobs", "bash_output", "stage_case_report", "future_host_writer", "native_selection_read", "native_selection_propose_extra"} {
 		if SupportsHostToolV1(name) {
 			t.Fatalf("tool %q was incorrectly classified as a generic V1 side-effect canonicalizer", name)
 		}
+	}
+}
+
+func nativeProposalIdentityArgumentsForTest(payload string) json.RawMessage {
+	arguments := `{"scopeId":"abdccbadecddaaebaebadfecefeeeedfbecabfdeadebdfad","operationId":"desktop178_b7e49c1032ad865f"`
+	if payload != "" {
+		arguments += "," + payload
+	}
+	return json.RawMessage(arguments + `}`)
+}
+
+func TestNativeSelectionProposeIdentityBindsScopedTypedPayloads(t *testing.T) {
+	protectedA, protectedB := "protected_"+strings.Repeat("a", 48), "protected_"+strings.Repeat("b", 48)
+	canvasID := "canvas_" + strings.Repeat("a", 48)
+	tests := []struct{ name, payload, changed string }{
+		{"ordered parts", `"parts":[{"kind":"literal","text":"First"},{"kind":"literal","text":"Second"}]`, `"parts":[{"kind":"literal","text":"Second"},{"kind":"literal","text":"First"}]`},
+		{"protected reference", `"parts":[{"kind":"literal","text":"Edit "},{"kind":"protected","protectedRef":"` + protectedA + `"}]`, `"parts":[{"kind":"literal","text":"Edit "},{"kind":"protected","protectedRef":"` + protectedB + `"}]`},
+		{"workbook exact integer", `"workbook":{"kind":"number","value":9007199254740992}`, `"workbook":{"kind":"number","value":9007199254740993}`},
+		{"workbook exact decimal", `"workbook":{"kind":"number","value":1.00000000000000001}`, `"workbook":{"kind":"number","value":1.00000000000000002}`},
+		{"workbook formula", `"workbook":{"kind":"formula","formula":"=A1+1"}`, `"workbook":{"kind":"formula","formula":"=A1+2"}`},
+		{"workbook range", `"workbook":{"kind":"range","cells":[{"rowOffset":0,"columnOffset":0,"type":"text","text":"Before"}]}`, `"workbook":{"kind":"range","cells":[{"rowOffset":0,"columnOffset":0,"type":"text","text":"After"}]}`},
+		{"canvas layout", `"canvas":[{"kind":"set-node-layout","id":"` + canvasID + `","layout":{"x":0,"y":0,"width":1,"height":1}}]`, `"canvas":[{"kind":"set-node-layout","id":"` + canvasID + `","layout":{"x":0,"y":0,"width":2,"height":1}}]`},
+		{"canvas route", `"canvas":[{"kind":"set-edge-route","id":"` + canvasID + `","points":[]}]`, `"canvas":[{"kind":"set-edge-route","id":"` + canvasID + `","points":[{"x":0,"y":0},{"x":1,"y":1}]}]`},
+		{"canvas label", `"canvas":[{"kind":"set-display-label","id":"` + canvasID + `","target":"node","displayLabel":"Before"}]`, `"canvas":[{"kind":"set-display-label","id":"` + canvasID + `","target":"node","displayLabel":"After"}]`},
+		{"canvas style", `"canvas":[{"kind":"set-style","id":"` + canvasID + `","target":"node","style":{"fill":"#aabbcc","stroke":"#112233","strokeWidth":1,"dash":"solid","shape":"ellipse"}}]`, `"canvas":[{"kind":"set-style","id":"` + canvasID + `","target":"node","style":{"fill":"#aabbcc","stroke":"#112233","strokeWidth":1,"dash":"solid","shape":"rectangle"}}]`},
+		{"presentation geometry", `"presentation":{"kind":"shape-geometry","x100thMm":0,"y100thMm":0,"width100thMm":1,"height100thMm":1}`, `"presentation":{"kind":"shape-geometry","x100thMm":1,"y100thMm":0,"width100thMm":1,"height100thMm":1}`},
+		{"presentation fill", `"presentation":{"kind":"shape-fill","rgb":"#123456"}`, `"presentation":{"kind":"shape-fill","rgb":"#123457"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			arguments := nativeProposalIdentityArgumentsForTest(test.payload)
+			baseline, err := identityForTest("native_selection_propose", string(arguments))
+			if err != nil || baseline.ArgsHash == "" {
+				t.Fatalf("registered typed request rejected: %v", err)
+			}
+			value, err := domainsecurity.DecodeCanonicalJSONValue(arguments)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reordered, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			equivalent, err := identityForTest("native_selection_propose", string(reordered))
+			if err != nil || equivalent != baseline {
+				t.Fatal("object key order changed semantic identity", err)
+			}
+			// Different well-formed references are different requests, not proof of
+			// selection authority. The execution owner validates the referenced scope.
+			for name, changed := range map[string]string{
+				"scope":     strings.Replace(string(arguments), "abdccbadecddaaebaebadfecefeeeedfbecabfdeadebdfad", strings.Repeat("b", 48), 1),
+				"operation": strings.Replace(string(arguments), "desktop178_b7e49c1032ad865f", "desktop178_b7e49c1032ad865f_retry", 1),
+				"payload":   string(nativeProposalIdentityArgumentsForTest(test.changed)),
+			} {
+				identity, err := identityForTest("native_selection_propose", changed)
+				if err != nil || identity.ArgsHash == baseline.ArgsHash {
+					t.Fatalf("%s change vanished from identity: %v", name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestNativeSelectionProposeIdentityRetainsTrustedHostBindingWithoutResourceReads(t *testing.T) {
+	input := Input{
+		ToolName: "native_selection_propose", Arguments: nativeProposalIdentityArgumentsForTest(`"parts":[{"kind":"literal","text":"Scoped edit."}]`),
+		ResolvePath: func(string, string) (string, bool) {
+			t.Fatal("native request identity must not read or resolve a document")
+			return "", false
+		},
+	}
+	baseline, err := ResolveV1(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.HostBinding = map[string]any{"generationId": "synthetic-generation", "activationRevision": 1}
+	bound, err := ResolveV1(input)
+	if err != nil || baseline == bound {
+		t.Fatal("existing trusted HostBinding was omitted", err)
+	}
+	input.HostBinding = map[string]any{"generationId": "synthetic-generation", "activationRevision": 2}
+	changed, err := ResolveV1(input)
+	if err != nil || changed == bound {
+		t.Fatal("changed trusted HostBinding was omitted", err)
+	}
+}
+
+func TestNativeSelectionProposeIdentityRejectsInvalidRequests(t *testing.T) {
+	canvasID := "canvas_" + strings.Repeat("a", 48)
+	tests := []struct{ name, payload string }{
+		{"missing payload", ``},
+		{"mixed payloads", `"parts":[],"workbook":{"kind":"number","value":1}`},
+		{"unknown root field", `"parts":[],"unexpected":true`},
+		{"null parts", `"parts":null`},
+		{"null workbook", `"workbook":null`},
+		{"null canvas", `"canvas":null`},
+		{"null presentation", `"presentation":null`},
+		{"literal type", `"parts":[{"kind":"literal","text":1}]`},
+		{"protected reference", `"parts":[{"kind":"protected","protectedRef":"protected_invalid"}]`},
+		{"protected extra field", `"parts":[{"kind":"protected","protectedRef":"protected_` + strings.Repeat("a", 48) + `","text":"forged"}]`},
+		{"parts limit", `"parts":[` + strings.TrimSuffix(strings.Repeat(`{"kind":"literal","text":"x"},`, 257), ",") + `]`},
+		{"literal limit", `"parts":[{"kind":"literal","text":"` + strings.Repeat("x", 65537) + `"}]`},
+		{"workbook number type", `"workbook":{"kind":"number","value":"1"}`},
+		{"workbook formula", `"workbook":{"kind":"formula","formula":""}`},
+		{"workbook range offset", `"workbook":{"kind":"range","cells":[{"rowOffset":256,"columnOffset":0,"type":"number","value":1}]}`},
+		{"workbook extra field", `"workbook":{"kind":"number","value":1,"path":"other.xlsx"}`},
+		{"canvas reference", `"canvas":[{"kind":"set-display-label","id":"canvas_invalid","target":"node","displayLabel":"x"}]`},
+		{"canvas route length", `"canvas":[{"kind":"set-edge-route","id":"` + canvasID + `","points":[{"x":0,"y":0}]}]`},
+		{"canvas size", `"canvas":[{"kind":"set-node-layout","id":"` + canvasID + `","layout":{"x":0,"y":0,"width":0,"height":1}}]`},
+		{"presentation integer", `"presentation":{"kind":"shape-geometry","x100thMm":0,"y100thMm":0,"width100thMm":1.5,"height100thMm":1}`},
+		{"presentation extra selector", `"presentation":{"kind":"shape-fill","rgb":"#123456","shapeIndex":0}`},
+		{"presentation color", `"presentation":{"kind":"shape-fill","rgb":"#ABCDEF"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			arguments := nativeProposalIdentityArgumentsForTest(test.payload)
+			if _, err := identityForTest("native_selection_propose", string(arguments)); err == nil {
+				t.Fatal("request outside the actual closed native schema received an identity")
+			}
+		})
+	}
+	valid := string(nativeProposalIdentityArgumentsForTest(`"parts":[]`))
+	for name, arguments := range map[string]string{
+		"invalid scope":     strings.Replace(valid, "abdccbadecddaaebaebadfecefeeeedfbecabfdeadebdfad", "invalid", 1),
+		"invalid operation": strings.Replace(valid, "desktop178_b7e49c1032ad865f", "short", 1),
+		"duplicate key":     strings.Replace(valid, `"parts":[]`, `"parts":[],"parts":[]`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := identityForTest("native_selection_propose", arguments); err == nil {
+				t.Fatal("invalid request received an identity")
+			}
+		})
 	}
 }

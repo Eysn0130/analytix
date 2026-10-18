@@ -279,6 +279,17 @@
    Other engines and overlay scrollbars may reserve a different height.
    Wheel and trackpad scrolling need the pointer over the table, which is
    already the hover that re-enables scrolling. */
+/* Pinned DSH wide-table geometry; the existing chat scrollport is the query host.
+   Only >=4-column, non-blockquote tables receive this renderer hook. */
+:global([data-analytix-message-timeline-scroller]) .tableScroll:global(.md-table-wide) {
+  --dsh-table-spare: max(0px, calc((100cqw - var(--dsh-chat-content-width, 768px)) / 2));
+  --dsh-table-lead: calc(var(--dsh-table-spare) + min(var(--dsh-chat-content-width, 768px), 100cqw) - 100%);
+  width: calc(100% + var(--dsh-table-lead) + var(--dsh-table-spare));
+  max-width: none;
+  margin-left: calc(-1 * var(--dsh-table-lead));
+  padding-left: var(--dsh-table-lead);
+}
+
 .tableScroll:global(.md-table-wide) {
   overflow-x: hidden;
   padding-bottom: var(--dsh-scrollbar-width, 5px);
@@ -301,6 +312,8 @@
    natural width and scroll inside the wrapper; a hosting layout may widen
    the wrapper through the hook (deepsuite chat TableWrapper parity). */
 .tableScroll table {
+  position: relative;
+  z-index: 1;
   border-collapse: collapse;
   width: max-content;
   max-width: max-content;

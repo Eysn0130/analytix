@@ -15,6 +15,8 @@ import type {
   RuntimeErrorEventPayload,
   SnapshotRequiredEventPayload,
   RuntimeStatusEventPayload,
+  RuntimeProviderRetryLifecycleMetadata,
+  RuntimeProviderOutputCapObservation,
   ThreadGoal,
   ThreadTodoList,
   UserInputRequestPayload,
@@ -23,7 +25,11 @@ import type {
   RuntimeJobDiagnosticsMetadata,
   RuntimeProviderErrorDiagnosticsMetadata,
   GeneralTerminalProjectionBatch,
+  GeneralTerminalProjectionReceiptV1,
   ThreadUsageSnapshot,
+  TurnUsageEntry,
+  TurnUsageById,
+  ProviderAttemptTokenAggregate,
   ToolBlock,
   ToolEventPayload,
   UserInputQuestion
@@ -40,11 +46,16 @@ import {
   projectOrdinaryPublicText
 } from '@shared/ordinary-log-pii-projection'
 import { sanitizePublicSerializedText } from '@shared/public-runtime-content'
+import { isClosedProviderRetryLifecycle, isClosedProviderOutputCapObservation } from '@shared/public-runtime-sse'
 import {
   AcceptedFinalPublicViewV3Schema,
+  isHostUserInputQuestionBatch,
   PublicToolCallArgumentsProjectionV1,
-  PublicToolResultProjectionV1
+  PublicToolResultProjectionV1,
+  ToolCallTurnItem,
+  ToolResultTurnItem
 } from '../../../../packages/runtime/src/contracts/items.js'
+import { toolResultLocalSelectorSchemaV1 } from '../../../../packages/runtime/src/contracts/tool-result-local-display.js'
 import {
   AcceptedFinalDeliveryBatchV2Schema,
   type AcceptedFinalDeliveryBatchV2,
@@ -57,6 +68,7 @@ import type {
   CoreCaseProjectJson,
   CoreCacheDiagnosticsJson,
   CoreThreadGoalJson,
+  CoreThreadJson,
   CoreThreadTodoListJson,
   CoreThreadSummaryJson,
   CoreTurnItemJson,
@@ -70,6 +82,7 @@ import {
 } from '../lib/thread-title'
 
 const RUNTIME_EVENT_KINDS_DISPATCHED_BY_RENDERER = [
+  'goal_activation_changed',
   'thread_created',
   'thread_updated',
   'thread_rewound',
@@ -102,6 +115,7 @@ const RUNTIME_EVENT_KINDS_DISPATCHED_BY_RENDERER = [
   'user_input_resolved',
   'compaction_started',
   'compaction_completed',
+  'compaction_failed',
   'goal_updated',
   'goal_cleared',
   'todos_updated',
@@ -231,6 +245,10 @@ export function goalFromCore(goal: CoreThreadGoalJson): ThreadGoal {
   }))
   return {
     threadId: goal.threadId,
+    ...(goal.id !== undefined ? { id: goal.id } : {}),
+    ...(goal.revision !== undefined ? { revision: goal.revision } : {}),
+    ...(goal.maxGoalRounds !== undefined ? { maxGoalRounds: goal.maxGoalRounds } : {}),
+    ...(goal.roundsStarted !== undefined ? { roundsStarted: goal.roundsStarted } : {}),
     objective: goal.objective,
     status: goal.status,
     tokenBudget: goal.tokenBudget ?? null,
@@ -248,6 +266,21 @@ export function goalFromCore(goal: CoreThreadGoalJson): ThreadGoal {
     createdAt: goal.createdAt,
     updatedAt: goal.updatedAt
   }
+}
+
+export function goalHistoryBlocksFromCore(thread: Pick<CoreThreadJson,'goalHistory'>): Extract<ChatBlock,{kind:'goal'}>[] {
+  return (thread.goalHistory ?? []).map(entry => ({kind:'goal',id:entry.id,operation:entry.operation,
+    createdAt:entry.createdAt,goal:entry.goal ? goalFromCore(entry.goal) : null,...(entry.ref ? {ref:entry.ref} : {})}))
+}
+
+export function mergeGoalHistoryBlocks(current: ChatBlock[], recorded: Extract<ChatBlock,{kind:'goal'}>[]): ChatBlock[] {
+  const result: ChatBlock[] = current.filter(block => block.kind !== 'goal')
+  for (const goal of recorded) {
+    const timestamp = Date.parse(goal.createdAt ?? '')
+    const index = result.findIndex(block => Date.parse(block.createdAt ?? '') > timestamp)
+    if (index < 0) result.push(goal); else result.splice(index,0,goal)
+  }
+  return result
 }
 
 export function todosFromCore(todos: CoreThreadTodoListJson): ThreadTodoList {
@@ -700,7 +733,7 @@ function normalizeJobDiagnostics(value: unknown): RuntimeJobDiagnosticsMetadata 
   return Object.keys(normalized).length > 0 ? normalized : undefined
 }
 
-function normalizeProviderErrorDiagnostics(
+export function normalizeProviderErrorDiagnostics(
   value: unknown
 ): RuntimeProviderErrorDiagnosticsMetadata | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
@@ -840,15 +873,28 @@ function normalizeUserFileReferences(value: unknown): RuntimeDisclosureMetadata[
   return references.length > 0 ? references : undefined
 }
 
+/** Turn-owned presentation values stay separate from the strict Core item. */
+export type RendererTurnItemContext = {
+  attachmentIds?: string[]
+  workspaceCheckpointId?: string
+  activeSkillIds?: string[]
+  injectedMemoryIds?: string[]
+  skillInjectionBytes?: number
+}
+
 function applyRuntimeDisclosureMeta(
   meta: Record<string, unknown>,
   item: CoreTurnItemJson,
-  child?: CoreChildRuntimeMetadataJson | RuntimeChildMetadata
+  child?: CoreChildRuntimeMetadataJson | RuntimeChildMetadata,
+  rendererContext?: RendererTurnItemContext
 ): void {
-  const attachmentIds = stringArray(item.attachmentIds)
+  const disclosure = rendererContext ?? item
+  const attachmentIds = stringArray(disclosure.attachmentIds)
   const fileReferences = normalizeUserFileReferences(item.fileReferences)
-  const activeSkillIds = stringArray(item.activeSkillIds)
-  const injectedMemoryIds = stringArray(item.injectedMemoryIds)
+  const activeSkillIds = item.kind === 'user_message'
+    ? stringArray(item.activeSkillIds) ?? []
+    : stringArray(disclosure.activeSkillIds)
+  const injectedMemoryIds = stringArray(disclosure.injectedMemoryIds)
   const normalizedChild = normalizeChildMetadataForRenderer(child as CoreChildRuntimeMetadataJson | undefined)
   const displayText = typeof item.displayText === 'string' ? item.displayText.trim() : ''
   const clientUserMessageId = typeof item.clientUserMessageId === 'string' ? item.clientUserMessageId.trim() : ''
@@ -864,13 +910,13 @@ function applyRuntimeDisclosureMeta(
   }
   if (attachmentIds) meta.attachmentIds = attachmentIds
   if (fileReferences) meta.fileReferences = fileReferences
-  if (typeof item.workspaceCheckpointId === 'string' && item.workspaceCheckpointId.trim()) {
-    meta.workspaceCheckpointId = item.workspaceCheckpointId.trim()
+  if (typeof disclosure.workspaceCheckpointId === 'string' && disclosure.workspaceCheckpointId.trim()) {
+    meta.workspaceCheckpointId = disclosure.workspaceCheckpointId.trim()
   }
   if (activeSkillIds) meta.activeSkillIds = activeSkillIds
   if (injectedMemoryIds) meta.injectedMemoryIds = injectedMemoryIds
-  if (typeof item.skillInjectionBytes === 'number') {
-    meta.skillInjectionBytes = item.skillInjectionBytes
+  if (typeof disclosure.skillInjectionBytes === 'number') {
+    meta.skillInjectionBytes = disclosure.skillInjectionBytes
   }
   if (normalizedChild) meta.child = normalizedChild
 }
@@ -957,7 +1003,46 @@ function extractPlanMetadata(item: CoreTurnItemJson): Record<string, unknown> | 
   return null
 }
 
-function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetadataJson): ToolBlock {
+function isExactLocalToolName(value: unknown): value is string {
+  return typeof value === 'string' && value !== '' && value === value.trim() &&
+    !value.includes('\0') && !/[\uD800-\uDFFF]/u.test(value) && new TextEncoder().encode(value).length <= 256
+}
+
+function childMatchesToolResultScope(child: RuntimeChildMetadata, scope: { threadId: string; turnId: string; callId: string }): boolean {
+  // A parent call's result and a child's own result keep their original scopes.
+  return child.parentThreadId === scope.threadId && child.parentTurnId === scope.turnId && child.parentToolCallId === scope.callId ||
+    child.childThreadId === scope.threadId && child.childTurnId === scope.turnId
+}
+
+function localToolKindMatches(toolName: string, toolKind: unknown): boolean {
+  if (['web_fetch', 'create_goal', 'get_goal', 'update_goal', 'todo_write', 'run_skill', 'grep', 'glob'].includes(toolName)) return toolKind === 'tool_call'
+  if (['task', 'delegate_task', 'parallel_tasks'].includes(toolName)) return toolKind === 'subagent'
+  if (['list_jobs', 'wait', 'bash_output', 'kill_shell', 'restart_job'].includes(toolName)) return toolKind === 'command_execution'
+  return toolKind === 'tool_call' || toolKind === 'command_execution' || toolKind === 'file_change' || toolKind === 'subagent'
+}
+
+function settledToolResultLocator(item: ToolResultTurnItem, child?: RuntimeChildMetadata): {
+  turnId: string; callId: string; resultItemId: string
+} | undefined {
+  if (!['completed', 'failed', 'aborted'].includes(item.status ?? '') || !isExactLocalToolName(item.toolName) ||
+      !localToolKindMatches(item.toolName, item.toolKind)) return undefined
+  if (['create_goal', 'get_goal', 'update_goal', 'todo_write', 'run_skill', 'grep', 'glob'].includes(item.toolName) &&
+      item.output.projectionKind !== 'host_status') return undefined
+  const selector = toolResultLocalSelectorSchemaV1.safeParse({
+    threadId: item.threadId, turnId: item.turnId, callId: item.callId, resultItemId: item.id
+  })
+  if (!selector.success || child && !childMatchesToolResultScope(child, selector.data)) return undefined
+  // Core captures ordinary Inspect at settlement, including dynamically named
+  // tools. This locator carries no payload or grant; the existing reader checks
+  // current authority, the exact durable call/result and its protected binding.
+  const { turnId, callId, resultItemId } = selector.data
+  return { turnId, callId, resultItemId }
+}
+
+function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetadataJson, rendererContext?: RendererTurnItemContext): ToolBlock {
+  // Validate the original wire item, before any renderer disclosure is projected.
+  const coreResult = item.kind === 'tool_result' ? ToolResultTurnItem.safeParse(item) : undefined
+  const coreCall = item.kind === 'tool_call' ? ToolCallTurnItem.safeParse(item) : undefined
   const publicPayload = payloadFor(item)
   const normalizedChild = normalizeChildMetadataForRenderer(child) ?? childMetadataFromPayload(item)
   const detail = item.kind === 'tool_result'
@@ -978,10 +1063,21 @@ function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetad
     sourceItemId: item.id,
     ...(item.turnId ? { turnId: item.turnId } : {}),
     ...(item.callId ? { callId: item.callId } : {}),
-    ...(item.kind !== 'tool_progress' && !normalizedChild && item.toolName ? { toolName: item.toolName } : {})
+    ...(item.kind !== 'tool_progress' && (!normalizedChild || item.toolName === 'run_skill' && item.toolKind === 'tool_call') && item.toolName ? { toolName: item.toolName } : {})
   }
   const payload = publicPayload
-  applyRuntimeDisclosureMeta(meta, item, normalizedChild)
+  if (coreCall?.success || coreResult?.success) {
+    meta.recordThreadId = item.threadId
+    const identity = { threadId: item.threadId, turnId: item.turnId, callId: item.callId, itemId: item.id }
+    if (coreCall?.success) { meta.toolCallItemId = item.id; meta.toolCallIdentity = identity }
+    if (coreResult?.success) { meta.toolResultItemId = item.id; meta.toolResultIdentity = identity }
+  }
+  if (item.kind === 'tool_result') {
+    const result = PublicToolResultProjectionV1.safeParse(item.output)
+    if (result.success && (result.data.projectionKind !== 'web_fetch_status' ||
+      (item.toolName === 'web_fetch' && item.toolKind === 'tool_call')) &&
+      (result.data.projectionKind !== 'task_job_result' || coreResult?.success)) meta.publicResult = result.data
+  }
   const diagnostics = item.kind === 'tool_result' || item.kind === 'tool_progress'
     ? normalizeJobDiagnostics(payload.diagnostics)
     : undefined
@@ -998,6 +1094,11 @@ function toolBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetad
     const projection = PublicToolResultProjectionV1.safeParse(item.output)
     if (projection.success && projection.data.projectionKind === 'artifact_status') meta.generatedArtifact = projection.data.artifact
   }
+  if (coreResult?.success) {
+    const locator = settledToolResultLocator(coreResult.data, normalizedChild)
+    if (locator) { meta.localResult = locator; meta.toolName = coreResult.data.toolName }
+  }
+  applyRuntimeDisclosureMeta(meta, item, normalizedChild, rendererContext)
   return {
     kind: 'tool',
     id: toolBlockId(item, normalizedChild),
@@ -1064,37 +1165,41 @@ function questionsFromCore(
   fallbackId: string
 ): UserInputQuestion[] {
   if (Array.isArray(questions) && questions.length > 0) {
-    return questions
-      .map((question) => normalizeUserInputQuestion(question))
-      .filter((question): question is UserInputQuestion => question !== null)
+    if (!isHostUserInputQuestionBatch(fallbackId, questions)) return []
+    const normalized = questions.map(question => normalizeUserInputQuestion(question))
+    // An incomplete Core batch may not silently shrink into a different form.
+    if (normalized.some(question => question === null)) return []
+    return normalized.filter((question): question is UserInputQuestion => question !== null)
   }
-  return [
-    {
-      header: 'Input',
-      id: fallbackId,
-      question: prompt?.trim() ? projectOrdinaryPublicText(prompt.trim()) : 'Input requested',
-      options: []
-    }
-  ]
+  // Legacy freeform display remains available only with its Core handle.
+  // No local timestamp or placeholder may become question authority.
+  return fallbackId && prompt?.trim()
+    ? [{ header: 'Input', id: fallbackId, question: projectOrdinaryPublicText(prompt.trim()), options: [] }]
+    : []
 }
 
 function normalizeUserInputQuestion(question: unknown): UserInputQuestion | null {
   if (!question || typeof question !== 'object') return null
   const raw = question as Record<string, unknown>
-  const options = Array.isArray(raw.options)
-    ? raw.options
-        .map((option) => normalizeUserInputOption(option))
-        .filter((option): option is UserInputQuestion['options'][number] => option !== null)
-    : []
+  if (typeof raw.id !== 'string' || !raw.id.trim() ||
+      typeof raw.question !== 'string' || !raw.question.trim()) return null
+  const normalizedOptions = Array.isArray(raw.options)
+    ? raw.options.map(option => normalizeUserInputOption(option)) : []
+  const modern = raw.multiSelect !== undefined || (Array.isArray(raw.options) &&
+    raw.options.some(option => option !== null && typeof option === 'object' && 'id' in option))
+  if (modern && (!Array.isArray(raw.options) || typeof raw.multiSelect !== 'boolean' ||
+      normalizedOptions.some(option => option === null || option.id === undefined))) return null
+  const options = normalizedOptions.filter((option): option is UserInputQuestion['options'][number] => option !== null)
   return {
     header: typeof raw.header === 'string' && raw.header.trim()
       ? projectOrdinaryPublicText(raw.header.trim())
       : 'Input',
-    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : 'input',
+    id: raw.id.trim(),
     question: typeof raw.question === 'string' && raw.question.trim()
       ? projectOrdinaryPublicText(raw.question.trim())
       : 'Input requested',
-    options
+    options,
+    ...(typeof raw.multiSelect === 'boolean' ? { multiSelect: raw.multiSelect } : {})
   }
 }
 
@@ -1104,6 +1209,7 @@ function normalizeUserInputOption(option: unknown): UserInputQuestion['options']
   const label = typeof raw.label === 'string' && raw.label.trim() ? raw.label.trim() : null
   if (!label) return null
   return {
+    ...(typeof raw.id === 'string' && raw.id.trim() ? { id: raw.id.trim() } : {}),
     label: projectOrdinaryPublicText(label),
     description: typeof raw.description === 'string'
       ? projectOrdinaryPublicText(raw.description)
@@ -1118,13 +1224,41 @@ function normalizeCacheDiagnostics(value: CoreCacheDiagnosticsJson | undefined):
     const digest = rendererSha256(value[key])
     if (digest) normalized[key] = digest
   }
-  for (const key of ['prefixChanged', 'toolSourceChanged', 'cacheTelemetrySupported', 'modelInputComparable', 'providerCostEstimateComplete'] as const) {
+  for (const key of ['prefixChanged', 'toolSourceChanged', 'cacheTelemetrySupported', 'modelInputComparable', 'providerCostEstimateComplete', 'providerAttemptTelemetryValid'] as const) {
     const flag = rendererBoolean(value[key])
     if (flag !== undefined) normalized[key] = flag
   }
-  for (const key of ['toolSchemaTokens', 'toolCount', 'firstTokenLatencyMs', 'durationMs', 'cacheHitTokens', 'cacheMissTokens', 'modelInputComparablePrefixBytes', 'providerAttemptCount', 'providerCostKnownAttemptCount', 'providerKnownCostUsdAttemptCount', 'providerKnownCostCnyAttemptCount', 'providerKnownCostUsdNanos', 'providerKnownCostCnyNanos'] as const) {
+  for (const key of ['toolSchemaTokens', 'toolCount', 'firstTokenLatencyMs', 'durationMs', 'cacheHitTokens', 'cacheMissTokens', 'modelInputComparablePrefixBytes', 'providerLogicalCallCount', 'providerAttemptCount', 'providerCostKnownAttemptCount', 'providerKnownCostUsdAttemptCount', 'providerKnownCostCnyAttemptCount', 'providerKnownCostUsdNanos', 'providerKnownCostCnyNanos'] as const) {
     const count = rendererNumber(value[key])
     if (count !== undefined) normalized[key] = count
+  }
+  const aggregate = (input: unknown): ProviderAttemptTokenAggregate | undefined => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+    const row = input as Record<string, unknown>
+    const { complete, knownObservationCount, observationCount } = row
+    const counter = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0
+    if (typeof complete !== 'boolean' || !counter(knownObservationCount) || !counter(observationCount) ||
+        knownObservationCount > observationCount || (complete && knownObservationCount !== observationCount) ||
+        (complete ? !counter(row.value) : row.value !== undefined)) return undefined
+    return { complete, knownObservationCount, observationCount, ...(complete ? { value: row.value as number } : {}) }
+  }
+  for (const key of ['providerAttemptInputTokens', 'providerAttemptOutputTokens', 'providerAttemptCacheHitTokens', 'providerAttemptCacheMissTokens'] as const) {
+    const count = aggregate(value[key])
+    if (count) normalized[key] = count
+  }
+  const statuses = value.providerAttemptStatuses
+  if (statuses && ['succeeded', 'failed', 'cancelled', 'timedOut', 'streamAborted'].every(key => {
+    const n = statuses[key as keyof typeof statuses]
+    return Number.isSafeInteger(n) && n >= 0
+  })) normalized.providerAttemptStatuses = { succeeded: statuses.succeeded, failed: statuses.failed,
+    cancelled: statuses.cancelled, timedOut: statuses.timedOut, streamAborted: statuses.streamAborted }
+  const rate = value.providerAttemptCacheRate
+  if (rate?.known === false && rate.numerator === 0 && rate.denominator === 0) {
+    normalized.providerAttemptCacheRate = { known: false, numerator: 0, denominator: 0 }
+  } else if (rate?.known === true && typeof rate.numerator === 'number' && typeof rate.denominator === 'number' &&
+      Number.isSafeInteger(rate.numerator) && Number.isSafeInteger(rate.denominator) &&
+      rate.numerator >= 0 && rate.denominator > 0 && rate.numerator <= rate.denominator) {
+    normalized.providerAttemptCacheRate = { known: true, numerator: rate.numerator, denominator: rate.denominator }
   }
   if (value.dynamicStateCheck === 'not_checked') normalized.dynamicStateCheck = value.dynamicStateCheck
   if (value.toolSchemaEstimator === 'utf8_bytes_div4') normalized.toolSchemaEstimator = value.toolSchemaEstimator
@@ -1202,28 +1336,31 @@ export function usageFromCore(
   }
 }
 
-function userMessageBlockFromItem(item: CoreTurnItemJson): ChatBlock | null {
+function userMessageBlockFromItem(item: CoreTurnItemJson, rendererContext?: RendererTurnItemContext): ChatBlock | null {
   const meta: Record<string, unknown> = {}
   if (item.turnId) meta.turnId = item.turnId
-  applyRuntimeDisclosureMeta(meta, item)
+  applyRuntimeDisclosureMeta(meta, item, undefined, rendererContext)
   return {
     kind: 'user',
     id: item.id,
     createdAt: itemCreatedAt(item),
     text: projectOrdinaryPublicText(item.text ?? ''),
+    ...(item.source ? {source:{...item.source}} : {}),
     ...(Object.keys(meta).length > 0 ? { meta } : {})
   }
 }
 
-function userMessageEventFromItem(item: CoreTurnItemJson): UserMessageEventPayload {
+function userMessageEventFromItem(item: CoreTurnItemJson, seq?: number): UserMessageEventPayload {
   const meta: Record<string, unknown> = {}
   if (item.turnId) meta.turnId = item.turnId
   applyRuntimeDisclosureMeta(meta, item)
   return {
     itemId: item.id,
     turnId: item.turnId,
+    ...(seq !== undefined ? { seq } : {}),
     createdAt: itemCreatedAt(item),
     text: projectOrdinaryPublicText(item.text ?? ''),
+    ...(item.source ? {source:{...item.source}} : {}),
     ...(Object.keys(meta).length > 0 ? { meta } : {})
   }
 }
@@ -1238,6 +1375,8 @@ function assistantTextBlockFromItem(item: CoreTurnItemJson): ChatBlock | null {
   return {
     kind: 'assistant',
     id: item.id,
+    ...(item.status === 'completed' && item.role === 'assistant' && item.threadId && item.turnId
+      ? { assistantItemIdentity: { threadId: item.threadId, turnId: item.turnId, itemId: item.id } } : {}),
     createdAt: itemCreatedAt(item),
     text,
     ...(item.turnId ? { meta: { turnId: item.turnId } } : {})
@@ -1253,6 +1392,8 @@ function sealedAcceptedFinalAssistantBlockFromItem(item: CoreTurnItemJson): Chat
   return {
     kind: 'assistant',
     id: item.id,
+    ...(item.status === 'completed' && item.role === 'assistant' && item.threadId && item.turnId
+      ? { assistantItemIdentity: { threadId: item.threadId, turnId: item.turnId, itemId: item.id } } : {}),
     createdAt: itemCreatedAt(item),
     text,
     acceptedFinalView: acceptedFinalView.data,
@@ -1260,10 +1401,10 @@ function sealedAcceptedFinalAssistantBlockFromItem(item: CoreTurnItemJson): Chat
   }
 }
 
-function approvalBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetadataJson): ChatBlock {
+function approvalBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetadataJson, rendererContext?: RendererTurnItemContext): ChatBlock {
   const meta: Record<string, unknown> = {}
   if (item.turnId) meta.turnId = item.turnId
-  applyRuntimeDisclosureMeta(meta, item, child)
+  applyRuntimeDisclosureMeta(meta, item, child, rendererContext)
   return {
     kind: 'approval',
     id: item.id,
@@ -1293,6 +1434,7 @@ function userInputBlockFromItem(item: CoreTurnItemJson): ChatBlock {
     createdAt: itemCreatedAt(item),
     requestId: item.inputId ?? item.id,
     questions: userInputQuestionsFromItem(item),
+    ...(item.timedWait !== undefined ? { timedWait: item.timedWait } : {}),
     status:
       item.status === 'failed'
         ? 'error'
@@ -1300,7 +1442,7 @@ function userInputBlockFromItem(item: CoreTurnItemJson): ChatBlock {
           ? 'submitted'
           : item.status === 'cancelled'
             ? 'cancelled'
-          : 'pending',
+          : item.status === 'continued' ? 'continued' : 'pending',
     ...(Object.keys(meta).length > 0 ? { meta } : {})
   }
 }
@@ -1311,13 +1453,15 @@ function userInputRequestFromCore(input: {
   turnId?: string
   prompt?: string
   questions?: CoreTurnItemJson['questions'] | CoreRuntimeEventJson['questions']
+  timedWait?: CoreTurnItemJson['timedWait']
   seq?: number
 }): UserInputRequestPayload {
-  const fallbackId = input.inputId ?? input.itemId ?? `input_${input.seq ?? Date.now()}`
+  const fallbackId = input.inputId ?? input.itemId ?? ''
   return {
     itemId: input.itemId ?? fallbackId,
     requestId: input.inputId ?? fallbackId,
     questions: questionsFromCore(input.questions, input.prompt, input.inputId ?? fallbackId),
+    ...(input.timedWait !== undefined ? { timedWait: input.timedWait } : {}),
     ...(input.turnId ? { turnId: input.turnId, meta: { turnId: input.turnId } } : {})
   }
 }
@@ -1328,11 +1472,10 @@ function compactionBlockFromItem(item: CoreTurnItemJson): ChatBlock {
     id: item.id,
     createdAt: itemCreatedAt(item),
     summary: item.summary?.trim() || 'Context compacted',
+    ...conversationCompactionFields(item),
     status: item.status === 'failed' ? 'error' : 'success',
-    messagesBefore: item.replacedTokens,
-    detail: item.pinnedConstraints?.join('\n'),
     auto: item.auto === true,
-    ...(item.turnId ? { meta: { turnId: item.turnId } } : {})
+    meta: compactionMetadata(item)
   }
 }
 
@@ -1506,10 +1649,10 @@ function runtimeErrorEventIsTerminal(event: CoreRuntimeEventJson): boolean {
  * thread (load path) and as the canonical per-kind view that the
  * live event dispatcher maps onto sink callbacks.
  */
-export function chatBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetadataJson): ChatBlock | null {
+export function chatBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRuntimeMetadataJson, rendererContext?: RendererTurnItemContext): ChatBlock | null {
   switch (item.kind) {
     case 'user_message':
-      return userMessageBlockFromItem(item)
+      return userMessageBlockFromItem(item, rendererContext)
 		case 'assistant_text':
 			return assistantTextBlockFromItem(item)
 		case 'assistant_reasoning':
@@ -1517,9 +1660,9 @@ export function chatBlockFromItem(item: CoreTurnItemJson, child?: CoreChildRunti
     case 'tool_call':
     case 'tool_result':
     case 'tool_progress':
-      return toolBlockFromItem(item, child)
+      return toolBlockFromItem(item, child, rendererContext)
     case 'approval':
-      return approvalBlockFromItem(item, child)
+      return approvalBlockFromItem(item, child, rendererContext)
     case 'user_input':
       return userInputBlockFromItem(item)
     case 'compaction':
@@ -1552,12 +1695,11 @@ function compactionFromItem(item: CoreTurnItemJson): CompactionEventPayload {
     itemId: item.id,
     turnId: item.turnId,
     summary: item.summary?.trim() || 'Context compacted',
+    ...conversationCompactionFields(item),
     status: item.status === 'failed' ? 'error' : item.status === 'running' ? 'running' : 'success',
     createdAt: itemCreatedAt(item),
-    messagesBefore: item.replacedTokens,
-    detail: item.pinnedConstraints?.length ? item.pinnedConstraints.join('\n') : undefined,
     auto: item.auto === true,
-    ...(item.turnId ? { meta: { turnId: item.turnId } } : {})
+    meta: compactionMetadata(item)
   }
 }
 
@@ -1582,11 +1724,12 @@ function reviewFromItem(item: CoreTurnItemJson): ReviewEventPayload {
 function emitItem(
   item: CoreTurnItemJson,
   sink: ThreadEventSink,
-  child?: CoreChildRuntimeMetadataJson
+  child?: CoreChildRuntimeMetadataJson,
+  seq?: number
 ): void {
   switch (item.kind) {
     case 'user_message':
-      sink.onUserMessage(userMessageEventFromItem(item))
+      sink.onUserMessage(userMessageEventFromItem(item, seq))
       return
     case 'assistant_text':
     case 'assistant_reasoning':
@@ -1641,16 +1784,29 @@ function compactionFromEvent(
 ): CompactionEventPayload {
   const turnId = eventTurnId(event)
   return {
-    itemId: eventItemId(event) ?? (turnId ? `compaction_${turnId}` : `compaction_${event.seq ?? Date.now()}`),
+    itemId: event.compactionId ?? eventItemId(event) ?? (turnId ? `compaction_${turnId}` : `compaction_${event.seq ?? Date.now()}`),
     ...(turnId ? { turnId } : {}),
     ...(typeof event.seq === 'number' ? { seq: event.seq } : {}),
     summary: event.summary ?? 'Context compacted',
+    ...conversationCompactionFields(event),
     status,
-    ...(event.timestamp ? { createdAt: event.timestamp } : {}),
-    messagesBefore: event.replacedTokens,
-    detail: event.pinnedConstraints?.join('\n'),
+    ...(event.createdAt ?? event.timestamp ? { createdAt: event.createdAt ?? event.timestamp } : {}),
     auto: event.auto === true,
-    ...(turnId ? { meta: { turnId } } : {})
+    meta: compactionMetadata({ ...event, turnId })
+  }
+}
+
+function conversationCompactionFields(value: Pick<CoreTurnItemJson, 'summaryKind' | 'summary'>): Pick<CompactionEventPayload, 'summaryKind' | 'detail'> {
+  return value.summaryKind === 'conversation' && value.summary?.trim()
+    ? { summaryKind: 'conversation', detail: value.summary } : {}
+}
+
+function compactionMetadata(value: Partial<Pick<CoreTurnItemJson, 'turnId' | 'replacedTokens' | 'shadowedItemCount' | 'tokenCountKind' | 'tokenEstimatorVersion'>>) {
+  return {
+    ...(value.turnId ? { turnId: value.turnId } : {}),
+    ...(typeof value.replacedTokens === 'number' && Number.isSafeInteger(value.replacedTokens) && value.replacedTokens >= 0 ? { replacedTokens: value.replacedTokens } : {}),
+    ...(typeof value.shadowedItemCount === 'number' && Number.isSafeInteger(value.shadowedItemCount) && value.shadowedItemCount > 0 ? { shadowedItemCount: value.shadowedItemCount } : {}),
+    ...(value.tokenCountKind === 'estimated' ? { tokenCountKind: value.tokenCountKind, tokenEstimatorVersion: value.tokenEstimatorVersion } : {})
   }
 }
 
@@ -1698,6 +1854,7 @@ function turnCompletedFromEvent(event: CoreRuntimeEventJson): {
   seq?: number
   acceptedFinalDigest?: string
   terminalReason?: CoreRuntimeEventJson['terminalReason']
+  endReason?: CoreRuntimeEventJson['endReason']
 } {
   const threadId = readRuntimeEventString(event, 'threadId', 'thread_id')
   const turnId = readRuntimeEventString(event, 'turnId', 'turn_id')
@@ -1707,7 +1864,8 @@ function turnCompletedFromEvent(event: CoreRuntimeEventJson): {
     ...(event.timestamp ? { createdAt: event.timestamp } : {}),
     ...(typeof event.seq === 'number' ? { seq: event.seq } : {}),
     ...(event.acceptedFinalDigest ? { acceptedFinalDigest: event.acceptedFinalDigest } : {}),
-    ...(event.terminalReason ? { terminalReason: event.terminalReason } : {})
+    ...(event.terminalReason ? { terminalReason: event.terminalReason } : {}),
+    ...(event.endReason ? { endReason: event.endReason } : {})
   }
 }
 
@@ -1907,14 +2065,39 @@ export function projectToolEventForRenderer(event: ToolEventPayload): ToolEventP
   const turnId = rendererIdentifier(event.turnId) ?? rendererIdentifier(meta.turnId)
   const sourceItemId = rendererIdentifier(meta.sourceItemId)
   const callId = rendererIdentifier(meta.callId)
+  const recordThreadId = rendererIdentifier(meta.recordThreadId)
+  const toolCallItemId = rendererIdentifier(meta.toolCallItemId)
+  const toolResultItemId = rendererIdentifier(meta.toolResultItemId)
+  const recordIdentity = (value: unknown, physicalId: string | undefined) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const record = value as Record<string, unknown>
+    return record.threadId === recordThreadId && record.turnId === turnId && record.callId === callId && record.itemId === physicalId &&
+      recordThreadId && turnId && callId && physicalId && physicalId === sourceItemId
+      ? { threadId: recordThreadId, turnId, callId, itemId: physicalId } : undefined
+  }
+  const toolCallIdentity = recordIdentity(meta.toolCallIdentity, toolCallItemId)
+  const toolResultIdentity = recordIdentity(meta.toolResultIdentity, toolResultItemId)
+  const reference = toolResultLocalSelectorSchemaV1.omit({ threadId: true }).safeParse(meta.localResult)
+  const toolName = isExactLocalToolName(meta.toolName) ? meta.toolName : undefined
+  const localResult = runtimeStatus !== 'tool_progress' && (event.status === 'success' || event.status === 'error') && toolResultIdentity && toolName &&
+    event.turnId === turnId && meta.turnId === turnId && meta.sourceItemId === toolResultItemId && reference.success &&
+    reference.data.turnId === toolResultIdentity.turnId && reference.data.callId === toolResultIdentity.callId &&
+    reference.data.resultItemId === toolResultIdentity.itemId && (!child || childMatchesToolResultScope(child, toolResultIdentity)) &&
+    localToolKindMatches(toolName, event.toolKind)
+    ? reference.data : undefined
   const diagnostics = normalizeJobDiagnostics(meta.diagnostics)
   const explicitStage = fixedPipelineStage(meta.stage ?? runtimeStatus)?.stage
   const childStage = child ? fixedPipelineStage(`subagent_${child.childStatus}`)?.stage : undefined
   const stage = explicitStage ?? childStage
   const safeMeta: Record<string, unknown> = {
+    ...(recordThreadId && (toolCallIdentity || toolResultIdentity) ? {
+      recordThreadId, ...(toolCallIdentity ? { toolCallItemId, toolCallIdentity } : {}),
+      ...(toolResultIdentity ? { toolResultItemId, toolResultIdentity } : {})
+    } : {}),
     ...(turnId ? { turnId } : {}),
     ...(sourceItemId ? { sourceItemId } : {}),
     ...(callId ? { callId } : {}),
+    ...(localResult ? { localResult, toolName } : {}),
     runtimeStatus: runtimeStatus === 'tool_progress' ? 'tool_progress' : stage ?? 'child_lifecycle_unknown',
     ...(stage ? { stage } : {}),
     ...(child ? { child } : {}),
@@ -1925,7 +2108,7 @@ export function projectToolEventForRenderer(event: ToolEventPayload): ToolEventP
     ...(turnId ? { turnId } : {}),
     summary: fixedProgressSummary(child),
     status: event.status === 'success' || event.status === 'error' ? event.status : 'running',
-    toolKind: child?.kind === 'background-shell'
+    toolKind: localResult ? event.toolKind : child?.kind === 'background-shell'
       ? 'command_execution'
       : child
         ? 'subagent'
@@ -1934,6 +2117,22 @@ export function projectToolEventForRenderer(event: ToolEventPayload): ToolEventP
           : 'tool_call',
     meta: safeMeta
   }
+}
+
+export function normalizeProviderRetryLifecycleForRenderer(value: unknown): RuntimeProviderRetryLifecycleMetadata | undefined {
+  if (!isClosedProviderRetryLifecycle(value)) return undefined
+  return { ...(value as RuntimeProviderRetryLifecycleMetadata) }
+}
+
+export function normalizeProviderOutputCapForRenderer(value: unknown): RuntimeProviderOutputCapObservation | undefined {
+  if (!isClosedProviderOutputCapObservation(value)) return undefined
+  return { ...(value as RuntimeProviderOutputCapObservation) }
+}
+
+/** Length-prefix each scope part so punctuation in public IDs cannot collide. */
+export function providerRetryStatusItemId(threadId: string, turnId: string, retry: RuntimeProviderRetryLifecycleMetadata): string {
+  return 'runtime_status_retry_' + [threadId, turnId, retry.logicalSequence, retry.source,
+    retry.outerAttempt, retry.physicalAttempt ?? ''].map(part => `${String(part).length}:${part}`).join('_')
 }
 
 function runtimeStatusFromEvent(event: CoreRuntimeEventJson): RuntimeStatusEventPayload | null {
@@ -1996,6 +2195,12 @@ function runtimeStatusFromEvent(event: CoreRuntimeEventJson): RuntimeStatusEvent
     const details = event.details && typeof event.details === 'object' && !Array.isArray(event.details)
       ? event.details as Record<string, unknown>
       : undefined
+    const retry = stage === 'provider_retrying' && threadId && turnId && details?.visibleRecovery !== true
+      ? normalizeProviderRetryLifecycleForRenderer(details?.retry) : undefined
+    const providerOutputCap = stage === 'response_received' ? normalizeProviderOutputCapForRenderer({
+      stopReason: details?.stopReason, streamCompleted: details?.streamCompleted, logicalSequence: details?.logicalSequence,
+      ...(details?.toolCallCount !== undefined ? { toolCallCount: details.toolCallCount } : {})
+    }) : undefined
     const publicDetails = normalizeJobDiagnostics(details)
     const providerError = normalizeProviderErrorDiagnostics(details?.providerError)
     const projectedDetails = publicDetails || providerError
@@ -2005,7 +2210,13 @@ function runtimeStatusFromEvent(event: CoreRuntimeEventJson): RuntimeStatusEvent
     const maxAttempt = readStructuredNumber(event as Record<string, unknown>, 'maxAttempt') ?? readStructuredNumber(details, 'maxAttempt')
     return {
       kind: 'pipeline_stage',
-      itemId: providerProgress
+      ...(threadId ? { threadId } : {}),
+      ...(typeof event.seq === 'number' && Number.isSafeInteger(event.seq) && event.seq >= 0 ? { seq: event.seq } : {}),
+      ...(retry ? { retry } : {}),
+      ...(providerOutputCap ? { providerOutputCap } : {}),
+      itemId: retry && threadId && turnId
+        ? providerRetryStatusItemId(threadId, turnId, retry)
+        : providerProgress
         ? `runtime_status_${turnId}_provider_progress`
         : `runtime_status_${turnId ?? threadId ?? 'thread'}_${stage}_${key}`,
       turnId,
@@ -2183,6 +2394,222 @@ export async function dispatchAnalytixRuntimeEvents(
   return acceptedFinalReceipt
 }
 
+/** Renderer-only attribution, never an authority or model-context source. */
+export type OrdinaryDisplayHistoryBlock = ChatBlock & {
+  displayHistory: Readonly<{ source: 'host_public_replay'; threadId: string; throughSeq: number }>
+}
+
+export function isOrdinaryDisplayHistoryBlock(block: ChatBlock): block is OrdinaryDisplayHistoryBlock {
+  return 'displayHistory' in block &&
+    (block as OrdinaryDisplayHistoryBlock).displayHistory?.source === 'host_public_replay'
+}
+
+/** Collect display items only. Never dispatch old events into a live turn sink. */
+export function turnUsageEntryFromBatch(batch: Pick<GeneralTerminalProjectionBatch, 'threadId' | 'turnId' | 'firstSeq' | 'lastSeq' | 'usage'>): TurnUsageEntry {
+  return { threadId: batch.threadId, turnId: batch.turnId, firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, snapshot: batch.usage }
+}
+
+/** Existing store projection merge; newer or equally committed turn cursors win. */
+export function mergeTurnUsageById(threadId: string, older: TurnUsageById = {}, newer: TurnUsageById = {}): TurnUsageById {
+  const result: TurnUsageById = Object.create(null) as TurnUsageById
+  for (const entries of [older, newer]) for (const [turnId, entry] of Object.entries(entries)) {
+    if (entry.threadId !== threadId || entry.turnId !== turnId || !Number.isSafeInteger(entry.firstSeq) ||
+        !Number.isSafeInteger(entry.lastSeq) || entry.firstSeq <= 0 || entry.lastSeq < entry.firstSeq) continue
+    if (!result[turnId] || result[turnId].lastSeq <= entry.lastSeq) result[turnId] = entry
+  }
+  return result
+}
+
+/** A complete replay owns deletion through its boundary. Partial GET data does not. */
+export function reconcileTurnUsageById(threadId: string, incoming: TurnUsageById | undefined,
+  current: TurnUsageById | undefined, throughSeq?: number,
+  rewoundTurnIds: Readonly<Record<string, true>> = {}): TurnUsageById {
+  const complete = Number.isSafeInteger(throughSeq) && throughSeq! >= 0
+  const eligible = (entries: TurnUsageById | undefined, keepNewer = false): TurnUsageById =>
+    Object.fromEntries(Object.entries(entries ?? {}).filter(([turnId, entry]) =>
+      rewoundTurnIds[turnId] !== true && (!keepNewer || entry.lastSeq > throughSeq!)))
+  return mergeTurnUsageById(threadId, eligible(incoming), eligible(current, complete))
+}
+
+/** An in-flight snapshot cannot reintroduce turns removed by a live Host rewind. */
+export function filterRewoundDisplayBlocks(blocks: ChatBlock[], rewoundTurnIds: Readonly<Record<string, true>> = {}): ChatBlock[] {
+  return blocks.filter(block => !('meta' in block && typeof block.meta?.turnId === 'string' &&
+    rewoundTurnIds[block.meta.turnId.trim()] === true))
+}
+
+function generalTerminalReceiptsEqual(a: GeneralTerminalProjectionReceiptV1 | undefined,
+  b: GeneralTerminalProjectionReceiptV1 | undefined): boolean {
+  return a === b || !!a && !!b && a.schemaVersion === b.schemaVersion && a.batchDigest === b.batchDigest &&
+    a.threadId === b.threadId && a.turnId === b.turnId && a.itemId === b.itemId &&
+    a.firstSeq === b.firstSeq && a.lastSeq === b.lastSeq && a.status === b.status &&
+    a.endReason?.kind === b.endReason?.kind
+}
+
+export function createOrdinaryHistoryReplay(threadId: string, throughSeq: number): {
+  accept: (events: unknown[]) => void
+  mergeSnapshot: (snapshot: ChatBlock[], options?: { threadId: string; includeHistoricalBlocks?: boolean }) => ChatBlock[]
+  turnUsage: () => TurnUsageById
+} {
+  if (!Number.isSafeInteger(throughSeq) || throughSeq < 0) throw new Error('Invalid history replay boundary.')
+  // Keep projected UI items, not a second event log or provider conversation.
+  const blocks = new Map<string, ChatBlock>()
+  const turnUsageById: TurnUsageById = Object.create(null) as TurnUsageById
+  const removedTurns = new Set<string>()
+  const conflictingTerminalIds = new Set<string>()
+  let cursor = 0
+  const turnIdFor = (block: ChatBlock): string | undefined => {
+    const turnId = 'meta' in block ? block.meta?.turnId : undefined
+    return typeof turnId === 'string' ? turnId : undefined
+  }
+  const keyFor = (block: ChatBlock): string => block.kind === 'compaction' && turnIdFor(block)
+    ? `compaction:${turnIdFor(block)}` : block.id
+  const put = (block: ChatBlock): void => {
+    const turnId = turnIdFor(block)
+    if (turnId && removedTurns.has(turnId)) return
+    const previous = blocks.get(keyFor(block))
+    // A Map overwrite must not hide conflicting physical terminal identities.
+    if (previous && (previous.kind === 'assistant' || block.kind === 'assistant') &&
+        !(previous.kind === 'assistant' && block.kind === 'assistant' &&
+          turnIdFor(previous) === turnId && previous.text === block.text && previous.createdAt === block.createdAt &&
+          generalTerminalReceiptsEqual(previous.generalTerminalProjectionReceipt, block.generalTerminalProjectionReceipt))) {
+      conflictingTerminalIds.add(block.id)
+    }
+    blocks.set(keyFor(block), block)
+  }
+  return {
+    accept: events => {
+      const atomic = events.some(value => value && typeof value === 'object' &&
+        ['general_terminal_batch', 'accepted_final_batch'].includes(String((value as { kind?: unknown }).kind)))
+      if (atomic && events.length !== 1) throw new Error('Mixed history terminal batch.')
+      for (const value of events) {
+        if (!value || typeof value !== 'object') throw new Error('Invalid history event.')
+        const event = value as CoreRuntimeEventJson
+        const kind = (value as { kind?: string }).kind
+        if (event.threadId !== threadId || !Number.isSafeInteger(event.seq) || event.seq! <= 0 || event.seq! > throughSeq) {
+          throw new Error('History event is outside its snapshot boundary.')
+        }
+        if (kind === 'accepted_final_batch' || kind === 'public_projection_revoked' ||
+            event.kind === 'snapshot_required' || event.kind === 'error' &&
+            (event.terminal === true || event.fatal === true || event.code === 'sse_setup_error')) {
+          throw new Error('Ordinary history replay is unavailable.')
+        }
+        if (event.seq! <= cursor) continue
+        if (kind === 'general_terminal_batch') {
+          const batch = generalTerminalProjectionBatchFromRuntime(value)
+          if (!batch || batch.threadId !== threadId || batch.firstSeq <= cursor || batch.lastSeq !== event.seq) {
+            throw new Error('Invalid history terminal boundary.')
+          }
+          if (batch.terminalItem) {
+            const terminalItem = batch.terminalItem
+            // Restore the same owner/item/sequence-bound terminal proof as live
+            // delivery. A standalone item or display-history label cannot supply it.
+            put(terminalItem.kind === 'assistant' ? {
+              ...terminalItem,
+              generalTerminalProjectionReceipt: {
+                schemaVersion: 1, batchDigest: batch.batchDigest,
+                threadId: batch.threadId, turnId: batch.turnId, itemId: terminalItem.id,
+                firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, status: batch.terminal.status,
+                ...(batch.terminal.endReason ? { endReason: batch.terminal.endReason } : {})
+              }
+            } : terminalItem)
+          }
+          if (!batch.terminalItem && batch.terminal.endReason) {
+            for (const block of blocks.values()) {
+              if (block.kind === 'user' && turnIdFor(block) === batch.turnId) {
+                put({ ...block, generalTerminalProjectionReceipt: {
+                  schemaVersion: 1, batchDigest: batch.batchDigest,
+                  threadId: batch.threadId, turnId: batch.turnId, itemId: block.id,
+                  firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, status: batch.terminal.status,
+                  endReason: batch.terminal.endReason
+                } })
+              }
+            }
+          }
+          if (!removedTurns.has(batch.turnId)) turnUsageById[batch.turnId] = turnUsageEntryFromBatch(batch)
+        } else if (event.kind === 'thread_rewound') {
+          for (const turnId of event.removedTurnIds ?? []) { removedTurns.add(turnId); delete turnUsageById[turnId] }
+          for (const [key, block] of blocks) {
+            if (removedTurns.has(turnIdFor(block) ?? '')) blocks.delete(key)
+          }
+        } else if (event.item && ['item_created', 'item_updated', 'item_completed'].includes(event.kind ?? '')) {
+          // Standalone assistant snapshots/deltas do not prove final authority.
+          if (event.item.threadId !== threadId || event.item.turnId !== event.turnId) {
+            throw new Error('History item identity mismatch.')
+          }
+          if (event.item.kind === 'user_message' || event.item.kind === 'compaction') {
+            const block = chatBlockFromItem(event.item)
+            if (block) put(block)
+          }
+        } else if (event.kind === 'compaction_completed' || event.compactionId &&
+          (event.kind === 'compaction_started' || event.kind === 'compaction_failed')) {
+          const item = compactionFromEvent(event, event.kind === 'compaction_started' ? 'running' : event.kind === 'compaction_failed' ? 'error' : 'success')
+          put({ kind: 'compaction', id: item.itemId, createdAt: item.createdAt,
+            summary: event.kind === 'compaction_started' ? '' : item.summary, summaryKind: item.summaryKind, detail: item.detail,
+            status: event.kind === 'compaction_started' ? 'unknown' : item.status, auto: item.auto, meta: item.meta })
+        }
+        cursor = event.seq!
+      }
+    },
+    turnUsage: () => {
+      if (cursor !== throughSeq) throw new Error('Public history replay ended before its snapshot boundary.')
+      // Do not let display consumers mutate the private latest receipt bounds.
+      return Object.fromEntries(Object.entries(turnUsageById).map(([id, entry]) => [id, { ...entry }]))
+    },
+    mergeSnapshot: (snapshot, options) => {
+      if (cursor !== throughSeq) throw new Error('Public history replay ended before its snapshot boundary.')
+      if (options && options.threadId !== threadId) throw new Error('History snapshot thread identity mismatch.')
+      // Scope comes from the verified GET caller. Text/identity alone cannot
+      // establish the primary thread after its public item has been mapped.
+      const primaryIdCounts = new Map<string, number>()
+      for (const block of snapshot) primaryIdCounts.set(block.id, (primaryIdCounts.get(block.id) ?? 0) + 1)
+      const primary = snapshot.filter(block => !removedTurns.has(turnIdFor(block) ?? '')).map(block => {
+        if (!options || (block.kind !== 'assistant' && block.kind !== 'user') || primaryIdCounts.get(block.id) !== 1 ||
+            conflictingTerminalIds.has(block.id) || block.kind === 'assistant' && (block.acceptedFinalView !== undefined ||
+            block.acceptedFinalProjectionReceipt !== undefined || block.acceptedFinalProjectionTerminal !== undefined) ||
+            isOrdinaryDisplayHistoryBlock(block) && block.displayHistory.threadId !== threadId) return block
+        const replay = blocks.get(block.id)
+        if (replay?.kind !== block.kind || (replay.kind !== 'assistant' && replay.kind !== 'user') || replay.text !== block.text || !replay.createdAt ||
+            replay.createdAt !== block.createdAt || turnIdFor(replay) !== turnIdFor(block)) return block
+        const receipt = replay.generalTerminalProjectionReceipt
+        const latest = receipt && turnUsageById[receipt.turnId]
+        if (!receipt || receipt.threadId !== threadId || receipt.turnId !== turnIdFor(block) ||
+            receipt.itemId !== block.id || !latest || latest.firstSeq !== receipt.firstSeq || latest.lastSeq !== receipt.lastSeq) return block
+        // The batch validated createdAt. Exact equality preserves that legal
+        // timestamp without copying replay content, metadata or attribution.
+        if (block.generalTerminalProjectionReceipt) return block
+        return { ...block, generalTerminalProjectionReceipt: { ...receipt } }
+      })
+      if (options?.includeHistoricalBlocks === false) return primary
+      const groups = new Map<string, ChatBlock[]>()
+      const groupFor = (block: ChatBlock): string => turnIdFor(block) ?? keyFor(block)
+      for (const block of blocks.values()) {
+        const key = groupFor(block)
+        const group = groups.get(key) ?? []
+        // Enumerable attribution survives model-label/receipt/settlement spreads.
+        // A current primary turn replaces this entire group below, dropping it.
+        const displayBlock: OrdinaryDisplayHistoryBlock = { ...block,
+          ...((block.kind === 'assistant' || block.kind === 'user') && block.generalTerminalProjectionReceipt
+            ? { generalTerminalProjectionReceipt: { ...block.generalTerminalProjectionReceipt } } : {}),
+          displayHistory: { source: 'host_public_replay', threadId, throughSeq } }
+        group.push(displayBlock)
+        groups.set(key, group)
+      }
+      const current = new Map<string, ChatBlock[]>()
+      for (const block of primary) {
+        const key = groupFor(block)
+        const group = current.get(key) ?? []
+        group.push(block)
+        current.set(key, group)
+      }
+      // Replay owns turn chronology; primary owns each current turn's full
+      // items/order. Keep the already completed tail above the compaction marker.
+      // Matching real turn identity also replaces compaction events without itemId.
+      for (const [key, group] of current) groups.set(key, group)
+      return [...groups.values()].flat()
+    }
+  }
+}
+
 export function generalTerminalProjectionBatchFromRuntime(
   value: unknown
 ): GeneralTerminalProjectionBatch | null {
@@ -2220,7 +2647,8 @@ export function generalTerminalProjectionBatchFromRuntime(
     terminal: {
       status: terminalEvent.status,
       createdAt: terminalEvent.timestamp,
-      terminalReason: terminalEvent.terminalReason
+      terminalReason: terminalEvent.terminalReason,
+      ...(terminalEvent.endReason ? { endReason: terminalEvent.endReason } : {})
     }
   }
 }
@@ -2272,7 +2700,8 @@ export function acceptedFinalProjectionBatchFromRuntime(
       status: terminalEvent.status,
       createdAt: terminalEvent.timestamp,
       acceptedFinalDigest: terminalEvent.acceptedFinalDigest,
-      terminalReason: terminalEvent.terminalReason
+      terminalReason: terminalEvent.terminalReason,
+      ...(terminalEvent.endReason ? { endReason: terminalEvent.endReason } : {})
     }
   }
 }
@@ -2319,7 +2748,7 @@ export async function dispatchAnalytixRuntimeEvent(
     case 'item_completed':
     case 'tool_call_started':
     case 'tool_call_finished':
-      if (event.item) emitItem(event.item, sink, event.child)
+      if (event.item) emitItem(event.item, sink, event.child, event.seq)
       else {
         const tool = toolLifecycleFromEvent(event)
         if (tool) sink.onTool(tool)
@@ -2404,6 +2833,7 @@ export async function dispatchAnalytixRuntimeEvent(
       return
     }
     case 'user_input_requested':
+      if (!eventInputId(event)) return
       sink.onUserInput(
         userInputRequestFromCore({
           itemId: eventItemId(event),
@@ -2411,6 +2841,7 @@ export async function dispatchAnalytixRuntimeEvent(
           turnId: eventTurnId(event),
           prompt: event.prompt,
           questions: event.questions,
+          timedWait: event.timedWait,
           seq: event.seq
         })
       )
@@ -2420,11 +2851,12 @@ export async function dispatchAnalytixRuntimeEvent(
         ? 'submitted'
         : event.status === 'cancelled'
           ? 'cancelled'
-          : 'error'
+          : event.status === 'continued' ? 'continued' : 'error'
       const itemId = eventItemId(event)
       const inputId = eventInputId(event)
+      if (!inputId) return
       sink.onUserInputStatus({
-        itemId: itemId ?? inputId ?? `input_${event.seq ?? Date.now()}`,
+        itemId: itemId ?? inputId,
         ...(inputId ? { requestId: inputId } : {}),
         status,
         ...(status === 'error' ? { errorMessage: event.message ?? 'User input was not submitted.' } : {})
@@ -2436,6 +2868,12 @@ export async function dispatchAnalytixRuntimeEvent(
       return
     case 'compaction_completed':
       sink.onCompaction(compactionFromEvent(event, 'success'))
+      return
+    case 'compaction_failed':
+      sink.onCompaction(compactionFromEvent(event, 'error'))
+      return
+    case 'goal_activation_changed':
+      await sink.onGoalActivation?.({ threadId: eventThreadId(event) ?? '', activation: event.activation ?? null })
       return
     case 'goal_updated':
     {

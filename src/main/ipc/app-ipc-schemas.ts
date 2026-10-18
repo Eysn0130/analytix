@@ -1,5 +1,15 @@
+import { validateScheduleCalendarRule } from '../../../packages/runtime/src/contracts/schedule-rule'
+import { scheduleTaskExpectedFields } from '../../shared/schedule-task-mutation'
 import { objectExportBindingSchema } from '../../../packages/runtime/src/contracts/object-editing'
 import { z } from 'zod'
+export { writePrototypeAuthorizePayloadSchema } from '../../shared/write-prototype'
+import { childInputRequestSchemaV1 } from '../../shared/child-input-contract'
+import { UserInputResolutionRequest, UserInputWaitContinueRequestSchemaV1 } from '../../../packages/runtime/src/contracts/approvals'
+import { toolResultLocalEffectRequestSchemaV1, toolResultLocalPresentFileRequestSchemaV1 } from '../../../packages/runtime/src/contracts/tool-result-local-display'
+import {
+  MessageFeedbackPutRequestV1Schema,
+  MessageFeedbackDeleteRequestV1Schema
+} from '../../../packages/runtime/src/contracts/message-feedback'
 import {
   ANALYTIX_APPROVAL_TEMPLATE,
   ANALYTIX_ATTACHMENT_CONTENT_TEMPLATE,
@@ -13,6 +23,8 @@ import {
   ANALYTIX_MEMORY_DIAGNOSTICS_TEMPLATE,
   ANALYTIX_MEMORY_RECORD_TEMPLATE,
   ANALYTIX_MEMORY_TEMPLATE,
+  ANALYTIX_MESSAGE_FEEDBACK_TEMPLATE,
+  ANALYTIX_MESSAGE_FEEDBACK_ITEM_TEMPLATE,
   ANALYTIX_RUNTIME_INFO_TEMPLATE,
   ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_TEMPLATE,
   ANALYTIX_RUNTIME_TASK_JOBS_CHILD_TODOS_ACCEPT_TEMPLATE,
@@ -313,7 +325,7 @@ function compileEndpoint(
   // substituting the `{id}` / `{turn}` placeholders with `[^/]+`. The
   // template fragments are URL-encoded by the path helpers, so they
   // contain only characters that are safe to escape directly.
-  const pattern = template.replace(/[.+*?^$()|[\]\\]/g, '\\$&').replace(/\{(?:id|turn|checkpoint|task)\}/g, '[^/]+')
+  const pattern = template.replace(/[.+*?^$()|[\]\\]/g, '\\$&').replace(/\{(?:id|turn|checkpoint|task|message)\}/g, '[^/]+')
   const regex = new RegExp(`^${pattern}$`)
   return {
     match: (path: string) => regex.test(path),
@@ -360,6 +372,8 @@ const ENDPOINTS: readonly EndpointTemplate[] = [
   compileEndpoint(ANALYTIX_CASE_PROJECT_DETAIL_TEMPLATE, ['GET']),
   compileEndpoint(ANALYTIX_THREADS_TEMPLATE, ['GET', 'POST']),
   compileEndpoint(ANALYTIX_THREAD_TEMPLATE, ['GET', 'PATCH', 'DELETE']),
+  compileEndpoint(ANALYTIX_MESSAGE_FEEDBACK_TEMPLATE, ['GET']),
+  compileEndpoint(ANALYTIX_MESSAGE_FEEDBACK_ITEM_TEMPLATE, ['PUT', 'DELETE']),
   compileEndpoint(ANALYTIX_THREAD_SUMMARY_TEMPLATE, ['GET']),
   compileEndpoint(ANALYTIX_THREAD_SUMMARY_TASK_OUTPUT_TEMPLATE, ['GET']),
   compileEndpoint(ANALYTIX_THREAD_SUMMARY_TASK_KILL_TEMPLATE, ['POST']),
@@ -413,6 +427,47 @@ export const runtimeRequestPayloadSchema = z
   .superRefine((payload, context) => {
     const url = new URL(payload.path, 'http://localhost')
     const method = payload.method ?? 'GET'
+    if (url.pathname === ANALYTIX_RUNTIME_TASK_JOBS_STEER_TEMPLATE) {
+      try {
+        if (payload.path !== ANALYTIX_RUNTIME_TASK_JOBS_STEER_TEMPLATE || method !== 'POST' ||
+            new TextEncoder().encode(payload.body ?? '').length > 24 * 1024 ||
+            !childInputRequestSchemaV1.safeParse(JSON.parse(payload.body ?? '') as unknown).success) {
+          context.addIssue({ code: 'custom', message: 'child input request is invalid', path: ['body'] })
+        }
+      } catch {
+        context.addIssue({ code: 'custom', message: 'child input request is invalid', path: ['body'] })
+      }
+      return
+    }
+    if (/^\/v1\/threads\/[^/]+\/message-feedback(?:\/|$)/.test(url.pathname)) {
+      const route = /^\/v1\/threads\/([^/]+)\/message-feedback(?:\/([^/]+))?$/.exec(payload.path)
+      const canonicalId = (value: string): boolean => {
+        try {
+          const decoded = decodeURIComponent(value)
+          return /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(decoded) && !decoded.includes('..')
+        } catch { return false }
+      }
+      if (!route || !canonicalId(route[1]) || route[2] && !canonicalId(route[2])) {
+        context.addIssue({ code: 'custom', message: 'message feedback target is invalid', path: ['path'] })
+        return
+      }
+      if (!route[2]) {
+        if (method !== 'GET' || payload.body !== undefined) {
+          context.addIssue({ code: 'custom', message: 'message feedback list request is invalid', path: ['body'] })
+        }
+        return
+      }
+      try {
+        const schema = method === 'PUT' ? MessageFeedbackPutRequestV1Schema : MessageFeedbackDeleteRequestV1Schema
+        if ((method !== 'PUT' && method !== 'DELETE') || (payload.body?.length ?? 0) > 65536 ||
+            !schema.safeParse(JSON.parse(payload.body ?? '') as unknown).success) {
+          context.addIssue({ code: 'custom', message: 'message feedback body is invalid', path: ['body'] })
+        }
+      } catch {
+        context.addIssue({ code: 'custom', message: 'message feedback body is invalid', path: ['body'] })
+      }
+      return
+    }
     if (url.pathname === ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_TEMPLATE &&
         (payload.path !== ANALYTIX_RUNTIME_TOOL_EXECUTIONS_OBSERVE_TEMPLATE || method !== 'POST')) {
       context.addIssue({
@@ -420,6 +475,16 @@ export const runtimeRequestPayloadSchema = z
         message: 'tool execution observation target is invalid',
         path: ['path']
       })
+      return
+    }
+    if (/^\/v1\/user-inputs\/[^/]+$/.test(url.pathname) && method === 'POST') {
+      try {
+        if (!z.union([UserInputResolutionRequest, UserInputWaitContinueRequestSchemaV1]).safeParse(JSON.parse(payload.body ?? '') as unknown).success) {
+          context.addIssue({ code: 'custom', message: 'user input response body is invalid', path: ['body'] })
+        }
+      } catch {
+        context.addIssue({ code: 'custom', message: 'user input response body is invalid', path: ['body'] })
+      }
       return
     }
     if (url.pathname === '/v1/attachments' && method === 'POST') {
@@ -566,7 +631,74 @@ const providerPricingSchema = z.object({
   currency: z.enum(['USD', 'CNY']).optional()
 }).strict()
 
+function hasModelPreferenceControls(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0)
+    if (code < 32 || code === 127) return true
+  }
+  return false
+}
+
+const modelPreferenceTextSchema = z.string().min(1).max(128).refine((value) =>
+  value === value.trim() && !hasModelPreferenceControls(value))
+const modelPreferenceSchema = z.object({
+  aliases: z.array(modelPreferenceTextSchema).max(50).refine((values) =>
+    new Set(values).size === values.length).optional(),
+  reasoning: z.object({
+    supportedEfforts: z.array(modelReasoningEffortSchema).min(1).max(6).refine((values) =>
+      new Set(values).size === values.length),
+    defaultEffort: modelReasoningEffortSchema,
+    requestProtocol: modelReasoningRequestProtocolSchema
+  }).strict().refine((value) => value.supportedEfforts.includes(value.defaultEffort)).nullable().optional()
+}).strict()
+const modelPreferenceRecordSchema = z.unknown().transform((value, ctx) => {
+  const invalid = () => {
+    ctx.addIssue({ code: 'custom', message: 'Invalid model preference record.' })
+    return z.NEVER
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return invalid()
+  const entries = Object.entries(value)
+  if (entries.length > 200) return invalid()
+  const keys = new Set<string>()
+  const output: Record<string, z.infer<typeof modelPreferenceSchema>> = Object.create(null)
+  for (const [key, profile] of entries) {
+    if (!modelPreferenceTextSchema.safeParse(key).success || keys.has(key.toLowerCase())) return invalid()
+    const parsed = modelPreferenceSchema.safeParse(profile)
+    if (!parsed.success) return invalid()
+    keys.add(key.toLowerCase())
+    output[key] = parsed.data
+  }
+  return output
+})
+const modelPreferenceRuntimeByteLength = (json: string): number => {
+  const encoded = json.replace(/[<>&\u2028\u2029]/g, (value) =>
+    `\\u${value.charCodeAt(0).toString(16).padStart(4, '0')}`)
+  return new TextEncoder().encode(encoded).byteLength
+}
+const modelPreferencesSchema = z.array(z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,95}$/),
+  baseUrl: z.string().min(1).max(2048).refine((value) => {
+    if (hasModelPreferenceControls(value) || /[\s?#\\]/.test(value)) return false
+    try {
+      const url = new URL(value)
+      return ['http:', 'https:'].includes(url.protocol) && Boolean(url.host) &&
+        !url.username && !url.password && !url.search && !url.hash
+    } catch { return false }
+  }),
+  endpointFormat: modelEndpointFormatSchema,
+  modelProfiles: modelPreferenceRecordSchema
+}).strict()).max(128).refine((values) => new Set(values.map((value) => value.id)).size === values.length)
+  .refine((values) => modelPreferenceRuntimeByteLength(JSON.stringify({ providers: values
+    .filter((entry) => Object.keys(entry.modelProfiles).length > 0).map((entry) => ({
+    ...entry, modelProfiles: Object.fromEntries(Object.entries(entry.modelProfiles).map(([model, profile]) => [model, {
+      ...profile, ...(profile.reasoning === null ? { reasoning: {
+        supportedEfforts: ['off'], defaultEffort: 'off', requestProtocol: 'none'
+      } } : {})
+    }]))
+  })) })) <= 1_048_576)
+
 const modelProviderPatchSchema = z.object({
+  modelPreferences: modelPreferencesSchema.optional(),
   activeProviderId: z.string().trim().max(64).optional(),
   baseUrl: z.string().trim().max(MAX_URL_LENGTH).optional(),
   proxy: networkProxySchema.optional(),
@@ -662,6 +794,10 @@ const analytixRuntimePatchSchema = z.object({
     summaryTimeoutMs: z.number().int().positive().max(120_000).optional(),
     summaryMaxTokens: z.number().int().positive().max(16_000).optional(),
     summaryInputMaxBytes: z.number().int().positive().max(8 * 1024 * 1024).optional()
+  }).strict().optional(),
+  userInput: z.object({
+    policy: z.enum(['legacy', 'timed']),
+    defaultTimeoutSeconds: z.number().int().refine(value => value === -1 || value >= 1 && value <= 2147483).nullable().optional()
   }).strict().optional(),
   runtimeTuning: z.object({
     streamIdleTimeoutMs: z.number().int().min(0).max(3_600_000).optional(),
@@ -1026,15 +1162,26 @@ const scheduleInternalPatchSchema = z.object({
   secret: z.string().max(MAX_BODY_BYTES).optional()
 }).strict()
 
-const scheduledTaskSchedulePatchSchema = z.object({
-  kind: clawScheduleKindSchema.optional(),
+const scheduleKindSchema = z.enum(['manual', 'interval', 'daily', 'at', 'weekly', 'cron'])
+const scheduleRuleFields = {
+  kind: scheduleKindSchema,
   everyMinutes: z.number().int().min(1).max(10_080).optional(),
   timeOfDay: z.string().max(16).optional(),
-  atTime: z.string().max(128).optional()
-}).strict()
+  atTime: z.string().max(128).optional(),
+  timeZone: z.string().max(255).optional(),
+  weekdays: z.array(z.number().int().min(1).max(7)).max(7).optional(),
+  expression: z.string().max(512).optional()
+}
+const scheduleRuleCheck = (allowLegacyDaily: boolean) => (value: { kind?: unknown; timeOfDay?: unknown; timeZone?: unknown; weekdays?: unknown; expression?: unknown }, ctx: z.RefinementCtx) => {
+  try { validateScheduleCalendarRule(value, allowLegacyDaily) }
+  catch (error) { ctx.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid schedule rule.' }) }
+}
+const scheduledTaskSchedulePatchSchema = z.object(scheduleRuleFields).strict().superRefine(scheduleRuleCheck(false))
+const scheduledTaskScheduleExpectedSchema = z.object({ ...scheduleRuleFields,
+  everyMinutes: scheduleRuleFields.everyMinutes.unwrap(), timeOfDay: scheduleRuleFields.timeOfDay.unwrap(), atTime: scheduleRuleFields.atTime.unwrap()
+}).strict().superRefine(scheduleRuleCheck(true))
 
-const scheduledTaskPatchSchema = z.object({
-  id: z.string().max(MAX_ID_LENGTH).optional(),
+export const scheduleTaskEditPatchSchema = z.object({
   title: z.string().max(512).optional(),
   enabled: z.boolean().optional(),
   prompt: z.string().max(MAX_CHANNEL_TEXT_LENGTH).optional(),
@@ -1044,14 +1191,38 @@ const scheduledTaskPatchSchema = z.object({
   model: z.string().trim().min(1).max(128).optional(),
   reasoningEffort: scheduleReasoningEffortSchema.optional(),
   mode: clawRunModeSchema.optional(),
-  schedule: scheduledTaskSchedulePatchSchema.optional(),
-  createdAt: z.string().max(128).optional(),
-  updatedAt: z.string().max(128).optional(),
-  lastRunAt: z.string().max(128).optional(),
-  nextRunAt: z.string().max(128).optional(),
-  lastStatus: clawTaskStatusSchema.optional(),
-  lastMessage: z.string().max(MAX_CHANNEL_TEXT_LENGTH).optional(),
-  lastThreadId: z.string().max(MAX_ID_LENGTH).optional()
+  schedule: scheduledTaskSchedulePatchSchema.optional()
+}).strict()
+
+const scheduleTaskExpectedSchema = scheduleTaskEditPatchSchema.extend({
+  schedule: scheduledTaskScheduleExpectedSchema.optional()
+})
+
+export const scheduleTaskHistoryPayloadSchema = z.object({
+  taskId: trimmedString(MAX_ID_LENGTH), limit: z.literal(20), before: trimmedString(MAX_ID_LENGTH).optional()
+}).strict()
+
+export const scheduleTaskCreatePayloadSchema = scheduleTaskEditPatchSchema.extend({
+  title: z.string().trim().min(1).max(512),
+  prompt: z.string().max(MAX_CHANNEL_TEXT_LENGTH),
+  schedule: scheduledTaskSchedulePatchSchema
+})
+
+export const scheduleTaskUpdatePayloadSchema = z.object({
+  taskId: trimmedString(MAX_ID_LENGTH),
+  patch: scheduleTaskEditPatchSchema,
+  expected: scheduleTaskExpectedSchema
+}).strict().superRefine((request, ctx) => {
+  for (const field of scheduleTaskExpectedFields(request.patch)) {
+    if (!Object.prototype.hasOwnProperty.call(request.expected, field) || request.expected[field] === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['expected', field], message: 'Expected current editable value is required.' })
+    }
+  }
+})
+
+export const scheduleTaskDeletePayloadSchema = z.object({
+  taskId: trimmedString(MAX_ID_LENGTH),
+  expected: scheduleTaskExpectedSchema.required()
 }).strict()
 
 const scheduleSettingsPatchSchema = z.object({
@@ -1063,8 +1234,7 @@ const scheduleSettingsPatchSchema = z.object({
   promptPrefix: z.string().max(MAX_CHANNEL_TEXT_LENGTH).optional(),
   skills: scheduleSkillPatchSchema.optional(),
   keepAwake: z.boolean().optional(),
-  internal: scheduleInternalPatchSchema.optional(),
-  tasks: z.array(scheduledTaskPatchSchema).max(512).optional()
+  internal: scheduleInternalPatchSchema.optional()
 }).strict()
 
 function stripLegacySettingsPatchKeys(payload: unknown): unknown {
@@ -1090,6 +1260,7 @@ const settingsPatchObjectSchema = z.object({
   theme: themeSchema.optional(),
   uiFontScale: uiFontScaleSchema.optional(),
   motionPreference: motionPreferenceSchema.optional(),
+  performanceUsageMode: z.enum(['compact', 'detailed']).optional(),
   cursorSpotlight: z.boolean().optional(),
   provider: modelProviderPatchSchema.optional(),
   runtime: analytixRuntimePatchSchema.optional(),
@@ -1275,6 +1446,12 @@ export const workspaceFileTargetPayloadSchema = z
     column: z.number().int().positive().max(1_000_000).optional()
   })
   .strict()
+
+// Protected reads have identities only; the ordinary path request is unchanged.
+export const workspaceProtectedFileReadPayloadSchema = z.object({ protectedRead: toolResultLocalEffectRequestSchemaV1 }).strict()
+export const workspaceProtectedPresentFileReadPayloadSchema = z.object({ protectedPresent: toolResultLocalPresentFileRequestSchemaV1 }).strict()
+export const workspaceFileReadPayloadSchema = z.union([workspaceProtectedFileReadPayloadSchema, workspaceProtectedPresentFileReadPayloadSchema, workspaceFileTargetPayloadSchema])
+export const workspacePresentMediaReadPayloadSchema = z.union([workspaceProtectedPresentFileReadPayloadSchema, workspaceFileTargetPayloadSchema])
 
 export const localPdfTextTargetPayloadSchema = z
   .object({
@@ -1485,9 +1662,12 @@ export const writeInfographicPayloadSchema = z
 export const writePrototypeFilePayloadSchema = z
   .object({
     path: trimmedString(MAX_PATH_LENGTH),
-    workspaceRoot: trimmedString(MAX_PATH_LENGTH)
+    workspaceRoot: trimmedString(MAX_PATH_LENGTH),
+    mode: z.enum(['write-prototype', 'workspace-html']).optional()
   })
   .strict()
+
+export const writePrototypeRevokePayloadSchema = z.object({ grantId: z.string().regex(/^[a-f0-9]{48}$/) }).strict()
 
 export const speechTranscribePayloadSchema = z
   .object({
@@ -1519,6 +1699,15 @@ export const computerUsePermissionKindSchema = z.enum(['accessibility', 'screenR
 export const chromeBrowserUseExtensionPageTargetSchema = z.enum(['webstore', 'settings'])
 
 const RENDERER_LOG_EVENT_CODE_BY_CATEGORY: Readonly<Record<string, string>> = {
+  'sse-event-active': 'renderer_sse_event_active',
+  'sse-event-aborted': 'renderer_sse_event_aborted',
+  'sse-event-closed': 'renderer_sse_event_closed',
+  'sse-ack_false-active': 'renderer_sse_ack_false_active',
+  'sse-ack_false-aborted': 'renderer_sse_ack_false_aborted',
+  'sse-ack_false-closed': 'renderer_sse_ack_false_closed',
+  'sse-ack_transport-active': 'renderer_sse_ack_transport_active',
+  'sse-ack_transport-aborted': 'renderer_sse_ack_transport_aborted',
+  'sse-ack_transport-closed': 'renderer_sse_ack_transport_closed',
   approval: 'renderer_approval_failed',
   'create-thread': 'renderer_create_thread_failed',
   'git-checkpoint': 'renderer_git_checkpoint_failed',
@@ -1538,6 +1727,10 @@ export const logErrorPayloadSchema = z
   })
   .strict()
   .transform((payload) => {
+    if (payload.category.startsWith('sse-') &&
+        Object.prototype.hasOwnProperty.call(RENDERER_LOG_EVENT_CODE_BY_CATEGORY, payload.category)) {
+      return { code: RENDERER_LOG_EVENT_CODE_BY_CATEGORY[payload.category] }
+    }
     const inputDetail = payload.detail && typeof payload.detail === 'object' && !Array.isArray(payload.detail)
       ? payload.detail as Record<string, unknown>
       : {}
@@ -1619,9 +1812,13 @@ export const sseStartPayloadSchema = z
   .object({
     threadId: trimmedString(MAX_ID_LENGTH),
     sinceSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    streamId: optionalTrimmedString(MAX_ID_LENGTH)
+    streamId: optionalTrimmedString(MAX_ID_LENGTH),
+    replayThroughSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
   })
   .strict()
+  .refine(value => value.replayThroughSeq === undefined || value.replayThroughSeq >= value.sinceSeq, {
+    message: 'Replay boundary precedes its cursor.'
+  })
 
 export const streamIdSchema = trimmedString(MAX_ID_LENGTH)
 

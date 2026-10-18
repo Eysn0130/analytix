@@ -138,6 +138,7 @@ function MountedTableModal({ labels, table, controls, feedback, opener, onClose 
 }) {
   const ref = useModalFocus(onClose, true, true, opener), titleId = useId()
   return createPortal(<div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+    data-analytix-main-chat-table={opener?.isConnected && opener.closest('.ds-chat-stage [data-analytix-message-timeline-content]') ? 'true' : undefined}
     className={`${css.tableModal} ${css.markdown} ds-assistant-markdown`} onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
     <section className={css.tableModalPanel}>
       <header className={css.tableModalHeader}><h2 id={titleId}>{labels.title}</h2>
@@ -153,12 +154,12 @@ function MountedTableModal({ labels, table, controls, feedback, opener, onClose 
 export function MarkdownTable({ data, table, labels, wide, busy }: {
   data: MarkdownTableData; table: ReactElement; labels: MarkdownTableLabels; wide: boolean; busy: boolean
 }) {
-  const [fullscreen, setFullscreen] = useState(false), [copied, setCopied] = useState(false)
+  const [opener, setOpener] = useState<HTMLButtonElement | null>(null), [copied, setCopied] = useState(false)
   const [pending, setPending] = useState(false), [feedback, setFeedback] = useState('')
-  const opener = useRef<HTMLButtonElement | null>(null)
+  const fullscreen = opener !== null
   const revision = JSON.stringify(data), generation = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    generation.current += 1; setCopied(false); setPending(false); setFeedback(''); setFullscreen(false)
+    generation.current += 1; setCopied(false); setPending(false); setFeedback(''); setOpener(null)
     if (timer.current !== null) clearTimeout(timer.current)
     return () => { generation.current += 1; if (timer.current !== null) clearTimeout(timer.current) }
   }, [revision, busy])
@@ -183,10 +184,10 @@ export function MarkdownTable({ data, table, labels, wide, busy }: {
     onCopy: format => { void copy(format) }, onDownload: download }
   return <div className={css.tableBlock} data-markdown-table>
     <div inert={fullscreen}>
-      <TableControls {...controls} onFullscreen={button => { opener.current = button; setFullscreen(true) }} />
+      <TableControls {...controls} onFullscreen={setOpener} />
       <div className={`${css.tableScroll} ${wide ? 'md-table-wide' : css.tableFill}`} tabIndex={0} aria-label={labels.title}>{table}</div>
       <span role="status" className="sr-only">{feedback}</span>
     </div>
-    {fullscreen && <MountedTableModal labels={labels} table={table} controls={controls} feedback={feedback} opener={opener.current} onClose={() => setFullscreen(false)} />}
+    {fullscreen && <MountedTableModal labels={labels} table={table} controls={controls} feedback={feedback} opener={opener} onClose={() => setOpener(null)} />}
   </div>
 }

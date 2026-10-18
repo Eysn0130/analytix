@@ -31,6 +31,8 @@ type FinalizeAfterLoopInput struct {
 	ChildRunID      string
 	TerminalReason  string
 	OrdinaryResult  *domainordinaryresult.ResultSlotV1
+	EndReason       *domainterminal.EndReason
+	EmptyOutputCap  bool
 }
 
 type CommitCompletionInput struct {
@@ -46,6 +48,8 @@ type CommitCompletionInput struct {
 	ChildRunID      string
 	TerminalReason  string
 	OrdinaryResult  *domainordinaryresult.ResultSlotV1
+	EndReason       *domainterminal.EndReason
+	EmptyOutputCap  bool
 }
 
 type CommitCompletionResult struct {
@@ -78,6 +82,16 @@ func CommitCompletedTurn(input CommitCompletionInput) (CommitCompletionResult, e
 		input.SecurityContext.ThreadID != strings.TrimSpace(input.ThreadID) || input.SecurityContext.TurnID != strings.TrimSpace(input.TurnID) {
 		return CommitCompletionResult{}, errors.New("general completion security context is invalid")
 	}
+	if domainterminal.ValidateEndReason(input.EndReason) != nil ||
+		(input.EmptyOutputCap && (input.EndReason == nil || input.OrdinaryResult != nil)) {
+		return CommitCompletionResult{}, errors.New("completion output-cap metadata is invalid")
+	}
+	if !input.EmptyOutputCap && input.OrdinaryResult == nil {
+		input.EndReason = nil
+	}
+	if input.OrdinaryResult != nil && input.OrdinaryResult.CandidateOrigin == domainordinaryresult.ResultSlotOriginHostFixedV1 {
+		input.EndReason = nil
+	}
 	finishedAt := strings.TrimSpace(input.FinishedAt)
 	if finishedAt == "" {
 		finishedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -87,6 +101,9 @@ func CommitCompletedTurn(input CommitCompletionInput) (CommitCompletionResult, e
 		createdAt = finishedAt
 	}
 	publishedText := GeneralProviderFinalQuarantinedText
+	if input.EmptyOutputCap {
+		publishedText = ""
+	}
 	if input.OrdinaryResult != nil {
 		if domainordinaryresult.ValidateResultSlotV1(*input.OrdinaryResult) != nil {
 			return CommitCompletionResult{}, errors.New("general completion ordinary result is invalid")
@@ -96,7 +113,7 @@ func CommitCompletedTurn(input CommitCompletionInput) (CommitCompletionResult, e
 	record := BuildCompletionRecord(CompletionRecordInput{
 		ThreadID: input.ThreadID, TurnID: input.TurnID, Model: input.Model, AssistantText: publishedText,
 		CreatedAt: createdAt, FinishedAt: finishedAt, Usage: input.Telemetry.PublicUsageMap(),
-		CacheDiagnostics: input.Telemetry.PublicCacheDiagnosticsMap(), UsageSource: input.UsageSource, ChildRunID: input.ChildRunID,
+		CacheDiagnostics: input.Telemetry.PublicCacheDiagnosticsMap(), UsageSource: input.UsageSource, ChildRunID: input.ChildRunID, EndReason: input.EndReason,
 	})
 	if input.OrdinaryResult != nil {
 		record.AssistantItem["ordinaryResult"] = domainordinaryresult.ResultSlotV1Map(*input.OrdinaryResult)
@@ -108,14 +125,24 @@ func CommitCompletedTurn(input CommitCompletionInput) (CommitCompletionResult, e
 		return CommitCompletionResult{}, err
 	}
 	bindingRecord := domainturnterminal.GeneralTerminalCASBindingV1Map(binding)
-	record.AssistantItem["generalTerminalCASBinding"] = bindingRecord
-	record.ItemCompletedEvent = AssistantItemCompletedEvent(record.AssistantItem)
-	record.ItemCompletedEvent["timestamp"] = finishedAt
+	if input.EmptyOutputCap {
+		record.AssistantItem = nil
+		record.ItemCompletedEvent = nil
+	} else {
+		record.AssistantItem["generalTerminalCASBinding"] = bindingRecord
+	}
+	if record.AssistantItem != nil {
+		record.ItemCompletedEvent = AssistantItemCompletedEvent(record.AssistantItem)
+		record.ItemCompletedEvent["timestamp"] = finishedAt
+	}
 	record.UsageEvent["timestamp"] = finishedAt
 	record.TurnCompletedEvent["timestamp"] = finishedAt
 	record.TurnCompletedEvent["generalTerminalCASBindingDigest"] = binding.BindingDigest
 	record.TurnCompletedEvent["terminalReason"] = binding.TerminalReason
-	items := []map[string]any{record.AssistantItem}
+	items := []map[string]any{}
+	if record.AssistantItem != nil {
+		items = append(items, record.AssistantItem)
+	}
 	publication, err := BuildGeneralTerminalPublicationCommitV1(
 		input.SecurityContext, binding, record, finishedAt, len(items) > 0,
 	)
@@ -170,6 +197,7 @@ func FinalizeAfterLoop(input FinalizeAfterLoopInput) error {
 		ChildRunID:      input.ChildRunID,
 		TerminalReason:  input.TerminalReason,
 		OrdinaryResult:  input.OrdinaryResult,
+		EndReason:       input.EndReason, EmptyOutputCap: input.EmptyOutputCap,
 	})
 	if err != nil {
 		return err

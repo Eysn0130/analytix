@@ -26,9 +26,23 @@ func TestVersionBoundaryCompatibility(t *testing.T) {
 			t.Errorf("version boundary changed: %v -> %d; want %d", tc.input, got, tc.want)
 		}
 	}
-	for _, input := range []any{nil, math.Inf(-1), math.Nextafter(float64(math.MinInt), math.Inf(-1)), json.Number("1")} {
+	for _, input := range []any{nil, math.Inf(-1), math.Nextafter(float64(math.MinInt), math.Inf(-1))} {
 		if got := generalCompactionNumeric(input); got != -1 {
 			t.Errorf("invalid/unsupported version accepted: %v", input)
+		}
+	}
+}
+
+func TestCompactionStrictJSONNumbers(t *testing.T) {
+	for _, value := range []json.Number{"1", "3", "5", "9007199254740993"} {
+		parsed, err := value.Int64()
+		if err == nil && parsed <= math.MaxInt && generalCompactionNumeric(value) != int(parsed) {
+			t.Errorf("integer rejected: %s", value)
+		}
+	}
+	for _, value := range []json.Number{"", "garbage", "1.5", "1.0", "1e3", "NaN", "Inf", "-1", "-0", "9223372036854775808"} {
+		if generalCompactionNumeric(value) != -1 {
+			t.Errorf("invalid compaction number accepted: %s", value)
 		}
 	}
 }

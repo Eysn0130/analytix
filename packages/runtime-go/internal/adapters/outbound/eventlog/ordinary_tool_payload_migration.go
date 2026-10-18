@@ -210,6 +210,10 @@ func MigrateSemanticStartupContent(input SemanticStartupContentMigrationInput) e
 	if err := preflightSemanticStartupCurrentAuthorityV1(input.Root); err != nil {
 		return err
 	}
+	forkSeeds, err := readLegacyForkHistorySeedsV1(input.Root, input.RestartPreservation)
+	if err != nil {
+		return err
+	}
 	if err := MigrateDerivedExecutionAuthority(DerivedExecutionAuthorityMigrationInput{Root: input.Root, RestartPreservation: input.RestartPreservation}); err != nil {
 		return err
 	}
@@ -219,7 +223,7 @@ func MigrateSemanticStartupContent(input SemanticStartupContentMigrationInput) e
 	if err := MigrateOrdinaryToolPayloads(OrdinaryToolPayloadMigrationInput{Root: input.Root, ThreadSummaryIndexPath: input.ThreadSummaryIndexPath, RestartPreservation: input.RestartPreservation}); err != nil {
 		return err
 	}
-	if err := MigrateLegacyOrdinaryProjectionClosure(LegacyOrdinaryProjectionClosureInput{Root: input.Root, RestartPreservation: input.RestartPreservation}); err != nil {
+	if err := MigrateLegacyOrdinaryProjectionClosure(LegacyOrdinaryProjectionClosureInput{Root: input.Root, RestartPreservation: input.RestartPreservation, forkSeeds: forkSeeds}); err != nil {
 		return err
 	}
 	if err := migrateLegacyEventSequenceOrderV1(legacyEventSequenceMigrationInput{Root: input.Root, RestartPreservation: input.RestartPreservation}); err != nil {

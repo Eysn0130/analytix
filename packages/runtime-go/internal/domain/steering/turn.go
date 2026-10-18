@@ -13,10 +13,12 @@ var ErrTurnNotFound = errors.New("turn not found")
 var ErrTurnInactive = errors.New("turn is not running")
 var ErrTurnNotLatest = errors.New("turn is not the active latest turn")
 var ErrContextMismatch = errors.New("expected context digest does not match active turn")
+var ErrEntryPromoted = errors.New("steering entry was already promoted")
 var ErrPendingPrefixMismatch = errors.New("expected steering prefix does not match current pending entries")
 
 type AuthorityVerifierV1 func(map[string]any, string) error
 type AuthorityPromoterV1 func(map[string]any, string) (map[string]any, error)
+type AuthorityCancellerV1 func(map[string]any, string) (map[string]any, error)
 
 // PendingEntryExpectationV1 is the immutable CAS input for one pending entry.
 // The pair is sufficient because the host-signed content digest binds every
@@ -290,6 +292,13 @@ func PendingEntriesFromTurnV1(
 				return nil, ErrIdentityConflict
 			}
 			pending = append(pending, cloneSteeringMapV1(entry))
+		case "cancelled":
+			if ValidateCancelledUserInputEntryForContextV1(entry, contextDigest) != nil || verify(entry, contextDigest) != nil {
+				return nil, ErrProjectionInvalid
+			}
+			if itemByID[entryID] != nil || itemByID[clientID] != nil {
+				return nil, ErrIdentityConflict
+			}
 		case "promoted":
 			item, found := itemByID[entryID]
 			if !found || verify(entry, contextDigest) != nil ||
@@ -339,4 +348,45 @@ func cloneSteeringValueV1(value any) any {
 func steeringListV1(value any) []any {
 	values, _ := value.([]any)
 	return values
+}
+
+// CancelUserInputEntryInTurnV1 cancels exactly one signed admission. Callers
+// serialize this CAS with promotion; an accepted item is never withdrawn.
+func CancelUserInputEntryInTurnV1(threadID, turnID string, turn map[string]any, expected PendingEntryExpectationV1, sourceInputID, captureReceiptID, contextDigest, cancelledAt string, verify AuthorityVerifierV1, cancel AuthorityCancellerV1) (map[string]any, map[string]any, bool, error) {
+	if _, err := PendingEntriesFromTurnV1(threadID, turnID, turn, contextDigest, verify); err != nil {
+		return nil, nil, false, err
+	}
+	if expected.ID == "" || !domainsecurity.IsSHA256Hex(expected.ContentDigest) || sourceInputID == "" || !domainsecurity.IsSHA256Hex(captureReceiptID) || cancel == nil {
+		return nil, nil, false, ErrProjectionInvalid
+	}
+	for index, raw := range steeringListV1(turn["steering"]) {
+		entry, _ := raw.(map[string]any)
+		if stringField(entry, "id") != expected.ID {
+			continue
+		}
+		if stringField(entry, "contentDigest") != expected.ContentDigest || stringField(entry, "userInputId") != sourceInputID || stringField(entry, "userInputCaptureReceiptId") != captureReceiptID {
+			return nil, nil, false, ErrReplayMismatch
+		}
+		switch stringField(entry, "status") {
+		case "promoted":
+			return nil, nil, false, ErrEntryPromoted
+		case "cancelled":
+			return cloneSteeringMapV1(turn), cloneSteeringMapV1(entry), false, nil
+		case "pending":
+			cancelled := cloneSteeringMapV1(entry)
+			cancelled["status"] = "cancelled"
+			cancelled["cancelledAt"] = cancelledAt
+			cancelled["cancelReason"] = UserInputDiscardReasonV1
+			sealed, err := cancel(cancelled, contextDigest)
+			if err != nil || ValidateCancelledUserInputEntryForContextV1(sealed, contextDigest) != nil || verify(sealed, contextDigest) != nil {
+				return nil, nil, false, ErrProjectionInvalid
+			}
+			updated := cloneSteeringMapV1(turn)
+			entries := append([]any(nil), steeringListV1(updated["steering"])...)
+			entries[index] = sealed
+			updated["steering"] = entries
+			return updated, cloneSteeringMapV1(sealed), true, nil
+		}
+	}
+	return nil, nil, false, ErrIdentityConflict
 }

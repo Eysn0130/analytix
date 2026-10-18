@@ -392,7 +392,7 @@ type G5DesktopSovereigntyCase struct {
 	RendererProviderEndpointMatrix     G5RendererProviderEndpointMatrix    `json:"rendererProviderEndpointMatrix"`
 	RendererProviderAliasGuardMatrix   G5RendererProviderAliasGuardMatrix  `json:"rendererProviderAliasGuardMatrix"`
 	RendererProviderFacadeSealMatrix   G5RendererProviderFacadeSealMatrix  `json:"rendererProviderFacadeSealMatrix"`
-	SideConversationRelationMatrix     G5SideConversationRelationMatrix    `json:"sideConversationRelationContractMatrix"`
+	SideConversationPromotionMatrix    G5SideConversationPromotionMatrix   `json:"sideConversationPromotionContractMatrix"`
 	RendererUsageRuntimeClientMatrix   G5RendererUsageRuntimeClientMatrix  `json:"rendererUsageRuntimeClientFacadeMatrix"`
 	RendererSettingsReadFacadeMatrix   G5RendererSettingsReadFacadeMatrix  `json:"rendererSettingsReadFacadeMatrix"`
 	PreloadRuntimeRequestBridgeMatrix  G5PreloadRuntimeRequestBridgeMatrix `json:"preloadRuntimeRequestBridgeMatrix"`
@@ -423,10 +423,8 @@ type G5DesktopSovereigntySourceFiles struct {
 	RendererModelUsage        string `json:"rendererModelUsage"`
 	RendererModelUsageTest    string `json:"rendererModelUsageTest"`
 	RendererSettingsAgents    string `json:"rendererSettingsAgents"`
-	RendererLlmDebug          string `json:"rendererLlmDebug"`
 	RendererKeyboardSettings  string `json:"rendererKeyboardShortcutSettings"`
 	RendererVoiceDictation    string `json:"rendererVoiceDictation"`
-	RendererInitialUsage      string `json:"rendererInitialUsageHeatmap"`
 	PreloadRuntimeRequestTest string `json:"preloadRuntimeRequestTest"`
 	PreloadSseBridgeTest      string `json:"preloadSseBridgeTest"`
 }
@@ -466,15 +464,15 @@ type G5DesktopSovereigntyOutput struct {
 	RendererProviderFacadeSealUsesRuntimeClient           bool `json:"rendererProviderFacadeSealUsesRuntimeClient"`
 	RendererProviderFacadeSealRejectsDirectBridge         bool `json:"rendererProviderFacadeSealRejectsDirectBridge"`
 	RendererProviderFacadeSealCoversArchiveRestore        bool `json:"rendererProviderFacadeSealCoversArchiveRestore"`
-	RendererProviderFacadeSealCoversRelationPatch         bool `json:"rendererProviderFacadeSealCoversRelationPatch"`
+	RendererProviderFacadeSealCoversSidePromotion         bool `json:"rendererProviderFacadeSealCoversSidePromotion"`
 	RendererProviderFacadeSealScanGuardPresent            bool `json:"rendererProviderFacadeSealScanGuardPresent"`
 	RendererProviderFacadeSealUnitEvidencePresent         bool `json:"rendererProviderFacadeSealUnitEvidencePresent"`
-	SideConversationRelationContractOptionalProvider      bool `json:"sideConversationRelationContractOptionalProvider"`
-	SideConversationRelationPromotesThroughProvider       bool `json:"sideConversationRelationPromotesThroughProvider"`
-	SideConversationRelationRefreshesAndCloses            bool `json:"sideConversationRelationRefreshesAndCloses"`
-	SideConversationRelationRejectsDirectBridge           bool `json:"sideConversationRelationRejectsDirectBridge"`
-	SideConversationRelationScanGuardPresent              bool `json:"sideConversationRelationScanGuardPresent"`
-	SideConversationRelationUnitEvidencePresent           bool `json:"sideConversationRelationUnitEvidencePresent"`
+	SideConversationPromotionContractOptionalProvider     bool `json:"sideConversationPromotionContractOptionalProvider"`
+	SideConversationPromotionPromotesThroughProvider      bool `json:"sideConversationPromotionPromotesThroughProvider"`
+	SideConversationPromotionReadsBackAndCloses           bool `json:"sideConversationPromotionReadsBackAndCloses"`
+	SideConversationPromotionRejectsDirectBridge          bool `json:"sideConversationPromotionRejectsDirectBridge"`
+	SideConversationPromotionScanGuardPresent             bool `json:"sideConversationPromotionScanGuardPresent"`
+	SideConversationPromotionUnitEvidencePresent          bool `json:"sideConversationPromotionUnitEvidencePresent"`
 	RendererUsageRuntimeClientCoversThreadUsage           bool `json:"rendererUsageRuntimeClientCoversThreadUsage"`
 	RendererUsageRuntimeClientCoversDailyUsage            bool `json:"rendererUsageRuntimeClientCoversDailyUsage"`
 	RendererUsageRuntimeClientCoversModelUsage            bool `json:"rendererUsageRuntimeClientCoversModelUsage"`
@@ -484,7 +482,6 @@ type G5DesktopSovereigntyOutput struct {
 	RendererUsageRuntimeClientUnitEvidencePresent         bool `json:"rendererUsageRuntimeClientUnitEvidencePresent"`
 	RendererSettingsReadFacadeCoversKeyboardShortcuts     bool `json:"rendererSettingsReadFacadeCoversKeyboardShortcuts"`
 	RendererSettingsReadFacadeCoversSpeechToText          bool `json:"rendererSettingsReadFacadeCoversSpeechToText"`
-	RendererSettingsReadFacadeCoversUsageModelLabel       bool `json:"rendererSettingsReadFacadeCoversUsageModelLabel"`
 	RendererSettingsReadFacadePreservesSettingsEvent      bool `json:"rendererSettingsReadFacadePreservesSettingsChangedEvent"`
 	RendererSettingsReadFacadeRejectsDirectBridge         bool `json:"rendererSettingsReadFacadeRejectsDirectBridge"`
 	RendererSettingsReadFacadeScanGuardPresent            bool `json:"rendererSettingsReadFacadeScanGuardPresent"`
@@ -640,20 +637,22 @@ type G5RendererProviderFacadeSealMatrix struct {
 	SourceUsesRuntimeClient             bool     `json:"sourceUsesRuntimeClient"`
 	SourceRejectsDirectBridgeBypass     bool     `json:"sourceRejectsDirectBridgeBypass"`
 	ArchiveRestoreSourceEvidencePresent bool     `json:"archiveRestoreSourceEvidencePresent"`
-	RelationSourceEvidencePresent       bool     `json:"relationSourceEvidencePresent"`
+	PromotionSourceEvidencePresent      bool     `json:"promotionSourceEvidencePresent"`
 	LifecycleUnitEvidencePresent        bool     `json:"lifecycleUnitEvidencePresent"`
 	ScanGuardPresent                    bool     `json:"scanGuardPresent"`
 	ProviderFacadeTokenScanPresent      bool     `json:"providerFacadeTokenScanPresent"`
 }
 
-type G5SideConversationRelationMatrix struct {
+type G5SideConversationPromotionMatrix struct {
 	ProviderMethod                          string `json:"providerMethod"`
 	StoreAction                             string `json:"storeAction"`
 	Relation                                string `json:"relation"`
+	SoleIntent                              bool   `json:"soleIntent"`
+	LineagePreserved                        bool   `json:"lineagePreserved"`
 	ProviderContractOptional                bool   `json:"providerContractOptional"`
 	ProviderImplementationUsesRuntimeClient bool   `json:"providerImplementationUsesRuntimeClient"`
 	StoreUsesProviderContract               bool   `json:"storeUsesProviderContract"`
-	StoreRefreshesAndCloses                 bool   `json:"storeRefreshesAndCloses"`
+	StoreVerifiesReadbackAndCloses          bool   `json:"storeVerifiesReadbackAndCloses"`
 	StoreRejectsDirectRuntimeBridge         bool   `json:"storeRejectsDirectRuntimeBridge"`
 	UnitEvidencePresent                     bool   `json:"unitEvidencePresent"`
 	ScanGuardPresent                        bool   `json:"scanGuardPresent"`
@@ -668,7 +667,6 @@ type G5RendererUsageRuntimeClientMatrix struct {
 	DailyUsageSourceUsesRuntimeClient   bool     `json:"dailyUsageSourceUsesRuntimeClient"`
 	ModelUsageSourceUsesRuntimeClient   bool     `json:"modelUsageSourceUsesRuntimeClient"`
 	TokenEconomySourceUsesRuntimeClient bool     `json:"tokenEconomySourceUsesRuntimeClient"`
-	LlmDebugSourceUsesRuntimeClient     bool     `json:"llmDebugSourceUsesRuntimeClient"`
 	SourceRejectsDirectBridgeBypass     bool     `json:"sourceRejectsDirectBridgeBypass"`
 	UsageUnitEvidencePresent            bool     `json:"usageUnitEvidencePresent"`
 	ScanGuardPresent                    bool     `json:"scanGuardPresent"`
@@ -681,7 +679,6 @@ type G5RendererSettingsReadFacadeMatrix struct {
 	SettingsReaders                          []string `json:"settingsReaders"`
 	KeyboardShortcutSourceUsesSettingsClient bool     `json:"keyboardShortcutSourceUsesSettingsClient"`
 	SpeechToTextSourceUsesSettingsClient     bool     `json:"speechToTextSourceUsesSettingsClient"`
-	UsageHeatmapSourceUsesSettingsClient     bool     `json:"usageHeatmapSourceUsesSettingsClient"`
 	SettingsChangedEventPreserved            bool     `json:"settingsChangedEventPreserved"`
 	SourceRejectsDirectSettingsBypass        bool     `json:"sourceRejectsDirectSettingsBypass"`
 	ScanGuardPresent                         bool     `json:"scanGuardPresent"`
@@ -3027,8 +3024,8 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 		input.RendererProviderFacadeSealMatrix.ArchiveRestoreSourceEvidencePresent &&
 			input.RendererProviderFacadeSealMatrix.LifecycleUnitEvidencePresent &&
 			stringInSlice("renderer-provider-facade-lifecycle-evidence", input.EvidenceIDs)
-	rendererProviderFacadeSealCoversRelationPatch :=
-		input.RendererProviderFacadeSealMatrix.RelationSourceEvidencePresent &&
+	rendererProviderFacadeSealCoversSidePromotion :=
+		input.RendererProviderFacadeSealMatrix.PromotionSourceEvidencePresent &&
 			input.RendererProviderFacadeSealMatrix.LifecycleUnitEvidencePresent &&
 			stringInSlice("renderer-provider-facade-lifecycle-evidence", input.EvidenceIDs)
 	rendererProviderFacadeSealScanGuardPresent :=
@@ -3037,38 +3034,40 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 			stringInSlice("renderer-provider-direct-bypass-scan-evidence", input.EvidenceIDs)
 	rendererProviderFacadeSealUnitEvidencePresent :=
 		len(input.RendererProviderFacadeSealMatrix.SealedMethods) == 2 &&
-			allStringInSlice([]string{"archiveThread", "updateThreadRelation"}, input.RendererProviderFacadeSealMatrix.SealedMethods) &&
+			allStringInSlice([]string{"archiveThread", "promoteSideThread"}, input.RendererProviderFacadeSealMatrix.SealedMethods) &&
 			rendererProviderFacadeSealUsesRuntimeClient &&
 			rendererProviderFacadeSealRejectsDirectBridge &&
 			rendererProviderFacadeSealCoversArchiveRestore &&
-			rendererProviderFacadeSealCoversRelationPatch &&
+			rendererProviderFacadeSealCoversSidePromotion &&
 			rendererProviderFacadeSealScanGuardPresent
-	sideConversationRelationContractOptionalProvider :=
-		input.SideConversationRelationMatrix.ProviderMethod == "updateThreadRelation" &&
-			input.SideConversationRelationMatrix.ProviderContractOptional &&
-			input.SideConversationRelationMatrix.ProviderImplementationUsesRuntimeClient &&
-			stringInSlice("side-conversation-relation-provider-contract", input.EvidenceIDs)
-	sideConversationRelationPromotesThroughProvider :=
-		input.SideConversationRelationMatrix.StoreAction == "promoteSideConversation" &&
-			input.SideConversationRelationMatrix.Relation == "primary" &&
-			input.SideConversationRelationMatrix.StoreUsesProviderContract &&
-			stringInSlice("side-conversation-relation-store-evidence", input.EvidenceIDs)
-	sideConversationRelationRefreshesAndCloses :=
-		input.SideConversationRelationMatrix.StoreRefreshesAndCloses &&
-			stringInSlice("side-conversation-relation-store-evidence", input.EvidenceIDs)
-	sideConversationRelationRejectsDirectBridge :=
-		input.SideConversationRelationMatrix.StoreRejectsDirectRuntimeBridge &&
+	sideConversationPromotionContractOptionalProvider :=
+		input.SideConversationPromotionMatrix.ProviderMethod == "promoteSideThread" &&
+			input.SideConversationPromotionMatrix.ProviderContractOptional &&
+			input.SideConversationPromotionMatrix.ProviderImplementationUsesRuntimeClient &&
+			stringInSlice("side-conversation-promotion-provider-contract", input.EvidenceIDs)
+	sideConversationPromotionPromotesThroughProvider :=
+		input.SideConversationPromotionMatrix.StoreAction == "promoteSideConversation" &&
+			input.SideConversationPromotionMatrix.Relation == "fork" &&
+			input.SideConversationPromotionMatrix.SoleIntent &&
+			input.SideConversationPromotionMatrix.LineagePreserved &&
+			input.SideConversationPromotionMatrix.StoreUsesProviderContract &&
+			stringInSlice("side-conversation-promotion-store-evidence", input.EvidenceIDs)
+	sideConversationPromotionReadsBackAndCloses :=
+		input.SideConversationPromotionMatrix.StoreVerifiesReadbackAndCloses &&
+			stringInSlice("side-conversation-promotion-store-evidence", input.EvidenceIDs)
+	sideConversationPromotionRejectsDirectBridge :=
+		input.SideConversationPromotionMatrix.StoreRejectsDirectRuntimeBridge &&
 			stringInSlice("side-conversation-direct-bypass-scan-evidence", input.EvidenceIDs)
-	sideConversationRelationScanGuardPresent :=
-		input.SideConversationRelationMatrix.ScanGuardPresent &&
+	sideConversationPromotionScanGuardPresent :=
+		input.SideConversationPromotionMatrix.ScanGuardPresent &&
 			stringInSlice("side-conversation-direct-bypass-scan-evidence", input.EvidenceIDs)
-	sideConversationRelationUnitEvidencePresent :=
-		input.SideConversationRelationMatrix.UnitEvidencePresent &&
-			sideConversationRelationContractOptionalProvider &&
-			sideConversationRelationPromotesThroughProvider &&
-			sideConversationRelationRefreshesAndCloses &&
-			sideConversationRelationRejectsDirectBridge &&
-			sideConversationRelationScanGuardPresent
+	sideConversationPromotionUnitEvidencePresent :=
+		input.SideConversationPromotionMatrix.UnitEvidencePresent &&
+			sideConversationPromotionContractOptionalProvider &&
+			sideConversationPromotionPromotesThroughProvider &&
+			sideConversationPromotionReadsBackAndCloses &&
+			sideConversationPromotionRejectsDirectBridge &&
+			sideConversationPromotionScanGuardPresent
 	rendererUsageRuntimeClientCoversThreadUsage :=
 		input.RendererUsageRuntimeClientMatrix.Facade == "rendererRuntimeClient.runtimeRequest" &&
 			stringInSlice("loadThreadUsage", input.RendererUsageRuntimeClientMatrix.UsageLoaders) &&
@@ -3092,9 +3091,7 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 			stringInSlice("renderer-usage-runtime-client-unit-evidence", input.EvidenceIDs)
 	rendererUsageRuntimeClientCoversSettingsDiagnostics :=
 		stringInSlice("loadTokenEconomySavingsSummary", input.RendererUsageRuntimeClientMatrix.DiagnosticsLoaders) &&
-			stringInSlice("LlmDebugSettingsSection", input.RendererUsageRuntimeClientMatrix.DiagnosticsLoaders) &&
 			input.RendererUsageRuntimeClientMatrix.TokenEconomySourceUsesRuntimeClient &&
-			input.RendererUsageRuntimeClientMatrix.LlmDebugSourceUsesRuntimeClient &&
 			stringInSlice("renderer-usage-runtime-client-settings-diagnostics-evidence", input.EvidenceIDs)
 	rendererUsageRuntimeClientRejectsDirectBridge :=
 		input.RendererUsageRuntimeClientMatrix.ForbiddenDirectBridge == "window.analytix.runtime.runtimeRequest" &&
@@ -3121,11 +3118,6 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 		input.RendererSettingsReadFacadeMatrix.Facade == "rendererRuntimeClient.getSettings" &&
 			stringInSlice("useSpeechToTextEnabled", input.RendererSettingsReadFacadeMatrix.SettingsReaders) &&
 			input.RendererSettingsReadFacadeMatrix.SpeechToTextSourceUsesSettingsClient &&
-			stringInSlice("renderer-settings-read-facade-source-evidence", input.EvidenceIDs)
-	rendererSettingsReadFacadeCoversUsageModelLabel :=
-		input.RendererSettingsReadFacadeMatrix.Facade == "rendererRuntimeClient.getSettings" &&
-			stringInSlice("InitialSessionUsageHeatmapView", input.RendererSettingsReadFacadeMatrix.SettingsReaders) &&
-			input.RendererSettingsReadFacadeMatrix.UsageHeatmapSourceUsesSettingsClient &&
 			stringInSlice("renderer-settings-read-facade-source-evidence", input.EvidenceIDs)
 	rendererSettingsReadFacadePreservesSettingsChangedEvent :=
 		input.RendererSettingsReadFacadeMatrix.SettingsChangedEventPreserved &&
@@ -3229,15 +3221,15 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 		RendererProviderFacadeSealUsesRuntimeClient:           rendererProviderFacadeSealUsesRuntimeClient,
 		RendererProviderFacadeSealRejectsDirectBridge:         rendererProviderFacadeSealRejectsDirectBridge,
 		RendererProviderFacadeSealCoversArchiveRestore:        rendererProviderFacadeSealCoversArchiveRestore,
-		RendererProviderFacadeSealCoversRelationPatch:         rendererProviderFacadeSealCoversRelationPatch,
+		RendererProviderFacadeSealCoversSidePromotion:         rendererProviderFacadeSealCoversSidePromotion,
 		RendererProviderFacadeSealScanGuardPresent:            rendererProviderFacadeSealScanGuardPresent,
 		RendererProviderFacadeSealUnitEvidencePresent:         rendererProviderFacadeSealUnitEvidencePresent,
-		SideConversationRelationContractOptionalProvider:      sideConversationRelationContractOptionalProvider,
-		SideConversationRelationPromotesThroughProvider:       sideConversationRelationPromotesThroughProvider,
-		SideConversationRelationRefreshesAndCloses:            sideConversationRelationRefreshesAndCloses,
-		SideConversationRelationRejectsDirectBridge:           sideConversationRelationRejectsDirectBridge,
-		SideConversationRelationScanGuardPresent:              sideConversationRelationScanGuardPresent,
-		SideConversationRelationUnitEvidencePresent:           sideConversationRelationUnitEvidencePresent,
+		SideConversationPromotionContractOptionalProvider:     sideConversationPromotionContractOptionalProvider,
+		SideConversationPromotionPromotesThroughProvider:      sideConversationPromotionPromotesThroughProvider,
+		SideConversationPromotionReadsBackAndCloses:           sideConversationPromotionReadsBackAndCloses,
+		SideConversationPromotionRejectsDirectBridge:          sideConversationPromotionRejectsDirectBridge,
+		SideConversationPromotionScanGuardPresent:             sideConversationPromotionScanGuardPresent,
+		SideConversationPromotionUnitEvidencePresent:          sideConversationPromotionUnitEvidencePresent,
 		RendererUsageRuntimeClientCoversThreadUsage:           rendererUsageRuntimeClientCoversThreadUsage,
 		RendererUsageRuntimeClientCoversDailyUsage:            rendererUsageRuntimeClientCoversDailyUsage,
 		RendererUsageRuntimeClientCoversModelUsage:            rendererUsageRuntimeClientCoversModelUsage,
@@ -3247,7 +3239,6 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 		RendererUsageRuntimeClientUnitEvidencePresent:         rendererUsageRuntimeClientUnitEvidencePresent,
 		RendererSettingsReadFacadeCoversKeyboardShortcuts:     rendererSettingsReadFacadeCoversKeyboardShortcuts,
 		RendererSettingsReadFacadeCoversSpeechToText:          rendererSettingsReadFacadeCoversSpeechToText,
-		RendererSettingsReadFacadeCoversUsageModelLabel:       rendererSettingsReadFacadeCoversUsageModelLabel,
 		RendererSettingsReadFacadePreservesSettingsEvent:      rendererSettingsReadFacadePreservesSettingsChangedEvent,
 		RendererSettingsReadFacadeRejectsDirectBridge:         rendererSettingsReadFacadeRejectsDirectBridge,
 		RendererSettingsReadFacadeScanGuardPresent:            rendererSettingsReadFacadeScanGuardPresent,

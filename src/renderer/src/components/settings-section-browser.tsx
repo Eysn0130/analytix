@@ -5,7 +5,7 @@ import type {
   AnalytixBrowserLocalUrlTarget,
   AnalytixBrowserUseSettingsV1
 } from '@shared/app-settings'
-import { Plus, ShieldAlert, SquareMousePointer } from '../design/AnalytixUiIcons'
+import { ShieldAlert, SquareMousePointer } from '../design/AnalytixUiIcons'
 import {
   CodexEmptyState,
   CodexSelect,
@@ -13,8 +13,7 @@ import {
   CodexSettingsPanel,
   CodexSettingsRow,
   CodexSettingsSection,
-  CodexToggle,
-  CodexToolbarButton
+  CodexToggle
 } from './settings-codex-list'
 
 function defaultBrowserUse(): AnalytixBrowserUseSettingsV1 {
@@ -34,8 +33,7 @@ export function BrowserSettingsSection({ ctx }: { ctx: Record<string, any> }): R
     t,
     analytix,
     updateAnalytix,
-    openSettingsSection,
-    showTopNotice
+    openSettingsSection
   } = ctx
   const browserUse: AnalytixBrowserUseSettingsV1 = {
     ...defaultBrowserUse(),
@@ -50,11 +48,6 @@ export function BrowserSettingsSection({ ctx }: { ctx: Record<string, any> }): R
       }
     })
   }
-  const showUnavailable = (messageKey: string): void => {
-    showTopNotice?.({ tone: 'info', message: t(messageKey) })
-  }
-  const unavailableTitle = t('settingsFeatureUnavailable')
-
   return (
     <CodexSettingsPage
       title={t('browser')}
@@ -105,19 +98,6 @@ export function BrowserSettingsSection({ ctx }: { ctx: Record<string, any> }): R
             }
           />
           <CodexSettingsRow
-            title={t('browserClearData')}
-            description={t('browserClearDataDescCompact')}
-            control={
-              <CodexToolbarButton
-                onClick={() => showUnavailable('browserClearDataUnavailable')}
-                disabled
-                title={unavailableTitle}
-              >
-                {t('browserClearAllData')}
-              </CodexToolbarButton>
-            }
-          />
-          <CodexSettingsRow
             title={t('browserAnnotationScreenshots')}
             description={t('browserAnnotationScreenshotsDesc')}
             control={
@@ -141,18 +121,7 @@ export function BrowserSettingsSection({ ctx }: { ctx: Record<string, any> }): R
         <CodexSettingsPanel>
           <CodexSettingsRow
             title={t('browserApproval')}
-            description={
-              <>
-                {t('browserApprovalDesc')}{' '}
-                <button
-                  type="button"
-                  className="font-semibold text-accent hover:underline"
-                  onClick={() => showUnavailable('browserLearnMoreUnavailable')}
-                >
-                  {t('browserLearnMore')}
-                </button>
-              </>
-            }
+            description={t('browserApprovalDesc')}
             control={
               <CodexSelect
                 label={t('browserApproval')}
@@ -172,16 +141,6 @@ export function BrowserSettingsSection({ ctx }: { ctx: Record<string, any> }): R
       <CodexSettingsSection
         title={t('browserSitePermissionsTitle')}
         subtitle={t('browserSitePermissionsSubtitle')}
-        action={
-          <CodexToolbarButton
-            onClick={() => showUnavailable('browserSitePermissionsAddUnavailable')}
-            disabled
-            title={unavailableTitle}
-          >
-            <Plus className="h-5 w-5" strokeWidth={1.9} />
-            {t('browserSitePermissionsAdd')}
-          </CodexToolbarButton>
-        }
       >
         {browserUse.sitePermissions.length > 0 ? (
           <CodexSettingsPanel>

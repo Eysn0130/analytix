@@ -2,12 +2,13 @@
  * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
 import { memo, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
-import { ChevronDown as IconChevronDownOutlineRegular, ChevronUp as IconChevronUpOutlineRegular } from '../../../design/AnalytixUiIcons'
+import { DshChevronDownOutlineRegular as IconChevronDownOutlineRegular, DshChevronUpOutlineRegular as IconChevronUpOutlineRegular } from './DshToolIcons'
 import { TextShimmer } from './TextShimmer'
 import css from './DisclosureRow.module.css'
 
 /** Shared 24px process row: tertiary text and icons, secondary on hover. */
 export interface DisclosureRowProps {
+  bodyId?: string
   summary?: ReactNode
   actions?: ReactNode
   error?: boolean
@@ -46,6 +47,7 @@ export interface DisclosureRowProps {
  */
 export const DisclosureRow = memo(function DisclosureRow({
   icon,
+  bodyId,
   summary,
   actions,
   error = false,
@@ -74,7 +76,7 @@ export const DisclosureRow = memo(function DisclosureRow({
     onToggle()
   }
   const toggleFromKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!rowExpands || event.nativeEvent.isComposing || event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+    if (!rowExpands || event.repeat || event.keyCode === 229 || event.nativeEvent.isComposing || event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
     event.preventDefault()
     onToggle()
   }
@@ -100,6 +102,7 @@ export const DisclosureRow = memo(function DisclosureRow({
         role={rowExpands ? 'button' : undefined}
         tabIndex={rowExpands ? 0 : undefined}
         aria-expanded={rowExpands ? open : undefined}
+        aria-controls={rowExpands ? bodyId : undefined}
         onClick={rowExpands ? onToggle : undefined}
         onKeyDown={rowExpands ? toggleFromKeyboard : undefined}
       >
@@ -108,6 +111,7 @@ export const DisclosureRow = memo(function DisclosureRow({
             type="button"
             className={clsx(css.leading, leadingClassName)}
             aria-label={title}
+            aria-controls={bodyId}
             aria-expanded={open}
             onClick={toggleFromLeading}
           >
@@ -118,11 +122,11 @@ export const DisclosureRow = memo(function DisclosureRow({
             {leading}
           </span>
         )}
-        <div className={clsx(css.content, contentClassName)}>
-          {title && <TextShimmer active={running} className={clsx(css.title, titleClassName)}>{title}</TextShimmer>}
+        <TextShimmer active={running} className={clsx(css.content, contentClassName)} contentClassName={contentLayoutClassName}>
+          {title && <TextShimmer className={clsx(css.title, titleClassName)}>{title}</TextShimmer>}
           {summary}
           {(keepContentWhenOpen || !open) && collapsedContent}
-        </div>
+        </TextShimmer>
         {actions && <div className={css.actions} onClick={event => event.stopPropagation()}>{actions}</div>}
 
       </div>

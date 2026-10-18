@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	appusage "analytix.local/runtime-go/internal/app/usage"
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
@@ -113,6 +114,40 @@ func SanitizeCaseEventPublication(thread map[string]any, event map[string]any) (
 	}
 	if kind == "turn_completed" || kind == "turn_failed" || kind == "turn_aborted" {
 		return nil, errors.New("case terminal event is not owned by an accepted-final publication manifest")
+	}
+	if kind == "pipeline_stage" {
+		stage := stringField(event, "stage")
+		details, _ := event["details"].(map[string]any)
+		if stage == "logical_step_started" || stage == "logical_step_assembled" || stage == "logical_step_closed" {
+			projectedDetails, valid := appusage.ProjectLogicalStepDetailsV1(stage, details)
+			if !valid || turn == nil || stringField(event, "threadId") == "" || stringField(event, "turnId") == "" || stringField(event, "threadId") != stringField(thread, "id") || stringField(event, "turnId") != stringField(turn, "id") {
+				return nil, errors.New("case logical step record is not closed or scoped")
+			}
+			projected := selectCaseEventFields(event, []string{"kind", "threadId", "turnId", "stage", "seq", "timestamp"})
+			projected["details"] = projectedDetails
+			if stage == "logical_step_started" {
+				projected["label"] = "Logical step started"
+			} else if stage == "logical_step_assembled" {
+				projected["label"] = "Logical step assembled"
+			} else {
+				projected["label"] = "Logical step closed"
+			}
+			return validateCaseEventOrdinaryProjection(projected)
+		}
+		if stage == "post_start" {
+			// Retain only this exact coverage marker. Legacy or unknown versions
+			// continue through metadata projection, so the usage fold reports null.
+			version, valid := contracts.NumericSeq(details["logicalStepMetricsVersion"])
+			if valid && version == appusage.LogicalStepMetricsVersionV1 {
+				if turn == nil || stringField(event, "threadId") == "" || stringField(event, "turnId") == "" || stringField(event, "threadId") != stringField(thread, "id") || stringField(event, "turnId") != stringField(turn, "id") {
+					return nil, errors.New("case logical step coverage marker is not scoped")
+				}
+				projected := selectCaseEventFields(event, []string{"kind", "threadId", "turnId", "stage", "seq", "timestamp"})
+				projected["details"] = map[string]any{"logicalStepMetricsVersion": float64(version)}
+				projected["label"] = "Post-Start"
+				return validateCaseEventOrdinaryProjection(projected)
+			}
+		}
 	}
 	if compaction, handled, compactionErr := sanitizeCaseCompactionEvent(thread, turn, event); handled {
 		if compactionErr != nil {

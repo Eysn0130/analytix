@@ -1,5 +1,5 @@
 import { providerModelDisplayName } from '@shared/provider-display'
-import { useState, type ReactElement, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import {
   AudioLines,
   Brain,
@@ -17,15 +17,13 @@ import {
   Trash2
 } from '../design/AnalytixUiIcons'
 import {
-  MODEL_ENDPOINT_FORMATS,
-  type ModelEndpointFormat,
+  type ModelProviderModelProfileV1,
   type ModelProviderProfileV1,
   type ModelReasoningEffort,
   type ModelReasoningRequestProtocol
 } from '@shared/app-settings'
 import { Toggle } from './settings-controls'
 import {
-  CONTEXT_WINDOW_PRESETS,
   PROVIDER_MODEL_REASONING_EFFORT_CHOICES,
   PROVIDER_MODEL_REASONING_PROTOCOLS,
   applyProviderModelForm,
@@ -33,7 +31,6 @@ import {
   chatModelProfile,
   describeContextWindowTokens,
   newProviderModelForm,
-  parseContextWindowInput,
   providerModelListEntries,
   providerModelFormForExisting,
   removeProviderModel,
@@ -72,13 +69,6 @@ const REASONING_EFFORT_LABEL_KEYS: Record<ModelReasoningEffort, string> = {
   medium: 'providerModelEffortMedium',
   high: 'providerModelEffortHigh',
   max: 'providerModelEffortMax'
-}
-
-const ENDPOINT_FORMAT_LABEL_KEYS: Record<ModelEndpointFormat, string> = {
-  chat_completions: 'modelEndpointChatCompletions',
-  responses: 'modelEndpointResponses',
-  messages: 'modelEndpointMessages',
-  custom_endpoint: 'modelEndpointCustomEndpoint'
 }
 
 const MODEL_KIND_META: Array<{
@@ -128,7 +118,6 @@ const MODEL_KIND_META: Array<{
 type EditorState = {
   mode: 'add' | 'edit'
   form: ProviderModelForm
-  contextText: string
   aliasesText: string
 }
 
@@ -137,7 +126,6 @@ function editorStateForNew(provider: ModelProviderProfileV1): EditorState {
   return {
     mode: 'add',
     form,
-    contextText: form.contextWindowTokens ? describeContextWindowTokens(form.contextWindowTokens) : '',
     aliasesText: ''
   }
 }
@@ -151,7 +139,6 @@ function editorStateForExisting(
   return {
     mode: 'edit',
     form,
-    contextText: form.contextWindowTokens ? describeContextWindowTokens(form.contextWindowTokens) : '',
     aliasesText: form.aliases.join(', ')
   }
 }
@@ -160,17 +147,11 @@ function parseAliasesText(raw: string): string[] {
   return raw.split(/[\s,]+/).map((alias) => alias.trim()).filter(Boolean)
 }
 
-function effectiveFormForEditor(editor: EditorState): ProviderModelForm {
-  const trimmedContext = editor.contextText.trim()
-  const contextWindowTokens =
-    editor.form.kind !== 'chat' || trimmedContext === ''
-      ? null
-      : parseContextWindowInput(trimmedContext) ?? Number.NaN
-  return {
-    ...editor.form,
-    contextWindowTokens,
-    aliases: parseAliasesText(editor.aliasesText)
-  }
+function effectiveFormForEditor(editor: EditorState, nativeMessages: boolean): ProviderModelForm {
+  // Native Messages derives reasoning from the native model ID. Compatibility
+  // metadata stays stored, but hidden controls cannot block model-ID edits.
+  return { ...editor.form, aliases: nativeMessages ? [] : parseAliasesText(editor.aliasesText),
+    reasoningEnabled: nativeMessages ? false : editor.form.reasoningEnabled }
 }
 
 function formErrorMessage(t: Translate, error: ProviderModelFormError): string {
@@ -278,14 +259,29 @@ export function ProviderModelsManager({
   provider,
   t,
   selectControlClass,
-  onChange
+  onChange,
+  unclassifiedMediaModelIds = [],
+  onEditingChange
 }: {
   provider: ModelProviderProfileV1
   t: Translate
   selectControlClass: string
-  onChange: (next: ModelProviderProfileV1) => void
+  onChange: (next: ModelProviderProfileV1) => void | Promise<void>
+  unclassifiedMediaModelIds?: readonly string[]
+  onEditingChange?: (editing: boolean) => void
 }): ReactElement {
   const [editor, setEditor] = useState<EditorState | null>(null)
+  const editorCurrent = useRef(editor)
+  useEffect(() => { editorCurrent.current = editor }, [editor])
+  useEffect(() => { onEditingChange?.(editor !== null) }, [editor, onEditingChange])
+  useEffect(() => () => { onEditingChange?.(false) }, [onEditingChange])
+  const [saving, setSaving] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
+  const editorMounted = useRef(true)
+  useEffect(() => {
+    editorMounted.current = true
+    return () => { editorMounted.current = false }
+  }, [])
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
 
@@ -293,16 +289,50 @@ export function ProviderModelsManager({
     setEditor((prev) => prev ? { ...prev, form: { ...prev.form, ...patch } } : prev)
   }
 
-  const saveEditor = (): void => {
-    if (!editor) return
-    const form = effectiveFormForEditor(editor)
+  const nativeMessages = provider.registryKind === 'deepseek-messages'
+  const saveEditor = async (): Promise<void> => {
+    if (!editor || saving) return
+    const currentEditor = editor
+    const form = effectiveFormForEditor(currentEditor, nativeMessages)
     if (validateProviderModelForm(form, provider).length > 0) return
-    onChange(applyProviderModelForm(provider, form))
-    setEditor(null)
+    setSaving(true)
+    setSaveFailed(false)
+    try {
+      const next = applyProviderModelForm(provider, form)
+      if (form.kind === 'chat') {
+        const original = currentEditor.mode === 'edit'
+          ? chatModelProfile(provider, form.originalModelId)
+          : undefined
+        const previous: ModelProviderModelProfileV1 = original ?? {
+          inputModalities: ['text'], outputModalities: ['text'],
+          supportsToolCalling: true, messageParts: ['text']
+        }
+        const edited = chatModelProfile(next, form.modelId)
+        const modelKey = form.modelId.trim().toLowerCase()
+        if (nativeMessages) {
+          if (original) next.modelProfiles[modelKey] = { ...original }
+          else delete next.modelProfiles[modelKey]
+        } else if (!original && !edited?.aliases?.length && !edited?.reasoning) {
+          delete next.modelProfiles[modelKey]
+        } else {
+          next.modelProfiles[modelKey] = {
+            ...previous, aliases: edited?.aliases, reasoning: edited?.reasoning
+          }
+        }
+      }
+      await onChange(next)
+      if (editorMounted.current) setEditor((current) => current === currentEditor ? null : current)
+    } catch {
+      if (editorMounted.current && editorCurrent.current === currentEditor) setSaveFailed(true)
+    } finally {
+      if (editorMounted.current) setSaving(false)
+    }
   }
 
   const deleteModel = (kind: ProviderModelKind, modelId: string): void => {
-    onChange(removeProviderModel(provider, kind, modelId))
+    void Promise.resolve(onChange(removeProviderModel(provider, kind, modelId))).catch(() => {
+      if (editorMounted.current) setSaveFailed(true)
+    })
     setEditor((prev) =>
       prev?.mode === 'edit' && modelEntryKey(prev.form.kind, prev.form.originalModelId) === modelEntryKey(kind, modelId)
         ? null
@@ -323,11 +353,9 @@ export function ProviderModelsManager({
   const visibleEntries = showListTools
     ? filteredEntries.slice(safePage * MODEL_LIST_PAGE_SIZE, safePage * MODEL_LIST_PAGE_SIZE + MODEL_LIST_PAGE_SIZE)
     : filteredEntries
-  const effectiveForm = editor ? effectiveFormForEditor(editor) : null
+  const effectiveForm = editor ? effectiveFormForEditor(editor, nativeMessages) : null
   const errors = editor && effectiveForm ? validateProviderModelForm(effectiveForm, provider) : []
   const showNonTextWarning = Boolean(effectiveForm && chatModelIdLooksNonText(effectiveForm))
-  const parsedContextTokens =
-    editor && editor.contextText.trim() !== '' ? parseContextWindowInput(editor.contextText) : null
   const editingKey = editor?.mode === 'edit' ? modelEntryKey(editor.form.kind, editor.form.originalModelId) : ''
   const reasoningEffortPool = effectiveForm
     ? sortReasoningEfforts([...PROVIDER_MODEL_REASONING_EFFORT_CHOICES, ...effectiveForm.reasoningEfforts])
@@ -381,7 +409,7 @@ export function ProviderModelsManager({
                       <ModelName modelId={modelId} />
                       <span className="flex min-w-0 flex-wrap items-center gap-1">
                         <ModelBadge tone={kind === 'chat' ? 'faint' : 'muted'}>
-                          {t(modelKindLabelKey(kind))}
+                          {t(kind !== 'chat' && unclassifiedMediaModelIds.includes(modelId) ? 'providerModelKindMedia' : modelKindLabelKey(kind))}
                         </ModelBadge>
                         {kind === 'chat' && profile ? (
                           <>
@@ -483,8 +511,8 @@ export function ProviderModelsManager({
           {editor.mode === 'add' ? (
             <div className="grid gap-2">
               <span className="text-[12px] font-semibold text-ds-muted">{t('providerModelKindLabel')}</span>
-              <div className="grid gap-2 md:grid-cols-3">
-                {MODEL_KIND_META.map(({ kind, icon: Icon, titleKey, descKey }) => {
+              <div className="grid gap-2 md:grid-cols-2">
+                {MODEL_KIND_META.filter(({ kind }) => kind === 'chat' || kind === 'image').map(({ kind, icon: Icon, titleKey, descKey }) => {
                   const selected = editor.form.kind === kind
                   return (
                     <button
@@ -500,9 +528,9 @@ export function ProviderModelsManager({
                     >
                       <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-ds-ink">
                         <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
-                        {t(titleKey)}
+                        {t(kind === 'image' ? 'providerModelKindMedia' : titleKey)}
                       </span>
-                      <span className="text-[11.5px] leading-4 text-ds-faint">{t(descKey)}</span>
+                      <span className="text-[11.5px] leading-4 text-ds-faint">{t(kind === 'image' ? 'providerModelKindMediaDesc' : descKey)}</span>
                     </button>
                   )
                 })}
@@ -526,55 +554,10 @@ export function ProviderModelsManager({
               </span>
             ) : null}
           </label>
-          {editor.form.kind === 'chat' ? (
+          {editor.form.kind === 'chat' && nativeMessages ?
+            <p className="text-[12px] leading-5 text-ds-muted">{t('providerModelNativeMessagesManaged')}</p> : null}
+          {editor.form.kind === 'chat' && !nativeMessages ? (
             <>
-              <div className="grid gap-1.5">
-                <span className="text-[12px] font-semibold text-ds-muted">{t('providerModelContextLabel')}</span>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {CONTEXT_WINDOW_PRESETS.map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setEditor((prev) =>
-                        prev ? { ...prev, contextText: describeContextWindowTokens(preset) } : prev
-                      )}
-                      className={chipButtonClass(parsedContextTokens === preset)}
-                    >
-                      {describeContextWindowTokens(preset)}
-                    </button>
-                  ))}
-                  <input
-                    className="w-36 min-w-0 rounded-xl border border-ds-border bg-ds-card px-3 py-1.5 font-mono text-[12.5px] text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
-                    value={editor.contextText}
-                    placeholder={t('providerModelContextPlaceholder')}
-                    spellCheck={false}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      setEditor((prev) => prev ? { ...prev, contextText: value } : prev)
-                    }}
-                  />
-                  {parsedContextTokens ? (
-                    <span className="text-[12px] text-ds-faint">
-                      {t('providerModelContextParsed', { tokens: parsedContextTokens.toLocaleString() })}
-                    </span>
-                  ) : null}
-                </div>
-                <span className="text-[12px] leading-5 text-ds-faint">{t('providerModelContextHint')}</span>
-              </div>
-              <div className="grid gap-2 md:grid-cols-2">
-                <ToggleField
-                  label={t('providerModelVisionLabel')}
-                  description={t('providerModelVisionDesc')}
-                  checked={editor.form.visionInput}
-                  onChange={(value) => updateForm({ visionInput: value })}
-                />
-                <ToggleField
-                  label={t('providerModelToolsLabel')}
-                  description={t('providerModelToolsDesc')}
-                  checked={editor.form.supportsToolCalling}
-                  onChange={(value) => updateForm({ supportsToolCalling: value })}
-                />
-              </div>
               <div className="grid gap-2">
                 <ToggleField
                   label={t('providerModelReasoningLabel')}
@@ -653,32 +636,6 @@ export function ProviderModelsManager({
                 ) : null}
               </div>
               <label className={fieldLabelClass}>
-                {t('providerModelEndpointFormatLabel')}
-                <select
-                  className={selectControlClass}
-                  value={editor.form.endpointFormat ?? ''}
-                  onChange={(e) => updateForm({
-                    endpointFormat: e.target.value === ''
-                      ? null
-                      : e.target.value as ModelEndpointFormat
-                  })}
-                >
-                  <option value="">
-                    {t('providerModelEndpointInherit', {
-                      format: t(ENDPOINT_FORMAT_LABEL_KEYS[provider.endpointFormat])
-                    })}
-                  </option>
-                  {MODEL_ENDPOINT_FORMATS.map((format) => (
-                    <option key={format} value={format}>
-                      {t(ENDPOINT_FORMAT_LABEL_KEYS[format])}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[12px] font-normal leading-5 text-ds-faint">
-                  {t('providerModelEndpointFormatHint')}
-                </span>
-              </label>
-              <label className={fieldLabelClass}>
                 {t('providerModelAliasesLabel')}
                 <input
                   className={`${textInputClass} font-mono text-[13px]`}
@@ -705,18 +662,20 @@ export function ProviderModelsManager({
               ))}
             </div>
           ) : null}
+          {saveFailed ? <p role="alert" className="text-[12px] text-red-600 dark:text-red-300">{t('applyFailed')}</p> : null}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={errors.length > 0}
-              onClick={saveEditor}
+              disabled={saving || errors.length > 0}
+              onClick={() => { void saveEditor() }}
               className="inline-flex h-9 items-center gap-2 rounded-full bg-accent px-4 text-[12.5px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t('providerModelSave')}
             </button>
             <button
               type="button"
-              onClick={() => setEditor(null)}
+              disabled={saving}
+              onClick={() => { setEditor(null); setSaveFailed(false) }}
               className="inline-flex h-9 items-center rounded-full border border-ds-border bg-ds-card px-3 text-[12.5px] font-medium text-ds-muted shadow-sm transition hover:bg-ds-hover hover:text-ds-ink"
             >
               {t('providerModelCancel')}

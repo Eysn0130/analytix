@@ -24,8 +24,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { z } from 'zod'
+import { childInputResponseSchemaV1 } from '../../shared/child-input-contract'
 import {
   DEFAULT_ANALYTIX_DATA_DIR,
+  buildRuntimeModelPreferencesJSON,
   getAnalytixRuntimeSettings,
   isAnalytixRuntimeInsecure,
   resolveAnalytixRuntimeSettings,
@@ -54,6 +56,7 @@ import {
 import {
   reclaimAnalytixPort,
   resolveAnalytixDataDir,
+  resolveDocumentCodecLaunch,
   resolveAvailableAnalytixPort,
   syncGuiManagedAnalytixConfig,
   type AnalytixUnexpectedExitInfo
@@ -62,7 +65,10 @@ import { getAnalytixBaseUrl } from '../analytix-base-url'
 import type { RuntimeHostScheduleMcpBindingV1 } from '../claw-schedule-mcp-config'
 import type { DesktopExternalStateBoundary } from '../desktop-external-state-isolation'
 import { validOrdinaryResultSlotV1 } from '../general-terminal-publication'
-import { logWarn, publicConsoleInfo, type StartupTraceStage } from '../logger'
+import {
+  logNativeOfficeManualBeginPhaseV1, logWarn, publicConsoleInfo,
+  type GoRuntimeStartupFailureClass, type StartupTraceStage
+} from '../logger'
 import {
   BundledFundsMaterializationChildUnconfirmedError,
   assertNoUnconfirmedMaterializationChildV1,
@@ -72,6 +78,7 @@ import {
   type BundledFundsMaterializationBindingV1
 } from './bundled-funds-materialization'
 import { createStartupOwnerPhaseStreamV1, type StartupOwnerPhaseV1 } from './startup-owner-trace-v1'
+import { createNativeManualBeginPhaseStreamV1 } from './native-manual-begin-phase-v1'
 import {
   authorityAnchorProjectionV1,
   takeMainOwnedRuntimeAuthorityEnvelopeV1,
@@ -102,6 +109,12 @@ import {
 } from '../../../packages/runtime/src/contracts/attachments.js'
 import { RuntimeInfoResponse as RuntimeInfoResponseSchema } from '../../../packages/runtime/src/contracts/runtime-info.js'
 import {
+  MessageFeedbackItemV1Schema,
+  MessageFeedbackListResponseV1Schema,
+  MessageFeedbackDeleteResponseV1Schema,
+  MessageFeedbackConflictV1Schema
+} from '../../../packages/runtime/src/contracts/message-feedback.js'
+import {
   AttachmentDiagnosticsResponseV2 as AttachmentDiagnosticsResponseSchema,
   MemoryDiagnosticsResponseV2 as MemoryDiagnosticsResponseSchema,
   RuntimeToolsResponse as RuntimeToolsResponseSchema
@@ -118,6 +131,8 @@ import {
 import { ACCEPTED_FINAL_DELIVERY_GROUP_LIMIT_V1 } from '../../../packages/runtime/src/contracts/events.js'
 import {
   ClearThreadTodosResponse,
+  ClearThreadGoalResponse,
+  ThreadGoalResponse,
   ThreadSummaryResponse as ThreadSummaryResponseSchema,
   ThreadSummaryTaskMutationResponse as ThreadSummaryTaskMutationResponseSchema,
   DeleteThreadResponse,
@@ -143,7 +158,9 @@ import {
 import { StartReviewResponse } from '../../../packages/runtime/src/contracts/review.js'
 import {
   ApprovalDecisionResponse,
-  UserInputResolutionResponse
+  UserInputResolutionResponse,
+  UserInputWaitScheduledResponseSchemaV1,
+  UserInputLateReplyResponseSchemaV1
 } from '../../../packages/runtime/src/contracts/approvals.js'
 import {
   DailyUsageResponseSchema,
@@ -2194,13 +2211,34 @@ export function setGoRuntimeUnexpectedExitHandler(
 export type GoSidecarExitObserver = {
   markReady: () => void
   markIntentionalStop: () => void
+  markStartupFailed: (failureClass: GoRuntimeStartupFailureClass) => void
 }
 
 export function observeGoSidecarExit(
   child: ChildProcess,
-  options: { superviseUnexpectedExit: boolean }
+  options: { superviseUnexpectedExit: boolean; startupAttempt?: number }
 ): GoSidecarExitObserver {
+  let startupFailureClass: GoRuntimeStartupFailureClass | null = null
+  const reportStartupDiagnostic = (
+    stage: 'go startup:failed' | 'go process:exited',
+    exitCode: number | null,
+    signal: NodeJS.Signals | null
+  ): void => {
+    if (options.startupAttempt === undefined || process.env.ANALYTIX_STARTUP_TRACE !== '1') return
+    try {
+      publicConsoleInfo('go-runtime-startup', '', {
+        stage,
+        attempt: options.startupAttempt,
+        failureClass: startupFailureClass,
+        exitCode,
+        signal,
+        cleanupAfterStartupFailure: stage === 'go process:exited' &&
+          startupFailureClass !== null && intentionalGoSidecarStops.has(child)
+      })
+    } catch { /* diagnostics must not change the child lifecycle */ }
+  }
   child.once('exit', (code, signal) => {
+    reportStartupDiagnostic('go process:exited', code ?? null, signal ?? null)
     const reportUnexpectedExit =
       options.superviseUnexpectedExit &&
       readyGoSidecars.has(child) &&
@@ -2230,16 +2268,21 @@ export function observeGoSidecarExit(
     },
     markIntentionalStop: () => {
       intentionalGoSidecarStops.add(child)
+    },
+    markStartupFailed: (failureClass) => {
+      startupFailureClass = failureClass
+      reportStartupDiagnostic('go startup:failed', child.exitCode, child.signalCode)
     }
   }
 }
 
-function waitForGoConformanceReady(
+export function waitForGoConformanceReady(
   child: ChildProcess,
   readyPrefix = GO_CONFORMANCE_READY_PREFIX,
   runtimeLabel = 'Go conformance sidecar',
   requireTokenEcho = true,
-  timeoutMs = GO_CONFORMANCE_STARTUP_TIMEOUT_MS
+  timeoutMs = GO_CONFORMANCE_STARTUP_TIMEOUT_MS,
+  onRejected?: (failureClass: GoRuntimeStartupFailureClass) => void
 ): Promise<{
   url: string
   runtimePid?: number
@@ -2268,8 +2311,12 @@ function waitForGoConformanceReady(
   datasetSnapshotAdmissionV2AckHmacSha256?: string
 }> {
   return new Promise((resolve, reject) => {
+    const rejectReady = (failureClass: GoRuntimeStartupFailureClass, error: unknown): void => {
+      try { onRejected?.(failureClass) } catch { /* preserve the original rejection */ }
+      reject(error)
+    }
     if (!child.stdout) {
-      reject(new Error(`${runtimeLabel} stdout is unavailable.`))
+      rejectReady('stdout_unavailable', new Error(`${runtimeLabel} stdout is unavailable.`))
       return
     }
     const stdoutStream = child.stdout
@@ -2290,7 +2337,7 @@ function waitForGoConformanceReady(
       const incoming = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, 'utf8')
       if (stdout.length + incoming.length > MAX_GO_READY_STDOUT_BYTES) {
         incoming.fill(0)
-        settle(() => reject(new Error(`${runtimeLabel} emitted an invalid ready payload.`)))
+        settle(() => rejectReady('ready_output_limit', new Error(`${runtimeLabel} emitted an invalid ready payload.`)))
         return
       }
       const combined = Buffer.concat([stdout, incoming])
@@ -2301,7 +2348,7 @@ function waitForGoConformanceReady(
       try {
         line = takeExactGoRuntimeReadyLine(stdout, readyPrefix)
       } catch {
-        settle(() => reject(new Error(`${runtimeLabel} emitted an invalid ready payload.`)))
+        settle(() => rejectReady('ready_line_invalid', new Error(`${runtimeLabel} emitted an invalid ready payload.`)))
         return
       }
       if (line === null) return
@@ -2322,7 +2369,7 @@ function waitForGoConformanceReady(
               ? typeof parsed.runtimeToken !== 'string'
               : false)
           ) {
-            reject(new Error(`${runtimeLabel} emitted an invalid ready payload.`))
+            rejectReady('ready_payload_invalid', new Error(`${runtimeLabel} emitted an invalid ready payload.`))
             return
           }
           const onUnexpectedStdout = (value: Buffer | string): void => {
@@ -2405,13 +2452,14 @@ function waitForGoConformanceReady(
               : {})
           })
         } catch (error) {
-          reject(error)
+          rejectReady('ready_parse_failed', error)
         }
       })
     }
     const onExit = (code: number | null): void => {
       settle(() => {
-        reject(
+        rejectReady(
+          'ready_child_exited',
           new Error(
             `${runtimeLabel} exited before ready with code ${code ?? 'unknown'}. ${goStderrDiagnosticText()}`
           )
@@ -2420,12 +2468,12 @@ function waitForGoConformanceReady(
     }
     const onError = (): void => {
       settle(() => {
-        reject(new Error(`${runtimeLabel} failed before ready. ${goStderrDiagnosticText()}`))
+        rejectReady('ready_child_error', new Error(`${runtimeLabel} failed before ready. ${goStderrDiagnosticText()}`))
       })
     }
     const timer = setTimeout(() => {
       settle(() => {
-        reject(new Error(`${runtimeLabel} did not become ready. ${goStderrDiagnosticText()}`))
+        rejectReady('ready_timeout', new Error(`${runtimeLabel} did not become ready. ${goStderrDiagnosticText()}`))
       })
     }, Math.max(1, timeoutMs))
     stdoutStream.on('data', onStdout)
@@ -2821,15 +2869,26 @@ async function startGoConformanceSidecarOnce(
     isRuntimeServer && process.env.ANALYTIX_STARTUP_TRACE === '1',
     (line) => { process.stdout.write(line) }
   )
+  const nativeManualBeginTrace = isRuntimeServer
+    ? createNativeManualBeginPhaseStreamV1(logNativeOfficeManualBeginPhaseV1)
+    : null
   child.stderr?.on('data', (chunk) => {
     appendGoStderrTail(String(chunk))
     publicationTrace.write(chunk)
     startupOwnerTrace?.accept(chunk)
     fundsCSVAdmissionTrace.accept(chunk)
+    nativeManualBeginTrace?.accept(chunk)
   })
-  child.once('close', () => publicationTrace.close())
-  const exitObserver = observeGoSidecarExit(child, { superviseUnexpectedExit: isRuntimeServer })
+  child.once('close', () => {
+    nativeManualBeginTrace?.close()
+    publicationTrace.close()
+  })
+  const exitObserver = observeGoSidecarExit(child, {
+    superviseUnexpectedExit: isRuntimeServer,
+    startupAttempt: launchGeneration
+  })
   let readyPayloadReceived = false
+  let startupFailureClass: GoRuntimeStartupFailureClass = 'private_frame_failed'
 
   try {
     if (hasPrivateStartupFrame) {
@@ -2841,14 +2900,17 @@ async function startGoConformanceSidecarOnce(
     }
     traceRuntimeStartup('go private frame:done')
     const runtimeLabel = isRuntimeServer ? 'Go runtime server' : 'Go conformance sidecar'
+    startupFailureClass = 'ready_wait_failed'
     const ready = await waitForGoConformanceReady(
       child,
       isRuntimeServer ? GO_RUNTIME_SERVER_READY_PREFIX : GO_CONFORMANCE_READY_PREFIX,
       runtimeLabel,
       !isRuntimeServer,
-      isRuntimeServer ? GO_RUNTIME_SERVER_STARTUP_TIMEOUT_MS_V1 : GO_CONFORMANCE_STARTUP_TIMEOUT_MS
+      isRuntimeServer ? GO_RUNTIME_SERVER_STARTUP_TIMEOUT_MS_V1 : GO_CONFORMANCE_STARTUP_TIMEOUT_MS,
+      (failureClass) => { startupFailureClass = failureClass }
     )
     readyPayloadReceived = true
+    startupFailureClass = 'ready_identity_failed'
     traceRuntimeStartup('go ready line:received')
     if (!isRuntimeServer && ready.runtimeToken !== runtimeToken) {
       throw new Error(`${runtimeLabel} ready token does not match the requested runtime token.`)
@@ -2889,6 +2951,7 @@ async function startGoConformanceSidecarOnce(
     }
     traceRuntimeStartup('go ready identity:verified')
     exitObserver.markReady()
+    startupFailureClass = 'post_ready_failed'
     if (isRuntimeDefault) {
       if (bundledFundsMaterialization) {
         bindBundledFundsMaterializationToCurrentRuntimeV1(bundledFundsMaterialization)
@@ -2909,6 +2972,7 @@ async function startGoConformanceSidecarOnce(
     traceRuntimeStartup('go adapter:done')
   } catch (error) {
     traceRuntimeStartup('go adapter:failed')
+    exitObserver.markStartupFailed(startupFailureClass)
     const retryWithoutAuthority = shouldRetryWithoutOptionalCaseAuthorityV1({
       runtimeServer: isRuntimeServer,
       authorityAttempted: mainOwnedAuthority !== null,
@@ -3027,6 +3091,10 @@ export const analytixRuntimeAdapter = {
 
   isChildRunning(): boolean {
     return isGoSidecarRunning()
+  },
+
+  runningChildIdentity(): object | null {
+    return !goSidecarStopPromise && isGoSidecarRunning() ? goSidecarOwnedProcess?.process ?? null : null
   },
 
   getBaseUrl(settings: AppSettingsV1): string {
@@ -3504,6 +3572,19 @@ const MemoryMutationResponseV1Schema = z.object({
 
 type RuntimeResponseSchemaV1 = z.ZodTypeAny
 
+// Main emits these fixed failures after blocking an unsafe success response.
+// Preserve only their closed envelopes when the native IPC projects them again.
+const NativeMainGuardFailureV1Schema = z.union([
+  z.object({
+    code: z.literal('runtime_response_schema_invalid'),
+    message: z.literal('Runtime response failed schema validation.')
+  }).strict(),
+  z.object({
+    code: z.literal('runtime_response_not_public'),
+    message: z.literal('Runtime response was blocked at the public boundary.')
+  }).strict()
+])
+
 // Body admission and schema selection share one registration. Observation still
 // requires a body for every verb, while only POST has an admitted response schema.
 const runtimeRequiredBodyContractsV1 = new Map<string, { schema: RuntimeResponseSchemaV1; method?: string }>([
@@ -3527,6 +3608,7 @@ function runtimeResponseContractV1(path: string, method: string): RuntimeRespons
   const requiredBody = runtimeRequiredBodyContractsV1.get(path)
   const summaryMatch = /^\/v1\/threads\/([^/]+)\/summary(?:\/tasks\/([^/]+)\/(output|kill|restart))?$/.exec(path)
   const isThreadSummaryRoute = /^\/v1\/threads\/[^/]+\/summary(?:\/|$)/.test(path)
+  const isMessageFeedbackRoute = /^\/v1\/threads\/[^/]+\/message-feedback(?:\/|$)/.test(path)
   const schemas = requiredBody
     ? (!requiredBody.method || requiredBody.method === method ? [requiredBody.schema] : null)
     : summaryMatch
@@ -3535,14 +3617,21 @@ function runtimeResponseContractV1(path: string, method: string): RuntimeRespons
       : runtimeOtherResponseSchemasV1(path, method)
   return {
     schemas,
-    requiresBody: Boolean(requiredBody),
-    requiresExactPublicProjection: path.startsWith('/v1/runtime/task-jobs/') || isThreadSummaryRoute,
+    requiresBody: Boolean(requiredBody) || isMessageFeedbackRoute || path === '/v1/runtime/task-jobs/steer',
+    requiresExactPublicProjection: path.startsWith('/v1/runtime/task-jobs/') || isThreadSummaryRoute || isMessageFeedbackRoute,
     isThreadSummaryRoute,
     summaryIdentity: summaryMatch ? threadSummaryRouteIdentityV1(summaryMatch) : null
   }
 }
 
 function runtimeOtherResponseSchemasV1(path: string, method: string): RuntimeResponseSchemaV1[] | null {
+  const feedback = messageFeedbackRouteV1(path)
+  if (feedback) {
+    if (!feedback.messageId) return method === 'GET' ? [MessageFeedbackListResponseV1Schema] : null
+    if (method === 'PUT') return [MessageFeedbackItemV1Schema]
+    if (method === 'DELETE') return [MessageFeedbackDeleteResponseV1Schema]
+    return null
+  }
   if (path === '/health') return [RuntimeHealthResponseV1Schema]
   if (path === '/v1/memory') {
     if (method === 'GET') return [MemoryListResponseV1Schema]
@@ -3554,6 +3643,7 @@ function runtimeOtherResponseSchemasV1(path: string, method: string): RuntimeRes
   if (path === '/v1/runtime/task-jobs/list') return [TaskJobListResponseV1Schema]
   if (path === '/v1/runtime/task-jobs/wait') return [TaskJobWaitResponseV1Schema]
   if (path === '/v1/runtime/task-jobs/kill') return [TaskJobKillResponseV1Schema]
+  if (path === '/v1/runtime/task-jobs/steer' && method === 'POST') return [childInputResponseSchemaV1]
   if (path === '/v1/attachments') return [AttachmentUploadResponse]
   if (/^\/v1\/attachments\/[^/]+\/content$/.test(path)) return [AttachmentContentResponse]
   if (/^\/v1\/attachments\/[^/]+$/.test(path)) return [AttachmentMetadataResponse]
@@ -3563,6 +3653,9 @@ function runtimeOtherResponseSchemasV1(path: string, method: string): RuntimeRes
   if (/^\/v1\/threads\/[^/]+\/todos$/.test(path)) {
     if (method === 'DELETE') return [ClearThreadTodosResponse]
     return [ThreadTodosResponse]
+  }
+  if (/^\/v1\/threads\/[^/]+\/goal$/.test(path)) {
+    return method === 'DELETE' ? [ClearThreadGoalResponse] : [ThreadGoalResponse]
   }
   if (/^\/v1\/threads\/[^/]+\/compact$/.test(path)) return [CompactResponse]
   if (path === '/v1/threads') {
@@ -3586,7 +3679,7 @@ function runtimeOtherResponseSchemasV1(path: string, method: string): RuntimeRes
   if (/^\/v1\/threads\/[^/]+\/review$/.test(path)) return [StartReviewResponse]
   if (/^\/v1\/approvals\/[^/]+$/.test(path)) return [ApprovalDecisionResponse]
   if (/^\/v1\/user-inputs\/[^/]+$/.test(path) && method === 'POST') {
-    return [UserInputResolutionResponse]
+    return [UserInputResolutionResponse, UserInputWaitScheduledResponseSchemaV1, UserInputLateReplyResponseSchemaV1]
   }
   if (path === '/v1/usage') {
     return [DailyUsageResponseSchema, ThreadUsageResponseSchema, RuntimeUsageResponseSchema, ModelUsageResponseSchema]
@@ -3755,6 +3848,29 @@ function decodeClosedRuntimeRouteSegmentV1(value: string): string | null {
   }
 }
 
+function messageFeedbackRouteV1(path: string): { threadId: string; messageId?: string } | null {
+  const match = /^\/v1\/threads\/([^/]+)\/message-feedback(?:\/([^/]+))?$/.exec(path)
+  if (!match) return null
+  const canonicalId = (value: string): string | null => {
+    const decoded = decodeClosedRuntimeRouteSegmentV1(value)
+    return decoded && /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(decoded) && !decoded.includes('..') ? decoded : null
+  }
+  const threadId = canonicalId(match[1])
+  const messageId = match[2] ? canonicalId(match[2]) : undefined
+  return threadId && (!match[2] || messageId) ? { threadId, ...(messageId ? { messageId } : {}) } : null
+}
+
+function publicMessageFeedbackConflictV1(value: unknown, messageId: string): unknown | null {
+  const parsed = MessageFeedbackConflictV1Schema.safeParse(value)
+  if (!parsed.success || parsed.data.current && parsed.data.current.messageId !== messageId) return null
+  const current = parsed.data.current
+  if (containsPrivateAcceptedFinalAuthority(current) || containsPrivateRuntimeDiagnosticContent(current) ||
+      canonicalRuntimeBoundaryValue(sanitizePublicRuntimeValue(current)) !== canonicalRuntimeBoundaryValue(current)) return null
+  // The fixed envelope must survive both Host and IPC projection. Only the
+  // strictly checked current item is preserved; generic errors remain closed.
+  return { code: parsed.data.code, message: parsed.data.message, current }
+}
+
 function threadSummaryRouteIdentityV1(match: RegExpExecArray): ThreadSummaryRouteIdentityV1 | null {
   const threadId = decodeClosedRuntimeRouteSegmentV1(match[1])
   if (!threadId) return null
@@ -3791,6 +3907,11 @@ export function sanitizeRuntimeResponse(
   const path = pathAndQuery.split('?', 1)[0]
   const method = requestMethod.trim().toUpperCase()
   const contract = runtimeResponseContractV1(path, method)
+  if (pathAndQuery !== path && /^\/v1\/threads\/[^/]+\/message-feedback(?:\/|$)/.test(path)) {
+    return { ok: false, status: 502, body: JSON.stringify({
+      code: 'runtime_response_schema_invalid', message: 'Runtime response failed schema validation.'
+    }) }
+  }
   const packagedForkDiagnostic = process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1' &&
     (/^\/v1\/threads\/[^/]+\/fork$/.test(path) || (path === '/v1/threads' && method === 'GET'))
   if (packagedForkDiagnostic) {
@@ -3816,6 +3937,34 @@ export function sanitizeRuntimeResponse(
   try {
     const parsed = JSON.parse(response.body) as unknown
     if (!response.ok) {
+      if (pathAndQuery === '/v1/runtime/task-jobs/steer' && method === 'POST') {
+        const failure = childInputResponseSchemaV1.safeParse(parsed)
+        if (failure.success && failure.data.code && !failure.data.receipt) {
+          return { ...response, body: JSON.stringify(failure.data) }
+        }
+      }
+      const feedback = messageFeedbackRouteV1(path)
+      if (response.status === 409 && (method === 'PUT' || method === 'DELETE') && feedback?.messageId) {
+        const conflict = publicMessageFeedbackConflictV1(parsed, feedback.messageId)
+        if (conflict) return { ...response, body: JSON.stringify(conflict) }
+      }
+      if (response.status === 502) {
+        const failure = NativeMainGuardFailureV1Schema.safeParse(parsed)
+        if (failure.success) return { ...response, body: JSON.stringify(failure.data) }
+      }
+      // A strictly bound pre-admission failure only. Arbitrary conflicts retain
+      // their ordinary public projection and cannot retire a late attempt.
+      const input = /^\/v1\/user-inputs\/(input_[a-f0-9]{64})$/.exec(pathAndQuery)
+      if (method === 'POST' && response.status === 409 && input) {
+        const projected = { code: 'user_input_late_reply_too_large', message: 'The late answer is too large. Edit it and submit a new attempt.' } as const
+        // The Host facade and native IPC both project this response. Preserve
+        // only the closed fixed envelope at this same exact POST seam.
+        const failure = z.union([
+          z.object({ code: z.literal('late_reply_too_large'), message: z.string(), inputId: z.literal(input[1]) }).strict(),
+          z.object({ code: z.literal(projected.code), message: z.literal(projected.message) }).strict()
+        ]).safeParse(parsed)
+        if (failure.success) return { ...response, body: JSON.stringify(projected) }
+      }
       if (path === '/v1/provider-registry' || path.startsWith('/v1/provider-registry/')) {
         // The downstream typed IPC validates status/operation as well. Keep
         // only this strict, key-free envelope with canonical error messages.
@@ -3888,6 +4037,13 @@ export function sanitizeRuntimeResponse(
             message: 'Runtime response failed schema validation.'
           })
         }
+      }
+      const feedback = messageFeedbackRouteV1(path)
+      if (feedback?.messageId && method === 'PUT' &&
+          (validated as { messageId?: unknown }).messageId !== feedback.messageId) {
+        return { ok: false, status: 502, body: JSON.stringify({
+          code: 'runtime_response_schema_invalid', message: 'Runtime response failed schema validation.'
+        }) }
       }
       const resumedSession = /^\/v1\/sessions\/([^/]+)\/resume-thread$/.exec(path)
       if (resumedSession && (validated as { session_id?: unknown }).session_id !==
@@ -4055,10 +4211,12 @@ export function resolveGoRuntimeMCPConfigPath(dataDir: string): string {
 }
 
 export function buildGoRuntimeProviderArgs(
-  _settings: AppSettingsV1,
+  settings: AppSettingsV1,
   runtime: ReturnType<typeof resolveAnalytixRuntimeSettings>
 ): string[] {
+  const modelPreferences = buildRuntimeModelPreferencesJSON(settings)
   return [
+    ...(modelPreferences ? ['--model-providers-json', modelPreferences] : []),
     '--approval-policy',
     runtime.approvalPolicy,
     '--sandbox-mode',
@@ -4074,6 +4232,7 @@ export function buildGoRuntimeSidecarEnv(
   runtimeToken: string = runtime.runtimeToken
 ): NodeJS.ProcessEnv {
   const childEnvironment = { ...env }
+  const documentCodec = resolveDocumentCodecLaunch()
   const reservedNames = new Set<string>([
     'ANALYTIX_API_KEY',
     'ANALYTIX_MODEL_PROVIDERS',
@@ -4091,6 +4250,8 @@ export function buildGoRuntimeSidecarEnv(
     ...PROTECTED_AUTHORITY_ENVIRONMENT_V1,
     'ANALYTIX_RUNTIME_TOKEN',
     'ANALYTIX_MCP_CONFIG_PATH',
+    'ANALYTIX_DOCUMENT_CODEC_EXECUTABLE',
+    'ANALYTIX_DOCUMENT_CODEC_ENTRY',
     'ANALYTIX_APP_ROOT',
     'ANALYTIX_DEVELOPMENT_PLUGIN_SOURCE_ROOT',
     'ANALYTIX_DEVELOPMENT_OFFICE_ASSET_ROOT',
@@ -4103,6 +4264,8 @@ export function buildGoRuntimeSidecarEnv(
   }
   return {
     ...childEnvironment,
+    ANALYTIX_DOCUMENT_CODEC_EXECUTABLE: env.ANALYTIX_DOCUMENT_CODEC_EXECUTABLE ?? documentCodec.executable,
+    ANALYTIX_DOCUMENT_CODEC_ENTRY: env.ANALYTIX_DOCUMENT_CODEC_ENTRY ?? documentCodec.entry,
     ANALYTIX_RUNTIME_TOKEN: runtimeToken,
     ANALYTIX_MCP_CONFIG_PATH: resolveGoRuntimeMCPConfigPath(dataDir),
     ...(app.isPackaged ? {} : {

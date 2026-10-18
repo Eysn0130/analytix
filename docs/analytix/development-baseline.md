@@ -11,17 +11,14 @@ An independent Mac or cloud host is not a default prerequisite.
 
 ## Update main, branch, install, verify, commit, PR
 
-Use one public `main`, not a second snapshot checkout. The sequence below is
-for new work. When explicitly continuing an existing unmerged PR, first refresh
-its actual head/base and candidate ancestry, preserve newer work, and continue
-that authorized branch; do not switch to old main or rebuild its history.
-Before new work:
+Use the [Git workflow](git-workflow.md) for branch setup, reviewed commits,
+and authorized PR/merge operations. Before preparing dependencies, preserve the
+working tree and verify the intended branch. When explicitly continuing an
+existing unmerged PR, first refresh its actual head/base and candidate ancestry,
+preserve newer work, and continue that authorized branch; do not switch to old
+main or rebuild its history.
 
 ```sh
-git status --short --branch
-git switch main
-git pull --ff-only
-git switch --no-track -c codex/<short-task-name>
 # Configured Owner macOS host only, in the same zsh:
 source ./scripts/use-analytix-cache.sh
 # Fresh clone or changed dependency manifests/lockfiles only:
@@ -76,20 +73,12 @@ the routing below before selecting wider checks:
 ```sh
 npm run verify:baseline
 # Run the relevant application/Go/backend/plugin regression checks too.
-git diff --check
-git add <reviewed-task-owned-files>
-git diff --cached
-git commit -m "Describe the change"
-git push -u origin HEAD
-gh pr create --base main
 ```
 
 Changing business logic still requires its contract-specific tests. Source
 baseline success is not a substitute for full regression, live Provider,
-privacy, packaged GUI or installer acceptance. Normal development uses a
-short-lived `codex/*` branch and PR; merge only after current CI and applicable
-acceptance pass. Do not push directly to main, bypass a check, or merge private
-archive ancestry, force push, or push all local branches/tags.
+privacy, packaged GUI or installer acceptance.
+Do not push all local branches/tags.
 
 ## Bounded maintenance routing
 

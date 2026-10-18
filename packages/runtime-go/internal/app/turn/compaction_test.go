@@ -1,12 +1,15 @@
 package turn
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	appmodel "analytix.local/runtime-go/internal/app/model"
+	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
@@ -395,4 +398,154 @@ func TestCompactionCannotRemoveEvidenceSettlementAuthority(t *testing.T) {
 	if plan.Error == nil || plan.Changed {
 		t.Fatalf("evidence settlement marker was compacted without an authority archive: %#v", plan)
 	}
+}
+
+func TestCompactionTailTelemetryScanViewPreservesExactAuthorityV1(t *testing.T) {
+	thread, commit, authorities := compactionTelemetryTailFixtureV1(t)
+	turn := publicationFixtureTurn(thread)
+	if err := domainevent.ValidatePublicRecord(turn); !errors.Is(err, domainevent.ErrRawFailurePersistence) {
+		t.Fatalf("generic nested outbox scanner no longer reproduces the boundary: %v", err)
+	}
+	before, err := json.Marshal(thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeOutbox, _ := json.Marshal(turn["generalTerminalPublication"])
+	beforeBinding, _ := json.Marshal(turn["generalTerminalCASBinding"])
+	beforeItems, _ := json.Marshal(turn["items"])
+	value, ok := sanitizeCompactionTailTurn(turn, authorities)
+	projected, _ := value.(map[string]any)
+	if !ok || projected == nil {
+		t.Fatal("validated telemetry outbox was not retained in the compaction tail")
+	}
+	afterOutbox, _ := json.Marshal(projected["generalTerminalPublication"])
+	afterBinding, _ := json.Marshal(projected["generalTerminalCASBinding"])
+	afterItems, _ := json.Marshal(projected["items"])
+	if !bytes.Equal(beforeOutbox, afterOutbox) || !bytes.Equal(beforeBinding, afterBinding) || !bytes.Equal(beforeItems, afterItems) {
+		t.Fatal("compaction scan view changed retained tail items, binding or outbox bytes")
+	}
+	minimal := map[string]any{"id": commit.ThreadID, "turns": []any{projected}}
+	if err := ValidateGeneralTerminalPublicationCommitForThreadV1(minimal, commit.TurnID, commit); err != nil {
+		t.Fatalf("retained telemetry outbox is not reconstructable: %v", err)
+	}
+	after, err := json.Marshal(thread)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("compaction validation changed its original thread payload")
+	}
+}
+
+func TestCompactionTailTelemetryScanViewRejectsInvalidAuthorityV1(t *testing.T) {
+	rewriteUsage := func(t *testing.T, thread map[string]any, mutate func(map[string]any)) {
+		t.Helper()
+		turn := publicationFixtureTurn(thread)
+		commit, err := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(turn["generalTerminalPublication"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		frozen, err := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		binding, err := domainturnterminal.ParseGeneralTerminalCASBindingV1(turn["generalTerminalCASBinding"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		usage := contracts.CloneMap(commit.UsageEvent)
+		mutate(usage)
+		itemEvent := AssistantItemCompletedEvent(publicationFixtureAssistant(thread))
+		itemEvent["timestamp"] = commit.CommittedAt
+		// The domain constructor preserves this legacy open telemetry shape.
+		// The existing app authority validator must reject it before qualification.
+		replacement, err := domainturnterminal.NewGeneralTerminalPublicationCommitV1(frozen, binding, commit.CommittedAt,
+			[]domainturnterminal.GeneralTerminalPublicationDraftV1{
+				{Slot: "terminal-item", Draft: itemEvent},
+				{Slot: "usage", Draft: usage},
+				{Slot: "terminal", Draft: contracts.CloneMap(commit.TerminalEvent)},
+			},
+		)
+		if err != nil {
+			t.Fatal("could not prepare the legacy open telemetry rejection fixture")
+		}
+		turn["generalTerminalPublication"] = domainturnterminal.GeneralTerminalPublicationCommitV1Map(replacement)
+	}
+	for name, mutate := range map[string]func(*testing.T, map[string]any){
+		"unknown outbox field": func(_ *testing.T, thread map[string]any) {
+			publicationFixtureTurn(thread)["generalTerminalPublication"].(map[string]any)["unexpected"] = true
+		},
+		"raw usage field": func(t *testing.T, thread map[string]any) {
+			rewriteUsage(t, thread, func(usage map[string]any) {
+				usage["cacheDiagnostics"].(map[string]any)["outputPreview"] = "PRIVATE_PROVIDER_SENTINEL"
+			})
+		},
+		"raw usage error": func(t *testing.T, thread map[string]any) {
+			rewriteUsage(t, thread, func(usage map[string]any) {
+				usage["cacheDiagnostics"].(map[string]any)["providerAttemptTelemetryError"] = "PRIVATE_PROVIDER_FAILURE"
+			})
+		},
+		"missing binding": func(_ *testing.T, thread map[string]any) {
+			delete(publicationFixtureTurn(thread), "generalTerminalCASBinding")
+		},
+		"detached binding": func(t *testing.T, thread map[string]any) {
+			turn := publicationFixtureTurn(thread)
+			frozen, err := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding, err := domainturnterminal.NewGeneralTerminalCASBindingV1(frozen, "other public assistant text")
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn["generalTerminalCASBinding"] = domainturnterminal.GeneralTerminalCASBindingV1Map(binding)
+		},
+		"wrong commit digest": func(_ *testing.T, thread map[string]any) {
+			publicationFixtureTurn(thread)["generalTerminalPublication"].(map[string]any)["commitDigest"] = strings.Repeat("b", 64)
+		},
+		"wrong terminal item binding": func(_ *testing.T, thread map[string]any) {
+			publicationFixtureAssistant(thread)["generalTerminalCASBinding"].(map[string]any)["bindingDigest"] = strings.Repeat("b", 64)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			thread, _, authorities := compactionTelemetryTailFixtureV1(t)
+			mutate(t, thread)
+			before, err := json.Marshal(thread)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value, ok := sanitizeCompactionTailTurn(publicationFixtureTurn(thread), authorities); ok || value != nil {
+				t.Fatal("invalid outbox authority received compaction scan-view qualification")
+			}
+			after, err := json.Marshal(thread)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("compaction rejection changed its original thread payload")
+			}
+		})
+	}
+}
+
+func compactionTelemetryTailFixtureV1(t *testing.T) (map[string]any, domainturnterminal.GeneralTerminalPublicationCommitV1, map[string]domainturnterminal.GeneralTerminalProjectionAuthorityV1) {
+	t.Helper()
+	prepared, err := PrepareTerminalCASMutation(generalTerminalTelemetryCASInputV1(t))
+	if err != nil || !prepared.Applied {
+		t.Fatalf("exact active telemetry fixture could not prepare the compaction tail: %v", err)
+	}
+	thread := prepared.Thread
+	turn := publicationFixtureTurn(thread)
+	turn["items"] = append(turn["items"].([]any), map[string]any{
+		"id": "user-telemetry-tail", "turnId": stringField(turn, "id"), "threadId": stringField(thread, "id"),
+		"kind": "user_message", "role": "user", "status": "completed", "text": "  retained public user text\n",
+	})
+	commit, err := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(turn["generalTerminalPublication"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := domainturnterminal.NewGeneralTerminalPublicationArchiveV1([]domainturnterminal.GeneralTerminalPublicationCommitV1{commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread[GeneralTerminalPublicationArchiveFieldV1] = domainturnterminal.GeneralTerminalPublicationArchiveV1Map(archive)
+	authorities, err := domainturnterminal.GeneralTerminalProjectionAuthoritiesV1(thread)
+	if err != nil || !authorities[commit.TurnID].Terminal {
+		t.Fatalf("telemetry fixture has no exact compaction authority: %v", err)
+	}
+	return thread, commit, authorities
 }

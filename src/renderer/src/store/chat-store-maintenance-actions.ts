@@ -1,11 +1,16 @@
 import { captureRewindResendPayload } from './rewind-resend-payload'
 import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
 import { AttachmentPublicMetadata } from '../../../../packages/runtime/src/contracts/attachments.js'
+import { UserInputActionSelectorSchemaV1 } from '../../../../packages/runtime/src/contracts/approvals.js'
+import { countedGoalRefV1 } from '../../../../packages/runtime/src/contracts/threads.js'
 import { projectAttachmentReferencesForPublicSurfaces } from '../agent/attachment-public'
 import { getThreadBinding } from './chat-store-thread-binding'
 import { withImageThreadNavigation } from '../write/image-thread-navigation'
-import type { ChatBlock, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
+import type { ChatBlock, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus, UserInputAnswer, UserInputSubmission } from '../agent/types'
 import { getProvider } from '../agent/registry'
+import { restoreThreadDisplayHistory } from '../agent/analytix-runtime'
+import { mergeGoalHistoryBlocks, reconcileTurnUsageById } from '../agent/analytix-mapper'
+import { clearActiveStream } from '../thread/streaming/active-stream-store'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
 import { applyTheme, applyUiFontScale } from '../lib/apply-theme'
@@ -34,7 +39,8 @@ import { workspaceLabelFromPath } from '../lib/workspace-label'
 import { isInternalTemporaryWorkspace, normalizeWorkspaceRoot } from '../lib/workspace-path'
 import { buildClawRuntimePrompt } from '@shared/app-settings'
 import { projectOrdinaryPublicText } from '@shared/ordinary-log-pii-projection'
-import type { ChatState, ChatStoreGet, ChatStoreSet } from './chat-store-types'
+import type { ChatState, ChatStoreGet, ChatStoreSet, ThreadSelectionReceipt, TurnForkSnapshot, TurnForkSource } from './chat-store-types'
+import { queueMessagesPatch, queuePausePatch, queuedMessagesForThread, retireQueuedThreads } from './chat-store-queue'
 import {
   activeClawChannel,
   compactCodeWorkspaceRoots,
@@ -51,7 +57,10 @@ import {
   clearedThreadSelection,
   collectAssistantTextForTurn,
   findLatestUserBlockId,
+  findUserInputBlockIndex,
   findReusableEmptyThreadId,
+  forgetUserInputDraftInterruptionsForThread,
+  markDeletedUserInputDraftThread,
   reconcileOptimisticUserBlock,
   threadSnapshotLooksRunning,
   threadBelongsToWorkspace
@@ -121,22 +130,6 @@ function releaseThreadWorktreeIfNeeded(threadId: string | null): void {
   saveThreadWorktreeRegistry(forgetThreadWorktree(threadId))
 }
 
-function applyGoalSnapshot(
-  set: ChatStoreSet,
-  threadId: string,
-  goal: ThreadGoal | null,
-  updatedAt = new Date().toISOString()
-): void {
-  set((s) => ({
-    activeThreadGoal: s.activeThreadId === threadId ? goal : s.activeThreadGoal,
-    threads: s.threads.map((thread) =>
-      thread.id === threadId
-        ? { ...thread, goal, updatedAt: goal?.updatedAt ?? updatedAt }
-        : thread
-    )
-  }))
-}
-
 function applyTodosSnapshot(
   set: ChatStoreSet,
   threadId: string,
@@ -167,6 +160,7 @@ function quarantineInterruptedTurn(
     turnId,
     userBlockId,
     busy: false,
+    markUserInputUncertain: true,
     set,
     get
   })
@@ -186,7 +180,12 @@ async function reconcileInterruptedTurn(
     userBlockId,
     terminalStatus: 'aborted',
     isCurrent,
-    loadThreadDetail: (id) => getProvider().getThreadDetail(id),
+    loadThreadDetail: async (id) => {
+      const provider = getProvider()
+      const detail = await provider.getThreadDetail(id)
+      if (!isCurrent()) throw new Error('Interrupted thread selection changed.')
+      return restoreThreadDisplayHistory(provider, id, detail)
+    },
     set,
     get
   })
@@ -216,12 +215,55 @@ function forkBlocksThroughTurn(blocks: ChatBlock[], turnId: string): ChatBlock[]
   return foundTarget ? out : blocks
 }
 
+function submittedUserInputDisplay(
+  block: Extract<ChatBlock, { kind: 'user_input' }>,
+  answers: UserInputSubmission[]
+): UserInputAnswer[] {
+  return answers.map(answer => {
+    if (!('kind' in answer)) return {
+      id: answer.id,
+      label: projectOrdinaryPublicText(answer.label),
+      value: projectOrdinaryPublicText(answer.value)
+    }
+    if (answer.kind === 'skip') return { id: answer.id, label: i18n.t('common:userInputSkipped'), value: '' }
+    const question = block.questions.find(question => question.id === answer.id)
+    const selected = answer.optionIds.map(id => question?.options.find(option => option.id === id)?.label ?? '')
+      .filter(Boolean).map(label => projectOrdinaryPublicText(label))
+    // Typed custom text is a private submission, never a renderer history/export field.
+    const customStatus = answer.customText?.trim() ? i18n.t('common:userInputSubmitted') : ''
+    return {
+      id: answer.id,
+      label: selected.join(', ') || customStatus,
+      value: [...selected, customStatus].filter(Boolean).join('\n')
+    }
+  })
+}
+
 export function createMaintenanceActions(
   { set, get, sseAbortRef }: StoreActionContext
 ): Pick<ChatState, 'renameActiveThread' | 'renameThread' | 'archiveThread' | 'compactActiveThread' | 'forkActiveThread' | 'forkThreadFromTurn' | 'setActiveThreadGoal' | 'setActiveThreadGoalStatus' | 'clearActiveThreadGoal' | 'setActiveThreadTodoStatus' | 'clearActiveThreadTodos' | 'syncPlanTodosFromMarkdown' | 'resumeSessionIntoThread' | 'deleteThread' | 'rewindAndResend' | 'rollbackWorkspaceToCheckpoint' | 'resolveApproval' | 'resolveUserInput' | 'interrupt'> {
   const binding = getThreadBinding(sseAbortRef)
   const resolvingGates = new Set<string>()
+  const renameOwners = new Map<string, number>()
+  let renameGeneration = 0
   let editInFlight = false
+  let goalMutationInFlight = false
+  const refreshGoalAuthority = async (threadId: string, generation: number, fallback?: ThreadGoal | null): Promise<void> => {
+    if (get().activeThreadId !== threadId || binding.generation !== generation) return
+    const provider = getProvider()
+    const epoch = (get().goalStateEpoch ?? 0) + 1
+    set({ goalStateEpoch: epoch })
+    const state = await provider.getThreadGoalState?.(threadId)
+    const detail = provider.getThreadGoalState ? null : await provider.getThreadDetail(threadId)
+    set(current => {
+      if (current.activeThreadId !== threadId || current.goalStateEpoch !== epoch || binding.generation !== generation) return {}
+      const goal = state ? state.goal : detail?.goal === undefined ? fallback !== undefined ? fallback : current.activeThreadGoal : detail.goal
+      return { activeThreadGoal: goal, activeGoalActivation: state?.activation ?? null,
+        goalStateEpoch: epoch + 1,
+        blocks: mergeGoalHistoryBlocks(current.blocks, state?.historyBlocks ?? detail!.blocks.filter(block => block.kind === 'goal')),
+        threads: current.threads.map(thread => thread.id === threadId ? { ...thread, goal } : thread) }
+    })
+  }
   type GateBlock = Extract<ChatBlock, { kind: 'approval' | 'user_input' }>
   const gateKey = (block: GateBlock): string =>
     `${block.kind}:${block.kind === 'approval' ? block.approvalId : block.requestId}`
@@ -238,7 +280,8 @@ export function createMaintenanceActions(
     if (!threadId || block.status !== 'pending' || resolvingGates.has(key)) return
     const belongs = (candidate: ChatBlock): candidate is GateBlock =>
       (candidate.kind === 'approval' || candidate.kind === 'user_input') &&
-      candidate.id === block.id && gateKey(candidate) === key
+      candidate.id === block.id && gateKey(candidate) === key &&
+      (block.kind !== 'user_input' || candidate.meta?.turnId === block.meta?.turnId)
     const current = (): boolean => get().activeThreadId === threadId && binding.generation === generation
     const pending = (): boolean => current() && get().blocks.some(candidate => belongs(candidate) && candidate.status === 'pending')
     resolvingGates.add(key)
@@ -302,10 +345,55 @@ export function createMaintenanceActions(
     }
   }
 
-  const forkActiveThreadWithOptions = async (options: { turnId?: string } = {}): Promise<void> => withImageThreadNavigation(undefined, async navigationCurrent => {
-    const { activeThreadId, busy, blocks } = get()
-    if (!activeThreadId) return
-    if (busy) {
+  const forkActiveThreadWithOptions = async (options: { turnId?: string; source?: TurnForkSource; expected?: ThreadSelectionReceipt } = {}): Promise<void> => withImageThreadNavigation(undefined, async navigationCurrent => {
+    const { activeThreadId, route, busy, blocks } = get()
+    const expected = options.expected
+    if (expected && (expected.threadId !== activeThreadId || !expected.isCurrent())) return
+    const source = options.source
+    const sourceThreadId = source?.threadId ?? expected?.threadId ?? activeThreadId
+    if (!sourceThreadId) return
+    const generation = binding.generation
+    const submissionGeneration = binding.submissionGeneration
+    const turnId = options.turnId?.trim()
+    const sourceSnapshot = (): TurnForkSnapshot | null => {
+      const snapshot = source?.getSnapshot()
+      if (!source) return { blocks: get().blocks ?? blocks, busy: get().busy ?? busy, latestSeq: get().lastSeq }
+      if (!snapshot || !source.isCurrent() || source.turnId !== turnId || snapshot.busy ||
+        snapshot.rewoundTurnIds?.[source.turnId] === true) return null
+      const closingIndex = snapshot.blocks.findIndex(block => block.kind === 'assistant' && block.id === source.finalItemId &&
+        blockRuntimeTurnId(block) === source.turnId && block.text.trim() !== '')
+      if (closingIndex < 0 || snapshot.blocks.slice(closingIndex + 1).some(block => blockRuntimeTurnId(block) === source.turnId &&
+        block.kind !== 'compaction' && (block.kind !== 'assistant' || block.text.trim() !== ''))) return null
+      if (source.endSeq !== undefined) {
+        const closing = snapshot.blocks[closingIndex] as Extract<ChatBlock, { kind: 'assistant' }>
+        const proof = source.proof
+        if (!proof) return null
+        if (proof.kind === 'general') {
+          const current = closing.generalTerminalProjectionReceipt, captured = proof.receipt
+          if (!current || closing.acceptedFinalView || current.schemaVersion !== captured.schemaVersion ||
+            current.batchDigest !== captured.batchDigest || current.threadId !== captured.threadId || current.turnId !== captured.turnId ||
+            current.itemId !== captured.itemId || current.firstSeq !== captured.firstSeq || current.lastSeq !== captured.lastSeq ||
+            current.status !== captured.status) return null
+        } else {
+          const current = closing.acceptedFinalProjectionReceipt, captured = proof.receipt
+          const currentTerminal = closing.acceptedFinalProjectionTerminal, capturedTerminal = proof.terminal
+          if (!current || current.schemaVersion !== captured.schemaVersion || current.batchId !== captured.batchId ||
+            current.threadId !== captured.threadId || current.turnId !== captured.turnId || current.lastSeq !== captured.lastSeq ||
+            current.publicationCommitId !== captured.publicationCommitId || !currentTerminal ||
+            currentTerminal.status !== capturedTerminal.status || currentTerminal.createdAt !== capturedTerminal.createdAt ||
+            currentTerminal.acceptedFinalDigest !== capturedTerminal.acceptedFinalDigest || currentTerminal.terminalReason !== capturedTerminal.terminalReason ||
+            closing.acceptedFinalView?.acceptedFinalDigest !== captured.publicationCommitId) return null
+        }
+        const receipt = closing.acceptedFinalProjectionReceipt ?? closing.generalTerminalProjectionReceipt
+        if (!Number.isSafeInteger(source.endSeq) || source.endSeq <= 0 || snapshot.latestSeq < source.endSeq ||
+          receipt?.threadId !== sourceThreadId || receipt.turnId !== source.turnId || receipt.lastSeq !== source.endSeq ||
+          (closing.acceptedFinalProjectionReceipt ? closing.acceptedFinalProjectionTerminal?.status : closing.generalTerminalProjectionReceipt?.status) !== source.status) return null
+      }
+      return snapshot
+    }
+    const initialSnapshot = sourceSnapshot()
+    if (!initialSnapshot) return
+    if (initialSnapshot.busy) {
       set({ error: i18n.t('common:threadActionBusy') })
       return
     }
@@ -318,35 +406,45 @@ export function createMaintenanceActions(
       set({ error: i18n.t('common:runtimeFeatureUnsupported') })
       return
     }
-    const turnId = options.turnId?.trim()
+    const authorityCurrent = (): boolean => {
+      const snapshot = sourceSnapshot()
+      return get().activeThreadId === activeThreadId && get().route === route &&
+        (!expected || expected.isCurrent()) &&
+        binding.generation === generation && binding.submissionGeneration === submissionGeneration &&
+        get().runtimeConnection === 'ready' && getProvider() === p && snapshot !== null && !snapshot.busy
+    }
+    const current = (): boolean => navigationCurrent() && authorityCurrent()
+    if (!current()) return
     try {
-      const parentThread =
-        get().threads.find((thread) => thread.id === activeThreadId) ?? {
-          id: activeThreadId,
-          title: activeThreadId.slice(0, 8)
-        }
+      const parent = get().threads.find((thread) => thread.id === sourceThreadId)
+      const parentThread = { id: sourceThreadId, title: parent?.title ?? initialSnapshot.title ?? sourceThreadId.slice(0, 8) }
+      const fallbackBlocks = turnId ? forkBlocksThroughTurn(initialSnapshot.blocks, turnId) : initialSnapshot.blocks
+      const messageCount = forkedMessageCount(fallbackBlocks)
+      const turnCount = forkedTurnCount(fallbackBlocks)
       const forked = turnId
-        ? await p.forkThread(activeThreadId, { turnId })
-        : await p.forkThread(activeThreadId)
-      const fallbackBlocks = turnId ? forkBlocksThroughTurn(blocks, turnId) : blocks
+        ? await p.forkThread(sourceThreadId, { turnId, ...(source?.endSeq !== undefined ? { endSeq: source.endSeq } : {}) })
+        : await p.forkThread(sourceThreadId)
+      // IME cancellation only retires navigation; retain the completed Host fork's
+      // lineage while its authority is current. Never retry the fork automatically.
+      if (!authorityCurrent()) return
       saveThreadForkRegistry(
         markThreadFork(
           forked.id,
           parentThread,
           {
             createdAt: forked.forkedAt ?? new Date().toISOString(),
-            forkedFromMessageCount: forked.forkedFromMessageCount ?? forkedMessageCount(fallbackBlocks),
-            forkedFromTurnCount: forked.forkedFromTurnCount ?? forkedTurnCount(fallbackBlocks)
+            forkedFromMessageCount: forked.forkedFromMessageCount ?? messageCount,
+            forkedFromTurnCount: forked.forkedFromTurnCount ?? turnCount
           },
           readThreadForkRegistry()
         )
       )
-      await get().refreshThreads()
-      if (!navigationCurrent()) return
+      if (expected) await get().refreshThreads({ isCurrent: authorityCurrent })
+      else await get().refreshThreads()
+      if (!current()) return
       await get().selectThread(forked.id)
-      if (!navigationCurrent()) return
     } catch (e) {
-      if (!navigationCurrent()) return
+      if (!current()) return
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -367,27 +465,65 @@ export function createMaintenanceActions(
     const targetId = threadId.trim()
     const nextTitle = title.trim()
     if (!targetId || !nextTitle) return
+    const owner = ++renameGeneration
+    renameOwners.set(targetId, owner)
     if (get().runtimeConnection !== 'ready') {
-      set({ error: i18n.t('common:runtimeActionNeedsConnection') })
-      return
+      const error = new Error(i18n.t('common:runtimeActionNeedsConnection'))
+      set({ error: error.message })
+      if (renameOwners.get(targetId) === owner) renameOwners.delete(targetId)
+      throw error
     }
     const p = getProvider()
+    const { activeThreadId, route, error: originalError } = get()
+    const generation = binding.generation
+    const submissionGeneration = binding.submissionGeneration
+    const ownsRename = (): boolean => renameOwners.get(targetId) === owner && getProvider() === p
+    const ownsUi = (): boolean => getProvider() === p && get().activeThreadId === activeThreadId && get().route === route &&
+      binding.generation === generation && binding.submissionGeneration === submissionGeneration &&
+      get().runtimeConnection === 'ready'
+    const current = (): boolean => ownsRename() && ownsUi()
+    // A completed mutation releases its slot; admitted index reads may continue
+    // under the same primitive owner until another rename or UI owner replaces it.
+    const readCurrent = (): boolean => renameGeneration === owner && ownsUi()
+    const recordError = (error: unknown, expectedError = originalError): void => {
+      if (!current() || get().error !== expectedError) return
+      set({
+        error: formatRuntimeError(error),
+        ...(shouldOpenSettingsForError(error)
+          ? { route: 'settings' as const, settingsSection: 'agents' as const }
+          : {})
+      })
+    }
     try {
-      await p.renameThread(targetId, nextTitle)
+      try {
+        await p.renameThread(targetId, nextTitle)
+      } catch (error) {
+        recordError(error)
+        throw error
+      }
+      if (!ownsRename()) return
+      const ownsError = current() && get().error === originalError
       set((s) => ({
         threads: s.threads.map((thread) =>
           thread.id === targetId ? { ...thread, title: nextTitle } : thread
         ),
-        error: null
+        threadSearchResults: s.threadSearchResults
+          ? { ...s.threadSearchResults, threads: s.threadSearchResults.threads.map((thread) =>
+            thread.id === targetId ? { ...thread, title: nextTitle } : thread
+          ) }
+          : s.threadSearchResults,
+        ...(ownsError && s.error === originalError ? { error: null } : {})
       }))
-      await get().refreshThreads()
-    } catch (e) {
-      set({
-        error: formatRuntimeError(e),
-        ...(shouldOpenSettingsForError(e)
-          ? { route: 'settings' as const, settingsSection: 'agents' as const }
-          : {})
-      })
+      if (!current() || !ownsError || get().error !== null) return
+      const refreshError = get().error
+      try {
+        await get().refreshThreads({ isCurrent: () => readCurrent() && get().error === refreshError })
+      } catch (error) {
+        // The rename is already acknowledged; a list refresh cannot undo it.
+        recordError(error, refreshError)
+      }
+    } finally {
+      if (renameOwners.get(targetId) === owner) renameOwners.delete(targetId)
     }
   },
 
@@ -406,6 +542,8 @@ export function createMaintenanceActions(
         await p.archiveThread(targetId, archived)
       } else if (archived) {
         await p.deleteThread(targetId)
+        set(s => ({ ...retireQueuedThreads(s, [targetId]), userInputDraftInterruptions: forgetUserInputDraftInterruptionsForThread(s.userInputDraftInterruptions, targetId),
+          deletedUserInputDraftThreadIds: markDeletedUserInputDraftThread(s.deletedUserInputDraftThreadIds, targetId) }))
       } else {
         throw new Error(i18n.t('common:runtimeFeatureUnsupported'))
       }
@@ -427,6 +565,11 @@ export function createMaintenanceActions(
           threads: s.threads.map((thread) =>
             thread.id === targetId ? { ...thread, archived } : thread
           ),
+          threadSearchResults: s.threadSearchResults
+            ? { ...s.threadSearchResults, threads: s.threadSearchResults.threads.map((thread) =>
+              thread.id === targetId ? { ...thread, archived } : thread
+            ) }
+            : null,
           watchTurnCompletion: w,
           unreadThreadIds: u,
           ...(archivingActive && navigationCurrent() ? clearedThreadSelection() : {}),
@@ -462,6 +605,7 @@ export function createMaintenanceActions(
       set({ error: i18n.t('common:runtimeFeatureUnsupported') })
       return
     }
+    set({ busy: true })
     try {
       await p.compactThread(activeThreadId, reason)
       await get().refreshThreads()
@@ -473,20 +617,24 @@ export function createMaintenanceActions(
           ? { route: 'settings' as const, settingsSection: 'agents' as const }
           : {})
       })
+    } finally {
+      if (get().activeThreadId === activeThreadId) set({ busy: false })
     }
   },
 
-  forkActiveThread: async () => {
-    await forkActiveThreadWithOptions()
+  forkActiveThread: async (expected?: ThreadSelectionReceipt) => {
+    await forkActiveThreadWithOptions({ expected })
   },
 
-  forkThreadFromTurn: async (turnId) => {
+  forkThreadFromTurn: async (turnId, source) => {
     const targetTurnId = turnId.trim()
-    if (!targetTurnId) return
-    await forkActiveThreadWithOptions({ turnId: targetTurnId })
+    if (!targetTurnId || source && (source.threadId.trim() !== source.threadId || !source.threadId ||
+      source.turnId !== targetTurnId || (source.status !== 'completed' && source.status !== 'aborted'))) return
+    await forkActiveThreadWithOptions({ turnId: targetTurnId, source })
   },
 
   setActiveThreadGoal: async (objective, options) => {
+    if (goalMutationInFlight) return false
     const trimmed = objective.trim()
     if (!trimmed) return false
     if (get().runtimeConnection !== 'ready') {
@@ -504,11 +652,17 @@ export function createMaintenanceActions(
       set({ error: i18n.t('common:runtimeFeatureUnsupported') })
       return false
     }
+    const existing = get().activeThreadGoal
+    const ref = countedGoalRefV1(existing)
+    const generation = binding.generation
+    goalMutationInFlight = true
+    set(state => ({ goalStateEpoch: (state.goalStateEpoch ?? 0) + 1 }))
     try {
       const goal = await p.setThreadGoal(activeThreadId, {
         objective: trimmed,
-        status: 'active',
-        ...(options?.research
+        ...(ref ? { operation: 'edit' as const, ref } : !existing && !options?.research ? { operation: 'create' as const } : {}),
+        ...(options?.maxGoalRounds !== undefined ? { maxGoalRounds: options.maxGoalRounds } : {}),
+        ...(!ref && options?.research
           ? {
               research: {
                 enabled: true as const,
@@ -517,12 +671,17 @@ export function createMaintenanceActions(
             }
           : {})
       })
-      applyGoalSnapshot(set, activeThreadId, goal)
+      await refreshGoalAuthority(activeThreadId, generation, goal)
       await get().refreshThreads()
-      return get().sendMessage(goal.objective, 'agent', {
-        displayText: i18n.t('common:goalUserMessage', { objective: goal.objective })
-      })
+      if (!existing && options?.research && get().activeThreadId === activeThreadId && binding.generation === generation) {
+        return get().sendMessage(goal.objective, 'agent', {
+          displayText: i18n.t('common:goalUserMessage', { objective: goal.objective })
+        })
+      }
+      return true
     } catch (e) {
+      await refreshGoalAuthority(activeThreadId, generation).catch(() => undefined)
+      if (get().activeThreadId !== activeThreadId || binding.generation !== generation) return false
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -530,10 +689,11 @@ export function createMaintenanceActions(
           : {})
       })
       return false
-    }
+    } finally { goalMutationInFlight = false }
   },
 
   setActiveThreadGoalStatus: async (status: ThreadGoalStatus) => {
+    if (goalMutationInFlight) return false
     const { activeThreadId } = get()
     if (!activeThreadId) return false
     if (get().runtimeConnection !== 'ready') {
@@ -545,12 +705,19 @@ export function createMaintenanceActions(
       set({ error: i18n.t('common:runtimeFeatureUnsupported') })
       return false
     }
+    const ref = countedGoalRefV1(get().activeThreadGoal)
+    if (ref && status !== 'active' && status !== 'paused') return false
+    const generation = binding.generation
+    goalMutationInFlight = true
+    set(state => ({ goalStateEpoch: (state.goalStateEpoch ?? 0) + 1 }))
     try {
-      const goal = await p.setThreadGoal(activeThreadId, { status })
-      applyGoalSnapshot(set, activeThreadId, goal)
+      const goal = await p.setThreadGoal(activeThreadId, ref ? { operation: status === 'active' ? 'resume' : 'pause', ref } : { status })
+      await refreshGoalAuthority(activeThreadId, generation, goal)
       await get().refreshThreads()
       return true
     } catch (e) {
+      await refreshGoalAuthority(activeThreadId, generation).catch(() => undefined)
+      if (get().activeThreadId !== activeThreadId || binding.generation !== generation) return false
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -558,10 +725,11 @@ export function createMaintenanceActions(
           : {})
       })
       return false
-    }
+    } finally { goalMutationInFlight = false }
   },
 
   clearActiveThreadGoal: async () => {
+    if (goalMutationInFlight) return false
     const { activeThreadId } = get()
     if (!activeThreadId) return false
     if (get().runtimeConnection !== 'ready') {
@@ -573,14 +741,20 @@ export function createMaintenanceActions(
       set({ error: i18n.t('common:runtimeFeatureUnsupported') })
       return false
     }
+    const ref = countedGoalRefV1(get().activeThreadGoal)
+    const generation = binding.generation
+    goalMutationInFlight = true
+    set(state => ({ goalStateEpoch: (state.goalStateEpoch ?? 0) + 1 }))
     try {
-      const cleared = await p.clearThreadGoal(activeThreadId)
+      const cleared = ref ? await p.clearThreadGoal(activeThreadId, ref) : await p.clearThreadGoal(activeThreadId)
       if (cleared) {
-        applyGoalSnapshot(set, activeThreadId, null)
+        await refreshGoalAuthority(activeThreadId, generation, null)
       }
       await get().refreshThreads()
       return cleared
     } catch (e) {
+      await refreshGoalAuthority(activeThreadId, generation).catch(() => undefined)
+      if (get().activeThreadId !== activeThreadId || binding.generation !== generation) return false
       set({
         error: formatRuntimeError(e),
         ...(shouldOpenSettingsForError(e)
@@ -588,7 +762,7 @@ export function createMaintenanceActions(
           : {})
       })
       return false
-    }
+    } finally { goalMutationInFlight = false }
   },
 
   setActiveThreadTodoStatus: async (todoId: string, status: ThreadTodoStatus) => {
@@ -616,9 +790,6 @@ export function createMaintenanceActions(
     try {
       const nextItems = activeThreadTodos.items.map((item) => {
         if (item.id === todoId) return { ...item, status }
-        if (status === 'in_progress' && item.status === 'in_progress') {
-          return { ...item, status: 'pending' as const }
-        }
         return item
       })
       const todos = await p.setThreadTodos(activeThreadId, threadTodoWriteItems({
@@ -781,6 +952,12 @@ export function createMaintenanceActions(
         delete u[targetId]
         return {
           threads: s.threads.filter((thread) => thread.id !== targetId),
+          threadSearchResults: s.threadSearchResults
+            ? { ...s.threadSearchResults, threads: s.threadSearchResults.threads.filter((thread) => thread.id !== targetId) }
+            : null,
+          ...retireQueuedThreads(s, [targetId]),
+          userInputDraftInterruptions: forgetUserInputDraftInterruptionsForThread(s.userInputDraftInterruptions, targetId),
+          deletedUserInputDraftThreadIds: markDeletedUserInputDraftThread(s.deletedUserInputDraftThreadIds, targetId),
           watchTurnCompletion: w,
           unreadThreadIds: u,
           ...(deletingActive && navigationCurrent() ? clearedThreadSelection() : {}),
@@ -885,6 +1062,14 @@ export function createMaintenanceActions(
       if (!isCurrent()) return
       // Our rewind SSE may already have removed the target. Mirror the captured
       // cut only after its successful HTTP reply, without requiring it to remain.
+      const removedTurnIds = new Set<string>([turnId])
+      for (const block of state.blocks.slice(idx)) {
+        if ('meta' in block && typeof block.meta?.turnId === 'string' && block.meta.turnId.trim()) removedTurnIds.add(block.meta.turnId.trim())
+      }
+      const rewoundTurnIds = { ...get().rewoundTurnIds,
+        ...Object.fromEntries([...removedTurnIds].map(id => [id, true as const])) }
+      const turnUsageById = reconcileTurnUsageById(activeThreadId, undefined, get().turnUsageById, undefined, rewoundTurnIds)
+      for (const removedTurnId of removedTurnIds) clearActiveStream(activeThreadId, removedTurnId)
       const turnStartedAtByUserId = { ...get().turnStartedAtByUserId }
       const turnDurationByUserId = { ...get().turnDurationByUserId }
       for (const block of state.blocks.slice(idx)) {
@@ -895,7 +1080,8 @@ export function createMaintenanceActions(
       sseAbortRef.current = null
       clearBusyWatchdog()
       set({ blocks: state.blocks.slice(0, idx), liveAssistant: '', currentTurnId: null, currentTurnUserId: null,
-        turnStartedAtByUserId, turnDurationByUserId, queuedMessages: [], queuedMessagesPausedReason: null, error: null })
+        turnStartedAtByUserId, turnDurationByUserId, turnUsageById, rewoundTurnIds, lastTurnUsage: null,
+        ...queueMessagesPatch(get(), activeThreadId, []), ...queuePausePatch(get(), null, activeThreadId), error: null })
       sending = true
       try {
         const pending = get().sendMessage(trimmed, undefined, { ...payload,
@@ -985,20 +1171,39 @@ export function createMaintenanceActions(
     }, { status: decision === 'allow' ? 'allowed' : 'denied' }, supported)
   },
 
-  resolveUserInput: async (blockId, action) => {
-    const block = get().blocks.find(candidate => candidate.id === blockId)
-    if (!block || block.kind !== 'user_input' || block.status !== 'pending') return
+  resolveUserInput: async (target, action) => {
+    const state = get()
+    if (!target || typeof target !== 'object' || !target.threadId || target.threadId !== state.activeThreadId) return
+    const index = findUserInputBlockIndex(state.blocks, target.itemId, target.requestId)
+    const block = index < 0 ? undefined : state.blocks[index]
+    if (!block || block.kind !== 'user_input') throw new Error(i18n.t('common:ownedThreadUnavailable'))
+    const parsedSelector = UserInputActionSelectorSchemaV1.safeParse(target)
+    if (!parsedSelector.success || parsedSelector.data.turnId !== block.meta?.turnId)
+      throw new Error(i18n.t('common:ownedThreadUnavailable'))
+    const selector = parsedSelector.data
     const provider = getProvider()
+    if (action.kind === 'late') {
+      const turnId = action.expectedTurnId
+      if (block.status !== 'continued' || !turnId || isPendingActiveStreamTurnId(turnId) || !provider.submitUserInputLateReply) throw new Error(i18n.t('common:userInputLateUnavailable'))
+      // The private leaf captures the current Host anchor once. A retry keeps
+      // that anchor and UUID; Host owns admission and the actual delivery target.
+      await provider.submitUserInputLateReply(block.requestId, action.answers, { clientUserMessageId: action.clientUserMessageId, expectedTurnId: turnId }, selector)
+      // Terminal streams retire. Reuse the existing guarded snapshot/SSE
+      // recovery for an idle wake; the receipt never fabricates busy or history.
+      if (!state.busy && get().activeThreadId === target.threadId && get().route === 'chat' && !get().busy)
+        void get().recoverActiveTurn()
+      return
+    }
+    if (block.status !== 'pending') throw new Error(i18n.t('common:pendingRequestNotResolved'))
     const supported = action.kind === 'submit'
       ? typeof provider.submitUserInputResponse === 'function'
       : typeof provider.cancelUserInput === 'function'
-    const publicAnswers = action.kind === 'submit' ? action.answers.map(answer => ({
-      ...answer, label: projectOrdinaryPublicText(answer.label), value: projectOrdinaryPublicText(answer.value)
-    })) : undefined
+    const publicAnswers = action.kind === 'submit'
+      ? submittedUserInputDisplay(block, action.answers) : undefined
     await resolveGate(block, async () => {
       if (!supported) throw new Error(i18n.t('common:runtimeUserInputUnsupported'))
-      if (action.kind === 'submit') await provider.submitUserInputResponse!(block.requestId, action.answers)
-      else await provider.cancelUserInput!(block.requestId)
+      if (action.kind === 'submit') await provider.submitUserInputResponse!(block.requestId, action.answers, selector)
+      else await provider.cancelUserInput!(block.requestId, selector)
     }, action.kind === 'submit' ? { status: 'submitted', answers: publicAnswers } : { status: 'cancelled' }, supported)
   },
 
@@ -1012,11 +1217,12 @@ export function createMaintenanceActions(
     // stream is aborted first because onDeltas/onTool flip `busy` back on
     // while the backend turn is still streaming.
     binding.generation += 1
+    binding.interruptionGeneration += 1
     sseAbortRef.current?.abort()
     sseAbortRef.current = null
     quarantineInterruptedTurn(set, get, activeThreadId, currentTurnId, currentTurnUserId)
-    if (get().queuedMessages.length > 0) {
-      set({ queuedMessagesPausedReason: 'interrupted' })
+    if (queuedMessagesForThread(get(), activeThreadId).length > 0) {
+      set(s => queuePausePatch(s, 'interrupted', activeThreadId))
     }
     const interruptGeneration = binding.generation
     const ownsInterrupt = () => get().activeThreadId === activeThreadId && binding.generation === interruptGeneration
@@ -1046,10 +1252,10 @@ export function createMaintenanceActions(
       )
       if (reconciled && ownsInterrupt()) {
         void get().refreshThreads()
-        if (get().queuedMessages.length === 0) {
+        if (queuedMessagesForThread(get(), activeThreadId).length === 0) {
           releaseThreadWorktreeIfNeeded(activeThreadId)
         }
-        void get().drainQueuedMessages()
+        void get().drainQueuedMessages(activeThreadId)
       }
     }
   }

@@ -341,3 +341,30 @@ func cloneAttemptRegistrationInputV1(input cachetelemetryport.AttemptRegistratio
 	input.ProviderConfig = append([]byte(nil), input.ProviderConfig...)
 	return input
 }
+
+func TestSignedProviderUsageKeepsReasoningZeroAndRejectsContradictorySubset(t *testing.T) {
+	result := domainmodel.Result{Usage: domainmodel.Usage{UsagePresenceKnown: true, HasPromptTokens: true, HasCompletionTokens: true, HasReasoningTokens: true, PromptTokens: 10, CompletionTokens: 2}}
+	got, err := cacheProviderUsage(result, domaincache.ProviderFamilyDeepSeek)
+	if err != nil || !got.ReasoningTokens.Known || got.ReasoningTokens.Value != 0 {
+		t.Fatalf("explicit reasoning zero lost: %#v err=%v", got, err)
+	}
+	result.Usage.HasReasoningTokens = false
+	got, err = cacheProviderUsage(result, domaincache.ProviderFamilyDeepSeek)
+	if err != nil || got.ReasoningTokens.Known {
+		t.Fatalf("missing reasoning fabricated: %#v err=%v", got, err)
+	}
+	result.Usage.HasReasoningTokens = true
+	result.Usage.ReasoningTokens = 3
+	if _, err := cacheProviderUsage(result, domaincache.ProviderFamilyDeepSeek); err == nil {
+		t.Fatal("contradictory reasoning must not enter signed ledger")
+	}
+}
+
+func TestNativeCounterQualificationReachesSignedSettlementWithoutCacheComparison(t *testing.T) {
+	for _, qualification := range []domaincache.ProviderOutputTokensFinalityV1{domaincache.ProviderOutputTokensProvisionalV1, domaincache.ProviderOutputTokensFinalV1} {
+		u, err := cacheProviderUsage(domainmodel.Result{Usage: domainmodel.Usage{UsagePresenceKnown: true, HasCompletionTokens: true, CompletionTokens: 20, OutputTokensFinality: qualification, HasCacheHit: true, CacheHitTokens: 5}}, domaincache.ProviderFamilyDeepSeek)
+		if err != nil || !u.NativeCounterPresence || !u.OutputTokens.Known || u.OutputTokens.Value != 20 || u.OutputTokensFinality != qualification || !u.CacheHitTokens.Known || u.CacheHitTokens.Value != 5 || u.InputTokens.Known || u.CacheMissTokens.Known {
+			t.Fatalf("native reported presence lost: %#v %v", u, err)
+		}
+	}
+}

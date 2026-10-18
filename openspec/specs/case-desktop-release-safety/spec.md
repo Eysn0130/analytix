@@ -424,11 +424,71 @@ Every data-analysis subprocess, converter, archive extractor, or packaged interp
 - **THEN** the complete process tree is terminated, staging is quarantined or removed safely, and no partial or attacker-selected target is published
 
 ### Requirement: Reasoning Zero-Byte Boundary
-Reasoning/thinking content SHALL have zero visible or exported bytes across success, failure, tool call, recovery, history, compaction, logs, traces, reports, and exports.
+Reasoning/thinking content SHALL have zero bytes in generic visible product
+events, SSE, durable history, recovery/replay, compaction, logs, traces,
+reports, and exports across success, failure and tool-call paths. The sole
+visible exception is the typed protected process-local completed native block
+sink specified by `case-claim-publication-gate`; it SHALL NOT alter these
+forbidden-channel boundaries or create durable reasoning history.
+
+Electron Main SHALL bind that sink to the current native main-frame document,
+pane/session and runtime incarnation. The renderer SHALL receive only a
+Main-local viewer handle and typed projected block descriptors/bodies; private
+runtime tokens, authority bindings, raw Provider-native IDs, signatures,
+encrypted content and continuation capsules SHALL NOT cross preload. Opaque
+host block IDs are local display handles and SHALL NOT be treated as Provider
+source identities. Main SHALL revoke the
+viewer and clear its copies on navigation, pane/session replacement, native
+visibility loss, close, or runtime loss. Expanded body requests and bounded
+long polls SHALL freshly recheck the same viewer and current runtime authority;
+renderer-supplied IDs or cached authorization SHALL NOT substitute.
+
+Protected-local process DTOs SHALL explicitly negotiate schema version 2 on
+all Go actions and successful replies. The Go owner SHALL expose the original
+thread/turn/context digest, lossless context epoch and volatile process
+incarnation. Coordinated upgrades SHALL reject missing/V1 success identities;
+no generic route or persisted display store SHALL be introduced.
+
+A user-opened, actually visible and scope-allowed native pane MAY automatically
+acquire its own fresh viewer lease and no-body presence, then read a projected
+preview with an empty expansion set. This SHALL require no separate authorization
+button. Unknown or unavailable presence SHALL NOT be represented as zero or a
+Think row. Only accepted real blocks/captures SHALL contribute presence. Body
+access SHALL require the completed source and one explicit block expansion.
+Group folding clears preview/body copies; pane hiding or retirement also clears
+its lease. A retired scope generation SHALL NOT automatically renew itself.
+
+Main and preload SHALL independently own each native document/pane lease.
+Authorizing and active leases SHALL share the existing bounded global quota.
+Closing, replacing or denying one pane SHALL NOT revoke sibling panes or an
+unrelated in-flight authorization. Main SHALL retain an independent document
+watch after the latest or last pane closes. Real global revocation SHALL advance
+an authority fence; delayed old-document/old-epoch notifications SHALL NOT retire
+successor leases. Notifications SHALL contain only non-body control stamps,
+with pane-targeted renderer callbacks carrying no payload. Before delivery,
+preload SHALL check the exact unique connected DOM root and all hidden/inert/
+aria-hidden/display/visibility ancestors, in addition to Main and fresh Go
+current-source validation. Renderer visibility booleans SHALL NOT authorize.
+
+#### Scenario: Main, side and inspector panes coexist
+- **WHEN** three actually visible panes hold fresh own-scope leases and the middle pane closes, hides or changes selection
+- **THEN** only that pane's old lease/copies retire; siblings remain independently readable, and late old replies cannot affect its successor
+
+#### Scenario: A delayed global control arrives after reauthorization
+- **WHEN** a native document acquires a successor after a real authority epoch change and receives the old epoch notification late
+- **THEN** only owners preceding that fence retire; the new document or new epoch lease stays current
 
 #### Scenario: Desktop replays all events after restart
 - **WHEN** a thread with provider reasoning is reloaded from durable state
-- **THEN** no reasoning item/delta/text/signature is returned to main, preload, renderer, export, or report surfaces
+- **THEN** no reasoning item/delta/text/signature is returned to main, preload, renderer, export, or report surfaces, and the protected process-local body is unavailable rather than reconstructed
+
+#### Scenario: A current native pane expands a completed block
+- **WHEN** the current original-own turn and native viewer pass fresh protected read validation for a complete plaintext native block
+- **THEN** only the typed credential-projected local copy may be visible, with truthful source-exact/redacted/withheld classification, while forbidden generic and export channels remain zero-byte
+
+#### Scenario: Native visibility or authority changes during a wait
+- **WHEN** the pane hides, navigates, changes session, loses its runtime, or original/current source authority changes before delivery
+- **THEN** the old viewer is denied, its copies are cleared, and no stale body is delivered after wake-up
 
 ### Requirement: Automatic Compaction Preserves Typed Continuation
 The production Go runtime SHALL perform deterministic pre-turn automatic
@@ -505,8 +565,12 @@ Todo state SHALL use the closed union `pending`, `in_progress`, `completed`, `fa
 - **THEN** the host persists `canceled` with its fixed reason code and does not delete the audit record or count it toward Goal completion
 
 #### Scenario: Malformed Todo replacement is submitted
-- **WHEN** an inbound Todo payload contains a non-object item, duplicate id, unknown property, invalid transition, multiple `in_progress` entries, or a terminal state with an invalid/missing reason
+- **WHEN** an inbound Todo payload contains a non-object item, duplicate id, unknown property, invalid transition, or a terminal state with an invalid/missing reason
 - **THEN** the request fails before persistence and the prior durable Todo set remains unchanged
+
+#### Scenario: Parallel work is represented in one Todo list
+- **WHEN** an authorized complete-list replacement contains multiple `in_progress` entries for work running in parallel
+- **THEN** the host accepts the complete list after normal lifecycle validation, preserves every active entry, and retains the same terminal-audit requirements
 
 #### Scenario: Failed work is explicitly retried
 - **WHEN** an authorized transition moves a failed or canceled Todo back to `in_progress`
@@ -766,7 +830,7 @@ The release evidence SHALL compute the following metrics from executable
 tests: unsupported high-risk claim released, unknown/mismatched citation
 accepted, cross-case receipt accepted, unadvertised tool executed,
 stale/spoofed MCP accepted, source-unavailable case fact, recovery evidence
-upgrade, reasoning visible/exported bytes, report without publication receipt,
+upgrade, reasoning bytes in forbidden generic/export channels, report without publication receipt,
 `write_report=false` file writes, receipt coverage, applicable P0/P1
 pass/skip state, packaged general-Agent acceptance, and packaged valuable-funds
 acceptance; entity-reference drift/collision, stale fact promoted to current,
@@ -776,7 +840,10 @@ continuation/subagent/MCP/public-tool/generic HTTP-SSE-event/free-form durable
 history-renderer/search/log/telemetry/crash/compaction channels, internal
 reference visible to the user, Direct Preview full/masked selection leakage,
 Agent private-carrier consumption count, full/masked pre-projection mismatch,
-typed-sink positive source-value display, original-snapshot history resolution,
+typed-sink positive source-value display, protected process-local completed
+native block positive display, partial/opaque body and signature-byte rejection,
+full-capture credential projection before bounds, process-local TTL/retry/
+revocation/restart body unavailability, original-snapshot history resolution,
 stale display delivery after case/snapshot/session/window change, external
 effect without explicit action, and provider-bound Connector PII leakage. A
 global UI/DOM zero-byte metric SHALL NOT replace the forbidden-channel negative

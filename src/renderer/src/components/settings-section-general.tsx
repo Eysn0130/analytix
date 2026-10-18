@@ -22,6 +22,7 @@ import {
 } from './settings-controls'
 import { LegacySessionImportCard } from './settings-section-general-legacy-import'
 import { UiThemeSettingsSection } from './settings-section-ui-theme'
+import { SettingsPerformanceUsage } from './settings-performance-usage'
 
 export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): ReactElement {
   const {
@@ -35,11 +36,12 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
     setShowRuntimeToken,
     portError,
     selectControlClass,
-    openOnboardingPreview,
+    openProviderSettings,
     pickWorkspace,
     resetWorkspaceToDefault,
     workspacePickerError,
     logPath,
+    logsSectionRef,
     logDirOpenError,
     setLogDirOpenError,
     pickWriteWorkspace,
@@ -133,6 +135,7 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                     </select>
                   }
                 />
+                <SettingsPerformanceUsage update={update} t={t} />
                 <SettingRow
                   title={t('motionPreference')}
                   description={t('motionPreferenceDesc')}
@@ -295,17 +298,17 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                 />
               </SettingsCard>
 
-              <SettingsCard title={t('onboardingPreview')} className="mt-6">
+              <SettingsCard title={t('providers')} className="mt-6">
                 <SettingRow
-                  title={t('onboardingPreview')}
-                  description={t('onboardingPreviewDesc')}
+                  title={t('analytixProvider')}
+                  description={t('providersDesc')}
                   control={
                     <button
                       type="button"
-                      onClick={openOnboardingPreview}
+                      onClick={openProviderSettings}
                       className="inline-flex w-fit items-center rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] font-medium text-ds-ink shadow-sm transition hover:bg-ds-hover"
                     >
-                      {t('onboardingPreviewOpen')}
+                      {t('providers')}
                     </button>
                   }
                 />
@@ -313,7 +316,8 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
 
               <LegacySessionImportCard t={t} tCommon={tCommon} />
 
-              <SettingsCard title={t('logTitle')} className="mt-6">
+              <div ref={logsSectionRef} className="mt-6">
+              <SettingsCard title={t('logTitle')}>
                 <SettingRow
                   title={t('logEnabled')}
                   description={t('logEnabledDesc')}
@@ -383,6 +387,7 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                   }
                 />
               </SettingsCard>
+              </div>
             </>
   )
 }

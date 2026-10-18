@@ -4,6 +4,9 @@ import (
 	"errors"
 	"math"
 	"strings"
+
+	appusage "analytix.local/runtime-go/internal/app/usage"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
 )
 
 var errInvalidPipelineTelemetry = errors.New("pipeline telemetry is not a closed public record")
@@ -13,12 +16,14 @@ type pipelineValueKind uint8
 const (
 	pipelineNumber pipelineValueKind = iota + 1
 	pipelineBoolean
+	pipelinePositiveInteger
 	pipelineApprovalPolicy
 	pipelineSandboxMode
 	pipelinePromptRoute
 	pipelineEndpointFormat
 	pipelineStopReason
 	pipelineAdmissionReason
+	pipelineMetricsVersion
 )
 
 var pipelineDetailSchema = map[string]map[string]pipelineValueKind{
@@ -29,7 +34,7 @@ var pipelineDetailSchema = map[string]map[string]pipelineValueKind{
 		"approvalPolicy": pipelineApprovalPolicy, "sandboxMode": pipelineSandboxMode,
 	},
 	"post_start": {
-		"maxModelSteps": pipelineNumber,
+		"maxModelSteps": pipelineNumber, "logicalStepMetricsVersion": pipelineMetricsVersion,
 	},
 	"input_received": {
 		"stepIndex": pipelineNumber, "promptBytes": pipelineNumber,
@@ -50,7 +55,8 @@ var pipelineDetailSchema = map[string]map[string]pipelineValueKind{
 	"post_send": pipelineProviderRequestSchema(true),
 	"response_received": {
 		"stopReason": pipelineStopReason, "toolCallCount": pipelineNumber, "streamCompleted": pipelineBoolean,
-		"durationMs": pipelineNumber, "firstTokenLatencyMs": pipelineNumber,
+		"logicalSequence": pipelinePositiveInteger,
+		"durationMs":      pipelineNumber, "firstTokenLatencyMs": pipelineNumber,
 		"firstReasoningLatencyMs": pipelineNumber, "firstRawTextLatencyMs": pipelineNumber,
 	},
 }
@@ -98,6 +104,13 @@ func pipelineProviderRequestSchema(postSend bool) map[string]pipelineValueKind {
 
 func projectPipelineTelemetry(stage string, details map[string]any, trace map[string]any, traceEnabled bool) (map[string]any, map[string]any, error) {
 	stage = strings.TrimSpace(stage)
+	if stage == "logical_step_started" || stage == "logical_step_assembled" || stage == "logical_step_closed" {
+		projected, valid := appusage.ProjectLogicalStepDetailsV1(stage, details)
+		if !valid || len(trace) > 0 {
+			return nil, nil, errInvalidPipelineTelemetry
+		}
+		return projected, nil, nil
+	}
 	schema, ok := pipelineDetailSchema[stage]
 	if !ok {
 		return nil, nil, errInvalidPipelineTelemetry
@@ -105,6 +118,20 @@ func projectPipelineTelemetry(stage string, details map[string]any, trace map[st
 	projected, err := projectPipelineValues(details, schema)
 	if err != nil {
 		return nil, nil, err
+	}
+	if _, capObservation := details["logicalSequence"]; stage == "response_received" && capObservation {
+		if projected["stopReason"] != "length" {
+			return nil, nil, errInvalidPipelineTelemetry
+		}
+		if _, ok := projected["streamCompleted"].(bool); !ok {
+			return nil, nil, errInvalidPipelineTelemetry
+		}
+		if count, present := projected["toolCallCount"]; present {
+			value, valid := pipelineFiniteNumber(count)
+			if !valid || math.Trunc(value) != value {
+				return nil, nil, errInvalidPipelineTelemetry
+			}
+		}
 	}
 	if !traceEnabled || len(trace) == 0 {
 		return projected, nil, nil
@@ -147,6 +174,12 @@ func projectPipelineValue(kind pipelineValueKind, value any) (any, bool) {
 	case pipelineNumber:
 		number, ok := pipelineFiniteNumber(value)
 		return number, ok && number >= 0 && number <= 1e15
+	case pipelinePositiveInteger:
+		number, ok := pipelineFiniteNumber(value)
+		return number, ok && number >= 1 && number <= 1e15 && math.Trunc(number) == number
+	case pipelineMetricsVersion:
+		number, ok := pipelineFiniteNumber(value)
+		return number, ok && number == appusage.LogicalStepMetricsVersionV1
 	case pipelineBoolean:
 		boolean, ok := value.(bool)
 		return boolean, ok
@@ -214,4 +247,14 @@ func pipelineFiniteNumber(value any) (float64, bool) {
 		return 0, false
 	}
 	return number, !math.IsNaN(number) && !math.IsInf(number, 0)
+}
+
+// Retry records use a closed projection alongside the existing provider
+// diagnostic projection and top-level attempt counters.
+func projectProviderRetryV1(input map[string]any) (map[string]any, error) {
+	projected, valid := domainmodel.ProjectProviderRetryDetailsV1(input)
+	if !valid {
+		return nil, errInvalidPipelineTelemetry
+	}
+	return projected, nil
 }

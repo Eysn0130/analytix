@@ -31,21 +31,31 @@ func newOfficeRuntime(ctx context.Context, config Config, identity identityport.
 	if err != nil || identity == nil || config.Insecure || strings.TrimSpace(config.RuntimeToken) == "" {
 		return nil, nil, nil, 0
 	}
-	assets, err := officeengineassets.OpenPrivateLocal(ctx, inspection)
-	if err != nil {
-		return nil, nil, nil, 0
+	// Documents uses the application's existing package/resource inspection, not
+	// the optional LibreOffice payload. No caller-supplied readiness flag exists.
+	current := func(ctx context.Context) bool {
+		next, err := packagedauthority.InspectCurrentPackageV2(ctx)
+		return err == nil && next.ResourcesRoot == inspection.ResourcesRoot &&
+			next.AuthorityFileSHA256 == inspection.AuthorityFileSHA256 &&
+			next.RuntimeIdentity == inspection.RuntimeIdentity &&
+			next.ApplicationRunnerIdentity == inspection.ApplicationRunnerIdentity &&
+			next.AppASARIdentity == inspection.AppASARIdentity && next.PackageAnchor == inspection.PackageAnchor
 	}
-	adapters := composeOfficeEditingAdapters(config, identity, protected, assets.Current)
-	// Server composition binds its projector/capture to the concrete adapters.
-	// The Host uses wrappers around those same pointers, not replacements in
-	// the server map, so all finite selection/editing operations remain bound.
-	hostedAdapters := qualifyOfficeAdapters(adapters, assets.Current)
-	host, discoveryErrors := composeOfficePackageHost(ctx, config, identity, hostedAdapters, assets.Root(), assets.Current)
-	if host == nil || len(adapters) != 3 || !assets.Current(ctx) {
-		if discoveryErrors == 0 {
-			discoveryErrors = 1
+	adapters := composeOfficeEditingAdapters(config, identity, protected, current, "docx")
+	hostedAdapters := qualifyOfficeAdapters(adapters, current)
+	descriptors := map[string]staticEditorPackageDescriptor{"analytix-documents": {root: inspection.ResourcesRoot, current: current}}
+	assets, assetErr := officeengineassets.OpenPrivateLocal(ctx, inspection)
+	if assetErr == nil {
+		native := composeOfficeEditingAdapters(config, identity, protected, assets.Current, "xlsx", "pptx")
+		for id, adapter := range native {
+			adapters[id] = adapter
+			hostedAdapters[id] = qualifiedOfficeAdapter{inner: adapter, current: assets.Current}
+			descriptors[id] = staticEditorPackageDescriptor{root: assets.Root(), current: assets.Current}
 		}
-		return nil, nil, nil, discoveryErrors
+	}
+	host, discoveryErrors := composeStaticEditorPackageHost(ctx, config, identity, hostedAdapters, descriptors)
+	if host == nil || !current(ctx) {
+		return nil, nil, nil, discoveryErrors + 1
 	}
 	return adapters, host, assets, discoveryErrors
 }

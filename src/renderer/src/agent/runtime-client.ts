@@ -1,9 +1,14 @@
 import type { AppSettingsPatch, AppSettingsV1 } from '@shared/app-settings'
+import {
+  childInputRequestSchemaV1, childInputResponseSchemaV1, childInputReceiptMatchesV1,
+  type ChildInputRequestV1, type ChildInputSubmitRequestV1, type ChildInputResponseV1, type ChildInputReceiptV1
+} from '@shared/child-input-contract'
 import type {
   AnalytixRuntimeApi,
   AnalytixSettingsApi,
   AcceptedFinalSseAckBindingV1,
   RuntimeRequestResult,
+  RuntimeSseReplayOptionsV1,
   SseEndPayload,
   SseErrorPayload,
   SseEventPayload
@@ -35,6 +40,18 @@ import { desktopQueryCache } from '../lib/desktop-query-cache'
 const SETTINGS_QUERY_KEY = ['settings'] as const
 const SETTINGS_STALE_TIME_MS = 5 * 60 * 1000
 
+function decodeChildInputResponse(body: string): ChildInputResponseV1 {
+  try {
+    const parsed = childInputResponseSchemaV1.safeParse(JSON.parse(body) as unknown)
+    if (parsed.success) return parsed.data
+  } catch { /* Keep untrusted response contents out of UI errors. */ }
+  throw new Error('Child message response was not confirmed.')
+}
+
+export class ChildInputRejectedError extends Error {
+  constructor(readonly code: string) { super('Child message was rejected. The draft has been kept.') }
+}
+
 class RendererRuntimeClient {
   private settingsApi(): Pick<AnalytixSettingsApi, 'getSettings' | 'setSettings'> {
     return window.analytix.settings
@@ -42,6 +59,9 @@ class RendererRuntimeClient {
 
   private runtimeApi(): Pick<
     AnalytixRuntimeApi,
+    | 'openUserInputWait'
+    | 'closeUserInputWait'
+    | 'onUserInputWaitChanged'
     | 'runtimeRequest'
     | 'restartRuntime'
     | 'startSse'
@@ -50,6 +70,7 @@ class RendererRuntimeClient {
     | 'onSseEvent'
     | 'onSseEnd'
     | 'onSseError'
+    | 'onRuntimeStatus'
   > {
     return window.analytix.runtime
   }
@@ -65,6 +86,11 @@ class RendererRuntimeClient {
     })
   }
 
+  // Recovery callers own readback adoption; leave cached reads and writes untouched.
+  readSettingsFromHost(): Promise<AppSettingsV1> {
+    return this.settingsApi().getSettings()
+  }
+
   async setSettings(partial: AppSettingsPatch): Promise<AppSettingsV1> {
     const settings = await this.settingsApi().setSettings(partial)
     desktopQueryCache.setQueryData(SETTINGS_QUERY_KEY, settings, SETTINGS_STALE_TIME_MS)
@@ -75,6 +101,11 @@ class RendererRuntimeClient {
   invalidateSettings(): void {
     desktopQueryCache.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY, exact: true })
   }
+
+  openUserInputWait: AnalytixRuntimeApi['openUserInputWait'] = selector => this.runtimeApi().openUserInputWait(selector)
+  closeUserInputWait: AnalytixRuntimeApi['closeUserInputWait'] = selector => this.runtimeApi().closeUserInputWait(selector)
+  onUserInputWaitChanged: AnalytixRuntimeApi['onUserInputWaitChanged'] = handler => this.runtimeApi().onUserInputWaitChanged(handler)
+  onRuntimeStatus: AnalytixRuntimeApi['onRuntimeStatus'] = handler => this.runtimeApi().onRuntimeStatus(handler)
 
   runtimeRequest(path: string, method?: string, body?: string): Promise<RuntimeRequestResult> {
     if (body === undefined) {
@@ -104,8 +135,36 @@ class RendererRuntimeClient {
     return this.runtimeRequest(ANALYTIX_RUNTIME_TASK_JOBS_RECOVER_PATH, 'POST', JSON.stringify(body))
   }
 
-  steerTaskJob(body: Record<string, unknown>): Promise<RuntimeRequestResult> {
-    return this.runtimeRequest(ANALYTIX_RUNTIME_TASK_JOBS_STEER_PATH, 'POST', JSON.stringify(body))
+  steerTaskJob(body: ChildInputRequestV1): Promise<RuntimeRequestResult> {
+    const request = childInputRequestSchemaV1.parse(body)
+    return this.runtimeRequest(ANALYTIX_RUNTIME_TASK_JOBS_STEER_PATH, 'POST', JSON.stringify(request))
+  }
+
+  async inspectChildInput(threadId: string, jobId: string, childThreadId?: string): Promise<ChildInputResponseV1['capabilities']> {
+    const response = await this.steerTaskJob({ mode: 'inspect', threadId, jobId })
+    const parsed = decodeChildInputResponse(response.body)
+    if (!response.ok || response.status !== 200 || parsed.code || parsed.receipt ||
+        childThreadId && parsed.capabilities.childThreadId !== childThreadId) {
+      throw new Error('Child input inspection was not confirmed.')
+    }
+    return parsed.capabilities
+  }
+
+  async submitChildInput(request: ChildInputSubmitRequestV1, childThreadId: string): Promise<ChildInputReceiptV1> {
+    const response = await this.steerTaskJob(request)
+    const parsed = decodeChildInputResponse(response.body)
+    const rejectionStatus: Record<string, number> = {
+      validation_error: 400, forbidden: 403, not_found: 404,
+      conflict: 409, new_turn_required: 409, input_cancelled: 409
+    }
+    if (!response.ok && parsed.code && rejectionStatus[parsed.code] === response.status && !parsed.receipt) {
+      throw new ChildInputRejectedError(parsed.code)
+    }
+    if (!response.ok || response.status !== 200 || parsed.code || !parsed.receipt ||
+        !childInputReceiptMatchesV1(parsed.receipt, request, childThreadId)) {
+      throw new Error('Child message was not confirmed. Retry the same message to check its admission.')
+    }
+    return parsed.receipt
   }
 
   killTaskJob(body: Record<string, unknown>): Promise<RuntimeRequestResult> {
@@ -168,8 +227,10 @@ class RendererRuntimeClient {
     return this.runtimeApi().restartRuntime()
   }
 
-  startSse(threadId: string, sinceSeq: number, streamId?: string): Promise<{ streamId: string }> {
-    return this.runtimeApi().startSse(threadId, sinceSeq, streamId)
+  startSse(threadId: string, sinceSeq: number, streamId?: string, replay?: RuntimeSseReplayOptionsV1): Promise<{ streamId: string }> {
+    return replay
+      ? this.runtimeApi().startSse(threadId, sinceSeq, streamId, replay)
+      : this.runtimeApi().startSse(threadId, sinceSeq, streamId)
   }
 
   ackSseEvent(

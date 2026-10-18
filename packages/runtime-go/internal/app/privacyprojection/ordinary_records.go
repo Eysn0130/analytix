@@ -1,6 +1,7 @@
 package privacyprojection
 
 import (
+	"strconv"
 	"strings"
 
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
@@ -49,6 +50,30 @@ func ProjectHostUserInputQuestions(inputID string, values []map[string]any) []ma
 	})
 	questions, _ := projected.(map[string]any)["questions"].([]map[string]any)
 	return questions
+}
+
+// ProjectHostValidatedUserInputAnswers preserves only an exact Core question
+// identity from the supplied host batch. Callers must validate the complete
+// answer batch against the signed pending request before using this projector.
+// Every content and extension string still receives the existing projection.
+func ProjectHostValidatedUserInputAnswers(inputID string, questions []map[string]any, values []map[string]string) []map[string]string {
+	projected := ProjectStringRecords(values)
+	if projected == nil {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(questions))
+	for index, question := range questions {
+		expected := strings.TrimSpace(inputID) + "_" + strconv.Itoa(index+1)
+		if id, ok := question["id"].(string); ok && id == expected {
+			allowed[id] = struct{}{}
+		}
+	}
+	for index, answer := range values {
+		if _, ok := allowed[answer["id"]]; ok {
+			projected[index]["id"] = answer["id"]
+		}
+	}
+	return projected
 }
 
 func ProjectStringRecords(values []map[string]string) []map[string]string {

@@ -7,6 +7,7 @@ import {
 
 export type AnalytixErrorCode =
   | PublicRuntimeHTTPErrorCode
+  | 'user_input_late_reply_too_large'
   | 'turn_in_progress'
   | 'turn_not_running'
   | 'turn_failed'
@@ -82,6 +83,7 @@ const LEGACY_GUARD_MESSAGES: Readonly<Record<LegacyMainGuardCode, string>> = {
 }
 
 const ADDITIONAL_ERROR_MESSAGES: Readonly<Record<Exclude<AnalytixErrorCode, PublicRuntimeHTTPErrorCode | 'turn_failed'>, string>> = {
+  user_input_late_reply_too_large: 'The late answer is too large. Edit it and submit a new attempt.',
   turn_in_progress: 'The thread already has a turn in progress.',
   turn_not_running: 'The requested turn is not running.',
   approval_not_pending: 'The requested approval is no longer pending.',

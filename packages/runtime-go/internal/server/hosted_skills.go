@@ -34,7 +34,15 @@ func hostedSkillProjection(skill hostapp.HostedSkill) map[string]any {
 
 func (h *runtimeServerHandler) executeOfficeSkill(ctx context.Context, args map[string]any, packageID string) (any, bool) {
 	failure := map[string]any{"code": "skill_snapshot_invalid", "error": "The Office plugin is unavailable or changed. Reload its skill before continuing."}
+	observation := subagentapp.SkillResultCaptureInputV1{RequestedName: subagentapp.SkillNameFromArgs(args), RunAs: "inline"}
+	captureFailure := func() {
+		observation.IsError = true
+		observation.ErrorCode, observation.ErrorMessage = "skill_snapshot_invalid", "The Office plugin is unavailable or changed. Reload its skill before continuing."
+		observation.Skill, observation.Instruction = nil, ""
+		captureRuntimeSkillResultV1(ctx, observation)
+	}
 	if subagentapp.SkillContinueOrForkRequested(args) {
+		captureFailure()
 		return failure, true
 	}
 	loaded, ok := ctx.Value(preparedHostedSkillKey{}).(hostapp.HostedSkill)
@@ -42,6 +50,7 @@ func (h *runtimeServerHandler) executeOfficeSkill(ctx context.Context, args map[
 		loaded, ok = h.currentOfficeSkill(ctx, packageID)
 	}
 	if !ok || loaded.Binding.PackageID != packageID {
+		captureFailure()
 		return failure, true
 	}
 	var output any
@@ -56,10 +65,13 @@ func (h *runtimeServerHandler) executeOfficeSkill(ctx context.Context, args map[
 			return err
 		}
 		output = subagentapp.InlineSkillOutput(record, args, "inline", body)
+		observation.Skill, observation.Instruction = record, body
 		return nil
 	})
 	if err != nil {
+		captureFailure()
 		return failure, true
 	}
+	captureRuntimeSkillResultV1(ctx, observation)
 	return output, false
 }

@@ -1,9 +1,11 @@
+import { settledDuration } from '../../components/chat/presentation/chat/turn-timing'
 import type { ReactElement } from 'react'
-import type { ChatBlock } from '../../agent/types'
+import type { AuthoritativeTurnStatuses, AuthoritativeTurnTimings, ChatBlock } from '../../agent/types'
 import { threadHasPendingRuntimeWork } from '../../store/chat-store-runtime-helpers'
 import { deriveTurnSections } from './derive-turn-sections'
 import {
   groupThreadTurns,
+  runtimeTurnId,
   splitThink,
   stableThreadTurnKey,
   type ThreadTurn
@@ -32,7 +34,10 @@ export type BuildThreadProjectionInput = {
   turnStartedAtByUserId: Record<string, number>
   turnDurationByUserId: Record<string, number>
   busy: boolean
-  tickNow: number
+  runtimeRunning?: boolean
+  tickNow?: number
+  authoritativeTurnTimings?: AuthoritativeTurnTimings
+  authoritativeTurnStatuses?: AuthoritativeTurnStatuses
   hiddenTurnCount: number
   pageSize: number
   autoCollapseThreshold: number
@@ -43,22 +48,6 @@ export type BuildThreadProjectionInput = {
   forkedFromTurnCount?: number
   turnPreview: (turn: ThreadTurn, fallback: string) => string
   turnTitle: (index: number) => string
-}
-
-function blockRuntimeTurnId(block: ChatBlock | undefined): string | null {
-  const meta = (block as { meta?: Record<string, unknown> } | undefined)?.meta
-  const turnId = typeof meta?.turnId === 'string' ? meta.turnId.trim() : ''
-  return turnId || null
-}
-
-function runtimeTurnId(turn: ThreadTurn): string | null {
-  const userTurnId = blockRuntimeTurnId(turn.user)
-  if (userTurnId) return userTurnId
-  for (const block of turn.blocks) {
-    const turnId = blockRuntimeTurnId(block)
-    if (turnId) return turnId
-  }
-  return null
 }
 
 function blockScrollStamp(block: ChatBlock | undefined): string {
@@ -81,34 +70,17 @@ function blockScrollStamp(block: ChatBlock | undefined): string {
   }
 }
 
-function deriveTurnTiming({
-  turn,
-  currentTurnUserId,
-  turnStartedAtByUserId,
-  turnDurationByUserId,
-  tickNow
-}: Pick<
-  BuildThreadProjectionInput,
-  | 'currentTurnUserId'
-  | 'turnStartedAtByUserId'
-  | 'turnDurationByUserId'
-  | 'tickNow'
-> & {
-  turn: ThreadTurn
-}): ThreadTurnTiming {
-  const userId = turn.user?.id
-  const isLive = !!(userId && currentTurnUserId === userId)
-  const startedAt = userId ? turnStartedAtByUserId[userId] : undefined
-  const recordedDuration = userId ? turnDurationByUserId[userId] : undefined
-  const liveDuration =
-    isLive && typeof startedAt === 'number'
-      ? Math.max(0, tickNow - startedAt)
-      : undefined
-  const durationMs =
-    typeof liveDuration === 'number'
-      ? Math.max(recordedDuration ?? 0, liveDuration)
-      : recordedDuration
-  return { durationMs }
+function deriveTurnTiming(input: BuildThreadProjectionInput & { turn: ThreadTurn }): ThreadTurnTiming {
+  const userId = input.turn.user?.id
+  const turnId = runtimeTurnId(input.turn) ?? (!input.turn.user && !input.turn.blocks.length ? input.currentTurnId : null)
+  const timing = turnId ? input.authoritativeTurnTimings?.[turnId] : undefined
+  const runningStartedAt = userId && input.currentTurnUserId === userId
+    ? input.turnStartedAtByUserId[userId] : undefined
+  return {
+    runningStartedAt: typeof runningStartedAt === 'number' && Number.isFinite(runningStartedAt) ? runningStartedAt : undefined,
+    durationMs: settledDuration(timing),
+    status: turnId ? input.authoritativeTurnStatuses?.[turnId] : undefined
+  }
 }
 
 function compactOneLine(text: string): string {
@@ -292,9 +264,28 @@ export function userMessageNavigationItemId(turnKey: string): string {
   return `${turnKey}:user`
 }
 
+type InputSegment = ThreadTurn & { user: Extract<ChatBlock, { kind: 'user' }> }
+
+function inputSegments(turn: ThreadTurn): InputSegment[] {
+  const segments: InputSegment[] = []
+  let current: InputSegment | undefined = turn.user && turn.user.source === undefined ? { user: turn.user, blocks: [] } : undefined
+  if (current) segments.push(current)
+  for (const block of turn.blocks) {
+    if (block.kind === 'user') {
+      current = block.source === undefined ? { user: block, blocks: [] } : undefined
+      if (current) segments.push(current)
+    } else current?.blocks.push(block)
+  }
+  return segments
+}
+
+function isSettled(status: ThreadTurnTiming['status']): boolean {
+  return status === 'completed' || status === 'failed' || status === 'aborted'
+}
+
 function anchorsFromNavigationItems(items: ThreadUserMessageNavigationItem[]): ThreadJumpAnchor[] {
   return items.map((item) => ({
-    key: item.turnKey,
+    key: item.id.slice(0, -':user'.length),
     label: item.label,
     title: item.title
   }))
@@ -303,7 +294,11 @@ function anchorsFromNavigationItems(items: ThreadUserMessageNavigationItem[]): T
 export function buildThreadProjection(input: BuildThreadProjectionInput): ThreadProjectionSnapshot {
   const turns = input.turns ?? groupThreadTurns(input.blocks)
   const visibleTurns = input.hiddenTurnCount > 0 ? turns.slice(input.hiddenTurnCount) : turns
-  const hasLiveShell = input.busy && !!input.activeThreadId && !!input.currentTurnId
+  const currentTurnId = input.currentTurnId?.trim() ?? ''
+  const currentTurnUserId = input.currentTurnUserId?.trim() ?? ''
+  const active = Boolean(input.busy || input.live.trim() || input.runtimeRunning || input.authoritativeTurnStatuses?.[currentTurnId] === 'running') &&
+    !isSettled(input.authoritativeTurnStatuses?.[currentTurnId])
+  const hasLiveShell = active && !!input.activeThreadId && !!currentTurnId
   const hasContent = input.blocks.length > 0 || !!input.live || hasLiveShell
   const latestBlock = input.blocks[input.blocks.length - 1]
   const rows: ThreadRow[] = []
@@ -313,10 +308,11 @@ export function buildThreadProjection(input: BuildThreadProjectionInput): Thread
       ? Math.max(0, input.forkedFromTurnCount)
       : undefined
   const userMessageNavigationItems: ThreadUserMessageNavigationItem[] = []
-  let questionIndex = turns.slice(0, input.hiddenTurnCount).filter((turn) => turn.user).length
+  let questionIndex = turns.slice(0, input.hiddenTurnCount).reduce((count, turn) => count + inputSegments(turn).length, 0)
   let hasVisibleLiveTurn = false
-  const currentTurnId = input.currentTurnId?.trim() ?? ''
-  const currentTurnUserId = input.currentTurnUserId?.trim() ?? ''
+  const runtimeOwnerIndex = currentTurnId ? turns.findIndex(turn => runtimeTurnId(turn) === currentTurnId) : -1
+  const legacyOwnerIndex = currentTurnUserId ? turns.findIndex(turn => !runtimeTurnId(turn) && turn.user?.id === currentTurnUserId) : -1
+  const liveOwnerIndex = runtimeOwnerIndex >= 0 ? runtimeOwnerIndex : currentTurnId ? legacyOwnerIndex : turns.length - 1
 
   if (!hasContent || !input.activeThreadId) {
     rows.push({ kind: 'emptyHero', id: `empty:${input.activeThreadId ?? 'none'}` })
@@ -339,20 +335,20 @@ export function buildThreadProjection(input: BuildThreadProjectionInput): Thread
     const absoluteIndex = input.hiddenTurnCount + index
     const key = stableThreadTurnKey(turn, absoluteIndex)
     const timing = deriveTurnTiming({ ...input, turn })
-    const userNavigationItemId = turn.user ? userMessageNavigationItemId(key) : undefined
+    const userNavigationItemId = turn.user && turn.user.source === undefined ? userMessageNavigationItemId(key) : undefined
 
-    if (turn.user && userNavigationItemId) {
+    for (const segment of inputSegments(turn)) {
       questionIndex += 1
-      const responsePreview = navigationResponsePreview(turn)
-      const context = navigationContextChips(turn)
+      const responsePreview = navigationResponsePreview(segment)
+      const context = navigationContextChips(segment)
       userMessageNavigationItems.push({
-        id: userNavigationItemId,
+        id: userMessageNavigationItemId(segment.user.id),
         turnKey: key,
         label: String(questionIndex),
-        preview: compactOneLine(turn.user.text),
+        preview: compactOneLine(segment.user.text),
         ...(responsePreview ? { responsePreview } : {}),
         ...context,
-        title: input.turnPreview(turn, input.turnTitle(questionIndex)),
+        title: input.turnPreview(segment, input.turnTitle(questionIndex)),
         position: questionIndex,
         durationMs: timing.durationMs
       })
@@ -363,20 +359,15 @@ export function buildThreadProjection(input: BuildThreadProjectionInput): Thread
     }
 
     const isLatest = index === visibleTurns.length - 1
-    const turnId = runtimeTurnId(turn)
-    const isLiveTurn = currentTurnId
-      ? Boolean(
-          turnId === currentTurnId ||
-          (currentTurnUserId && turn.user?.id === currentTurnUserId)
-        )
-      : isLatest && Boolean(input.busy || input.live.trim())
+    const settled = isSettled(timing.status)
+    const isLiveTurn = active && !settled && absoluteIndex === liveOwnerIndex
     if (isLiveTurn) hasVisibleLiveTurn = true
     const live = isLiveTurn ? input.live : ''
     const { content: liveContent } = splitThink(live)
     const liveProcessText = ''
     const hasLiveStream = isLiveTurn && !!liveContent.trim()
     const pendingRuntimeWork = threadHasPendingRuntimeWork(turn.blocks)
-    const isProcessing = (input.busy && isLiveTurn) || pendingRuntimeWork || hasLiveStream
+    const isProcessing = !settled && (isLiveTurn && (input.busy || input.runtimeRunning || timing.status === 'running') || pendingRuntimeWork || hasLiveStream)
     const sections = deriveTurnSections({
       turn,
       isProcessing,
@@ -420,13 +411,13 @@ export function buildThreadProjection(input: BuildThreadProjectionInput): Thread
     rows.push({ kind: 'collapseEarlier', id: 'collapse-earlier' })
   }
 
-  if ((input.blocks.length === 0 && (input.live || hasLiveShell)) || (hasLiveShell && !hasVisibleLiveTurn)) {
+  if (active && ((input.blocks.length === 0 && (input.live || hasLiveShell)) || (hasLiveShell && !hasVisibleLiveTurn))) {
     const { content: liveContent } = splitThink(input.live)
     const liveOnlyTurnId = input.currentTurnId?.trim() || 'pending'
     const liveOnlyThreadId = input.activeThreadId?.trim() || 'thread'
     const sections = deriveTurnSections({
       turn: { blocks: [] },
-      isProcessing: input.busy,
+      isProcessing: input.busy || input.runtimeRunning === true || input.authoritativeTurnStatuses?.[currentTurnId] === 'running',
       liveProcessText: '',
       liveContent,
       workspaceRoot: input.workspaceRoot
@@ -436,7 +427,7 @@ export function buildThreadProjection(input: BuildThreadProjectionInput): Thread
       id: `live-only-turn:${liveOnlyThreadId}:${liveOnlyTurnId}`,
       turnId: input.currentTurnId ?? null,
       live: input.live,
-      isProcessing: input.busy,
+      isProcessing: input.busy || input.runtimeRunning === true || input.authoritativeTurnStatuses?.[currentTurnId] === 'running',
       liveContent,
       timing: deriveTurnTiming({ ...input, turn: { blocks: [] } }),
       sections,

@@ -5,7 +5,8 @@ copies its materials and both exact lockfiles into `Resources/dependency-legal`
 before resource sealing and signing. These inputs do not change third-party
 package metadata, execute upstream scripts, or grant publication authority.
 
-The 31 records originate from the complete retained Core96e55 artifact inventory.
+The 30 current records originate from the retained Core96e55 artifact inventory
+and the bounded source rebind described below.
 Every npm archive was downloaded from the public npm registry and matched against
 the SHA-512 integrity in the current root/runtime locks. `bindings` records each
 lock path, resolved URL and integrity, including duplicate installations.
@@ -14,8 +15,8 @@ The degenerator5.0.1 archive contains two identical `dist/index.js` entries (one
 spelled `./dist/index.js`); they were compared byte-for-byte without extraction
 or execution. Conflicting duplicate entries are not accepted.
 
-`packageJsonSha256` pins the original archive bytes and the existing pinned
-electron-builder26.15.3 metadata projection. Each projection was compared with
+`packageJsonSha256` pins the original archive bytes and, where retained, the
+previously reviewed electron-builder26.15.3 metadata projection. Each retained projection was compared with
 the archive: only builder-owned removal of scripts, keywords, bugs and its
 documented metadata exclusions was observed. No name, version, author, license,
 dependency or code field was changed. All other retained package files must match
@@ -32,9 +33,23 @@ The 2026-09-22 admission continuation binds the three AWS exact versions to
 Apache-2.0, xml-naming to its exact MIT source, buffer-equal to its original
 author's license-only successor (only the package version differs), and
 html-parse-stringify to its maintainer's license-only commit with unchanged
-3.0.1 source. The entities source has one documented published fast-path
-uncommenting; its remaining files and 2.1.1 metadata match the MIT source.
+3.0.1 source.
 These are source/material conclusions, not counts of passed packaged instances.
+
+The 2026-10-18 bounded rebind replaces the obsolete entities 2.1.1 record with
+independent root 3.1.0 and nested xml-builder 2.2.0 instances. Their official npm
+archives match the current lock integrities and all installed files. At the
+npm-published Git revisions, all eight 2.2.0 members match `Entity/`; eight of
+nine 3.1.0 members match. In package.json, only the version metadata field differs
+(source 3.0.0, published 3.1.0); the archive also adds a final LF absent from Git.
+Both fixed revisions retain the exact existing root MIT text;
+the catalog reuses that unchanged material and records each source separately.
+Only original metadata is admitted for these two records; no new builder
+projection is inferred. The no-longer-installed khroma 2.1.0 binding is retired,
+while its retained license material remains. The other 44 instance bindings and
+their existing record bytes are unchanged. This rebind updates the root lock
+digest only after those exact instance reviews; it does not resolve native or
+other outstanding provenance, packaging or release obligations.
 
 Canvas uses the existing thin64 Mach-O payload identity implementation: only
 reviewed arm64 source and normalized payload pins can explain signing changes.

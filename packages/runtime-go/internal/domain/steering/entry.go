@@ -1,45 +1,60 @@
 package steering
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"strconv"
 	"strings"
 	"time"
 
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
+	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
 const ProjectionVersionV1 = 1
 
-const maxSteeringTextBytes = 16 * 1024
+const MaxSteeringTextBytesV1 = 16 * 1024
+const maxSteeringTextBytes = MaxSteeringTextBytesV1
+
+// Question is a closed container, not one prose field. The existing record
+// budget bounds its complete encoding; real fields, final turn occupancy and
+// actual event frames retain their independent limits. Ordinary steering stays
+// at 16KiB. Nothing is truncated to obtain admission.
+const MaxUserInputReplyEnvelopeBytesV1 = domainevent.MaxQuestionReplyRecordBytesV1
 
 type entryContentV1 struct {
-	Version                 int                          `json:"version"`
-	ID                      string                       `json:"id"`
-	ClientUserMessageID     string                       `json:"clientUserMessageId"`
-	Text                    string                       `json:"text"`
-	DisplayText             string                       `json:"displayText"`
-	AdmittedAt              string                       `json:"admittedAt"`
-	Delivery                string                       `json:"delivery"`
-	JobID                   string                       `json:"jobId"`
-	ChildRunID              string                       `json:"childRunId"`
-	SteerMessageID          string                       `json:"steerMessageId"`
-	ParentThreadID          string                       `json:"parentThreadId"`
-	ChildThreadID           string                       `json:"childThreadId"`
-	SourceTurnID            string                       `json:"sourceTurnId"`
-	SourceToolCallID        string                       `json:"sourceToolCallId"`
-	JobProjectionVersion    int                          `json:"jobProjectionVersion"`
-	JobContentDigest        string                       `json:"jobContentDigest"`
-	JobContextDigest        string                       `json:"jobContextDigest"`
-	JobAuthorityDigest      string                       `json:"jobAuthorityDigest"`
-	JobQueueAuthorityDigest string                       `json:"jobQueueAuthorityDigest"`
-	LogicalEffect           domainsecurity.LogicalEffect `json:"logicalEffect,omitempty"`
-	OrdinaryWork            *bool                        `json:"ordinaryWork,omitempty"`
+	UserInputReplyIdentity    *UserInputReplyIdentityV1    `json:"userInputReplyIdentity,omitempty"`
+	UserInputID               string                       `json:"userInputId,omitempty"`
+	UserInputCaptureReceiptID string                       `json:"userInputCaptureReceiptId,omitempty"`
+	Version                   int                          `json:"version"`
+	ID                        string                       `json:"id"`
+	ClientUserMessageID       string                       `json:"clientUserMessageId"`
+	Text                      string                       `json:"text"`
+	DisplayText               string                       `json:"displayText"`
+	AdmittedAt                string                       `json:"admittedAt"`
+	Delivery                  string                       `json:"delivery"`
+	JobID                     string                       `json:"jobId"`
+	ChildRunID                string                       `json:"childRunId"`
+	SteerMessageID            string                       `json:"steerMessageId"`
+	ParentThreadID            string                       `json:"parentThreadId"`
+	ChildThreadID             string                       `json:"childThreadId"`
+	SourceTurnID              string                       `json:"sourceTurnId"`
+	SourceToolCallID          string                       `json:"sourceToolCallId"`
+	JobProjectionVersion      int                          `json:"jobProjectionVersion"`
+	JobContentDigest          string                       `json:"jobContentDigest"`
+	JobContextDigest          string                       `json:"jobContextDigest"`
+	JobAuthorityDigest        string                       `json:"jobAuthorityDigest"`
+	JobQueueAuthorityDigest   string                       `json:"jobQueueAuthorityDigest"`
+	LogicalEffect             domainsecurity.LogicalEffect `json:"logicalEffect,omitempty"`
+	OrdinaryWork              *bool                        `json:"ordinaryWork,omitempty"`
 }
 
 // EntryLogicalEffectBinding is host-owned steering intent metadata. It is
@@ -55,7 +70,7 @@ var admissionFieldsV1 = map[string]struct{}{
 	"sourceTurnId": {}, "sourceToolCallId": {},
 	"jobProjectionVersion": {}, "jobContentDigest": {}, "jobContextDigest": {},
 	"jobAuthorityDigest": {}, "jobQueueAuthorityDigest": {},
-	"logicalEffect": {}, "ordinaryWork": {},
+	"logicalEffect": {}, "ordinaryWork": {}, "userInputId": {}, "userInputCaptureReceiptId": {}, "userInputReplyIdentity": {},
 }
 
 var pendingFieldsV1 = func() map[string]struct{} {
@@ -270,6 +285,7 @@ func parseEntryContentV1(raw map[string]any, allowed map[string]struct{}) (entry
 		}
 	}
 	content := entryContentV1{
+		UserInputID: stringField(raw, "userInputId"), UserInputCaptureReceiptID: stringField(raw, "userInputCaptureReceiptId"),
 		Version: ProjectionVersionV1, ID: strings.TrimSpace(stringField(raw, "id")),
 		ClientUserMessageID: strings.TrimSpace(stringField(raw, "clientUserMessageId")),
 		Text:                strings.TrimSpace(stringField(raw, "text")), DisplayText: strings.TrimSpace(stringField(raw, "displayText")),
@@ -283,6 +299,13 @@ func parseEntryContentV1(raw map[string]any, allowed map[string]struct{}) (entry
 		JobContextDigest:        strings.TrimSpace(stringField(raw, "jobContextDigest")),
 		JobAuthorityDigest:      strings.TrimSpace(stringField(raw, "jobAuthorityDigest")),
 		JobQueueAuthorityDigest: strings.TrimSpace(stringField(raw, "jobQueueAuthorityDigest")),
+	}
+	if identity, present := raw["userInputReplyIdentity"]; present {
+		parsed, err := ParseUserInputReplyIdentityV1(identity, content.UserInputID)
+		if err != nil {
+			return entryContentV1{}, err
+		}
+		content.UserInputReplyIdentity = &parsed
 	}
 	logicalEffect, ordinaryWork, hasLogicalEffect, err := parseLogicalEffectBindingV1(raw)
 	if err != nil {
@@ -298,7 +321,11 @@ func parseEntryContentV1(raw map[string]any, allowed map[string]struct{}) (entry
 	if content.ClientUserMessageID == "" {
 		content.ClientUserMessageID = content.ID
 	}
-	if content.ID == "" || content.ClientUserMessageID == "" || content.Text == "" || len(content.Text) > maxSteeringTextBytes ||
+	textLimit := maxSteeringTextBytes
+	if content.UserInputReplyIdentity != nil && content.UserInputID != "" && domainsecurity.IsSHA256Hex(content.UserInputCaptureReceiptID) && domaincontinuation.IsUserInputReplyAttemptIDV1(content.ClientUserMessageID) {
+		textLimit = MaxUserInputReplyEnvelopeBytesV1
+	}
+	if content.ID == "" || content.ClientUserMessageID == "" || content.Text == "" || len(content.Text) > textLimit ||
 		content.AdmittedAt == "" || (content.Delivery != "" && content.Delivery != "steer") {
 		return entryContentV1{}, errors.New("steering entry content is invalid")
 	}
@@ -306,6 +333,23 @@ func parseEntryContentV1(raw map[string]any, allowed map[string]struct{}) (entry
 		return entryContentV1{}, errors.New("steering admission time is invalid")
 	}
 	content.Delivery = "steer"
+	if content.UserInputID != "" || content.UserInputCaptureReceiptID != "" {
+		if len(content.UserInputID) != len("input_")+64 || !strings.HasPrefix(content.UserInputID, "input_") || !domainsecurity.IsSHA256Hex(strings.TrimPrefix(content.UserInputID, "input_")) || !domainsecurity.IsSHA256Hex(content.UserInputCaptureReceiptID) || content.JobID != "" || content.UserInputReplyIdentity == nil {
+			return entryContentV1{}, errors.New("late user input steering linkage is invalid")
+		}
+	}
+	if content.UserInputReplyIdentity != nil {
+		if content.UserInputID == "" || content.UserInputCaptureReceiptID == "" {
+			return entryContentV1{}, errors.New("late identity requires Host capture linkage")
+		}
+		payload, err := ParseUserInputReplyContentV1(content.Text, *content.UserInputReplyIdentity)
+		if err != nil {
+			return entryContentV1{}, err
+		}
+		if _, err := UserInputReplyEnvelopeV1(*content.UserInputReplyIdentity, payload); err != nil {
+			return entryContentV1{}, err
+		}
+	}
 	hasTaskJobLineage := content.JobID != "" || content.ChildRunID != "" || content.SteerMessageID != "" ||
 		content.ParentThreadID != "" || content.ChildThreadID != ""
 	if hasTaskJobLineage && (content.JobID == "" || content.JobID != content.ChildRunID || content.SteerMessageID == "" ||
@@ -334,6 +378,9 @@ func parseEntryContentV1(raw map[string]any, allowed map[string]struct{}) (entry
 			}
 			continue
 		}
+		if key == "userInputReplyIdentity" {
+			continue
+		}
 		if key == "ordinaryWork" {
 			if _, ok := value.(bool); !ok {
 				return entryContentV1{}, errors.New("steering logical effect field type is invalid")
@@ -359,6 +406,7 @@ func entryContentMapV1(content entryContentV1) map[string]any {
 		"admittedAt": content.AdmittedAt, "delivery": content.Delivery,
 	}
 	for key, value := range map[string]string{
+		"userInputId": content.UserInputID, "userInputCaptureReceiptId": content.UserInputCaptureReceiptID,
 		"displayText": content.DisplayText, "jobId": content.JobID, "childRunId": content.ChildRunID,
 		"steerMessageId": content.SteerMessageID, "parentThreadId": content.ParentThreadID,
 		"childThreadId": content.ChildThreadID, "sourceTurnId": content.SourceTurnID, "sourceToolCallId": content.SourceToolCallID,
@@ -368,6 +416,9 @@ func entryContentMapV1(content entryContentV1) map[string]any {
 		if value != "" {
 			out[key] = value
 		}
+	}
+	if content.UserInputReplyIdentity != nil {
+		out["userInputReplyIdentity"] = UserInputReplyIdentityMapV1(*content.UserInputReplyIdentity)
 	}
 	if content.JobProjectionVersion != 0 {
 		out["jobProjectionVersion"] = content.JobProjectionVersion
@@ -453,6 +504,14 @@ func sameCanonicalEntryMapV1(raw, canonical map[string]any) bool {
 		if !found {
 			return false
 		}
+		if key == "userInputReplyIdentity" {
+			left, leftErr := json.Marshal(actual)
+			right, rightErr := json.Marshal(expected)
+			if leftErr != nil || rightErr != nil || !bytes.Equal(left, right) {
+				return false
+			}
+			continue
+		}
 		switch typed := expected.(type) {
 		case int:
 			if !isExactJSONInteger(actual) || exactIntField(map[string]any{"value": actual}, "value") != typed {
@@ -484,4 +543,160 @@ func isProjectionVersionV1(raw any) bool {
 	default:
 		return false
 	}
+}
+
+// UserInputReplyIdentityV1 contains only receipt-derived Host correlation.
+// The existing admission and promotion signatures cover this exact ordered value.
+type UserInputReplyIdentityV1 struct {
+	CallID    string                             `json:"callId"`
+	ToolName  string                             `json:"toolName"`
+	Questions []UserInputReplyQuestionIdentityV1 `json:"questionIdentities"`
+}
+type UserInputReplyQuestionIdentityV1 struct {
+	ID                string   `json:"id"`
+	OptionIDs         []string `json:"optionIds"`
+	SelectedOptionIDs []string `json:"selectedOptionIds"`
+}
+type UserInputReplyOptionContentV1 struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+type UserInputReplyQuestionContentV1 struct {
+	Question    string                          `json:"question"`
+	Header      string                          `json:"header"`
+	Detail      string                          `json:"detail,omitempty"`
+	Options     []UserInputReplyOptionContentV1 `json:"options"`
+	MultiSelect bool                            `json:"multiSelect"`
+}
+type UserInputReplyAnswerContentV1 struct {
+	Selected []string `json:"selected"`
+	Custom   string   `json:"custom,omitempty"`
+}
+
+// Content never carries Host IDs. Every string below remains ordinary content.
+type UserInputReplyContentV1 struct {
+	Kind      string                            `json:"kind"`
+	Questions []UserInputReplyQuestionContentV1 `json:"questions"`
+	Answers   []UserInputReplyAnswerContentV1   `json:"answers"`
+}
+
+const UserInputReplyContentKindV1 = "question_reply_content"
+
+func UserInputReplyIdentityMapV1(identity UserInputReplyIdentityV1) map[string]any {
+	encoded, _ := json.Marshal(identity)
+	var result map[string]any
+	_ = json.Unmarshal(encoded, &result)
+	return result
+}
+func decodeClosedUserInputReplyV1(encoded []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return errors.New("late Question payload is invalid")
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("late Question payload has trailing data")
+	}
+	return nil
+}
+func ParseUserInputReplyIdentityV1(raw any, inputID string) (UserInputReplyIdentityV1, error) {
+	var identity UserInputReplyIdentityV1
+	encoded, err := json.Marshal(raw)
+	if err != nil || decodeClosedUserInputReplyV1(encoded, &identity) != nil || !domainsecurity.IsHostToolCallIDV1(identity.CallID) || (identity.ToolName != "request_user_input" && identity.ToolName != "user_input") || (len(identity.Questions) == 0 || len(identity.Questions) > 3) {
+		return identity, errors.New("late Question identity is invalid")
+	}
+	if !strings.HasPrefix(inputID, "input_") || !domainsecurity.IsSHA256Hex(strings.TrimPrefix(inputID, "input_")) {
+		return identity, errors.New("late Question source identity is invalid")
+	}
+	for ordinal, question := range identity.Questions {
+		if question.ID != inputID+"_"+strconv.Itoa(ordinal+1) || question.OptionIDs == nil || question.SelectedOptionIDs == nil || len(question.OptionIDs) > 3 {
+			return identity, errors.New("late Question ordered identity is invalid")
+		}
+		options := make(map[string]bool, len(question.OptionIDs))
+		for index, id := range question.OptionIDs {
+			if id != question.ID+"_option_"+strconv.Itoa(index+1) {
+				return identity, errors.New("late Question option identity is invalid")
+			}
+			options[id] = true
+		}
+		selected := map[string]bool{}
+		for _, id := range question.SelectedOptionIDs {
+			if !options[id] || selected[id] {
+				return identity, errors.New("late Question selected identity is invalid")
+			}
+			selected[id] = true
+		}
+	}
+	return identity, nil
+}
+func UserInputReplyIdentityFromEntryV1(entry map[string]any) (UserInputReplyIdentityV1, bool, error) {
+	raw, present := entry["userInputReplyIdentity"]
+	if !present {
+		if stringField(entry, "userInputId") != "" || stringField(entry, "userInputCaptureReceiptId") != "" {
+			return UserInputReplyIdentityV1{}, true, errors.New("late Question identity is missing")
+		}
+		return UserInputReplyIdentityV1{}, false, nil
+	}
+	identity, err := ParseUserInputReplyIdentityV1(raw, stringField(entry, "userInputId"))
+	return identity, true, err
+}
+
+var ErrUserInputReplyCapacityV1 = errors.New("late Question complete envelope exceeds existing inline capacity")
+
+func ParseUserInputReplyContentV1(text string, identity UserInputReplyIdentityV1) (UserInputReplyContentV1, error) {
+	var content UserInputReplyContentV1
+	if len(text) > MaxUserInputReplyEnvelopeBytesV1 {
+		return content, ErrUserInputReplyCapacityV1
+	}
+	if err := domainevent.ValidateQuestionReplyContentV1(text); err != nil {
+		if errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+			return content, errors.Join(ErrUserInputReplyCapacityV1, err)
+		}
+		return content, err
+	}
+	if decodeClosedUserInputReplyV1([]byte(text), &content) != nil || content.Kind != UserInputReplyContentKindV1 || len(content.Questions) != len(identity.Questions) || len(content.Answers) != len(identity.Questions) {
+		return content, errors.New("late Question content is invalid")
+	}
+	for index, question := range content.Questions {
+		ids, answer := identity.Questions[index], content.Answers[index]
+		if question.Question == "" || question.Options == nil || answer.Selected == nil || len(question.Options) != len(ids.OptionIDs) || len(answer.Selected) != len(ids.SelectedOptionIDs) || (!question.MultiSelect && (len(answer.Selected) > 1 || (len(answer.Selected) > 0 && answer.Custom != ""))) {
+			return content, errors.New("late Question content association is invalid")
+		}
+		for selectedIndex, selectedID := range ids.SelectedOptionIDs {
+			matched := false
+			for optionIndex, id := range ids.OptionIDs {
+				if id == selectedID && answer.Selected[selectedIndex] == question.Options[optionIndex].Label {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return content, errors.New("late Question selected content is invalid")
+			}
+		}
+	}
+	return content, nil
+}
+func UserInputReplyEnvelopeV1(identity UserInputReplyIdentityV1, content UserInputReplyContentV1) (string, error) {
+	if len(content.Questions) != len(identity.Questions) || len(content.Answers) != len(identity.Questions) {
+		return "", errors.New("late Question envelope association is invalid")
+	}
+	questions, answers := make([]map[string]any, 0, len(content.Questions)), make([]map[string]any, 0, len(content.Answers))
+	for index, question := range content.Questions {
+		record := map[string]any{"id": identity.Questions[index].ID, "question": question.Question, "header": question.Header, "options": question.Options, "multiSelect": question.MultiSelect}
+		if question.Detail != "" {
+			record["detail"] = question.Detail
+		}
+		questions = append(questions, record)
+		answer := map[string]any{"id": identity.Questions[index].ID, "selected": content.Answers[index].Selected}
+		if content.Answers[index].Custom != "" {
+			answer["custom"] = content.Answers[index].Custom
+		}
+		answers = append(answers, answer)
+	}
+	encoded, err := json.Marshal(map[string]any{"kind": "answer_to_pending_question", "tool": identity.ToolName, "callId": identity.CallID, "questions": questions, "answers": answers})
+	if err != nil || len(encoded) > MaxUserInputReplyEnvelopeBytesV1 {
+		return "", ErrUserInputReplyCapacityV1
+	}
+	return string(encoded), nil
 }

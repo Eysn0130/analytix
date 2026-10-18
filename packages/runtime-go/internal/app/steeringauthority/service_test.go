@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"strings"
 	"testing"
 
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -91,5 +92,47 @@ func TestServiceFailsClosedWithoutAuthorityOrLiveContext(t *testing.T) {
 	cancel()
 	if _, err := service.Seal(cancelled, map[string]any{}, domainsecurity.SHA256Hex([]byte("cancelled-context"))); err == nil {
 		t.Fatal("cancelled authority context was ignored")
+	}
+}
+
+func sealedQuestionDiscardPendingForTest(t *testing.T, service *Service, frozen domainsecurity.TurnSecurityContext, clientID string) map[string]any {
+	t.Helper()
+	source := "input_" + strings.Repeat("a", 64)
+	identity := domainsteering.UserInputReplyIdentityV1{CallID: "call_host_" + strings.Repeat("b", 64), ToolName: "request_user_input", Questions: []domainsteering.UserInputReplyQuestionIdentityV1{{ID: source + "_1", OptionIDs: []string{}, SelectedOptionIDs: []string{}}}}
+	pending, err := domainsteering.BindPendingEntryV1(map[string]any{"id": domainsteering.EntryIDV1(frozen.TurnID, clientID), "clientUserMessageId": clientID, "text": `{"kind":"question_reply_content","questions":[{"question":"Synthetic question?","header":"","options":[],"multiSelect":false}],"answers":[{"selected":[],"custom":"synthetic answer"}]}`, "admittedAt": "2026-07-18T01:02:03Z", "delivery": "steer", "userInputId": source, "userInputCaptureReceiptId": strings.Repeat("c", 64), "userInputReplyIdentity": domainsteering.UserInputReplyIdentityMapV1(identity)}, frozen.ContextDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := service.Seal(context.Background(), pending, frozen.ContextDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealed
+}
+
+func TestQuestionDiscardTrustsBothInstallationProofs(t *testing.T) {
+	first, foreign := newAuthorityStub(0x41), newAuthorityStub(0x57)
+	service := NewService(first)
+	frozen := inventorySecurityContext(t, "thread-discard", "turn-discard", 1)
+	pending := sealedQuestionDiscardPendingForTest(t, service, frozen, "00000000-0000-4000-8000-000000000091")
+	candidate := copyAuthorityEntry(pending)
+	candidate["status"], candidate["cancelledAt"], candidate["cancelReason"] = "cancelled", "2026-07-18T01:02:04Z", domainsteering.UserInputDiscardReasonV1
+	sealed, err := service.CancelUserInput(context.Background(), candidate, frozen.ContextDigest)
+	if err != nil || service.Verify(context.Background(), sealed, frozen.ContextDigest) != nil || sealed["authoritySignature"] != pending["authoritySignature"] {
+		t.Fatal("discard lost installation admission", err)
+	}
+	if _, err := NewService(foreign).CancelUserInput(context.Background(), candidate, frozen.ContextDigest); err == nil {
+		t.Fatal("foreign installation signed discard")
+	}
+	body, err := domainsteering.CancelledUserInputEntrySigningBytesV1(candidate, frozen.ContextDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignProof, err := domainsteering.SealCancelledUserInputEntryAuthorityV1(candidate, frozen.ContextDigest, foreign.keyID, foreign.public, ed25519.Sign(foreign.private, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.Verify(context.Background(), foreignProof, frozen.ContextDigest) == nil || NewService(foreign).Verify(context.Background(), foreignProof, frozen.ContextDigest) == nil {
+		t.Fatal("one trusted proof hid the other foreign proof")
 	}
 }

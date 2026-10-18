@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyCursorSpotlight, applyDocumentLocale, applyMotionPreference, isShellMotionReduced } from './apply-theme'
+import { applyCursorSpotlight, applyDocumentLocale, applyMotionPreference, applyUiFontScale, isShellMotionReduced } from './apply-theme'
 
 function stubMotionEnvironment(initialMatches: boolean): {
   dataset: Record<string, string>
@@ -147,5 +147,44 @@ describe('applyMotionPreference', () => {
     setMatches(true)
     expect(dataset.motionReduced).toBe('true')
     expect(isShellMotionReduced()).toBe(true)
+  })
+})
+
+describe('applyUiFontScale content typography', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function styleProperties() {
+    const properties = new Map<string, string>()
+    vi.stubGlobal('document', { documentElement: {
+      style: { setProperty: (name: string, value: string) => properties.set(name, value) }
+    } })
+    return properties
+  }
+
+  it('aligns the existing default small tier with the DSH 14px content baseline', () => {
+    const properties = styleProperties()
+    applyUiFontScale('small')
+    expect(properties.get('--ds-ui-scale')).toBe('0.82')
+    expect(properties.get('--dsh-content-font-size')).toBe('14px')
+    expect([...properties.keys()]).toEqual(['--ds-ui-scale', '--dsh-content-font-size'])
+  })
+
+  it('retains explicit medium and large ratios and reapplies a later user selection', () => {
+    const properties = styleProperties()
+    // A saved medium selection can be the first call; no default is written first.
+    applyUiFontScale('medium')
+    expect(properties.get('--ds-ui-scale')).toBe('0.88')
+    const medium = Number.parseFloat(properties.get('--dsh-content-font-size')!)
+    expect(medium).toBeCloseTo(15.024390243902438, 10)
+    applyUiFontScale('large')
+    expect(properties.get('--ds-ui-scale')).toBe('1')
+    const large = Number.parseFloat(properties.get('--dsh-content-font-size')!)
+    expect(large).toBeCloseTo(17.073170731707318, 10)
+    expect(large / medium).toBeCloseTo(1 / 0.88, 10)
+    applyUiFontScale('small')
+    expect(properties.get('--dsh-content-font-size')).toBe('14px')
+    expect(properties.get('--ds-ui-scale')).toBe('0.82')
   })
 })

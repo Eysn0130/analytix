@@ -14,7 +14,7 @@ const (
 )
 
 func SecurityBoundChildOutput(record domainjob.Record) bool {
-	return record.SecurityBinding != nil
+	return record.SecurityBinding != nil || record.HostChildInput != nil
 }
 
 // ChildOutputRequiresWithholding is the public-output boundary. Job kind,

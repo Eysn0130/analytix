@@ -219,6 +219,15 @@ func TestSubagentAndJobToolSchemasKeepDurableIdentityFields(t *testing.T) {
 	}
 }
 
+func TestRestartJobDescriptionRequiresFreshInputForBoundRuns(t *testing.T) {
+	description := schemaByName(t, JobToolSchemas(), "restart_job").Description
+	for _, scope := range []string{"legacy terminal", "security-bound", "Host-input", "new authorized input", "rejected"} {
+		if !strings.Contains(description, scope) {
+			t.Fatalf("restart description omits actual authority scope %q: %s", scope, description)
+		}
+	}
+}
+
 func parallelTaskItemHasProperty(t *testing.T, schema domainmodel.ToolSchema, property string) bool {
 	t.Helper()
 	var decoded struct {

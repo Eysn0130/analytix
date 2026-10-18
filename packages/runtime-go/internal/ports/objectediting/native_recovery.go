@@ -2,6 +2,7 @@ package objectediting
 
 import (
 	"context"
+	"encoding/json"
 
 	office "analytix.local/runtime-go/internal/domain/officegeneration"
 )
@@ -29,6 +30,8 @@ type NativeChangeInput struct {
 // NativeChangeStatus belongs only to the protected-local display lane. Engine
 // selection tokens are intentionally absent: reopening cannot revive a capture.
 type NativeChangeStatus struct {
+	Version         int                        `json:"-"`
+	Origin          string                     `json:"-"`
 	ChangeID        string                     `json:"changeId"`
 	ThreadID        string                     `json:"threadId"`
 	ProposalID      string                     `json:"proposalId"`
@@ -109,4 +112,44 @@ type NativePresentationInput struct {
 }
 type NativePresentationFiles interface {
 	ValidateNativePresentation(context.Context, NativePresentationInput) (*office.PresentationReview, error)
+}
+
+// Manual authority is an explicit variant; an empty proposal never grants edits.
+type NativeManualDraft struct {
+	ChangeID         string `json:"changeId"`
+	ThreadID         string `json:"threadId"`
+	BaseRevision     string `json:"baseRevision"`
+	BeginOperationID string `json:"beginOperationId"`
+}
+type NativeManualInput struct {
+	Workspace, Path, ObjectIdentity string
+	Draft                           NativeManualDraft
+}
+type NativeManualFiles interface {
+	PrepareNativeManual(context.Context, NativeManualInput) (NativeChangeStatus, error)
+}
+
+func (s NativeChangeStatus) MarshalJSON() ([]byte, error) {
+	type legacy NativeChangeStatus
+	if s.Version != 2 {
+		return json.Marshal(legacy(s))
+	}
+	return json.Marshal(struct {
+		Version         int    `json:"version"`
+		Origin          string `json:"origin"`
+		ChangeID        string `json:"changeId"`
+		ThreadID        string `json:"threadId"`
+		BaseRevision    string `json:"baseRevision"`
+		Revision        string `json:"revision"`
+		Status          string `json:"status"`
+		SaveOperationID string `json:"saveOperationId"`
+		UndoOperationID string `json:"undoOperationId"`
+		CanUndo         bool   `json:"canUndo"`
+		CanCancel       bool   `json:"canCancel"`
+		CanRetryUndo    bool   `json:"canRetryUndo"`
+		CanResume       bool   `json:"canResume"`
+		CreatedAt       string `json:"createdAt"`
+		SavedAt         string `json:"savedAt"`
+	}{2, "manual", s.ChangeID, s.ThreadID, s.BaseRevision, s.Revision, s.Status,
+		s.SaveOperationID, s.UndoOperationID, s.CanUndo, s.CanCancel, s.CanRetryUndo, s.CanResume, s.CreatedAt, s.SavedAt})
 }

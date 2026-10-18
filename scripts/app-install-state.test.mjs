@@ -62,3 +62,12 @@ test('changed postinstall implementation after pull invalidates old installation
   f.write('scripts/postinstall.cjs', 'synthetic changed install behavior')
   assert.equal(appInstallCurrent(f.root), false)
 })
+
+
+test('changing the required preview patch owner invalidates a recorded installation', t => {
+  const f = fixture(t)
+  recordAppInstall(f.root, f.digest())
+  assert.equal(appInstallCurrent(f.root), true)
+  f.write('scripts/apply-dsh-preview-patches.cjs', 'synthetic changed patch owner')
+  assert.equal(appInstallCurrent(f.root), false)
+})

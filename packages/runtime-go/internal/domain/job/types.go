@@ -200,6 +200,7 @@ type ProjectionDecision struct {
 }
 
 type Record struct {
+	HostChildInput             *HostChildInputIdentityV1 `json:"hostChildInput,omitempty"`
 	ID                         string                    `json:"id"`
 	ChildSeq                   int                       `json:"childSeq"`
 	ParentGoalID               string                    `json:"parentGoalId"`
@@ -311,9 +312,12 @@ type Record struct {
 	PauseState                 ChildRunPauseState        `json:"pauseState,omitempty"`
 
 	ForegroundChildHandoffReceipt *ForegroundChildHandoffReceiptV1 `json:"foregroundChildHandoffReceipt,omitempty"`
+
+	ProtectedOutputSnapshot *ProtectedOutputSnapshotV1 `json:"protectedOutputSnapshot,omitempty"`
 }
 
 type StartRequest struct {
+	HostChildInput        *HostChildInputIdentityV1
 	ParentGoalID          string
 	ParentGoalObjective   string
 	ParentThreadID        string
@@ -390,6 +394,7 @@ type UpdateRequest struct {
 	ChildCompletionReceipt   *ChildCompletionReceiptV1
 	Workspace                string
 	Output                   string
+	ProtectedOutputSnapshot  *ProtectedOutputSnapshotV1
 	Error                    string
 	FailureCode              string
 	Usage                    map[string]any

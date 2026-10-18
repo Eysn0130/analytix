@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,8 +12,10 @@ import (
 	eventlog "analytix.local/runtime-go/internal/adapters/outbound/eventlog"
 	liveevents "analytix.local/runtime-go/internal/adapters/outbound/liveevents"
 	eventrecordingapp "analytix.local/runtime-go/internal/app/eventrecording"
+	threadapp "analytix.local/runtime-go/internal/app/thread"
 	turnapp "analytix.local/runtime-go/internal/app/turn"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 	acceptedfinaleventport "analytix.local/runtime-go/internal/ports/acceptedfinalevent"
 	"analytix.local/runtime-go/internal/protocol"
 )
@@ -77,6 +80,25 @@ func (s *DurableEventSessionStore) recordEvents(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, draft := range drafts {
+		if isOrdinaryCompactionCompletionV3(draft) {
+			if len(drafts) != 1 {
+				return nil, nil, errors.New("ordinary compaction completion must be recorded alone")
+			}
+			recorded, order, err := s.recordOrdinaryCompactionCompletionNoLock(draft)
+			if err != nil {
+				return nil, order, err
+			}
+			return []map[string]any{recorded}, order, nil
+		}
+	}
+	return s.recordEventsNoLock(drafts, atomic)
+}
+
+func (s *DurableEventSessionStore) recordEventsNoLock(drafts []map[string]any, atomic bool) ([]map[string]any, []string, error) {
+	for _, draft := range drafts {
+		if domainthread.IsMessageFeedbackEventV1(draft) {
+			return nil, nil, errors.New("message feedback requires its dedicated durable owner")
+		}
 		if err := s.requireRestartWritableNoLockV1(stringField(draft, "threadId")); err != nil {
 			return nil, nil, err
 		}
@@ -436,4 +458,143 @@ func (s *DurableEventSessionStore) NewlineTerminated(threadID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.eventLog.NewlineTerminated(threadID)
+}
+
+func isOrdinaryCompactionCompletionV3(event map[string]any) bool {
+	version, ok := numericSeq(event["schemaVersion"])
+	return stringField(event, "kind") == "compaction_completed" && ok && version == 3
+}
+
+func sameOrdinaryCompletionFacts(a, b map[string]any) bool {
+	clean := func(value map[string]any) []byte {
+		copy := cloneMap(value)
+		delete(copy, "seq")
+		delete(copy, "timestamp")
+		// The informational reason belongs to the started receipt, not the checkpoint.
+		delete(copy, "reason")
+		body, _ := json.Marshal(copy)
+		return body
+	}
+	return bytes.Equal(clean(a), clean(b))
+}
+
+// All ordinary completion writers use the same owner-locked durable receipt.
+// Replay, rather than an in-memory candidate or sequence cache, decides retries.
+func (s *DurableEventSessionStore) ordinaryCompactionReceiptNoLock(draft map[string]any) (map[string]any, map[string]any, error) {
+	threadID, operationID := stringField(draft, "threadId"), stringField(draft, "compactionId")
+	replay, err := s.loadEventsSinceFileNoLock(threadID, 0)
+	if err != nil || len(replay.Diagnostics) != 0 {
+		return nil, nil, errors.Join(err, errors.New("ordinary compaction receipt replay is unavailable"))
+	}
+	var receipt, start map[string]any
+	highest := 0
+	for _, event := range replay.Events {
+		if seq, ok := numericSeq(event["seq"]); ok && seq > highest {
+			highest = seq
+		}
+		if stringField(event, "compactionId") != operationID {
+			continue
+		}
+		switch stringField(event, "kind") {
+		case "compaction_started":
+			if version, ok := numericSeq(event["schemaVersion"]); ok && version == 3 {
+				start = event
+			}
+		case "compaction_completed":
+			if !isOrdinaryCompactionCompletionV3(event) || receipt != nil || !sameOrdinaryCompletionFacts(event, draft) {
+				return nil, nil, errors.New("ordinary compaction receipt facts conflict")
+			}
+			receipt = event
+		case "compaction_failed":
+			return nil, nil, errors.New("ordinary compaction operation already failed")
+		}
+	}
+	// A single-event append can commit while its final fsync reports an error.
+	// Recover the actual durable frontier before any retry allocates a sequence.
+	for seq := range s.pendingEvents[threadID] {
+		if seq > highest {
+			highest = seq
+		}
+	}
+	s.highestSeqByThread[threadID] = highest
+	return receipt, start, nil
+}
+
+func (s *DurableEventSessionStore) recordOrdinaryCompactionCompletionNoLock(draft map[string]any) (map[string]any, []string, error) {
+	if err := s.requireRestartWritableNoLockV1(stringField(draft, "threadId")); err != nil {
+		return nil, nil, err
+	}
+	receipt, start, err := s.ordinaryCompactionReceiptNoLock(draft)
+	if err != nil {
+		return nil, nil, err
+	}
+	if receipt != nil {
+		return cloneMap(receipt), nil, nil
+	}
+	thread, err := s.readThreadNoLock(stringField(draft, "threadId"))
+	if err != nil {
+		return nil, nil, err
+	}
+	expected, err := threadapp.OrdinaryCompactionCompletedEventV3(thread, stringField(draft, "turnId"))
+	if err != nil || !sameOrdinaryCompletionFacts(expected, draft) {
+		return nil, nil, errors.Join(err, errors.New("ordinary compaction completion lacks committed checkpoint facts"))
+	}
+	if start == nil || stringField(start, "threadId") != stringField(draft, "threadId") || stringField(start, "turnId") != stringField(draft, "turnId") || stringField(start, "itemId") != stringField(draft, "itemId") || start["auto"] != draft["auto"] {
+		return nil, nil, errors.New("ordinary compaction completion lacks matching started receipt")
+	}
+	if reason, ok := start["reason"]; ok {
+		expected["reason"] = reason
+	}
+	_, order, appendErr := s.recordEventsNoLock([]map[string]any{expected}, false)
+	// Do not remove a primary marker until the complete receipt is observable
+	// from the existing on-disk replay, even when Append returned an error.
+	receipt, _, readErr := s.ordinaryCompactionReceiptNoLock(expected)
+	if readErr == nil && receipt != nil {
+		if appendErr != nil {
+			// RecordBatch returned before publication. Keep this exact durable
+			// receipt ahead of any later sequence under the existing owner lock.
+			// Normal appends already publish; receipt-only retries return above.
+			s.publishEventBundleNoLock(stringField(receipt, "threadId"), []map[string]any{receipt})
+		}
+		return cloneMap(receipt), order, nil
+	}
+	return nil, order, errors.Join(appendErr, readErr, errors.New("ordinary compaction completion is not durably readable"))
+}
+
+// The canonical primary writer calls this only after its mutation validation.
+// It covers compaction, rewind and every other primary marker removal path.
+func (s *DurableEventSessionStore) preserveOrdinaryCompactionReceiptsBeforeWriteNoLock(next map[string]any) error {
+	// A creation has no old primary checkpoint; sidecars cannot supply one.
+	if _, err := os.Stat(s.threadPath(stringField(next, "id"))); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	previous, err := s.readThreadNoLock(stringField(next, "id"))
+	if err != nil || previous == nil {
+		return err
+	}
+	for _, raw := range listAny(previous["turns"]) {
+		turn, _ := raw.(map[string]any)
+		items := listAny(turn["items"])
+		if len(items) != 1 {
+			continue
+		}
+		item, _ := items[0].(map[string]any)
+		if !domainevent.ValidGeneralCompactionProviderHistoryItemV5(item) {
+			continue
+		}
+		completed, err := threadapp.OrdinaryCompactionCompletedEventV3(previous, stringField(turn, "id"))
+		if err != nil {
+			continue
+		}
+		retained, retainedErr := threadapp.OrdinaryCompactionCompletedEventV3(next, stringField(turn, "id"))
+		if retainedErr == nil && sameOrdinaryCompletionFacts(completed, retained) {
+			continue
+		}
+		if _, _, err := s.recordOrdinaryCompactionCompletionNoLock(completed); err != nil {
+			return err
+		}
+	}
+	return nil
 }

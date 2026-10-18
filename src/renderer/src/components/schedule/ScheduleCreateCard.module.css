@@ -1,0 +1,28 @@
+/* Selected ScheduleCreateCard layout from pinned DSH 5badb150; MIT, Copyright (c) 2026 DeepSeek. */
+.card {
+  --schedule-card-fill: rgb(250, 250, 250);
+  --schedule-card-hover: rgb(245, 245, 245);
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1, var(--ds-border-muted));
+  border-radius: 18px;
+  background: var(--schedule-card-fill);
+  color: var(--dsw-alias-label-primary, var(--ds-text));
+  font-family: var(--dsw-font-family, inherit);
+  transition: background-color 120ms ease;
+}
+:global([data-theme='dark']) .card { --schedule-card-fill: rgb(33, 33, 35); --schedule-card-hover: rgb(41, 41, 41); }
+.card:has(.cardOpen:hover), .card:has(.openButton:hover) { background: var(--schedule-card-hover); }
+.cardOpen { position: absolute; inset: 0; width: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
+.row { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; }
+.leading { display: grid; place-items: center; flex: none; box-sizing: border-box; width: 40px; height: 40px; border: 0.5px solid var(--dsw-alias-border-l1, var(--ds-border-muted)); border-radius: 10px; background: var(--schedule-card-fill); }
+.body { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; pointer-events: none; }
+.title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; line-height: 20px; }
+.frequency { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary, var(--ds-text-faint)); font-size: 10px; line-height: 16px; }
+.openButton { position: relative; z-index: 1; flex: none; box-sizing: border-box; height: 28px; padding: 4px 8px; border: 0.5px solid var(--dsw-alias-border-l3, var(--ds-border-strong)); border-radius: 8px; background: transparent; color: inherit; font-family: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.openButton:hover { background: var(--dsw-alias-interactive-bg-hover, var(--ds-surface-hover)); }
+.cardOpen:focus-visible, .openButton:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ds-accent)); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+:global(:root[data-motion-reduced='true']) .card { transition: none; }

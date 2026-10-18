@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"analytix.local/runtime-go/internal/contracts"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
@@ -771,4 +773,270 @@ func providerHistorySecurityRecord(securityContext domainsecurity.TurnSecurityCo
 	record := map[string]any{}
 	_ = json.Unmarshal(body, &record)
 	return record
+}
+
+func TestLateQuestionReplayRebindsVerifiedHistoryToCurrentScope(t *testing.T) {
+	prior, authority, entry, item := lateQuestionModelProjectionFixtureV1(t)
+	current, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: prior.ThreadID, TurnID: "late-replay-current", WorkspaceRealPath: prior.WorkspaceRealPath, TenantID: prior.TenantID, UserID: prior.UserID, SourceManifestHash: prior.SourceManifestHash, ContextEpoch: prior.ContextEpoch, IssuedAt: time.Unix(2, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := map[string]any{"id": prior.ThreadID, "securityState": providerHistorySecurityRecord(current), "turns": []any{map[string]any{"id": prior.TurnID, "securityContext": providerHistorySecurityRecord(prior), "steering": []any{entry}, "items": []any{item}}, map[string]any{"id": current.TurnID, "securityContext": providerHistorySecurityRecord(current), "steering": []any{}, "items": []any{}}}}
+	messages := ProviderHistoryBeforeTurnWithSteeringAuthority(thread, current.TurnID, authority)
+	if len(messages) != 1 {
+		t.Fatal("signed late history did not replay")
+	}
+	identity, _, err := UserInputReplyProviderPayloadV1(messages[0], current)
+	if err != nil || identity.CallID != ("call_host_"+strings.Repeat("a", 26)+"123456789012"+strings.Repeat("a", 26)) {
+		t.Fatal("late history did not rebind exact correlation to current scope")
+	}
+	if _, _, err := UserInputReplyProviderPayloadV1(messages[0], prior); err == nil {
+		t.Fatal("late replay binding remained bound to old turn")
+	}
+	if got := ProviderHistoryBeforeTurn(thread, current.TurnID); len(got) != 0 {
+		t.Fatal("late history replayed without installation authority")
+	}
+	altered := contracts.CloneMap(thread)
+	old := altered["turns"].([]any)[0].(map[string]any)
+	metadata := old["steering"].([]any)[0].(map[string]any)["userInputReplyIdentity"].(map[string]any)
+	metadata["callId"] = "forged"
+	if got := ProviderHistoryBeforeTurnWithSteeringAuthority(altered, current.TurnID, authority); len(got) != 0 {
+		t.Fatal("tampered late metadata entered replay")
+	}
+}
+
+// Synthetic signed audit fixture only. Production timer/reopen evidence lives
+// in server's existing timed Question lifecycle test.
+type pendingHistoryAuditStubV1 struct {
+	receipt     domaincontinuation.Receipt
+	disposition domaincontinuation.Disposition
+	publicKey   ed25519.PublicKey
+}
+
+func (audit pendingHistoryAuditStubV1) ResolveTrustedDispositionForAudit(_ context.Context, inputID string) (domaincontinuation.Receipt, domaincontinuation.Disposition, error) {
+	keyID, public, signature, err := domaincontinuation.AuthorityMaterial(audit.receipt)
+	if err != nil || inputID != audit.receipt.Payload.GateID || keyID != domainsecurity.SHA256Hex(audit.publicKey) || !bytes.Equal(public, audit.publicKey) || !ed25519.Verify(public, domaincontinuation.ReceiptSigningBytes(audit.receipt), signature) {
+		return domaincontinuation.Receipt{}, domaincontinuation.Disposition{}, errors.New("synthetic receipt audit rejected")
+	}
+	keyID, public, signature, err = domaincontinuation.DispositionAuthorityMaterial(audit.disposition)
+	if err != nil || keyID != domainsecurity.SHA256Hex(audit.publicKey) || !bytes.Equal(public, audit.publicKey) || !ed25519.Verify(public, domaincontinuation.DispositionSigningBytes(audit.disposition), signature) {
+		return domaincontinuation.Receipt{}, domaincontinuation.Disposition{}, errors.New("synthetic disposition audit rejected")
+	}
+	return audit.receipt, audit.disposition, nil
+}
+
+func pendingHistoryFixtureV1(t *testing.T, threadID string, timeout *int, toolNames ...string) (map[string]any, pendingHistoryAuditStubV1) {
+	t.Helper()
+	toolName := "request_user_input"
+	if len(toolNames) == 1 {
+		toolName = toolNames[0]
+	}
+	now := time.Date(2026, 10, 9, 1, 2, 3, 0, time.UTC)
+	frozen, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: threadID, TurnID: "turn-signed-pending-history", WorkspaceRealPath: "/synthetic-workspace", ContextEpoch: 3, SourceManifestHash: domainsecurity.SHA256Hex([]byte("synthetic-history-manifest")), IssuedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := json.RawMessage(`{"prompt":"PRIVATE_QUESTION_SENTINEL","questions":[{"question":"PRIVATE_QUESTION_SENTINEL"}]}`)
+	callID := modelTestHostToolCallID("signed-original-pending-history")
+	scope := []string{toolName}
+	scopeBody, _ := json.Marshal(scope)
+	grant := domainsecurity.NewExecutionGrant(domainsecurity.ExecutionGrantInput{Context: frozen, Provider: "synthetic", ServerIdentity: "host:builtin", ToolName: toolName, ToolCallID: callID, ArgsHash: domainsecurity.CanonicalJSONHash(arguments), SchemaHash: domainsecurity.SHA256Hex([]byte("synthetic-schema")), ScopeHash: domainsecurity.SHA256Hex(scopeBody), ReadOnly: false, ApprovalState: "not_required", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
+	gateID := domaincontinuation.GateID(domaincontinuation.KindUserInput, threadID, frozen.TurnID, frozen.ContextDigest, grant.GrantID, callID)
+	config := domainmodel.TurnConfig{ProviderID: "synthetic", Model: "synthetic", APIKey: "synthetic-only", BaseURL: "https://provider.invalid", EndpointFormat: "chat_completions"}
+	payload := domaincontinuation.Payload{Version: domaincontinuation.ContractVersionV3, Kind: domaincontinuation.KindUserInput, GateID: gateID, ThreadID: threadID, TurnID: frozen.TurnID, ItemID: "item_" + gateID, CallID: callID, ToolName: toolName, ToolCallItemID: domaintoolcall.ToolCallItemIDV1(frozen.TurnID, callID), Arguments: arguments, ProviderID: config.ProviderID, Model: config.Model, ProviderRouteHash: ProviderContinuationRouteHash(config), ApprovalPolicy: "never", SandboxMode: "workspace-write", ToolScope: scope, LogicalEffect: domainsecurity.LogicalEffectOrdinary, OrdinaryWork: true, ProviderStepExact: true, OrdinaryResultInputIsolated: true, ProviderStepPromptSHA256: domaincontinuation.CanonicalProviderStepPromptSHA256("synthetic historical prompt"), ProviderNamespace: domaincontinuation.NewProviderContinuationNamespaceV1("turn", "", 1, nil), SecurityContext: frozen, ExecutionGrant: grant, IssuedAt: now.Add(time.Second).Format(time.RFC3339Nano)}
+	if timeout != nil {
+		payload.UserInputTimedWait = &domaincontinuation.UserInputTimedWaitV1{TimeoutSeconds: *timeout}
+	}
+	public, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sign := func(body []byte) ([]byte, error) { return ed25519.Sign(private, body), nil }
+	receipt, err := domaincontinuation.NewReceipt(payload, domainsecurity.SHA256Hex(public), public, sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reason, gateStatus := domaincontinuation.StatusSubmitted, "user_input_submitted", "submitted"
+	if timeout != nil && *timeout != -1 {
+		status, reason, gateStatus = domaincontinuation.StatusContinued, "user_input_continued", "continued"
+	}
+	disposition, err := domaincontinuation.NewDisposition(receipt, status, reason, now.Add(2*time.Second), domainsecurity.SHA256Hex(public), public, sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := map[string]any{"id": payload.ToolCallItemID, "threadId": threadID, "turnId": frozen.TurnID, "kind": "tool_call", "status": "completed", "callId": callID, "toolName": payload.ToolName, "arguments": domaintoolcall.PublicToolCallArgumentsProjectionRecordV1(), "executionGrant": continuationRecord(grant)}
+	result := map[string]any{"id": domaintoolresult.ToolResultItemIDV1(frozen.TurnID, callID), "threadId": threadID, "turnId": frozen.TurnID, "kind": "tool_result", "role": "tool", "status": "completed", "callId": callID, "toolName": payload.ToolName, "toolKind": "tool_call", "isError": false, "output": domaintoolresult.PublicToolResultProjectionRecordV1(domaintoolresult.WithheldProjectionV1("completed", "tool_output_private"))}
+	for _, item := range []map[string]any{call, result} {
+		item["contextDigest"] = frozen.ContextDigest
+		item["contextEpoch"] = float64(frozen.ContextEpoch)
+		item["executionGrantId"] = grant.GrantID
+	}
+	gate := map[string]any{"id": payload.ItemID, "kind": "user_input", "inputId": gateID, "status": gateStatus, "continuationReceiptId": receipt.ReceiptID, "prompt": "PRIVATE_QUESTION_SENTINEL", "questions": []any{map[string]any{"question": "PRIVATE_QUESTION_SENTINEL"}}, "submission": "PRIVATE_ANSWER_SENTINEL"}
+	thread := map[string]any{"id": threadID, "securityState": continuationRecord(frozen), "turns": []any{map[string]any{"id": frozen.TurnID, "status": "completed", "securityContext": continuationRecord(frozen), "items": []any{call, gate, result}}}}
+	return thread, pendingHistoryAuditStubV1{receipt: receipt, disposition: disposition, publicKey: public}
+}
+
+func assertOriginalPendingHistoryV1(t *testing.T, messages []domainmodel.Message, callID string) {
+	t.Helper()
+	if len(messages) != 2 || messages[0].Role != "assistant" || len(messages[0].ToolCalls) != 1 || messages[0].ToolCalls[0].ID != callID || string(messages[0].ToolCalls[0].Arguments) != "{}" || messages[1].Role != "tool" || messages[1].ToolCallID != callID {
+		t.Fatal("history changed original Host call/result pairing")
+	}
+	var output map[string]any
+	if json.Unmarshal([]byte(messages[1].Content), &output) != nil || len(output) != 3 || output["pending"] != true || output["callId"] != callID || output["message"] != "The question remains open for a later answer. Continue independent work; no answer or approval was supplied." {
+		t.Fatal("history lost closed original pending semantics")
+	}
+	body, _ := json.Marshal(messages)
+	if bytes.Contains(body, []byte("PRIVATE_QUESTION_SENTINEL")) || bytes.Contains(body, []byte("PRIVATE_ANSWER_SENTINEL")) || bytes.Contains(body, []byte("answer_to_pending_question")) {
+		t.Fatal("pending history revived raw Question/answer or late-envelope content")
+	}
+}
+
+func TestTimedUserInputPendingHistoryUsesSignedOriginalCallAndSurvivesNewTurn(t *testing.T) {
+	timeout := 120
+	thread, audit := pendingHistoryFixtureV1(t, "thread-signed-pending-history", &timeout)
+	assertOriginalPendingHistoryV1(t, ProviderHistoryFromThreadWithSteeringAuthority(thread, nil, audit), audit.receipt.Payload.CallID)
+	// A locator has no callId; an injected unrelated callId cannot select the
+	// model pair. Only the signed original source supplies that identity.
+	turn := thread["turns"].([]any)[0].(map[string]any)
+	turn["items"].([]any)[1].(map[string]any)["callId"] = modelTestHostToolCallID("untrusted-question-call")
+	assertOriginalPendingHistoryV1(t, ProviderHistoryFromThreadWithSteeringAuthority(thread, nil, audit), audit.receipt.Payload.CallID)
+	current, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: audit.receipt.Payload.ThreadID, TurnID: "turn-new-historical-reader", WorkspaceRealPath: "/synthetic-workspace", ContextEpoch: 4, SourceManifestHash: domainsecurity.SHA256Hex([]byte("synthetic-history-manifest")), IssuedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread["securityState"] = continuationRecord(current)
+	thread["turns"] = append(thread["turns"].([]any), map[string]any{"id": current.TurnID, "status": "running", "securityContext": continuationRecord(current), "items": []any{}})
+	assertOriginalPendingHistoryV1(t, ProviderHistoryBeforeTurnWithSteeringAuthority(thread, current.TurnID, nil, audit), audit.receipt.Payload.CallID)
+}
+
+func TestTimedUserInputPendingHistoryRejectsUntrustedOrUnsettledBindings(t *testing.T) {
+	timeout := 120
+	mutations := map[string]func(map[string]any, *pendingHistoryAuditStubV1){
+		"forged receipt signature": func(_ map[string]any, a *pendingHistoryAuditStubV1) {
+			a.receipt.AuthoritySignature = strings.Repeat("A", len(a.receipt.AuthoritySignature))
+		},
+		"forged disposition signature": func(_ map[string]any, a *pendingHistoryAuditStubV1) {
+			a.disposition.AuthoritySignature = strings.Repeat("A", len(a.disposition.AuthoritySignature))
+		},
+		"wrong receipt": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			v["turns"].([]any)[0].(map[string]any)["items"].([]any)[1].(map[string]any)["continuationReceiptId"] = strings.Repeat("a", 64)
+		},
+		"wrong frozen context": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			delete(v["turns"].([]any)[0].(map[string]any), "securityContext")
+		},
+		"wrong result context": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			v["turns"].([]any)[0].(map[string]any)["items"].([]any)[2].(map[string]any)["contextDigest"] = strings.Repeat("a", 64)
+		},
+		"wrong result grant": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			v["turns"].([]any)[0].(map[string]any)["items"].([]any)[2].(map[string]any)["executionGrantId"] = strings.Repeat("a", 64)
+		},
+		"wrong original call": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			turn := v["turns"].([]any)[0].(map[string]any)
+			call := turn["items"].([]any)[0].(map[string]any)
+			foreign := modelTestHostToolCallID("foreign-original-question-call")
+			call["callId"] = foreign
+			call["id"] = domaintoolcall.ToolCallItemIDV1(turn["id"].(string), foreign)
+		},
+		"wrong original result call": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			turn := v["turns"].([]any)[0].(map[string]any)
+			result := turn["items"].([]any)[2].(map[string]any)
+			foreign := modelTestHostToolCallID("foreign-original-question-result")
+			result["callId"] = foreign
+			result["id"] = domaintoolresult.ToolResultItemIDV1(turn["id"].(string), foreign)
+		},
+		"wrong Host result id": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			v["turns"].([]any)[0].(map[string]any)["items"].([]any)[2].(map[string]any)["id"] = "wrong-result"
+		},
+		"duplicate result": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			turn := v["turns"].([]any)[0].(map[string]any)
+			items := turn["items"].([]any)
+			turn["items"] = append(items, contracts.CloneMap(items[2].(map[string]any)))
+		},
+		"duplicate locator": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			turn := v["turns"].([]any)[0].(map[string]any)
+			items := turn["items"].([]any)
+			turn["items"] = append(items, contracts.CloneMap(items[1].(map[string]any)))
+		},
+		"malformed raw pending output": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			v["turns"].([]any)[0].(map[string]any)["items"].([]any)[2].(map[string]any)["output"] = map[string]any{"pending": true, "answers": "PRIVATE_ANSWER_SENTINEL"}
+		},
+		"unknown output": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			v["turns"].([]any)[0].(map[string]any)["items"].([]any)[2].(map[string]any)["output"] = domaintoolresult.PublicToolResultProjectionRecordV1(domaintoolresult.OutcomeUnknownAfterRestartProjectionV1())
+		},
+		"failed output": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			v["turns"].([]any)[0].(map[string]any)["items"].([]any)[2].(map[string]any)["output"] = domaintoolresult.PublicToolResultProjectionRecordV1(domaintoolresult.WithheldProjectionV1("failed", "tool_output_private"))
+		},
+		"missing result": func(v map[string]any, _ *pendingHistoryAuditStubV1) {
+			turn := v["turns"].([]any)[0].(map[string]any)
+			turn["items"] = turn["items"].([]any)[:2]
+		},
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			thread, audit := pendingHistoryFixtureV1(t, "thread-pending-negative", &timeout)
+			mutate(thread, &audit)
+			messages := ProviderHistoryFromThreadWithSteeringAuthority(thread, nil, audit)
+			body, _ := json.Marshal(messages)
+			if bytes.Contains(body, []byte(`\"pending\":true`)) || bytes.Contains(body, []byte("PRIVATE_ANSWER_SENTINEL")) || bytes.Contains(body, []byte("PRIVATE_QUESTION_SENTINEL")) {
+				t.Fatal("invalid source/binding restored pending or raw data")
+			}
+		})
+	}
+}
+
+func TestTimedUserInputPendingHistoryKeepsPrivateProtocolClosureAndLegacyHistory(t *testing.T) {
+	timeout := 120
+	thread, audit := pendingHistoryFixtureV1(t, "thread-pending-private-wrapper", &timeout)
+	turn := thread["turns"].([]any)[0].(map[string]any)
+	turn["items"].([]any)[2].(map[string]any)["privateProtocolObserved"] = true
+	messages := ProviderHistoryFromThreadWithSteeringAuthority(thread, nil, audit)
+	if len(messages) != 1 || messages[0].Role != "user" {
+		t.Fatal("pending history revived closed private protocol roles")
+	}
+	content, ok := CompletedPrivateProtocolSafeHistoryContentV1(messages[0].Content, "request_user_input")
+	var output map[string]any
+	if !ok || json.Unmarshal([]byte(content), &output) != nil || len(output) != 3 || output["pending"] != true || output["callId"] != audit.receipt.Payload.CallID {
+		t.Fatal("existing private wrapper lost bounded pending semantics")
+	}
+	indefinite := -1
+	for _, wait := range []*int{nil, &indefinite} {
+		untimed, source := pendingHistoryFixtureV1(t, "thread-legacy-pending-history", wait)
+		baseline := ProviderHistoryFromThread(untimed)
+		withAudit := ProviderHistoryFromThreadWithSteeringAuthority(untimed, nil, source)
+		left, _ := json.Marshal(baseline)
+		right, _ := json.Marshal(withAudit)
+		if !bytes.Equal(left, right) {
+			t.Fatal("legacy/indefinite submitted history changed")
+		}
+	}
+	ordinaryCall, ordinaryResult := providerHistoryTestToolPairV1("turn-ordinary-pending-regression", "ordinary-pending-regression", "read_file", domaintoolresult.PublicToolResultProjectionRecordV1(domaintoolresult.WithheldProjectionV1("completed", "tool_output_private")))
+	ordinary := map[string]any{"turns": []any{map[string]any{"id": "turn-ordinary-pending-regression", "items": []any{ordinaryCall, ordinaryResult}}}}
+	left, _ := json.Marshal(ProviderHistoryFromThread(ordinary))
+	right, _ := json.Marshal(ProviderHistoryFromThreadWithSteeringAuthority(ordinary, nil, audit))
+	if !bytes.Equal(left, right) {
+		t.Fatal("ordinary tool history changed")
+	}
+}
+
+func TestTimedUserInputPendingHistoryPreservesExistingNativeToolAliases(t *testing.T) {
+	timeout := 120
+	indefinite := -1
+	for _, toolName := range []string{"request_user_input", "user_input"} {
+		t.Run(toolName, func(t *testing.T) {
+			thread, audit := pendingHistoryFixtureV1(t, "thread-pending-alias-"+toolName, &timeout, toolName)
+			messages := ProviderHistoryFromThreadWithSteeringAuthority(thread, nil, audit)
+			assertOriginalPendingHistoryV1(t, messages, audit.receipt.Payload.CallID)
+			if messages[0].ToolCalls[0].Name != toolName || messages[1].Name != toolName {
+				t.Fatal("history renamed the signed native Question alias")
+			}
+			for _, wait := range []*int{nil, &indefinite} {
+				legacy, source := pendingHistoryFixtureV1(t, "thread-legacy-alias-"+toolName, wait, toolName)
+				before, _ := json.Marshal(ProviderHistoryFromThread(legacy))
+				after, _ := json.Marshal(ProviderHistoryFromThreadWithSteeringAuthority(legacy, nil, source))
+				if !bytes.Equal(before, after) {
+					t.Fatal("legacy native alias history changed")
+				}
+			}
+		})
+	}
 }

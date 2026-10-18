@@ -6,7 +6,6 @@ import {
   readUiModePreference,
   writeUiModePreference
 } from './ui-mode'
-import { MASCOT_MODE_STORAGE_KEY } from './ui-mode'
 
 class MemoryStorage {
   private values = new Map<string, string>()
@@ -44,29 +43,31 @@ afterEach(() => {
 })
 
 describe('ui mode preference', () => {
-  it('defaults to the Xiezhi/default mode when no preference exists', () => {
+  it('defaults to the default theme when no preference exists', () => {
     installStorage()
 
     expect(readUiModePreference()).toBe(UI_MODE_DEFAULT)
   })
 
-  it('migrates the retired mascot preference back to default', () => {
+  it('ignores the retired mascot preference without rewriting it', () => {
     const storage = installStorage()
 
     storage.setItem(UI_MODE_STORAGE_KEY, UI_MODE_MASCOT)
     expect(readUiModePreference()).toBe(UI_MODE_DEFAULT)
 
-    storage.setItem(UI_MODE_STORAGE_KEY, '')
-    storage.setItem(MASCOT_MODE_STORAGE_KEY, '1')
-    expect(readUiModePreference()).toBe(UI_MODE_DEFAULT)
+    expect(storage.getItem(UI_MODE_STORAGE_KEY)).toBe(UI_MODE_MASCOT)
   })
 
-  it('writes non-mascot modes while keeping the legacy mascot flag off', () => {
+  it('writes theme preferences without modifying retired preferences', () => {
     const storage = installStorage()
+
+    storage.setItem('analytix.mascotMode', '1')
+    storage.setItem('analytix.focusMode', '1')
 
     writeUiModePreference('starlight')
 
     expect(storage.getItem(UI_MODE_STORAGE_KEY)).toBe('starlight')
-    expect(storage.getItem(MASCOT_MODE_STORAGE_KEY)).toBe('0')
+    expect(storage.getItem('analytix.mascotMode')).toBe('1')
+    expect(storage.getItem('analytix.focusMode')).toBe('1')
   })
 })

@@ -8,15 +8,16 @@ import { build } from 'vite'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const OFFICE_CODEC_ENTRY = 'office-generation-codec-entry.js'
+export const EXCEL_PREVIEW_COPY_CODEC_ENTRY = 'excel-preview-copy-codec-entry.js'
 export const OFFICE_CODEC_DIRECTORY = 'out/office-codec'
 const maximumBytes = 16 * 1024 * 1024
 
 // Check the emitted program as well as Rollup's dependency graph. A remaining
 // dynamic require must not silently find a dependency outside the shipped tree.
-export function assertOfficeCodecImports(code) {
+export function assertOfficeCodecImports(code, { allowNetwork = true } = {}) {
   const tree = parse(code, { ecmaVersion: 'latest', sourceType: 'script' })
   const check = value => {
-    if (typeof value !== 'string' || !isBuiltin(value)) throw new Error(`office-codec-external-dependency: ${String(value).slice(0, 160)}`)
+    if (typeof value !== 'string' || !isBuiltin(value) || !allowNetwork && /^(?:node:)?(?:http|https|http2|net|tls|dns|dgram|child_process|worker_threads|vm)(?:\/|$)/.test(value)) throw new Error(`office-codec-external-dependency: ${String(value).slice(0, 160)}`)
   }
   const visit = node => {
     if (!node || typeof node !== 'object') return
@@ -33,11 +34,11 @@ export function assertOfficeCodecImports(code) {
   visit(tree)
 }
 
-/** Reusable afterPack check; these two files are covered by the existing payload authority. */
+/** Reusable afterPack check; these three files are covered by the existing payload authority. */
 export function validateOfficeCodecDirectory(directory) {
   const root = lstatSync(directory)
   if (!root.isDirectory() || root.isSymbolicLink()) throw new Error('office-codec-directory-invalid')
-  const expected = [OFFICE_CODEC_ENTRY, 'package.json'].sort()
+  const expected = [OFFICE_CODEC_ENTRY, EXCEL_PREVIEW_COPY_CODEC_ENTRY, 'package.json'].sort()
   if (JSON.stringify(readdirSync(directory).sort()) !== JSON.stringify(expected)) throw new Error('office-codec-files-invalid')
   const files = expected.map(name => {
     const path = join(directory, name), stat = lstatSync(path)
@@ -45,53 +46,62 @@ export function validateOfficeCodecDirectory(directory) {
     const bytes = readFileSync(path)
     if (name === 'package.json') {
       if (bytes.toString('utf8') !== '{"type":"commonjs"}\n') throw new Error('office-codec-module-type-invalid')
-    } else assertOfficeCodecImports(bytes.toString('utf8'))
+    } else assertOfficeCodecImports(bytes.toString('utf8'), { allowNetwork: name !== EXCEL_PREVIEW_COPY_CODEC_ENTRY })
     return { name, byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
   })
   return { entryPath: join(directory, OFFICE_CODEC_ENTRY), files }
 }
 
 export async function buildOfficeCodec({ outputDirectory = join(repoRoot, OFFICE_CODEC_DIRECTORY) } = {}) {
-  const result = await build({
-    configFile: false,
-    envDir: false,
-    root: repoRoot,
-    publicDir: false,
-    logLevel: 'error',
-    resolve: { conditions: ['node'], mainFields: ['module', 'main'] },
-    build: {
-      target: 'node22',
-      write: false,
-      minify: false,
-      sourcemap: false,
-      commonjsOptions: {
-        transformMixedEsModules: true,
-        // debug probes this uninstalled optional terminal-color package inside
-        // try/catch. The codec has no terminal; preserve its no-color fallback.
-        ignoreTryCatch: id => id === 'supports-color' ? 'remove' : false
-      },
-      lib: { entry: join(repoRoot, 'src/main/office/office-generation-codec-entry.ts'), formats: ['cjs'] },
-      rollupOptions: {
-        external: id => isBuiltin(id),
-        onwarn(warning, warn) {
-          if (warning.code === 'UNRESOLVED_IMPORT') throw new Error(`office-codec-unresolved-import: ${warning.exporter ?? warning.source ?? warning.message}`)
-          warn(warning)
+  const chunks = []
+  // Separate fixed entry preserves the existing generation stdin/stdout contract.
+  // Both use the same builder, standalone closure checks and packaged directory.
+  for (const [entryName, source] of [
+    [OFFICE_CODEC_ENTRY, 'src/main/office/office-generation-codec-entry.ts'],
+    [EXCEL_PREVIEW_COPY_CODEC_ENTRY, 'src/main/office/excel-preview-copy-codec-entry.ts']
+  ]) {
+    const result = await build({
+      configFile: false,
+      envDir: false,
+      root: repoRoot,
+      publicDir: false,
+      logLevel: 'error',
+      resolve: { conditions: ['node'], mainFields: ['module', 'main'] },
+      build: {
+        target: 'node22',
+        write: false,
+        minify: false,
+        sourcemap: false,
+        commonjsOptions: {
+          transformMixedEsModules: true,
+          // debug probes this uninstalled optional terminal-color package inside
+          // try/catch. The codec has no terminal; preserve its no-color fallback.
+          ignoreTryCatch: id => id === 'supports-color' ? 'remove' : false
         },
-        output: { format: 'cjs', entryFileNames: OFFICE_CODEC_ENTRY, inlineDynamicImports: true }
+        lib: { entry: join(repoRoot, source), formats: ['cjs'] },
+        rollupOptions: {
+          external: id => isBuiltin(id),
+          onwarn(warning, warn) {
+            if (warning.code === 'UNRESOLVED_IMPORT') throw new Error(`office-codec-unresolved-import: ${warning.exporter ?? warning.source ?? warning.message}`)
+            warn(warning)
+          },
+          output: { format: 'cjs', entryFileNames: entryName, inlineDynamicImports: true }
+        }
       }
-    }
-  })
-  const outputs = Array.isArray(result) ? result : [result]
-  if (outputs.length !== 1 || !('output' in outputs[0]) || outputs[0].output.length !== 1) throw new Error('office-codec-output-invalid')
-  const chunk = outputs[0].output[0]
-  if (chunk.type !== 'chunk' || chunk.fileName !== OFFICE_CODEC_ENTRY ||
-      [...chunk.imports, ...chunk.dynamicImports].some(id => !isBuiltin(id))) throw new Error('office-codec-output-invalid')
-  assertOfficeCodecImports(chunk.code)
-  if (Buffer.byteLength(chunk.code) > maximumBytes) throw new Error('office-codec-output-too-large')
+    })
+    const outputs = Array.isArray(result) ? result : [result]
+    if (outputs.length !== 1 || !('output' in outputs[0]) || outputs[0].output.length !== 1) throw new Error('office-codec-output-invalid')
+    const chunk = outputs[0].output[0]
+    if (chunk.type !== 'chunk' || chunk.fileName !== entryName ||
+        [...chunk.imports, ...chunk.dynamicImports].some(id => !isBuiltin(id))) throw new Error('office-codec-output-invalid')
+    assertOfficeCodecImports(chunk.code, { allowNetwork: entryName !== EXCEL_PREVIEW_COPY_CODEC_ENTRY })
+    if (Buffer.byteLength(chunk.code) > maximumBytes) throw new Error('office-codec-output-too-large')
+    chunks.push(chunk)
+  }
   mkdirSync(outputDirectory, { recursive: true })
-  writeFileSync(join(outputDirectory, OFFICE_CODEC_ENTRY), chunk.code)
+  for (const chunk of chunks) writeFileSync(join(outputDirectory, chunk.fileName), chunk.code)
   writeFileSync(join(outputDirectory, 'package.json'), '{"type":"commonjs"}\n')
-  return { ...validateOfficeCodecDirectory(outputDirectory), watchFiles: Object.keys(chunk.modules).filter(id => !id.startsWith('\0')) }
+  return { ...validateOfficeCodecDirectory(outputDirectory), watchFiles: [...new Set(chunks.flatMap(chunk => Object.keys(chunk.modules)))].filter(id => !id.startsWith('\0')) }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

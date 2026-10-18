@@ -1,0 +1,58 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+/* Pinned default tokens are scoped to this Search leaf and standalone card. */
+.scope, .block {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --dsw-font-xs-13: 13px/20px var(--dsw-font-family);
+  --dsw-font-markdown-code: 12px/19px var(--ds-font-family-code);
+  --dsw-font-markdown-code-block: 11px/19px var(--ds-font-family-code);
+  --dsw-font-markdown-code-block-small: 11px/16px var(--ds-font-family-code);
+  --dsw-radius-lg: 16px;
+  --dsw-radius-sm: 8px;
+  --dsw-alias-label-primary: #0f1115;
+  --dsw-alias-label-secondary: #61666b;
+  --dsw-alias-label-tertiary: #81858c;
+  --dsw-alias-label-caption: #adb2b8;
+  --dsw-alias-markdown-code-block: #f9fafb;
+  --dsw-alias-markdown-code-block-banner: #f9fafb;
+  --dsw-alias-bg-base: #ffffff;
+  --dsw-alias-border-l1: rgba(0, 0, 0, .04);
+  --dsw-alias-border-l3: rgba(0, 0, 0, .12);
+  --dsw-alias-interactive-bg-hover-solid: #f1f3f5;
+  --dsw-alias-state-error-primary: #ec1313;
+  --dsw-alias-state-warn-label: #dd8629;
+  --dsw-alias-state-business-primary: #4176e6;
+}
+:global([data-theme='dark']) .scope, :global([data-theme='dark']) .block {
+  --dsw-alias-label-primary: #f9fafb;
+  --dsw-alias-label-secondary: #cfd3d6;
+  --dsw-alias-label-tertiary: #adb2b8;
+  --dsw-alias-label-caption: #81858c;
+  --dsw-alias-markdown-code-block: #1b1b1c;
+  --dsw-alias-markdown-code-block-banner: #2c2c2e;
+  --dsw-alias-bg-base: #151517;
+  --dsw-alias-border-l1: rgba(255, 255, 255, .06);
+  --dsw-alias-border-l3: rgba(255, 255, 255, .16);
+  --dsw-alias-interactive-bg-hover-solid: #353638;
+  --dsw-alias-state-error-primary: #f25a5a;
+  --dsw-alias-state-business-primary: #7aaaff;
+}
+.block.chatBlock { margin: 4px 0 4px 4px; }
+.scope .fallbackCard { font: var(--dsw-font-markdown-code-block-small); }
+.scope .fallbackCard [data-error] { color: var(--dsw-alias-state-error-primary); }
+.block { --dsl-search-radius: var(--dsw-radius-lg); --dsl-search-line-height: 22px; position: relative; margin: 16px 0; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-markdown-code-block); border-radius: var(--dsl-search-radius); }
+.header { display: flex; align-items: center; gap: 12px; padding: 9px 14px; background: var(--dsw-alias-markdown-code-block-banner); border-top-left-radius: var(--dsl-search-radius); border-top-right-radius: var(--dsl-search-radius); }
+.summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--dsw-font-xs-13); color: var(--dsw-alias-label-secondary); }
+.copyButton { flex: none; background: transparent; border: none; padding: 0; margin: 0; color: var(--dsw-alias-label-secondary); cursor: pointer; font: var(--dsw-font-xs-13); }
+.copyButton:disabled { opacity: .5; cursor: default; }
+.body { padding: 8px 14px 12px 0; font: var(--dsw-font-markdown-code-block); overflow-x: auto; overflow-y: hidden; }
+.line { min-height: var(--dsl-search-line-height); padding-left: 14px; white-space: pre; }
+.lineNumber, .line[data-search-context] { color: var(--dsw-alias-label-tertiary); }
+.fileHeader { display: flex; align-items: baseline; gap: 8px; width: 100%; min-height: var(--dsl-search-line-height); padding: 0 14px; border: none; background: transparent; cursor: pointer; font: inherit; text-align: left; }
+.filePath { min-width: 0; font-weight: 600; color: var(--dsw-alias-label-primary); white-space: pre; }
+.fileCount { flex: none; color: var(--dsw-alias-label-tertiary); }
+.expand { display: block; width: 100%; padding: 0 14px; border: none; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; font: inherit; text-align: left; }
+.expand:hover { color: var(--dsw-alias-label-secondary); }
+.copyButton:focus-visible, .fileHeader:focus-visible, .expand:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 2px; }
+.empty { padding: 12px 14px; font: var(--dsw-font-markdown-code-block); color: var(--dsw-alias-label-tertiary); }

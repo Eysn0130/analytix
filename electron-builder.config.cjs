@@ -221,6 +221,12 @@ module.exports = {
       ]
     },
     {
+      from: 'plugins/analytix-documents',
+      to: 'plugins/analytix-documents',
+      filter: ['.analytix-plugin/package.json', '.codex-plugin/plugin.json',
+        'assets/adapter.json', 'skills/documents/SKILL.md', 'ui/editor.json']
+    },
+    {
       from: 'plugins/analytix-fund-analysis',
       to: 'plugins/analytix-fund-analysis',
       filter: [

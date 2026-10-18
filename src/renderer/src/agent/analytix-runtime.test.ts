@@ -11,11 +11,14 @@ import {
   modelProviderTokenPlanProfile,
   type AppSettingsV1
 } from '@shared/app-settings'
-import { AnalytixRuntimeProvider } from './analytix-runtime'
+import { trajectorySource } from '../components/trajectory/trajectory-source'
+import { stepEvent, userEvent } from '../components/trajectory/trajectory-test-fixtures'
+import { AnalytixRuntimeProvider, restoreThreadDisplayHistory } from './analytix-runtime'
 import { getProvider, resetProviderCacheForTests } from './registry'
 import { rendererRuntimeClient } from './runtime-client'
-import type { AcceptedFinalProjectionBatch, ThreadEventSink } from './types'
+import type { AcceptedFinalProjectionBatch, ThreadEventSink, UserInputWaitState } from './types'
 import {
+  isPublicProjectionRevoked,
   markPublicProjectionRevoked,
   resetPublicProjectionRevocationsForTests
 } from '../lib/public-projection-revocation'
@@ -764,6 +767,294 @@ describe('AnalytixRuntimeProvider', () => {
     expect(caps.approvals).toBe(true)
   })
 
+  it.each([true, false])('restores ordinary UI history and usage with compaction: %s', async hasCompaction => {
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    const compact = hasCompaction ? { id: 'compact-item', turnId: 'compact-turn', threadId: 'thr_general', role: 'system',
+      status: 'completed', kind: 'compaction', createdAt: '2026-10-08T00:00:00Z', summary: 'Context compacted',
+      pinnedConstraints: ['not a session summary'] } : { id: 'primary-user', turnId: 'compact-turn', threadId: 'thr_general',
+      role: 'user', status: 'completed', kind: 'user_message', text: 'Primary ordinary history', createdAt: '2026-10-08T00:00:00Z' }
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({
+      id: 'thr_general', latestSeq: 24, status: 'idle', turns: [{ id: 'compact-turn', threadId: 'thr_general',
+        status: 'completed', items: [compact] }]
+    }) }))
+    const ackSseEvent = vi.fn(async (_streamId: string, _seq: number) => true)
+    const startSse: Window['analytix']['runtime']['startSse'] = vi.fn(async (_thread, _since, streamId, replay) => {
+      expect(replay).toEqual({ replayThroughSeq: 24 })
+      queueMicrotask(() => {
+        const sid = streamId!
+        onData?.({ streamId: sid, events: [{ seq: 1, kind: 'item_created', itemId: 'old-user', threadId: 'thr_general', turnId: 'turn_general', timestamp: '2026-10-08T00:00:00Z',
+          item: { id: 'old-user', threadId: 'thr_general', turnId: 'turn_general', role: 'user', status: 'completed',
+            kind: 'user_message', text: 'authorized user', createdAt: '2026-10-08T00:00:00Z' } }] })
+        onData?.({ streamId: sid, events: [generalTerminalDeliveryBatchForRenderer()] })
+        onData?.({ streamId: sid, events: [{ seq: 24, kind: 'cursor_advanced', threadId: 'thr_general',
+          timestamp: '2026-10-08T00:00:00Z', reason: 'restricted_content_removed' }] })
+        onEnd?.({ streamId: sid })
+      })
+      return { streamId: streamId! }
+    })
+    installDsGui({ runtimeRequest, startSse, ackSseEvent,
+      onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+      onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } } })
+    const provider = new AnalytixRuntimeProvider()
+    const primary = await provider.getThreadDetail('thr_general')
+    expect(startSse).not.toHaveBeenCalled()
+    expect(primary.blocks.map(block => block.id)).toEqual([compact.id])
+    const displayed = await restoreThreadDisplayHistory(provider, 'thr_general', primary)
+    expect(displayed.latestSeq).toBe(primary.latestSeq)
+    expect(primary.turnUsageById).toEqual({})
+    expect(displayed.turnUsageThroughSeq).toBe(24)
+    expect(trajectorySource.getSnapshot('thr_general')).toMatchObject({ completeThroughSeq: 24, history: 'complete' })
+    expect(trajectorySource.getSnapshot('thr_general').records.some(record => record.text === 'authorized user')).toBe(true)
+    expect(Object.keys(displayed.turnUsageById ?? {})).toEqual(['turn_general'])
+    expect(displayed.turnUsageById?.turn_general).toMatchObject({ threadId: 'thr_general', turnId: 'turn_general',
+      firstSeq: 20, lastSeq: 22, snapshot: { inputTokens: 2, outputTokens: 1, totalTokens: 3, cacheHitRate: null, costUsd: null } })
+    expect(displayed.blocks.map(block => block.id)).toEqual(hasCompaction ? ['old-user', 'item_general', 'compact-item'] : ['primary-user'])
+    expect(ackSseEvent.mock.calls.map(call => call[1])).toEqual([1, 22, 24])
+    expect(primary.blocks.map(block => block.id)).toEqual([compact.id])
+    expect((await provider.getThreadDetail('thr_general')).blocks).toEqual(primary.blocks)
+    expect(startSse).toHaveBeenCalledTimes(1)
+    expect(displayed.blocks.at(-1)).not.toHaveProperty('detail')
+  })
+
+  it.each([true, false])('Footer receipt primary binding survives real GET and bounded replay with compaction: %s', async hasCompaction => {
+    const batch = generalTerminalDeliveryBatchForRenderer(), item = batch.events[0].item!
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    const primaryUser = { id: 'primary-user', threadId: 'thr_general', turnId: 'turn_general', role: 'user',
+      kind: 'user_message', status: 'completed', createdAt: item.createdAt, text: 'Primary request' }
+    const compact = { id: 'current-compaction', threadId: 'thr_general', turnId: 'compact-turn', role: 'system',
+      kind: 'compaction', status: 'completed', createdAt: item.createdAt, summary: 'Context compacted', pinnedConstraints: [] }
+    const request = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ id: 'thr_general', latestSeq: 24, status: 'idle',
+      turns: [{ id: 'turn_general', threadId: 'thr_general', status: 'completed', items: [primaryUser, item] },
+        ...(hasCompaction ? [{ id: 'compact-turn', threadId: 'thr_general', status: 'completed', items: [compact] }] : [])] }) }))
+    const startSse: Window['analytix']['runtime']['startSse'] = vi.fn(async (threadId, _since, streamId, replay) => {
+      expect(threadId).toBe('thr_general'); expect(replay).toEqual({ replayThroughSeq: 24 })
+      queueMicrotask(() => {
+        onData?.({ streamId: streamId!, events: [{ kind: 'item_created', seq: 1, itemId: 'replay-only-user', timestamp: batch.timestamp, threadId: 'thr_general', turnId: 'old-turn',
+          item: { ...primaryUser, id: 'replay-only-user', turnId: 'old-turn', text: 'Replay-only request' } }] })
+        onData?.({ streamId: streamId!, events: [batch] })
+        onData?.({ streamId: streamId!, events: [{ kind: 'cursor_advanced', seq: 24, timestamp: batch.timestamp, threadId: 'thr_general', reason: 'restricted_content_removed' }] })
+        onEnd?.({ streamId: streamId! })
+      }); return { streamId: streamId! }
+    })
+    installDsGui({ runtimeRequest: request, startSse, ackSseEvent: async () => true,
+      onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+      onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } } })
+    const provider = new AnalytixRuntimeProvider(), primary = await provider.getThreadDetail('thr_general')
+    const before = JSON.stringify(primary.blocks)
+    expect(primary.blocks.find(block => block.id === item.id)).not.toHaveProperty('generalTerminalProjectionReceipt')
+    const displayed = await restoreThreadDisplayHistory(provider, 'thr_general', primary)
+    expect(displayed.blocks.find(block => block.id === item.id)).toMatchObject({ generalTerminalProjectionReceipt: {
+      schemaVersion: 1, threadId: 'thr_general', turnId: 'turn_general', itemId: item.id,
+      batchDigest: batch.batchDigest, firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, status: 'completed' } })
+    expect(displayed.blocks.map(block => block.id)).toEqual(hasCompaction
+      ? ['replay-only-user', 'primary-user', item.id, compact.id] : ['primary-user', item.id])
+    expect(JSON.stringify(primary.blocks)).toBe(before)
+    expect(displayed.blocks.find(block => block.id === item.id)).toMatchObject(primary.blocks.find(block => block.id === item.id)!)
+    expect(startSse).toHaveBeenCalledOnce()
+  })
+
+  it('keeps primary ordinary detail usable when optional historical usage replay is unavailable', async () => {
+    installDsGui({ startSse: async () => { throw new Error('Replay unavailable') } })
+    const provider = new AnalytixRuntimeProvider()
+    const detail = { blocks: [{ kind: 'user' as const, id: 'ordinary', text: 'primary history' }], latestSeq: 12 }
+    const displayed = await provider.restoreThreadDisplayHistory('thread', detail)
+    expect(displayed).toBe(detail)
+    expect(displayed.turnUsageThroughSeq).toBeUndefined()
+    expect(displayed.blocks).toBe(detail.blocks)
+  })
+
+  it('purges retained trajectory on an unsequenced replay revocation, never ACKs or falls back, and ignores late callbacks', async () => {
+    const threadId = 'trajectory-history-revoked'
+    trajectorySource.bindThread(threadId)
+    trajectorySource.observe(threadId, [stepEvent('logical_step_started', 1, 1, threadId)])
+    expect(trajectorySource.getSnapshot(threadId).records).toHaveLength(1)
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    const ackSseEvent = vi.fn(async () => true), stopSse = vi.fn(async () => true)
+    const startSse: Window['analytix']['runtime']['startSse'] = vi.fn(async (_thread, _since, streamId) => {
+      queueMicrotask(() => {
+        const delayed = onData, sid = streamId!
+        delayed?.({ streamId: sid, events: [{ schemaVersion: 1, kind: 'public_projection_revoked', threadId,
+          historyAuthority: 'case_boundary_only_v1', code: 'case_public_authority_rejected', action: 'purge_case_projection', terminal: true }] })
+        // An already captured IPC callback must be harmless after the control settles.
+        queueMicrotask(() => delayed?.({ streamId: sid, events: [stepEvent('logical_step_assembled', 12, 2, threadId)] }))
+        onEnd?.({ streamId: sid })
+      })
+      return { streamId: streamId! }
+    })
+    installDsGui({ startSse, ackSseEvent, stopSse,
+      onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+      onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } } })
+    const provider = new AnalytixRuntimeProvider()
+    const detail = { blocks: [{ kind: 'user' as const, id: 'stale-primary', text: 'Primary history' }], latestSeq: 12 }
+    await expect(provider.restoreThreadDisplayHistory(threadId, detail)).rejects.toThrow('Public case projection authority was revoked.')
+    expect(isPublicProjectionRevoked(threadId)).toBe(true)
+    expect(trajectorySource.getSnapshot(threadId)).toMatchObject({ records: [], history: 'revoked', loadedThroughSeq: null, completeThroughSeq: null })
+    expect(ackSseEvent).not.toHaveBeenCalled()
+    expect(stopSse).toHaveBeenCalledWith(vi.mocked(startSse).mock.calls[0]?.[2])
+    await expect(provider.restoreThreadDisplayHistory(threadId, detail)).rejects.toThrow('Public case projection authority was revoked.')
+    expect(startSse).toHaveBeenCalledTimes(1)
+    trajectorySource.bindThread('trajectory-history-other')
+    trajectorySource.bindThread(threadId)
+    trajectorySource.observe(threadId, [stepEvent('logical_step_assembled', 12, 2, threadId)])
+    expect(trajectorySource.getSnapshot(threadId)).toMatchObject({ records: [], history: 'revoked' })
+  })
+
+  it.each(['foreign', 'malformed', 'mixed', 'sequenced'] as const)('rejects %s replay revocation without ACK or local authority mutation', async mode => {
+    const threadId = `trajectory-history-invalid-${mode}`, foreign = `${threadId}-other`
+    trajectorySource.bindThread(threadId)
+    trajectorySource.observe(threadId, [stepEvent('logical_step_started', 1, 1, threadId)])
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    const ackSseEvent = vi.fn(async () => true)
+    const startSse: Window['analytix']['runtime']['startSse'] = vi.fn(async (_thread, _since, streamId) => {
+      queueMicrotask(() => {
+        const control = { schemaVersion: 1, kind: 'public_projection_revoked', threadId: mode === 'foreign' ? foreign : threadId,
+          historyAuthority: 'case_boundary_only_v1', code: 'case_public_authority_rejected', action: 'purge_case_projection', terminal: mode !== 'malformed',
+          ...(mode === 'sequenced' ? { seq: 10, timestamp: '2026-10-15T00:00:00Z' } : {}) }
+        onData?.({ streamId: streamId!, events: mode === 'mixed' ? [control, stepEvent('logical_step_assembled', 12, 2, threadId)] : [control] })
+        onEnd?.({ streamId: streamId! })
+      })
+      return { streamId: streamId! }
+    })
+    installDsGui({ startSse, ackSseEvent,
+      onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+      onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } } })
+    const provider = new AnalytixRuntimeProvider()
+    const detail = { blocks: [{ kind: 'user' as const, id: 'primary', text: 'Primary history' }], latestSeq: 12 }
+    // The rejected delivery retains the pre-existing optional-replay fallback policy.
+    expect(await provider.restoreThreadDisplayHistory(threadId, detail)).toBe(detail)
+    expect(isPublicProjectionRevoked(threadId)).toBe(false)
+    expect(isPublicProjectionRevoked(foreign)).toBe(false)
+    expect(trajectorySource.getSnapshot(threadId)).toMatchObject({ history: 'partial', completeThroughSeq: null })
+    expect(trajectorySource.getSnapshot(threadId).records).toHaveLength(1)
+    expect(ackSseEvent).not.toHaveBeenCalled()
+  })
+
+  it('preserves ordinary replay duplicate handling and per-delivery ACK before mapper completion', async () => {
+    const thread = 'ordinary-idempotent-replay'
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    const ackSseEvent = vi.fn(async (_id: string, _seq: number) => true)
+    installDsGui({ ackSseEvent, startSse: async (_thread, _since, id) => {
+      queueMicrotask(() => {
+        onData?.({ streamId: id!, events: [userEvent(1, thread)] })
+        onData?.({ streamId: id!, events: [userEvent(1, thread)] })
+        onData?.({ streamId: id!, events: [{ kind: 'cursor_advanced', seq: 10, timestamp: '2026-10-15T00:00:10Z', threadId: thread, reason: 'restricted_content_removed' }] })
+        onEnd?.({ streamId: id! })
+      })
+      return { streamId: id! }
+    }, onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+    onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } } })
+    const provider = new AnalytixRuntimeProvider()
+    const restored = await provider.restoreThreadDisplayHistory(thread, { latestSeq: 10, blocks: [
+      { kind: 'compaction', id: 'primary-compaction', status: 'success', summary: 'Context compacted' }
+    ] })
+    expect(restored.blocks.map(block => block.id)).toEqual(['trajectory-user-1', 'primary-compaction'])
+    expect(ackSseEvent.mock.calls.map(call => call[1])).toEqual([1, 1, 10])
+  })
+
+  it('loads trajectory history through its own finite stream without dispatching or stopping a live stream', async () => {
+    const thread = 'trajectory-independent-replay', events = Array.from({ length: 2001 }, (_, index) => userEvent(index + 1, thread))
+    const data = new Set<Parameters<Window['analytix']['runtime']['onSseEvent']>[0]>()
+    const ends = new Set<Parameters<Window['analytix']['runtime']['onSseEnd']>[0]>()
+    let liveId = '', replayId = ''
+    const startSse: Window['analytix']['runtime']['startSse'] = vi.fn(async (_thread, _since, id, replay) => {
+      if (replay) {
+        replayId = id!
+        expect(replay).toEqual({ replayThroughSeq: 2001 })
+        queueMicrotask(() => {
+          for (const receive of data) receive({ streamId: id!, events })
+          for (const end of ends) end({ streamId: id! })
+        })
+      } else liveId = id!
+      return { streamId: id! }
+    })
+    const stopSse = vi.fn(async (_streamId: string) => true), ackSseEvent = vi.fn(async (_streamId: string, _seq: number) => true)
+    installDsGui({ startSse, stopSse, ackSseEvent,
+      onSseEvent: receive => { data.add(receive); return () => { data.delete(receive) } },
+      onSseEnd: end => { ends.add(end); return () => { ends.delete(end) } } })
+    const provider = new AnalytixRuntimeProvider()
+    await provider.restoreThreadDisplayHistory(thread, { blocks: [], latestSeq: 0 })
+    trajectorySource.observe(thread, events)
+    const off = trajectorySource.subscribe(thread, () => undefined), live = new AbortController()
+    const onSeq = vi.fn(), onDeltas = vi.fn(), onError = vi.fn()
+    const pendingLive = provider.subscribeThreadEvents(thread, 2001, { onSeq, onDeltas, onError } as unknown as ThreadEventSink, live.signal)
+    await vi.waitFor(() => expect(liveId).not.toBe(''))
+    expect(await trajectorySource.loadOlder(thread)).toBe(true)
+    expect(replayId).not.toBe(liveId)
+    expect(ackSseEvent).toHaveBeenCalledExactlyOnceWith(replayId, 2001)
+    expect(stopSse.mock.calls.every(call => call[0] === replayId)).toBe(true)
+    expect(onSeq).not.toHaveBeenCalled(); expect(onDeltas).not.toHaveBeenCalled(); expect(onError).not.toHaveBeenCalled()
+    expect(trajectorySource.getSnapshot(thread).records.map(record => record.firstSeq)).toEqual([1])
+    live.abort(); await pendingLive; off()
+  })
+
+  it.each(['short', 'error'] as const)('keeps %s trajectory replay unavailable and never publishes its partial candidate', async mode => {
+    const thread = `trajectory-older-${mode}`
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    let onError: Parameters<Window['analytix']['runtime']['onSseError']>[0] | undefined
+    installDsGui({ startSse: async (_thread, _since, id) => {
+      queueMicrotask(() => {
+        onData?.({ streamId: id!, events: [userEvent(1, thread)] })
+        if (mode === 'short') onEnd?.({ streamId: id! })
+        else onError?.({ streamId: id!, message: 'unavailable' })
+      })
+      return { streamId: id! }
+    }, onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+    onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } },
+    onSseError: handler => { onError = handler; return () => { onError = undefined } } })
+    const provider = new AnalytixRuntimeProvider()
+    await provider.restoreThreadDisplayHistory(thread, { blocks: [], latestSeq: 0 })
+    trajectorySource.observe(thread, [userEvent(10, thread)])
+    const off = trajectorySource.subscribe(thread, () => undefined)
+    expect(await trajectorySource.loadOlder(thread)).toBe(false)
+    expect(trajectorySource.getSnapshot(thread)).toMatchObject({ olderHistory: 'unavailable', historyWindow: 'latest' })
+    expect(trajectorySource.getSnapshot(thread).records.map(record => record.firstSeq)).toEqual([10])
+    off()
+  })
+
+  it('leaves case-boundary history unavailable without starting an ordinary replay', async () => {
+    const startSse = vi.fn(async () => ({ streamId: 'unused' }))
+    installDsGui({ startSse })
+    const provider = new AnalytixRuntimeProvider(), thread = 'trajectory-case-boundary'
+    await provider.restoreThreadDisplayHistory(thread, { blocks: [], latestSeq: 12, historyAuthority: 'case_boundary_only_v1' })
+    trajectorySource.observe(thread, [userEvent(10, thread)])
+    const off = trajectorySource.subscribe(thread, () => undefined)
+    expect(await trajectorySource.loadOlder(thread)).toBe(false)
+    expect(trajectorySource.getSnapshot(thread)).toMatchObject({ olderHistory: 'unavailable', canLoadOlder: false })
+    expect(startSse).not.toHaveBeenCalled()
+    off()
+  })
+
+  it('stops an explicitly cancelled UI replay and removes its event listeners', async () => {
+    const off = vi.fn()
+    const started = deferred<void>()
+    const startResult = deferred<{ streamId: string }>()
+    let replayStreamId = ''
+    const stopSse = vi.fn(async () => true)
+    installDsGui({ stopSse,
+      startSse: async (_thread, _since, streamId) => { replayStreamId = streamId!; started.resolve(); return startResult.promise },
+      onSseEvent: () => off, onSseEnd: () => off, onSseError: () => off })
+    const provider = new AnalytixRuntimeProvider()
+    const controller = new AbortController()
+    const pending = provider.restoreThreadDisplayHistory('thread', { blocks: [{ kind: 'compaction', id: 'c',
+      status: 'success', summary: 'Context compacted' }], latestSeq: 12 }, controller.signal)
+    const rejected = expect(pending).rejects.toThrow(/cancelled/)
+    await started.promise
+    controller.abort()
+    await rejected
+    expect(off).toHaveBeenCalledTimes(3)
+    expect(stopSse).toHaveBeenCalledTimes(1)
+    startResult.resolve({ streamId: replayStreamId })
+    await startResult.promise; await Promise.resolve(); await Promise.resolve()
+    expect(stopSse).toHaveBeenCalledTimes(2)
+    expect(stopSse).toHaveBeenLastCalledWith(replayStreamId)
+  })
+
   it('reports invalid runtime JSON responses with a stable error message', async () => {
     installDsGui({
       runtimeRequest: vi.fn(async () => ({
@@ -907,6 +1198,9 @@ describe('AnalytixRuntimeProvider', () => {
       if (path === '/v1/threads' && method === 'POST') {
         return { ok: true, status: 201, body: JSON.stringify(threadBody) }
       }
+      if (path.endsWith('/compact')) {
+        return { ok: true, status: 200, body: JSON.stringify({ ok: true, threadId: 'thr_surface', replacedTokens: 0, pinnedConstraints: [] }) }
+      }
       if (path.endsWith('/turns')) {
         return {
           ok: true,
@@ -1001,6 +1295,12 @@ describe('AnalytixRuntimeProvider', () => {
           })
         }
       }
+      if (path.startsWith('/v1/user-inputs/')) {
+        return { ok: true, status: 200, body: JSON.stringify({
+          inputId: path.endsWith('input_cancel') ? 'input_cancel' : 'input_surface',
+          status: path.endsWith('input_cancel') ? 'cancelled' : 'submitted'
+        }) }
+      }
       return { ok: true, status: 200, body: '{}' }
     })
     installDsGui({ runtimeRequest })
@@ -1091,6 +1391,20 @@ describe('AnalytixRuntimeProvider', () => {
     ]))
   })
 
+  it('lists all archived public summaries with an explicit zero limit and no side history', async () => {
+    const summaries = Array.from({ length: 52 }, (_, index) => ({
+      id: `thr_archive_${index}`, title: `Archive ${index}`, status: 'archived',
+      workspace: '/synthetic/archive', model: 'synthetic', mode: 'agent', updatedAt: '2026-01-01T00:00:00Z'
+    }))
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify({ threads: summaries }) }))
+    installDsGui({ runtimeRequest })
+    const provider = new AnalytixRuntimeProvider()
+    const archived = await provider.listThreads({ archivedOnly: true, limit: 0 })
+    expect(runtimeRequest).toHaveBeenCalledExactlyOnceWith('/v1/threads?limit=0&archived_only=true', 'GET')
+    expect(archived).toHaveLength(52)
+    expect(archived.at(-1)).toMatchObject({ id: 'thr_archive_51', archived: true })
+  })
+
   it('uses Analytix thread lifecycle endpoints for list, archive, restore, rename, workspace, and delete', async () => {
     const runtimeRequest = vi.fn(async (path: string, _method?: string, _body?: string) => {
       if (path === '/v1/threads?limit=25&search=archive+match&include_archived=true&archived_only=true') {
@@ -1127,7 +1441,7 @@ describe('AnalytixRuntimeProvider', () => {
     await provider.archiveThread('thr_archived', false)
     await provider.renameThread('thr_archived', 'Renamed')
     await provider.updateThreadWorkspace('thr_archived', '/tmp/next-workspace')
-    await provider.updateThreadRelation('thr_archived', 'primary')
+    await provider.promoteSideThread('thr_archived')
     await provider.deleteThread('thr_archived')
 
     expect(threads).toEqual([
@@ -1146,13 +1460,13 @@ describe('AnalytixRuntimeProvider', () => {
       2,
       '/v1/threads/thr_archived',
       'PATCH',
-      JSON.stringify({ status: 'archived' })
+      JSON.stringify({ archived: true })
     )
     expect(runtimeRequest).toHaveBeenNthCalledWith(
       3,
       '/v1/threads/thr_archived',
       'PATCH',
-      JSON.stringify({ status: 'idle' })
+      JSON.stringify({ archived: false })
     )
     expect(runtimeRequest).toHaveBeenNthCalledWith(
       4,
@@ -1170,13 +1484,36 @@ describe('AnalytixRuntimeProvider', () => {
       6,
       '/v1/threads/thr_archived',
       'PATCH',
-      JSON.stringify({ relation: 'primary' })
+      JSON.stringify({ promoteSide: true })
     )
     expect(runtimeRequest).toHaveBeenNthCalledWith(
       7,
       '/v1/threads/thr_archived',
       'DELETE'
     )
+  })
+
+  it('preserves a formal Side promotion refusal through the runtime client facade', async () => {
+    const runtimeRequest = vi.fn(async () => ({ ok: false, status: 409,
+      body: JSON.stringify({ code: 'conflict', message: 'The request conflicts with the current runtime state.' }) }))
+    installDsGui({ runtimeRequest })
+    const provider = new AnalytixRuntimeProvider()
+    await expect(provider.promoteSideThread('thr_side')).rejects.toThrow('The request conflicts with the current runtime state.')
+    expect(runtimeRequest).toHaveBeenCalledExactlyOnceWith('/v1/threads/thr_side', 'PATCH', JSON.stringify({ promoteSide: true }))
+  })
+
+  it.each([true, false])('propagates a rejected archive intent archived=%s', async archived => {
+    const runtimeRequest = vi.fn(async () => ({
+      ok: false, status: 409, body: JSON.stringify({ code: 'conflict', message: 'thread is busy' })
+    }))
+    installDsGui({ runtimeRequest })
+    await expect(new AnalytixRuntimeProvider().archiveThread('thr_busy', archived)).rejects.toThrow('The request conflicts with the current runtime state.')
+    expect(runtimeRequest).toHaveBeenCalledExactlyOnceWith('/v1/threads/thr_busy', 'PATCH', JSON.stringify({ archived }))
+  })
+
+  it('propagates an archive transport failure', async () => {
+    installDsGui({ runtimeRequest: vi.fn(async () => { throw new Error('transport unavailable') }) })
+    await expect(new AnalytixRuntimeProvider().archiveThread('thr_archive', true)).rejects.toThrow('transport unavailable')
   })
 
   it('maps Analytix thread items into chat blocks', async () => {
@@ -1730,7 +2067,7 @@ describe('AnalytixRuntimeProvider', () => {
     expect(detail.blocks).toEqual([
       expect.objectContaining({ kind: 'approval', approvalId: 'appr_live', status: 'pending' }),
       expect.objectContaining({ kind: 'approval', approvalId: 'appr_stale', status: 'error' }),
-      expect.objectContaining({ kind: 'user_input', requestId: 'input_stale', status: 'cancelled' })
+      expect.objectContaining({ kind: 'user_input', requestId: 'input_stale', status: 'error', errorMessage: 'User input outcome is unavailable.' })
     ])
   })
 
@@ -1893,6 +2230,9 @@ describe('AnalytixRuntimeProvider', () => {
 		'assistant'
 	])
 	expect(detail.turnDurationByUserId?.item_user).toBe(8_000)
+    expect(detail.authoritativeTurnStatuses).toEqual({ turn_1: 'completed' })
+    expect(detail.authoritativeTurnTimings?.turn_1).toEqual({ turnId: 'turn_1', userItemId: 'item_user',
+      startedAt: Date.parse('2026-01-02T03:04:00.000Z'), finishedAt: Date.parse('2026-01-02T03:04:08.000Z') })
   })
 
   it('posts Analytix turn requests and returns the deterministic user item id', async () => {
@@ -1903,7 +2243,7 @@ describe('AnalytixRuntimeProvider', () => {
     }))
     installDsGui({ runtimeRequest })
     const provider = new AnalytixRuntimeProvider()
-    const result = await provider.sendUserMessage('thr_1', 'hello')
+    const result = await provider.sendUserMessage('thr_1', 'hello', { requestedSkillIds: ['review'] })
     expect(runtimeRequest).toHaveBeenCalledWith(
       '/v1/threads/thr_1/turns',
       'POST',
@@ -1911,7 +2251,8 @@ describe('AnalytixRuntimeProvider', () => {
         prompt: 'hello',
         async: true,
         approvalPolicy: 'on-request',
-        sandboxMode: 'workspace-write'
+        sandboxMode: 'workspace-write',
+        requestedSkillIds: ['review']
       })
     )
     expect(result.userMessageItemId).toBe('item_user_real')
@@ -2960,13 +3301,14 @@ describe('AnalytixRuntimeProvider', () => {
             createdAt: 't0',
             updatedAt: 't1'
           })
-        : '{}'
+        : JSON.stringify({ inputId: path.endsWith('input_2') ? 'input_2' : 'input_1',
+            status: path.endsWith('input_2') ? 'cancelled' : 'submitted' })
     }))
     installDsGui({ runtimeRequest })
     const provider = new AnalytixRuntimeProvider()
 
     const forked = await provider.forkThread('thr_parent')
-    await provider.forkThread('thr_parent', { relation: 'fork', turnId: 'turn_parent_1' })
+    await provider.forkThread('thr_parent', { relation: 'fork', turnId: 'turn_parent_1', endSeq: 13 })
     await provider.submitUserInputResponse('input_1', [{ id: 'choice', label: 'Yes', value: 'yes' }])
     await provider.cancelUserInput('input_2')
 
@@ -2975,7 +3317,7 @@ describe('AnalytixRuntimeProvider', () => {
     expect(runtimeRequest).toHaveBeenCalledWith(
       '/v1/threads/thr_parent/fork',
       'POST',
-      JSON.stringify({ relation: 'fork', turnId: 'turn_parent_1' })
+      JSON.stringify({ relation: 'fork', turnId: 'turn_parent_1', endSeq: 13 })
     )
     expect(runtimeRequest).toHaveBeenCalledWith(
       '/v1/user-inputs/input_1',
@@ -3002,7 +3344,10 @@ describe('AnalytixRuntimeProvider', () => {
     const encodedApproval = encodeURIComponent(approvalId)
     const encodedInput = encodeURIComponent(inputId)
     const encodedSession = encodeURIComponent(sessionId)
-    const runtimeRequest = vi.fn(async (path: string) => {
+    const runtimeRequest = vi.fn(async (path: string, _method?: string, body?: string) => {
+      if (path.endsWith('/compact')) {
+        return { ok: true, status: 200, body: JSON.stringify({ ok: true, threadId, replacedTokens: 0, pinnedConstraints: [] }) }
+      }
       if (path.endsWith('/turns')) {
         return {
           ok: true,
@@ -3093,6 +3438,10 @@ describe('AnalytixRuntimeProvider', () => {
           })
         }
       }
+      if (path === `/v1/user-inputs/${encodedInput}`) {
+        return { ok: true, status: 200, body: JSON.stringify({ inputId,
+          status: body && JSON.parse(body).cancelled ? 'cancelled' : 'submitted' }) }
+      }
       return { ok: true, status: 200, body: '{}' }
     })
     installDsGui({ runtimeRequest })
@@ -3104,7 +3453,7 @@ describe('AnalytixRuntimeProvider', () => {
     await provider.interruptTurn(threadId, turnId)
     await provider.compactThread(threadId)
     await provider.submitApprovalDecision(approvalId, 'allow')
-    await provider.submitUserInputResponse(inputId, [])
+    await provider.submitUserInputResponse(inputId, [{ id: 'q1', label: 'Yes', value: 'Yes' }])
     await provider.cancelUserInput(inputId)
     await provider.forkThread(threadId)
     await provider.resumeSession(sessionId)
@@ -3139,6 +3488,18 @@ describe('AnalytixRuntimeProvider', () => {
       expect(path).not.toContain(sessionId)
     }
   })
+
+  it.each(['not-json', JSON.stringify({ ok: true, threadId: 'thr_compact', replacedTokens: 0 })])(
+    'rejects invalid compaction response body %s',
+    async body => {
+      const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body }))
+      installDsGui({ runtimeRequest })
+      const provider = new AnalytixRuntimeProvider()
+
+      await expect(provider.compactThread('thr_compact')).rejects.toThrow('runtime_response_schema_invalid')
+      expect(runtimeRequest).toHaveBeenCalledWith('/v1/threads/thr_compact/compact', 'POST', '{}')
+    }
+  )
 
   it('resumes a session through the Analytix HTTP runtime', async () => {
     const runtimeRequest = vi.fn(async () => ({
@@ -3324,6 +3685,153 @@ describe('AnalytixRuntimeProvider', () => {
     expect(sink.onDeltas).not.toHaveBeenCalled()
   })
 
+  it.each([
+    { outcome: 'false', lifecycle: 'active' },
+    { outcome: 'false', lifecycle: 'aborted' },
+    { outcome: 'false', lifecycle: 'closed' },
+    { outcome: 'transport', lifecycle: 'active' },
+    { outcome: 'transport', lifecycle: 'aborted' },
+    { outcome: 'transport', lifecycle: 'closed' }
+  ] as const)('classifies ACK refusal without recording the rejected transport body: $outcome/$lifecycle', async ({ outcome, lifecycle }) => {
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    let streamId = ''
+    const started = deferred<void>(), ackStarted = deferred<void>(), acknowledgement = deferred<boolean>()
+    const canary = 'PRIVATE_ACK_BODY_NEVER_LOGGED /private/synthetic.csv Bearer INERT_CANARY'
+    const logError = vi.fn(async () => undefined)
+    const stopSse = vi.fn(async () => true)
+    const ackSseEvent = vi.fn(async (_streamId: string, _seq: number) => {
+      ackStarted.resolve()
+      return acknowledgement.promise
+    })
+    const ac = new AbortController()
+    const sink: ThreadEventSink = {
+      onSeq: vi.fn(), onDeltas: vi.fn(), onUserMessage: vi.fn(), onTool: vi.fn(),
+      onCompaction: vi.fn(), onApproval: vi.fn(), onUserInput: vi.fn(), onUserInputStatus: vi.fn(),
+      onGoal: vi.fn(), onTodos: vi.fn(), onTurnComplete: vi.fn(), onRuntimeError: vi.fn(), onError: vi.fn()
+    }
+    installDsGui({
+      onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+      onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } },
+      startSse: async (_threadId, _sinceSeq, id) => {
+        streamId = id ?? 'stream-diagnostic'
+        started.resolve()
+        return { streamId }
+      }, ackSseEvent, stopSse
+    })
+    Object.assign(window.analytix, { logs: { error: logError } })
+    const completion = new AnalytixRuntimeProvider().subscribeThreadEvents('thr_1', 2, sink, ac.signal)
+    await started.promise
+    onData?.({ streamId, events: [{
+      kind: 'assistant_text_delta', seq: 3,
+      item: { id: 'diagnostic-draft', turnId: 'turn_1', threadId: 'thr_1', role: 'assistant',
+        status: 'running', createdAt: 't1', kind: 'assistant_text', text: 'Synthetic public draft.' }
+    }] })
+    await ackStarted.promise
+    if (lifecycle === 'aborted') ac.abort()
+    if (lifecycle === 'closed') onEnd?.({ streamId })
+    if (outcome === 'transport') acknowledgement.reject(new Error(canary))
+    else acknowledgement.resolve(false)
+    await completion
+
+    expect(ackSseEvent).toHaveBeenCalledExactlyOnceWith(streamId, 3)
+    expect(sink.onSeq).toHaveBeenCalledExactlyOnceWith(3)
+    expect(logError).toHaveBeenCalledExactlyOnceWith(`sse-ack_${outcome}-${lifecycle}`, 'SSE renderer rejection')
+    expect(sink.onRuntimeError).toHaveBeenCalledWith(expect.objectContaining({ code: 'sse_ack_rejected', severity: 'error' }))
+    expect(sink.onError).toHaveBeenCalledWith(expect.any(Error), { terminal: false })
+    expect(stopSse).toHaveBeenCalledWith(streamId)
+    const logged = JSON.stringify(logError.mock.calls)
+    expect(logged).not.toContain(canary)
+    expect(logged).not.toContain(streamId)
+    expect(logged).not.toContain('thr_1')
+    expect(logged).not.toContain('diagnostic-draft')
+    expect((sink.onError as ReturnType<typeof vi.fn>).mock.calls.map(([error]) => (error as Error).message).join(' ')).not.toContain(canary)
+  })
+
+  it.each(['active', 'aborted', 'closed'] as const)('classifies a throwing renderer sink as a fixed event reason: %s', async lifecycle => {
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    let streamId = ''
+    const started = deferred<void>(), ac = new AbortController()
+    const canary = 'PRIVATE_SINK_EXCEPTION /private/synthetic.csv INERT_CANARY'
+    const logError = vi.fn(async () => undefined), ackSseEvent = vi.fn(async () => true)
+    const sink: ThreadEventSink = {
+      onSeq: vi.fn(() => {
+        if (lifecycle === 'aborted') ac.abort()
+        if (lifecycle === 'closed') onEnd?.({ streamId })
+        throw new Error(canary)
+      }), onDeltas: vi.fn(), onUserMessage: vi.fn(), onTool: vi.fn(),
+      onCompaction: vi.fn(), onApproval: vi.fn(), onUserInput: vi.fn(), onUserInputStatus: vi.fn(),
+      onGoal: vi.fn(), onTodos: vi.fn(), onTurnComplete: vi.fn(), onRuntimeError: vi.fn(), onError: vi.fn()
+    }
+    installDsGui({
+      onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+      onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } },
+      startSse: async (_threadId, _sinceSeq, id) => {
+        streamId = id ?? 'stream-diagnostic'; started.resolve(); return { streamId }
+      }, ackSseEvent
+    })
+    Object.assign(window.analytix, { logs: { error: logError } })
+    const completion = new AnalytixRuntimeProvider().subscribeThreadEvents('thr_1', 2, sink, ac.signal)
+    await started.promise
+    onData?.({ streamId, events: [{ kind: 'assistant_text_delta', seq: 3,
+      item: { id: 'diagnostic-draft', turnId: 'turn_1', threadId: 'thr_1', role: 'assistant',
+        status: 'running', createdAt: 't1', kind: 'assistant_text', text: 'Synthetic public draft.' } }] })
+    await completion
+    expect(logError).toHaveBeenCalledExactlyOnceWith(`sse-event-${lifecycle}`, 'SSE renderer rejection')
+    expect(ackSseEvent).not.toHaveBeenCalled()
+    expect(sink.onRuntimeError).toHaveBeenCalledWith(expect.objectContaining({ code: 'sse_event_rejected', severity: 'error' }))
+    expect(sink.onError).toHaveBeenCalledWith(expect.any(Error), { terminal: false })
+    expect(JSON.stringify(logError.mock.calls)).not.toContain(canary)
+    expect((sink.onError as ReturnType<typeof vi.fn>).mock.calls.map(([error]) => (error as Error).message).join(' ')).not.toContain(canary)
+  })
+
+  it.each(['success', 'log-throws', 'log-rejects'] as const)('keeps ACK and visible failure semantics independent of logging: %s', async mode => {
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    let onEnd: Parameters<Window['analytix']['runtime']['onSseEnd']>[0] | undefined
+    let streamId = ''
+    const started = deferred<void>(), ac = new AbortController()
+    const canary = 'PRIVATE_LOGGER_EXCEPTION_INERT_CANARY'
+    const logError = mode === 'log-throws'
+      ? vi.fn(() => { throw new Error(canary) })
+      : vi.fn(async () => { if (mode === 'log-rejects') throw new Error(canary) })
+    const ackSseEvent = vi.fn(async () => mode === 'success')
+    const sink: ThreadEventSink = {
+      onSeq: vi.fn(), onDeltas: vi.fn(), onUserMessage: vi.fn(), onTool: vi.fn(),
+      onCompaction: vi.fn(), onApproval: vi.fn(), onUserInput: vi.fn(), onUserInputStatus: vi.fn(),
+      onGoal: vi.fn(), onTodos: vi.fn(), onTurnComplete: vi.fn(), onRuntimeError: vi.fn(), onError: vi.fn()
+    }
+    installDsGui({
+      onSseEvent: handler => { onData = handler; return () => { onData = undefined } },
+      onSseEnd: handler => { onEnd = handler; return () => { onEnd = undefined } },
+      startSse: async (_threadId, _sinceSeq, id) => {
+        streamId = id ?? 'stream-diagnostic'; started.resolve(); return { streamId }
+      }, ackSseEvent
+    })
+    Object.assign(window.analytix, { logs: { error: logError } })
+    const completion = new AnalytixRuntimeProvider().subscribeThreadEvents('thr_1', 2, sink, ac.signal)
+    await started.promise
+    onData?.({ streamId, events: [{ kind: 'assistant_text_delta', seq: 3,
+      item: { id: 'diagnostic-draft', turnId: 'turn_1', threadId: 'thr_1', role: 'assistant',
+        status: 'running', createdAt: 't1', kind: 'assistant_text', text: 'Synthetic public draft.' } }] })
+    if (mode === 'success') {
+      await vi.waitFor(() => expect(ackSseEvent).toHaveBeenCalledTimes(1))
+      onEnd?.({ streamId })
+    }
+    await completion
+    expect(ackSseEvent).toHaveBeenCalledTimes(1)
+    if (mode === 'success') {
+      expect(logError).not.toHaveBeenCalled()
+      expect(sink.onRuntimeError).not.toHaveBeenCalled()
+      expect(sink.onError).not.toHaveBeenCalled()
+    } else {
+      expect(logError).toHaveBeenCalledExactlyOnceWith('sse-ack_false-active', 'SSE renderer rejection')
+      expect(sink.onRuntimeError).toHaveBeenCalledWith(expect.objectContaining({ code: 'sse_ack_rejected' }))
+      expect(sink.onError).toHaveBeenCalledWith(expect.any(Error), { terminal: false })
+      expect((sink.onError as ReturnType<typeof vi.fn>).mock.calls.map(([error]) => (error as Error).message).join(' ')).not.toContain(canary)
+    }
+  })
+
   it('dispatches public projection revocation as a control and never ACKs it', async () => {
     let onData: ((payload: { streamId: string; events: unknown[] }) => void) | null = null
     const ackSseEvent = vi.fn(async () => true)
@@ -3433,15 +3941,18 @@ describe('AnalytixRuntimeProvider', () => {
       stopSse
     })
 
+    const observeTrajectory = vi.spyOn(trajectorySource, 'observe')
     const provider = new AnalytixRuntimeProvider()
     const subscription = provider.subscribeThreadEvents('thr_case', 19, sink, new AbortController().signal)
     await commitStarted
+    expect(observeTrajectory).not.toHaveBeenCalled()
     expect(onAcceptedFinalBatch).toHaveBeenCalledTimes(1)
     expect(sink.onSeq).not.toHaveBeenCalled()
     expect(ackSseEvent).not.toHaveBeenCalled()
 
     releaseCommit()
     await subscription
+    expect(observeTrajectory).toHaveBeenCalledExactlyOnceWith('thr_case', [acceptedFinalDeliveryBatchForRenderer()])
     const streamId = startSse.mock.calls[0]?.[2]
     expect(ackSseEvent).toHaveBeenCalledTimes(1)
     expect(ackSseEvent).toHaveBeenCalledWith(streamId, 22, {
@@ -3453,6 +3964,7 @@ describe('AnalytixRuntimeProvider', () => {
     expect(sink.onUsage).toBeUndefined()
     expect(sink.onTurnComplete).not.toHaveBeenCalled()
     expect(sink.onError).not.toHaveBeenCalled()
+    observeTrajectory.mockRestore()
   })
 
   it('commits one general terminal batch before ACKing its terminal sequence without authority', async () => {
@@ -4280,5 +4792,360 @@ describe('rewind errors without a durable no-commit receipt', () => {
     installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: false, status, body: JSON.stringify(body) })) })
     const result = await new AnalytixRuntimeProvider().rewindThread('thread', 'turn').catch(error => error)
     expect(result.constructor).toBe(Error)
+  })
+})
+
+describe('typed user-input response correlation', () => {
+  const answers = [{ id: 'input_owned_1', kind: 'answer' as const, optionIds: [], customText: 'PRIVATE_CUSTOM_SENTINEL' }]
+  it('submits typed content once and accepts only correlated metadata', async () => {
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200,
+      body: JSON.stringify({ inputId: 'input_owned', status: 'submitted' }) }))
+    installDsGui({ runtimeRequest })
+    await expect(new AnalytixRuntimeProvider().submitUserInputResponse('input_owned', answers)).resolves.toBeUndefined()
+    expect(runtimeRequest).toHaveBeenCalledOnce()
+    expect(runtimeRequest).toHaveBeenCalledWith('/v1/user-inputs/input_owned', 'POST', JSON.stringify({ answers }))
+  })
+  it.each([
+    { inputId: 'input_foreign', status: 'submitted' },
+    { inputId: 'input_owned', status: 'cancelled' },
+    { inputId: 'input_owned', status: 'submitted', answers: [{ id: 'input_owned_1', value: 'PRIVATE_CUSTOM_SENTINEL' }] },
+    { inputId: 'input_owned', status: 'submitted', customText: 'PRIVATE_CUSTOM_SENTINEL' }
+  ])('rejects unrelated or content-bearing typed response without exposing body', async body => {
+    installDsGui({ runtimeRequest: vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify(body) })) })
+    const error = await new AnalytixRuntimeProvider().submitUserInputResponse('input_owned', answers)
+      .then(() => null, (error: unknown) => error)
+    expect(error).toBeInstanceOf(Error)
+    expect(String(error)).not.toContain('PRIVATE_CUSTOM_SENTINEL')
+  })
+})
+
+describe('request-scoped timed question consumer', () => {
+  const requestId = 'input_' + 'a'.repeat(64)
+  const selector = { threadId: 'thread-timed', turnId: 'turn-source', itemId: 'item_' + requestId, requestId }
+  const providers: AnalytixRuntimeProvider[] = []
+  const flush = async () => { for (let index = 0; index < 8; index++) await Promise.resolve() }
+  function installWait(initialOpen?: ReturnType<typeof rendererRuntimeClient.openUserInputWait>) {
+    let notify!: Parameters<typeof rendererRuntimeClient.onUserInputWaitChanged>[0]
+    const off = vi.fn()
+    vi.spyOn(rendererRuntimeClient, 'onUserInputWaitChanged').mockImplementation(listener => { notify = listener; return off })
+    const open = vi.spyOn(rendererRuntimeClient, 'openUserInputWait').mockResolvedValue({ state: 'connecting' })
+    if (initialOpen) open.mockReturnValueOnce(initialOpen)
+    const close = vi.spyOn(rendererRuntimeClient, 'closeUserInputWait').mockResolvedValue(undefined)
+    const request = vi.spyOn(rendererRuntimeClient, 'runtimeRequest').mockResolvedValue({ ok: true, status: 202, body: JSON.stringify({ inputId: requestId, scheduled: true }) })
+    const provider = new AnalytixRuntimeProvider(); providers.push(provider)
+    const states: UserInputWaitState[] = []
+    const controls = provider.observeUserInputWait(selector, state => states.push(state))
+    const firstFrame = (remainingMs: number | null) => notify({ selector, wait: { state: 'waiting', snapshot: { remainingMs }, observedAt: Date.now() } })
+    return { provider, states, controls, open, close, request, off, firstFrame, notify: (state: 'ended' | 'unavailable') => notify({ selector, wait: { state } }) }
+  }
+  afterEach(async () => {
+    providers.splice(0).forEach(provider => provider.settleUserInputWait(selector)); await flush()
+    vi.restoreAllMocks(); vi.useRealTimers()
+  })
+  it('holds pre-frame focus, resumes its frozen remaining time on blur, and treats 202 as scheduled only', async () => {
+    vi.useFakeTimers(); const fixture = installWait()
+    fixture.controls.focus(); fixture.firstFrame(1200); await flush()
+    expect(fixture.states.at(-1)).toEqual({ phase: 'focused', remainingMs: 1200 })
+    await vi.advanceTimersByTimeAsync(5000); expect(fixture.request).not.toHaveBeenCalled()
+    fixture.controls.blur(); await vi.advanceTimersByTimeAsync(1200); await flush()
+    expect(fixture.request).toHaveBeenCalledWith('/v1/user-inputs/' + requestId, 'POST', JSON.stringify({ action: 'continue', selector }))
+    expect(fixture.states.at(-1)?.phase).toBe('scheduled'); expect(fixture.close).not.toHaveBeenCalled()
+    fixture.provider.settleUserInputWait(selector); expect(fixture.states.at(-1)?.phase).toBe('ended'); expect(fixture.close).toHaveBeenCalledOnce()
+  })
+  it('publishes scheduled only after the exact Host 202 acknowledgement', async () => {
+    vi.useFakeTimers(); const fixture = installWait()
+    let acknowledge!: (value: Awaited<ReturnType<typeof rendererRuntimeClient.runtimeRequest>>) => void
+    fixture.request.mockReturnValueOnce(new Promise(resolve => { acknowledge = resolve }))
+    fixture.firstFrame(1); await flush(); await vi.advanceTimersByTimeAsync(1)
+    expect(fixture.states.at(-1)).toEqual({ phase: 'continuing', remainingMs: 0 })
+    expect(fixture.states.some(state => state.phase === 'scheduled')).toBe(false)
+    fixture.controls.focus(); fixture.controls.blur(); fixture.controls.takeTime(); fixture.controls.engage()
+    await vi.advanceTimersByTimeAsync(5000); expect(fixture.request).toHaveBeenCalledOnce()
+    acknowledge({ ok: true, status: 202, body: JSON.stringify({ inputId: requestId, scheduled: true }) }); await flush()
+    expect(fixture.states.at(-1)).toEqual({ phase: 'scheduled', remainingMs: 0 }); expect(fixture.close).not.toHaveBeenCalled()
+  })
+  it('shows failure without scheduled when the continuation request rejects', async () => {
+    vi.useFakeTimers(); const fixture = installWait()
+    let reject!: (error: Error) => void
+    fixture.request.mockReturnValueOnce(new Promise((_resolve, no) => { reject = no }))
+    fixture.firstFrame(1); await flush(); await vi.advanceTimersByTimeAsync(1)
+    reject(new Error('Synthetic transport unavailable')); await flush()
+    expect(fixture.states.at(-1)?.phase).toBe('error'); expect(fixture.states.some(state => state.phase === 'scheduled')).toBe(false)
+  })
+  it.each(['ended', 'unavailable', 'settled', 'retry'] as const)('ignores a delayed 202 after %s has replaced the wait state', async replacement => {
+    vi.useFakeTimers(); const fixture = installWait()
+    let acknowledge!: (value: Awaited<ReturnType<typeof rendererRuntimeClient.runtimeRequest>>) => void
+    fixture.request.mockReturnValueOnce(new Promise(resolve => { acknowledge = resolve }))
+    fixture.firstFrame(1); await flush(); await vi.advanceTimersByTimeAsync(1)
+    if (replacement === 'settled') fixture.provider.settleUserInputWait(selector)
+    else if (replacement === 'retry') { fixture.notify('unavailable'); fixture.controls.retry(); await flush(); fixture.firstFrame(null) }
+    else fixture.notify(replacement)
+    const before = fixture.states.at(-1)
+    acknowledge({ ok: true, status: 202, body: JSON.stringify({ inputId: requestId, scheduled: true }) }); await flush()
+    expect(fixture.states.at(-1)).toEqual(before); expect(fixture.states.some(state => state.phase === 'scheduled')).toBe(false)
+  })
+  it.each(['engage', 'takeTime'] as const)('keeps pre-frame %s intent on the actual first snapshot', async operation => {
+    vi.useFakeTimers(); const fixture = installWait(); fixture.controls[operation](); fixture.firstFrame(1); await flush()
+    expect(fixture.states.at(-1)?.phase).toBe(operation === 'engage' ? 'editing' : 'waiting')
+    await vi.advanceTimersByTimeAsync(60_000); expect(fixture.request).not.toHaveBeenCalled(); expect(fixture.close).not.toHaveBeenCalled()
+  })
+  it('treats a -1/null Host snapshot as silent indefinite wait', async () => {
+    vi.useFakeTimers(); const fixture = installWait(); fixture.firstFrame(null); await flush()
+    expect(fixture.states.at(-1)).toEqual({ phase: 'waiting', remainingMs: null })
+    fixture.controls.focus(); fixture.controls.blur(); await vi.advanceTimersByTimeAsync(60_000)
+    expect(fixture.request).not.toHaveBeenCalled()
+  })
+  it('preserves the business claim across leaf removal and re-observation without resetting the deadline', async () => {
+    vi.useFakeTimers(); const fixture = installWait(); fixture.firstFrame(2000); await flush()
+    fixture.controls.unsubscribe(); await vi.advanceTimersByTimeAsync(1000)
+    const states: UserInputWaitState[] = [], second = fixture.provider.observeUserInputWait(selector, state => states.push(state))
+    expect(states.at(-1)?.remainingMs).toBe(1000); expect(fixture.open).toHaveBeenCalledOnce(); expect(fixture.close).not.toHaveBeenCalled()
+    second.unsubscribe(); await vi.advanceTimersByTimeAsync(1000); expect(fixture.request).toHaveBeenCalledOnce()
+  })
+  it.each(['ended', 'unavailable'] as const)('keeps %s separate from a real terminal outcome and retries the same identity', async terminal => {
+    vi.useFakeTimers(); const fixture = installWait(); fixture.firstFrame(10_000); await flush(); fixture.notify(terminal)
+    expect(fixture.states.at(-1)?.phase).toBe(terminal === 'ended' ? 'ended' : 'error')
+    await vi.advanceTimersByTimeAsync(10_000); expect(fixture.request).not.toHaveBeenCalled()
+    fixture.controls.retry(); await flush(); expect(fixture.close).toHaveBeenCalledWith(selector); expect(fixture.open).toHaveBeenCalledTimes(2)
+    fixture.firstFrame(5000); expect(fixture.states.at(-1)?.phase).toBe('counting')
+  })
+  it.each(['resolve', 'reject'] as const)('ignores an initial open %s after retry has attached its successor', async outcome => {
+    let resolve!: (state: Awaited<ReturnType<typeof rendererRuntimeClient.openUserInputWait>>) => void, reject!: (error: Error) => void
+    const initial = new Promise<Awaited<ReturnType<typeof rendererRuntimeClient.openUserInputWait>>>((yes, no) => { resolve = yes; reject = no })
+    const fixture = installWait(initial)
+    fixture.notify('unavailable'); fixture.controls.retry(); await flush(); fixture.firstFrame(null)
+    expect(fixture.states.at(-1)).toEqual({ phase: 'waiting', remainingMs: null })
+    if (outcome === 'resolve') resolve({ state: 'unavailable' })
+    else reject(new Error('Synthetic stale first open'))
+    await flush()
+    expect(fixture.states.at(-1)).toEqual({ phase: 'waiting', remainingMs: null })
+    expect(fixture.open).toHaveBeenCalledTimes(2)
+  })
+  it('rejects an unrelated or non-202 continuation acknowledgement', async () => {
+    const fixture = installWait()
+    fixture.request.mockResolvedValueOnce({ ok: true, status: 200, body: JSON.stringify({ inputId: requestId, scheduled: true }) })
+    await expect(fixture.provider.continueUserInput(requestId)).rejects.toThrow()
+    fixture.request.mockResolvedValueOnce({ ok: true, status: 202, body: JSON.stringify({ inputId: 'input_' + 'b'.repeat(64), scheduled: true }) })
+    await expect(fixture.provider.continueUserInput(requestId)).rejects.toThrow()
+  })
+  it('isolates an old held GET EOF throughout the retry close barrier before admitting a fresh frame', async () => {
+    const fixture = installWait(); fixture.firstFrame(5000); await flush()
+    fixture.notify('unavailable')
+    let finishClose!: () => void
+    fixture.close.mockReturnValueOnce(new Promise<void>(resolve => { finishClose = resolve }))
+    fixture.controls.retry(); await flush()
+    expect(fixture.open).toHaveBeenCalledOnce()
+    fixture.notify('ended'); fixture.notify('unavailable')
+    expect(fixture.states.at(-1)).toEqual({ phase: 'connecting', remainingMs: null })
+    finishClose(); await flush(); expect(fixture.open).toHaveBeenCalledTimes(2)
+    fixture.firstFrame(3000)
+    expect(fixture.states.at(-1)?.phase).toBe('counting')
+    expect(fixture.states.at(-1)?.remainingMs).toBeGreaterThan(0)
+  })
+  it('never opens a new wait after settlement while a retry close is still pending', async () => {
+    const fixture = installWait(); fixture.notify('unavailable')
+    let finishClose!: () => void
+    fixture.close.mockReturnValueOnce(new Promise<void>(resolve => { finishClose = resolve }))
+    fixture.controls.retry(); await flush(); fixture.provider.settleUserInputWait(selector)
+    finishClose(); await flush()
+    expect(fixture.open).toHaveBeenCalledOnce()
+  })
+  it('removes the metadata listener after an observerless failed claim', async () => {
+    const fixture = installWait(); await flush(); fixture.controls.unsubscribe(); fixture.notify('unavailable')
+    expect(fixture.off).toHaveBeenCalledOnce()
+  })
+  it('returns real queued delivery without manufacturing accepted and validates exact UUID/target', async () => {
+    const fixture = installWait(), lateReply = { clientUserMessageId: '67eeac24-98da-4a49-a4ee-1d5b54574999', expectedTurnId: 'turn-current' }
+    const delivery = { clientUserMessageId: lateReply.clientUserMessageId, turnId: lateReply.expectedTurnId, state: 'queued' }
+    fixture.request.mockResolvedValueOnce({ ok: true, status: 200, body: JSON.stringify({ inputId: requestId, status: 'continued', lateReply: delivery }) })
+    const answers = [{ id: requestId + '_1', kind: 'answer' as const, optionIds: [], customText: 'Synthetic answer' }]
+    expect(await fixture.provider.submitUserInputLateReply(requestId, answers, lateReply)).toEqual(delivery)
+    expect(JSON.parse(fixture.request.mock.calls.at(-1)![2]!)).toEqual({ answers, lateReply })
+    // Idle wake and exact retry return the actual durable target, which may
+    // differ from the retained terminal compare-and-set anchor.
+    for (const state of ['queued', 'accepted'] as const) {
+      const actual = { ...delivery, turnId: 'turn-host-idle-wake', state }
+      fixture.request.mockResolvedValueOnce({ ok: true, status: 200, body: JSON.stringify({ inputId: requestId, status: 'continued', lateReply: actual }) })
+      expect(await fixture.provider.submitUserInputLateReply(requestId, answers, lateReply)).toEqual(actual)
+      expect(JSON.parse(fixture.request.mock.calls.at(-1)![2]!)).toEqual({ answers, lateReply })
+    }
+    for (const invalid of [
+      { inputId: 'input_' + 'b'.repeat(64), status: 'continued', lateReply: delivery },
+      { inputId: requestId, status: 'continued', lateReply: { ...delivery, clientUserMessageId: '11111111-1111-4111-8111-111111111111' } },
+      { inputId: requestId, status: 'continued', lateReply: { ...delivery, turnId: '' } },
+      { inputId: requestId, status: 'continued', lateReply: { ...delivery, started: true } }
+    ]) {
+      fixture.request.mockResolvedValueOnce({ ok: true, status: 200, body: JSON.stringify(invalid) })
+      await expect(fixture.provider.submitUserInputLateReply(requestId, answers, lateReply)).rejects.toThrow('unrelated late answer')
+    }
+  })
+  it.each([400, 413, 409, 500])('distinguishes definite HTTP %s rejection from uncertain/conflicting delivery', async status => {
+    const fixture = installWait(); fixture.request.mockResolvedValueOnce({ ok: false, status, body: '{}' })
+    const failure = await fixture.provider.submitUserInputLateReply(requestId, [], { clientUserMessageId: '67eeac24-98da-4a49-a4ee-1d5b54574999', expectedTurnId: 'turn-current' }).catch(error => error)
+    expect(failure.userInputLateReplyUnadmitted).toBe(status === 400 || status === 413)
+  })
+})
+
+
+describe('sanitized timed-answer HTTP error desktop consumption', () => {
+  it.each([400, 413, 409])('preserves public HTTP %s admission meaning', async status => {
+    const requestId = 'input_' + 'a'.repeat(64)
+    const publicError = status === 409
+      ? { code: 'conflict', message: 'The request conflicts with the current runtime state.' }
+      : { code: 'validation_error', message: 'The request did not satisfy the runtime contract.' }
+    const request = vi.fn(async () => ({ ok: false, status, body: JSON.stringify(publicError) }))
+    installDsGui({ runtimeRequest: request })
+    const failure = await new AnalytixRuntimeProvider().submitUserInputLateReply(requestId, [], {
+      clientUserMessageId: '67eeac24-98da-4a49-a4ee-1d5b54574999', expectedTurnId: 'turn-target'
+    }).then(() => null, (error: unknown) => error)
+    expect(failure).toBeInstanceOf(Error)
+    expect(JSON.parse((failure as Error).message)).toEqual(publicError)
+    expect((failure as Error & { userInputLateReplyUnadmitted?: boolean }).userInputLateReplyUnadmitted).toBe(status === 400 || status === 413)
+    expect(request).toHaveBeenCalledOnce()
+  })
+})
+
+it('allows a new UUID after the exact sanitized late-too-large nonadmission', async () => {
+  const requestId = 'input_' + 'a'.repeat(64)
+  const request = vi.fn(async () => ({ ok: false, status: 409, body: JSON.stringify({
+    code: 'user_input_late_reply_too_large', message: 'The late answer is too large. Edit it and submit a new attempt.'
+  }) }))
+  installDsGui({ runtimeRequest: request })
+  const failure = await new AnalytixRuntimeProvider().submitUserInputLateReply(requestId, [], {
+    clientUserMessageId: '67eeac24-98da-4a49-a4ee-1d5b54574999', expectedTurnId: 'turn-target'
+  }).catch(error => error)
+  expect(failure).toBeInstanceOf(Error)
+  expect(failure.userInputLateReplyUnadmitted).toBe(true)
+  expect(failure.userInputLateReplyTooLarge).toBe(true)
+  expect(request).toHaveBeenCalledOnce()
+})
+
+
+describe('Question action original owner selector', () => {
+  const requestId = 'input_' + 'c'.repeat(64)
+  const selector = { threadId: 'original-thread', turnId: 'original-question-turn', itemId: 'item_' + requestId, requestId }
+  const answers = [{ id: requestId + '_1', kind: 'answer' as const, optionIds: [], customText: 'Synthetic original answer' }]
+  const lateReply = { clientUserMessageId: '67eeac24-98da-4a49-a4ee-1d5b54574999', expectedTurnId: 'current-steering-turn' }
+  const operations = ['submit', 'cancel', 'continue', 'late'] as const
+  type Operation = typeof operations[number]
+  function invoke(provider: AnalytixRuntimeProvider, operation: Operation, owner?: typeof selector) {
+    if (operation === 'submit') return provider.submitUserInputResponse(requestId, answers, owner)
+    if (operation === 'cancel') return provider.cancelUserInput(requestId, owner)
+    if (operation === 'continue') return provider.continueUserInput(requestId, owner)
+    return provider.submitUserInputLateReply(requestId, answers, lateReply, owner)
+  }
+  function body(operation: Operation) {
+    return operation === 'submit' ? { answers } : operation === 'cancel' ? { cancelled: true }
+      : operation === 'continue' ? { action: 'continue' } : { answers, lateReply }
+  }
+  function response(operation: Operation) {
+    return { ok: true, status: operation === 'continue' ? 202 : 200, body: JSON.stringify(operation === 'continue'
+      ? { inputId: requestId, scheduled: true } : operation === 'late'
+      ? { inputId: requestId, status: 'continued', lateReply: { clientUserMessageId: lateReply.clientUserMessageId, turnId: 'actual-host-wake-turn', state: 'queued' } }
+      : { inputId: requestId, status: operation === 'submit' ? 'submitted' : 'cancelled' }) }
+  }
+  it.each(operations)('carries the original complete selector for %s independently of late steering', async operation => {
+    const runtimeRequest = vi.fn(async () => response(operation)); installDsGui({ runtimeRequest })
+    await invoke(new AnalytixRuntimeProvider(), operation, selector)
+    expect(runtimeRequest).toHaveBeenCalledOnce()
+    expect(runtimeRequest).toHaveBeenCalledWith('/v1/user-inputs/' + requestId, 'POST', JSON.stringify({ ...body(operation), selector }))
+  })
+  it.each(operations)('retains only the explicitly absent original-owner compatibility form for %s', async operation => {
+    const runtimeRequest = vi.fn(async () => response(operation)); installDsGui({ runtimeRequest })
+    await invoke(new AnalytixRuntimeProvider(), operation)
+    expect(runtimeRequest).toHaveBeenCalledWith('/v1/user-inputs/' + requestId, 'POST', JSON.stringify(body(operation)))
+  })
+  it.each(operations)('rejects a supplied invalid or unrelated %s selector before any POST', async operation => {
+    const runtimeRequest = vi.fn(async () => response(operation)); installDsGui({ runtimeRequest })
+    const foreign = 'input_' + 'd'.repeat(64)
+    for (const owner of [null, {}, { ...selector, turnId: '' }, { ...selector, itemId: 'legacy-item' },
+      { ...selector, requestId: foreign, itemId: 'item_' + foreign }, { ...selector, raw: 'Synthetic forbidden field' }]) {
+      await expect(invoke(new AnalytixRuntimeProvider(), operation, owner as typeof selector)).rejects.toThrow('Question action owner is unavailable.')
+    }
+    expect(runtimeRequest).not.toHaveBeenCalled()
+  })
+})
+
+describe('discarded reply public history', () => {
+  it('retains each historical attempt as a static notice through reload without changing its Question', async () => {
+    const question = { id: 'item_input_history', inputId: 'input_history', kind: 'user_input', status: 'continued',
+      turnId: 'turn_question', threadId: 'thr_fork', questions: [], role: 'system', createdAt: '2026-10-10T00:00:00Z' }
+    const cancelled = { id: 'entry_discard', text: 'DO_NOT_COPY_ANSWER_CONTENT', clientUserMessageId: 'attempt_discard',
+      status: 'cancelled', cancelledAt: '2026-10-10T00:00:02Z', cancelReason: 'user_input_discarded' }
+    const response = { id: 'thr_fork', status: 'idle', forkedFromThreadId: 'thr_source', latestSeq: 12,
+      pendingUserInputIds: [], turns: [
+        { id: 'turn_question', threadId: 'thr_fork', status: 'completed', createdAt: question.createdAt, items: [question], steering: [] },
+        { id: 'turn_attempt', threadId: 'thr_fork', status: 'completed', createdAt: '2026-10-10T00:00:01Z', items: [],
+          steering: [cancelled, { ...cancelled, id: 'another_discard', clientUserMessageId: 'another_attempt' }] }
+      ] }
+    const before = structuredClone(response)
+    const runtimeRequest = vi.fn().mockResolvedValue({ ok: true, status: 200, body: JSON.stringify(response) })
+    installDsGui({ runtimeRequest })
+    const provider = new AnalytixRuntimeProvider(), first = await provider.getThreadDetail('thr_fork')
+    expect((await provider.getThreadDetail('thr_fork')).blocks).toEqual(first.blocks)
+    expect(first.blocks[0]).toMatchObject({ kind: 'user_input', status: 'continued', requestId: 'input_history' })
+    const notices = first.blocks.filter(block => block.kind === 'system')
+    expect(notices).toHaveLength(2)
+    expect(new Set(notices.map(block => block.id)).size).toBe(2)
+    for (const notice of notices) expect(notice).toMatchObject({ kind: 'system', code: 'history_user_input_discarded',
+      text: '', createdAt: cancelled.cancelledAt, meta: { turnId: 'turn_attempt' } })
+    expect(JSON.stringify(notices)).not.toContain('DO_NOT_COPY_ANSWER_CONTENT')
+    expect(JSON.stringify(notices)).not.toContain('clientUserMessageId')
+    expect(first.pendingUserInputIds).toEqual([])
+    expect(response).toEqual(before)
+    expect(runtimeRequest.mock.calls.every(([path]) => path === '/v1/threads/thr_fork')).toBe(true)
+  })
+  it('does not label a queued, promoted, whole-turn-cancelled or malformed attempt as a discarded reply', async () => {
+    const base = { id: 'entry', text: 'ordinary', status: 'cancelled', cancelledAt: '2026-10-10T00:00:02Z', cancelReason: 'user_input_discarded' }
+    const steering = ['legacy', { ...base, status: 'pending' }, { ...base, status: 'promoted' },
+      { ...base, cancelReason: 'aborted' }, { ...base, id: undefined }, { ...base, cancelledAt: 'invalid' }]
+    installDsGui({ runtimeRequest: vi.fn().mockResolvedValue({ ok: true, status: 200, body: JSON.stringify({
+      id: 'thr_fork', status: 'idle', turns: [{ id: 'turn', threadId: 'thr_fork', status: 'completed', items: [], steering }]
+    }) }) })
+    expect((await new AnalytixRuntimeProvider().getThreadDetail('thr_fork')).blocks).toEqual([])
+  })
+})
+
+describe('trajectory observer on the existing runtime stream', () => {
+  it('publishes logical timing after the existing ACK without acquiring another SSE owner', async () => {
+    let onData: Parameters<Window['analytix']['runtime']['onSseEvent']>[0] | undefined
+    const controller = new AbortController()
+    const threadId = 'trajectory-runtime-live'
+    const event = stepEvent('logical_step_started', 1, 1, threadId)
+    const order: string[] = []
+    const off = trajectorySource.subscribe(threadId, () => { order.push('observer'); throw new Error('display observer') })
+    const startSse = vi.fn(async (_threadId, _sinceSeq, streamId) => {
+      queueMicrotask(() => onData?.({ streamId, events: [event] }))
+      return { streamId }
+    })
+    const ackSseEvent = vi.fn(async () => { order.push('ack'); return true })
+    installDsGui({ startSse, ackSseEvent, onSseEvent: handler => { onData = handler; return () => { onData = undefined } } })
+    const sink: ThreadEventSink = {
+      onSeq: () => controller.abort(), onDeltas() {}, onUserMessage() {}, onTool() {}, onCompaction() {},
+      onApproval() {}, onUserInput() {}, onUserInputStatus() {}, onGoal() {}, onTodos() {}, onTurnComplete() {}, onError: vi.fn()
+    }
+    await new AnalytixRuntimeProvider().subscribeThreadEvents(threadId, 0, sink, controller.signal)
+    off()
+    expect(order).toEqual(['ack', 'observer'])
+    expect(startSse).toHaveBeenCalledTimes(1)
+    expect(ackSseEvent).toHaveBeenCalledTimes(1)
+    expect(sink.onError).not.toHaveBeenCalled()
+    expect(trajectorySource.getSnapshot(threadId).records).toHaveLength(1)
+    expect(trajectorySource.getSnapshot(threadId).completeThroughSeq).toBeNull()
+  })
+})
+
+
+describe('local Word thread HTTP contract',()=>{
+  afterEach(()=>{rendererRuntimeClient.invalidateSettings();vi.restoreAllMocks();vi.unstubAllGlobals()})
+  it('omits model, Provider and internal purpose from the real Core create request',async()=>{
+    const runtimeRequest=vi.fn(async()=>({ok:true,status:201,body:JSON.stringify({id:'thr_local_word_http',title:'Local Word',workspace:'/tmp/workspace',model:'',mode:'agent',status:'idle',createdAt:'2026-10-17T00:00:00.000Z',updatedAt:'2026-10-17T00:00:00.000Z'})}))
+    installDsGui({runtimeRequest});rendererRuntimeClient.invalidateSettings()
+    await new AnalytixRuntimeProvider().createThread({workspace:'/tmp/workspace',title:'Local Word',localDocument:true,model:'must-not-select',providerId:'must-not-select'})
+    expect(runtimeRequest).toHaveBeenCalledOnce()
+    const [path,method,body]=runtimeRequest.mock.calls[0] as unknown as [string,string,string]
+    expect(path).toBe('/v1/threads');expect(method).toBe('POST')
+    expect(JSON.parse(body)).toMatchObject({workspace:'/tmp/workspace',title:'Local Word',mode:'agent'})
+    expect(JSON.parse(body)).not.toHaveProperty('model');expect(JSON.parse(body)).not.toHaveProperty('providerId');expect(JSON.parse(body)).not.toHaveProperty('localDocument')
   })
 })

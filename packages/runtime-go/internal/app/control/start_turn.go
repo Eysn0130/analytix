@@ -9,6 +9,7 @@ import (
 )
 
 func NormalizeStartTurnRequest(request StartTurnRequest) StartTurnRequest {
+	request.RequestedSkillIDs = append([]string(nil), request.RequestedSkillIDs...)
 	request.ThreadID = strings.TrimSpace(request.ThreadID)
 	request.RiskIntent = NormalizeRiskIntent(request.RiskIntent)
 	request.Model = strings.TrimSpace(request.Model)

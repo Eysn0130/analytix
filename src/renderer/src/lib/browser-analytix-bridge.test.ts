@@ -1094,3 +1094,124 @@ describe('browser analytix bridge', () => {
     expect(window.localStorage.getItem('analytix.browserPreview.settings')).toContain('/tmp/preview')
   })
 })
+
+
+describe('browser protected process boundary', () => {
+  it('implements all six typed members with no network, storage or logging effects', async () => {
+    stubBrowserWindow(); const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+    installBrowserAnalytixBridge({ runtimeProxyPrefix: '/runtime-proxy' })
+    const storage = vi.spyOn(window.localStorage, 'setItem'), log = vi.spyOn(console, 'log')
+    const runtime = window.analytix.runtime, viewerId = '11111111-1111-4111-8111-111111111111'
+    await expect(runtime.authorizeProcessPane({ paneId: 'pane', threadId: 'thread', turnId: 'turn' })).resolves.toEqual({ status: 'unavailable' })
+    await expect(runtime.readProcessPane({ viewerId })).resolves.toEqual({ status: 'unavailable' })
+    await expect(runtime.setProcessPaneExpanded({ viewerId, expandedBlockIds: ['block'] })).resolves.toEqual({ status: 'unavailable' })
+    await expect(runtime.closeProcessPane({ viewerId })).resolves.toEqual({ status: 'unavailable' })
+    await expect(runtime.openProcessCapture({ viewerId, blockId: 'block', captureDigest: 'a'.repeat(64) })).resolves.toEqual({ status: 'unavailable' })
+    const handler = vi.fn(), off = runtime.onProcessPaneInvalidated({ paneId: 'pane' }, handler); off(); off()
+    const offAll = runtime.onProcessPaneInvalidated(handler); offAll(); offAll()
+    expect(handler).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled(); expect(storage).not.toHaveBeenCalled(); expect(log).not.toHaveBeenCalled()
+  })
+  it('blocks protected namespace variants before both generic proxies can fetch', async () => {
+    stubBrowserWindow(); const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+    installBrowserAnalytixBridge({ runtimeProxyPrefix: '/runtime-proxy' })
+    const paths = ['/v1/local-display/process/read', 'v1/local-display/process/target?token=PRIVATE_CANARY',
+      '/v1/local-display/tool-result-snapshot/', '/v1/local-display/unknown', '//v1//local-display//process/read',
+      '/v1/local-display/../local-display/process/read', '/x/../v1/local-display/process/read',
+      '/v1/%6cocal-display/process/read', '/v1/%25%36%63ocal-display/process/read', '/v1%2flocal-display%2fprocess%2fread',
+      '/v1%252flocal-display/process/read', '/x/%2e%2e/v1/local-display/process/read',
+      '/v1\\local-display\\process/read', '/v1/%/process', '/v1/%2525252525252525252flocal-display/process/read']
+    for (const path of paths) for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+      for (const request of [window.analytix.runtime.runtimeRequest, window.analytix.diagnostics.runtimeRequest]) {
+        const reply = await request(path, method, 'PRIVATE_BODY_CANARY')
+        expect(reply).toMatchObject({ ok: false, status: 403 })
+        expect(reply.body).not.toContain('CANARY'); expect(reply.body).not.toContain(path)
+      }
+    }
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it('keeps public routes, ordinary queries and legitimate percent-encoded IDs on the existing proxy path', async () => {
+    stubBrowserWindow()
+    const fetch = vi.fn(async (_path: string) => new Response('{}', { status: 200 })); vi.stubGlobal('fetch', fetch)
+    installBrowserAnalytixBridge({ runtimeProxyPrefix: '/runtime-proxy' })
+    for (const path of ['/health', '/health?next=/v1/local-display/process/read', '/v1/local-display-public/test', '/v1/threads/a%20b', '/v1/threads/a%2Fb', '/v1/threads/a%25b', '/v1/threads/a%25AF', '/v1/threads/a%25ff']) {
+      await window.analytix.runtime.runtimeRequest(path)
+      expect(fetch.mock.calls.at(-1)?.[0]).toBe('/runtime-proxy' + path)
+    }
+    expect(fetch).toHaveBeenCalledTimes(8)
+  })
+})
+
+it('denies a protected final URL even when the configured proxy prefix supplies v1', async () => {
+  stubBrowserWindow(); const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+  installBrowserAnalytixBridge({ runtimeProxyPrefix: '/v1' })
+  for (const request of [window.analytix.runtime.runtimeRequest, window.analytix.diagnostics.runtimeRequest]) {
+    await expect(request('/local-display/process/read')).resolves.toMatchObject({ ok: false, status: 403 })
+  }
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+it('denies protected structural encodings mixed with literal percent IDs across both proxy entries', async () => {
+  stubBrowserWindow(); const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+  installBrowserAnalytixBridge({ runtimeProxyPrefix: '/runtime-proxy' })
+  for (const path of ['/v1/%256cocal-display/process/read%25AF', '/v1/%256cocal-display/process/target%25ff',
+    '/v1%252flocal-display%252fprocess%252fread%25AF', '/v1%252flocal-display%252fprocess%252ftarget%25ff']) {
+    for (const request of [window.analytix.runtime.runtimeRequest, window.analytix.diagnostics.runtimeRequest]) {
+      await expect(request(path, 'POST', 'SYNTHETIC_PRIVATE_CANARY')).resolves.toMatchObject({ ok: false, status: 403 })
+    }
+  }
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+
+it('keeps schedule Host operations unavailable and rejects task-array settings writes in browser previews', async () => {
+  stubBrowserWindow()
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  installBrowserAnalytixBridge()
+  const write = vi.spyOn(window.localStorage, 'setItem')
+  await expect(window.analytix.schedule.listTasks()).resolves.toMatchObject({ kind: 'unavailable' })
+  await expect(window.analytix.schedule.createTask({ title: 'New', prompt: 'Run', schedule: { kind: 'manual' } })).resolves.toMatchObject({ kind: 'unavailable' })
+  await expect(window.analytix.schedule.updateTask({ taskId: 'task', patch: { title: 'New' }, expected: { title: 'Old' } })).resolves.toMatchObject({ kind: 'unavailable' })
+  for (const save of [window.analytix.settings.setSettings, window.analytix.settings.saveSettingsSilent]) {
+    await expect(save({ schedule: { tasks: [] } })).rejects.toThrow(/schedule task API/)
+  }
+  expect(fetch).not.toHaveBeenCalled()
+  expect(write).not.toHaveBeenCalled()
+})
+
+
+it('leaves native Present application effects unavailable in the browser facade', async () => {
+  stubBrowserWindow()
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+  installBrowserAnalytixBridge()
+  const identity = { viewId: '11111111-1111-4111-8111-111111111111', threadId: 'thread-a', turnId: 'turn-a',
+    callId: 'call_host_' + 'a'.repeat(64), resultItemId: 'item_result_' + 'b'.repeat(64), snapshotDigest: 'c'.repeat(64), index: 0 }
+  await expect(window.analytix.runtime.listToolResultLocalPresentApplications(identity)).resolves.toEqual({ ok: false, code: 'unavailable' })
+  await expect(window.analytix.runtime.openToolResultLocalPresentFile(identity)).resolves.toEqual({ ok: false, code: 'unavailable' })
+  await expect(window.analytix.runtime.openToolResultLocalPresentFile({ ...identity, action: 'reveal' })).resolves.toEqual({ ok: false, code: 'unavailable' })
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+
+it('does not fetch or store Present private history or object associations in a browser', async () => {
+  stubBrowserWindow(); const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+  installBrowserAnalytixBridge()
+  const write = vi.spyOn(window.localStorage, 'setItem')
+  const owner = { kind: 'present_history' as const, viewId: '11111111-1111-4111-8111-111111111111', threadId: 'thread-a', turnId: 'turn-a' }
+  expect(await window.analytix.runtime.openToolResultLocalPresentHistory(owner)).toEqual({ ok: false, code: 'unavailable' })
+  const { kind: _kind, ...identity } = owner
+  expect(await window.analytix.runtime.associateToolResultLocalPresentFile({ ...identity, callId: 'call_host_' + 'a'.repeat(64),
+    resultItemId: 'item_result_' + 'b'.repeat(64), snapshotDigest: 'c'.repeat(64), index: 0, artifactIds: [] })).toEqual({ ok: false, code: 'unavailable' })
+  expect(fetch).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
+})
+
+
+it('leaves Excel complete-byte reading unavailable in the browser facade', async () => {
+  stubBrowserWindow()
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+  installBrowserAnalytixBridge()
+  const write = vi.spyOn(window.localStorage, 'setItem')
+  await expect(window.analytix.files.readExcel({ path: '/fixture/book.xlsx' })).resolves.toMatchObject({ ok: false })
+  expect(fetch).not.toHaveBeenCalled()
+  expect(write).not.toHaveBeenCalled()
+})

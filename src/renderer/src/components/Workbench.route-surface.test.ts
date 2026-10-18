@@ -235,7 +235,7 @@ describe('Workbench route surface', () => {
 
   it('anchors the return-to-bottom button above the full composer surface', () => {
     const anchorIndex = workbenchSource.indexOf('data-analytix-return-to-bottom-anchor')
-    const composerIndex = workbenchSource.indexOf('<FloatingComposerIsland')
+    const composerIndex = workbenchSource.indexOf('<InputBar')
 
     expect(anchorIndex).toBeGreaterThanOrEqual(0)
     expect(composerIndex).toBeGreaterThan(anchorIndex)
@@ -246,13 +246,14 @@ describe('Workbench route surface', () => {
   it('keeps shell navigation clear of native titlebar controls', async () => {
     const baseShellSource = await readBaseShellSource()
 
-    expect(baseShellSource).toContain('--ds-window-controls-safe-block: calc(50px / var(--ds-ui-scale))')
+    expect(baseShellSource).toContain('--ds-window-controls-safe-block: 50px')
     expect(baseShellSource).toContain('--ds-macos-traffic-light-left: 16px')
     expect(baseShellSource).toContain('--ds-macos-traffic-light-top: 16px')
     expect(baseShellSource).toContain('--ds-macos-traffic-light-width: 66px')
     expect(baseShellSource).toContain('--ds-macos-traffic-light-gap: 18px')
     expect(baseShellSource).toContain('--ds-window-controls-safe-inset: calc(')
-    expect(baseShellSource).toContain('/ var(--ds-ui-scale)')
+    expect(baseShellSource).toMatch(/body \{[^}]*zoom: 1;/)
+    expect(baseShellSource).toMatch(/--ds-window-controls-safe-inset: calc\(\s*var\(--ds-macos-traffic-light-left\) \+ var\(--ds-macos-traffic-light-width\) \+ var\(--ds-macos-traffic-light-gap\)\s*\);/)
     expect(baseShellSource).toMatch(/\.ds-shell-navigation-controls \{[^}]*gap: 4px;/)
     expect(baseShellSource).toContain('--ds-window-chrome-navigation-width: calc(')
     expect(baseShellSource).toContain('calc(var(--ds-shell-rail-width) + var(--ds-window-chrome-sidebar-width))')
@@ -334,7 +335,10 @@ describe('Workbench route surface', () => {
     expect(baseShellSource).toContain(":root[data-motion-reduced='true'] .ds-thread-summary-content-motion")
     expect(baseShellSource).not.toContain('@media (prefers-reduced-motion: reduce) {\n  .ds-left-sidebar-pane')
     expect(baseShellSource).not.toContain('@media (prefers-reduced-motion: reduce) {\n  .ds-thread-summary-content-motion')
-    expect(workbenchSource).toContain("route !== 'plugins' && route !== 'schedule' && (rightPanelDockedVisible || rightPanelRetained")
+    expect(workbenchSource).toContain("route !== 'plugins' && (rightPanelDockedVisible || rightPanelRetained")
+    expect(workbenchSource).toContain("panelMode === 'schedule-task' && workspaceActiveTab?.scheduleTaskId")
+    expect(workbenchSource).toContain('onOpenTaskDetail={openTaskDetail}')
+    expect(workbenchSource).toMatch(/route === 'schedule' \? \([\s\S]*?<ScheduleTasksView[\s\S]*?\{renderRightPanel\(\)\}/)
     expect(baseShellSource).toMatch(/:root \{[^}]*--ds-window-controls-safe-block: 0px;[^}]*--ds-window-controls-safe-inset: 0px;/)
     expect(baseShellSource).toContain(".ds-window-chrome[data-resizing='true'] .ds-window-chrome-navigation { transition: none; }")
     expect(baseShellSource).not.toContain(

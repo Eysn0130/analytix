@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "contributionId": "workspace-editor",
-  "kind": "native-office",
+  "kind": "docx-editor",
   "documentKind": "docx",
   "title": "Documents"
 }

@@ -1,10 +1,14 @@
 {
   "schemaVersion": 1,
-  "adapter": "zeta-office",
+  "adapter": "superdoc",
   "documentKind": "docx",
   "openFormats": [
     "docx"
   ],
-  "readOnly": true,
-  "protocolVersion": 1
+  "readOnly": false,
+  "protocolVersion": 1,
+  "package": "superdoc",
+  "version": "2.24.0",
+  "reactPackage": "@superdoc/react",
+  "reactVersion": "2.19.0"
 }

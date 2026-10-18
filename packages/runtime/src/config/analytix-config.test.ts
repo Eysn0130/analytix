@@ -118,3 +118,18 @@ describe('expandHomePath', () => {
     expect(expandHomePath('~other/config.json')).toBe('~other/config.json')
   })
 })
+
+describe('normal user-input policy config', () => {
+  it('preserves an absent leaf and does not stamp legacy or a timeout', () => {
+    expect(RuntimeTuningConfigSchema.parse({})).not.toHaveProperty('userInput')
+    expect(RuntimeTuningConfigSchema.parse({ userInput: { policy: 'timed' } }).userInput).toEqual({ policy: 'timed' })
+  })
+  it.each([null, -1, 1, 120, 2147483])('accepts the frozen timeout %s', defaultTimeoutSeconds => {
+    expect(RuntimeTuningConfigSchema.parse({ userInput: { policy: 'timed', defaultTimeoutSeconds } }).userInput).toEqual({ policy: 'timed', defaultTimeoutSeconds })
+  })
+  it.each([{}, { defaultTimeoutSeconds: 120 }, { policy: 'test' }, { policy: 'timed', defaultTimeoutSeconds: 0 },
+    { policy: 'timed', defaultTimeoutSeconds: -2 }, { policy: 'timed', defaultTimeoutSeconds: 1.5 },
+    { policy: 'timed', defaultTimeoutSeconds: 2147484 }, { policy: 'timed', injected: true }])('rejects malformed policy atoms %j', userInput => {
+    expect(RuntimeTuningConfigSchema.safeParse({ userInput }).success).toBe(false)
+  })
+})

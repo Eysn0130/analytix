@@ -13,7 +13,7 @@ describe('unified sidebar navigation', () => {
     const props = { threads: [], caseProjects: [], caseProjectThreadsById: {}, caseProjectLoadingById: {},
       caseProjectErrorsById: {}, caseProjectExpandedById: {}, activeThreadId: null, activeView: 'chat',
       connectPhoneSidebarOpen: false, runtimeReady: true, threadSearch: '', showArchivedThreads: false,
-      onNewChat: noop, onOpenSettings: noop, onOpenPlugins: noop, onFocusModeChange: noop,
+      onNewChat: noop, onOpenSettings: noop, onOpenPlugins: noop,
       onToggleConnectPhone: noop, onThreadSearchChange: noop, onScheduleOpen: noop
     } as unknown as ComponentProps<typeof Sidebar>
     const html = renderToStaticMarkup(createElement('div', {},

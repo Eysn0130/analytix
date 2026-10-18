@@ -39,6 +39,10 @@ func (m *Manager) ClaimChildRunStart(expected Record) (Record, error) {
 		}
 		now := nextRuntimeLeaseInstant(record.LastHeartbeatAt, time.Now().UTC())
 		nowText := now.Format(time.RFC3339Nano)
+		if record.HostChildInput != nil && record.HostChildInput.ClaimedAt == "" {
+			record.HostChildInput = domainjob.CloneHostChildInputIdentityV1(record.HostChildInput)
+			record.HostChildInput.ClaimedAt = nowText
+		}
 		record.LastHeartbeatAt = nowText
 		record.LeaseExpiresAt = now.Add(defaultTaskJobLeaseTimeout).Format(time.RFC3339Nano)
 		record.UpdatedAt = nowText
@@ -83,6 +87,9 @@ func (m *Manager) ValidateChildRunStart(expected Record) (Record, error) {
 }
 
 func childRunStartClaimBlocker(record Record, expected Record, now time.Time) string {
+	if domainjob.ValidateHostChildInputRecordV1(record) != nil {
+		return "Host child input record is invalid"
+	}
 	status := strings.TrimSpace(record.Status)
 	if status != string(domainjob.StatusRunning) {
 		return "child run start status is not running: " + firstNonEmptyString(status, "missing")
@@ -125,6 +132,13 @@ func childRunStartClaimBlocker(record Record, expected Record, now time.Time) st
 }
 
 func sameChildRunStartIdentity(record Record, expected Record) bool {
+	if record.HostChildInput == nil || expected.HostChildInput == nil {
+		if record.HostChildInput != nil || expected.HostChildInput != nil {
+			return false
+		}
+	} else if *record.HostChildInput != *expected.HostChildInput {
+		return false
+	}
 	if strings.TrimSpace(record.ParentGoalID) != strings.TrimSpace(expected.ParentGoalID) ||
 		strings.TrimSpace(record.ParentThreadID) != strings.TrimSpace(expected.ParentThreadID) ||
 		strings.TrimSpace(record.ParentTurnID) != strings.TrimSpace(expected.ParentTurnID) ||

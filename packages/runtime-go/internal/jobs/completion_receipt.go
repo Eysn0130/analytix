@@ -13,6 +13,9 @@ import (
 )
 
 func validateDurableChildRunRecord(ctx context.Context, record Record, verifier ChildCompletionReceiptVerifier) error {
+	if err := domainjob.ValidateProtectedOutputSnapshotV1(record); err != nil {
+		return err
+	}
 	if err := domainjob.ValidateStatusV1(record.Status); err != nil {
 		return err
 	}
@@ -36,6 +39,9 @@ func validateDurableChildRunRecord(ctx context.Context, record Record, verifier 
 	}
 	if strings.TrimSpace(record.Error) != "" {
 		return errors.New("child-run error text cannot be written to the job record")
+	}
+	if record.HostChildInput != nil {
+		return domainjob.ValidateHostChildInputRecordV1(record)
 	}
 	if record.SecurityBinding == nil {
 		if record.ChildCompletionReceipt != nil || record.ForegroundChildHandoffReceipt != nil {
@@ -351,6 +357,9 @@ func validateChildCompletionReceiptForRecord(record Record, receipt domainjob.Ch
 }
 
 func exactChildCompletionReceiptReplay(record Record, request UpdateRequest) bool {
+	if request.ProtectedOutputSnapshot != nil && (record.ProtectedOutputSnapshot == nil || *request.ProtectedOutputSnapshot != *record.ProtectedOutputSnapshot) {
+		return false
+	}
 	if record.ChildCompletionReceipt == nil || request.ChildCompletionReceipt == nil ||
 		strings.TrimSpace(record.Status) != string(domainjob.StatusCompleted) ||
 		strings.TrimSpace(request.Status) != string(domainjob.StatusCompleted) ||
@@ -377,6 +386,7 @@ func exactChildCompletionReceiptReplay(record Record, request UpdateRequest) boo
 	remainder.ChildThreadID = ""
 	remainder.ChildTurnID = ""
 	remainder.ChildCompletionReceipt = nil
+	remainder.ProtectedOutputSnapshot = nil
 	remainder.Workspace = ""
 	remainder.Output = ""
 	remainder.Error = ""
@@ -387,6 +397,9 @@ func exactChildCompletionReceiptReplay(record Record, request UpdateRequest) boo
 }
 
 func exactForegroundChildHandoffReceiptReplay(record Record, request UpdateRequest) bool {
+	if request.ProtectedOutputSnapshot != nil && (record.ProtectedOutputSnapshot == nil || *request.ProtectedOutputSnapshot != *record.ProtectedOutputSnapshot) {
+		return false
+	}
 	if record.ForegroundChildHandoffReceipt == nil || request.ForegroundChildHandoffReceipt == nil ||
 		strings.TrimSpace(record.Status) != string(domainjob.StatusCompleted) ||
 		strings.TrimSpace(request.Status) != string(domainjob.StatusCompleted) ||
@@ -413,6 +426,7 @@ func exactForegroundChildHandoffReceiptReplay(record Record, request UpdateReque
 	remainder.ChildThreadID = ""
 	remainder.ChildTurnID = ""
 	remainder.ForegroundChildHandoffReceipt = nil
+	remainder.ProtectedOutputSnapshot = nil
 	remainder.Workspace = ""
 	remainder.Output = ""
 	remainder.Error = ""

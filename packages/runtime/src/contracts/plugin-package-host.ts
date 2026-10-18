@@ -6,6 +6,9 @@ const packageId = z.enum(['analytix-documents', 'analytix-spreadsheets', 'analyt
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const revision = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const operation = z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/)
+/** The two user Word operations extend the existing finite readiness list. */
+export const nativeOfficeUserOperations = ['create-object', 'begin-manual-edit'] as const
+export const MaxPluginPackageHostOperations = 20
 
 export const pluginPackageViewSchema = z.object({
   packageId, packageVersion: z.string().min(1), displayName: z.string().min(1),
@@ -14,7 +17,7 @@ export const pluginPackageViewSchema = z.object({
   activationState: z.enum(['unset', 'recorded', 'unavailable']),
   desiredState: z.enum(['enabled', 'disabled']).optional(), activationRevision: revision,
   activationId: digest.optional(), available: z.boolean(), unavailableReason: z.string().optional(),
-  operations: z.array(operation).max(18)
+  operations: z.array(operation).max(MaxPluginPackageHostOperations)
 }).strict().superRefine((value, ctx) => {
   if ((value.materialized && !digest.safeParse(value.generationId).success) ||
       (value.activationState === 'recorded' && (!value.desiredState || !value.activationId || value.activationRevision === 0)) ||

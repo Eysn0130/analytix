@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	contracts "analytix.local/runtime-go/internal/contracts"
+	domaingoal "analytix.local/runtime-go/internal/domain/goal"
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
@@ -49,13 +50,16 @@ func ApplyStatePatch(input StatePatchInput) (map[string]any, error) {
 			"updatedAt":       now,
 		}
 	}
-	if strings.TrimSpace(stringField(goal, "id")) == "" {
-		goal["id"] = "goal_" + contracts.SafeRecordID(threadID)
-	}
 	if objective := projectGoalText(strings.TrimSpace(stringField(patch, "objective"))); objective != "" {
 		goal["objective"] = objective
 	}
 	if status := strings.TrimSpace(stringField(patch, "status")); status != "" {
+		if ref, _, _, counted := domaingoal.CountedRecordV1(goal); counted && status != stringField(goal, "status") {
+			if ref.Revision >= 9007199254740991 {
+				return nil, errors.New("goal revision exhausted")
+			}
+			goal["revision"] = ref.Revision + 1
+		}
 		goal["status"] = status
 	}
 	if tokenBudget, ok := patch["tokenBudget"]; ok {

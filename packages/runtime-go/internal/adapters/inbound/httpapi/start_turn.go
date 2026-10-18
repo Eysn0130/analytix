@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"regexp"
 	"strings"
 
 	controlapp "analytix.local/runtime-go/internal/app/control"
@@ -18,6 +19,8 @@ import (
 	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 )
+
+var requestedSkillIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$`)
 
 const (
 	maxStartTurnRequestBytes  = 4 << 20
@@ -29,7 +32,7 @@ const (
 )
 
 var startTurnRequestFields = map[string]struct{}{
-	"prompt": {}, "displayText": {}, "riskIntent": {}, "async": {}, "model": {},
+	"requestedSkillIds": {}, "prompt": {}, "displayText": {}, "riskIntent": {}, "async": {}, "model": {},
 	"providerId": {}, "endpointFormat": {}, "reasoningEffort": {}, "mode": {},
 	"approvalPolicy": {}, "sandboxMode": {}, "attachmentIds": {}, "fileReferences": {},
 	"guiPlan": {}, "workspaceCheckpointId": {}, "disableUserInput": {}, "maxModelSteps": {},
@@ -141,6 +144,17 @@ func DecodeStartTurnRequest(threadID string, body []byte) (controlapp.StartTurnR
 	}
 	if err := decodeStartTurnBool(fields, "disableUserInput", &request.DisableUserInput, &request.DisableUserInputSet); err != nil {
 		return controlapp.StartTurnRequest{}, err
+	}
+	if raw, ok := fields["requestedSkillIds"]; ok {
+		request.RequestedSkillIDs, err = decodeStartTurnStringList(raw, "requestedSkillIds")
+		if err != nil || len(request.RequestedSkillIDs) > 16 {
+			return controlapp.StartTurnRequest{}, errors.New("requestedSkillIds must contain at most 16 canonical skill IDs")
+		}
+		for _, id := range request.RequestedSkillIDs {
+			if !requestedSkillIDPattern.MatchString(id) {
+				return controlapp.StartTurnRequest{}, errors.New("requestedSkillIds contains an invalid skill ID")
+			}
+		}
 	}
 	if raw, ok := fields["attachmentIds"]; ok {
 		request.AttachmentIDs, err = decodeStartTurnStringList(raw, "attachmentIds")

@@ -18,6 +18,7 @@ import {
   GoG3ProviderStreamingUsageCacheContract,
   GoG4ToolsApprovalUserInputMcpContract,
   GoG5FullLoopContract,
+  GoG5NamedRuntimeApi,
   GoMinimalAgentLoopContract,
   McpToolLifecycleContract,
   ProviderCacheContract,
@@ -1510,6 +1511,151 @@ async function putG5CommandThread(
   })
 }
 
+function preloadRuntimeBridgeSourceWitness(source: string) {
+  const syntax = ts.createSourceFile('preload.ts', source, ts.ScriptTarget.Latest, true)
+  const declarations = syntax.statements.flatMap(statement => ts.isVariableStatement(statement)
+    ? statement.declarationList.declarations.filter(node => ts.isIdentifier(node.name) && node.name.text === 'flatApi') : [])
+  const expression = (node: ts.Expression | undefined) => {
+    while (node && (ts.isParenthesizedExpression(node) || ts.isSatisfiesExpression(node) || ts.isAsExpression(node))) node = node.expression
+    return node
+  }
+  const initializer = expression(declarations.length === 1 ? declarations[0].initializer : undefined)
+  const api = initializer && ts.isObjectLiteralExpression(initializer) ? initializer : undefined
+  const named = (node: ts.PropertyName | undefined, name: string) => !!node &&
+    (ts.isIdentifier(node) || ts.isStringLiteral(node)) && node.text === name
+  const identifier = (node: ts.Node | undefined, name: string | undefined) => !!node &&
+    name !== undefined && ts.isIdentifier(node) && node.text === name
+  const method = (name: string) => {
+    const members = api?.properties.filter(node => !ts.isSpreadAssignment(node) && named(node.name, name)) ?? []
+    const member = members.length === 1 ? members[0] : undefined
+    return member && ts.isPropertyAssignment(member) && ts.isArrowFunction(member.initializer) ? member.initializer : undefined
+  }
+  const parameter = (node: ts.ArrowFunction | undefined, index: number) => {
+    const name = node?.parameters[index]?.name
+    return name && ts.isIdentifier(name) ? name.text : undefined
+  }
+  const returned = (node: ts.ArrowFunction | undefined) => {
+    if (!node) return undefined
+    if (!ts.isBlock(node.body)) return node.body
+    const statement = node.body.statements.length === 1 ? node.body.statements[0] : undefined
+    return statement && ts.isReturnStatement(statement) ? statement.expression : undefined
+  }
+  const ipc = (node: ts.Expression | undefined, operation: string, channel: string, count: number) =>
+    node && ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+    identifier(node.expression.expression, 'ipcRenderer') && node.expression.name.text === operation &&
+    node.arguments.length === count && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === channel ? node : undefined
+  const property = (node: ts.ObjectLiteralExpression, name: string) => {
+    const members = node.properties.filter(value => !ts.isSpreadAssignment(value) && named(value.name, name))
+    const member = members.length === 1 ? members[0] : undefined
+    return member && ts.isShorthandPropertyAssignment(member) ? member.name
+      : member && ts.isPropertyAssignment(member) ? member.initializer : undefined
+  }
+  const start = method('startSse'), startCall = ipc(returned(start), 'invoke', 'runtime:sse:start', 2)
+  const payload = startCall?.arguments[1]
+  const spread = payload && ts.isObjectLiteralExpression(payload)
+    ? payload.properties.filter(ts.isSpreadAssignment) : []
+  const replay = expression(spread.length === 1 ? spread[0].expression : undefined)
+  const replayValue = replay && ts.isConditionalExpression(replay) && ts.isObjectLiteralExpression(replay.whenTrue)
+    ? property(replay.whenTrue, 'replayThroughSeq') : undefined
+  const startUnchanged = !!start && start.parameters.length === 4 && !!payload && ts.isObjectLiteralExpression(payload) &&
+    payload.properties.length === 4 && ['threadId', 'sinceSeq', 'streamId'].every((name, index) =>
+      identifier(property(payload, name), parameter(start, index))) && !!replay && ts.isConditionalExpression(replay) &&
+    identifier(replay.condition, parameter(start, 3)) && ts.isObjectLiteralExpression(replay.whenTrue) &&
+    replay.whenTrue.properties.length === 1 && ts.isObjectLiteralExpression(replay.whenFalse) && replay.whenFalse.properties.length === 0 &&
+    !!replayValue && ts.isPropertyAccessExpression(replayValue) && identifier(replayValue.expression, parameter(start, 3)) &&
+    replayValue.name.text === 'replayThroughSeq'
+  const stop = method('stopSse'), stopCall = ipc(returned(stop), 'invoke', 'runtime:sse:stop', 2)
+  const stopUnchanged = !!stop && stop.parameters.length === 1 && !!stopCall && identifier(stopCall.arguments[1], parameter(stop, 0))
+  const restart = method('restartRuntime')
+  const restartStatements = restart && ts.isBlock(restart.body) ? restart.body.statements : []
+  const restartReturn = restartStatements.findIndex(statement => ts.isReturnStatement(statement))
+  const restartStatement = restartStatements[restartReturn]
+  const retirement = restartStatements.findIndex(statement => ts.isExpressionStatement(statement) &&
+    ts.isCallExpression(statement.expression) && identifier(statement.expression.expression, 'retireProcessOwnerAndNotify') &&
+    statement.expression.arguments.length === 0)
+  const restartUnchanged = !!restart && restart.parameters.length === 0 && restartStatements.length === 2 && retirement === 0 && restartReturn === 1 &&
+    !!restartStatement && ts.isReturnStatement(restartStatement) && !!ipc(restartStatement.expression, 'invoke', 'runtime:restart', 1)
+  const listeners = [
+    ['onSseEvent', 'runtime:sse-event', 'isStrictPublicRuntimeSseIpcPayload'],
+    ['onSseEnd', 'runtime:sse-end', 'isStrictPublicRuntimeSseEndPayload'],
+    ['onSseError', 'runtime:sse-error', 'isStrictPublicRuntimeSseErrorPayload']
+  ].map(([name, channel, validator]) => {
+    const listener = method(name)
+    const statements = listener && ts.isBlock(listener.body) ? listener.body.statements : []
+    const wrappers = statements.flatMap(statement => ts.isVariableStatement(statement)
+      ? statement.declarationList.declarations.filter(node => node.initializer && ts.isArrowFunction(node.initializer)) : [])
+    const declaration = wrappers.length === 1 ? wrappers[0] : undefined
+    const wrapper = declaration?.initializer && ts.isArrowFunction(declaration.initializer) ? declaration.initializer : undefined
+    const wrapperName = declaration && ts.isIdentifier(declaration.name) ? declaration.name.text : undefined
+    const subscriptions = statements.filter(statement => ts.isExpressionStatement(statement) &&
+      !!ipc(statement.expression, 'on', channel, 2))
+    const subscription = subscriptions.length === 1 ? subscriptions[0] : undefined
+    const subscribed = subscription && ts.isExpressionStatement(subscription)
+      ? ipc(subscription.expression, 'on', channel, 2) : undefined
+    const registered = !!listener && listener.parameters.length === 1 && statements.length === 3 &&
+      ts.isVariableStatement(statements[0]) && statements[0].declarationList.declarations.length === 1 &&
+      statements[0].declarationList.declarations[0] === declaration && subscription === statements[1] &&
+      ts.isReturnStatement(statements[2]) && !!subscribed && identifier(subscribed.arguments[1], wrapperName)
+    const guard = wrapper && ts.isBlock(wrapper.body) && wrapper.body.statements.length === 1 ? wrapper.body.statements[0] : undefined
+    const condition = guard && ts.isIfStatement(guard) ? guard.expression : undefined
+    const then = guard && ts.isIfStatement(guard) ? guard.thenStatement : undefined
+    const delivery = then && ts.isBlock(then) && then.statements.length === 1 ? then.statements[0] : then
+    const guarded = registered && !!wrapper && wrapper.parameters.length === 2 && !!guard && ts.isIfStatement(guard) &&
+      guard.elseStatement === undefined && !!condition && ts.isCallExpression(condition) && identifier(condition.expression, validator) &&
+      condition.arguments.length === 1 && identifier(condition.arguments[0], parameter(wrapper, 1)) &&
+      !!delivery && ts.isExpressionStatement(delivery) && ts.isCallExpression(delivery.expression) &&
+      identifier(delivery.expression.expression, parameter(listener, 0)) && delivery.expression.arguments.length === 1 &&
+      identifier(delivery.expression.arguments[0], parameter(wrapper, 1))
+    const returns = statements.filter(ts.isReturnStatement)
+    const returnedStatement = returns.length === 1 ? returns[0] : undefined
+    const cleanup = returnedStatement && ts.isReturnStatement(returnedStatement) && returnedStatement.expression &&
+      ts.isArrowFunction(returnedStatement.expression) ? returnedStatement.expression : undefined
+    const removal = ipc(returned(cleanup), 'removeListener', channel, 2)
+    return { guarded, cleanup: registered && !!cleanup && cleanup.parameters.length === 0 && !!removal && identifier(removal.arguments[1], wrapperName) }
+  })
+  return {
+    sseStartStop: startUnchanged && stopUnchanged,
+    restart: restartUnchanged,
+    ssePayloadGuards: listeners.every(value => value.guarded),
+    sseCleanup: listeners.every(value => value.cleanup)
+  }
+}
+
+function rendererRuntimeBridgeSourceWitness(source: string) {
+  const syntax = ts.createSourceFile('runtime-client.ts', source, ts.ScriptTarget.Latest, true)
+  const owners = syntax.statements.filter(node => ts.isClassDeclaration(node) && node.name?.text === 'RendererRuntimeClient')
+  const owner = owners.length === 1 && ts.isClassDeclaration(owners[0]) ? owners[0] : undefined
+  const method = (name: string) => {
+    const members = owner?.members.filter(node => ts.isMethodDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) ?? []
+    const member = members.length === 1 ? members[0] : undefined
+    return member && ts.isMethodDeclaration(member) ? member : undefined
+  }
+  const parameter = (node: ts.MethodDeclaration | undefined, index: number) => {
+    const name = node?.parameters[index]?.name
+    return name && ts.isIdentifier(name) ? name.text : undefined
+  }
+  const identifier = (node: ts.Node | undefined, name: string | undefined) => !!node &&
+    name !== undefined && ts.isIdentifier(node) && node.text === name
+  const returned = (node: ts.MethodDeclaration | undefined) => {
+    const statement = node?.body?.statements.length === 1 ? node.body.statements[0] : undefined
+    return statement && ts.isReturnStatement(statement) ? statement.expression : undefined
+  }
+  const forwarded = (node: ts.Expression | undefined, name: string, parameters: (string | undefined)[]) => {
+    if (!node || !ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return false
+    const api = node.expression.expression
+    return node.expression.name.text === name && ts.isCallExpression(api) && api.arguments.length === 0 &&
+      ts.isPropertyAccessExpression(api.expression) && api.expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
+      api.expression.name.text === 'runtimeApi' && node.arguments.length === parameters.length &&
+      node.arguments.every((argument, index) => identifier(argument, parameters[index]))
+  }
+  const start = method('startSse'), result = returned(start), stop = method('stopSse')
+  const startUnchanged = !!start && start.parameters.length === 4 && !!result && ts.isConditionalExpression(result) &&
+    identifier(result.condition, parameter(start, 3)) &&
+    forwarded(result.whenTrue, 'startSse', [0, 1, 2, 3].map(index => parameter(start, index))) &&
+    forwarded(result.whenFalse, 'startSse', [0, 1, 2].map(index => parameter(start, index)))
+  return { sseStartStop: startUnchanged && !!stop && stop.parameters.length === 1 && forwarded(returned(stop), 'stopSse', [parameter(stop, 0)]) }
+}
+
 function desktopSovereigntyControlCase() {
   const sourceFiles = {
     preload: 'src/preload/index.ts' as const,
@@ -1533,10 +1679,8 @@ function desktopSovereigntyControlCase() {
     rendererModelUsage: 'src/renderer/src/hooks/use-model-usage.ts' as const,
     rendererModelUsageTest: 'src/renderer/src/hooks/use-model-usage.test.ts' as const,
     rendererSettingsAgents: 'src/renderer/src/components/settings-section-agents.tsx' as const,
-    rendererLlmDebug: 'src/renderer/src/components/settings-section-llm-debug.tsx' as const,
     rendererKeyboardShortcutSettings: 'src/renderer/src/lib/keyboard-shortcut-settings.ts' as const,
     rendererVoiceDictation: 'src/renderer/src/components/chat/use-voice-dictation.ts' as const,
-    rendererInitialUsageHeatmap: 'src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx' as const,
     preloadRuntimeRequestTest: 'src/preload/preload-runtime-request.test.ts' as const,
     preloadSseBridgeTest: 'src/preload/preload-sse-bridge.test.ts' as const
   }
@@ -1560,12 +1704,13 @@ function desktopSovereigntyControlCase() {
   const rendererModelUsageSource = repoSource(sourceFiles.rendererModelUsage)
   const rendererModelUsageTestSource = repoSource(sourceFiles.rendererModelUsageTest)
   const rendererSettingsAgentsSource = repoSource(sourceFiles.rendererSettingsAgents)
-  const rendererLlmDebugSource = repoSource(sourceFiles.rendererLlmDebug)
   const rendererKeyboardShortcutSettingsSource = repoSource(sourceFiles.rendererKeyboardShortcutSettings)
   const rendererVoiceDictationSource = repoSource(sourceFiles.rendererVoiceDictation)
-  const rendererInitialUsageHeatmapSource = repoSource(sourceFiles.rendererInitialUsageHeatmap)
   const preloadRuntimeRequestTestSource = repoSource(sourceFiles.preloadRuntimeRequestTest)
   const preloadSseBridgeTestSource = repoSource(sourceFiles.preloadSseBridgeTest)
+  const preloadProcessBridgeTestSource = repoSource('src/preload/process-local-display-bridge.test.ts')
+  const preloadBridgeWitness = preloadRuntimeBridgeSourceWitness(preloadSource)
+  const rendererBridgeWitness = rendererRuntimeBridgeSourceWitness(rendererRuntimeClientSource)
   const rendererSources = repoProductionSources(sourceFiles.rendererSourceRoot)
     .map((relativePath) => repoSource(relativePath))
   const rendererSource = rendererSources.join('\n')
@@ -1619,25 +1764,7 @@ function desktopSovereigntyControlCase() {
     'deepseek',
     'reasonix'
   ] as const
-  const allowedNamedRuntimeApis = [
-    'acceptedSlotDisplay',
-    'cancelFundsCSVImport',
-    'cleaningDiffPreview',
-    'confirmFundsCSVSnapshot',
-    'directSourcePreview',
-    'fetchUpstreamModels',
-    'getAnalytixConfigFile',
-    'importMappingPreview',
-    'onRuntimeStatus',
-    'openAnalytixConfigDir',
-    'probeModelCapabilities',
-    'restartRuntime',
-    'revokeCleaningDiffPreview',
-    'runDeterministicFundsCleaning',
-    'stageFundsCSVSnapshot',
-    'statusFundsCSVImport',
-    'setAnalytixConfigFile'
-  ] as const
+  const allowedNamedRuntimeApis = [...GoG5NamedRuntimeApi.options]
   const allowedNamedSettingsApis = [
     'saveSettingsSilent',
     'setSettings'
@@ -1654,9 +1781,7 @@ function desktopSovereigntyControlCase() {
     preloadSource.includes("ipcRenderer.invoke('runtime:request', { path, method, body })") &&
     !forbiddenRuntimeIpcChannelsExposed.some((channel) => channel.endsWith(':request'))
   const runtimeSseUsesAnalytixIpc =
-    preloadSource.includes("startSse: (threadId, sinceSeq, streamId) =>") &&
-    preloadSource.includes("ipcRenderer.invoke('runtime:sse:start', { threadId, sinceSeq, streamId })") &&
-    preloadSource.includes("stopSse: (streamId) => ipcRenderer.invoke('runtime:sse:stop', streamId)") &&
+    preloadBridgeWitness.sseStartStop &&
     !forbiddenRuntimeIpcChannelsExposed.some((channel) => channel.endsWith(':sse'))
   const directBridgeAccesses = Array.from(
     rendererSource.matchAll(/window\.analytix(?:\?\.|\.)(runtime|settings)(?:\?\.|\.)([A-Za-z0-9_]+)/g)
@@ -1734,10 +1859,7 @@ function desktopSovereigntyControlCase() {
       rendererRuntimeClientSource.includes('return this.runtimeApi().runtimeRequest(path, method, body)'),
     sourcePassesRestartUnchanged: rendererRuntimeClientSource.includes('restartRuntime(): Promise<void>') &&
       rendererRuntimeClientSource.includes('return this.runtimeApi().restartRuntime()'),
-    sourcePassesSseControlsUnchanged: rendererRuntimeClientSource.includes('startSse(threadId: string, sinceSeq: number, streamId?: string)') &&
-      rendererRuntimeClientSource.includes('return this.runtimeApi().startSse(threadId, sinceSeq, streamId)') &&
-      rendererRuntimeClientSource.includes('stopSse(streamId: string): Promise<boolean>') &&
-      rendererRuntimeClientSource.includes('return this.runtimeApi().stopSse(streamId)'),
+    sourcePassesSseControlsUnchanged: rendererBridgeWitness.sseStartStop,
     sourcePassesSseListenersUnchanged: rendererRuntimeClientSource.includes('onSseEvent(handler: (payload: SseEventPayload) => void)') &&
       rendererRuntimeClientSource.includes('return this.runtimeApi().onSseEvent(handler)') &&
       rendererRuntimeClientSource.includes('return this.runtimeApi().onSseEnd(handler)') &&
@@ -1749,6 +1871,7 @@ function desktopSovereigntyControlCase() {
       rendererRuntimeClientTestSource.includes('expect(restartRuntime).toHaveBeenCalledTimes(1)'),
     sseUnitEvidencePresent: rendererRuntimeClientTestSource.includes('passes SSE control and listener handlers through window.analytix unchanged') &&
       rendererRuntimeClientTestSource.includes("expect(startSse).toHaveBeenCalledWith('thr/with space?x=1#frag', 7, 'stream-renderer')") &&
+      rendererRuntimeClientTestSource.includes("expect(startSse).toHaveBeenCalledWith('thread', 0, 'finite', { replayThroughSeq: 12 })") &&
       rendererRuntimeClientTestSource.includes('expect(onSseError).toHaveBeenCalledWith(errorHandler)'),
     legacyAliasUnitEvidencePresent: rendererRuntimeClientTestSource.includes('legacy bridge alias should not be read') &&
       rendererRuntimeClientTestSource.includes('get kun()') &&
@@ -1870,7 +1993,7 @@ function desktopSovereigntyControlCase() {
       rendererProviderTestSource.includes('FORBIDDEN_PUBLIC_RUNTIME_ROUTE'),
     lifecycleEvidencePresent: rendererProviderTestSource.includes('uses Analytix thread lifecycle endpoints for list, archive, restore, rename, workspace, and delete') &&
       rendererProviderTestSource.includes('/v1/threads/thr_archived') &&
-      rendererProviderTestSource.includes("JSON.stringify({ relation: 'primary' })"),
+      rendererProviderTestSource.includes("JSON.stringify({ promoteSide: true })"),
     approvalUserInputEvidencePresent: rendererProviderTestSource.includes('submitApprovalDecision') &&
       rendererProviderTestSource.includes('submitUserInputResponse') &&
       rendererProviderTestSource.includes('cancelUserInput') &&
@@ -1890,61 +2013,67 @@ function desktopSovereigntyControlCase() {
   const rendererProviderFacadeSealMatrix = {
     facade: 'rendererRuntimeClient.runtimeRequest' as const,
     forbiddenDirectBridge: 'window.analytix.runtime.runtimeRequest' as const,
-    sealedMethods: ['archiveThread', 'updateThreadRelation'] as const,
+    sealedMethods: ['archiveThread', 'promoteSideThread'] as const,
     sourceUsesRuntimeClient: rendererProviderSource.includes('rendererRuntimeClient.runtimeRequest'),
     sourceRejectsDirectBridgeBypass: !rendererProviderSource.includes('window.analytix.runtime.runtimeRequest'),
     archiveRestoreSourceEvidencePresent: rendererProviderSource.includes('async archiveThread(threadId: string, archived: boolean)') &&
-      rendererProviderSource.includes("JSON.stringify({ status: archived ? 'archived' : 'idle' })") &&
+      rendererProviderSource.includes('JSON.stringify({ archived })') &&
+      !rendererProviderSource.includes("JSON.stringify({ status: archived ? 'archived' : 'idle' })") &&
       rendererProviderSource.includes('archive thread failed'),
-    relationSourceEvidencePresent: rendererProviderSource.includes("updateThreadRelation(threadId: string, relation: NonNullable<NormalizedThread['relation']>)") &&
-      rendererProviderSource.includes('JSON.stringify({ relation })') &&
-      rendererProviderSource.includes('update thread relation failed'),
+    promotionSourceEvidencePresent: rendererProviderSource.includes("promoteSideThread(threadId: string)") &&
+      rendererProviderSource.includes('JSON.stringify({ promoteSide: true })') &&
+      rendererProviderSource.includes('promote Side thread failed'),
     lifecycleUnitEvidencePresent: rendererProviderTestSource.includes('uses Analytix thread lifecycle endpoints for list, archive, restore, rename, workspace, and delete') &&
-      rendererProviderTestSource.includes("JSON.stringify({ status: 'archived' })") &&
-      rendererProviderTestSource.includes("JSON.stringify({ status: 'idle' })") &&
-      rendererProviderTestSource.includes("JSON.stringify({ relation: 'primary' })"),
+      rendererProviderTestSource.includes('JSON.stringify({ archived: true })') &&
+      rendererProviderTestSource.includes('JSON.stringify({ archived: false })') &&
+      rendererProviderTestSource.includes("JSON.stringify({ promoteSide: true })"),
     scanGuardPresent: productSovereigntyScanSource.includes('renderer direct runtime bridge bypass scan') &&
       productSovereigntyScanSource.includes('directRuntimeRequestBridgePattern') &&
       productSovereigntyScanSource.includes('window\\\\.analytix(?:\\\\?\\\\.|\\\\.)runtime(?:\\\\?\\\\.|\\\\.)runtimeRequest') &&
       productSovereigntyScanSource.includes('src/renderer/src'),
     providerFacadeTokenScanPresent: productSovereigntyScanSource.includes('post-881 renderer runtime provider facade contract token scan') &&
       productSovereigntyScanSource.includes('archiveThread\\\\(threadId: string, archived: boolean\\\\)') &&
-      productSovereigntyScanSource.includes("updateThreadRelation\\\\(threadId: string, relation: NonNullable<NormalizedThread\\\\['relation'\\\\]>\\\\)") &&
+      productSovereigntyScanSource.includes('promoteSideThread\\\\(threadId: string\\\\)') &&
       productSovereigntyScanSource.includes('rendererRuntimeClient\\\\.runtimeRequest')
   }
-  const sideConversationRelationContractMatrix = {
-    providerMethod: 'updateThreadRelation' as const,
+  const sideConversationPromotionContractMatrix = {
+    providerMethod: 'promoteSideThread' as const,
     storeAction: 'promoteSideConversation' as const,
-    relation: 'primary' as const,
-    providerContractOptional: rendererAgentTypesSource.includes("updateThreadRelation?(threadId: string, relation: NonNullable<NormalizedThread['relation']>): Promise<void>"),
-    providerImplementationUsesRuntimeClient: rendererProviderFacadeSealMatrix.relationSourceEvidencePresent &&
+    relation: 'fork' as const,
+    soleIntent: rendererProviderSource.includes('JSON.stringify({ promoteSide: true })'),
+    lineagePreserved: rendererSideActionsSource.includes('lineage.some(key => promoted[key] !== before[key])'),
+    providerContractOptional: rendererAgentTypesSource.includes("promoteSideThread?(threadId: string): Promise<void>"),
+    providerImplementationUsesRuntimeClient: rendererProviderFacadeSealMatrix.promotionSourceEvidencePresent &&
       rendererProviderFacadeSealMatrix.sourceRejectsDirectBridgeBypass,
-    storeUsesProviderContract: rendererSideActionsSource.includes("typeof provider.updateThreadRelation !== 'function'") &&
-      rendererSideActionsSource.includes("await provider.updateThreadRelation(sideId, 'primary')"),
-    storeRefreshesAndCloses: rendererSideActionsSource.includes('await ctx.get().refreshThreads()') &&
+    storeUsesProviderContract: rendererSideActionsSource.includes("typeof provider.promoteSideThread !== 'function'") &&
+      rendererSideActionsSource.includes("await provider.promoteSideThread(sideId)"),
+    storeVerifiesReadbackAndCloses: rendererSideActionsSource.includes('await provider.getThreadDetail(sideId)') &&
+      rendererSideActionsSource.includes('await provider.listThreads({ limit: 0 })') &&
+      rendererSideActionsSource.includes('if (!isCurrent()) return') &&
       rendererSideActionsSource.includes('await actions.closeSideConversation(sideId)'),
     storeRejectsDirectRuntimeBridge: !rendererSideActionsSource.includes('window.analytix.runtime.runtimeRequest'),
-    unitEvidencePresent: rendererSideActionsTestSource.includes('promoteSideConversation clears the relation through the provider and refreshes the thread list') &&
-      rendererSideActionsTestSource.includes("expect(provider.relationMock).toHaveBeenCalledWith(id, 'primary')") &&
-      rendererSideActionsTestSource.includes('expect(provider.refreshThreadsMock).toHaveBeenCalledTimes(1)') &&
+    unitEvidencePresent: rendererSideActionsTestSource.includes('promoteSideConversation verifies durable fork lineage and normal-list visibility before closing') &&
+      rendererSideActionsTestSource.includes('expect(provider.promoteMock).toHaveBeenCalledExactlyOnceWith(id)') &&
+      rendererSideActionsTestSource.includes('expect(provider.listMock).toHaveBeenCalledExactlyOnceWith({ limit: 0 })') &&
+      rendererSideActionsTestSource.includes('keeps the original Side, draft and subscription when promotion %s fails') &&
       rendererSideActionsTestSource.includes('expect(state.sideConversations[id]).toBeUndefined()'),
-    scanGuardPresent: productSovereigntyScanSource.includes('post-881 side conversation provider relation contract token scan') &&
-      productSovereigntyScanSource.includes("updateThreadRelation\\\\(sideId, 'primary'\\\\)") &&
-      productSovereigntyScanSource.includes('relationMock') &&
+    scanGuardPresent: productSovereigntyScanSource.includes('post-881 side conversation provider promotion contract token scan') &&
+      productSovereigntyScanSource.includes('promoteSideThread\\\\(sideId\\\\)') &&
+      productSovereigntyScanSource.includes('getThreadDetail\\\\(sideId\\\\)') &&
+      productSovereigntyScanSource.includes('listMock') &&
       productSovereigntyScanSource.includes('chat-store-side-actions.ts')
   }
   const rendererUsageFacadeSources = [
     rendererThreadUsageSource,
     rendererDailyUsageSource,
     rendererModelUsageSource,
-    rendererSettingsAgentsSource,
-    rendererLlmDebugSource
+    rendererSettingsAgentsSource
   ].join('\n')
   const rendererUsageRuntimeClientFacadeMatrix = {
     facade: 'rendererRuntimeClient.runtimeRequest' as const,
     forbiddenDirectBridge: 'window.analytix.runtime.runtimeRequest' as const,
     usageLoaders: ['loadThreadUsage', 'loadDailyUsage', 'loadModelUsage'] as const,
-    diagnosticsLoaders: ['loadTokenEconomySavingsSummary', 'LlmDebugSettingsSection'] as const,
+    diagnosticsLoaders: ['loadTokenEconomySavingsSummary'] as const,
     threadUsageSourceUsesRuntimeClient: rendererThreadUsageSource.includes('loadThreadUsage(threadId: string)') &&
       rendererThreadUsageSource.includes("rendererRuntimeClient.runtimeRequest(`/v1/usage?${params.toString()}`, 'GET')"),
     dailyUsageSourceUsesRuntimeClient: rendererDailyUsageSource.includes('loadDailyUsage(range: DailyUsageRange)') &&
@@ -1953,8 +2082,6 @@ function desktopSovereigntyControlCase() {
       rendererModelUsageSource.includes("rendererRuntimeClient.runtimeRequest(buildModelUsagePath(range), 'GET')"),
     tokenEconomySourceUsesRuntimeClient: rendererSettingsAgentsSource.includes('loadTokenEconomySavingsSummary()') &&
       rendererSettingsAgentsSource.includes("rendererRuntimeClient.runtimeRequest('/v1/usage?group_by=thread', 'GET')"),
-    llmDebugSourceUsesRuntimeClient: rendererLlmDebugSource.includes('LlmDebugSettingsSection') &&
-      rendererLlmDebugSource.includes("rendererRuntimeClient.runtimeRequest('/v1/debug/llm-rounds', 'GET')"),
     sourceRejectsDirectBridgeBypass: !rendererUsageFacadeSources.includes('window.analytix.runtime.runtimeRequest'),
     usageUnitEvidencePresent: rendererThreadUsageTestSource.includes('requests only the selected thread usage bucket') &&
       rendererThreadUsageTestSource.includes("expect(runtimeRequest).toHaveBeenCalledWith(threadUsagePath('thr_native_cache'), 'GET')") &&
@@ -1975,19 +2102,16 @@ function desktopSovereigntyControlCase() {
   }
   const rendererSettingsReadFacadeSources = [
     rendererKeyboardShortcutSettingsSource,
-    rendererVoiceDictationSource,
-    rendererInitialUsageHeatmapSource
+    rendererVoiceDictationSource
   ].join('\n')
   const rendererSettingsReadFacadeMatrix = {
     facade: 'rendererRuntimeClient.getSettings' as const,
     forbiddenDirectBridge: 'window.analytix.settings.getSettings' as const,
-    settingsReaders: ['useKeyboardShortcutSettings', 'useSpeechToTextEnabled', 'InitialSessionUsageHeatmapView'] as const,
+    settingsReaders: ['useKeyboardShortcutSettings', 'useSpeechToTextEnabled'] as const,
     keyboardShortcutSourceUsesSettingsClient: rendererKeyboardShortcutSettingsSource.includes('useKeyboardShortcutSettings()') &&
       rendererKeyboardShortcutSettingsSource.includes('rendererRuntimeClient.getSettings().then(apply)'),
     speechToTextSourceUsesSettingsClient: rendererVoiceDictationSource.includes('useSpeechToTextEnabled()') &&
       rendererVoiceDictationSource.includes('rendererRuntimeClient.getSettings().then(apply)'),
-    usageHeatmapSourceUsesSettingsClient: rendererInitialUsageHeatmapSource.includes('rendererRuntimeClient.getSettings()') &&
-      rendererInitialUsageHeatmapSource.includes('setModelLabel(settings.runtime.model.trim())'),
     settingsChangedEventPreserved: rendererKeyboardShortcutSettingsSource.includes("export const SETTINGS_CHANGED_EVENT = 'analytix:settings-changed'") &&
       rendererKeyboardShortcutSettingsSource.includes('window.addEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)') &&
       rendererVoiceDictationSource.includes('window.addEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)'),
@@ -2000,7 +2124,6 @@ function desktopSovereigntyControlCase() {
       productSovereigntyScanSource.includes('useKeyboardShortcutSettings\\\\(\\\\)') &&
       productSovereigntyScanSource.includes('useSpeechToTextEnabled\\\\(\\\\)') &&
       !productSovereigntyScanSource.includes('useSpeechToTextSettings\\\\(\\\\)') &&
-      productSovereigntyScanSource.includes('setModelLabel\\\\(settings\\\\.runtime\\\\.model\\\\.trim\\\\(\\\\)\\\\)') &&
       productSovereigntyScanSource.includes('rendererRuntimeClient\\\\.getSettings')
   }
   const preloadRuntimeThreadId = 'thr/with space?x=1#frag'
@@ -2034,12 +2157,17 @@ function desktopSovereigntyControlCase() {
     },
     sourcePassesArgumentsUnchanged: preloadSource.includes("runtimeRequest: (path, method, body) =>") &&
       preloadSource.includes("ipcRenderer.invoke('runtime:request', { path, method, body })"),
-    sourcePassesRestartUnchanged: preloadSource.includes("restartRuntime: () => ipcRenderer.invoke('runtime:restart')"),
+    sourcePassesRestartUnchanged: preloadBridgeWitness.restart,
     runtimeFacadeUnitEvidencePresent: preloadRuntimeRequestTestSource.includes('passes runtime request paths through the analytix runtime facade unchanged') &&
       preloadRuntimeRequestTestSource.includes("api.runtime.runtimeRequest(path, 'POST', '{\"action\":\"step\"}')") &&
       preloadRuntimeRequestTestSource.includes("expect(electronMock.invoke).toHaveBeenCalledWith('runtime:request'"),
     restartUnitEvidencePresent: preloadRuntimeRequestTestSource.includes('routes explicit runtime restarts through the analytix runtime IPC channel') &&
-      preloadRuntimeRequestTestSource.includes("expect(electronMock.invoke).toHaveBeenCalledWith('runtime:restart')"),
+      preloadRuntimeRequestTestSource.includes("expect(electronMock.invoke).toHaveBeenCalledWith('runtime:restart')") &&
+      preloadProcessBridgeTestSource.includes("boundary: 'runtime:restart'") &&
+      preloadProcessBridgeTestSource.includes('notifies protected leaves and retires the owner before $boundary invokes Main') &&
+      preloadProcessBridgeTestSource.includes('fences queued $method replies across $boundary before invocation settles') &&
+      preloadProcessBridgeTestSource.includes('expect(cleared).toHaveBeenCalledTimes(1)') &&
+      preloadProcessBridgeTestSource.includes("expect(electronMock.invoke).toHaveBeenCalledWith('process-local:close', { viewerId })"),
     diagnosticsFacadeUnitEvidencePresent: preloadRuntimeRequestTestSource.includes('keeps diagnostics runtime requests on the same analytix IPC channel') &&
       preloadRuntimeRequestTestSource.includes("api.diagnostics.runtimeRequest(path, 'POST', '{}')") &&
       preloadRuntimeRequestTestSource.includes("expect(electronMock.invoke).toHaveBeenCalledWith('runtime:request'"),
@@ -2074,18 +2202,13 @@ function desktopSovereigntyControlCase() {
       streamId: 'stream-a' as const,
       status: 404 as const
     },
-    sourcePassesStartStopUnchanged: preloadSource.includes("startSse: (threadId, sinceSeq, streamId) =>") &&
-      preloadSource.includes("ipcRenderer.invoke('runtime:sse:start', { threadId, sinceSeq, streamId })") &&
-      preloadSource.includes("stopSse: (streamId) => ipcRenderer.invoke('runtime:sse:stop', streamId)"),
-    sourcePayloadOnlyWrappers: preloadSource.includes('payload: Parameters<typeof handler>[0]') &&
-      preloadSource.includes(') => handler(payload)') &&
-      preloadSource.includes("ipcRenderer.on('runtime:sse-event', wrapped)") &&
-      preloadSource.includes("ipcRenderer.on('runtime:sse-end', wrapped)") &&
-      preloadSource.includes("ipcRenderer.on('runtime:sse-error', wrapped)"),
-    sourceCleanupUsesSameWrapper: preloadSource.includes("ipcRenderer.removeListener('runtime:sse-event', wrapped)") &&
-      preloadSource.includes("ipcRenderer.removeListener('runtime:sse-end', wrapped)") &&
-      preloadSource.includes("ipcRenderer.removeListener('runtime:sse-error', wrapped)"),
+    sourcePassesStartStopUnchanged: preloadBridgeWitness.sseStartStop,
+    sourcePayloadOnlyWrappers: preloadBridgeWitness.ssePayloadGuards,
+    sourceCleanupUsesSameWrapper: preloadBridgeWitness.sseCleanup,
     startStopUnitEvidencePresent: preloadSseBridgeTestSource.includes('passes SSE start and stop requests through the analytix runtime facade unchanged') &&
+      preloadSseBridgeTestSource.includes('passes an explicit finite replay boundary through the existing SSE IPC route') &&
+      preloadSseBridgeTestSource.includes("await api.runtime.startSse('thread', 0, 'finite', { replayThroughSeq: 12 })") &&
+      preloadSseBridgeTestSource.includes("threadId: 'thread', sinceSeq: 0, streamId: 'finite', replayThroughSeq: 12") &&
       preloadSseBridgeTestSource.includes("expect(electronMock.invoke).toHaveBeenNthCalledWith(1, 'runtime:sse:start'") &&
       preloadSseBridgeTestSource.includes("expect(electronMock.invoke).toHaveBeenNthCalledWith(2, 'runtime:sse:stop', 'stream-provided')"),
     payloadUnitEvidencePresent: preloadSseBridgeTestSource.includes('forwards SSE event, end, and error payloads without exposing Electron events') &&
@@ -2163,7 +2286,7 @@ function desktopSovereigntyControlCase() {
       ? 'renderer-provider-facade-source-evidence'
       : '',
     rendererProviderFacadeSealMatrix.archiveRestoreSourceEvidencePresent &&
-      rendererProviderFacadeSealMatrix.relationSourceEvidencePresent &&
+      rendererProviderFacadeSealMatrix.promotionSourceEvidencePresent &&
       rendererProviderFacadeSealMatrix.lifecycleUnitEvidencePresent
       ? 'renderer-provider-facade-lifecycle-evidence'
       : '',
@@ -2171,17 +2294,17 @@ function desktopSovereigntyControlCase() {
       rendererProviderFacadeSealMatrix.providerFacadeTokenScanPresent
       ? 'renderer-provider-direct-bypass-scan-evidence'
       : '',
-    sideConversationRelationContractMatrix.providerContractOptional &&
-      sideConversationRelationContractMatrix.providerImplementationUsesRuntimeClient
-      ? 'side-conversation-relation-provider-contract'
+    sideConversationPromotionContractMatrix.providerContractOptional &&
+      sideConversationPromotionContractMatrix.providerImplementationUsesRuntimeClient
+      ? 'side-conversation-promotion-provider-contract'
       : '',
-    sideConversationRelationContractMatrix.storeUsesProviderContract &&
-      sideConversationRelationContractMatrix.storeRefreshesAndCloses &&
-      sideConversationRelationContractMatrix.unitEvidencePresent
-      ? 'side-conversation-relation-store-evidence'
+    sideConversationPromotionContractMatrix.storeUsesProviderContract &&
+      sideConversationPromotionContractMatrix.storeVerifiesReadbackAndCloses &&
+      sideConversationPromotionContractMatrix.unitEvidencePresent
+      ? 'side-conversation-promotion-store-evidence'
       : '',
-    sideConversationRelationContractMatrix.storeRejectsDirectRuntimeBridge &&
-      sideConversationRelationContractMatrix.scanGuardPresent
+    sideConversationPromotionContractMatrix.storeRejectsDirectRuntimeBridge &&
+      sideConversationPromotionContractMatrix.scanGuardPresent
       ? 'side-conversation-direct-bypass-scan-evidence'
       : '',
     rendererUsageRuntimeClientFacadeMatrix.threadUsageSourceUsesRuntimeClient &&
@@ -2191,7 +2314,6 @@ function desktopSovereigntyControlCase() {
       ? 'renderer-usage-runtime-client-source-evidence'
       : '',
     rendererUsageRuntimeClientFacadeMatrix.tokenEconomySourceUsesRuntimeClient &&
-      rendererUsageRuntimeClientFacadeMatrix.llmDebugSourceUsesRuntimeClient &&
       rendererUsageRuntimeClientFacadeMatrix.sourceRejectsDirectBridgeBypass
       ? 'renderer-usage-runtime-client-settings-diagnostics-evidence'
       : '',
@@ -2204,7 +2326,6 @@ function desktopSovereigntyControlCase() {
       : '',
     rendererSettingsReadFacadeMatrix.keyboardShortcutSourceUsesSettingsClient &&
       rendererSettingsReadFacadeMatrix.speechToTextSourceUsesSettingsClient &&
-      rendererSettingsReadFacadeMatrix.usageHeatmapSourceUsesSettingsClient &&
       rendererSettingsReadFacadeMatrix.sourceRejectsDirectSettingsBypass
       ? 'renderer-settings-read-facade-source-evidence'
       : '',
@@ -2289,7 +2410,7 @@ function desktopSovereigntyControlCase() {
     rendererProviderEndpointMatrix,
     rendererProviderAliasGuardMatrix,
     rendererProviderFacadeSealMatrix,
-    sideConversationRelationContractMatrix,
+    sideConversationPromotionContractMatrix,
     rendererUsageRuntimeClientFacadeMatrix,
     rendererSettingsReadFacadeMatrix,
     preloadRuntimeRequestBridgeMatrix,
@@ -2362,35 +2483,36 @@ function desktopSovereigntyControlCase() {
         rendererProviderFacadeSealMatrix.forbiddenDirectBridge === 'window.analytix.runtime.runtimeRequest',
       rendererProviderFacadeSealCoversArchiveRestore: rendererProviderFacadeSealMatrix.archiveRestoreSourceEvidencePresent &&
         rendererProviderFacadeSealMatrix.lifecycleUnitEvidencePresent,
-      rendererProviderFacadeSealCoversRelationPatch: rendererProviderFacadeSealMatrix.relationSourceEvidencePresent &&
+      rendererProviderFacadeSealCoversSidePromotion: rendererProviderFacadeSealMatrix.promotionSourceEvidencePresent &&
         rendererProviderFacadeSealMatrix.lifecycleUnitEvidencePresent,
       rendererProviderFacadeSealScanGuardPresent: rendererProviderFacadeSealMatrix.scanGuardPresent &&
         rendererProviderFacadeSealMatrix.providerFacadeTokenScanPresent,
       rendererProviderFacadeSealUnitEvidencePresent: rendererProviderFacadeSealMatrix.sealedMethods.length === 2 &&
         rendererProviderFacadeSealMatrix.sealedMethods.includes('archiveThread') &&
-        rendererProviderFacadeSealMatrix.sealedMethods.includes('updateThreadRelation') &&
+        rendererProviderFacadeSealMatrix.sealedMethods.includes('promoteSideThread') &&
         rendererProviderFacadeSealMatrix.sourceUsesRuntimeClient &&
         rendererProviderFacadeSealMatrix.sourceRejectsDirectBridgeBypass &&
         rendererProviderFacadeSealMatrix.archiveRestoreSourceEvidencePresent &&
-        rendererProviderFacadeSealMatrix.relationSourceEvidencePresent &&
+        rendererProviderFacadeSealMatrix.promotionSourceEvidencePresent &&
         rendererProviderFacadeSealMatrix.lifecycleUnitEvidencePresent &&
         rendererProviderFacadeSealMatrix.scanGuardPresent &&
         rendererProviderFacadeSealMatrix.providerFacadeTokenScanPresent,
-      sideConversationRelationContractOptionalProvider: sideConversationRelationContractMatrix.providerContractOptional &&
-        sideConversationRelationContractMatrix.providerMethod === 'updateThreadRelation',
-      sideConversationRelationPromotesThroughProvider: sideConversationRelationContractMatrix.storeUsesProviderContract &&
-        sideConversationRelationContractMatrix.relation === 'primary',
-      sideConversationRelationRefreshesAndCloses: sideConversationRelationContractMatrix.storeRefreshesAndCloses,
-      sideConversationRelationRejectsDirectBridge: sideConversationRelationContractMatrix.storeRejectsDirectRuntimeBridge,
-      sideConversationRelationScanGuardPresent: sideConversationRelationContractMatrix.scanGuardPresent,
-      sideConversationRelationUnitEvidencePresent: sideConversationRelationContractMatrix.storeAction === 'promoteSideConversation' &&
-        sideConversationRelationContractMatrix.providerContractOptional &&
-        sideConversationRelationContractMatrix.providerImplementationUsesRuntimeClient &&
-        sideConversationRelationContractMatrix.storeUsesProviderContract &&
-        sideConversationRelationContractMatrix.storeRefreshesAndCloses &&
-        sideConversationRelationContractMatrix.storeRejectsDirectRuntimeBridge &&
-        sideConversationRelationContractMatrix.unitEvidencePresent &&
-        sideConversationRelationContractMatrix.scanGuardPresent,
+      sideConversationPromotionContractOptionalProvider: sideConversationPromotionContractMatrix.providerContractOptional &&
+        sideConversationPromotionContractMatrix.providerMethod === 'promoteSideThread',
+      sideConversationPromotionPromotesThroughProvider: sideConversationPromotionContractMatrix.storeUsesProviderContract &&
+        sideConversationPromotionContractMatrix.relation === 'fork' &&
+        sideConversationPromotionContractMatrix.soleIntent && sideConversationPromotionContractMatrix.lineagePreserved,
+      sideConversationPromotionReadsBackAndCloses: sideConversationPromotionContractMatrix.storeVerifiesReadbackAndCloses,
+      sideConversationPromotionRejectsDirectBridge: sideConversationPromotionContractMatrix.storeRejectsDirectRuntimeBridge,
+      sideConversationPromotionScanGuardPresent: sideConversationPromotionContractMatrix.scanGuardPresent,
+      sideConversationPromotionUnitEvidencePresent: sideConversationPromotionContractMatrix.storeAction === 'promoteSideConversation' &&
+        sideConversationPromotionContractMatrix.providerContractOptional &&
+        sideConversationPromotionContractMatrix.providerImplementationUsesRuntimeClient &&
+        sideConversationPromotionContractMatrix.storeUsesProviderContract &&
+        sideConversationPromotionContractMatrix.storeVerifiesReadbackAndCloses &&
+        sideConversationPromotionContractMatrix.storeRejectsDirectRuntimeBridge &&
+        sideConversationPromotionContractMatrix.unitEvidencePresent &&
+        sideConversationPromotionContractMatrix.scanGuardPresent,
       rendererUsageRuntimeClientCoversThreadUsage: rendererUsageRuntimeClientFacadeMatrix.facade === 'rendererRuntimeClient.runtimeRequest' &&
         rendererUsageRuntimeClientFacadeMatrix.usageLoaders.includes('loadThreadUsage') &&
         rendererUsageRuntimeClientFacadeMatrix.threadUsageSourceUsesRuntimeClient &&
@@ -2404,9 +2526,7 @@ function desktopSovereigntyControlCase() {
         rendererUsageRuntimeClientFacadeMatrix.modelUsageSourceUsesRuntimeClient &&
         rendererUsageRuntimeClientFacadeMatrix.usageUnitEvidencePresent,
       rendererUsageRuntimeClientCoversSettingsDiagnostics: rendererUsageRuntimeClientFacadeMatrix.diagnosticsLoaders.includes('loadTokenEconomySavingsSummary') &&
-        rendererUsageRuntimeClientFacadeMatrix.diagnosticsLoaders.includes('LlmDebugSettingsSection') &&
-        rendererUsageRuntimeClientFacadeMatrix.tokenEconomySourceUsesRuntimeClient &&
-        rendererUsageRuntimeClientFacadeMatrix.llmDebugSourceUsesRuntimeClient,
+        rendererUsageRuntimeClientFacadeMatrix.tokenEconomySourceUsesRuntimeClient,
       rendererUsageRuntimeClientRejectsDirectBridge: rendererUsageRuntimeClientFacadeMatrix.forbiddenDirectBridge === 'window.analytix.runtime.runtimeRequest' &&
         rendererUsageRuntimeClientFacadeMatrix.sourceRejectsDirectBridgeBypass,
       rendererUsageRuntimeClientScanGuardPresent: rendererUsageRuntimeClientFacadeMatrix.scanGuardPresent &&
@@ -2421,9 +2541,6 @@ function desktopSovereigntyControlCase() {
       rendererSettingsReadFacadeCoversSpeechToText: rendererSettingsReadFacadeMatrix.facade === 'rendererRuntimeClient.getSettings' &&
         rendererSettingsReadFacadeMatrix.settingsReaders.includes('useSpeechToTextEnabled') &&
         rendererSettingsReadFacadeMatrix.speechToTextSourceUsesSettingsClient,
-      rendererSettingsReadFacadeCoversUsageModelLabel: rendererSettingsReadFacadeMatrix.facade === 'rendererRuntimeClient.getSettings' &&
-        rendererSettingsReadFacadeMatrix.settingsReaders.includes('InitialSessionUsageHeatmapView') &&
-        rendererSettingsReadFacadeMatrix.usageHeatmapSourceUsesSettingsClient,
       rendererSettingsReadFacadePreservesSettingsChangedEvent: rendererSettingsReadFacadeMatrix.settingsChangedEventPreserved,
       rendererSettingsReadFacadeRejectsDirectBridge: rendererSettingsReadFacadeMatrix.forbiddenDirectBridge === 'window.analytix.settings.getSettings' &&
         rendererSettingsReadFacadeMatrix.sourceRejectsDirectSettingsBypass,
@@ -3072,13 +3189,15 @@ function rendererRouteSurfaceSovereigntyControlCase(sourceOverrides: {
   const nativeRule = cssSource.match(/^\s*:root\[data-platform='darwin'\]\s*\{([^}]*)\}/m)?.[1] ?? ''
   const chromeRule = cssSource.match(/^\s*\.ds-window-chrome\s*\{([^}]*)\}/m)?.[1] ?? ''
   const navigationRule = cssSource.match(/^\s*\.ds-window-chrome-navigation\s*\{([^}]*)\}/m)?.[1] ?? ''
+  const bodyRule = cssSource.match(/^\s*body\s*\{([^}]*)\}/m)?.[1] ?? ''
   // The shared chrome now reserves the native exclusion area for every body
   // route; the old route-local plugin-tab selector is no longer its owner.
   const nativeSafeInsetCssPresent = chromeOwnsNavigation &&
     rootRule.includes('--ds-shell-chrome-height: 40px;') &&
     rootRule.includes('--ds-shell-rail-width: 52px;') &&
-    nativeRule.includes('--ds-window-controls-safe-block: calc(50px / var(--ds-ui-scale))') &&
-    /--ds-window-controls-safe-inset: calc\(\s*\(\s*var\(--ds-macos-traffic-light-left\) \+ var\(--ds-macos-traffic-light-width\) \+ var\(--ds-macos-traffic-light-gap\)\s*\) \/ var\(--ds-ui-scale\)\s*\);/.test(nativeRule) &&
+    bodyRule.includes('zoom: 1;') &&
+    nativeRule.includes('--ds-window-controls-safe-block: 50px;') &&
+    /--ds-window-controls-safe-inset: calc\(\s*var\(--ds-macos-traffic-light-left\) \+ var\(--ds-macos-traffic-light-width\) \+ var\(--ds-macos-traffic-light-gap\)\s*\);/.test(nativeRule) &&
     nativeRule.includes('--ds-titlebar-safe-header-left: var(--ds-window-controls-safe-inset);') &&
     chromeRule.includes('flex: 0 0 max(var(--ds-shell-chrome-height), var(--ds-window-controls-safe-block));') &&
     chromeRule.includes('--ds-window-chrome-navigation-width: calc(var(--ds-shell-rail-width) + var(--ds-window-chrome-sidebar-width));') &&
@@ -5973,7 +6092,9 @@ describe('renderer native safe area source contract', () => {
     ['safe height', { baseShellCss: css.replace('flex: 0 0 max(var(--ds-shell-chrome-height), var(--ds-window-controls-safe-block));', 'flex: 0 0 var(--ds-shell-chrome-height);') }],
     ['safe padding', { baseShellCss: css.replace('padding-left: var(--ds-titlebar-safe-header-left);', 'padding-left: 0px;') }],
     ['native inset token chain', { baseShellCss: css.replace('--ds-titlebar-safe-header-left: var(--ds-window-controls-safe-inset);', '--ds-titlebar-safe-header-left: 0px;') }],
-    ['scaled safe block', { baseShellCss: css.replace('--ds-window-controls-safe-block: calc(50px / var(--ds-ui-scale))', '--ds-window-controls-safe-block: 0px') }],
+    ['physical safe block', { baseShellCss: css.replace('--ds-window-controls-safe-block: 50px;', '--ds-window-controls-safe-block: 0px;') }],
+    ['physical body coordinate axis', { baseShellCss: css.replace('zoom: 1;', 'zoom: 1.25;') }],
+    ['body-owned zoom rule', { baseShellCss: css.replace('zoom: 1;', 'zoom: 1.25;').concat('\n.unrelated-body { zoom: 1; }\n') }],
     ['navigation width token chain', { baseShellCss: css.replace('--ds-window-chrome-navigation-width: calc(var(--ds-shell-rail-width) + var(--ds-window-chrome-sidebar-width));', '--ds-window-chrome-navigation-width: 0px;') }],
     ['non-shrinking navigation reservation', { baseShellCss: css.replace('flex: 0 0 var(--ds-window-chrome-navigation-width);', 'flex: 1 1 auto;') }],
     ['intrinsic width in the navigation owner', { baseShellCss: css
@@ -6700,6 +6821,136 @@ describe('Go runtime kernel conformance manifest', () => {
       'No Go runtime replaces analytix serve.',
       'Renderer must not observe Go-specific routes or Reasonix public protocol.'
     ]))
+  })
+
+  it('keeps renderer facade policy closed while accepting unique observed subsets', () => {
+    const fixture = loadGoG5FullLoopContract()
+    const access = fixture.controlExecutableCases.desktopSovereignty.rendererBridgeAllowList
+    const withAccess = (changes: Partial<Record<keyof typeof access, unknown>>) => {
+      const clone = structuredClone(fixture)
+      return { ...clone, controlExecutableCases: { ...clone.controlExecutableCases, desktopSovereignty: {
+        ...clone.controlExecutableCases.desktopSovereignty,
+        rendererBridgeAllowList: { ...clone.controlExecutableCases.desktopSovereignty.rendererBridgeAllowList, ...changes }
+      } } }
+    }
+    const subset = withAccess({ directRuntimeApis: ['restartRuntime'], directSettingsApis: ['setSettings'] })
+    expect(GoG5FullLoopContract.safeParse(subset).success).toBe(true)
+    expect(subset.controlExecutableCases.desktopSovereignty.expected).toEqual(fixture.controlExecutableCases.desktopSovereignty.expected)
+    const rejections = [
+      { reason: 'truncated runtime policy', changes: { allowedNamedRuntimeApis: access.allowedNamedRuntimeApis.slice(1) } },
+      { reason: 'duplicate runtime policy', changes: {
+        allowedNamedRuntimeApis: [access.allowedNamedRuntimeApis[0], ...access.allowedNamedRuntimeApis.slice(0, -1)]
+      } },
+      { reason: 'truncated settings policy', changes: { allowedNamedSettingsApis: access.allowedNamedSettingsApis.slice(1) } },
+      { reason: 'duplicate settings policy', changes: { allowedNamedSettingsApis: ['setSettings', 'setSettings'] } },
+      { reason: 'duplicate runtime inventory', changes: { directRuntimeApis: ['restartRuntime', 'restartRuntime'] } },
+      { reason: 'unknown runtime inventory', changes: { directRuntimeApis: ['unknownRuntimeApi'] } },
+      { reason: 'generic runtime bypass', changes: { directRuntimeApis: ['runtimeRequest'] } },
+      { reason: 'duplicate settings inventory', changes: { directSettingsApis: ['setSettings', 'setSettings'] } },
+      { reason: 'direct settings read', changes: { directSettingsApis: ['getSettings'] } },
+      { reason: 'runtime violation', changes: { directRuntimeViolations: ['runtimeRequest'] } },
+      { reason: 'settings violation', changes: { directSettingsViolations: ['getSettings'] } },
+      { reason: 'runtime bypass count', changes: { genericRuntimeBypassCount: 1 } },
+      { reason: 'settings read bypass count', changes: { settingsReadBypassCount: 1 } }
+    ]
+    for (const { reason, changes } of rejections) expect(GoG5FullLoopContract.safeParse(withAccess(changes)).success, reason).toBe(false)
+  })
+
+  it('checks desktop bridge semantics within their declared source owners', () => {
+    const listener = (name: string, channel: string, validator: string) => `${name}: receive => {
+      const delivery = (_electron, value) => { if (${validator}(value)) receive(value) };
+      ipcRenderer.on('${channel}', delivery);
+      return () => ipcRenderer.removeListener('${channel}', delivery);
+    }`
+    const preload = `const flatApi = {
+      startSse: (thread, cursor, id, boundary) => ipcRenderer.invoke('runtime:sse:start', {
+        threadId: thread, sinceSeq: cursor, streamId: id,
+        ...(boundary ? { replayThroughSeq: boundary.replayThroughSeq } : {})
+      }),
+      stopSse: id => ipcRenderer.invoke('runtime:sse:stop', id),
+      restartRuntime: () => { retireProcessOwnerAndNotify(); return ipcRenderer.invoke('runtime:restart'); },
+      ${listener('onSseEvent', 'runtime:sse-event', 'isStrictPublicRuntimeSseIpcPayload')},
+      ${listener('onSseEnd', 'runtime:sse-end', 'isStrictPublicRuntimeSseEndPayload')},
+      ${listener('onSseError', 'runtime:sse-error', 'isStrictPublicRuntimeSseErrorPayload')}
+    } satisfies FlatApi`
+    const renderer = `class RendererRuntimeClient {
+      startSse(thread: string, cursor: number, id?: string, finite?: Options) {
+        return finite ? this.runtimeApi().startSse(thread, cursor, id, finite) : this.runtimeApi().startSse(thread, cursor, id);
+      }
+      stopSse(id: string) { return this.runtimeApi().stopSse(id); }
+    }`
+    expect(preloadRuntimeBridgeSourceWitness(preload)).toEqual({
+      sseStartStop: true, restart: true, ssePayloadGuards: true, sseCleanup: true
+    })
+    expect(rendererRuntimeBridgeSourceWitness(renderer)).toEqual({ sseStartStop: true })
+
+    const preloadRejections = [
+      { reason: 'a foreign API supplies a decoy start channel', field: 'sseStartStop', source:
+        preload.replace("invoke('runtime:sse:start'", "invoke('foreign:sse:start'") +
+        "\nconst otherApi = { startSse: (threadId, sinceSeq, streamId) => ipcRenderer.invoke('runtime:sse:start', { threadId, sinceSeq, streamId }) };" },
+      { reason: 'the replay boundary comes from the cursor', field: 'sseStartStop', source:
+        preload.replace('replayThroughSeq: boundary.replayThroughSeq', 'replayThroughSeq: cursor') },
+      { reason: 'the thread and stream parameters are exchanged', field: 'sseStartStop', source:
+        preload.replace('threadId: thread', 'threadId: id') },
+      { reason: 'retirement is hidden in an uncalled closure', field: 'restart', source:
+        preload.replace('retireProcessOwnerAndNotify();', 'const unused = () => retireProcessOwnerAndNotify();') },
+      { reason: 'an earlier branch bypasses retirement', field: 'restart', source:
+        preload.replace('retireProcessOwnerAndNotify();', "if (skip) return ipcRenderer.invoke('runtime:restart'); retireProcessOwnerAndNotify();") },
+      { reason: 'Main is invoked before retirement', field: 'restart', source:
+        preload.replace("retireProcessOwnerAndNotify(); return ipcRenderer.invoke('runtime:restart');",
+          "const pending = ipcRenderer.invoke('runtime:restart'); retireProcessOwnerAndNotify(); return pending;") },
+      { reason: 'restart carries a new payload', field: 'restart', source:
+        preload.replace("invoke('runtime:restart')", "invoke('runtime:restart', {})") },
+      { reason: 'validation does not control delivery', field: 'ssePayloadGuards', source:
+        preload.replace('if (isStrictPublicRuntimeSseIpcPayload(value)) receive(value)',
+          'isStrictPublicRuntimeSseIpcPayload(value); receive(value)') },
+      { reason: 'the method delivers raw data outside its guarded wrapper', field: 'ssePayloadGuards', source:
+        preload.replace("ipcRenderer.on('runtime:sse-event', delivery);", "receive(raw); ipcRenderer.on('runtime:sse-event', delivery);") },
+      { reason: 'an unrelated API supplies the only strict guard', field: 'ssePayloadGuards', source:
+        preload.replace('if (isStrictPublicRuntimeSseIpcPayload(value)) receive(value)', 'receive(value)') +
+        `\nconst otherApi = { ${listener('onSseEvent', 'runtime:sse-event', 'isStrictPublicRuntimeSseIpcPayload')} };` },
+      { reason: 'the end validator is used for event payloads', field: 'ssePayloadGuards', source:
+        preload.replace('isStrictPublicRuntimeSseIpcPayload(value)', 'isStrictPublicRuntimeSseEndPayload(value)') },
+      { reason: 'cleanup removes a different listener', field: 'sseCleanup', source:
+        preload.replace("removeListener('runtime:sse-event', delivery)", "removeListener('runtime:sse-event', otherDelivery)") },
+      { reason: 'cleanup uses a different channel', field: 'sseCleanup', source:
+        preload.replace("removeListener('runtime:sse-event', delivery)", "removeListener('runtime:sse-end', delivery)") }
+    ] as const
+    for (const { reason, field, source } of preloadRejections) {
+      expect(preloadRuntimeBridgeSourceWitness(source)[field], reason).toBe(false)
+    }
+    const rendererRejections = [
+      renderer.replace('id, finite) : this.runtimeApi().startSse(thread, cursor, id)',
+        'id) : this.runtimeApi().startSse(thread, cursor, id, finite)'),
+      renderer.replace(': this.runtimeApi().startSse(thread, cursor, id)',
+        ': this.runtimeApi().startSse(thread, cursor, id, undefined)'),
+      renderer.replace('this.runtimeApi().startSse(thread, cursor, id, finite)',
+        'this.otherApi().startSse(thread, cursor, id, finite)'),
+      renderer.replace('class RendererRuntimeClient', 'class OtherClient') +
+        'class RendererRuntimeClient { startSse(thread, cursor, id, finite) { return undefined; } stopSse(id) { return false; } }'
+    ]
+    for (const source of rendererRejections) expect(rendererRuntimeBridgeSourceWitness(source).sseStartStop).toBe(false)
+  })
+
+  it('keeps active desktop facade coverage after retired settings UI cleanup', () => {
+    const contract = loadGoG5FullLoopContract().controlExecutableCases.desktopSovereignty
+    const source = desktopSovereigntyControlCase()
+    expect(contract.rendererUsageRuntimeClientFacadeMatrix).toEqual(source.rendererUsageRuntimeClientFacadeMatrix)
+    expect(contract.rendererSettingsReadFacadeMatrix).toEqual(source.rendererSettingsReadFacadeMatrix)
+    expect(contract.sideConversationPromotionContractMatrix).toEqual(source.sideConversationPromotionContractMatrix)
+    expect(source.expected).toMatchObject({
+      rendererProviderFacadeSealCoversArchiveRestore: true,
+      rendererProviderFacadeSealCoversSidePromotion: true,
+      sideConversationPromotionReadsBackAndCloses: true,
+      rendererProviderFacadeSealRejectsDirectBridge: true,
+      rendererUsageRuntimeClientCoversSettingsDiagnostics: true,
+      rendererUsageRuntimeClientRejectsDirectBridge: true,
+      rendererSettingsReadFacadeCoversKeyboardShortcuts: true,
+      rendererSettingsReadFacadeCoversSpeechToText: true,
+      rendererSettingsReadFacadePreservesSettingsChangedEvent: true,
+      rendererSettingsReadFacadeRejectsDirectBridge: true,
+      rendererSettingsReadFacadeScanGuardPresent: true
+    })
   })
 
   it('ties G5 shadow slices to task, cache, session, and MCP source fixtures', async () => {
@@ -8785,14 +9036,39 @@ describe('Go runtime kernel conformance manifest', () => {
     for (const route of contract.routes) {
       const h = buildG2Harness()
       await seedG2Setup(h, route.setup)
-      const response = await dispatchRequest(h.router, requestFromRoute(route, contract.runtimeToken))
+      if (route.id === 'thread-archive-patch') {
+        // This historical replay predates the Go-owned archive intent. The
+        // diagnostic TypeScript oracle rejects both writes without mutating state.
+        const before = structuredClone(await h.threadStore.get('thr_g2_beta'))
+        expect(before).not.toBeNull()
+        expect(route.body, route.id).toEqual({ status: 'archived' })
+        const legacyStatus = await dispatchRequest(h.router, requestFromRoute(route, contract.runtimeToken))
+        expect(legacyStatus.status, route.id).toBe(400)
+        expect(await readJson(legacyStatus), route.id).toEqual({
+          code: 'validation_error',
+          message: 'The request did not satisfy the runtime contract.'
+        })
+        expect(await h.threadStore.get('thr_g2_beta'), route.id).toEqual(before)
 
-      expect(response.status, route.id).toBe(route.response.status)
-      if (route.responseKind === 'sse') {
-        expect(response.headers.get('content-type'), route.id).toContain('text/event-stream')
-        expect(await readSseEvents(response), route.id).toEqual(route.sseFrames ?? [])
+        const archiveIntent = await dispatchRequest(h.router, requestFromRoute({
+          ...route,
+          body: { archived: true }
+        }, contract.runtimeToken))
+        expect(archiveIntent.status, route.id).toBe(409)
+        expect(await readJson(archiveIntent), route.id).toEqual({
+          code: 'thread_archive_unavailable',
+          message: 'thread archive intent requires the Go runtime'
+        })
+        expect(await h.threadStore.get('thr_g2_beta'), route.id).toEqual(before)
       } else {
-        expect(await readJson(response), route.id).toEqual(route.response.body)
+        const response = await dispatchRequest(h.router, requestFromRoute(route, contract.runtimeToken))
+        expect(response.status, route.id).toBe(route.response.status)
+        if (route.responseKind === 'sse') {
+          expect(response.headers.get('content-type'), route.id).toContain('text/event-stream')
+          expect(await readSseEvents(response), route.id).toEqual(route.sseFrames ?? [])
+        } else {
+          expect(await readJson(response), route.id).toEqual(route.response.body)
+        }
       }
     }
   })
@@ -8816,6 +9092,7 @@ describe('Go runtime kernel conformance manifest', () => {
       repoSource('packages/runtime-go/internal/server/durable_recovery.go'),
       repoSource('packages/runtime-go/internal/adapters/outbound/eventlog/store.go'),
     ].join('\n')
+    const durableReplaySource = repoSource('packages/runtime-go/internal/adapters/outbound/eventlog/replay.go')
     const durableTestSource = repoSource('packages/runtime-go/durable_replay_contract_test.go')
     const durableCommandSource = repoSource('packages/runtime-go/cmd/contract-sidecar/main.go')
     const durableSidecarTestSource = repoSource('packages/runtime/tests/go-durable-sidecar-conformance.test.ts')
@@ -8905,8 +9182,13 @@ describe('Go runtime kernel conformance manifest', () => {
     expect(durableStoreSource).toContain('events.jsonl')
     expect(durableStoreSource).toContain('candidateDigest := sha256.New()')
     expect(durableStoreSource).toContain('candidateWriter := io.MultiWriter(temp, candidateDigest)')
-    expect(durableStoreSource).toContain('json.NewEncoder(candidateWriter)')
-    expect(durableStoreSource).toContain('encoder.Encode(event)')
+    expect(durableStoreSource).toContain('frame, err := EncodeEventJSONLFrameV1(event)')
+    expect(durableStoreSource).toContain('candidateWriter.Write(frame)')
+    expect(durableStoreSource).toContain('func EncodeEventJSONLFrameV1(event map[string]any) ([]byte, error)')
+    expect(durableStoreSource).toContain('encoded, err := json.Marshal(event)')
+    expect(durableStoreSource).toContain('if len(encoded)+1 > maxEventJSONLLineBytesV1')
+    expect(durableStoreSource).toContain("return append(encoded, '\\n'), nil")
+    expect(durableReplaySource).toContain('const maxEventJSONLLineBytesV1 = 4 << 20')
     expect(durableStoreSource).toContain('NewlineTerminated')
     expect(durableStoreSource).toContain('LoadEventsSince')
     expect(durableStoreSource).toContain('sort.SliceStable')

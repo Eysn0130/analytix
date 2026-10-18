@@ -6,12 +6,15 @@ import {
   type ScheduleSettingsV1,
   type ScheduleTaskMessageKey,
   type ScheduleTaskStatus,
-  type ScheduledTaskV1
+  type ScheduledTaskV1,
+  type ScheduledTaskScheduleV1,
+  type ClawTaskV1
 } from './app-settings-types'
 import {
   compactStrings,
   normalizeAtTime,
   normalizeBoolean,
+  normalizeClawScheduleKind,
   normalizePositiveInteger,
   normalizeRunMode,
   normalizeScheduleKind,
@@ -19,6 +22,8 @@ import {
   normalizeStatus,
   normalizeTimeOfDay
 } from './app-settings-normalizers'
+
+import { canonicalizeCronExpression, normalizeScheduleWeekdays, validateScheduleCalendarRule } from '../../packages/runtime/src/contracts/schedule-rule'
 
 const SCHEDULE_TASK_MESSAGE_KEY_SET = new Set<ScheduleTaskMessageKey>(
   SCHEDULE_TASK_MESSAGE_KEYS
@@ -29,7 +34,7 @@ const SCHEDULE_TASK_MESSAGE_KEYS_BY_STATUS: Readonly<
 > = {
   idle: ['schedule_task_idle'],
   running: ['schedule_task_running', 'schedule_task_started'],
-  success: ['schedule_task_completed'],
+  success: ['schedule_task_completed', 'schedule_task_accepted'],
   error: ['schedule_task_failed', 'schedule_task_interrupted']
 }
 
@@ -65,6 +70,35 @@ export function scheduleSettingsNeedsMessageKeyMigration(
   })
 }
 
+export function normalizeScheduledTaskRule(schedule: Partial<ScheduledTaskScheduleV1> | undefined): ScheduledTaskScheduleV1 {
+  const calendar = schedule?.kind === 'weekly' || schedule?.kind === 'cron' ||
+    Object.prototype.hasOwnProperty.call(schedule ?? {}, 'timeZone')
+  const next: ScheduledTaskScheduleV1 = {
+    kind: normalizeScheduleKind(schedule?.kind),
+    everyMinutes: normalizePositiveInteger(schedule?.everyMinutes, 60, 1, 10_080),
+    timeOfDay: calendar && schedule?.kind !== 'cron' ? schedule?.timeOfDay ?? '' : normalizeTimeOfDay(schedule?.timeOfDay),
+    atTime: normalizeAtTime(schedule?.atTime),
+    ...(Object.prototype.hasOwnProperty.call(schedule ?? {}, 'timeZone') ? { timeZone: schedule!.timeZone } : {}),
+    ...(Object.prototype.hasOwnProperty.call(schedule ?? {}, 'weekdays') ? { weekdays: schedule!.weekdays } : {}),
+    ...(Object.prototype.hasOwnProperty.call(schedule ?? {}, 'expression') ? { expression: schedule!.expression } : {})
+  }
+  validateScheduleCalendarRule(next, true)
+  if (next.kind === 'weekly') next.weekdays = normalizeScheduleWeekdays(next.weekdays)
+  if (next.kind === 'cron') next.expression = canonicalizeCronExpression(next.expression!)
+  return next
+}
+
+/** Claw retains its original four-field shape and normalization semantics. */
+export function normalizeClawScheduledTask(task: Partial<ClawTaskV1>, index: number, now: string): ClawTaskV1 {
+  const schedule = {
+    kind: normalizeClawScheduleKind(task.schedule?.kind),
+    everyMinutes: normalizePositiveInteger(task.schedule?.everyMinutes, 60, 1, 10_080),
+    timeOfDay: normalizeTimeOfDay(task.schedule?.timeOfDay),
+    atTime: normalizeAtTime(task.schedule?.atTime)
+  }
+  return { ...normalizeScheduledTask({ ...task, schedule }, index, now), schedule }
+}
+
 export function normalizeScheduledTask(
   task: Partial<ScheduledTaskV1>,
   index: number,
@@ -84,12 +118,7 @@ export function normalizeScheduledTask(
     model,
     reasoningEffort: normalizeScheduleReasoningEffort(task.reasoningEffort),
     mode: normalizeRunMode(task.mode),
-    schedule: {
-      kind: normalizeScheduleKind(schedule?.kind),
-      everyMinutes: normalizePositiveInteger(schedule?.everyMinutes, 60, 1, 10_080),
-      timeOfDay: normalizeTimeOfDay(schedule?.timeOfDay),
-      atTime: normalizeAtTime(schedule?.atTime)
-    },
+    schedule: normalizeScheduledTaskRule(schedule),
     createdAt: typeof task.createdAt === 'string' && task.createdAt ? task.createdAt : now,
     updatedAt: typeof task.updatedAt === 'string' && task.updatedAt ? task.updatedAt : now,
     lastRunAt: typeof task.lastRunAt === 'string' ? task.lastRunAt : '',

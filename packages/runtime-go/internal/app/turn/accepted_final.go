@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
@@ -102,7 +103,7 @@ func shallowAcceptedFinalMapV1(value map[string]any) map[string]any {
 // This is read-compatible integrity validation, not installation trust or
 // permission to mutate. Trusted projection and atomic CAS retain that authority.
 func AcceptedFinalHistoryValidationViewV1(threadID string, turn map[string]any) (map[string]any, error) {
-	if err := domainsecret.ValidateValueLimitsV1(turn); err != nil {
+	if err := domainevent.ValidateQuestionReplyResourceLimitsV1(turn); err != nil {
 		return nil, err
 	}
 	if turn["acceptedFinal"] == nil {

@@ -239,6 +239,9 @@ export class ThreadService {
   }
 
   async setGoal(threadId: string, request: SetThreadGoalRequest): Promise<ThreadGoal> {
+    if ('operation' in request) {
+      throw new Error('Goal lifecycle commands require the Go runtime')
+    }
     const current = await this.threadStore.get(threadId)
     if (!current) throw new Error(`thread not found: ${threadId}`)
     if (!current.goal && !request.objective) {

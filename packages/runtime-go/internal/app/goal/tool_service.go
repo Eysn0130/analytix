@@ -10,6 +10,7 @@ import (
 
 	executiongrantapp "analytix.local/runtime-go/internal/app/executiongrant"
 	appthread "analytix.local/runtime-go/internal/app/thread"
+	domaingoal "analytix.local/runtime-go/internal/domain/goal"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
@@ -24,6 +25,16 @@ type ToolStore interface {
 	CommitPreparedCompleteStep(PreparedCompleteStepCommit) (PreparedCompleteStepCommitResult, error)
 	CommitPreparedUpdateGoal(PreparedUpdateGoalCommit) (map[string]any, error)
 	CommitPreparedTodoOps(PreparedTodoOpsCommit) (map[string]any, error)
+}
+
+// Optional observation capability on the existing store; provider output and
+// legacy ToolStore implementations keep their original contract.
+type TodoWriteSnapshotStoreV1 interface {
+	CommitTodoWriteSnapshotV1(threadID string, items []any) (TodoWriteCommittedSnapshotV1, error)
+}
+type TodoWriteCommittedSnapshotV1 struct {
+	Before map[string]any
+	After  map[string]any
 }
 
 var ErrPreparedStateStale = errors.New("prepared owner state changed before persistence")
@@ -63,8 +74,10 @@ type PendingToolContext struct {
 }
 
 type ToolResult struct {
-	Output  any
-	IsError bool
+	ProtectedError   *domaintoolresult.ProtectedOutputErrorV1 `json:"-"`
+	Output           any
+	IsError          bool
+	ProtectedCapture *domaintoolresult.ProtectedCaptureV1 `json:"-"`
 }
 
 type ToolService struct {
@@ -184,7 +197,7 @@ func (s ToolService) GetGoal(threadID string) ToolResult {
 	if err != nil {
 		return errorResult("goal_read_failed", err.Error())
 	}
-	return okResult(ToolResponse(goal, ""))
+	return observedGoalResultV1(goal, ToolResponse(goal, ""))
 }
 
 func (s ToolService) CreateGoal(pending PendingToolContext, args map[string]any) ToolResult {
@@ -192,14 +205,20 @@ func (s ToolService) CreateGoal(pending PendingToolContext, args map[string]any)
 	if objective == "" {
 		return errorResult("validation_error", "objective is required")
 	}
-	if existing, err := s.store().GetGoal(pending.ThreadID); err == nil && existing != nil {
+	if existing, err := s.store().GetGoal(pending.ThreadID); err == nil && existing != nil && stringField(existing, "status") != "complete" {
 		return errorResult("goal_exists", "cannot create a new goal because this thread already has a goal; use update_goal only when the existing goal is complete")
 	} else if err != nil {
 		return errorResult("goal_read_failed", err.Error())
 	}
 	patch := map[string]any{
 		"objective": objective,
-		"status":    "active",
+		"operation": "create",
+	}
+	if value, present := args["maxGoalRounds"]; present {
+		patch["maxGoalRounds"] = value
+	}
+	if value, present := args["max_goal_rounds"]; present {
+		patch["maxGoalRounds"] = value
 	}
 	if tokenBudget, ok, err := NormalizeTokenBudget(firstNonEmptyAny(args["token_budget"], args["tokenBudget"])); err != nil {
 		return errorResult("validation_error", err.Error())
@@ -214,7 +233,7 @@ func (s ToolService) CreateGoal(pending PendingToolContext, args map[string]any)
 		return errorResult("goal_create_failed", err.Error())
 	}
 	s.recordGoalUpdated(pending.ThreadID, goal)
-	return okResult(ToolResponse(goal, ""))
+	return observedGoalResultV1(goal, ToolResponse(goal, ""))
 }
 
 func (s ToolService) CompleteStep(pending PendingToolContext, args map[string]any) ToolResult {
@@ -375,6 +394,15 @@ func (s ToolService) PrepareUpdateGoal(pending PendingToolContext, args map[stri
 		return PreparedUpdateGoal{}, preparationError("goal_not_active", "cannot update goal because the current goal is "+stringField(goal, "status")+", not active")
 	}
 	if status == "blocked" {
+		if _, _, _, counted := domaingoal.CountedRecordV1(goal); counted {
+			thread, readErr := s.store().GetThread(pending.ThreadID)
+			if readErr != nil {
+				return PreparedUpdateGoal{}, newToolPreparationError("goal_read_failed", readErr)
+			}
+			if _, valid := RecordedRoundForTurnV1(thread, goal, pending.TurnID); !valid {
+				return PreparedUpdateGoal{}, preparationError("goal_round_required", "blocking reports require an actual admitted Goal turn")
+			}
+		}
 		reason, normalizedReason, reasonErr := CanonicalBlockedReasonV1(firstNonEmptyAnyString(args["reason"]))
 		if reasonErr != nil {
 			return PreparedUpdateGoal{}, newToolPreparationError("validation_error", reasonErr)
@@ -452,15 +480,15 @@ func (s ToolService) ExecutePreparedUpdateGoal(pending PendingToolContext, prepa
 		if nextStatus == "blocked" {
 			message = "Goal marked blocked after repeated same-condition reports."
 		}
-		return okResult(ToolResponseWithAudits(updated, "", map[string]any{
+		return observedGoalResultV1(updated, ToolResponseWithAudits(updated, "", map[string]any{
 			"reason": prepared.Reason, "count": count, "requiredCount": float64(3), "status": nextStatus, "message": message,
 		}, nil))
 	case "request_self_check":
-		return okResult(ToolResponseWithAudits(updated, "", nil, map[string]any{
+		return observedGoalResultV1(updated, ToolResponseWithAudits(updated, "", nil, map[string]any{
 			"selfCheckRequired": true, "instructions": StrictCompletionSelfCheckInstructions(),
 		}))
 	default:
-		return okResult(ToolResponse(updated, "Goal achieved. Report final usage from this tool result if relevant."))
+		return observedGoalResultV1(updated, ToolResponse(updated, "Goal achieved. Report final usage from this tool result if relevant."))
 	}
 }
 
@@ -476,6 +504,14 @@ func (s ToolService) TodoWrite(threadID string, args map[string]any) ToolResult 
 	rawTodos, ok := args["todos"].([]any)
 	if !ok {
 		return errorResult("validation_error", "todos must be an array")
+	}
+	if store, ok := s.store().(TodoWriteSnapshotStoreV1); ok {
+		committed, err := store.CommitTodoWriteSnapshotV1(threadID, rawTodos)
+		if err != nil {
+			return errorResult("todo_write_failed", err.Error())
+		}
+		s.recordTodosUpdated(threadID, committed.After)
+		return observedTodoResultV1(committed.After, committed.Before, true)
 	}
 	current, err := s.store().GetTodos(threadID)
 	if err != nil {
@@ -493,7 +529,22 @@ func (s ToolService) TodoWrite(threadID string, args map[string]any) ToolResult 
 		return errorResult("todo_write_failed", err.Error())
 	}
 	s.recordTodosUpdated(threadID, todos)
-	return okResult(map[string]any{"todos": todos})
+	return observedTodoResultV1(todos, nil, false)
+}
+
+func observedGoalResultV1(goal map[string]any, output map[string]any) ToolResult {
+	result := okResult(output)
+	if capture, valid := domaintoolresult.NewProtectedGoalCaptureV1(goal); valid {
+		result.ProtectedCapture = &capture
+	}
+	return result
+}
+func observedTodoResultV1(after, before map[string]any, baselineKnown bool) ToolResult {
+	result := okResult(map[string]any{"todos": after})
+	if capture, valid := domaintoolresult.NewProtectedTodoCaptureV1(after, before, baselineKnown); valid {
+		result.ProtectedCapture = &capture
+	}
+	return result
 }
 
 func (s ToolService) TodoOps(threadID string, args map[string]any) ToolResult {
@@ -829,11 +880,7 @@ func completedTodoItems(items []any, matchIndex int) []any {
 			delete(next, "statusReasonCode")
 		}
 		if stringField(next, "status") == "in_progress" {
-			if activeSeen {
-				next["status"] = "pending"
-			} else {
-				activeSeen = true
-			}
+			activeSeen = true
 		}
 		nextItems = append(nextItems, next)
 	}
@@ -862,48 +909,6 @@ func (s ToolService) ValidateTodoStepMatch(threadID string, step string, stepInd
 		return fmt.Errorf("step %q has no matching todo_write item", step)
 	}
 	return nil
-}
-
-func (s ToolService) blockGoal(pending PendingToolContext, goal map[string]any, args map[string]any) ToolResult {
-	reason, normalizedReason, err := CanonicalBlockedReasonV1(firstNonEmptyAnyString(args["reason"]))
-	if err != nil {
-		return errorResult("validation_error", err.Error())
-	}
-	sameReason := NormalizeBlockedReason(stringField(goal, "blockedReason")) == normalizedReason
-	sameTurn := stringField(goal, "blockedTurnId") == pending.TurnID
-	prior := int(floatFromAny(goal["blockedCount"]))
-	if !sameReason {
-		prior = 0
-	}
-	count := prior + 1
-	if sameReason && sameTurn && prior > 0 {
-		count = prior
-	}
-	nextStatus := "active"
-	if count >= 3 {
-		nextStatus = "blocked"
-	}
-	updated, err := s.store().SetGoal(pending.ThreadID, map[string]any{
-		"status":        nextStatus,
-		"blockedReason": reason,
-		"blockedCount":  float64(count),
-		"blockedTurnId": pending.TurnID,
-	})
-	if err != nil {
-		return errorResult("goal_update_failed", err.Error())
-	}
-	s.recordGoalUpdated(pending.ThreadID, updated)
-	message := "Goal remains active until the same blocking condition repeats across three goal turns."
-	if nextStatus == "blocked" {
-		message = "Goal marked blocked after repeated same-condition reports."
-	}
-	return okResult(ToolResponseWithAudits(updated, "", map[string]any{
-		"reason":        reason,
-		"count":         float64(count),
-		"requiredCount": float64(3),
-		"status":        nextStatus,
-		"message":       message,
-	}, nil))
 }
 
 func (s ToolService) toolResultItems(threadID string) []map[string]any {
@@ -959,7 +964,7 @@ func okResult(output any) ToolResult {
 }
 
 func errorResult(code string, message string) ToolResult {
-	return ToolResult{Output: map[string]any{"code": code, "error": message}, IsError: true}
+	return ToolResult{Output: map[string]any{"code": code, "error": message}, IsError: true, ProtectedError: domaintoolresult.ProjectProtectedOutputErrorV1([]domaintoolresult.ProtectedOutputErrorEntryV1{{Message: message}})}
 }
 
 type missingStore struct{}

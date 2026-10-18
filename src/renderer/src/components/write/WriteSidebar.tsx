@@ -1,429 +1,116 @@
 import type { FormEvent, ReactElement } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
-import {
-  ChevronDown,
-  ChevronRight,
-  FilePlus2,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  Plus,
-  RefreshCw,
-  Trash2
-} from '../../design/AnalytixUiIcons'
+import { FolderOpen } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceEntry } from '@shared/workspace-file'
 import type { ComposerFileReference } from '../../lib/composer-file-references'
 import { composerFileReferenceFromPath } from '../../lib/composer-file-references'
-import { confirmDialog } from '../../lib/confirm-dialog'
+import { previewWorkspaceFile } from '../../lib/workspace-file-preview'
 import { formatWorkspacePickerError } from '../../lib/format-workspace-picker-error'
-import {
-  useWriteWorkspaceStore,
-  writeBasenameFromPath,
-  writeDirnameFromPath,
-  writeJoinPath,
-  writeRelativeToWorkspace
-} from '../../write/write-workspace-store'
-import {
-  SidebarCollapseMotion,
-  SidebarCommandRow,
-  SidebarIconButton,
-  SidebarSectionHeader,
-  SidebarTreeRow
-} from '../sidebar/SidebarPrimitives'
+import { useWriteWorkspaceStore, writeWorkspaceHasUnsettledDraft, writeJoinPath } from '../../write/write-workspace-store'
+import { SidebarCommandRow } from '../sidebar/SidebarPrimitives'
 import { WriteFileTree } from './WriteFileTree'
 
 type EntryDialog =
-  | { kind: 'create-file'; parentDirectory?: string; value: string }
-  | { kind: 'create-folder'; parentDirectory?: string; value: string }
-  | { kind: 'rename'; entry: WorkspaceEntry; value: string }
-  | { kind: 'delete'; entry: WorkspaceEntry }
+  | {kind:'create-file';parentDirectory?:string;value:string}
+  | {kind:'create-folder';parentDirectory?:string;value:string}
+  | {kind:'rename';entry:WorkspaceEntry;value:string}
+  | {kind:'delete';entry:WorkspaceEntry}
+type Translate = (key:string,opts?:Record<string,unknown>) => string
 
-type Translate = (key: string, opts?: Record<string, unknown>) => string
-
-// The former Write navigation is now a file surface inside the right workspace.
-export function WriteSidebar({ initialWorkspaceRoot, selectedPath, onOpenFile, onAddReference }: {
-  initialWorkspaceRoot?: string
-  selectedPath?: string | null
-  onOpenFile?: (workspaceRoot: string, path: string) => void
-  onAddReference?: (reference: ComposerFileReference & { type: 'file' | 'directory' }) => void
+/** Generic file browser. Its temporary root never changes writing settings or a retained draft. */
+export function WriteSidebar({initialWorkspaceRoot,selectedPath,onOpenFile,onAddReference}: {
+  initialWorkspaceRoot?:string;selectedPath?:string | null
+  onOpenFile?:(workspaceRoot:string,path:string) => void
+  onAddReference?:(reference:ComposerFileReference & {type:'file' | 'directory'}) => void
 } = {}): ReactElement {
   const { t } = useTranslation('common')
-  const [entryDialog, setEntryDialog] = useState<EntryDialog | null>(null)
-  const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Record<string, boolean>>({})
-  // Field-level subscription: the sidebar must not re-render on fileContent or
-  // selection updates, which fire on every keystroke in the editor.
-  const {
-    defaultWorkspaceRoot,
-    workspaceRoots,
-    settingsError,
-    workspaceRoot,
-    rootDirectory,
-    entriesByDir,
-    expandedDirs,
-    loadingDirs,
-    treeError,
-    activeFilePath,
-    loadWriteSettings,
-    selectWriteWorkspace,
-    addWriteWorkspace,
-    removeWriteWorkspace,
-    toggleDirectory,
-    openFile,
-    createFile,
-    createDirectory,
-    renameEntry,
-    deleteEntry,
-    refreshWorkspace,
-    setFileError
-  } = useWriteWorkspaceStore(
-    useShallow((s) => ({
-      defaultWorkspaceRoot: s.defaultWorkspaceRoot,
-      workspaceRoots: s.workspaceRoots,
-      settingsError: s.settingsError,
-      workspaceRoot: s.workspaceRoot,
-      rootDirectory: s.rootDirectory,
-      entriesByDir: s.entriesByDir,
-      expandedDirs: s.expandedDirs,
-      loadingDirs: s.loadingDirs,
-      treeError: s.treeError,
-      activeFilePath: s.activeFilePath,
-      loadWriteSettings: s.loadWriteSettings,
-      selectWriteWorkspace: s.selectWriteWorkspace,
-      addWriteWorkspace: s.addWriteWorkspace,
-      removeWriteWorkspace: s.removeWriteWorkspace,
-      toggleDirectory: s.toggleDirectory,
-      openFile: s.openFile,
-      createFile: s.createFile,
-      createDirectory: s.createDirectory,
-      renameEntry: s.renameEntry,
-      deleteEntry: s.deleteEntry,
-      refreshWorkspace: s.refreshWorkspace,
-      setFileError: s.setFileError
-    }))
-  )
-
-  useEffect(() => {
-    void (async () => {
-      if (initialWorkspaceRoot) await useWriteWorkspaceStore.getState().initializeWorkspace(initialWorkspaceRoot)
-      await loadWriteSettings()
-    })()
-  }, [initialWorkspaceRoot, loadWriteSettings])
-
-  const root = rootDirectory || workspaceRoot
-  const visibleWorkspaceRoots = [...new Set([workspaceRoot, ...workspaceRoots].filter(Boolean))]
-  const entryDialogPortalTarget = typeof document === 'undefined' ? null : document.body
-  const rootLoading = Boolean(
-    loadingDirs.__root__
-    || loadingDirs[root]
-    || (workspaceRoot.trim() && !entriesByDir[root])
-  )
-
-  const defaultParentDirectory = (): string => {
-    if (!root) return workspaceRoot
-    if (activeFilePath && activeFilePath.startsWith(root)) return writeDirnameFromPath(activeFilePath)
-    return root
+  const storedRoot = useWriteWorkspaceStore(state => state.workspaceRoot)
+  const [root,setRoot] = useState(initialWorkspaceRoot || storedRoot)
+  const currentRoot = useRef(root);currentRoot.current = root
+  const mounted = useRef(true), operation = useRef(0), inFlight = useRef(false)
+  const [entryDialog,setEntryDialog] = useState<EntryDialog | null>(null)
+  const [error,setError] = useState<string | null>(null)
+  const [busy,setBusy] = useState(false)
+  const {entriesByDir,expandedDirs,loadingDirs,treeError,activeFilePath,loadDirectory,toggleDirectory,createFile,createDirectory,renameEntry,deleteEntry} = useWriteWorkspaceStore(useShallow(state => ({
+    entriesByDir:state.entriesByDir,expandedDirs:state.expandedDirs,loadingDirs:state.loadingDirs,treeError:state.treeError,
+    activeFilePath:state.activeFilePath,loadDirectory:state.loadDirectory,toggleDirectory:state.toggleDirectory,
+    createFile:state.createFile,createDirectory:state.createDirectory,renameEntry:state.renameEntry,deleteEntry:state.deleteEntry
+  })))
+  useEffect(() => { mounted.current = true;return () => { mounted.current = false;operation.current++ } }, [])
+  useEffect(() => { operation.current++;setRoot(initialWorkspaceRoot || storedRoot);setEntryDialog(null);setError(null) }, [initialWorkspaceRoot,storedRoot])
+  useEffect(() => { if (root.trim()) void loadDirectory(root,root) }, [root,loadDirectory])
+  const refresh = async (owner = root): Promise<void> => {
+    await loadDirectory(owner,owner)
+    await Promise.all([...useWriteWorkspaceStore.getState().expandedDirs].filter(path => path.startsWith(owner + '/')).map(path => loadDirectory(owner,path)))
   }
-
-  const suggestedCreatePath = (
-    kind: 'file' | 'folder',
-    parentDirectory?: string
-  ): { parent: string; suggested: string } => {
-    const explicitParent = parentDirectory?.trim()
-    const parent = explicitParent || defaultParentDirectory()
-    const relativeParent = writeRelativeToWorkspace(root, parent)
-    const baseName = kind === 'file' ? 'untitled.md' : 'new-folder'
-    const suggested = explicitParent
-      ? baseName
-      : relativeParent === writeBasenameFromPath(root)
-        ? baseName
-        : `${relativeParent}/${baseName}`
-    return { parent: explicitParent || root, suggested }
+  const open = (owner:string,path:string): void => {
+    if (onOpenFile) onOpenFile(owner,path)
+    else previewWorkspaceFile({workspaceRoot:owner,path})
   }
-
-  const openCreateFileDialog = async (parentDirectory?: string): Promise<void> => {
-    if (!workspaceRoot.trim() || !root) {
-      await pickWriteWorkspace()
-      return
-    }
-    const { suggested } = suggestedCreatePath('file', parentDirectory)
-    setEntryDialog({ kind: 'create-file', parentDirectory, value: suggested })
-  }
-
-  const openCreateDirectoryDialog = async (parentDirectory?: string): Promise<void> => {
-    if (!workspaceRoot.trim() || !root) {
-      await pickWriteWorkspace()
-      return
-    }
-    const { suggested } = suggestedCreatePath('folder', parentDirectory)
-    setEntryDialog({ kind: 'create-folder', parentDirectory, value: suggested })
-  }
-
-  const openRenameEntryDialog = (entry: WorkspaceEntry): void => {
-    setEntryDialog({ kind: 'rename', entry, value: entry.name })
-  }
-
-  const openDeleteEntryDialog = (entry: WorkspaceEntry): void => {
-    setEntryDialog({ kind: 'delete', entry })
-  }
-
-  const submitEntryDialog = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-    if (!entryDialog) return
-
-    if (entryDialog.kind === 'delete') {
-      const ok = await deleteEntry(workspaceRoot, entryDialog.entry.path)
-      if (ok) setEntryDialog(null)
-      return
-    }
-
-    const value = entryDialog.value.trim()
-    if (!value) return
-
-    if (entryDialog.kind === 'rename') {
-      if (value === entryDialog.entry.name) {
-        setEntryDialog(null)
-        return
-      }
-      const renamed = await renameEntry(workspaceRoot, entryDialog.entry.path, value)
-      if (renamed) setEntryDialog(null)
-      return
-    }
-
-    const { parent } = suggestedCreatePath(
-      entryDialog.kind === 'create-file' ? 'file' : 'folder',
-      entryDialog.parentDirectory
-    )
-    const created = entryDialog.kind === 'create-file'
-      ? await createFile(workspaceRoot, writeJoinPath(parent, value))
-      : await createDirectory(workspaceRoot, writeJoinPath(parent, value))
-    if (created) {
-      setEntryDialog(null)
-      if (entryDialog.kind === 'create-file') onOpenFile?.(workspaceRoot, writeJoinPath(parent, value))
-    }
-  }
-
-  const pickWriteWorkspace = async (): Promise<void> => {
+  const pickWorkspace = async (): Promise<void> => {
+    const attempt = ++operation.current
     try {
-      setFileError(null)
-      if (typeof window.analytix?.workspace?.pickDirectory !== 'function') {
-        throw new Error('workspace:pick-directory unavailable')
-      }
-      const picked = await window.analytix.workspace.pickDirectory(workspaceRoot || defaultWorkspaceRoot || undefined)
-      if (!picked.canceled && picked.path) {
-        await addWriteWorkspace(picked.path)
-      }
-    } catch (error) {
-      setFileError(formatWorkspacePickerError(error))
+      setError(null)
+      if (typeof window.analytix?.workspace?.pickDirectory !== 'function') throw new Error('workspace:pick-directory unavailable')
+      const picked = await window.analytix.workspace.pickDirectory(root || undefined)
+      if (mounted.current && attempt === operation.current && !picked.canceled && picked.path) { setRoot(picked.path);setEntryDialog(null) }
+    } catch (failure) { if (mounted.current && attempt === operation.current) setError(formatWorkspacePickerError(failure)) }
+  }
+  const createEntry = (kind:'create-file' | 'create-folder',parentDirectory?:string): void => {
+    if (!root.trim()) { void pickWorkspace();return }
+    setEntryDialog({kind,parentDirectory:parentDirectory || root,value:kind === 'create-file' ? 'untitled.md' : 'new-folder'})
+  }
+  const submitEntryDialog = async (event:FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    if (!entryDialog || inFlight.current || useWriteWorkspaceStore.getState().shutdownFrozen) return
+    const dialog = entryDialog, owner = root, attempt = operation.current
+    const draft = useWriteWorkspaceStore.getState()
+    const normalize = (path:string) => path.replaceAll('\\','/').replace(/\/+$/,'')
+    if ((dialog.kind === 'delete' || dialog.kind === 'rename') && draft.activeFilePath &&
+      writeWorkspaceHasUnsettledDraft(draft)) {
+      const active = normalize(draft.activeFilePath), affected = normalize(dialog.entry.path)
+      if (active === affected || active.startsWith(affected + '/')) { setError(t('workspaceLegacyDraftDescription'));return }
     }
+    const current = () => mounted.current && currentRoot.current === owner && operation.current === attempt
+    const value = dialog.kind === 'delete' ? '' : dialog.value.trim()
+    if (dialog.kind !== 'delete' && !value) return
+    inFlight.current = true;setBusy(true);setError(null)
+    try {
+      let completed = false, created:string | null = null
+      if (dialog.kind === 'delete') completed = await deleteEntry(owner,dialog.entry.path)
+      else if (dialog.kind === 'rename') completed = dialog.entry.name === value || !!(await renameEntry(owner,dialog.entry.path,value!))
+      else if (dialog.kind === 'create-file') {
+        // Keep the existing shutdown/permission guards, without opening the old Write adapter.
+        created = await createFile(owner,writeJoinPath(dialog.parentDirectory || owner,value!), '', {openAfterCreate:false})
+        completed = !!created
+      } else completed = !!(await createDirectory(owner,writeJoinPath(dialog.parentDirectory || owner,value!)))
+      if (completed) {
+        await refresh(owner)
+        if (current()) { setEntryDialog(null);if (created) open(owner,created) }
+      }
+    } catch (failure) { if (current()) setError(failure instanceof Error ? failure.message : String(failure)) }
+    finally { inFlight.current = false;if (mounted.current) setBusy(false) }
   }
-
-  const selectWorkspaceAndThread = async (workspacePath: string): Promise<void> => {
-    await selectWriteWorkspace(workspacePath)
-  }
-
-  const toggleWorkspaceGroup = async (workspacePath: string): Promise<void> => {
-    if (workspacePath !== workspaceRoot) {
-      await selectWorkspaceAndThread(workspacePath)
-      setCollapsedWorkspaces((current) => ({ ...current, [workspacePath]: false }))
-      return
-    }
-    setCollapsedWorkspaces((current) => ({
-      ...current,
-      [workspacePath]: current[workspacePath] !== true
-    }))
-  }
-
-  const removeWorkspaceFromList = async (workspacePath: string): Promise<void> => {
-    if (workspaceRoots.length <= 1) return
-    if (!(await confirmDialog(t('writeRemoveWorkspaceConfirm', { name: writeBasenameFromPath(workspacePath) })))) return
-    await removeWriteWorkspace(workspacePath)
-  }
-
-  return (
-    <>
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="ds-no-drag flex flex-col px-0.5">
-        <SidebarCommandRow
-          icon={<FilePlus2 className="h-4 w-4" strokeWidth={1.9} />}
-          label={t('writeCreateFile')}
-          onClick={() => void openCreateFileDialog()}
-          variant="accent"
-        />
-        <SidebarCommandRow
-          icon={<FolderOpen className="h-4 w-4" strokeWidth={1.75} />}
-          label={t('writeAddWorkspace')}
-          onClick={() => void pickWriteWorkspace()}
-        />
-      </div>
-
-      <div className="ds-no-drag mx-1.5 my-3" />
-
-      <div className="ds-no-drag flex min-h-0 flex-1 flex-col">
-        <SidebarSectionHeader
-          label={t('writeSpaces')}
-          actions={
-            <SidebarIconButton
-              onClick={() => void pickWriteWorkspace()}
-              title={t('writeAddWorkspace')}
-              ariaLabel={t('writeAddWorkspace')}
-              stopPropagation
-            >
-              <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-            </SidebarIconButton>
-          }
-        />
-
-        {settingsError ? (
-          <div className="mx-2 mt-1 rounded-lg border border-red-200/70 bg-red-50/80 px-2.5 py-2 text-[12px] leading-5 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-            {settingsError}
-          </div>
-        ) : null}
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-          {visibleWorkspaceRoots.length === 0 ? (
-            <button
-              type="button"
-              onClick={() => void pickWriteWorkspace()}
-              className="mx-1 mt-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
-            >
-              <FolderOpen className="h-4 w-4 shrink-0 text-accent" strokeWidth={1.75} />
-              <span className="min-w-0 flex-1 truncate text-[14px] font-medium">
-                {t('writeAddWorkspace')}
-              </span>
-            </button>
-          ) : null}
-
-          {visibleWorkspaceRoots.map((workspacePath) => {
-            const active = workspacePath === workspaceRoot
-            const collapsed = active ? collapsedWorkspaces[workspacePath] === true : true
-            const removable = workspaceRoots.length > 1 && workspacePath !== defaultWorkspaceRoot
-            return (
-              <div key={workspacePath} className="mb-1">
-                <SidebarTreeRow
-                  active={active}
-                  title={workspacePath}
-                  onClick={() => void toggleWorkspaceGroup(workspacePath)}
-                  className="min-h-[36px]"
-                  buttonClassName="items-center gap-2 px-2.5 py-2"
-                  actions={
-                    active || removable ? (
-                      <>
-                        {active ? (
-                          <>
-                            <SidebarIconButton
-                              onClick={() => void openCreateFileDialog(root)}
-                              title={t('writeCreateFile')}
-                              ariaLabel={t('writeCreateFile')}
-                              tone="accent"
-                              stopPropagation
-                            >
-                              <FilePlus2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-                            </SidebarIconButton>
-                            <SidebarIconButton
-                              onClick={() => void openCreateDirectoryDialog(root)}
-                              title={t('writeCreateFolder')}
-                              ariaLabel={t('writeCreateFolder')}
-                              stopPropagation
-                            >
-                              <FolderPlus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                            </SidebarIconButton>
-                            <SidebarIconButton
-                              onClick={() => void refreshWorkspace(workspaceRoot)}
-                              title={t('writeRefreshWorkspace')}
-                              ariaLabel={t('writeRefreshWorkspace')}
-                              stopPropagation
-                            >
-                              <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />
-                            </SidebarIconButton>
-                          </>
-                        ) : null}
-
-                        {removable ? (
-                          <SidebarIconButton
-                            onClick={() => void removeWorkspaceFromList(workspacePath)}
-                            title={t('writeRemoveWorkspace')}
-                            ariaLabel={t('writeRemoveWorkspace')}
-                            tone="danger"
-                            stopPropagation
-                          >
-                            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.9} />
-                          </SidebarIconButton>
-                        ) : null}
-                      </>
-                    ) : undefined
-                  }
-                >
-                  {collapsed ? (
-                    <ChevronRight className="h-3 w-3 shrink-0 text-ds-faint" strokeWidth={2} />
-                  ) : (
-                    <ChevronDown className="h-3 w-3 shrink-0 text-ds-faint" strokeWidth={2} />
-                  )}
-                  {collapsed ? (
-                    <Folder className="h-3.5 w-3.5 shrink-0 text-ds-muted" strokeWidth={1.75} />
-                  ) : (
-                    <FolderOpen className="h-3.5 w-3.5 shrink-0 text-ds-muted" strokeWidth={1.75} />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">{writeBasenameFromPath(workspacePath)}</span>
-                </SidebarTreeRow>
-
-                <SidebarCollapseMotion
-                  open={active && !collapsed}
-                  className="ds-sidebar-write-workspace-children"
-                  innerClassName="pl-3"
-                >
-                  <div className="ds-sidebar-reveal-item px-2.5 pb-1 text-[11.5px] text-ds-faint">
-                    <span className="block truncate" title={workspacePath}>
-                      {workspacePath === defaultWorkspaceRoot ? t('writeDefaultSpace') : workspacePath}
-                    </span>
-                  </div>
-                  <div className="ds-sidebar-reveal-item">
-                    <WriteFileTree
-                      rootDirectory={root}
-                      entriesByDir={entriesByDir}
-                      expandedDirs={expandedDirs}
-                      loadingDirs={loadingDirs}
-                      selectedFilePath={selectedPath ?? activeFilePath}
-                      error={treeError}
-                      rootLoading={rootLoading}
-                      onToggleDir={(path) => void toggleDirectory(workspaceRoot, path)}
-                      onSelectFile={(path) => onOpenFile ? onOpenFile(workspaceRoot, path) : void openFile(workspaceRoot, path)}
-                      onAddReference={onAddReference ? (entry) => onAddReference({ ...composerFileReferenceFromPath(entry.path, workspaceRoot), type: entry.type }) : undefined}
-                      onCreateFile={(directoryPath) => void openCreateFileDialog(directoryPath)}
-                      onCreateDirectory={(directoryPath) => void openCreateDirectoryDialog(directoryPath)}
-                      onRenameEntry={openRenameEntryDialog}
-                      onDeleteEntry={openDeleteEntryDialog}
-                      onRefresh={() => void refreshWorkspace(workspaceRoot)}
-                      showHeader={false}
-                      showRootLabel={false}
-                    />
-                  </div>
-                </SidebarCollapseMotion>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+  const portal = typeof document === 'undefined' ? null : document.body
+  return <>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden" aria-busy={busy}>
+      <SidebarCommandRow icon={<FolderOpen className="h-4 w-4" strokeWidth={1.75} />} label={t('writeAddWorkspace')} onClick={() => { void pickWorkspace() }} />
+      {error ? <p role="alert" className="p-2 text-xs text-ds-muted">{error}</p> : null}
+      <WriteFileTree rootDirectory={root} entriesByDir={entriesByDir} expandedDirs={expandedDirs} loadingDirs={loadingDirs}
+        selectedFilePath={selectedPath ?? activeFilePath} error={treeError} rootLoading={!!loadingDirs[root] || !!root && !entriesByDir[root]}
+        onToggleDir={path => { void toggleDirectory(root,path) }} onSelectFile={path => open(root,path)}
+        onAddReference={onAddReference ? entry => onAddReference({...composerFileReferenceFromPath(entry.path,root),type:entry.type}) : undefined}
+        onCreateFile={parent => createEntry('create-file',parent)} onCreateDirectory={parent => createEntry('create-folder',parent)}
+        onRenameEntry={entry => setEntryDialog({kind:'rename',entry,value:entry.name})} onDeleteEntry={entry => setEntryDialog({kind:'delete',entry})}
+        onRefresh={() => { void refresh() }} />
     </div>
-    {entryDialog && entryDialogPortalTarget ? createPortal(
-      <WriteEntryDialog
-        dialog={entryDialog}
-        onClose={() => setEntryDialog(null)}
-        onValueChange={(value) =>
-          setEntryDialog((current) => {
-            if (!current || current.kind === 'delete') return current
-            return { ...current, value }
-          })
-        }
-        onSubmit={(event) => void submitEntryDialog(event)}
-        t={t}
-      />,
-      entryDialogPortalTarget
-    ) : null}
-    </>
-  )
+    {entryDialog && portal ? createPortal(<WriteEntryDialog dialog={entryDialog} onClose={() => { if (!inFlight.current) setEntryDialog(null) }}
+      onValueChange={value => { if (!inFlight.current) setEntryDialog(current => current?.kind === 'delete' || !current ? current : {...current,value}) }}
+      onSubmit={event => { void submitEntryDialog(event) }} t={t} />,portal) : null}
+  </>
 }
 
 function entryDialogTitle(dialog: EntryDialog, t: Translate): string {

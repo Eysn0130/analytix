@@ -24,7 +24,7 @@ import type {
   ComputerUsePermissionState,
   ModelCapabilityProbeResult
 } from '@shared/analytix-api'
-import { ArrowLeft, ChevronRight, Loader2, Plus, RefreshCw, ShieldAlert } from '../design/AnalytixUiIcons'
+import { ArrowLeft, ChevronRight, Loader2, RefreshCw, ShieldAlert } from '../design/AnalytixUiIcons'
 import computerUseIcon from '../../../../plugins/analytix-computer-use/assets/icon.png'
 import chromeIcon from '../../../asset/img/chrome-production-large.png'
 import {
@@ -433,12 +433,8 @@ export function ComputerUseChromeSettingsDetail({
   onBrowserUseChange
 }: ComputerUseChromeSettingsDetailProps): ReactElement {
   const { t, showTopNotice } = ctx
-  const unavailableTitle = t('settingsFeatureUnavailable')
   const approvalOptions = [
     { value: 'neverAsk', label: t('browserApprovalAlwaysAllow') },
-    { value: 'alwaysAsk', label: t('browserApprovalAlwaysAsk') }
-  ]
-  const askOnlyOptions = [
     { value: 'alwaysAsk', label: t('browserApprovalAlwaysAsk') }
   ]
   const showUnavailable = (messageKey: string): void => {
@@ -513,18 +509,7 @@ export function ComputerUseChromeSettingsDetail({
         <CodexSettingsPanel>
           <CodexSettingsRow
             title={t('browserApproval')}
-            description={
-              <>
-                {t('browserApprovalDesc')}{' '}
-                <button
-                  type="button"
-                  className="font-semibold text-accent hover:underline"
-                  onClick={() => showUnavailable('browserLearnMoreUnavailable')}
-                >
-                  {t('browserLearnMore')}
-                </button>
-              </>
-            }
+            description={t('browserApprovalDesc')}
             control={
               <CodexSelect
                 label={t('browserApproval')}
@@ -534,64 +519,12 @@ export function ComputerUseChromeSettingsDetail({
               />
             }
           />
-          <CodexSettingsRow
-            title={t('computerUseChromeHistory')}
-            description={t('computerUseChromeHistoryDesc')}
-            control={
-              <CodexSelect
-                label={t('computerUseChromeHistory')}
-                value="alwaysAsk"
-                options={askOnlyOptions}
-                onChange={() => showUnavailable('computerUseChromePermissionUnavailable')}
-                disabled
-                title={unavailableTitle}
-              />
-            }
-          />
-          <CodexSettingsRow
-            title={t('computerUseChromeDownload')}
-            description={t('computerUseChromeDownloadDesc')}
-            control={
-              <CodexSelect
-                label={t('computerUseChromeDownload')}
-                value="alwaysAsk"
-                options={askOnlyOptions}
-                onChange={() => showUnavailable('computerUseChromePermissionUnavailable')}
-                disabled
-                title={unavailableTitle}
-              />
-            }
-          />
-          <CodexSettingsRow
-            title={t('computerUseChromeUpload')}
-            description={t('computerUseChromeUploadDesc')}
-            control={
-              <CodexSelect
-                label={t('computerUseChromeUpload')}
-                value="alwaysAsk"
-                options={askOnlyOptions}
-                onChange={() => showUnavailable('computerUseChromePermissionUnavailable')}
-                disabled
-                title={unavailableTitle}
-              />
-            }
-          />
         </CodexSettingsPanel>
       </CodexSettingsSection>
 
       <CodexSettingsSection
         title={t('browserSitePermissionsTitle')}
         subtitle={t('browserSitePermissionsSubtitle')}
-        action={
-          <CodexToolbarButton
-            onClick={() => showUnavailable('browserSitePermissionsAddUnavailable')}
-            disabled
-            title={unavailableTitle}
-          >
-            <Plus className="h-5 w-5" strokeWidth={1.9} />
-            {t('browserSitePermissionsAdd')}
-          </CodexToolbarButton>
-        }
       >
         {browserUse.sitePermissions.length > 0 ? (
           <CodexSettingsPanel>
@@ -817,7 +750,6 @@ export function ComputerUseSettingsSection({ ctx }: { ctx: Record<string, any> }
   const statusDescription: ReactNode = backendUnavailable
     ? t('computerUseBackendUnavailable')
     : t('computerUseAnyAppDesc')
-  const unavailableTitle = t('settingsFeatureUnavailable')
 
   if (panel === 'chrome') {
     return (
@@ -890,22 +822,6 @@ export function ComputerUseSettingsSection({ ctx }: { ctx: Record<string, any> }
         </CodexSettingsPanel>
 
         <ComputerUsePermissionPanel t={t} />
-      </CodexSettingsSection>
-
-      <CodexSettingsSection
-        title={t('computerUseAlwaysAllowedApps')}
-        action={
-          <CodexToolbarButton
-            onClick={() => showUnavailable('computerUseAllowedAppsAddUnavailable')}
-            disabled
-            title={unavailableTitle}
-          >
-            <Plus className="h-5 w-5" strokeWidth={1.9} />
-            {t('computerUseAllowedAppsAdd')}
-          </CodexToolbarButton>
-        }
-      >
-        <CodexEmptyState>{t('computerUseAllowedAppsEmpty')}</CodexEmptyState>
       </CodexSettingsSection>
 
       <CodexSettingsSection

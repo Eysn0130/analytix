@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
+import * as logger from '../logger'
 import { createNativeOfficeController, type NativeOfficeEngineRequest } from './native-office-controller'
 import type { PluginPackageView } from '../../../packages/runtime/src/contracts/plugin-package-host'
 const hash = (value: Uint8Array) => createHash('sha256').update(value).digest('hex')
@@ -8,9 +9,10 @@ const objectId = 'a'.repeat(64), sessionId = 'e'.repeat(48), revision = hash(ori
 const threadId = 'thread-native', changeId = '9'.repeat(64), saveOperationId = 'save_core_0001', undoOperationId = 'undo_core_0001'
 const open = {action:'open',threadId,workspace:'/workspace',path:'a.docx',bounds:{x:0,y:0,width:800,height:600}}
 function setup(typed = false, presentation = false) {
+  const openRequest = { ...open, path: presentation ? 'a.pptx' : typed ? 'a.xlsx' : 'a.docx' }
   const presentationSelection={pageIndex:0,targetShapeIndex:0,pageWidth100thMm:1000,pageHeight100thMm:1000,shapes:[{shapeIndex:0,kind:'rectangle' as const,name:'shape',text:'selected',x100thMm:100,y100thMm:100,width100thMm:100,height100thMm:100,fillRGB:'#123456'}]}
   const presentationReview={before:presentationSelection,after:{...presentationSelection,shapes:[{...presentationSelection.shapes[0],fillRGB:'#abcdef'}]}}
-  let failTyped=false, rejectNoop=false, rejectText=false, rejectFidelity=false
+  let failTyped=false, busyTyped=false, rejectNoop=false, rejectText=false, rejectFidelity=false
   const workbook={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[{sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number' as const,numberFormat:0,rowVisible:true as const,columnVisible:true as const,merged:false as const}]}
   const workbookReview={before:workbook,after:{...workbook,cells:[{...workbook.cells[0],text:'2',formula:'2',value:2}]},results:['']}
   let current = {documentId:objectId,version:revision,kind:(presentation?'pptx':typed?'xlsx':'docx') as 'pptx'|'xlsx'|'docx',changeSequence:0,acknowledgedSequence:0,dirty:false}
@@ -22,9 +24,11 @@ function setup(typed = false, presentation = false) {
   let interruptSave=false, interruptResume=false, interruptUndo=false, loseResumeReceipt=false, pendingCandidate:Uint8Array|undefined
   const statusOperationIds:string[]=[]
   const receipts = new Map<string, any>()
+  let scopeOverride:Record<string,unknown> = {}, selectionReadError=false
+  const selectionCalls:string[]=[]
   let scope:any, loseDecision=false, acceptedOperation:string|undefined, replacementText='proposed'
   let openGate:Promise<void>|undefined, releaseOpen:(()=>void)|undefined
-  const pkg:PluginPackageView={packageId:presentation?'analytix-presentations':typed?'analytix-spreadsheets':'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','commit-object','object-status','capture-selection','proposal-read','proposal-accept','proposal-reject','selection-revoke','object-recovery','undo-change','cancel-change','resume-change']}
+  const pkg:PluginPackageView={packageId:presentation?'analytix-presentations':typed?'analytix-spreadsheets':'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','commit-object','object-status','capture-selection','selection-read','proposal-read','proposal-accept','proposal-reject','selection-revoke','object-recovery','undo-change','cancel-change','resume-change']}
   const selection=()=>presentation?({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'shapes',scope:'page-and-shape-index-at-version-and-change-sequence',shapes:[{pageIndex:0,shapeIndex:0,name:'shape',type:'com.sun.star.drawing.RectangleShape',text:'selected'}],presentation:presentationSelection,token:'selection_123',capture:{capturedCharacters:8,totalCharacters:8,truncated:false,unit:'utf-16',complete:true}}):typed?({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'cells',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],cells:workbook.cells,token:'selection_123',capture:{capturedCharacters:1,totalCharacters:1,truncated:false,unit:'utf-16',complete:true}}):({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'text',scope:'session-text-range-at-version-and-change-sequence',text:'selected',token:'selection_123',capture:{capturedCharacters:8,totalCharacters:8,truncated:false,unit:'utf-16',complete:true}})
   const requests:NativeOfficeEngineRequest[]=[]
   const createController=()=>createNativeOfficeController({
@@ -32,7 +36,8 @@ function setup(typed = false, presentation = false) {
       if(r.action==='list')return {ok:true,packages:[pkg]}
       if(r.action!=='invoke')throw Error('not authorized')
       if(r.operation==='open-object'){await openGate;return {ok:true,output:{ok:true,document:{objectId,sessionId,path:presentation?'/workspace/a.pptx':typed?'/workspace/a.xlsx':'/workspace/a.docx',revision:saved,content:Buffer.from(corruptReload?original:corruptOpen?edited:saved===revision?original:edited).toString('base64')}}}}
-      if(r.operation==='capture-selection'){scope={...r.input,scopeId,parts:[{kind:'literal',text:'selected'}]};delete scope.text;return {ok:true,output:{ok:true,scope}}}
+      if(r.operation==='capture-selection'){selectionCalls.push(r.operation);scope={...r.input,scopeId,parts:[{kind:'literal',text:'selected'}],...scopeOverride};delete scope.text;return {ok:true,output:{ok:true,scope}}}
+      if(r.operation==='selection-read'){selectionCalls.push(r.operation);return {ok:true,output:selectionReadError?{ok:false,code:'scope_invalid',message:'stale'}:{ok:true,scope:{...scope,...scopeOverride}}}}
       if(r.operation==='proposal-read')return {ok:true,output:{ok:true,proposals:[{proposalId,status:'proposed',parts:[{kind:'literal',text:'proposed'}]}],localReviews:[{proposalId,beforeText:'selected raw field',afterText:'proposed raw field'}]}}
       if(r.operation==='object-recovery'){
         const owned=persisted && (persisted.threadId===r.input.threadId || foreignRecovery) ? structuredClone(persisted) : null
@@ -109,13 +114,19 @@ function setup(typed = false, presentation = false) {
       if(r.operation==='object-status'){statusCalls++;statusOperationIds.push(r.input.operationId as string);return {ok:true,output:{ok:true,receipt:receipts.get(r.input.operationId as string)}}}
       throw Error('unexpected Core operation')
     },
-    createSurface(listener){onEvent=listener;return {attach(){},hide(){hidden++},destroy(){destroyed++},async request(r){
+    createSurface(listener){let playbackSequence=0;onEvent=listener;return {attach(){},hide(){hidden++},destroy(){destroyed++},async request(r){
       requests.push(r)
       const base={type:'result',channel:'surface',command:r.command,operationId:r.operationId,documentId:r.documentId,version:r.version,ok:true}
       if(r.command==='open'){if(failReload){failReload=false;throw Error('reload failed')}opened=r.operationId;current={...current,version:r.version,changeSequence:0,acknowledgedSequence:0,dirty:false}}
       if(r.command==='close')return base
+      if(r.command==='local-view'){
+        if(current.kind!=='pptx'||r.action!=='play-read')throw Error('unexpected fixture local-view action')
+        return {...base,state:{...current},view:{zoom:100,zoomType:3,fit:false,page:1,pages:1,readOnly:true,modified:current.dirty,
+          playback:{generation:0,sequence:++playbackSequence,phase:'idle',slideIndex:null,slideCount:null}}}
+      }
       if(r.command==='edit'&&rejectFidelity)throw Error('unsupported-format-fidelity')
       if(r.command==='replace'&&rejectText)throw Error('unsupported-selection')
+      if((r.command==='replaceCells'||r.command==='replacePresentation')&&busyTyped)throw Error('operation-in-progress')
       if((r.command==='replaceCells'||r.command==='replacePresentation')&&failTyped){current={...current,changeSequence:1,dirty:true};throw Error('typed-mutation-failed')}
       if(r.command==='replace'||r.command==='replaceCells'||r.command==='replacePresentation')current={...current,changeSequence:current.changeSequence+1,dirty:true}
       if(r.command==='export')return {...base,state:{...current},bytes:edited,exportedSequence:current.changeSequence}
@@ -125,7 +136,7 @@ function setup(typed = false, presentation = false) {
   let controller=createController()
   const change=()=>{current={...current,changeSequence:current.changeSequence+1,dirty:true};onEvent({type:'changed',operationId:opened,documentId:objectId,version:current.version,state:{...current}})}
   const target=()=>({objectId,revision:current.version,expectedChangeSequence:current.changeSequence})
-  return {rejectFidelity:()=>{rejectFidelity=true},rejectText:()=>{rejectText=true},rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:()=>{failTyped=true},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
+  return {openRequest,busyTyped:(value:boolean)=>{busyTyped=value},scopeOverride:(value:Record<string,unknown>)=>{scopeOverride=value},refuseSelectionRead:()=>{selectionReadError=true},selectionCalls,rejectFidelity:()=>{rejectFidelity=true},rejectText:()=>{rejectText=true},rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:()=>{failTyped=true},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
 }
 test('native annotation preparation is explicit; persisted receipt advances revision, close unknown object never closes active',async()=>{
   const h=setup();expect((await h.controller.request(open)).ok).toBe(true)
@@ -210,9 +221,12 @@ test('renderer manual edit commands are rejected before reaching the native engi
 })
 
 async function applyProposal(h: ReturnType<typeof setup>) {
-  await h.controller.request(open)
-  await h.controller.request({action:'annotate',...h.target()})
-  await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId:'thread-native',editable:true})
+  const opened = await h.controller.request(h.openRequest)
+  if (!opened.ok) return opened
+  const annotated = await h.controller.request({action:'annotate',...h.target()})
+  if (!annotated.ok) return annotated
+  const referenced = await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:true})
+  if (!referenced.ok) return referenced
   return h.controller.request({action:'acceptProposal',...h.target(),scopeId:h.scopeId,proposalId:h.proposalId})
 }
 test('Core rejection of an unchanged proposal never replaces, exports, or commits native bytes',async()=>{
@@ -424,17 +438,22 @@ test('a pending-save query refreshes explicit recovery capability without writin
   expect(h.getCommitCalls()).toBe(1);expect(h.getResumeCalls()).toBe(1)
 })
 test('querying an interrupted resume unlocks the same operation for a later explicit click only',async()=>{
-  const h=setup();await pendingSaveAfterRestart(h);h.interruptResume()
-  const resume={action:'resumeChange',threadId,changeId,...h.target()}
-  expect(await h.controller.request(resume)).toMatchObject({ok:false,error:'unknown',view:{saving:true}})
-  expect(await h.controller.request(resume)).toMatchObject({ok:false,error:'unknown'})
-  const engineCount=h.requests.length
-  expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:false,error:'unknown',view:{saving:false,recovery:{pending:{canResume:true,saveOperationId}}}})
-  expect(h.getSaved()).toBe(revision);expect(h.getResumeCalls()).toBe(1)
-  expect(h.getCommitCalls()).toBe(1);expect(h.getUndoCalls()).toBe(0)
-  expect(h.requests).toHaveLength(engineCount)
-  expect(await h.controller.request(resume)).toMatchObject({ok:true,view:{revision:hash(edited),saving:false}})
-  expect(h.getResumeCalls()).toBe(2);expect(h.getCommitCalls()).toBe(1)
+  const diagnostic=vi.spyOn(logger,'logNativeOfficeManualBeginFailure').mockImplementation(()=>undefined)
+  try {
+    const h=setup();await pendingSaveAfterRestart(h);h.interruptResume()
+    const resume={action:'resumeChange',threadId,changeId,...h.target()}
+    expect(await h.controller.request(resume)).toMatchObject({ok:false,error:'unknown',view:{saving:true}})
+    expect(await h.controller.request({action:'beginManualEdit',threadId,...h.target()})).toMatchObject({ok:false,error:'unknown'})
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith('unknown',{schemaAccepted:null,outerCode:null,innerCode:null,pendingSave:false,pendingRecovery:true,pendingManualCancel:false})
+    expect(await h.controller.request(resume)).toMatchObject({ok:false,error:'unknown'})
+    const engineCount=h.requests.length
+    expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:false,error:'unknown',view:{saving:false,recovery:{pending:{canResume:true,saveOperationId}}}})
+    expect(h.getSaved()).toBe(revision);expect(h.getResumeCalls()).toBe(1)
+    expect(h.getCommitCalls()).toBe(1);expect(h.getUndoCalls()).toBe(0)
+    expect(h.requests).toHaveLength(engineCount)
+    expect(await h.controller.request(resume)).toMatchObject({ok:true,view:{revision:hash(edited),saving:false}})
+    expect(h.getResumeCalls()).toBe(2);expect(h.getCommitCalls()).toBe(1)
+  } finally {diagnostic.mockRestore()}
 })
 test('querying an interrupted undo exposes retry but never rolls back until the next explicit click',async()=>{
   const h=setup();await applyProposal(h);h.interruptUndo()
@@ -464,6 +483,23 @@ test.each(['resume','undo'] as const)('a query never unlocks a pending %s using 
 })
 
 
+test.each(['xlsx','pptx'] as const)('a transient %s typed apply refusal retains its healthy owner and prepared review for retry',async(kind)=>{
+ const h=setup(kind==='xlsx',kind==='pptx')
+ expect((await h.controller.request({...open,path:`a.${kind}`})).ok).toBe(true)
+ expect((await h.controller.request({action:'annotate',...h.target()})).ok).toBe(true)
+ expect((await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:true})).ok).toBe(true)
+ h.busyTyped(true)
+ const request={action:'acceptProposal',...h.target(),scopeId:h.scopeId,proposalId:h.proposalId}
+ expect(await h.controller.request(request)).toMatchObject({ok:false,error:'unavailable',view:{status:'ready',editing:true,dirty:false,changeSequence:0,revision}})
+ expect(h.getDestroyed()).toBe(0);expect(h.requests.filter(r=>r.command==='open')).toHaveLength(1)
+ expect(h.requests.some(r=>r.command==='export')).toBe(false);expect(h.getCommitCalls()).toBe(0)
+ expect(h.getPrepared()).toMatchObject({status:'prepared',canCancel:true,revision:''})
+ expect(h.controller.getView()?.appliedProposals??[]).not.toContain(h.proposalId)
+ h.busyTyped(false)
+ expect(await h.controller.request(request)).toMatchObject({ok:true,view:{dirty:false,canUndo:true}})
+ expect(h.getDestroyed()).toBe(0);expect(h.getCommitCalls()).toBe(1)
+ expect(h.requests.filter(r=>r.command===(kind==='pptx'?'replacePresentation':'replaceCells'))).toHaveLength(2)
+})
 test('typed approval uses only replaceCells and the fixed Core save operation',async()=>{
  const h=setup(true);expect((await h.controller.request({...open,path:'a.xlsx'})).ok).toBe(true)
  const result=await applyProposal(h);expect(result.ok,JSON.stringify(result)).toBe(true)
@@ -519,4 +555,472 @@ test('unsupported DOCX format remains previewable without edit authority or a Co
   expect(h.requests.some(r=>r.command==='replace'||r.command==='export')).toBe(false)
   expect(h.getCommitCalls()).toBe(0);expect(h.getSaved()).toBe(revision)
   expect(await h.controller.request({action:'close',objectId})).toMatchObject({ok:true})
+})
+
+
+test('readonly reference preparation and challenge use Core without requesting native edits',async()=>{
+  const h=setup();await h.controller.request(open)
+  expect(await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:false})).toMatchObject({ok:true,view:{scope:{scopeId:h.scopeId,editable:false}}})
+  expect(await h.controller.request({action:'proposals',objectId,scopeId:h.scopeId})).toMatchObject({ok:true})
+  expect(h.controller.getView()?.editing).toBeFalsy()
+  expect(h.selectionCalls).toEqual(['capture-selection','selection-read'])
+  expect(h.requests.every(request=>['open','captureSelection'].includes(request.command))).toBe(true)
+  expect(h.getCommitCalls()).toBe(0)
+  h.refuseSelectionRead()
+  expect(await h.controller.request({action:'proposals',objectId,scopeId:h.scopeId})).toMatchObject({ok:false,error:'stale_selection'})
+})
+test.each([
+  {sessionId:'f'.repeat(48)},{threadId:'other'},{selectionToken:'other_token'},
+  {baseRevision:'f'.repeat(64)},{changeSequence:1},{editable:true}
+])('rejects a schema-valid but wrongly bound readonly capture %j',async mismatch=>{
+  const h=setup();await h.controller.request(open);h.scopeOverride(mismatch)
+  expect(await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:false})).toMatchObject({ok:false,error:'invalid_response'})
+  expect(h.controller.getView()?.scope).toBeUndefined()
+  expect(h.getCommitCalls()).toBe(0)
+})
+test('rejects a readonly Core challenge whose binding drifted since capture',async()=>{
+  const h=setup();await h.controller.request(open)
+  await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:false})
+  h.scopeOverride({baseRevision:'f'.repeat(64)})
+  expect(await h.controller.request({action:'proposals',objectId,scopeId:h.scopeId})).toMatchObject({ok:false,error:'stale_selection'})
+  expect(h.getCommitCalls()).toBe(0)
+})
+
+
+test('dirty selection references require explicit save-first before capturing Core authority',async()=>{
+  const h=setup();await h.controller.request(open);await h.controller.request({action:'annotate',...h.target()});h.change()
+  const count=h.selectionCalls.filter(call=>call==='capture-selection').length
+  expect(await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:false})).toMatchObject({ok:false,error:'unsaved_changes',view:{dirty:true}})
+  expect(h.selectionCalls.filter(call=>call==='capture-selection')).toHaveLength(count)
+  expect(h.getCommitCalls()).toBe(0)
+})
+
+// Synthetic protocol fixture only: a freeze ACK below is not Qt/IME runtime evidence.
+function setupManual(beginResponse?: unknown) {
+  type ManualAuthority = {version:2;origin:'manual';changeId:string;baseRevision:string;saveOperationId:string;undoOperationId:string}
+  type ManualState = {version:2;origin:'manual';changeId:string;baseRevision:string;generation:number;frozen:boolean}
+  type State = {documentId:string;version:string;kind:'docx';changeSequence:number;acknowledgedSequence:number;dirty:boolean;manual?:ManualState}
+  let current:State = {documentId:objectId,version:revision,kind:'docx',changeSequence:0,acknowledgedSequence:0,dirty:false}
+  let savedBytes=original.slice(), workBytes=original.slice(), opened='', generation=0, serial=0, operation=0
+  let onEvent:(event:unknown)=>void=()=>{}, pending:any, committed:any, activeAuthority:ManualAuthority|undefined
+  let loseBegin=false, invalidAuthority=false, loseCommit=false, refuseFreeze=false, emptyCapture=false, foreignFreeze=false, wrongExportSequence=false
+  let queuedInput=false, compositionPending=false, refuseCommit=false, refuseExport=false, loseCancelReply=false
+  let loseAck:'before'|'after'|undefined
+  let lastLease:{generation:number;sequence:number;token:string}|undefined
+  let formatState={fontFamily:'Noto Sans CJK SC',fontSize:12,bold:false,italic:false,underline:false}
+  const requests:NativeOfficeEngineRequest[]=[], calls:{operation:string;input:any}[]=[], order:string[]=[]
+  const begins=new Map<string,ManualAuthority>(), receipts=new Map<string,any>(), cancelled=new Map<string,any>()
+  const pkg:PluginPackageView={packageId:'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','begin-manual-edit','commit-object','object-status','capture-selection','selection-revoke','object-recovery','cancel-change','undo-change']}
+  const selection=(empty=false)=>{
+    const token=`manual_selection_${++serial}`
+    lastLease=current.manual?{generation:current.manual.generation,sequence:current.changeSequence,token}:undefined
+    const text=empty?'':'selected'
+    return {documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'text',scope:'session-text-range-at-version-and-change-sequence',text,token,
+      capture:{capturedCharacters:text.length,totalCharacters:text.length,truncated:false,unit:'utf-16',complete:true},
+      ...(lastLease?{rangeLease:{...lastLease},formatState:{...formatState}}:{})}
+  }
+  const mutate=()=>{
+    expect(current.manual?.frozen).toBe(false)
+    current={...current,changeSequence:current.changeSequence+1,dirty:true}
+    workBytes=new Uint8Array([80,75,workBytes[2]+1])
+  }
+  const controller=createNativeOfficeController({
+    newOperationId:()=>`manual_host_${++operation}`,
+    onChange(){},
+    async packageHost(request):Promise<any>{
+      if(request.action==='list')return {ok:true,packages:[pkg]}
+      if(request.action!=='invoke')throw Error('unexpected package action')
+      const {operation:op,input}=request
+      calls.push({operation:op,input:structuredClone(input)});order.push(`core:${op}`)
+      if(op==='open-object')return {ok:true,output:{ok:true,document:{objectId,sessionId,path:'/workspace/a.docx',revision:hash(savedBytes),content:Buffer.from(savedBytes).toString('base64')}}}
+      if(op==='object-recovery')return {ok:true,output:{ok:true,recovery:{current:committed??null,pending:pending??null}}}
+      if(op==='begin-manual-edit'){
+        expect(input).toMatchObject({sessionId,threadId,baseRevision:hash(savedBytes)})
+        if(beginResponse !== undefined)return beginResponse
+        const id=input.operationId as string
+        let authority=begins.get(id)
+        if(!authority){
+          const index=begins.size+1
+          authority={version:2,origin:'manual',changeId:hash(Buffer.from(`manual-change-${index}`)),baseRevision:hash(savedBytes),saveOperationId:`manual_save_${index}`,undoOperationId:`manual_undo_${index}`}
+          begins.set(id,authority)
+          pending={...authority,threadId,revision:'',status:'prepared',canUndo:false,canCancel:true,canRetryUndo:false,canResume:false,createdAt:'2026-10-15T00:00:00Z',savedAt:''}
+        }
+        if(loseBegin){loseBegin=false;throw Error('reply lost after reserving manual authority')}
+        if(invalidAuthority){const {version:_version,origin:_origin,...missingOrigin}=authority;return {ok:true,output:{ok:true,manual:missingOrigin}}}
+        return {ok:true,output:{ok:true,manual:authority}}
+      }
+      if(op==='commit-object'){
+        expect(input).toMatchObject({sessionId,threadId,changeId:pending.changeId,baseRevision:pending.baseRevision,operationId:pending.saveOperationId})
+        if(refuseCommit){refuseCommit=false;return {ok:true,output:{ok:false,code:'not_text',message:'synthetic candidate refusal'}}}
+        const bytes=new Uint8Array(Buffer.from((input.content as any).data,'base64'))
+        expect(input.content).toEqual({encoding:'base64',kind:'docx',data:Buffer.from(bytes).toString('base64'),sha256:hash(bytes),byteLength:bytes.byteLength})
+        expect(input.baseRevision).toBe(hash(savedBytes));savedBytes=bytes
+        const receipt={operationId:input.operationId,revision:hash(bytes),status:'committed',savedAt:'2026-10-15T00:01:00Z'}
+        receipts.set(input.operationId as string,receipt)
+        committed={...pending,revision:receipt.revision,status:'committed',savedAt:receipt.savedAt,canUndo:true,canCancel:false};pending=undefined
+        if(loseCommit){loseCommit=false;throw Error('reply lost after committing bytes')}
+        return {ok:true,output:{ok:true,receipt}}
+      }
+      if(op==='object-status')return {ok:true,output:{ok:true,receipt:receipts.get(input.operationId as string)}}
+      if(op==='cancel-change'){
+        const prior=pending??cancelled.get(input.changeId as string)
+        expect(prior).toMatchObject({version:2,origin:'manual',revision:'',canCancel:true})
+        expect(input).toEqual({sessionId,threadId,changeId:prior.changeId,baseRevision:hash(savedBytes)})
+        if(pending){cancelled.set(pending.changeId,structuredClone(pending));pending=undefined}
+        else expect(cancelled.has(input.changeId as string)).toBe(true)
+        if(loseCancelReply){loseCancelReply=false;throw Error('reply lost after Core cancelled the manual reservation')}
+        return {ok:true,output:{ok:true,recovery:{current:committed??null,pending:null}}}
+      }
+      if(op==='capture-selection'){
+        const {text,...binding}=input
+        expect(text).toBe('selected')
+        return {ok:true,output:{ok:true,scope:{...binding,scopeId:'d'.repeat(48),parts:[{kind:'literal',text}]}}}
+      }
+      if(op==='close-object')return {ok:true,output:{ok:true,closed:true}}
+      if(op==='selection-revoke')return {ok:true,output:{ok:true,revoked:true}}
+      throw Error(`unexpected Core operation: ${op}`)
+    },
+    createSurface(listener){onEvent=listener;return {attach(){},hide(){order.push('surface:hide')},destroy(){order.push('surface:destroy')},async request(request){
+      requests.push(structuredClone(request));order.push(`engine:${request.command}`)
+      const base={type:'result',channel:'surface',command:request.command,operationId:request.operationId,documentId:request.documentId,version:request.version,ok:true}
+      if(request.command==='close')return base
+      if(request.command==='open'){
+        opened=request.operationId;workBytes=request.bytes!.slice();activeAuthority=undefined
+        current={documentId:objectId,version:request.version,kind:'docx',changeSequence:0,acknowledgedSequence:0,dirty:false}
+      }
+      if(request.command==='manual-edit'){
+        expect([...begins.values()]).toContainEqual(request.manual)
+        activeAuthority=request.manual!
+        const {saveOperationId:_save,undoOperationId:_undo,...identity}=activeAuthority
+        current={...current,manual:{...identity,generation:++generation,frozen:false}}
+      }
+      if(request.command==='format'){
+        expect(request.changeId).toBe(activeAuthority?.changeId)
+        if(JSON.stringify(request.rangeLease)!==JSON.stringify(lastLease))throw Error('stale-selection')
+        mutate()
+        const format=request.format!
+        if(format.kind==='font-family')formatState={...formatState,fontFamily:format.value}
+        else if(format.kind==='font-size')formatState={...formatState,fontSize:format.value}
+        else formatState={...formatState,[format.kind]:format.value}
+        const selected=selection()
+        return {...base,state:structuredClone(current),selection:selected,rangeLease:{...lastLease!},formatState:{...formatState}}
+      }
+      if(request.command==='validateSelection'){
+        if(request.selectionToken!==lastLease?.token||request.expectedChangeSequence!==current.changeSequence)throw Error('stale-selection')
+        return {...base,state:structuredClone(current)}
+      }
+      if(request.command==='freeze'){
+        if(refuseFreeze)throw Error('native-input-unavailable')
+        if(compositionPending)throw Error('native-composition-pending')
+        if(queuedInput){queuedInput=false;mutate()}
+        expect(request.changeId).toBe(activeAuthority?.changeId)
+        current={...current,manual:{...current.manual!,frozen:true}}
+        return {...base,state:structuredClone(current),freezeAck:{changeId:activeAuthority!.changeId,operationId:foreignFreeze?'stale_freeze_0001':request.operationId,generation:current.manual!.generation,sequence:current.changeSequence}}
+      }
+      if(request.command==='export'){
+        const frozen=requests.filter(r=>r.command==='freeze').at(-1)!
+        expect(request.freezeAck).toEqual({changeId:activeAuthority!.changeId,operationId:frozen.operationId,generation:current.manual!.generation,sequence:current.changeSequence})
+        expect(request).toMatchObject({changeId:activeAuthority!.changeId,operationId:activeAuthority!.saveOperationId})
+        if(refuseExport){refuseExport=false;throw Error('native-input-unavailable')}
+        return {...base,state:structuredClone(current),bytes:workBytes.slice(),exportedSequence:current.changeSequence-(wrongExportSequence?1:0)}
+      }
+      if(request.command==='ack'){
+        if(request.status==='failed'){
+          expect(request).toMatchObject({exportOperationId:activeAuthority!.saveOperationId,exportedSequence:current.changeSequence})
+          return {...base,state:structuredClone(current),selection:selection()}
+        }
+        expect(request).toMatchObject({status:'committed',exportOperationId:activeAuthority!.saveOperationId,exportedSequence:current.changeSequence,persistedVersion:hash(savedBytes)})
+        const failure=loseAck;loseAck=undefined
+        if(failure==='before')throw Error('native-input-unavailable')
+        const {manual:_manual,...state}=current
+        current={...state,version:request.persistedVersion!,acknowledgedSequence:request.exportedSequence!,dirty:false}
+        activeAuthority=undefined
+        if(failure==='after')throw Error('office-operation-timeout-unknown')
+      }
+      const empty=request.command==='captureSelection'&&emptyCapture
+      if(empty)emptyCapture=false
+      return {...base,state:structuredClone(current),selection:selection(empty)}
+    }}}
+  })
+  const target=()=>({objectId,revision:current.version,expectedChangeSequence:current.changeSequence})
+  return {controller,requests,calls,order,target,
+    begin:()=>controller.request({action:'beginManualEdit',threadId,...target()}),
+    change(){mutate();onEvent({type:'changed',operationId:opened,documentId:objectId,version:current.version,state:structuredClone(current)})},
+    lease:()=>({...lastLease!}),driftSelection:()=>{lastLease={...lastLease!,token:'worker_range_moved'}},authority:()=>[...begins.values()].at(-1)!,saved:()=>hash(savedBytes),
+    loseBegin:()=>{loseBegin=true},invalidAuthority:()=>{invalidAuthority=true},loseCommit:()=>{loseCommit=true},loseAck:(when:'before'|'after')=>{loseAck=when},
+    queuedInput:()=>{queuedInput=true},compositionPending:()=>{compositionPending=true},refuseCommit:()=>{refuseCommit=true},refuseExport:()=>{refuseExport=true},loseCancelReply:()=>{loseCancelReply=true},
+    refuseFreeze:()=>{refuseFreeze=true},emptyCapture:()=>{emptyCapture=true},foreignFreeze:()=>{foreignFreeze=true},wrongExportSequence:()=>{wrongExportSequence=true}}
+}
+
+const manualBeginPrivateDetail='SYNTHETIC_PRIVATE_MANUAL_BEGIN_DETAIL_31E7'
+test.each([
+  {name:'validated inner refusal',reply:{ok:true,output:{ok:false,code:'not_text',message:manualBeginPrivateDetail}},error:'unknown',folded:'unavailable',state:{schemaAccepted:true,outerCode:null,innerCode:'not_text'}},
+  {name:'validated inner forbidden',reply:{ok:true,output:{ok:false,code:'forbidden',message:manualBeginPrivateDetail}},error:'forbidden',folded:'forbidden',state:{schemaAccepted:true,outerCode:null,innerCode:'forbidden'}},
+  {name:'validated outer refusal',reply:{ok:false,code:'conflict',message:manualBeginPrivateDetail},error:'package_unavailable',folded:'package_unavailable',state:{schemaAccepted:true,outerCode:'conflict',innerCode:null}},
+  {name:'unvalidated outer code',reply:{ok:false,code:manualBeginPrivateDetail,message:manualBeginPrivateDetail},error:'invalid_response',folded:'invalid_response',state:{schemaAccepted:false,outerCode:null,innerCode:null}},
+  {name:'unvalidated inner code',reply:{ok:true,output:{ok:false,code:manualBeginPrivateDetail,message:manualBeginPrivateDetail}},error:'invalid_response',folded:'invalid_response',state:{schemaAccepted:false,outerCode:null,innerCode:null}}
+])('manual begin diagnostics preserve only the closed cause of $name',async({reply,error,folded,state})=>{
+  const diagnostic=vi.spyOn(logger,'logNativeOfficeManualBeginFailure').mockImplementation(()=>undefined)
+  try {
+    const h=setupManual(reply);await h.controller.request(open)
+    expect(await h.begin()).toMatchObject({ok:false,error,view:{dirty:false}})
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith(folded,{...state,pendingSave:false,pendingRecovery:false,pendingManualCancel:false})
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain(manualBeginPrivateDetail)
+    expect(h.calls.filter(call=>call.operation==='begin-manual-edit')).toHaveLength(1)
+    expect(h.requests.some(request=>['manual-edit','edit','format','export'].includes(request.command))).toBe(false)
+    expect(h.controller.getView()?.manual).toBeUndefined()
+  } finally {diagnostic.mockRestore()}
+})
+
+test('manual input waits for explicit Core authority and retries the same uncertain begin operation',async()=>{
+  const diagnostic=vi.spyOn(logger,'logNativeOfficeManualBeginFailure').mockImplementation(()=>undefined)
+  try {
+    const h=setupManual();await h.controller.request(open);h.loseBegin()
+    expect(await h.begin()).toMatchObject({ok:false,error:'unknown',view:{dirty:false}})
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith('unavailable',{schemaAccepted:null,outerCode:null,innerCode:null,pendingSave:false,pendingRecovery:false,pendingManualCancel:false})
+    expect(h.requests.some(r=>r.command==='manual-edit')).toBe(false)
+    expect(await h.controller.request({...open,threadId:'other-thread'})).toMatchObject({ok:false,error:'unknown'})
+    expect(h.calls.some(c=>c.operation==='begin-manual-edit'&&c.input.threadId==='other-thread')).toBe(false)
+    expect(await h.begin()).toMatchObject({ok:true,view:{editing:true,manual:{version:2,origin:'manual',frozen:false}}})
+    const begins=h.calls.filter(c=>c.operation==='begin-manual-edit')
+    expect(begins).toHaveLength(2);expect(begins[1].input).toEqual(begins[0].input)
+    expect(h.order.indexOf('core:begin-manual-edit')).toBeLessThan(h.order.indexOf('engine:manual-edit'))
+    const count=h.requests.length
+    expect(await h.begin()).toMatchObject({ok:true})
+    expect(h.calls.filter(c=>c.operation==='begin-manual-edit')).toHaveLength(2);expect(h.requests).toHaveLength(count)
+    expect(diagnostic).toHaveBeenCalledOnce()
+  } finally {diagnostic.mockRestore()}
+})
+test('a clean manual authority cannot transfer to another thread and closing cancels its reservation without reopening',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin()
+  const count=h.requests.length
+  expect(await h.controller.request({...open,threadId:'other-thread'})).toMatchObject({ok:false,error:'unsaved_changes',view:{dirty:false,manual:{origin:'manual'}}})
+  expect(h.requests).toHaveLength(count)
+  expect(h.calls.some(c=>c.operation==='begin-manual-edit'&&c.input.threadId==='other-thread')).toBe(false)
+  expect(await h.begin()).toMatchObject({ok:true})
+  expect(await h.controller.request({action:'close',objectId})).toEqual({ok:true,view:null})
+  expect(h.calls.filter(c=>c.operation==='cancel-change')).toHaveLength(1)
+  expect(h.requests.filter(r=>r.command==='open')).toHaveLength(1)
+  expect(h.calls.some(c=>c.operation==='commit-object'||c.operation==='undo-change')).toBe(false)
+  expect(h.saved()).toBe(revision)
+})
+test('closing a clean manual view freezes queued input and the later save reuses that exact proof once',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.queuedInput()
+  expect(h.controller.getView()).toMatchObject({dirty:false,changeSequence:0})
+  expect(await h.controller.request({action:'close',objectId})).toMatchObject({ok:false,error:'unsaved_changes',view:{revision,dirty:true,changeSequence:1,manual:{frozen:true}}})
+  const freeze=h.requests.filter(r=>r.command==='freeze')
+  expect(freeze).toHaveLength(1)
+  expect(h.requests.some(r=>r.command==='close'||r.command==='export')).toBe(false)
+  expect(h.calls.some(c=>c.operation==='cancel-change'||c.operation==='close-object'||c.operation==='commit-object')).toBe(false)
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:true,view:{revision:h.saved(),dirty:false,editing:false}})
+  expect(h.requests.filter(r=>r.command==='freeze')).toEqual(freeze)
+  expect(h.requests.filter(r=>r.command==='export')).toHaveLength(1)
+  expect(h.requests.find(r=>r.command==='export')?.freezeAck?.operationId).toBe(freeze[0].operationId)
+  expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(1)
+  expect(h.saved()).toBe(hash(edited))
+})
+test('pending composition prevents a clean manual close from cancelling its Core reservation',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.compositionPending()
+  expect(await h.controller.request({action:'close',objectId})).toMatchObject({ok:false,error:'composition_pending',view:{revision,dirty:false,manual:{origin:'manual'}}})
+  expect(h.requests.filter(r=>r.command==='freeze')).toHaveLength(1)
+  expect(h.requests.some(r=>r.command==='close'||r.command==='export'||r.command==='ack')).toBe(false)
+  expect(h.calls.some(c=>c.operation==='cancel-change'||c.operation==='close-object'||c.operation==='commit-object')).toBe(false)
+  expect(h.saved()).toBe(revision)
+})
+test('missing proposal fields never substitute for the explicit manual authority discriminator',async()=>{
+  const h=setupManual();await h.controller.request(open);h.invalidAuthority()
+  expect(await h.begin()).toMatchObject({ok:false,error:'invalid_response',view:{dirty:false}})
+  expect(h.controller.getView()?.manual).toBeUndefined()
+  expect(h.requests.some(r=>r.command==='manual-edit'||r.command==='format'||r.command==='export')).toBe(false)
+})
+test('manual formatting rejects a forged or stale lease and accepts each renewed native token',async()=>{
+  const h=setupManual();await h.controller.request(open);expect((await h.begin()).ok).toBe(true)
+  const lease=h.lease(),changeId=h.authority().changeId
+  expect(await h.controller.request({action:'format',...h.target(),changeId,rangeLease:{...lease,token:'forged_selection'},format:{kind:'bold',value:true}})).toMatchObject({ok:false,error:'stale_selection'})
+  expect(await h.controller.request({action:'format',...h.target(),changeId,rangeLease:lease,format:{kind:'bold',value:true}})).toMatchObject({ok:true,view:{dirty:true,changeSequence:1,selection:{formatState:{bold:true}}}})
+  const renewed=h.lease();expect(renewed.token).not.toBe(lease.token)
+  expect(await h.controller.request({action:'format',...h.target(),changeId,rangeLease:lease,format:{kind:'italic',value:true}})).toMatchObject({ok:false,error:'stale_selection'})
+  expect(await h.controller.request({action:'format',...h.target(),changeId,rangeLease:renewed,format:{kind:'font-family',value:'Noto Serif CJK SC'}})).toMatchObject({ok:true,view:{changeSequence:2,selection:{formatState:{bold:true,fontFamily:'Noto Serif CJK SC'}}}})
+  expect(h.requests.filter(r=>r.command==='format')).toHaveLength(3)
+  expect(h.calls.some(c=>c.operation==='commit-object')).toBe(false)
+})
+test('saveAll freezes queued native input in a clean manual view before deciding whether Core has bytes to commit',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.queuedInput()
+  expect(h.controller.getView()).toMatchObject({dirty:false,changeSequence:0})
+  expect(await h.controller.saveAll()).toMatchObject({ok:true,view:{revision:h.saved(),dirty:false,editing:false,changeSequence:1,acknowledgedSequence:1}})
+  expect(h.saved()).toBe(hash(edited))
+  expect(h.requests.filter(r=>r.command==='freeze')).toHaveLength(1)
+  expect(h.requests.filter(r=>r.command==='export')).toHaveLength(1)
+  expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(1)
+  expect(h.calls.some(c=>c.operation==='cancel-change')).toBe(false)
+})
+test('a clean manual view with pending composition cannot save or export before native confirmation',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.compositionPending()
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:false,error:'composition_pending',view:{dirty:false,revision}})
+  expect(h.requests.filter(r=>r.command==='freeze')).toHaveLength(1)
+  expect(h.requests.some(r=>r.command==='export'||r.command==='ack')).toBe(false)
+  expect(h.calls.some(c=>c.operation==='commit-object'||c.operation==='cancel-change')).toBe(false)
+  expect(h.saved()).toBe(revision)
+})
+test('a truly clean native freeze cancels the reservation and rereads Core into a readonly copy without a commit',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin()
+  const count=h.order.length
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:true,view:{revision,dirty:false}})
+  expect(h.controller.getView()?.manual).toBeUndefined();expect(h.controller.getView()?.editing).not.toBe(true)
+  expect(h.requests.filter(r=>r.command==='freeze')).toHaveLength(1)
+  expect(h.requests.some(r=>r.command==='export'||r.command==='ack')).toBe(false)
+  expect(h.calls.filter(c=>c.operation==='cancel-change')).toHaveLength(1)
+  expect(h.calls.some(c=>c.operation==='commit-object'||c.operation==='undo-change')).toBe(false)
+  expect(h.order.slice(count).filter(item=>['engine:freeze','core:open-object','core:cancel-change','engine:open'].includes(item))).toEqual(['engine:freeze','core:open-object','core:cancel-change','core:open-object','engine:open'])
+  expect(h.requests.filter(r=>r.command==='open').at(-1)).toMatchObject({bytes:original,version:revision})
+})
+test('a rejected frozen manual save requires explicit recovery before another begin or save can mutate',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.change();h.refuseCommit()
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:false,error:'save_failed',view:{dirty:true,saving:false,manual:{frozen:true}}})
+  const count=h.requests.length
+  expect(await h.begin()).toMatchObject({ok:false,error:'unsaved_changes'})
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:false,error:'unsaved_changes'})
+  expect(h.requests).toHaveLength(count)
+  expect(h.calls.filter(c=>c.operation==='begin-manual-edit')).toHaveLength(1)
+  expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(1)
+  expect(h.calls.some(c=>c.operation==='object-status')).toBe(false)
+  expect(h.saved()).toBe(revision)
+})
+test('a failed manual export consumes the attempt and cannot freeze or export its working copy again',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.change();h.refuseExport()
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:false,error:'native_input_unavailable',view:{dirty:true,manual:{frozen:true}}})
+  const count=h.requests.length
+  expect(await h.begin()).toMatchObject({ok:false,error:'unsaved_changes'})
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:false,error:'unsaved_changes'})
+  expect(h.requests).toHaveLength(count)
+  expect(h.requests.filter(r=>r.command==='export')).toHaveLength(1)
+  expect(h.calls.some(c=>c.operation==='commit-object'||c.operation==='object-status')).toBe(false)
+  expect(h.saved()).toBe(revision)
+})
+test('manual saves bind freeze, export and receipt ACK, then require a new transaction at the saved revision',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.change()
+  const first=h.authority()
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:true,view:{dirty:false,editing:false,canUndo:true}})
+  const firstRevision=h.saved(),view=h.controller.getView()
+  expect(view?.manual).toBeUndefined();expect(view?.revision).toBe(firstRevision)
+  expect(h.order.filter(item=>['engine:freeze','engine:export','core:commit-object','engine:ack'].includes(item))).toEqual(['engine:freeze','engine:export','core:commit-object','engine:ack'])
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:false,error:'invalid_request'})
+  expect((await h.begin()).ok).toBe(true)
+  const next=h.authority()
+  expect(next.baseRevision).toBe(firstRevision);expect(next.changeId).not.toBe(first.changeId);expect(next.saveOperationId).not.toBe(first.saveOperationId)
+  h.change();expect((await h.controller.request({action:'save',...h.target()})).ok).toBe(true)
+  const commits=h.calls.filter(c=>c.operation==='commit-object')
+  expect(commits.map(c=>[c.input.changeId,c.input.operationId,c.input.baseRevision])).toEqual([[first.changeId,first.saveOperationId,revision],[next.changeId,next.saveOperationId,firstRevision]])
+  expect(h.saved()).not.toBe(firstRevision)
+})
+test.each(['foreign freeze','different export sequence'] as const)('manual save rejects %s before Core can write',async(kind)=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.change()
+  if(kind==='foreign freeze')h.foreignFreeze();else h.wrongExportSequence()
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:false,error:'invalid_response',view:{dirty:true,revision}})
+  expect(h.calls.some(c=>c.operation==='commit-object')).toBe(false)
+  expect(h.requests.some(r=>r.command==='ack')).toBe(false)
+  if(kind==='foreign freeze')expect(h.requests.some(r=>r.command==='export')).toBe(false)
+})
+test('an unknown manual save only queries its original operation and never exports or commits twice',async()=>{
+  const diagnostic=vi.spyOn(logger,'logNativeOfficeManualBeginFailure').mockImplementation(()=>undefined)
+  try {
+    const h=setupManual();await h.controller.request(open);await h.begin();h.change();h.loseCommit()
+    expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:false,error:'unknown',view:{dirty:true,saving:true,manual:{frozen:true}}})
+    const count=h.requests.length, authority=h.authority()
+    expect(await h.begin()).toMatchObject({ok:false,error:'unknown'})
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith('unknown',{schemaAccepted:null,outerCode:null,innerCode:null,pendingSave:true,pendingRecovery:false,pendingManualCancel:false})
+    expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:true,view:{dirty:false,saving:false,editing:false}})
+    expect(h.calls.filter(c=>c.operation==='object-status').map(c=>c.input.operationId)).toEqual([authority.saveOperationId])
+    expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(1)
+    expect(h.requests.slice(count).map(r=>r.command)).toEqual(['ack'])
+  } finally {diagnostic.mockRestore()}
+})
+test.each(['before','after'] as const)('a confirmed manual commit recovers when the native ACK fails %s applying without a second commit',async(when)=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.change();h.loseAck(when)
+  const count=h.order.length
+  expect(await h.controller.request({action:'save',...h.target()})).toMatchObject({ok:true,view:{revision:h.saved(),dirty:false,editing:false,saving:false,canUndo:true,changeSequence:0,acknowledgedSequence:0}})
+  expect(h.controller.getView()?.manual).toBeUndefined()
+  expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(1)
+  expect(h.calls.some(c=>c.operation==='object-status'||c.operation==='undo-change')).toBe(false)
+  expect(h.requests.filter(r=>r.command==='ack')).toHaveLength(1)
+  expect(h.requests.filter(r=>r.command==='export')).toHaveLength(1)
+  expect(h.requests.filter(r=>r.command==='open')).toHaveLength(2)
+  expect(h.requests.filter(r=>r.command==='open').at(-1)).toMatchObject({version:h.saved(),bytes:edited})
+  expect(h.order.slice(count).filter(item=>['core:commit-object','engine:ack','core:open-object','engine:open'].includes(item))).toEqual(['core:commit-object','engine:ack','core:open-object','engine:open'])
+  expect((await h.controller.request({action:'saveStatus',objectId})).ok).toBe(true)
+  expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(1)
+})
+test('discard cancels only the prepared manual copy and reopens Core bytes without undoing or deleting the file',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.change()
+  const count=h.order.length,changeId=h.authority().changeId
+  expect(await h.controller.request({action:'discardManualEdit',threadId,changeId,...h.target()})).toMatchObject({ok:true,view:{revision,dirty:false}})
+  expect(h.controller.getView()?.editing).not.toBe(true)
+  expect(h.saved()).toBe(revision)
+  expect(h.calls.filter(c=>c.operation==='cancel-change')).toHaveLength(1)
+  expect(h.calls.some(c=>c.operation==='commit-object'||c.operation==='undo-change')).toBe(false)
+  expect(h.order.slice(count).filter(item=>['core:open-object','core:cancel-change','engine:open'].includes(item))).toEqual(['core:open-object','core:cancel-change','core:open-object','engine:open'])
+  expect(h.requests.filter(r=>r.command==='open').at(-1)).toMatchObject({bytes:original,version:revision})
+  expect(h.controller.getView()?.manual).toBeUndefined()
+  expect(await h.controller.request({action:'discardManualEdit',threadId,changeId,...h.target()})).toMatchObject({ok:false,error:'invalid_request'})
+  expect(h.calls.filter(c=>c.operation==='cancel-change')).toHaveLength(1)
+})
+test('a lost discard reply retries the same cancelled change and blocks input, formatting and references until confirmed',async()=>{
+  const diagnostic=vi.spyOn(logger,'logNativeOfficeManualBeginFailure').mockImplementation(()=>undefined)
+  try {
+    const h=setupManual();await h.controller.request(open);await h.begin();h.change();await h.controller.request({action:'captureSelection'})
+    const changeId=h.authority().changeId,rangeLease=h.lease()
+    h.loseCancelReply()
+    expect(await h.controller.request({action:'discardManualEdit',threadId,changeId,...h.target()})).toMatchObject({ok:false,error:'unknown'})
+    const count=h.requests.length
+    expect(await h.begin()).toMatchObject({ok:false,error:'unknown'})
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith('unknown',{schemaAccepted:null,outerCode:null,innerCode:null,pendingSave:false,pendingRecovery:false,pendingManualCancel:true})
+    expect(await h.controller.request({action:'format',...h.target(),changeId,rangeLease,format:{kind:'bold',value:true}})).toMatchObject({ok:false,error:'unknown'})
+    expect(await h.controller.request({action:'reference',...h.target(),selectionToken:rangeLease.token,threadId,editable:false,saveFirst:true})).toMatchObject({ok:false,error:'unknown'})
+    expect(h.requests).toHaveLength(count)
+    expect(h.calls.filter(c=>c.operation==='cancel-change')).toHaveLength(1)
+    const recoveryReads=h.calls.filter(c=>c.operation==='object-recovery').length
+    expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:false,error:'unknown'})
+    expect(h.calls.filter(c=>c.operation==='object-recovery')).toHaveLength(recoveryReads+1)
+    expect(h.calls.filter(c=>c.operation==='cancel-change')).toHaveLength(1)
+    expect(h.requests).toHaveLength(count)
+    expect(await h.controller.request({action:'discardManualEdit',threadId,changeId,...h.target()})).toMatchObject({ok:true,view:{revision,dirty:false}})
+    expect(h.controller.getView()?.manual).toBeUndefined();expect(h.controller.getView()?.editing).not.toBe(true)
+    const cancels=h.calls.filter(c=>c.operation==='cancel-change')
+    expect(cancels).toHaveLength(2);expect(cancels[1].input).toEqual(cancels[0].input)
+    expect(cancels[0].input).toEqual({sessionId,threadId,changeId,baseRevision:revision})
+    expect(h.order.indexOf('surface:destroy')).toBeGreaterThan(-1)
+    expect(h.order.indexOf('surface:destroy')).toBeLessThan(h.order.indexOf('core:cancel-change'))
+    expect(h.calls.some(c=>c.operation==='commit-object'||c.operation==='undo-change'||c.operation==='capture-selection')).toBe(false)
+    expect(h.requests.filter(r=>r.command==='open').at(-1)).toMatchObject({bytes:original,version:revision})
+    expect(h.saved()).toBe(revision)
+  } finally {diagnostic.mockRestore()}
+})
+test('an unreported native range movement rejects a clean manual reference before Core captures stale text',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin()
+  const token=h.lease().token,count=h.requests.length
+  h.driftSelection()
+  expect(h.controller.getView()).toMatchObject({dirty:false,changeSequence:0})
+  expect(await h.controller.request({action:'reference',...h.target(),selectionToken:token,threadId,editable:false})).toMatchObject({ok:false,error:'stale_selection'})
+  expect(h.requests.slice(count).map(r=>r.command)).toEqual(['validateSelection'])
+  expect(h.calls.some(c=>c.operation==='capture-selection'||c.operation==='commit-object')).toBe(false)
+  expect(h.saved()).toBe(revision)
+})
+test('explicit save-and-reference recaptures the saved selection and never reuses its dirty token',async()=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.change();await h.controller.request({action:'captureSelection'})
+  const token=h.lease().token,count=h.order.length
+  expect(await h.controller.request({action:'reference',...h.target(),selectionToken:token,threadId,editable:false})).toMatchObject({ok:false,error:'unsaved_changes'})
+  expect(await h.controller.request({action:'reference',...h.target(),selectionToken:token,threadId,editable:false,saveFirst:true})).toMatchObject({ok:true,view:{dirty:false,scope:{baseRevision:h.saved(),editable:false}}})
+  const capture=h.calls.filter(c=>c.operation==='capture-selection')
+  expect(capture).toHaveLength(1);expect(capture[0].input.selectionToken).not.toBe(token)
+  expect(capture[0].input).toMatchObject({text:'selected',baseRevision:h.saved(),changeSequence:1})
+  expect(h.order.slice(count).filter(item=>['engine:validateSelection','engine:freeze','engine:export','core:commit-object','engine:ack','engine:captureSelection','core:capture-selection'].includes(item))).toEqual(['engine:validateSelection','engine:freeze','engine:export','core:commit-object','engine:ack','engine:captureSelection','core:capture-selection'])
+})
+test.each(['freeze unavailable','empty recapture'] as const)('save-and-reference has no whole-document fallback after %s',async(kind)=>{
+  const h=setupManual();await h.controller.request(open);await h.begin();h.change();await h.controller.request({action:'captureSelection'})
+  const token=h.lease().token
+  if(kind==='freeze unavailable')h.refuseFreeze();else h.emptyCapture()
+  expect(await h.controller.request({action:'reference',...h.target(),selectionToken:token,threadId,editable:false,saveFirst:true})).toMatchObject({ok:false,error:kind==='freeze unavailable'?'native_input_unavailable':'unsupported_selection'})
+  expect(h.calls.some(c=>c.operation==='capture-selection')).toBe(false)
+  expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(kind==='freeze unavailable'?0:1)
+  expect(h.requests.some(r=>r.command==='replace')).toBe(false)
 })

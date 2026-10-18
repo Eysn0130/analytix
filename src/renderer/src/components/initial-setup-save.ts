@@ -1,4 +1,7 @@
+import { ordinarySettingsPatch } from '@shared/schedule-task-mutation'
+import type { AppSettingsPatch } from '@shared/app-settings'
 import {
+  DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_MODEL_PROVIDER_ID,
   MODEL_PROVIDER_PRESETS,
   applyAnalytixRuntimePatch,
@@ -418,7 +421,9 @@ async function syncProviderCredential(input: {
         providerIncarnation: '',
         providerCredentialPurpose: ''
       },
-      provider,
+      provider: provider.id === DEFAULT_MODEL_PROVIDER_ID && !provider.endpoint.trim()
+        ? { ...provider, endpoint: DEFAULT_DEEPSEEK_BASE_URL }
+        : provider,
       credential: {
         kind: 'set',
         purpose: 'provider-api-key',
@@ -621,7 +626,7 @@ export async function persistInitialSetup(input: {
   drafts: InitialSetupDrafts
   selection: InitialSetupSelection
   requestProviderRegistry: ProviderRegistryRequestFn
-  saveSettings: (settings: AppSettingsV1) => Promise<AppSettingsV1>
+  saveSettings: (settings: AppSettingsPatch) => Promise<AppSettingsV1>
 }): Promise<AppSettingsV1> {
   const nextSettings = buildInitialSetupSettings(input.settings, input.drafts, input.selection)
   const providerSettings = getModelProviderSettings(nextSettings)
@@ -665,7 +670,7 @@ export async function persistInitialSetup(input: {
     probe.providerIncarnation !== selected.incarnation) {
     throw new Error('The Provider connection could not be verified. Check the connection in Settings and retry.')
   }
-  const saved = await input.saveSettings(nextSettings)
+  const saved = await input.saveSettings(ordinarySettingsPatch(nextSettings))
   if (snapshot.selectedProviderId !== selectedId) {
     const result = await input.requestProviderRegistry({
       schemaVersion: 1,

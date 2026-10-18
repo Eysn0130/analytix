@@ -545,7 +545,6 @@
         "src/renderer/src/components/chat/FloatingComposerExecutionPicker.tsx",
         "src/renderer/src/components/chat/FloatingComposerModelPicker.tsx",
         "src/renderer/src/components/chat/GitBranchPicker.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/SideConversationPanel.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogStepContent.tsx",
         "src/renderer/src/components/chat/SubagentCallCard.tsx",
@@ -648,7 +647,6 @@
         "ChevronUp"
       ],
       "consumers": [
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/presentation/CodeSourceActions.tsx",
         "src/renderer/src/components/chat/presentation/DisclosureRow.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
@@ -677,7 +675,6 @@
         "src/renderer/src/components/chat/FloatingComposer.tsx",
         "src/renderer/src/components/chat/GeneratedOfficeArtifact.tsx",
         "src/renderer/src/components/chat/GitBranchPicker.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/SideConversationPanel.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogSections.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogStepContent.tsx",
@@ -1132,7 +1129,6 @@
       ],
       "consumers": [
         "src/renderer/src/components/chat/GitBranchPicker.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogSections.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogStepContent.tsx",
         "src/renderer/src/components/settings-gui-update.tsx",
@@ -2214,7 +2210,6 @@
         "src/renderer/src/components/PluginMarketplaceView.tsx",
         "src/renderer/src/components/SettingsSidebar.tsx",
         "src/renderer/src/components/chat/ConnectPhoneView.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/SidebarClaw.tsx",
         "src/renderer/src/components/chat/message-timeline-empty.tsx",
         "src/renderer/src/components/plan/PlanPanel.tsx",
@@ -2222,7 +2217,6 @@
         "src/renderer/src/components/settings-gui-update.tsx",
         "src/renderer/src/components/settings-section-agents.tsx",
         "src/renderer/src/components/settings-section-computer-use.tsx",
-        "src/renderer/src/components/settings-section-llm-debug.tsx",
         "src/renderer/src/components/settings-section-worktree.tsx",
         "src/renderer/src/components/shell/ShellGuiUpdateAction.tsx",
         "src/renderer/src/components/write/WriteFileTree.tsx",
@@ -2474,7 +2468,6 @@
         "src/renderer/src/components/InitialSetupDialog.tsx",
         "src/renderer/src/components/SettingsSidebar.tsx",
         "src/renderer/src/components/chat/FloatingComposer.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/SidebarProjectsSection.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",
         "src/renderer/src/components/sdd/SddAssistantPanel.tsx",
@@ -3004,7 +2997,6 @@
       "reason": "Official source preserves this control meaning.",
       "consumers": [
         "src/renderer/src/components/chat/GitBranchPicker.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogStepContent.tsx",
         "src/renderer/src/components/chat/SidebarClawDialog.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogSections.tsx",
@@ -3365,7 +3357,6 @@
         "src/renderer/src/components/RuntimeBanner.tsx",
         "src/renderer/src/components/PluginMarketplaceView.tsx",
         "src/renderer/src/components/chat/GitBranchPicker.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/FloatingComposerExecutionPicker.tsx",
         "src/renderer/src/components/chat/SideConversationPanel.tsx",
         "src/renderer/src/components/chat/SidebarClawDialogStepContent.tsx",
@@ -3446,7 +3437,6 @@
       "source": "ChevronUp",
       "reason": "Official source preserves this control meaning.",
       "consumers": [
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/settings-section-providers.tsx",
         "src/renderer/src/components/write/WriteMarkdownPreview.tsx",
         "src/renderer/src/components/chat/presentation/CodeSourceActions.tsx",
@@ -4143,7 +4133,6 @@
         "src/renderer/src/components/WorkspaceFilePreviewPanel.tsx",
         "src/renderer/src/components/PluginMarketplaceView.tsx",
         "src/renderer/src/components/chat/GitBranchPicker.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/GeneratedOfficeArtifact.tsx",
         "src/renderer/src/components/chat/SideConversationPanel.tsx",
         "src/renderer/src/components/chat/ConnectPhoneView.tsx",
@@ -4728,7 +4717,6 @@
         "src/renderer/src/components/DevBrowserPanel.tsx",
         "src/renderer/src/components/SettingsSidebar.tsx",
         "src/renderer/src/components/PluginMarketplaceView.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/ConnectPhoneView.tsx",
         "src/renderer/src/components/chat/SidebarClaw.tsx",
         "src/renderer/src/components/plan/PlanPanel.tsx",
@@ -4743,8 +4731,7 @@
         "src/renderer/src/components/write/WriteFileTree.tsx",
         "src/renderer/src/components/write/WriteWorkspaceStart.tsx",
         "src/renderer/src/components/write/WriteSidebar.tsx",
-        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx",
-        "src/renderer/src/components/settings-section-llm-debug.tsx"
+        "src/renderer/src/data-analysis/features/flow/graph/components/FlowShell.tsx"
       ]
     },
     {
@@ -5012,7 +4999,6 @@
         "src/renderer/src/components/DevBrowserPanel.tsx",
         "src/renderer/src/components/InitialSetupDialog.tsx",
         "src/renderer/src/components/SettingsSidebar.tsx",
-        "src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx",
         "src/renderer/src/components/chat/FloatingComposer.tsx",
         "src/renderer/src/components/chat/SidebarProjectsSection.tsx",
         "src/renderer/src/components/chat/message-timeline-bubbles.tsx",

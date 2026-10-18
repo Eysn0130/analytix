@@ -9,6 +9,7 @@ import (
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
+	domainterminaltelemetry "analytix.local/runtime-go/internal/domain/terminaltelemetry"
 )
 
 var ErrRawFailurePersistence = errors.New("raw failure content is not persistable")
@@ -17,6 +18,64 @@ var ErrRawFailurePersistence = errors.New("raw failure content is not persistabl
 // records. Provider, tool, process, and job errors may remain on ephemeral
 // protocol paths, but their raw strings have no durable event representation.
 func validateClosedFailureProjectionV1(value any) error {
+	return validateClosedFailureProjectionTreeV1(closedUsageFailureValidationViewV1(value))
+}
+
+// Within generic public-record validation, only a root usage event may classify
+// this closed telemetry enum as metadata. The original record still passes
+// every other public-record validator, and the terminal CAS/outbox remains
+// responsible for publication authority. Nested lookalikes never acquire this
+// exception through recursive validation.
+func closedUsageFailureValidationViewV1(value any) any {
+	record, ok := value.(map[string]any)
+	if !ok || record["kind"] != "usage" || !generalTerminalDeliveryAllowedKeysV1(record,
+		[]string{"kind", "threadId", "turnId", "model", "usage", "cacheDiagnostics", "timestamp"},
+		append([]string{"seq", "usageSource", "childRunId", "usageFinalStatus"}, generalTerminalDeliveryPublicationMarkerNames...),
+	) {
+		return value
+	}
+	_, modelOK := record["model"].(string)
+	usage, usageOK := record["usage"].(map[string]any)
+	diagnostics, diagnosticsOK := record["cacheDiagnostics"].(map[string]any)
+	if !modelOK || !generalTerminalDeliveryPublicIDV1(contracts.StringField(record, "threadId")) ||
+		!generalTerminalDeliveryPublicIDV1(contracts.StringField(record, "turnId")) ||
+		!generalTerminalDeliveryTimestampV1(contracts.StringField(record, "timestamp")) ||
+		!usageOK || !diagnosticsOK || diagnostics["providerAttemptTelemetryError"] != "invalid_or_incomplete" {
+		return value
+	}
+	diagnosticView := ClosedTerminalTelemetryFailureValidationViewV1(usage, diagnostics)
+	if _, present := diagnosticView["providerAttemptTelemetryError"]; present {
+		return value
+	}
+	view := make(map[string]any, len(record))
+	for key, child := range record {
+		view[key] = child
+	}
+	view["cacheDiagnostics"] = diagnosticView
+	return view
+}
+
+// ClosedTerminalTelemetryFailureValidationViewV1 classifies only the fixed
+// host telemetry error enum after validating the complete real usage/diagnostic
+// pair. Callers must check the original inputs' resource limits first, then run
+// every public-record scanner on usage and the returned diagnostic view. This
+// view grants no event identity or publication authority and never changes the
+// original payload. Unrecognized pairs retain the ordinary strict scan.
+func ClosedTerminalTelemetryFailureValidationViewV1(usage, diagnostics map[string]any) map[string]any {
+	if diagnostics["providerAttemptTelemetryError"] != "invalid_or_incomplete" ||
+		!domainterminaltelemetry.ValidateTerminalTelemetryPublicMapsV1(usage, diagnostics) {
+		return diagnostics
+	}
+	view := make(map[string]any, len(diagnostics)-1)
+	for key, child := range diagnostics {
+		if key != "providerAttemptTelemetryError" {
+			view[key] = child
+		}
+	}
+	return view
+}
+
+func validateClosedFailureProjectionTreeV1(value any) error {
 	switch typed := value.(type) {
 	case map[string]any:
 		acceptedFinalFailure := isAcceptedFinalFailureProjectionV1(typed)
@@ -48,13 +107,13 @@ func validateClosedFailureProjectionV1(value any) error {
 				}
 				return ErrRawFailurePersistence
 			}
-			if err := validateClosedFailureProjectionV1(child); err != nil {
+			if err := validateClosedFailureProjectionTreeV1(child); err != nil {
 				return err
 			}
 		}
 	case []any:
 		for _, child := range typed {
-			if err := validateClosedFailureProjectionV1(child); err != nil {
+			if err := validateClosedFailureProjectionTreeV1(child); err != nil {
 				return err
 			}
 		}

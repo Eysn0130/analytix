@@ -20,6 +20,7 @@ import {
 } from '../../shared/app-settings'
 import { analytixThreadSteerPath } from '../../shared/analytix-endpoints'
 import { sanitizePublicRuntimeValue } from '../../shared/public-runtime-content'
+import { PublicRuntimeErrorResponse } from '../../../packages/runtime/src/contracts/errors'
 import { createProviderRegistryIpcHandler } from '../ipc/provider-registry-ipc'
 import { RuntimeInfoResponse as RuntimeInfoResponseSchema } from '../../../packages/runtime/src/contracts/runtime-info.js'
 import { RuntimeToolsResponse as RuntimeToolsResponseSchema } from '../../../packages/runtime/src/contracts/runtime-tools.js'
@@ -64,12 +65,14 @@ import {
   verifyWitnessedAuthorityStartupIdentity,
   waitForDesktopPrivateHistoryMigrationV2,
   waitForDesktopInstallationKeyPreflightV1,
+  waitForGoConformanceReady,
   runtimeRequestTimeoutMs,
   runtimeRequestViaHost
 } from './analytix-adapter'
 import type {
   MainOwnedRuntimeAuthorityEnvelopeV1
 } from './main-owned-authority-envelope-v1'
+import type { GoRuntimeStartupFailureClass } from '../logger'
 
 const electronApp = vi.hoisted(() => ({ isPackaged: false, getAppPath: () => process.cwd() }))
 vi.mock('electron', () => ({ app: electronApp }))
@@ -649,6 +652,143 @@ describe('Go runtime ready payload', () => {
     ]) {
       expect(() => takeExactGoRuntimeReadyLine(invalid, prefix)).toThrow('ready output is invalid')
     }
+  })
+})
+
+describe('Go runtime startup failure diagnostics', () => {
+  const prefix = 'ANALYTIX_TEST_READY '
+  const privateCanary = 'SYNTHETIC_PRIVATE_STARTUP_DIAGNOSTIC_CANARY'
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it.each([
+    'ready_output_limit', 'ready_line_invalid', 'ready_parse_failed',
+    'ready_payload_invalid', 'ready_child_exited', 'ready_child_error'
+  ] as const)('preserves the %s branch without publishing its private input', async (expectedClass) => {
+    vi.stubEnv('ANALYTIX_STARTUP_TRACE', '1')
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    const child = fakeMigrationChild()
+    const observer = observeGoSidecarExit(child.process, { superviseUnexpectedExit: true, startupAttempt: 17 })
+    const failures: GoRuntimeStartupFailureClass[] = []
+    const rejected = waitForGoConformanceReady(child.process, prefix, 'Go test runtime', true, 1000,
+      (failureClass) => failures.push(failureClass)).catch((error: unknown) => {
+        observer.markStartupFailed(failures[0])
+        return error
+      })
+
+    switch (expectedClass) {
+      case 'ready_output_limit':
+        child.stdout.write(Buffer.alloc((64 << 10) + 1, 0x61))
+        break
+      case 'ready_line_invalid':
+        child.stdout.write(`${privateCanary}\n`)
+        break
+      case 'ready_parse_failed':
+        child.stdout.write(`${prefix}{not-json:${privateCanary}}\n`)
+        break
+      case 'ready_payload_invalid':
+        child.stdout.write(`${prefix}${JSON.stringify({ url: 'https://example.invalid', runtimeToken: privateCanary })}\n`)
+        break
+      case 'ready_child_exited':
+        Object.assign(child.process, { exitCode: 23 })
+        child.process.emit('exit', 23, null)
+        break
+      case 'ready_child_error':
+        child.process.emit('error', Object.assign(new Error(privateCanary), { code: privateCanary }))
+        break
+    }
+
+    expect(await rejected).toBeInstanceOf(Error)
+    expect(failures).toEqual([expectedClass])
+    expect(child.killCalls).toBe(0)
+    expect(child.stdout.listenerCount('data')).toBe(0)
+    expect(child.process.listenerCount('error')).toBe(0)
+    const output = info.mock.calls.flat().join(' ')
+    expect(output).toContain('"stage":"go startup:failed"')
+    expect(output).toContain(`"failureClass":"${expectedClass}"`)
+    expect(output).toContain('"attempt":17')
+    expect(output).toContain('"cleanupAfterStartupFailure":false')
+    expect(output).not.toContain(privateCanary)
+    expect(output).not.toContain('runtimeToken')
+    expect(output).not.toContain('stderr')
+  })
+
+  it('classifies missing stdout and an actual ready deadline without changing the rejection', async () => {
+    const failures: GoRuntimeStartupFailureClass[] = []
+    await expect(waitForGoConformanceReady(fakeChildProcess(), prefix, 'Go test runtime', true, 1000,
+      (failureClass) => failures.push(failureClass))).rejects.toThrow('stdout is unavailable')
+    vi.useFakeTimers()
+    const child = fakeMigrationChild()
+    const rejected = waitForGoConformanceReady(child.process, prefix, 'Go test runtime', true, 25,
+      (failureClass) => failures.push(failureClass)).catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(24)
+    expect(failures).toEqual(['stdout_unavailable'])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await rejected).toBeInstanceOf(Error)
+    expect(failures).toEqual(['stdout_unavailable', 'ready_timeout'])
+    expect(child.killCalls).toBe(0)
+    expect(child.process.listenerCount('exit')).toBe(0)
+  })
+
+  it('keeps a valid ready result and the original rejection if the diagnostic callback fails', async () => {
+    const valid = fakeMigrationChild()
+    const failures: GoRuntimeStartupFailureClass[] = []
+    const ready = waitForGoConformanceReady(valid.process, prefix, 'Go test runtime', true, 1000,
+      (failureClass) => failures.push(failureClass))
+    valid.stdout.write(`${prefix}${JSON.stringify({ url: 'http://127.0.0.1:45123/', runtimeToken: privateCanary })}\n`)
+    await expect(ready).resolves.toEqual({ url: 'http://127.0.0.1:45123/', runtimeToken: privateCanary })
+    expect(failures).toEqual([])
+    valid.process.emit('exit', 0, null)
+
+    const invalid = fakeMigrationChild()
+    const rejected = waitForGoConformanceReady(invalid.process, prefix, 'Go test runtime', true, 1000,
+      () => { throw new Error(privateCanary) })
+    const expected = expect(rejected).rejects.toThrow('invalid ready payload')
+    invalid.stdout.write(`${privateCanary}\n`)
+    await expected
+  })
+
+  it('separates natural pre-ready exit from cleanup after the recorded startup failure', () => {
+    vi.stubEnv('ANALYTIX_STARTUP_TRACE', '1')
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    const unexpected = vi.fn()
+    setGoRuntimeUnexpectedExitHandler(unexpected)
+    const natural = fakeChildProcess()
+    const naturalObserver = observeGoSidecarExit(natural, { superviseUnexpectedExit: true, startupAttempt: 21 })
+    Object.assign(natural, { exitCode: -1 })
+    natural.emit('exit', -1, null)
+    naturalObserver.markStartupFailed('ready_child_exited')
+
+    const cleanup = fakeChildProcess()
+    const cleanupObserver = observeGoSidecarExit(cleanup, { superviseUnexpectedExit: true, startupAttempt: 22 })
+    cleanupObserver.markStartupFailed('ready_parse_failed')
+    cleanupObserver.markIntentionalStop()
+    cleanup.emit('exit', null, 'SIGTERM')
+    const records = info.mock.calls.map(([line]) => JSON.parse(String(line).split(' detail=')[1]))
+    expect(records).toEqual([
+      { stage: 'go process:exited', attempt: 21, failureClass: null, exitCode: -1, signal: null, cleanupAfterStartupFailure: false },
+      { stage: 'go startup:failed', attempt: 21, failureClass: 'ready_child_exited', exitCode: -1, signal: null, cleanupAfterStartupFailure: false },
+      { stage: 'go startup:failed', attempt: 22, failureClass: 'ready_parse_failed', exitCode: null, signal: null, cleanupAfterStartupFailure: false },
+      { stage: 'go process:exited', attempt: 22, failureClass: 'ready_parse_failed', exitCode: null, signal: 'SIGTERM', cleanupAfterStartupFailure: true }
+    ])
+    expect(unexpected).not.toHaveBeenCalled()
+  })
+
+  it('keeps startup diagnostic output opt-in and preserves lifecycle handling when console output fails', () => {
+    vi.stubEnv('ANALYTIX_STARTUP_TRACE', '0')
+    const info = vi.spyOn(console, 'info').mockImplementation(() => { throw new Error(privateCanary) })
+    const child = fakeChildProcess()
+    const observer = observeGoSidecarExit(child, { superviseUnexpectedExit: true, startupAttempt: 23 })
+    observer.markStartupFailed('private_frame_failed')
+    expect(info).not.toHaveBeenCalled()
+    vi.stubEnv('ANALYTIX_STARTUP_TRACE', '1')
+    expect(() => observer.markStartupFailed('ready_wait_failed')).not.toThrow()
+    observer.markIntentionalStop()
+    expect(() => child.emit('exit', null, 'SIGTERM')).not.toThrow()
   })
 })
 
@@ -1611,6 +1751,25 @@ function writeRuntimeEvidenceFiles(dir: string): {
 }
 
 describe('runtimeRequestViaHost', () => {
+  it.each([400, 413, 409])('projects actual timed-answer HTTP %s into the exact public error contract', async status => {
+    const requestId = 'input_' + 'a'.repeat(64)
+    const path = '/v1/user-inputs/' + requestId
+    const requests: string[] = []
+    const port = await listen((request, response) => {
+      requests.push(request.method + ' ' + request.url)
+      response.statusCode = status; response.setHeader('Content-Type', 'application/json')
+      response.end(JSON.stringify({ code: status === 409 ? 'late_reply_too_large' : 'invalid_late_reply', message: 'PRIVATE_ERROR_SENTINEL', submission: 'PRIVATE_RAW_SENTINEL' }))
+    })
+    const result = await runtimeRequestViaHost(settingsForPort(port), path, { method: 'POST', body: '{}' }, async () => undefined)
+    const publicError = status === 409
+      ? { code: 'conflict', message: 'The request conflicts with the current runtime state.' }
+      : { code: 'validation_error', message: 'The request did not satisfy the runtime contract.' }
+    expect(result).toEqual({ ok: false, status, body: JSON.stringify(publicError) })
+    expect(PublicRuntimeErrorResponse.parse(JSON.parse(result.body))).toEqual(publicError)
+    expect(requests).toEqual(['POST ' + path])
+    expect(result.body).not.toContain('PRIVATE_'); expect(result.body).not.toContain('late_reply_too_large'); expect(result.body).not.toContain('invalid_late_reply')
+  })
+
   it('binds summary identity and exact public fields at the host boundary', async () => {
     const summary = {
       threadId: 'thread-1', generatedAt: '2026-09-30T00:00:00Z', latestSeq: 0,
@@ -2320,6 +2479,29 @@ describe('runtimeRequestViaHost', () => {
       updatedAt: '2026-07-22T00:01:00Z',
       deletedAt: '2026-07-22T00:01:00Z'
     }
+    // Exact successful response shapes emitted by the production Go thread service.
+    const completedCompact = {
+      ok: true,
+      threadId: 'thread-1',
+      turnId: 'turn_thread_1_compaction_1',
+      itemId: 'compaction_thread_1_1',
+      eventSeq: 42,
+      summary: 'Prior conversation compacted.',
+      replacedTokens: 12,
+      pinnedConstraints: ['user: preserve recent turns'],
+      sourceDigest: 'a'.repeat(64),
+      digestMarker: 'sha256:' + 'a'.repeat(12),
+      sourceItemIds: ['item-1'],
+      schemaVersion: 2,
+      reasoningExcluded: true,
+      reasoningExclusionProof: 'sha256:' + 'b'.repeat(64)
+    }
+    const noopCompact = {
+      ok: true,
+      threadId: 'thread-1',
+      replacedTokens: 0,
+      pinnedConstraints: ['user: preserve recent turns']
+    }
     const cases: Array<[string, string, unknown]> = [
       ['/v1/threads/thread-1/todos', 'GET', { todos }],
       ['/v1/threads/thread-1/todos', 'DELETE', { cleared: true }],
@@ -2329,6 +2511,8 @@ describe('runtimeRequestViaHost', () => {
         summary: 'Prior conversation compacted.',
         pinnedConstraints: ['keep safety gate']
       }],
+      ['/v1/threads/thread-1/compact', 'POST', completedCompact],
+      ['/v1/threads/thread-1/compact', 'POST', noopCompact],
       ['/v1/memory', 'GET', { memories: [liveMemory, tombstone] }],
       ['/v1/memory', 'POST', { memory: liveMemory }],
       ['/v1/memory/mem_go_1', 'PATCH', { memory: liveMemory }],
@@ -2347,6 +2531,33 @@ describe('runtimeRequestViaHost', () => {
       expect(rejected.ok).toBe(false)
       expect(rejected.status).toBe(502)
       expect(rejected.body).not.toContain('must-not-pass')
+    }
+
+    for (const body of [
+      { ...completedCompact, ok: false },
+      { ...completedCompact, turnId: '' },
+      { ...completedCompact, itemId: undefined },
+      { ...completedCompact, eventSeq: -1 },
+      { ...completedCompact, eventSeq: 0.5 },
+      { ...completedCompact, eventSeq: Number.MAX_SAFE_INTEGER + 1 },
+      { ...completedCompact, schemaVersion: 3 },
+      { ...completedCompact, reasoningExcluded: false },
+      { ...completedCompact, reasoningExclusionProof: undefined },
+      { ...completedCompact, reasoningExclusionProof: 'sha256:invalid' },
+      { ...noopCompact, replacedTokens: 1 },
+      { ...noopCompact, pinnedConstraints: 'user: preserve recent turns' }
+    ]) {
+      const rejected = sanitizeRuntimeResponse({
+        ok: true,
+        status: 200,
+        body: JSON.stringify(body)
+      }, '/v1/threads/thread-1/compact', null, 'POST')
+      expect(rejected.ok, JSON.stringify(body)).toBe(false)
+      expect(rejected.status).toBe(502)
+      expect(JSON.parse(rejected.body)).toEqual({
+        code: 'runtime_response_schema_invalid',
+        message: 'Runtime response failed schema validation.'
+      })
     }
   })
 
@@ -2633,11 +2844,11 @@ describe('runtimeRequestViaHost', () => {
     }
   })
 
-  it('accepts the exact case-bound thread list projection and rejects unknown fields', () => {
+  it.each(['deepseek-chat', ''])('accepts the exact case-bound thread list projection with model %j and rejects unknown fields', (model) => {
     const summary = {
       id: 'thread-1',
       title: 'Case A',
-      model: 'deepseek-chat',
+      model,
       mode: 'agent',
       status: 'idle',
       approvalPolicy: 'on-request',
@@ -3674,6 +3885,43 @@ exit 1
     }))
   })
 
+  it.each([false, true])('connects the normal Go sidecar to the existing document codec resolver (packaged=%s)', packaged => {
+    const settings = settingsForPort(8123)
+    const runtime = resolveAnalytixRuntimeSettings(settings)
+    const root = packaged ? '/synthetic/Analytix.app/Contents/Resources/app.asar' : '/synthetic/source'
+    const getAppPath = vi.spyOn(electronApp, 'getAppPath').mockReturnValue(root)
+    electronApp.isPackaged = packaged
+    try {
+      const env = buildGoRuntimeSidecarEnv(settings, runtime, '/tmp/analytix-codec-launch', { PATH: '/untrusted/path' })
+      expect(env.ANALYTIX_DOCUMENT_CODEC_EXECUTABLE).toBe(process.execPath)
+      expect(env.ANALYTIX_DOCUMENT_CODEC_ENTRY).toBe(join(
+        packaged ? root.replace(/app\.asar$/, 'app.asar.unpacked') : root,
+        'out', 'office-codec', 'office-generation-codec-entry.js'
+      ))
+      expect(env.ANALYTIX_DOCUMENT_CODEC_EXECUTABLE).not.toBe('node')
+    } finally { getAppPath.mockRestore() }
+  })
+
+  it('preserves explicit document codec overrides in the normal Go sidecar', () => {
+    const settings = settingsForPort(8123)
+    const executable = '/synthetic/explicit-codec/node'
+    const entry = '/synthetic/explicit-codec/office-generation-codec-entry.js'
+    const env = buildGoRuntimeSidecarEnv(settings, resolveAnalytixRuntimeSettings(settings), '/tmp/analytix-codec-launch', {
+      PATH: '/untrusted/path', ANALYTIX_DOCUMENT_CODEC_EXECUTABLE: executable, ANALYTIX_DOCUMENT_CODEC_ENTRY: entry
+    })
+    expect(env.ANALYTIX_DOCUMENT_CODEC_EXECUTABLE).toBe(executable)
+    expect(env.ANALYTIX_DOCUMENT_CODEC_ENTRY).toBe(entry)
+  })
+
+  it('keeps an explicitly unavailable document codec unavailable instead of replacing it from PATH', () => {
+    const settings = settingsForPort(8123)
+    const env = buildGoRuntimeSidecarEnv(settings, resolveAnalytixRuntimeSettings(settings), '/tmp/analytix-codec-launch', {
+      PATH: '/untrusted/path', ANALYTIX_DOCUMENT_CODEC_EXECUTABLE: '', ANALYTIX_DOCUMENT_CODEC_ENTRY: 'relative-codec.js'
+    })
+    expect(env.ANALYTIX_DOCUMENT_CODEC_EXECUTABLE).toBe('')
+    expect(env.ANALYTIX_DOCUMENT_CODEC_ENTRY).toBe('relative-codec.js')
+  })
+
   it('passes the generated runtime config path without Provider authority in the Go sidecar environment', () => {
     const settings = settingsForPort(8123)
     settings.provider = {
@@ -3850,7 +4098,8 @@ exit 1
       'ANALYTIX_HUB_TEST_GATEWAY_TOKEN', 'ANALYTIX_HUB_TEST_DESKTOP_AUTH_TOKEN',
       'ANALYTIX_RUNTIME_GO_DEEPSEEK_API_KEY', 'ANALYTIX_AUTHORITY_ANCHOR_V1',
       'ANALYTIX_CONTROLLED_ARTIFACT_HOST_V2_TOKEN', 'ANALYTIX_RUNTIME_TOKEN',
-      'ANALYTIX_MCP_CONFIG_PATH', 'ANALYTIX_APP_ROOT', 'ANALYTIX_RESOURCES_PATH'
+      'ANALYTIX_MCP_CONFIG_PATH', 'ANALYTIX_APP_ROOT', 'ANALYTIX_RESOURCES_PATH',
+      'ANALYTIX_DOCUMENT_CODEC_EXECUTABLE', 'ANALYTIX_DOCUMENT_CODEC_ENTRY'
     ]
     const alias = (name: string): string => casing === 'lowercase'
       ? name.toLowerCase() : name.replace('ANALYTIX', 'Analytix')
@@ -3866,7 +4115,8 @@ exit 1
     for (const name of reserved) {
       const keys = Object.keys(child).filter((key) => key.toUpperCase() === name)
       expect(keys).toEqual(['ANALYTIX_RUNTIME_TOKEN', 'ANALYTIX_MCP_CONFIG_PATH',
-        'ANALYTIX_APP_ROOT', 'ANALYTIX_RESOURCES_PATH'].includes(name) ? [name] : [])
+        'ANALYTIX_APP_ROOT', 'ANALYTIX_RESOURCES_PATH', 'ANALYTIX_DOCUMENT_CODEC_EXECUTABLE',
+        'ANALYTIX_DOCUMENT_CODEC_ENTRY'].includes(name) ? [name] : [])
     }
     expect(child.ANALYTIX_RUNTIME_TOKEN).toBe('managed-token')
   })
@@ -4483,9 +4733,11 @@ process.exit(1)
   })
 
   it('redacts secrets from Go runtime canary response excerpts', async () => {
+    // Deterministic synthetic redaction fixture; never use a real credential.
+    const syntheticRedactionToken = 'sk-' + 'x'.repeat(25)
     const port = await listen((_req, res) => {
       res.writeHead(500, { 'Content-Type': 'text/plain' })
-      res.end('startup failed Authorization: Bearer sk-liveSecretValue1234567890 token=runtime-token-value')
+      res.end(`startup failed Authorization: Bearer ${syntheticRedactionToken} token=runtime-token-value`)
     })
 
     const result = await probeGoConformanceRuntimeCanary(
@@ -4501,7 +4753,7 @@ process.exit(1)
     }))
     expect(message).toContain('Authorization=<redacted>')
     expect(message).toContain('token=<redacted>')
-    expect(message).not.toContain('sk-liveSecretValue1234567890')
+    expect(message).not.toContain(syntheticRedactionToken)
     expect(message).not.toContain('runtime-token-value')
   })
 
@@ -4954,17 +5206,19 @@ process.exit(1)
   })
 
   it('redacts secrets from Go runtime stderr before storing fallback status', async () => {
+    // Deterministic synthetic redaction fixture; never use a real credential.
+    const syntheticRedactionToken = 'sk-' + 'x'.repeat(25)
     await expect(ensureGoDefaultBackend(
       settingsForPort(1),
       async () => {
-        throw new Error('startup failed Authorization: Bearer sk-liveSecretValue1234567890')
+        throw new Error(`startup failed Authorization: Bearer ${syntheticRedactionToken}`)
       }
     )).rejects.toThrow(/TypeScript runtime fallback is retired/)
 
     const status = getAnalytixRuntimeBackendStatus()
     expect(status.activeBackend).toBe('go-runtime-default')
     expect(status.fallbackReason).toContain('Authorization=<redacted>')
-    expect(status.fallbackReason).not.toContain('sk-liveSecretValue1234567890')
+    expect(status.fallbackReason).not.toContain(syntheticRedactionToken)
     expect(status.fallbackReason).not.toContain('Bearer sk-')
   })
 
@@ -5929,6 +6183,264 @@ process.exit(1)
         expect(command).toContain('scripts/runtime-go-validation-command.mjs')
         expect(`${name}: ${command}`).not.toMatch(/\b(?:d0(?:24|25)[a-z0-9_-]*|proof|fixture|fake|mcpLocalProof)\b/i)
       }
+    }
+  })
+})
+
+describe('user-input metadata response boundary', () => {
+  it('accepts typed metadata and rejects extra custom content', () => {
+    const path = '/v1/user-inputs/input_owned'
+    const metadata = { inputId: 'input_owned', status: 'submitted' }
+    const response = { ok: true, status: 200, body: JSON.stringify(metadata) }
+    expect(sanitizeRuntimeResponse(response, path, null, 'POST')).toEqual(response)
+    const rejected = sanitizeRuntimeResponse({ ...response,
+      body: JSON.stringify({ ...metadata, customText: 'PRIVATE_CUSTOM_SENTINEL' }) }, path, null, 'POST')
+    expect(rejected).toMatchObject({ ok: false, status: 502 })
+    expect(rejected.body).not.toContain('PRIVATE_CUSTOM_SENTINEL')
+  })
+})
+
+it('passes only explicit closed model preferences to actual production Go argv', () => {
+  const settings = settingsForPort(8127)
+  settings.provider.modelPreferences = [{
+    id: 'provider-alpha', baseUrl: 'https://provider.invalid/v1', endpointFormat: 'chat_completions',
+    modelProfiles: { 'model-alpha': { aliases: ['alpha'], reasoning: null } }
+  }]
+  const args = buildGoRuntimeProviderArgs(settings, resolveAnalytixRuntimeSettings(settings))
+  const index = args.indexOf('--model-providers-json')
+  expect(index).toBeGreaterThanOrEqual(0)
+  expect(JSON.parse(args[index + 1])).toEqual({ providers: [{
+    ...settings.provider.modelPreferences[0], modelProfiles: { 'model-alpha': {
+      aliases: ['alpha'], reasoning: { supportedEfforts: ['off'], defaultEffort: 'off', requestProtocol: 'none' }
+    } }
+  }] })
+  expect(args).not.toContain('--provider-id')
+  expect(args).not.toContain('--base-url')
+  expect(args).not.toContain('--model')
+  expect(args).not.toContain('--api-key')
+  expect(args).not.toContain('--model-proxy-url')
+})
+
+describe('closed message feedback response projection', () => {
+  const path = '/v1/threads/thread/message-feedback/message'
+  const item = { messageId: 'message', rating: 'positive', note: 'Synthetic rating detail',
+    version: '11111111-1111-4111-8111-111111111111', createdAt: 1, updatedAt: 1 }
+  const envelope = (current: unknown) => ({ code: 'message_feedback_version_conflict',
+    message: 'Message feedback changed. Review the current rating and submit again.', current })
+  it.each(['PUT', 'DELETE'])('preserves strict safe conflict current through repeated %s native projections', method => {
+    for (const current of [null, item]) {
+      const response = { ok: false, status: 409, body: JSON.stringify(envelope(current)) }
+      const once = sanitizeRuntimeResponse(response, path, null, method)
+      expect(JSON.parse(once.body)).toEqual(envelope(current))
+      const twice = sanitizeRuntimeResponse(once, path, null, method)
+      expect(twice).toEqual(once); expect(sanitizeRuntimeResponse(twice, path, null, method)).toEqual(once)
+    }
+  })
+  it.each([
+    { path: path + '?extra=1', method: 'PUT', status: 409, body: envelope(item) },
+    { path, method: 'GET', status: 409, body: envelope(item) },
+    { path, method: 'PUT', status: 400, body: envelope(item) },
+    { path, method: 'PUT', status: 409, body: envelope({ ...item, messageId: 'other-message' }) },
+    { path, method: 'PUT', status: 409, body: { ...envelope(item), extra: 'PRIVATE_FEEDBACK_SENTINEL' } },
+    { path, method: 'PUT', status: 409, body: envelope({ ...item, note: '<think>PRIVATE_FEEDBACK_SENTINEL</think>' }) }
+  ])('does not disclose unbound or unsafe conflict current %j', value => {
+    const once = sanitizeRuntimeResponse({ ok: false, status: value.status, body: JSON.stringify(value.body) }, value.path, null, value.method)
+    const twice = sanitizeRuntimeResponse(once, value.path, null, value.method)
+    expect(once.body).not.toContain('PRIVATE_FEEDBACK_SENTINEL'); expect(twice.body).not.toContain('PRIVATE_FEEDBACK_SENTINEL')
+    expect(JSON.parse(once.body)).not.toHaveProperty('current')
+  })
+  it('requires a success body and exact target/schema without widening note guards', () => {
+    const list = '/v1/threads/thread/message-feedback'
+    expect(sanitizeRuntimeResponse({ ok: true, status: 200, body: JSON.stringify({ items: [item] }) }, list, null, 'GET').ok).toBe(true)
+    expect(sanitizeRuntimeResponse({ ok: true, status: 200, body: JSON.stringify(item) }, path, null, 'PUT').ok).toBe(true)
+    for (const body of ['', JSON.stringify({ ...item, messageId: 'other' }), JSON.stringify({ ...item, extra: true }), JSON.stringify({ ...item, note: '<think>PRIVATE_FEEDBACK_SENTINEL</think>' })]) {
+      const response = sanitizeRuntimeResponse({ ok: true, status: 200, body }, path, null, 'PUT')
+      expect(response.ok).toBe(false); expect(response.body).not.toContain('PRIVATE_FEEDBACK_SENTINEL')
+    }
+  })
+})
+
+describe('strict Question late answer nonadmission projection', () => {
+  const inputId = 'input_' + 'c'.repeat(64), path = '/v1/user-inputs/' + inputId
+  const body = { code: 'late_reply_too_large', message: 'PRIVATE_RAW_SENTINEL', inputId }
+  it('preserves only the fixed desktop nonadmission identity for the exact Host response', () => {
+    const result = sanitizeRuntimeResponse({ ok: false, status: 409, body: JSON.stringify(body) }, path, null, 'POST')
+    expect(JSON.parse(result.body)).toEqual({ code: 'user_input_late_reply_too_large', message: 'The late answer is too large. Edit it and submit a new attempt.' })
+    expect(result.body).not.toContain('PRIVATE_')
+    const twice = sanitizeRuntimeResponse(result, path, null, 'POST')
+    expect(twice).toEqual(result); expect(sanitizeRuntimeResponse(twice, path, null, 'POST')).toEqual(result)
+  })
+  it.each([
+    { path: path + '?extra=1', method: 'POST', status: 409, body },
+    { path, method: 'GET', status: 409, body },
+    { path, method: 'POST', status: 400, body },
+    { path, method: 'POST', status: 409, body: { ...body, inputId: 'input_' + 'd'.repeat(64) } },
+    { path, method: 'POST', status: 409, body: { ...body, extra: 'PRIVATE_RAW_SENTINEL' } },
+    { path, method: 'POST', status: 409, body: { ...body, code: 'other_conflict' } }
+  ])('does not relabel unrelated or poisoned response %j', value => {
+    const result = sanitizeRuntimeResponse({ ok: false, status: value.status, body: JSON.stringify(value.body) }, value.path, null, value.method)
+    expect(result.body).not.toContain('user_input_late_reply_too_large'); expect(result.body).not.toContain('PRIVATE_')
+  })
+})
+
+describe('closed Question nonadmission across the native second projection', () => {
+  const path = '/v1/user-inputs/input_' + 'c'.repeat(64)
+  const body = { code: 'user_input_late_reply_too_large', message: 'The late answer is too large. Edit it and submit a new attempt.' }
+  it.each([
+    { path: path + '?extra=1', method: 'POST', status: 409, body },
+    { path: '/v1/threads/thread', method: 'POST', status: 409, body },
+    { path, method: 'GET', status: 409, body },
+    { path, method: 'POST', status: 400, body },
+    { path, method: 'POST', status: 409, body: { ...body, message: 'PRIVATE_RAW_SENTINEL' } },
+    { path, method: 'POST', status: 409, body: { ...body, extra: 'PRIVATE_RAW_SENTINEL' } }
+  ])('does not extend the definite nonadmission identity beyond its exact fixed envelope %j', value => {
+    const result = sanitizeRuntimeResponse({ ok: false, status: value.status, body: JSON.stringify(value.body) }, value.path, null, value.method)
+    expect(result.body).not.toContain('user_input_late_reply_too_large'); expect(result.body).not.toContain('PRIVATE_')
+  })
+})
+
+
+describe('native Main guard response projection', () => {
+  const path = '/v1/threads/thread-guard-projection'
+  const canary = 'PRIVATE_MAIN_GUARD_CANARY'
+  const guards = [
+    { code: 'runtime_response_schema_invalid', message: 'Runtime response failed schema validation.',
+      rejectedBody: JSON.stringify({ unknownField: canary }) },
+    { code: 'runtime_response_not_public', message: 'Runtime response was blocked at the public boundary.',
+      rejectedBody: canary }
+  ] as const
+
+  it.each(guards)('preserves actual first $code rejection through second and third projections', guard => {
+    const first = sanitizeRuntimeResponse({ ok: true, status: 200, body: guard.rejectedBody }, path, null, 'GET')
+    expect(first).toEqual({ ok: false, status: 502, body: JSON.stringify({ code: guard.code, message: guard.message }) })
+    expect(first.body).not.toContain(canary)
+    const second = sanitizeRuntimeResponse(first, path, null, 'GET')
+    expect(second).toEqual(first)
+    expect(sanitizeRuntimeResponse(second, path, null, 'GET')).toEqual(first)
+  })
+
+  const rejected = guards.flatMap(guard => {
+    const body = { code: guard.code, message: guard.message }
+    return [
+      ...[200, 400, 409, 500, 503].map(status => ({ name: `${guard.code} status ${status}`, status, body })),
+      { name: `${guard.code} extra`, status: 502, body: { ...body, extra: canary } },
+      { name: `${guard.code} details`, status: 502, body: { ...body, details: { raw: canary } } },
+      { name: `${guard.code} providerError`, status: 502, body: { ...body, providerError: { body: canary } } },
+      { name: `${guard.code} reasonCode`, status: 502, body: { ...body, reasonCode: canary } },
+      { name: `${guard.code} poisoned message`, status: 502, body: { ...body, message: canary } },
+      { name: `${guard.code} missing message`, status: 502, body: { code: guard.code } },
+      { name: `${guard.code} whitespace message`, status: 502, body: { ...body, message: ` ${guard.message}` } },
+      { name: `${guard.code} uppercase code`, status: 502, body: { ...body, code: guard.code.toUpperCase() } },
+      { name: `${guard.code} whitespace code`, status: 502, body: { ...body, code: ` ${guard.code} ` } },
+      { name: `${guard.code} unknown code`, status: 502, body: { ...body, code: 'unknown_guard', message: canary } },
+      { name: `${guard.code} other legacy code`, status: 502, body: { code: 'runtime_unavailable', message: 'The Analytix runtime is unavailable.' } }
+    ]
+  })
+  it.each(rejected)('rejects $name without forwarding private bytes', value => {
+    const result = sanitizeRuntimeResponse({ ok: false, status: value.status, body: JSON.stringify(value.body) }, path, null, 'GET')
+    expect(result).toMatchObject({ ok: false, status: value.status })
+    expect(JSON.parse(result.body).code).not.toMatch(/^runtime_response_(?:schema_invalid|not_public)$/)
+    expect(result.body).not.toContain(canary)
+  })
+
+  it.each(guards)('keeps a successful $code envelope subject to the ordinary DTO guard', guard => {
+    const result = sanitizeRuntimeResponse({ ok: true, status: 200,
+      body: JSON.stringify({ code: guard.code, message: guard.message }) }, path, null, 'GET')
+    expect(result).toMatchObject({ ok: false, status: 502 })
+    expect(JSON.parse(result.body)).toEqual({ code: 'runtime_response_schema_invalid', message: 'Runtime response failed schema validation.' })
+  })
+})
+
+describe('actual Go Fork HTTP response at the strict Main boundary', () => {
+  it('accepts production Question, cold refork and unfinished started calls once, retaining the required-kind rejection', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'analytix-fork-main-'))
+    const witnessPath = join(directory, 'go-http-responses.json')
+    try {
+      const execution = spawnSync('go', [
+        'test', '-mod=readonly', '-tags', 'analytix_prod', '-count=1', '-run',
+        '^TestForkEventBoundary(ReplaysProductionQuestionAndReforkV1|ReplaysStartedToolBeforeCompletionV1)$',
+        './internal/server'
+      ], {
+        cwd: join(process.cwd(), 'packages/runtime-go'),
+        env: { ...process.env, ANALYTIX_FORK_MAIN_WITNESS_FILE: witnessPath },
+        timeout: 240_000, maxBuffer: 1024 * 1024, encoding: 'utf8', stdio: 'pipe'
+      })
+      const diagnostic = `${execution.error ?? ''}${execution.stdout ?? ''}${execution.stderr ?? ''}`.slice(-4000)
+      expect(execution.status, diagnostic).toBe(0)
+      expect(execution.signal).toBeNull()
+      const records = JSON.parse(readFileSync(witnessPath, 'utf8')) as Array<{
+        test: string; path: string; request: Record<string, unknown>
+        status: number; body: string; createdBranches: number
+      }>
+      expect(records.length).toBe(9)
+      expect(records.some(record => record.test.endsWith('/legacy'))).toBe(true)
+      expect(records.some(record => record.test.endsWith('/timed'))).toBe(true)
+      expect(records.some(record => record.test.endsWith('ReplaysStartedToolBeforeCompletionV1'))).toBe(true)
+      let responseBody = ''
+      let requests = 0
+      const port = await listen((_req, res) => {
+        requests += 1
+        res.statusCode = 201
+        res.setHeader('Content-Type', 'application/json')
+        res.end(responseBody)
+      })
+      const settings = settingsForPort(port)
+      for (const record of records) {
+        expect(record.status).toBe(201)
+        expect(record.createdBranches).toBe(1)
+        responseBody = record.body
+        const before = requests
+        const result = await runtimeRequestViaHost(settings, record.path, {
+          method: 'POST', body: JSON.stringify(record.request)
+        }, async () => undefined)
+        expect(result, record.test).toMatchObject({ ok: true, status: 201 })
+        expect(JSON.parse(result.body), record.test).toEqual(JSON.parse(record.body))
+        expect(requests - before).toBe(1)
+      }
+      const invalid = JSON.parse(records[0].body) as { turns: Array<{ items: Array<Record<string, unknown>> }> }
+      const call = invalid.turns.flatMap(turn => turn.items).find(item => item.kind === 'tool_call')
+      expect(call).toBeDefined()
+      delete call!.toolKind
+      responseBody = JSON.stringify(invalid)
+      const before = requests
+      expect(await runtimeRequestViaHost(settings, records[0].path, {
+        method: 'POST', body: JSON.stringify(records[0].request)
+      }, async () => undefined)).toEqual({
+        ok: false, status: 502,
+        body: JSON.stringify({ code: 'runtime_response_schema_invalid', message: 'Runtime response failed schema validation.' })
+      })
+      expect(requests - before).toBe(1)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  }, 300_000)
+})
+
+describe('Host child-input closed response through the actual public sanitizer', () => {
+  const path = '/v1/runtime/task-jobs/steer'
+  const caps = { send: 'steer', stop: true, runId: 'job', childThreadId: 'child', childTurnId: 'turn' }
+  const receipt = { action: 'steer', admission: 'queued', clientMessageId: 'd3a26000-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    jobId: 'job', childThreadId: 'child', childTurnId: 'turn', messageId: 'message' }
+  it('keeps exact inspect, admission and failure envelopes through both Main projections', () => {
+    for (const raw of [
+      { ok: true, status: 200, body: JSON.stringify({ schemaVersion: 1, capabilities: caps }) },
+      { ok: true, status: 200, body: JSON.stringify({ schemaVersion: 1, capabilities: caps, receipt }) },
+      { ok: false, status: 409, body: JSON.stringify({ schemaVersion: 1, capabilities: caps, code: 'conflict' }) },
+      { ok: false, status: 503, body: JSON.stringify({ schemaVersion: 1, capabilities: { send: 'disabled', stop: false }, code: 'child_input_unknown' }) }
+    ]) {
+      const once = sanitizeRuntimeResponse(raw, path, null, 'POST')
+      expect(once).toEqual(raw)
+      expect(sanitizeRuntimeResponse(once, path, null, 'POST')).toEqual(raw)
+    }
+  })
+  it('blocks missing, unknown, authority-bearing and inconsistent successful responses', () => {
+    for (const body of ['', JSON.stringify({ status: 'queued' }),
+      JSON.stringify({ schemaVersion: 1, capabilities: { ...caps, stop: false } }),
+      JSON.stringify({ schemaVersion: 1, capabilities: caps, receipt: { ...receipt, action: 'start' } }),
+      JSON.stringify({ schemaVersion: 1, capabilities: caps, receipt, runtimeToken: 'PRIVATE_CANARY' })]) {
+      const rejected = sanitizeRuntimeResponse({ ok: true, status: 200, body }, path, null, 'POST')
+      expect(rejected.ok).toBe(false); expect(rejected.status).toBe(502)
+      expect(rejected.body).not.toContain('PRIVATE_CANARY')
     }
   })
 })

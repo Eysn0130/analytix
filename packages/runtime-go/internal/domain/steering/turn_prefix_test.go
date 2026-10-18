@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -199,4 +200,52 @@ func steeringPrefixPendingForTest(
 		t.Fatal(err)
 	}
 	return sealPendingEntryForTest(t, pending, publicKey, privateKey)
+}
+
+func TestQuestionDiscardCASLeavesTailAndRejectsStalePromotion(t *testing.T) {
+	public, private, verify, promote := steeringPrefixAuthorityForTest(t)
+	pending := lateQuestionPendingForDiscardTest(t, public, private, "turn-prefix", "client-discard")
+	tail := steeringPrefixPendingForTest(t, public, private, 2, domainsecurity.LogicalEffectOrdinary, true)
+	turn := map[string]any{"steering": []any{pending, tail}, "items": []any{}}
+	expected, err := NewPendingEntryExpectationV1(pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel := func(raw map[string]any, digest string) (map[string]any, error) {
+		return sealQuestionDiscardForTest(t, raw, digest, public, private), nil
+	}
+	updated, discarded, changed, err := CancelUserInputEntryInTurnV1("thread-prefix", "turn-prefix", turn, expected, stringField(pending, "userInputId"), stringField(pending, "userInputCaptureReceiptId"), testContextDigest, "2026-07-18T01:02:10Z", verify, cancel)
+	if err != nil || !changed || discarded["status"] != "cancelled" || len(steeringListV1(updated["items"])) != 0 || pending["status"] != "pending" {
+		t.Fatal("single discard did not preserve queue/items", err)
+	}
+	_, replay, repeated, err := CancelUserInputEntryInTurnV1("thread-prefix", "turn-prefix", updated, expected, stringField(pending, "userInputId"), stringField(pending, "userInputCaptureReceiptId"), testContextDigest, "2026-07-18T01:02:11Z", verify, func(map[string]any, string) (map[string]any, error) {
+		t.Fatal("same discard signed twice")
+		return nil, nil
+	})
+	if err != nil || repeated || !reflect.DeepEqual(replay, discarded) {
+		t.Fatal("discard replay changed proof/time", err)
+	}
+	if _, _, _, err := PromoteTurnEntryPrefixV1("thread-prefix", "turn-prefix", updated, []PendingEntryExpectationV1{expected}, testContextDigest, "2026-07-18T01:02:12Z", verify, promote); !errors.Is(err, ErrPendingPrefixMismatch) {
+		t.Fatal("stale prefix promoted discarded reply", err)
+	}
+	remaining, err := PendingEntriesFromTurnV1("thread-prefix", "turn-prefix", updated, testContextDigest, verify)
+	if err != nil || len(remaining) != 1 || remaining[0]["id"] != tail["id"] {
+		t.Fatal("discard blocked pending tail", err)
+	}
+	final, entries, items, err := PromoteTurnEntriesV1("thread-prefix", "turn-prefix", updated, testContextDigest, "2026-07-18T01:02:12Z", verify, promote)
+	if err != nil || len(entries) != 1 || len(items) != 1 || items[0]["id"] != tail["id"] || len(steeringListV1(final["steering"])) != 2 {
+		t.Fatal("tail promotion lost signed discard", err)
+	}
+	promoted, _, _, err := PromoteTurnEntriesV1("thread-prefix", "turn-prefix", turn, testContextDigest, "2026-07-18T01:02:12Z", verify, promote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, changed, err := CancelUserInputEntryInTurnV1("thread-prefix", "turn-prefix", promoted, expected, stringField(pending, "userInputId"), stringField(pending, "userInputCaptureReceiptId"), testContextDigest, "2026-07-18T01:02:13Z", verify, cancel); !errors.Is(err, ErrEntryPromoted) || changed {
+		t.Fatal("discard withdrew accepted reply", err)
+	}
+	unsigned := cloneEntryMap(pending)
+	unsigned["status"], unsigned["cancelledAt"], unsigned["cancelReason"] = "cancelled", "2026-07-18T01:02:10Z", "aborted"
+	if _, err := PendingEntriesFromTurnV1("thread-prefix", "turn-prefix", map[string]any{"steering": []any{unsigned}, "items": []any{}}, testContextDigest, verify); err == nil {
+		t.Fatal("unsigned cancelled record entered running queue")
+	}
 }

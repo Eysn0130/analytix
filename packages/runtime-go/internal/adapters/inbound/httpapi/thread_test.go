@@ -400,6 +400,64 @@ func TestThreadHandlersRewindProjectsPublicResponse(t *testing.T) {
 	}
 }
 
+func TestThreadHandlersForkBoundaryValidationAndUnavailable(t *testing.T) {
+	for _, body := range []string{`null`, `{"endSeq":13}`, `{"turnId":"turn_1","endSeq":null}`, `{"turnId":"turn_1","endSeq":1.5}`, `{"turnId":"turn_1","endSeq":9007199254740992}`} {
+		stub := &threadServiceStub{forkResult: map[string]any{"id": "fork_1"}}
+		recorder := httptest.NewRecorder()
+		ThreadHandlers{Service: stub}.HandleFork(recorder, httptest.NewRequest(http.MethodPost, "/ignored", strings.NewReader(body)), "thr_1")
+		if recorder.Code != http.StatusBadRequest || stub.forkRequest != nil {
+			t.Fatal("invalid boundary reached the mutation owner")
+		}
+	}
+	stub := &threadServiceStub{forkResult: map[string]any{"id": "fork_1"}}
+	handler := ThreadHandlers{Service: stub}
+	for _, body := range []string{`{"turnId":"turn_1","endSeq":13}`, `{"turnId":"turn_1"}`, `{}`, `{"relation":"side"}`} {
+		recorder := httptest.NewRecorder()
+		handler.HandleFork(recorder, httptest.NewRequest(http.MethodPost, "/ignored", strings.NewReader(body)), "thr_1")
+		if recorder.Code != http.StatusCreated {
+			t.Fatal("valid or compatible fork input was rejected")
+		}
+		if strings.Contains(body, "endSeq") && stub.forkRequest["endSeq"] != float64(13) {
+			t.Fatal("captured E was not forwarded exactly")
+		}
+	}
+	stub.forkErr = errors.Join(threadapp.ErrForkBoundaryUnavailable, errors.New("PRIVATE_HISTORY_FAILURE"))
+	recorder := httptest.NewRecorder()
+	handler.HandleFork(recorder, httptest.NewRequest(http.MethodPost, "/ignored", strings.NewReader(`{"turnId":"turn_1","endSeq":13}`)), "thr_1")
+	body := decodeThreadBody(t, recorder)
+	if recorder.Code != http.StatusConflict || body["code"] != "fork_boundary_unavailable" || strings.Contains(recorder.Body.String(), "PRIVATE_HISTORY_FAILURE") {
+		t.Fatal("unprovable history did not fail with the bounded public response")
+	}
+}
+
+func TestThreadHandlersForkBoundaryExactRawJSON(t *testing.T) {
+	for _, number := range []string{"13.0000000000000001", "0.99999999999999999", "9007199254740990.5", "9007199254740991.0000000000000001", `"13"`, "1e1000000000"} {
+		t.Run("reject_"+number, func(t *testing.T) {
+			stub := &threadServiceStub{forkResult: map[string]any{"id": "fork_1"}}
+			body := `{"turnId":"turn_1","endSeq":` + number + `}`
+			recorder := httptest.NewRecorder()
+			ThreadHandlers{Service: stub}.HandleFork(recorder, httptest.NewRequest(http.MethodPost, "/ignored", strings.NewReader(body)), "thr_1")
+			if recorder.Code != http.StatusBadRequest || stub.forkRequest != nil {
+				t.Fatalf("noninteger raw boundary reached Fork: status=%d number=%s", recorder.Code, number)
+			}
+		})
+	}
+	for _, input := range []struct {
+		number string
+		want   float64
+	}{{"13", 13}, {"13.0", 13}, {"1.3e1", 13}, {"100e-2", 1}, {"0.001e3", 1}, {"9007199254740991", 9007199254740991}} {
+		t.Run("accept_"+input.number, func(t *testing.T) {
+			stub := &threadServiceStub{forkResult: map[string]any{"id": "fork_1"}}
+			body := `{"turnId":"turn_1","endSeq":` + input.number + `,"future":{"n":2.5}}`
+			recorder := httptest.NewRecorder()
+			ThreadHandlers{Service: stub}.HandleFork(recorder, httptest.NewRequest(http.MethodPost, "/ignored", strings.NewReader(body)), "thr_1")
+			if recorder.Code != http.StatusCreated || stub.forkRequest["endSeq"] != input.want || stub.forkRequest["future"].(map[string]any)["n"] != float64(2.5) {
+				t.Fatal("exact integer or ordinary request number compatibility changed")
+			}
+		})
+	}
+}
+
 func TestThreadHandlersForkRewindAndCompactErrors(t *testing.T) {
 	stub := &threadServiceStub{forkResult: map[string]any{"id": "fork_1"}, rewindResult: map[string]any{"ok": true}, compactResult: map[string]any{"ok": true}}
 	handler := ThreadHandlers{Service: stub}
@@ -519,7 +577,6 @@ func TestThreadHandlersRejectMalformedTodosBeforeServiceMutation(t *testing.T) {
 		`{"todos":[],"todos":[]}`,
 		`{"todos":[{"id":"same","content":"one","status":"pending"},{"id":"same","content":"two","status":"pending"}]}`,
 		`{"todos":[{"content":"one","status":"pending","unknown":true}]}`,
-		`{"todos":[{"content":"one","status":"in_progress"},{"content":"two","status":"in_progress"}]}`,
 		`{"todos":[{"content":"one","status":"failed"}]}`,
 		`{"todos":[{"content":"one","status":"canceled","statusReasonCode":"tool_failed"}]}`,
 	} {
@@ -532,6 +589,25 @@ func TestThreadHandlersRejectMalformedTodosBeforeServiceMutation(t *testing.T) {
 	}
 	if stub.setTodosCalls != 0 || stub.todosItems != nil {
 		t.Fatalf("malformed requests reached todo persistence: calls=%d items=%#v", stub.setTodosCalls, stub.todosItems)
+	}
+}
+
+func TestThreadHandlersAcceptParallelTodosWithOneServiceMutation(t *testing.T) {
+	items := []any{
+		map[string]any{"content": "one", "status": "in_progress"},
+		map[string]any{"content": "two", "status": "in_progress"},
+	}
+	stub := &threadServiceStub{setTodos: map[string]any{"items": items}}
+	handler := ThreadHandlers{Service: stub}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/ignored", strings.NewReader(`{"todos":[{"content":"one","status":"in_progress"},{"content":"two","status":"in_progress"}]}`))
+	handler.HandleTodos(recorder, request, "thr_1")
+	if recorder.Code != http.StatusOK || stub.setTodosCalls != 1 || !reflect.DeepEqual(stub.todosItems, items) {
+		t.Fatalf("parallel list did not reach persistence once and intact: code=%d calls=%d items=%#v", recorder.Code, stub.setTodosCalls, stub.todosItems)
+	}
+	body := decodeThreadBody(t, recorder)
+	if !reflect.DeepEqual(body["todos"], stub.setTodos) {
+		t.Fatalf("successful replacement did not return service result: %#v", body)
 	}
 }
 

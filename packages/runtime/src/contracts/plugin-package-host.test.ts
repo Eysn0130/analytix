@@ -31,3 +31,10 @@ describe('fixed four-package Host contract', () => {
       generationId: 'a'.repeat(64), expectedRevision: 1, contributionId: 'editor-adapter', operation: 'open', input: {} }).success).toBe(false)
   })
 })
+
+
+it('bounds the two explicit user Word operations within twenty entries', () => {
+  const operations = ['create-object', 'begin-manual-edit', ...Array.from({ length: 18 }, (_, i) => `operation-${i}`)]
+  expect(pluginPackageViewSchema.shape.operations.safeParse(operations).success).toBe(true)
+  expect(pluginPackageViewSchema.shape.operations.safeParse([...operations, 'operation-20']).success).toBe(false)
+})

@@ -52,7 +52,6 @@ func NormalizeTodos(threadID string, items []any, now string) (map[string]any, e
 		return nil, fmt.Errorf("too many todos (max %d)", MaxTodoItems)
 	}
 	normalized := make([]any, 0, len(items))
-	activeSeen := false
 	seenIDs := map[string]bool{}
 	reservedIDs := map[string]bool{}
 	for index, raw := range items {
@@ -109,12 +108,6 @@ func NormalizeTodos(threadID string, items []any, now string) (map[string]any, e
 		}
 		if err := domaintodo.ValidateStatusReason(parsedStatus, reason); err != nil {
 			return nil, fmt.Errorf("todo %d: %w", index+1, err)
-		}
-		if status == "in_progress" {
-			if activeSeen {
-				return nil, fmt.Errorf("at most one todo can be in_progress")
-			}
-			activeSeen = true
 		}
 		id := strings.TrimSpace(stringField(item, "id"))
 		if id == "" {
@@ -482,9 +475,6 @@ func applyTodoAppend(items []map[string]any, op map[string]any) ([]map[string]an
 	if status != "pending" && status != "in_progress" && status != "completed" {
 		return nil, nil, fmt.Errorf("invalid status %q", status)
 	}
-	if status == "in_progress" {
-		clearInProgress(items, -1)
-	}
 	next := map[string]any{
 		"id":      id,
 		"content": content,
@@ -522,7 +512,6 @@ func applyTodoMutation(items []map[string]any, op map[string]any, name string) (
 		if err := domaintodo.ValidateOperationTransition(name, currentStatus, domaintodo.StatusInProgress); err != nil {
 			return nil, nil, err
 		}
-		clearInProgress(items, index)
 		item["status"] = "in_progress"
 	case "done":
 		if err := domaintodo.ValidateOperationTransition(name, currentStatus, domaintodo.StatusCompleted); err != nil {
@@ -530,7 +519,7 @@ func applyTodoMutation(items []map[string]any, op map[string]any, name string) (
 		}
 		item["status"] = "completed"
 		delete(item, "statusReasonCode")
-		ensureOneActiveAfter(items, index)
+		ensureActiveAfter(items, index)
 	case "fail", "cancel":
 		nextStatus := domaintodo.StatusFailed
 		if name == "cancel" {
@@ -547,13 +536,12 @@ func applyTodoMutation(items []map[string]any, op map[string]any, name string) (
 		item["status"] = string(nextStatus)
 		item["statusReasonCode"] = reason
 		if wasActive {
-			ensureOneActiveAfter(items, index)
+			ensureActiveAfter(items, index)
 		}
 	case "retry":
 		if err := domaintodo.ValidateOperationTransition(name, currentStatus, domaintodo.StatusInProgress); err != nil {
 			return nil, nil, err
 		}
-		clearInProgress(items, index)
 		item["status"] = "in_progress"
 		delete(item, "statusReasonCode")
 	case "drop":
@@ -563,7 +551,7 @@ func applyTodoMutation(items []map[string]any, op map[string]any, name string) (
 		wasActive := stringField(item, "status") == "in_progress"
 		items = append(items[:index], items[index+1:]...)
 		if wasActive {
-			ensureOneActiveAfter(items, index-1)
+			ensureActiveAfter(items, index-1)
 		}
 	case "note":
 		note := truncateTodoText(projectOrdinaryThreadText(stringField(op, "note")), MaxTodoNoteLength)
@@ -616,15 +604,7 @@ func matchTodoIndex(items []map[string]any, op map[string]any) (int, error) {
 	return match, nil
 }
 
-func clearInProgress(items []map[string]any, keepIndex int) {
-	for index, item := range items {
-		if index != keepIndex && stringField(item, "status") == "in_progress" {
-			item["status"] = "pending"
-		}
-	}
-}
-
-func ensureOneActiveAfter(items []map[string]any, afterIndex int) {
+func ensureActiveAfter(items []map[string]any, afterIndex int) {
 	for _, item := range items {
 		if stringField(item, "status") == "in_progress" {
 			return

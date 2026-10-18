@@ -90,3 +90,16 @@ func (envelope HostContextEnvelope) RuntimeContextRecord() (map[string]any, erro
 		"expiresAt":          grant.ExpiresAt,
 	}, nil
 }
+
+// ScheduleOriginRecordV1 exposes only the historical native creation tuple.
+// Future executions must acquire current authority independently.
+func (envelope HostContextEnvelope) ScheduleOriginRecordV1() (map[string]any, error) {
+	c, g, err := envelope.Authority()
+	if err != nil {
+		return nil, err
+	}
+	if g.ToolName != "mcp__gui_schedule__gui_schedule_create" && g.ToolName != "mcp__gui_schedule__claw_schedule_create" {
+		return nil, errors.New("native Schedule create authority is required")
+	}
+	return map[string]any{"version": 1, "threadId": c.ThreadID, "turnId": c.TurnID, "toolCallId": g.ToolCallID, "grantId": g.GrantID}, nil
+}

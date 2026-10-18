@@ -856,3 +856,13 @@ func (s *RuntimeState) ActiveQueued() (int, int) {
 	defer s.mu.Unlock()
 	return s.active, len(s.waiters)
 }
+
+// BackgroundJobStartedV1 observes the existing start owner without holding
+// RuntimeState.mu while waiting for its start barrier.
+func (s *RuntimeState) BackgroundJobStartedV1(id string) bool {
+	if s == nil {
+		return false
+	}
+	control, ok := s.backgroundJobControl(id)
+	return ok && control != nil && control.startBarrier.StartedV1()
+}

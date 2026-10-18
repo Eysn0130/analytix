@@ -1,12 +1,52 @@
 package subagent
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 )
+
+func TestSkillResultCaptureV1RealInstructionAndBoundChild(t *testing.T) {
+	skill := map[string]any{"id": "synthetic-skill", "name": "Synthetic Skill", "packageDigest": strings.Repeat("a", 64), "prompt": "PRIVATE_PROMPT"}
+	input := SkillResultCaptureInputV1{RequestedName: "alias", Skill: skill, RunAs: "inline", Instruction: strings.Repeat("中", 10923)}
+	capture, ok := SkillResultCaptureV1(input)
+	if !ok || !capture.Truncated || len(capture.Body) != 32766 || capture.Skill.Resolved.Name != "Synthetic Skill" {
+		t.Fatal("actual UTF8 instruction observation unavailable")
+	}
+	security, grant, _ := jobSecurityAuthorityFixture(t, "run_skill", false)
+	binding, err := domainjob.NewSecurityBinding(security, grant, grant.ToolCallID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := domainjob.Record{ID: "job-skill", Kind: "subagent", Status: "failed", ParentThreadID: security.ThreadID, ParentTurnID: security.TurnID, ParentToolCallID: grant.ToolCallID,
+		SecurityBinding: binding, SkillPackageDigest: strings.Repeat("a", 64), ChildThreadID: "thread-child", ChildTurnID: "turn-child", Output: "PRIVATE_CHILD_OUTPUT", Error: "PRIVATE_CHILD_ERROR", Prompt: "PRIVATE_PROMPT"}
+	input.RunAs, input.Instruction, input.IsError = "subagent", "PRIVATE_INSTRUCTION", true
+	input.Job, input.SecurityContext, input.ExecutionGrantID, input.CallID = &record, security, grant.GrantID, grant.ToolCallID
+	capture, ok = SkillResultCaptureV1(input)
+	if !ok || capture.Status != "failed" || capture.Body != "" || capture.Truncated || capture.Skill.Child == nil || *capture.Skill.Child.ChildTurnID != "turn-child" || capture.Skill.Error != nil {
+		t.Fatal("actual child observation unavailable")
+	}
+	body, _ := json.Marshal(capture)
+	if strings.Contains(string(body), "PRIVATE_") || strings.Contains(string(body), grant.GrantID) {
+		t.Fatal("child payload/authority entered display")
+	}
+	input.CallID = "another-call"
+	if _, ok := SkillResultCaptureV1(input); ok {
+		t.Fatal("another invocation child accepted")
+	}
+	input.CallID = grant.ToolCallID
+	record.SkillPackageDigest = strings.Repeat("b", 64)
+	if _, ok := SkillResultCaptureV1(input); ok {
+		t.Fatal("another package child accepted")
+	}
+	input = SkillResultCaptureInputV1{RequestedName: "unknown", IsError: true, ErrorCode: "unknown_skill", ErrorMessage: "unknown skill"}
+	if capture, ok := SkillResultCaptureV1(input); !ok || capture.Skill.Resolved != nil || capture.Skill.Child != nil || capture.Skill.Error.Code != "unknown_skill" {
+		t.Fatal("unknown skill inferred current state")
+	}
+}
 
 func TestSkillTaskRequestFromArgs(t *testing.T) {
 	skill := map[string]any{

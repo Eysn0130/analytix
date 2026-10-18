@@ -246,6 +246,32 @@ const CORE_PUBLICATION_TIMING_KEYS = new Set([
   'publicationCommittedMs', 'sseDeliverableMs', 'publicationGapMs', 'physicalAttempt'
 ])
 
+const CORE_PROVIDER_PRIVACY_FAILURE_CAUSES = new Set([
+  'provider_privacy_authority_unavailable', 'uninspectable_provider_part',
+  'provider_schema_contains_pii', 'ordinary_provider_contains_case_effect',
+  'provider_logical_effect_invalid'
+])
+
+// Match the Go-private ProviderFailureDiagnosticV1 labels exactly. These
+// records carry no renderer IPC or public runtime event authority.
+const CORE_PROVIDER_FAILURE_CAUSES = new Set([
+  ...CORE_PROVIDER_PRIVACY_FAILURE_CAUSES,
+  'context_canceled', 'context_deadline_exceeded',
+  'turn_security_authority_unavailable', 'turn_security_identity_mismatch',
+  'turn_security_workspace_mismatch', 'turn_security_case_binding_mismatch',
+  'turn_security_dataset_snapshot_mismatch', 'turn_security_risk_policy_mismatch',
+  'turn_security_context_invalid', 'source_probe_unavailable', 'tool_source_unavailable',
+  'unknown'
+])
+
+const CORE_GENERATION_FAILURE_CAUSES: Readonly<Record<string, readonly string[]>> = {
+  checkpoint_settlement: ['unavailable', 'incomplete'],
+  checkpoint_record: ['unavailable'],
+  host_preconsume: ['context_canceled', 'context_deadline_exceeded', 'identity_invalid', 'snapshot_unavailable'],
+  host_postconsume: ['context_canceled', 'context_deadline_exceeded', 'identity_invalid', 'snapshot_unavailable'],
+  generation_output: ['validation_invalid', 'target_unavailable', 'codec_invalid', 'checkpoint_unavailable', 'context_canceled', 'other_unavailable']
+}
+
 // Only the owned child stderr calls this receiver. Core trace names are not
 // admitted by renderer IPC. It shares the existing bounded writer/rotation;
 // arbitrary stderr remains private and is never forwarded to a trace file.
@@ -261,14 +287,54 @@ export function createRuntimePublicationTraceReceiver(
       const value = JSON.parse(text.slice(prefix.length)) as Record<string, unknown>
       if (!value || Array.isArray(value) ||
           Object.keys(value).some((key) => !['name', 'threadId', 'turnId', 'data'].includes(key)) ||
-          value.name !== 'thread.terminal.core_committed' ||
+          (value.name !== 'thread.terminal.core_committed' && value.name !== 'thread.provider.loop_failure' && value.name !== 'thread.tool.generation_failure') ||
           typeof value.threadId !== 'string' || !/^ref-[a-f0-9]{64}$/.test(value.threadId) ||
           typeof value.turnId !== 'string' || !/^ref-[a-f0-9]{64}$/.test(value.turnId) ||
           !value.data || typeof value.data !== 'object' || Array.isArray(value.data)) return
       const data = value.data as Record<string, unknown>
       if (data.pid !== pid || !Number.isSafeInteger(pid) || pid <= 0 ||
-          !Number.isSafeInteger(runtimeGeneration) || runtimeGeneration < 1 ||
-          typeof data.timeOrigin !== 'number' || data.timeOrigin <= 0 ||
+          !Number.isSafeInteger(runtimeGeneration) || runtimeGeneration < 1) return
+      if (value.name === 'thread.tool.generation_failure') {
+        if (Object.keys(data).length !== 3 ||
+            Object.keys(data).some((key) => !['pid', 'stage', 'cause'].includes(key)) ||
+            typeof data.stage !== 'string' || typeof data.cause !== 'string' ||
+            !Object.hasOwn(CORE_GENERATION_FAILURE_CAUSES, data.stage) ||
+            !CORE_GENERATION_FAILURE_CAUSES[data.stage].includes(data.cause)) return
+        appendProjectedThreadTraceEvent(userDataDir, {
+          name: 'thread.tool.generation_failure', timestamp: Date.now(),
+          threadId: value.threadId, turnId: value.turnId,
+          data: { pid: data.pid, stage: data.stage, cause: data.cause, runtimeGeneration,
+            mainReceivedMonotonicMs: performance.now(), mainTimeOrigin: performance.timeOrigin }
+        })
+        return
+      }
+      if (value.name === 'thread.provider.loop_failure') {
+        if (Object.keys(data).length !== 3 ||
+            Object.keys(data).some((key) => !['pid', 'stage', 'cause'].includes(key)) ||
+            typeof data.stage !== 'string' || typeof data.cause !== 'string' ||
+            !CORE_PROVIDER_FAILURE_CAUSES.has(data.cause)) return
+        switch (data.stage) {
+          case 'acquire':
+          case 'prepare':
+            break
+          case 'privacy_projection':
+            if (!CORE_PROVIDER_PRIVACY_FAILURE_CAUSES.has(data.cause)) return
+            break
+          case 'unknown':
+            if (CORE_PROVIDER_PRIVACY_FAILURE_CAUSES.has(data.cause)) return
+            break
+          default:
+            return
+        }
+        appendProjectedThreadTraceEvent(userDataDir, {
+          name: 'thread.provider.loop_failure', timestamp: Date.now(),
+          threadId: value.threadId, turnId: value.turnId,
+          data: { pid: data.pid, stage: data.stage, cause: data.cause, runtimeGeneration,
+            mainReceivedMonotonicMs: performance.now(), mainTimeOrigin: performance.timeOrigin }
+        })
+        return
+      }
+      if (typeof data.timeOrigin !== 'number' || data.timeOrigin <= 0 ||
           typeof data.publicationCommittedMs !== 'number') return
       for (const [key, field] of Object.entries(data)) {
         if (key === 'logicalCallHmac') {

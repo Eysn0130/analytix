@@ -110,10 +110,6 @@ func TestNormalizeTodosRejectsMalformedItemsWithoutCoercion(t *testing.T) {
 			map[string]any{"id": "one", "content": "one", "status": "pending"},
 			map[string]any{"id": "one", "content": "two", "status": "pending"},
 		}},
-		{name: "multiple active", items: []any{
-			map[string]any{"content": "one", "status": "in_progress"},
-			map[string]any{"content": "two", "status": "in_progress"},
-		}},
 		{name: "failed without reason", items: []any{map[string]any{"content": "one", "status": "failed"}}},
 		{name: "canceled with failure reason", items: []any{map[string]any{"content": "one", "status": "canceled", "statusReasonCode": "tool_failed"}}},
 		{name: "pending with reason", items: []any{map[string]any{"content": "one", "status": "pending", "statusReasonCode": "tool_failed"}}},
@@ -415,5 +411,83 @@ func TestValidateTodoReplacementRequiresExplicitTerminalOperations(t *testing.T)
 	}
 	if err := ValidateTodoReplacement(terminal, empty); !errors.Is(err, ErrTodoTerminalAuditRetention) {
 		t.Fatalf("terminal deletion error = %v", err)
+	}
+}
+
+func TestNormalizeTodosPreservesParallelActiveItemsAndStableIDs(t *testing.T) {
+	todos, err := NormalizeTodos("thread-parallel", []any{
+		map[string]any{"content": "  First  ", "status": "in_progress"},
+		map[string]any{"id": "todo_2", "content": "Second", "status": "in_progress"},
+		map[string]any{"id": "third", "content": "Third", "status": "in_progress"},
+	}, "now")
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := todos["items"].([]any)
+	for index, id := range []string{"todo_1", "todo_2", "third"} {
+		item := items[index].(map[string]any)
+		if item["id"] != id || item["status"] != "in_progress" {
+			t.Fatalf("parallel item changed: %#v", item)
+		}
+	}
+	if items[0].(map[string]any)["content"] != "First" || IncompleteTodoCount(todos) != 3 {
+		t.Fatal("normalization or incomplete gate changed")
+	}
+}
+
+func TestTodoOpsPreserveOtherParallelActiveItems(t *testing.T) {
+	for _, name := range []string{"append", "start", "retry", "done", "fail", "cancel", "drop"} {
+		t.Run(name, func(t *testing.T) {
+			selected := map[string]any{"id": "selected", "content": "Selected", "status": "in_progress"}
+			op := map[string]any{"op": name, "id": "selected"}
+			switch name {
+			case "append":
+				op = map[string]any{"op": name, "id": "new", "content": "New", "status": "in_progress"}
+			case "start":
+				selected["status"] = "pending"
+			case "retry":
+				selected["status"] = "failed"
+				selected["statusReasonCode"] = "tool_failed"
+			case "fail":
+				op["statusReasonCode"] = "tool_failed"
+			case "cancel":
+				op["statusReasonCode"] = "user_canceled"
+			}
+			todos := map[string]any{"items": []any{selected,
+				map[string]any{"id": "parallel-a", "content": "A", "status": "in_progress"},
+				map[string]any{"id": "parallel-b", "content": "B", "status": "in_progress"},
+				map[string]any{"id": "queued", "content": "Queued", "status": "pending"},
+			}}
+			before, _ := json.Marshal(todos)
+			items, audit, err := ApplyTodoOps(todos, []any{op})
+			if err != nil {
+				t.Fatal(err)
+			}
+			byID := map[string]map[string]any{}
+			for _, raw := range items {
+				item := raw.(map[string]any)
+				byID[item["id"].(string)] = item
+			}
+			for _, id := range []string{"parallel-a", "parallel-b"} {
+				if byID[id]["status"] != "in_progress" {
+					t.Fatalf("%s downgraded unselected active %s", name, id)
+				}
+			}
+			if byID["queued"]["status"] != "pending" || len(audit) != 1 {
+				t.Fatal("unselected queued state or operation audit changed")
+			}
+			if name == "append" && byID["new"]["status"] != "in_progress" || (name == "start" || name == "retry") && byID["selected"]["status"] != "in_progress" {
+				t.Fatal("selected item was not activated")
+			}
+			if name == "retry" {
+				if _, exists := byID["selected"]["statusReasonCode"]; exists {
+					t.Fatal("retry retained terminal reason")
+				}
+			}
+			after, _ := json.Marshal(todos)
+			if string(before) != string(after) {
+				t.Fatal("preparation mutated source todos")
+			}
+		})
 	}
 }

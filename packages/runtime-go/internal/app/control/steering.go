@@ -155,17 +155,21 @@ func NewTurnRequiredResponse(threadID, turnID, blockerCode string) map[string]an
 }
 
 type SteeringEntryInput struct {
-	TurnID              string
-	Text                string
-	DisplayText         string
-	ClientUserMessageID string
-	AttachmentIDs       []string
-	FileReferences      []any
-	EffectBinding       domainsteering.EntryLogicalEffectBinding
-	Now                 time.Time
+	UserInputReplyIdentity    *domainsteering.UserInputReplyIdentityV1
+	UserInputID               string
+	UserInputCaptureReceiptID string
+	TurnID                    string
+	Text                      string
+	DisplayText               string
+	ClientUserMessageID       string
+	AttachmentIDs             []string
+	FileReferences            []any
+	EffectBinding             domainsteering.EntryLogicalEffectBinding
+	Now                       time.Time
 }
 
 type TurnSteeredEventInput struct {
+	Entry               map[string]any
 	ThreadID            string
 	TurnID              string
 	Text                string
@@ -218,6 +222,16 @@ func BuildSteeringEntry(input SteeringEntryInput) (string, map[string]any, error
 		"logicalEffect":       string(input.EffectBinding.LogicalEffect),
 		"ordinaryWork":        input.EffectBinding.OrdinaryWork,
 	}
+	if input.UserInputID != "" || input.UserInputCaptureReceiptID != "" {
+		if !IsOpaqueClientUserMessageID(input.ClientUserMessageID) || input.Now.IsZero() {
+			return "", nil, errors.New("late steering requires stable Host capture")
+		}
+		if input.UserInputReplyIdentity == nil {
+			return "", nil, errors.New("late steering requires receipt-derived identity")
+		}
+		entry["userInputReplyIdentity"] = domainsteering.UserInputReplyIdentityMapV1(*input.UserInputReplyIdentity)
+		entry["userInputId"], entry["userInputCaptureReceiptId"] = input.UserInputID, input.UserInputCaptureReceiptID
+	}
 	if displayText := strings.TrimSpace(input.DisplayText); displayText != "" && displayText != text {
 		entry["displayText"] = displayText
 	}
@@ -231,7 +245,7 @@ func BuildSteeringEntry(input SteeringEntryInput) (string, map[string]any, error
 }
 
 func BuildTurnSteeredEvent(input TurnSteeredEventInput) map[string]any {
-	return map[string]any{
+	event := map[string]any{
 		"kind":                "turn_steered",
 		"threadId":            strings.TrimSpace(input.ThreadID),
 		"turnId":              strings.TrimSpace(input.TurnID),
@@ -239,6 +253,18 @@ func BuildTurnSteeredEvent(input TurnSteeredEventInput) map[string]any {
 		"displayText":         strings.TrimSpace(input.DisplayText),
 		"clientUserMessageId": strings.TrimSpace(input.ClientUserMessageID),
 	}
+	if input.Entry != nil {
+		// Existing admission owns these bytes. Only inert display/history
+		// fields enter the existing log; signatures and grants remain private.
+		entry := map[string]any{}
+		for _, key := range []string{"id", "clientUserMessageId", "attachmentIds", "fileReferences", "admittedAt", "status"} {
+			if value, present := input.Entry[key]; present {
+				entry[key] = contracts.CloneValue(value)
+			}
+		}
+		event["steeringEntry"] = entry
+	}
+	return event
 }
 
 func SteeringAcceptedResponse(threadID, turnID, clientUserMessageID string, seq any) map[string]any {
@@ -266,7 +292,11 @@ func AdmitSteeringTurn(input AdmitSteeringInput) (map[string]any, error) {
 	if clientUserMessageID != "" && !IsOpaqueClientUserMessageID(clientUserMessageID) {
 		return nil, ErrInvalidSteerClientID
 	}
+	if request.UserInputID != "" {
+		input.Now = request.UserInputCapturedAt
+	}
 	clientUserMessageID, entry, err := BuildSteeringEntry(SteeringEntryInput{
+		UserInputID: request.UserInputID, UserInputCaptureReceiptID: request.UserInputCaptureReceiptID, UserInputReplyIdentity: request.UserInputReplyIdentity,
 		TurnID:              request.TurnID,
 		Text:                request.Text,
 		DisplayText:         request.DisplayText,
@@ -286,6 +316,7 @@ func AdmitSteeringTurn(input AdmitSteeringInput) (map[string]any, error) {
 		return nil, err
 	}
 	event, _, err := input.Store.RecordEvent(BuildTurnSteeredEvent(TurnSteeredEventInput{
+		Entry:               admitted,
 		ThreadID:            request.ThreadID,
 		TurnID:              request.TurnID,
 		Text:                request.Text,

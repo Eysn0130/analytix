@@ -205,6 +205,10 @@ func (m *Manager) startChildRun(ctx context.Context, request StartRequest, reser
 	if err := domainmodel.ValidateReasoningEffortV1(request.Effort); err != nil {
 		return Record{}, err
 	}
+	if request.HostChildInput != nil && (reservation == nil || reservation.state == nil || reservation.state.hostInput == nil ||
+		request.SecurityBinding != nil || request.HostChildInput.ClientMessageID != reservation.state.hostInput.ClientMessageID || request.HostChildInput.InputDigest != reservation.state.hostInput.InputDigest) {
+		return Record{}, errors.New("Host child input requires the exact process reservation")
+	}
 	if request.SecurityBinding != nil {
 		if err := domainjob.ValidateSecurityBinding(request.SecurityBinding); err != nil ||
 			request.SecurityBinding.ParentThreadID != request.ParentThreadID || request.SecurityBinding.ParentTurnID != strings.TrimSpace(request.ParentTurnID) ||
@@ -266,6 +270,19 @@ func (m *Manager) startChildRun(ctx context.Context, request StartRequest, reser
 	if m.restartPreservesRecordNoLock(Record{ParentThreadID: request.ParentThreadID, ChildThreadID: request.ChildThreadID}) {
 		return Record{}, ErrRestartPreserved
 	}
+	if request.HostChildInput != nil {
+		for _, existing := range m.jobs {
+			if existing.ChildThreadID != request.ChildThreadID {
+				continue
+			}
+			if existing.HostChildInput != nil && existing.HostChildInput.ClientMessageID == request.HostChildInput.ClientMessageID {
+				return Record{}, errors.New("Host child input identity is already reserved")
+			}
+			if !terminalStatus(existing.Status) {
+				return Record{}, errors.New("child thread already has a live run")
+			}
+		}
+	}
 	childRuns, maxChildSeq := m.childRunStatsNoLock(request.ParentThreadID)
 	if request.MaxChildRunsSet && request.MaxChildRuns >= 0 {
 		if childRuns >= request.MaxChildRuns {
@@ -300,6 +317,7 @@ func (m *Manager) startChildRun(ctx context.Context, request StartRequest, reser
 		ParentToolItemID:      strings.TrimSpace(request.ParentToolItemID),
 		ParentToolCallID:      strings.TrimSpace(request.ParentToolCallID),
 		SecurityBinding:       domainjob.CloneSecurityBinding(request.SecurityBinding),
+		HostChildInput:        domainjob.CloneHostChildInputIdentityV1(request.HostChildInput),
 		CaseDelegation:        domainjob.CloneCaseDelegationContextV1(request.CaseDelegation),
 		ChildThreadID:         strings.TrimSpace(request.ChildThreadID),
 		ChildTurnID:           strings.TrimSpace(request.ChildTurnID),
@@ -507,6 +525,10 @@ func (m *Manager) UpdateChildRun(id string, request UpdateRequest) (Record, erro
 			return cloneRecord(record), errors.New("legacy TypeScript child-run tombstone is immutable")
 		}
 		originalRecord := cloneRecord(record)
+		if request.ProtectedOutputSnapshot != nil && record.ProtectedOutputSnapshot != nil &&
+			*request.ProtectedOutputSnapshot != *record.ProtectedOutputSnapshot {
+			return cloneRecord(record), errors.New("protected Job output snapshot is immutable")
+		}
 		if err := domainmodel.ValidateReasoningEffortV1(record.Effort); err != nil {
 			return cloneRecord(record), err
 		}
@@ -528,10 +550,10 @@ func (m *Manager) UpdateChildRun(id string, request UpdateRequest) (Record, erro
 		record.Output = domainjob.ProjectPersistableUntrustedOutputV1(record.Output)
 		record.Error = ""
 		projectPersistableOperationalFieldsV1(&record)
-		if request.Output != "" && record.SecurityBinding != nil && strings.TrimSpace(record.Kind) == "subagent" {
+		if request.Output != "" && (record.SecurityBinding != nil || record.HostChildInput != nil) && strings.TrimSpace(record.Kind) == "subagent" {
 			return cloneRecord(record), errors.New("security-bound child output cannot be persisted")
 		}
-		if request.Usage != nil && record.SecurityBinding != nil && strings.TrimSpace(record.Kind) == "subagent" {
+		if request.Usage != nil && (record.SecurityBinding != nil || record.HostChildInput != nil) && strings.TrimSpace(record.Kind) == "subagent" {
 			return cloneRecord(record), errors.New("security-bound child usage cannot be persisted in the job record")
 		}
 		if err := domainjob.ValidatePersistedUsageV1(record.Kind, request.Usage); err != nil {
@@ -628,6 +650,9 @@ func (m *Manager) UpdateChildRun(id string, request UpdateRequest) (Record, erro
 				refreshRuntimeLease(&record, now)
 			}
 		}
+		if request.ProtectedOutputSnapshot != nil && terminalStatus(originalRecord.Status) && originalRecord.ProtectedOutputSnapshot == nil {
+			return cloneRecord(originalRecord), errors.New("terminal Job output cannot be reconstructed")
+		}
 		if value := strings.TrimSpace(request.ChildThreadID); value != "" {
 			record.ChildThreadID = value
 		}
@@ -636,6 +661,9 @@ func (m *Manager) UpdateChildRun(id string, request UpdateRequest) (Record, erro
 		}
 		if request.ChildCompletionReceipt != nil {
 			record.ChildCompletionReceipt = domainjob.CloneChildCompletionReceiptV1(request.ChildCompletionReceipt)
+		}
+		if request.ProtectedOutputSnapshot != nil {
+			record.ProtectedOutputSnapshot = domainjob.CloneProtectedOutputSnapshotV1(request.ProtectedOutputSnapshot)
 		}
 		if request.ForegroundChildHandoffReceipt != nil {
 			record.ForegroundChildHandoffReceipt = domainjob.CloneForegroundChildHandoffReceiptV1(request.ForegroundChildHandoffReceipt)
@@ -1684,7 +1712,9 @@ func sortedStrings(values []string) []string {
 }
 
 func cloneRecord(record Record) Record {
+	record.ProtectedOutputSnapshot = domainjob.CloneProtectedOutputSnapshotV1(record.ProtectedOutputSnapshot)
 	record.SecurityBinding = domainjob.CloneSecurityBinding(record.SecurityBinding)
+	record.HostChildInput = domainjob.CloneHostChildInputIdentityV1(record.HostChildInput)
 	record.CaseDelegation = domainjob.CloneCaseDelegationContextV1(record.CaseDelegation)
 	record.ChildCompletionReceipt = domainjob.CloneChildCompletionReceiptV1(record.ChildCompletionReceipt)
 	record.ForegroundChildHandoffReceipt = domainjob.CloneForegroundChildHandoffReceiptV1(record.ForegroundChildHandoffReceipt)

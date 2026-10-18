@@ -11,6 +11,15 @@
 export const ANALYTIX_HEALTH_PATH = '/health'
 export const ANALYTIX_HEALTH_TEMPLATE = '/health'
 
+export const ANALYTIX_MESSAGE_FEEDBACK_TEMPLATE = '/v1/threads/{id}/message-feedback'
+export const ANALYTIX_MESSAGE_FEEDBACK_ITEM_TEMPLATE = '/v1/threads/{id}/message-feedback/{message}'
+export function analytixMessageFeedbackPath(threadId: string): string {
+  return `/v1/threads/${encodeURIComponent(threadId)}/message-feedback`
+}
+export function analytixMessageFeedbackItemPath(threadId: string, messageId: string): string {
+  return `${analytixMessageFeedbackPath(threadId)}/${encodeURIComponent(messageId)}`
+}
+
 export const ANALYTIX_RUNTIME_INFO_PATH = '/v1/runtime/info'
 export const ANALYTIX_RUNTIME_INFO_TEMPLATE = '/v1/runtime/info'
 
@@ -248,6 +257,10 @@ export function analytixApprovalPath(approvalId: string): string {
 export const ANALYTIX_USER_INPUT_TEMPLATE = '/v1/user-inputs/{id}'
 export function analytixUserInputPath(inputId: string): string {
   return `/v1/user-inputs/${encodeURIComponent(inputId)}`
+}
+
+export function analytixUserInputWaitPath(inputId: string): string {
+  return `${analytixUserInputPath(inputId)}/wait`
 }
 
 export const ANALYTIX_SESSION_RESUME_TEMPLATE = '/v1/sessions/{id}/resume-thread'

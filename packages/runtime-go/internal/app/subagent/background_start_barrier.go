@@ -16,6 +16,7 @@ type BackgroundJobStartBarrier struct {
 	mu       sync.Mutex
 	canceled atomic.Bool
 	consumed bool
+	started  bool
 }
 
 func NewBackgroundJobStartBarrier() *BackgroundJobStartBarrier {
@@ -59,7 +60,11 @@ func (barrier *BackgroundJobStartBarrier) StartIfActive(ctx context.Context, sta
 		return errors.New("job start authority was already consumed")
 	}
 	barrier.consumed = true
-	return start()
+	if err := start(); err != nil {
+		return err
+	}
+	barrier.started = true
+	return nil
 }
 
 // Cancel closes start authority without waiting for a start that already won.
@@ -83,4 +88,15 @@ func (barrier *BackgroundJobStartBarrier) CancelAndWait() {
 	barrier.canceled.Store(true)
 	barrier.mu.Lock()
 	barrier.mu.Unlock()
+}
+
+// StartedV1 is lifecycle evidence that the existing one-shot callback handed
+// execution to its owner. A consumed barrier alone does not prove that.
+func (barrier *BackgroundJobStartBarrier) StartedV1() bool {
+	if barrier == nil {
+		return false
+	}
+	barrier.mu.Lock()
+	defer barrier.mu.Unlock()
+	return barrier.started
 }

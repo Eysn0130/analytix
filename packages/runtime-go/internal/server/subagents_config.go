@@ -4,6 +4,7 @@ import (
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
+	"context"
 )
 
 func loadRuntimeSubagentConfig(config RuntimeServerConfig) (runtimeSubagentConfig, error) {
@@ -35,6 +36,7 @@ func (h *runtimeServerHandler) runtimeSubagentService() *subagentapp.Service {
 		AuthorizeRecord: func(parentThreadID string, record domainjob.Record) bool {
 			return authorizer.Allows(parentThreadID, record)
 		},
+		ResolveProtectedOutput: h.resolveRuntimeProtectedJobOutputV1,
 	})
 }
 
@@ -42,6 +44,11 @@ func (h *runtimeServerHandler) runtimeJobSecurityAuthorizer() subagentapp.JobSec
 	authorizer := subagentapp.JobSecurityAuthorizer{WorkspaceHasCaseBinding: filestore.WorkspaceHasAnalytixCaseBinding}
 	if h != nil && h.store != nil {
 		authorizer.Threads = h.store
+	}
+	if h != nil && h.store != nil {
+		authorizer.HostInputCurrent = func(record domainjob.Record) bool {
+			return h.hostChildInputRecordCurrentV1(context.Background(), record, true)
+		}
 	}
 	if h != nil && h.jobs != nil {
 		authorizer.Jobs = h.jobs

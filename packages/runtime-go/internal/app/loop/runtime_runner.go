@@ -13,7 +13,10 @@ import (
 	privacyprojectionapp "analytix.local/runtime-go/internal/app/privacyprojection"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	appturn "analytix.local/runtime-go/internal/app/turn"
+	appusage "analytix.local/runtime-go/internal/app/usage"
+	"analytix.local/runtime-go/internal/contracts"
 	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
@@ -101,6 +104,7 @@ type RuntimeRunnerInput struct {
 	AnthropicCapsule         *domainmodel.AnthropicThinkingCapsule
 	PrivateProtocolCapsules  []*domainmodel.AnthropicThinkingCapsule
 	ProviderCallSequence     uint64
+	OutputCapLogicalSequence uint64
 	TerminalRecoveryKind     RuntimeTerminalRecoveryKind
 	CaseFundPolicy           CaseFundAnalysisPolicy
 	AdditionalCaseDataEffect bool
@@ -202,6 +206,9 @@ type RuntimeRunnerDependencies struct {
 	Provider                 ports.ProviderClient
 	PendingWork              *pendingworkapp.Service
 	Events                   *RuntimeEventRecorder
+	ProcessDisplay           func(domainmodel.ProcessFrameV1)
+	ProcessUnit              func(domaincontinuation.ProviderContinuationNamespaceV1, bool)
+	ProcessToolReady         func(appmodel.PendingToolCall)
 	ResolveToolCatalog       func(planActive bool, step RuntimeProviderStep) RuntimeRunnerToolCatalog
 	PromoteSteering          func(context.Context) (RuntimeSteeringBatch, error)
 	AcquireCandidateTerminal func(context.Context, RuntimeProviderStep) (context.Context, func(), error)
@@ -217,9 +224,14 @@ type RuntimeRunnerDependencies struct {
 
 func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps RuntimeRunnerDependencies) (loopResult RuntimeAgentLoopResult, loopErr error) {
 	stickyRecovery := input.TerminalRecoveryKind
+	if input.OutputCapLogicalSequence > input.ProviderCallSequence {
+		return RuntimeAgentLoopResult{}, errors.New("output-cap continuation sequence is invalid")
+	}
+	outputCapSequence := input.OutputCapLogicalSequence
 	caseSourceUnavailable := input.CaseFundPolicy.SourceUnavailable || input.CaseSourceUnavailable
 	defer func() {
 		loopResult.CaseSourceUnavailable = loopResult.CaseSourceUnavailable || caseSourceUnavailable
+		loopResult.OutputCapLogicalSequence = outputCapSequence
 		SealRuntimeAgentLoopResultForReturn(&loopResult, &stickyRecovery)
 	}()
 	if deps.Events == nil {
@@ -266,11 +278,42 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		currentProviderStep.CaseSourceUnavailable = true
 	}
 	loopEvents := deps.Events
+	// These public identities describe logical lifecycle only. The signed
+	// provider ledger retains its separate, private attempt/step bindings.
+	type logicalStepReading struct {
+		id        string
+		startedAt time.Time
+		committed bool
+		details   map[string]any
+	}
+	var logicalStep *logicalStepReading
+	closeLogicalStep := func() error {
+		current := logicalStep
+		logicalStep = nil
+		if current == nil || !current.committed {
+			return nil
+		}
+		return loopEvents.PipelineStageAtomic(input.ThreadID, input.TurnID, domainmodel.PipelineStage{
+			Stage: "logical_step_closed", At: time.Now().UTC(), Details: current.details,
+		})
+	}
+	defer func() { loopErr = errors.Join(loopErr, closeLogicalStep()) }()
 	newStage := func(stage string, details map[string]any) domainmodel.PipelineStage {
 		return domainmodel.PipelineStage{
 			Stage:   stage,
 			At:      time.Now().UTC(),
 			Details: details,
+		}
+	}
+	commitLogicalStart := func(stages []domainmodel.PipelineStage) {
+		if logicalStep == nil {
+			return
+		}
+		for _, stage := range stages {
+			if stage.Stage == "logical_step_started" && stage.Details["logicalStepId"] == logicalStep.id {
+				logicalStep.committed = true
+				return
+			}
 		}
 	}
 	pendingStartupStages := []domainmodel.PipelineStage{
@@ -283,7 +326,8 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			"sandboxMode":    input.SandboxMode,
 		}),
 		newStage("post_start", map[string]any{
-			"maxModelSteps": float64(effectiveMaxSteps),
+			"maxModelSteps":             float64(effectiveMaxSteps),
+			"logicalStepMetricsVersion": float64(appusage.LogicalStepMetricsVersionV1),
 		}),
 		newStage("input_received", map[string]any{
 			"stepIndex":   float64(0),
@@ -299,7 +343,14 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		stages = append(stages, pendingStartupStages...)
 		stages = append(stages, additional...)
 		pendingStartupStages = nil
-		return loopEvents.PipelineStages(input.ThreadID, input.TurnID, stages)
+		if err := loopEvents.PipelineStages(input.ThreadID, input.TurnID, stages); err != nil {
+			if runtimePipelineAppendCommittedV1(err) {
+				commitLogicalStart(stages)
+			}
+			return err
+		}
+		commitLogicalStart(stages)
+		return nil
 	}
 	flushStartupStagesWithCriticalStage := func(stage domainmodel.PipelineStage) error {
 		if len(pendingStartupStages) == 0 {
@@ -309,9 +360,14 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		stages = append(stages, pendingStartupStages...)
 		stages = append(stages, stage)
 		if err := loopEvents.PipelineStagesAtomic(input.ThreadID, input.TurnID, stages); err != nil {
+			if runtimePipelineAppendCommittedV1(err) {
+				pendingStartupStages = nil
+				commitLogicalStart(stages)
+			}
 			return err
 		}
 		pendingStartupStages = nil
+		commitLogicalStart(stages)
 		return nil
 	}
 	failAfterStartupStages := func(cause error) (RuntimeAgentLoopResult, error) {
@@ -521,7 +577,10 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			}
 		}
 		projectionStartedAt := time.Now()
-		ordinaryResult, err := compileOrdinaryCandidate(currentProviderStep, candidateText)
+		var ordinaryResult *domainordinaryresult.ResultSlotV1
+		if !providerResultOutputCapped(candidateResult) || strings.TrimSpace(candidateText) != "" {
+			ordinaryResult, err = compileOrdinaryCandidate(currentProviderStep, candidateText)
+		}
 		if err != nil {
 			releaseCandidateTerminal()
 			return RuntimeAgentLoopResult{AssistantText: candidateText, LastResult: candidateResult}, false,
@@ -544,11 +603,25 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		}, false, nil
 	}
 	for step := 0; step < maxSteps || stepLimitFinalizeNudged; step++ {
+		if err := closeLogicalStep(); err != nil {
+			return RuntimeAgentLoopResult{}, err
+		}
 		providerCallSequence++
+		providerStepStartedAt := time.Now().UTC()
 		stepLimitFinalizing := maxSteps > 0 && step >= maxSteps
 		if err := deps.PauseChild(ctx); err != nil {
 			return failAfterStartupStages(err)
 		}
+		logicalStartedAt := time.Now()
+		logicalID := contracts.NewOpaqueUUIDV4("logical-step", input.TurnID, logicalStartedAt)
+		logicalStep = &logicalStepReading{
+			id: logicalID, startedAt: logicalStartedAt,
+			details: map[string]any{"schemaVersion": float64(appusage.LogicalStepMetricsVersionV1), "logicalStepId": logicalID, "assistantMessageAssembled": false},
+		}
+		pendingStartupStages = append(pendingStartupStages, domainmodel.PipelineStage{
+			Stage: "logical_step_started", At: logicalStartedAt.UTC(),
+			Details: map[string]any{"schemaVersion": float64(appusage.LogicalStepMetricsVersionV1), "logicalStepId": logicalID},
+		})
 		stepText := ""
 		stepThinking := ""
 		stepThinkingSignature := ""
@@ -785,9 +858,14 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			PrivateProviderTelemetry: &domainmodel.ProviderTelemetryBindingV1{
 				SecurityContext: input.SecurityContext, UsageSource: domaincache.NormalizeProviderUsageSourceV1(input.UsageSource),
 				ChildRunID: input.ChildRunID, Channel: domaincache.ProviderChannelPrimary, LogicalSequence: providerCallSequence,
+				StepStartedAt:     providerStepStartedAt,
+				PublicAttribution: domaincache.ProviderPublicAttributionV1{Provider: input.ProviderID, Model: input.Model},
 			},
 		}
 		providerRequestToolManifestHash := toolcatalogapp.ToolSchemaHash(providerRequest.Tools)
+		// Freeze the actual model request before dispatch. Later preparation may
+		// select a different Host execution contract for the same tool name.
+		modelVisibleToolDefinitions := domainmodel.FreezeModelVisibleToolDefinitionsV1(providerRequest.Tools)
 		dispatch := providerDispatchGuard{
 			pre: flushStartupStagesWithCriticalStage,
 			post: func(stage domainmodel.PipelineStage) error {
@@ -803,6 +881,12 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			AcquireProviderAttempt: func(attemptCtx context.Context, attempt int) (context.Context, func(), error) {
 				return deps.AcquireProviderAttempt(attemptCtx, attempt, providerStep)
 			},
+			OnProcessFrame: func(frame domainmodel.ProcessFrameV1) {
+				// Only this real logical call supplies sequence/scope for native,
+				// reasoning_content and tool-preparation observations. None dispatches a tool.
+				frame.ProviderSequence = providerCallSequence
+				notifyProcessDisplayV1(deps.ProcessDisplay, frame)
+			},
 			BeforeProviderInvocation: dispatch.before,
 			AfterProviderAttempt:     dispatch.after,
 			OnTextChunk: func(domainmodel.Chunk) error {
@@ -810,11 +894,15 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 				// publication lane validates the complete candidate.
 				return nil
 			},
-			OnProviderRetrying: func(attempt int, maxAttempts int, cause error) error {
+			OnProviderRetryLifecycle: func(retry domainmodel.ProviderRetryV1, maxAttempts int, cause error) error {
 				if err := flushStartupStages(); err != nil {
 					return err
 				}
-				return loopEvents.ProviderRetrying(input.ThreadID, input.TurnID, attempt, maxAttempts, cause)
+				target := retry.OuterAttempt
+				if retry.Source == "transport_reconnect" {
+					target = retry.PhysicalAttempt
+				}
+				return loopEvents.ProviderRetrying(input.ThreadID, input.TurnID, target, maxAttempts, cause, retry)
 			},
 		}
 		if deps.PrepareProviderAttempt != nil && (prepareAttachments || deps.ResolveProviderIntent != nil) {
@@ -822,6 +910,8 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 				return deps.PrepareProviderAttempt(attemptCtx, attempt, request, promptRoute, toolManifestHash, providerCallSequence)
 			}
 		}
+		processNamespace := appmodel.ProviderNamespace(input.UsageSource, input.ChildRunID, providerCallSequence, input.DelegatedToolManifest)
+		notifyProcessUnitV2(deps.ProcessUnit, processNamespace, true)
 		stream, err := StreamProviderWithRetry(ctx, ProviderStreamInput{
 			Provider:            deps.Provider,
 			Request:             providerRequest,
@@ -835,6 +925,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 				Sequence: providerCallSequence,
 			},
 		})
+		notifyProcessUnitV2(deps.ProcessUnit, processNamespace, false)
 		stream, err = dispatch.finish(stream, err)
 		if len(pendingStartupStages) > 0 {
 			if flushErr := flushStartupStages(); flushErr != nil {
@@ -843,6 +934,7 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			}
 		}
 		result := stream.Result
+		logicalObservations := append([]domaincache.ProviderCallObservationV1(nil), result.CacheObservations...)
 		providerCallObservations = append(providerCallObservations, result.CacheObservations...)
 		result.CacheObservations = append([]domaincache.ProviderCallObservationV1(nil), providerCallObservations...)
 		stepText = stream.Text
@@ -851,6 +943,32 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		streamedDeltas = stream.StreamedDeltas
 		partialTextStarted = stream.PartialTextStarted
 		partialToolStarted = stream.PartialToolStarted
+		recordResponse := func(completed bool, observedCap bool) error {
+			responseDetails := map[string]any{
+				"stopReason":      result.Usage.FinishReason,
+				"toolCallCount":   float64(ToolCallCount(result.Chunks)),
+				"streamCompleted": completed,
+			}
+			if result.HasDuration {
+				responseDetails["durationMs"] = float64(result.DurationMs)
+			}
+			if result.HasFirstTokenLatency {
+				responseDetails["firstTokenLatencyMs"] = float64(result.FirstTokenLatencyMs)
+			}
+			if observedCap {
+				responseDetails["logicalSequence"] = float64(providerCallSequence)
+			}
+			if result.HasFirstReasoningLatency {
+				responseDetails["firstReasoningLatencyMs"] = float64(result.FirstReasoningLatencyMs)
+			}
+			if result.HasFirstRawTextLatency {
+				responseDetails["firstRawTextLatencyMs"] = float64(result.FirstRawTextLatencyMs)
+			}
+			if err := loopEvents.PipelineStage(input.ThreadID, input.TurnID, "response_received", responseDetails, time.Now().UTC(), nil); err != nil {
+				return WrapHostBoundaryFailure(HostResponseEventFailure, err)
+			}
+			return nil
+		}
 		if err != nil {
 			// Provider chunks are attempt-private transport material. Failure,
 			// callback failure, recovery, cancellation, and future callers may
@@ -907,6 +1025,13 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 				}
 				return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result}, err
 			}
+			// Only a verified logical return may publish an observed cap. Host
+			// cancellation and callback/dispatch failures above retain priority.
+			if domainmodel.NormalizeFinishReason(result.Usage.FinishReason) == "length" {
+				if recordErr := recordResponse(false, true); recordErr != nil {
+					return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result}, recordErr
+				}
+			}
 			if streamedDeltas && !CasePublicationRequired(input.SecurityContext) && streamRecoveries < MaxInterruptedStreamRecoveries && InterruptedStreamCanRecoverWithContext(ctx, err) {
 				stickyRecovery = MergeRuntimeTerminalRecoveryKind(stickyRecovery, RuntimeTerminalRecoveryApplied)
 				streamRecoveries++
@@ -929,22 +1054,12 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			}
 			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result}, err
 		}
-		responseDetails := map[string]any{
-			"stopReason":          result.Usage.FinishReason,
-			"toolCallCount":       float64(ToolCallCount(result.Chunks)),
-			"streamCompleted":     result.StreamCompleted,
-			"durationMs":          float64(result.DurationMs),
-			"firstTokenLatencyMs": float64(result.FirstTokenLatencyMs),
+		capped := providerResultOutputCapped(result)
+		if capped && outputCapSequence == 0 {
+			outputCapSequence = providerCallSequence
 		}
-		if result.HasFirstReasoningLatency {
-			responseDetails["firstReasoningLatencyMs"] = float64(result.FirstReasoningLatencyMs)
-		}
-		if result.HasFirstRawTextLatency {
-			responseDetails["firstRawTextLatencyMs"] = float64(result.FirstRawTextLatencyMs)
-		}
-		if err := loopEvents.PipelineStage(input.ThreadID, input.TurnID, "response_received", responseDetails, time.Now().UTC(), nil); err != nil {
-			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result},
-				WrapHostBoundaryFailure(HostResponseEventFailure, err)
+		if err := recordResponse(result.StreamCompleted && !capped, capped); err != nil {
+			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: result}, err
 		}
 		streamRecoveries = 0
 		last = result
@@ -960,6 +1075,21 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 		stepThinking = stepOutput.Reasoning
 		stepThinkingSignature = stepOutput.ReasoningSignature
 		toolCalls := stepOutput.ToolCalls
+		if capped {
+			toolCalls = nil
+		}
+		assistantMessage := domainmodel.Message{Role: "assistant", Content: stepText, ToolCalls: toolCalls}
+		assembledAt := time.Now()
+		logicalStep.details = logicalStepAssemblyDetailsV1(logicalStep.id, logicalStep.startedAt, assembledAt, result.Usage, logicalObservations)
+		// Commit the Host's assembly boundary before any tool admission or
+		// execution. The later close remains the sole logical metrics owner.
+		if err := loopEvents.PipelineStageAtomic(input.ThreadID, input.TurnID, domainmodel.PipelineStage{
+			Stage: "logical_step_assembled", At: assembledAt.UTC(),
+			Details: map[string]any{"schemaVersion": float64(appusage.LogicalStepMetricsVersionV1), "logicalStepId": logicalStep.id},
+		}); err != nil {
+			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: last},
+				WrapHostBoundaryFailure(HostResponseEventFailure, err)
+		}
 		if err := deps.PauseChild(ctx); err != nil {
 			return RuntimeAgentLoopResult{AssistantText: stepText, LastResult: last},
 				WrapHostBoundaryFailure(HostCandidateLifecycleFailure, err)
@@ -970,6 +1100,16 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 					Message: "foreground child completed without required " + required + " tool",
 					Code:    "subagent_required_final_tool_missing", Severity: "error",
 				}
+			}
+			if capped {
+				candidate, steered, err := finishCandidateBoundary(stepText, last, false, true)
+				if err != nil || !steered {
+					return candidate, err
+				}
+				if maxSteps > 0 {
+					step--
+				}
+				continue
 			}
 			if strings.TrimSpace(stepText) == "" {
 				if stepLimitFinalizing {
@@ -1173,7 +1313,6 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			terminal.OrdinaryResult = ordinaryResult
 			return terminal, nil
 		}
-		assistantMessage := domainmodel.Message{Role: "assistant", Content: stepText, ToolCalls: toolCalls}
 		privateProtocolSessionBeforeToolStep := privateProtocolSession
 		privateProtocolObservedBeforeToolStep := privateProtocolObserved
 		var nextAnthropicCapsule *domainmodel.AnthropicThinkingCapsule
@@ -1235,10 +1374,13 @@ func RunRuntimeAgentLoop(ctx context.Context, input RuntimeRunnerInput, deps Run
 			PrivateProtocolSession:          privateProtocolSession,
 			AnthropicCapsule:                nextAnthropicCapsule,
 			PrivateProtocolCapsules:         nextPrivateProtocolCapsules,
-			ProviderNamespace:               appmodel.ProviderNamespace(input.UsageSource, input.ChildRunID, providerCallSequence, input.DelegatedToolManifest),
+			ProviderNamespace:               processNamespace,
+			ProcessToolReady:                deps.ProcessToolReady,
 			TerminalRecoveryKind:            stickyRecovery,
+			OutputCapLogicalSequence:        outputCapSequence,
 			ToolCalls:                       toolCalls,
 			ToolSchemas:                     toolSchemas,
+			ModelVisibleToolDefinitions:     modelVisibleToolDefinitions,
 			ToolScope:                       advertisedToolScope,
 			SubagentDepth:                   input.SubagentDepth,
 			AdvertisedTools:                 advertisedTools,
@@ -1674,4 +1816,50 @@ func RuntimeMessageRoleBytes(messages []domainmodel.Message, role string) int {
 		}
 	}
 	return total
+}
+
+func notifyProcessUnitV2(callback func(domaincontinuation.ProviderContinuationNamespaceV1, bool), n domaincontinuation.ProviderContinuationNamespaceV1, active bool) {
+	if callback == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	callback(domaincontinuation.CloneProviderContinuationNamespaceV1(n), active)
+}
+
+// Freeze model wall time at typed assistant assembly, before tool execution.
+// Failed/retried attempts remain in billing; only the assembled result supplies
+// decode output, and a missing native final counter remains unknown.
+func logicalStepAssemblyDetailsV1(id string, startedAt, assembledAt time.Time, usage domainmodel.Usage, observations []domaincache.ProviderCallObservationV1) map[string]any {
+	details := map[string]any{"schemaVersion": float64(appusage.LogicalStepMetricsVersionV1), "logicalStepId": id, "assistantMessageAssembled": true}
+	llmMs := assembledAt.Sub(startedAt).Milliseconds()
+	if llmMs < 0 || llmMs > 9007199254740991 {
+		return details
+	}
+	details["llmMs"] = float64(llmMs)
+	var firstTokenAt time.Time
+	for _, observation := range observations {
+		if observation.FirstTokenAt == "" || observation.Validate() != nil {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, observation.FirstTokenAt)
+		if err != nil || at.Before(startedAt) || at.After(assembledAt) {
+			continue
+		}
+		if firstTokenAt.IsZero() || at.Before(firstTokenAt) {
+			firstTokenAt = at
+		}
+	}
+	if firstTokenAt.IsZero() {
+		return details
+	}
+	ttftMs := firstTokenAt.Sub(startedAt).Milliseconds()
+	if ttftMs < 0 || ttftMs > llmMs {
+		return details
+	}
+	details["ttftMs"] = float64(ttftMs)
+	if usage.UsagePresenceKnown && usage.HasCompletionTokens && usage.OutputTokensFinality == domaincache.ProviderOutputTokensFinalV1 && usage.CompletionTokens >= 0 && uint64(usage.CompletionTokens) <= 9007199254740991 {
+		details["decodeMs"] = float64(llmMs - ttftMs)
+		details["decodeTokens"] = float64(usage.CompletionTokens)
+	}
+	return details
 }

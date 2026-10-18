@@ -159,6 +159,33 @@ func NumberedReadTextView(content string, offset int, limit int) ReadTextView {
 	}
 }
 
+// OriginalReadTextSelectionV1 retains original decoded line terminators.
+// Model and read-before-edit replies keep their existing text semantics.
+func OriginalReadTextSelectionV1(content string, view ReadTextView) string {
+	if content == "" || view.StartLine < 1 || view.EndLine < view.StartLine {
+		return ""
+	}
+	starts := []int{0}
+	for offset := 0; offset < len(content); offset++ {
+		if content[offset] == '\r' {
+			if offset+1 < len(content) && content[offset+1] == '\n' {
+				offset++
+			}
+			starts = append(starts, offset+1)
+		} else if content[offset] == '\n' {
+			starts = append(starts, offset+1)
+		}
+	}
+	if view.StartLine > len(starts) {
+		return ""
+	}
+	end := len(content)
+	if view.EndLine < len(starts) {
+		end = starts[view.EndLine]
+	}
+	return content[starts[view.StartLine-1]:end]
+}
+
 func SplitTextLines(content string, keepFinalEmptyLine bool) []string {
 	normalized := strings.ReplaceAll(content, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")

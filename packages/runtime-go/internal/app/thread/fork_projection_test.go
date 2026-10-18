@@ -3,15 +3,101 @@ package thread
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"analytix.local/runtime-go/internal/contracts"
+	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
+
+func TestGoalDerivedThreadsDoNotReuseSourceBoundGoalHistory(t *testing.T) {
+	goal := map[string]any{"threadId": "source", "id": "goal-source", "revision": 1, "objective": "Recorded source objective", "status": "active", "maxGoalRounds": 8, "roundsStarted": 1, "tokensUsed": 0, "timeUsedSeconds": 0, "createdAt": "2026-10-11T00:00:00Z", "updatedAt": "2026-10-11T00:00:00Z"}
+	source := map[string]any{"id": "source", "title": "Source", "status": "idle", "turns": []any{}, "goal": goal,
+		"goalHistory": []any{map[string]any{"id": "goal-record", "operation": "round_started", "createdAt": "2026-10-11T00:00:00Z", "ref": map[string]any{"id": "goal-source", "revision": 1}, "goal": contracts.CloneMap(goal)}}}
+	before, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ProjectPublicThread(source); err != nil {
+		t.Fatal("source fixture is not a valid public thread", err)
+	}
+	for _, kind := range []string{"fork", "resume"} {
+		t.Run(kind, func(t *testing.T) {
+			var derived map[string]any
+			var err error
+			if kind == "fork" {
+				derived, err = BuildFork(ForkInput{Source: source, ForkID: "derived", ParentThreadID: "source", Now: "2026-10-11T00:01:00Z"})
+			} else {
+				derived, err = BuildResume(ResumeInput{Source: source, ThreadID: "derived", SessionID: "source", Now: "2026-10-11T00:01:00Z"})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ProjectPublicThread(derived); err != nil {
+				t.Fatal("derived public thread rejected source-bound Goal history", err)
+			}
+			for _, field := range []string{"goal", "goalHistory"} {
+				if _, present := derived[field]; present {
+					t.Fatal("derived thread reused source Goal authority", field)
+				}
+			}
+			after, err := json.Marshal(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Fatal("source recorded history was mutated")
+			}
+		})
+	}
+}
+
+func TestForkQuestionPreservesHostIdentityAndMultiSelectWithoutAuthority(t *testing.T) {
+	inputID := "input_" + strings.Repeat("a", 31) + "9999999999999" + strings.Repeat("b", 20)
+	for _, status := range []string{"pending", "continued", "submitted", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			source := map[string]any{"id": "item_" + inputID, "kind": "user_input", "threadId": "source", "turnId": "turn", "inputId": inputID, "status": status,
+				"continuationReceiptId": strings.Repeat("c", 64), "securityContext": map[string]any{"private": true}, "executionGrant": map[string]any{"private": true},
+				"questions": []any{map[string]any{"id": inputID + "_1", "question": "Synthetic question", "multiSelect": true,
+					"options": []any{map[string]any{"id": inputID + "_1_option_1", "label": "One", "description": ""}}}}}
+			before := contracts.CloneMap(source)
+			cloned := CloneItemForThread(source, "child", "2026-10-09T00:00:00Z")
+			want := status
+			if status == "pending" {
+				want = "cancelled"
+			}
+			if cloned["inputId"] != inputID || cloned["status"] != want || cloned["threadId"] != "child" {
+				t.Fatal("history identity or inert status changed")
+			}
+			question := cloned["questions"].([]any)[0].(map[string]any)
+			if question["id"] != inputID+"_1" || question["multiSelect"] != true || question["options"].([]any)[0].(map[string]any)["id"] != inputID+"_1_option_1" {
+				t.Fatal("original question identity or selection semantics lost")
+			}
+			for _, field := range []string{"continuationReceiptId", "securityContext", "executionGrant"} {
+				if _, exists := cloned[field]; exists {
+					t.Fatal("fork retained execution authority")
+				}
+			}
+			if domainprivacy.ValidatePublicValue(cloned) != nil || domainprivacy.ValidatePublicSourceProse(cloned) != nil {
+				t.Fatal("legitimate Host identity became prose PII")
+			}
+			cloned["prompt"] = "account 6222020000000000000"
+			if domainprivacy.ValidatePublicValue(cloned) == nil {
+				t.Fatal("question identity exception admitted ordinary account prose")
+			}
+			if !reflect.DeepEqual(source, before) {
+				t.Fatal("clone mutated original source")
+			}
+		})
+	}
+}
 
 func TestBuildForkClonesThreadHistoryAndLineage(t *testing.T) {
 	firstContext := domainsecurity.NewTurnSecurityContext(domainsecurity.TurnSecurityContextInput{
@@ -633,5 +719,31 @@ func TestCaseDerivationDoesNotInheritCompactionAuthority(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestForkPreservesSealedConversationSummaryWithoutExecutionAuthority(t *testing.T) {
+	facts, err := domainthread.SealCompactionSummaryFactsV1(domainthread.CompactionSummaryFactsV1{CompactionID: "compaction_source", Summary: "The user requested continuing the recorded task.", SourceDigest: strings.Repeat("a", 64), SourceItemIDs: []string{"item_source"}, ShadowedItemCount: 1, ReplacedTokens: 50, FinishedAt: "2026-10-09T00:00:01Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := map[string]any{"id": facts.CompactionID, "compactionId": facts.CompactionID, "threadId": "source", "turnId": "turn_source", "kind": "compaction", "role": "system", "status": "completed", "auto": false,
+		"createdAt": "2026-10-09T00:00:00Z", "finishedAt": facts.FinishedAt, "schemaVersion": 5, "providerHistoryProjectionVersion": 3, "summaryKind": "conversation", "summary": facts.Summary, "summaryDigest": facts.SummaryDigest,
+		"checkpointDigest": facts.CheckpointDigest, "sourceDigest": facts.SourceDigest, "sourceItemIds": []any{"item_source"}, "shadowedItemCount": 1, "replacedTokens": 50, "tokenCountKind": "estimated", "tokenEstimatorVersion": 1,
+		"reasoningExcluded": true, "caseFactsExcluded": true, "toolPayloadsExcluded": true, "pinnedConstraints": []any{"user: preserve recent turns"}, "digestMarker": "sha256:" + facts.SourceDigest[:12]}
+	item["reasoningExclusionProof"] = domainevent.ReasoningExclusionProof(item)
+	before := contracts.CloneMap(item)
+	cloned := CloneItemForThread(item, "child", "2026-10-10T00:00:00Z")
+	if !domainevent.ValidGeneralCompactionProviderHistoryItemV5(cloned) || cloned["threadId"] != "child" || cloned["summary"] != facts.Summary || cloned["checkpointDigest"] != facts.CheckpointDigest || cloned["compactionId"] != facts.CompactionID || !reflect.DeepEqual(before, contracts.CloneMap(item)) {
+		t.Fatal("fork lost or invented summary facts")
+	}
+	for _, key := range []string{"securityContext", "contextEpochSnapshot", "contextDigest", "executionGrant"} {
+		if _, ok := cloned[key]; ok {
+			t.Fatal("summary clone gained execution authority")
+		}
+	}
+	item["summary"] = "tampered summary"
+	if CloneItemForThread(item, "child", "2026-10-10T00:00:00Z") != nil {
+		t.Fatal("tampered historical summary revived")
 	}
 }

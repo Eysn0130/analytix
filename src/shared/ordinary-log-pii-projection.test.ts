@@ -261,6 +261,8 @@ describe('ordinary log PII projection', () => {
     expect(ordinaryPIICorpus.syntheticOnly).toBe(true)
     for (const testCase of ordinaryPIICorpus.untrustedTextCases) {
       const projected = projectOrdinaryLogPII(testCase.input)
+      expect(containsOrdinaryPublicPII(testCase.input), testCase.id).toBe(testCase.expected === 'mask')
+      expect(projectOrdinaryLogPII(projected), testCase.id).toBe(projected)
       if (testCase.expected === 'preserve') {
         expect(projected, testCase.id).toBe(testCase.input)
         continue
@@ -279,7 +281,7 @@ describe('ordinary log PII projection', () => {
     const restricted = [
       'account=0000123456789012345',
       '银行卡号：6222 0202 0202 0202 020',
-      '身份证号 110101199001011234',
+      '身份证号 11010519491231002X',
       '电话 13800138000',
       'email=investigator@example.com',
       'ip=192.168.10.22',
@@ -290,7 +292,7 @@ describe('ordinary log PII projection', () => {
     for (const value of [
       '0000123456789012345',
       '6222 0202 0202 0202 020',
-      '110101199001011234',
+      '11010519491231002X',
       '13800138000',
       'investigator@example.com',
       '192.168.10.22',
@@ -304,6 +306,33 @@ describe('ordinary log PII projection', () => {
     expect(projected).toContain('[EMAIL]')
     expect(projected).toContain('[IP]')
     expect(projected).toContain('[DEVICE]')
+  })
+
+  it('classifies numeric candidates before replacements and preserves source boundaries', () => {
+    const input = 'e\u0301 金额 １１０１０５１９４９１２３１００２０；account 0012\u200b3456；金额 12345678901'
+    const projected = projectOrdinaryLogPII(input)
+    expect(projected).toBe('e\u0301 金额 １１０１０５１９４９１２３１００２０；account [ACCOUNT]；金额 12345678901')
+    expect(projectOrdinaryLogPII(projected)).toBe(projected)
+    expect(containsOrdinaryPublicPII(projected)).toBe(false)
+  })
+
+  it.each(
+    ordinaryPIICorpus.untrustedTextCases.filter(testCase => testCase.id.startsWith('explicit-account-label-'))
+  )('preserves explicit account label authority beyond the cue window: $id', testCase => {
+    const projected = projectOrdinaryLogPII(testCase.input)
+    expect(containsOrdinaryPublicPII(testCase.input)).toBe(testCase.expected === 'mask')
+    if (testCase.expected === 'preserve') expect(projected).toBe(testCase.input)
+    else {
+      expect(projected).not.toContain(testCase.sensitiveCanonical)
+      if (testCase.id.endsWith('closest-measure')) expect(projected).toContain('；金额 123456789012')
+    }
+  })
+
+  it('retains the existing nonnumeric identifier owners when spans overlap', () => {
+    expect(projectOrdinaryLogPII('ip=192.168.100.123 email:qa@example.test mac=AA:BB:CC:DD:EE:FF'))
+      .toBe('ip=[IP] email:[EMAIL] mac=[DEVICE]')
+    expect(projectOrdinaryLogPII('金额 13800138000；金额 11010519491231002X'))
+      .toBe('金额 [PHONE]；金额 [IDENTITY]')
   })
 
   it('uses one ordinary public projection for credentials and restricted identifiers', () => {
@@ -412,5 +441,60 @@ describe('ordinary log PII projection', () => {
     expect(containsOrdinaryPublicPII(deep)).toBe(true)
 
     expect(containsOrdinaryPublicPII({ values: new Array(100_001).fill('safe') })).toBe(true)
+  })
+})
+
+describe('Core question option PII exception', () => {
+  it('limits structural option identity to its exact request/question/ordinal', () => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const question = { id: `${inputId}_1`, header: 'Path', question: 'Choose', multiSelect: false,
+      options: [{ id: `${inputId}_1_option_1`, label: 'Fast', description: '' }] }
+    const item = { kind: 'user_input', role: 'system', status: 'pending', inputId, questions: [question] }
+    expect(containsOrdinaryPublicPII(item)).toBe(false)
+    for (const forged of [
+      { ...item, role: undefined },
+      { ...item, status: undefined },
+      { ...item, questions: [{ ...question, options: [{ ...question.options[0], id: `${inputId}_2_option_1` }] }] },
+      { ...item, questions: [{ ...question, options: [{ ...question.options[0], label: 'account=6222020202020202020' }] }] },
+      { ...item, questions: [{ ...question, options: [{ ...question.options[0], opaque: '13800138000' }] }] },
+      { message: item }
+    ]) expect(containsOrdinaryPublicPII(forged)).toBe(true)
+  })
+})
+
+
+describe('continued Host question correlation', () => {
+  const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+  const option = { id: `${inputId}_1_option_1`, label: 'Fast', description: '' }
+  const question = { id: `${inputId}_1`, header: 'Path', question: 'Choose', multiSelect: false,
+    options: [option] }
+  const item = { kind: 'user_input', role: 'system', status: 'continued', inputId, questions: [question] }
+
+  it.each(['pending', 'submitted', 'cancelled', 'continued'])('preserves exact question and option IDs in %s items', status => {
+    expect(containsOrdinaryPublicPII({ turns: [{ items: [{ ...item, status }] }] })).toBe(false)
+  })
+
+  it.each(['submitted', 'cancelled', 'continued'])('preserves exact question and option IDs in %s resolutions', status => {
+    expect(containsOrdinaryPublicPII({
+      events: [{ kind: 'user_input_resolved', status, inputId, questions: [question] }]
+    })).toBe(false)
+  })
+
+  it('retains parent, lifecycle, exact binding and display-content privacy barriers', () => {
+    for (const unsafe of [
+      { ...item, role: 'user' },
+      { ...item, kind: 'tool_result' },
+      { ...item, status: 'completed' },
+      { ...item, inputId: `INPUT_${inputId.slice(6)}` },
+      { ...item, kind: 'user_input_requested' },
+      { ...item, questions: [{ ...question, id: `${inputId}_2` }] },
+      { ...item, questions: [{ ...question, options: [{ ...option, id: `${inputId}_2_option_1` }] }] },
+      { ...item, questions: [{ ...question, question: 'account=6222020202020202020' }] },
+      { ...item, questions: [{ ...question, options: [{ ...option, label: 'phone=13800138000' }] }] },
+      { ...item, questions: [{ ...question, options: [{ ...option, description: 'phone=13800138000' }] }] }
+    ]) expect(containsOrdinaryPublicPII(unsafe)).toBe(true)
+    expect(containsOrdinaryPublicPII({ message: item })).toBe(true)
+    expect(containsOrdinaryPublicPII({ text: { kind: 'user_input_resolved', status: 'continued', inputId, questions: [question] } })).toBe(true)
+    expect(containsOrdinaryPublicPII({ ...item, kind: 'user_input_requested', status: 'pending' })).toBe(false)
   })
 })

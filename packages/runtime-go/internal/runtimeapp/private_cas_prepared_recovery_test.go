@@ -48,6 +48,8 @@ func TestRuntimePrivateCASOwnerManifestBindsEveryExactProductionRoot(t *testing.
 	}
 	privateRoot := filepath.Join(dataDir, "private")
 	expected := map[string][]string{
+		"tool-result-snapshots-v1": {filepath.Join(privateRoot, "tool-result-snapshots-v1")},
+		"process-history-v1":      {filepath.Join(privateRoot, "process-history-v1")},
 		"backend-generation": {
 			filepath.Join(privateRoot, "runtime-sidecar-authority-v1", "allocations"),
 		},

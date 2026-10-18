@@ -93,13 +93,6 @@ Analytix explores a next-generation programming workflow: **requirement -> desig
 </p>
 <p align="center"><em>Requirement clarification, requirement documents, and planning demo</em></p>
 
-<p align="center">
-  <a href="src/asset/img/mascot-ui-plugin.mp4">
-    <img src="src/asset/img/mascot-ui-plugin.gif" width="680" alt="Mascot UI plugin demo">
-  </a>
-</p>
-<p align="center"><em>mascot / cameo UI plugin demo</em></p>
-
 ## Quick Start
 
 ### Download a Release

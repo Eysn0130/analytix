@@ -194,6 +194,12 @@ export async function updateThread(
   if (!parsed.success) {
     return validationError('invalid update thread body', parsed.error.issues)
   }
+  if (parsed.data.archived !== undefined) {
+    return jsonResponse({ code: 'thread_archive_unavailable', message: 'thread archive intent requires the Go runtime' }, 409)
+  }
+  if (parsed.data.promoteSide === true) {
+    return jsonResponse({ code: 'conflict', message: 'Side promotion requires the Go runtime' }, 409)
+  }
   try {
     const updated: ThreadRecord = await service.update(threadId, parsed.data)
     return jsonResponse(ThreadSchema.parse(updated))
@@ -235,6 +241,11 @@ export async function forkThread(
     const parsed = ForkThreadRequest.safeParse(body.value)
     if (!parsed.success) {
       return validationError('invalid fork thread body', parsed.error.issues)
+    }
+    // This retained diagnostic oracle has no authoritative event-prefix fold.
+    // Never accept a Footer boundary and silently clone present-day items.
+    if (parsed.data?.turnId) {
+      return jsonResponse({ code: 'fork_boundary_unavailable', message: 'event-boundary forks require the Go runtime' }, 409)
     }
     options = parsed.data ?? {}
   }

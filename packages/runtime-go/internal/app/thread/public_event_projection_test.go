@@ -2,22 +2,117 @@ package thread
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	checkpointapp "analytix.local/runtime-go/internal/app/checkpoint"
+	controlapp "analytix.local/runtime-go/internal/app/control"
+	appmodel "analytix.local/runtime-go/internal/app/model"
+	appturn "analytix.local/runtime-go/internal/app/turn"
 	appusage "analytix.local/runtime-go/internal/app/usage"
 	"analytix.local/runtime-go/internal/contracts"
 	domaincheckpointref "analytix.local/runtime-go/internal/domain/checkpointref"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
+	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
+
+func TestPublicUserInputTimedWaitStrictJSONLProjectionV1(t *testing.T) {
+	const threadID, turnID, inputID = "thr_timed_projection", "turn_timed_projection", "input_timed_projection"
+	deadline := "2026-10-10T00:02:00Z"
+	thread := map[string]any{"id": threadID, "turns": []any{map[string]any{"id": turnID, "threadId": threadID, "items": []any{}}}}
+	for _, scenario := range []struct {
+		name string
+		wait *appturn.TimedWaitViewV1
+	}{
+		{"legacy", nil},
+		{"minimum", &appturn.TimedWaitViewV1{TimeoutSeconds: 1, DeadlineAt: &deadline}},
+		{"default", &appturn.TimedWaitViewV1{TimeoutSeconds: 120, DeadlineAt: &deadline}},
+		{"maximum", &appturn.TimedWaitViewV1{TimeoutSeconds: 2147483, DeadlineAt: &deadline}},
+		{"unlimited", &appturn.TimedWaitViewV1{TimeoutSeconds: -1}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			_, event := appturn.UserInputRequestRecords(appturn.UserInputRequestInput{
+				ThreadID: threadID, TurnID: turnID, ItemID: "item_" + inputID, InputID: inputID,
+				Prompt: "Synthetic choice?", Questions: []map[string]any{{"id": "q", "question": "Synthetic choice?"}},
+				TimedWait: scenario.wait, ContinuationReceiptID: "PRIVATE_RECEIPT_SENTINEL",
+			})
+			event["seq"], event["timestamp"] = 1, "2026-10-10T00:00:00Z"
+			body, err := json.Marshal(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayed, err := domainjsonstrict.DecodeObject(append(body, '\n'), domainjsonstrict.Options{MaxBytes: len(body) + 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario.wait != nil {
+				if _, ok := replayed["timedWait"].(map[string]any)["timeoutSeconds"].(json.Number); !ok {
+					t.Fatal("fixture bypassed the strict production reader's number representation")
+				}
+			}
+			projected, visible, err := ProjectPublicThreadEvent(threadID, thread, replayed)
+			if err != nil || !visible || projected["itemId"] != "item_"+inputID || projected["inputId"] != inputID || projected["continuationReceiptId"] != nil {
+				t.Fatalf("real request event was not closed and visible: projected=%#v visible=%t err=%v", projected, visible, err)
+			}
+			if scenario.wait == nil {
+				if _, present := projected["timedWait"]; present {
+					t.Fatal("legacy Question acquired a timed wait")
+				}
+			} else if !reflect.DeepEqual(projected["timedWait"], event["timedWait"]) {
+				t.Fatalf("reader changed the closed wait: got=%#v want=%#v", projected["timedWait"], event["timedWait"])
+			}
+		})
+	}
+	for _, scenario := range []struct {
+		name string
+		wait map[string]any
+	}{
+		{"zero", map[string]any{"timeoutSeconds": 0, "deadlineAt": deadline}},
+		{"negative", map[string]any{"timeoutSeconds": -2, "deadlineAt": deadline}},
+		{"over-maximum", map[string]any{"timeoutSeconds": 2147484, "deadlineAt": deadline}},
+		{"fraction", map[string]any{"timeoutSeconds": json.Number("1.5"), "deadlineAt": deadline}},
+		// The persisted producer writes integer tokens; accept that reader
+		// representation without admitting alternate numeric encodings.
+		{"decimal-token", map[string]any{"timeoutSeconds": json.Number("120.0"), "deadlineAt": deadline}},
+		{"exponent-token", map[string]any{"timeoutSeconds": json.Number("1e2"), "deadlineAt": deadline}},
+		{"integer-overflow", map[string]any{"timeoutSeconds": json.Number("9223372036854775808"), "deadlineAt": deadline}},
+		{"string", map[string]any{"timeoutSeconds": "120", "deadlineAt": deadline}},
+		{"null-seconds", map[string]any{"timeoutSeconds": nil, "deadlineAt": deadline}},
+		{"bool", map[string]any{"timeoutSeconds": true, "deadlineAt": deadline}},
+		{"unlimited-with-deadline", map[string]any{"timeoutSeconds": -1, "deadlineAt": deadline}},
+		{"finite-with-null-deadline", map[string]any{"timeoutSeconds": 120, "deadlineAt": nil}},
+		{"missing-deadline", map[string]any{"timeoutSeconds": 120}},
+		{"noncanonical-deadline", map[string]any{"timeoutSeconds": 120, "deadlineAt": "2026-10-10T00:02:00+00:00"}},
+		{"extra-field", map[string]any{"timeoutSeconds": 120, "deadlineAt": deadline, "privateBody": "PRIVATE_SENTINEL"}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			event := map[string]any{"kind": "user_input_requested", "threadId": threadID, "turnId": turnID, "itemId": "item_" + inputID,
+				"inputId": inputID, "status": "pending", "seq": 1, "timestamp": "2026-10-10T00:00:00Z", "timedWait": scenario.wait}
+			body, err := json.Marshal(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayed, err := domainjsonstrict.DecodeObject(body, domainjsonstrict.Options{MaxBytes: len(body)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if projected, visible, err := ProjectPublicThreadEvent(threadID, thread, replayed); err != nil || visible || projected != nil {
+				t.Fatalf("malformed wait admitted: projected=%#v visible=%t err=%v", projected, visible, err)
+			}
+		})
+	}
+}
 
 func TestProviderErrorPipelineStagePublicProjectionIsClosedForOrdinaryAndCaseThreads(t *testing.T) {
 	const (
@@ -1017,6 +1112,141 @@ func TestOrdinaryToolResultSeparatesRootLifecycleFromClosedBlockedAndCancelledSt
 	}
 }
 
+// Constructor/projector contract evidence only; no provider or runtime state.
+func TestNativeTurnSteeredRealProducerPublicProjectionIsMetadataOnly(t *testing.T) {
+	const (
+		threadID        = "synthetic-native-hookup-thread"
+		turnID          = "turn-native-hookup"
+		promotionTurnID = "turn-idle-wake"
+		clientID        = "67eeac24-98da-4a49-a4ee-1d5b54574999"
+		timestamp       = "2026-10-09T00:00:00Z"
+	)
+	rawBuilder := controlapp.BuildTurnSteeredEvent(controlapp.TurnSteeredEventInput{
+		ThreadID: threadID, TurnID: turnID, ClientUserMessageID: clientID,
+		Text: "Continue the current synthetic task", DisplayText: "Local synthetic steering draft",
+	})
+	// The store owns these transport fields; this constructor test supplies them
+	// explicitly rather than claiming an executed HTTP or durable admission.
+	rawBuilder["seq"], rawBuilder["timestamp"] = float64(1), timestamp
+	rawBefore := contracts.CloneMap(rawBuilder)
+	promotedItem := map[string]any{
+		"id": "item-native-hookup-promoted", "threadId": threadID, "turnId": promotionTurnID,
+		"kind": "user_message", "role": "user", "status": "completed",
+		"createdAt": timestamp, "finishedAt": timestamp,
+		"text": "Continue with the synthetic accepted answer", "delivery": "steer",
+		"clientUserMessageId": clientID,
+	}
+	promotedBefore := contracts.CloneMap(promotedItem)
+	thread := map[string]any{"id": threadID, "turns": []any{
+		map[string]any{"id": turnID, "threadId": threadID, "status": "completed", "items": []any{}},
+		map[string]any{"id": promotionTurnID, "threadId": threadID, "status": "running", "items": []any{promotedItem}},
+	}}
+	projector := NewTrustedPublicProjector(nil)
+	projected, visible, err := projector.ProjectEvent(threadID, thread, rawBuilder)
+	if err != nil || !visible || projected == nil {
+		t.Fatalf("real steering constructor was not projectable: visible=%t err=%v", visible, err)
+	}
+	expected := map[string]any{
+		"kind": "turn_steered", "seq": float64(1), "timestamp": timestamp,
+		"threadId": threadID, "turnId": turnID, "clientUserMessageId": clientID,
+	}
+	promoted := appmodel.BuildPromotedSteering(appmodel.PromotedSteeringInput{
+		ThreadID: threadID, TurnID: promotionTurnID,
+		Entries: []map[string]any{{"clientUserMessageId": clientID, "admittedAt": timestamp}},
+		Items:   []map[string]any{promotedItem},
+	})
+	if len(promoted.ItemCreatedEvents) != 1 {
+		t.Fatalf("real promotion constructor produced %d events", len(promoted.ItemCreatedEvents))
+	}
+	promotionDraft := promoted.ItemCreatedEvents[0]
+	promotionDraft["seq"], promotionDraft["timestamp"] = float64(2), timestamp
+	promotion, promotionVisible, promotionErr := projector.ProjectEvent(threadID, thread, promotionDraft)
+	if promotionErr != nil || !promotionVisible || promotion == nil {
+		t.Fatalf("real promoted item was not projectable: visible=%t err=%v", promotionVisible, promotionErr)
+	}
+	// Export before the expected baseline metadata assertion fails. All content
+	// is synthetic; the optional path must be inside task temporary storage.
+	if destination := os.Getenv("ANALYTIX_NATIVE_HOOKUP_EVENT_WITNESS"); destination != "" {
+		destination = filepath.Clean(destination)
+		if !filepath.IsAbs(destination) || !(strings.HasPrefix(destination, "/tmp/") ||
+			strings.HasPrefix(destination, "/Volumes/AnalytixCache/development-v3/tmp/")) {
+			t.Fatal("witness destination is outside task temporary storage")
+		}
+		body, encodeErr := json.MarshalIndent(map[string]any{
+			"rawBuilder": rawBuilder, "projected": projected, "expected": expected, "promotion": promotion,
+		}, "", "  ")
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if writeErr := os.WriteFile(destination, append(body, '\n'), 0600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	t.Run("exact metadata and no steering prose", func(t *testing.T) {
+		if !reflect.DeepEqual(projected, expected) {
+			t.Fatalf("turn_steered public projection must contain exact metadata only: got=%#v want=%#v", projected, expected)
+		}
+	})
+	t.Run("raw private input is retained", func(t *testing.T) {
+		if !reflect.DeepEqual(rawBuilder, rawBefore) || !reflect.DeepEqual(promotedItem, promotedBefore) {
+			t.Fatal("public projection or promotion changed original constructor input")
+		}
+	})
+	t.Run("hostile status is rejected", func(t *testing.T) {
+		for _, status := range []any{"running", "completed", "ATTACKER_STATUS_SENTINEL", "", nil} {
+			hostile := contracts.CloneMap(rawBuilder)
+			hostile["status"] = status
+			result, shown, projectionErr := projector.ProjectEvent(threadID, thread, hostile)
+			if projectionErr != nil || shown || result != nil {
+				t.Fatalf("turn_steered with a status was published: status=%#v visible=%t err=%v", status, shown, projectionErr)
+			}
+		}
+	})
+	t.Run("allowed correlation and configuration metadata is retained", func(t *testing.T) {
+		metadata := map[string]any{
+			"admittedSeq": float64(1), "model": "synthetic-model", "providerId": "synthetic-provider",
+			"approvalPolicy": "on-request", "sandboxMode": "workspace-write", "mode": "agent",
+			"disableUserInput": false, "maxModelSteps": float64(4), "workspaceCheckpointId": "checkpoint-native-hookup",
+		}
+		input, want := contracts.CloneMap(rawBuilder), contracts.CloneMap(expected)
+		for key, value := range metadata {
+			input[key], want[key] = value, value
+		}
+		result, shown, projectionErr := projector.ProjectEvent(threadID, thread, input)
+		if projectionErr != nil || !shown || !reflect.DeepEqual(result, want) {
+			t.Fatalf("allowed steering metadata was lost or prose retained: got=%#v want=%#v visible=%t err=%v", result, want, shown, projectionErr)
+		}
+	})
+	t.Run("unrelated lifecycle fields are omitted without changing producer input", func(t *testing.T) {
+		input := contracts.CloneMap(rawBuilder)
+		for key, value := range map[string]any{
+			"itemId": "item-native-hookup-unrelated", "message": "Unrelated synthetic lifecycle message",
+			"code": domainfailure.CodeProviderTimeout, "details": map[string]any{"reasonCode": domainfailure.CodeProviderTimeout},
+			"terminalReason": "error", "severity": "error", "discard": false, "cancelled": false,
+			"cancelledPendingGates": float64(0),
+		} {
+			input[key] = value
+		}
+		before := contracts.CloneMap(input)
+		result, shown, projectionErr := projector.ProjectEvent(threadID, thread, input)
+		if projectionErr != nil || !shown || !reflect.DeepEqual(result, expected) {
+			t.Fatalf("unrelated steering lifecycle fields were exposed: got=%#v want=%#v visible=%t err=%v", result, expected, shown, projectionErr)
+		}
+		if !reflect.DeepEqual(input, before) {
+			t.Fatal("metadata-only projection changed the real producer input")
+		}
+	})
+	t.Run("promotion remains a completed user message in its actual turn", func(t *testing.T) {
+		want := map[string]any{
+			"kind": "item_created", "seq": float64(2), "timestamp": timestamp,
+			"threadId": threadID, "turnId": promotionTurnID, "itemId": promotedItem["id"], "item": promotedBefore,
+		}
+		if !reflect.DeepEqual(promotion, want) {
+			t.Fatalf("real promotion projection changed its typed user-message binding: got=%#v want=%#v", promotion, want)
+		}
+	})
+}
+
 func TestOrdinaryLifecycleProjectionEnforcesKindStatusPairs(t *testing.T) {
 	const hostile = "completed_6222020202020202020_PRIVATE_REASONING_SENTINEL"
 	thread := map[string]any{"id": "ordinary", "turns": []any{map[string]any{"id": "turn-ordinary", "items": []any{}}}}
@@ -1383,6 +1613,65 @@ func TestHostToolItemIdentityIsNotMisclassifiedAsPII(t *testing.T) {
 	}
 }
 
+func TestCanonicalQuestionEventIdentityIsNotMisclassifiedAsPIIV1(t *testing.T) {
+	const threadID, turnID = "ordinary-question", "turn-question"
+	inputID := domaincontinuation.GateID(domaincontinuation.KindUserInput, threadID, turnID,
+		strings.Repeat("a", 64), "synthetic-grant-53", "synthetic-question-call")
+	itemID, digest := "item_"+inputID, strings.TrimPrefix(inputID, "input_")
+	if !domainsecurity.IsSHA256Hex(digest) || !domainprivacy.ContainsRestrictedPII(itemID) {
+		t.Fatal("fixture no longer exercises a canonical Question digit-run collision")
+	}
+	thread := map[string]any{"id": threadID, "turns": []any{map[string]any{"id": turnID, "threadId": threadID, "items": []any{}}}}
+	_, requested := appturn.UserInputRequestRecords(appturn.UserInputRequestInput{
+		ThreadID: threadID, TurnID: turnID, ItemID: itemID, InputID: inputID,
+		Prompt: "Synthetic choice?", Questions: []map[string]any{{"id": "q", "question": "Synthetic choice?"}},
+		ContinuationReceiptID: "PRIVATE_RECEIPT_SENTINEL",
+	})
+	resolved := appturn.UserInputResolvedEvent(appturn.PendingGateCancellation{
+		ThreadID: threadID, TurnID: turnID, ItemID: itemID, ID: inputID, Prompt: "Synthetic choice?",
+	}, "continued")
+	for index, event := range []map[string]any{requested, resolved} {
+		t.Run(contracts.StringField(event, "kind"), func(t *testing.T) {
+			event["seq"], event["timestamp"] = index+1, "2026-10-18T00:00:00Z"
+			body, err := json.Marshal(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayed, err := domainjsonstrict.DecodeObject(append(body, '\n'), domainjsonstrict.Options{MaxBytes: len(body) + 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected, visible, err := ProjectPublicThreadEvent(threadID, thread, replayed)
+			if err != nil || !visible || projected["itemId"] != itemID || projected["inputId"] != inputID || projected["status"] != event["status"] || projected["continuationReceiptId"] != nil {
+				t.Fatalf("canonical Question correlation was not preserved: visible=%t err=%v itemExact=%t inputExact=%t statusExact=%t privateAbsent=%t", visible, err, projected["itemId"] == itemID, projected["inputId"] == inputID, projected["status"] == event["status"], projected["continuationReceiptId"] == nil)
+			}
+		})
+	}
+	for _, scenario := range []struct {
+		name, input, item string
+	}{
+		{"mismatched-input", "input_" + strings.Repeat("a", 64), itemID},
+		{"non-hex", "input_g" + digest[1:], "item_input_g" + digest[1:]},
+		{"uppercase", "input_" + strings.ToUpper(digest), "item_input_" + strings.ToUpper(digest)},
+		{"short", "input_" + digest[1:], "item_input_" + digest[1:]},
+		{"digest-whitespace", "input_ " + digest, "item_input_ " + digest},
+		{"trailing-whitespace", inputID + " ", itemID + " "},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			event := contracts.CloneMap(requested)
+			event["inputId"], event["itemId"] = scenario.input, scenario.item
+			projected, visible, err := ProjectPublicThreadEvent(threadID, thread, event)
+			if err != nil || visible && projected["itemId"] != nil {
+				t.Fatalf("noncanonical Question acquired an identity exemption: visible=%t err=%v itemPresent=%t", visible, err, projected["itemId"] != nil)
+			}
+		})
+	}
+	unrelated := map[string]any{"kind": "tool_progress", "threadId": threadID, "turnId": turnID, "itemId": itemID, "inputId": inputID, "toolName": "read_file", "status": "running"}
+	if projected, visible, err := ProjectPublicThreadEvent(threadID, thread, unrelated); err != nil || visible && projected["itemId"] != nil {
+		t.Fatalf("Question identity exemption widened to an unrelated event: visible=%t err=%v itemPresent=%t", visible, err, projected["itemId"] != nil)
+	}
+}
+
 func TestOrdinaryToolProgressWithholdsUntrustedSummaryAndMessageBeforeSSE(t *testing.T) {
 	const secret = "opaque-sse-secret-123"
 	const account = "6222020202020202020"
@@ -1486,4 +1775,345 @@ func publicProjectionSecurityRecord(context domainsecurity.TurnSecurityContext) 
 	record := map[string]any{}
 	_ = json.Unmarshal(body, &record)
 	return record
+}
+
+func TestRetryLifecycleAndOutputCapReachClosedPublicProjection(t *testing.T) {
+	threadID, turnID := "retry-thread", "retry-turn"
+	thread := map[string]any{"id": threadID, "turns": []any{map[string]any{"id": turnID, "threadId": threadID, "items": []any{}}}}
+	base := func(stage string, details map[string]any) map[string]any {
+		return map[string]any{"kind": "pipeline_stage", "threadId": threadID, "turnId": turnID, "seq": float64(42), "timestamp": "2026-10-07T12:00:00Z", "stage": stage, "attempt": float64(2), "maxAttempt": float64(3), "details": details}
+	}
+	retry := func(source, phase string) map[string]any {
+		v := map[string]any{"schemaVersion": float64(1), "source": source, "phase": phase, "logicalSequence": float64(7), "outerAttempt": float64(2)}
+		if source == "transport_reconnect" {
+			v["outerAttempt"] = float64(1)
+			v["physicalAttempt"] = float64(2)
+		}
+		if phase == "scheduled" {
+			v["delayMs"] = float64(0)
+			v["deadlineUnixMs"] = float64(1700000000000)
+		}
+		if phase == "cancelled" {
+			v["cancelReason"] = "attempt_rejected"
+		}
+		return v
+	}
+	for _, source := range []string{"provider_retry", "transport_reconnect"} {
+		for _, phase := range []string{"scheduled", "started", "cancelled"} {
+			r := retry(source, phase)
+			event := base("provider_retrying", map[string]any{"retry": r, "unrelatedField": "SYNTHETIC_UNPUBLIC_CONTENT"})
+			projected, visible, err := ProjectPublicThreadEvent(threadID, thread, event)
+			details, _ := projected["details"].(map[string]any)
+			if err != nil || !visible || !reflect.DeepEqual(details["retry"], r) || details["unrelatedField"] != nil || projected["seq"] != float64(42) {
+				t.Fatalf("source=%s phase=%s failed closed publication: %#v err=%v", source, phase, projected, err)
+			}
+		}
+	}
+	for _, name := range []string{"unknown_key", "unknown_phase", "unknown_source", "fractional_sequence", "missing_physical", "outer_physical", "missing_delay", "scheduled_reason", "invalid_cancel", "counter_mismatch", "budget_mismatch", "bad_timestamp", "visible_recovery", "null_retry"} {
+		t.Run(name, func(t *testing.T) {
+			r := retry("transport_reconnect", "scheduled")
+			event := base("provider_retrying", map[string]any{"retry": r})
+			switch name {
+			case "unknown_key":
+				r["rawPayload"] = "SYNTHETIC_UNPUBLIC_CONTENT"
+			case "unknown_phase":
+				r["phase"] = "elapsed"
+			case "unknown_source":
+				r["source"] = "invented"
+			case "fractional_sequence":
+				r["logicalSequence"] = 1.5
+			case "missing_physical":
+				delete(r, "physicalAttempt")
+			case "outer_physical":
+				r = retry("provider_retry", "started")
+				r["physicalAttempt"] = float64(3)
+				event["details"] = map[string]any{"retry": r}
+			case "missing_delay":
+				delete(r, "delayMs")
+			case "scheduled_reason":
+				r["cancelReason"] = "context_cancelled"
+			case "invalid_cancel":
+				r = retry("transport_reconnect", "cancelled")
+				r["cancelReason"] = "invented"
+				event["details"] = map[string]any{"retry": r}
+			case "counter_mismatch":
+				event["attempt"] = float64(3)
+			case "budget_mismatch":
+				event["maxAttempt"] = float64(1)
+			case "bad_timestamp":
+				event["timestamp"] = "invalid"
+			case "visible_recovery":
+				event["details"].(map[string]any)["visibleRecovery"] = true
+			case "null_retry":
+				event["details"].(map[string]any)["retry"] = nil
+			}
+			if projected, visible, err := ProjectPublicThreadEvent(threadID, thread, event); err != nil || visible || projected != nil {
+				t.Fatalf("invalid retry published: %#v err=%v", projected, err)
+			}
+		})
+	}
+	cap := map[string]any{"logicalSequence": float64(7), "stopReason": "length", "streamCompleted": false, "toolCallCount": float64(0)}
+	projected, visible, err := ProjectPublicThreadEvent(threadID, thread, base("response_received", cap))
+	if err != nil || !visible || !reflect.DeepEqual(projected["details"], cap) {
+		t.Fatalf("cap observation lost: %#v err=%v", projected, err)
+	}
+	for _, key := range []string{"logicalSequence", "stopReason", "streamCompleted", "toolCallCount"} {
+		for _, value := range []any{"SYNTHETIC_UNPUBLIC_CONTENT", nil} {
+			bad := contracts.CloneMap(cap)
+			bad[key] = value
+			if projected, visible, err := ProjectPublicThreadEvent(threadID, thread, base("response_received", bad)); err != nil || visible || projected != nil {
+				t.Fatalf("malformed cap published: %#v err=%v", projected, err)
+			}
+		}
+	}
+	for _, bad := range []map[string]any{
+		{"logicalSequence": float64(7), "stopReason": "stop", "streamCompleted": false},
+		{"logicalSequence": float64(7), "stopReason": "length", "streamCompleted": true},
+		{"logicalSequence": float64(7), "stopReason": "unknown", "streamCompleted": false},
+	} {
+		if projected, visible, err := ProjectPublicThreadEvent(threadID, thread, base("response_received", bad)); err != nil || visible || projected != nil {
+			t.Fatalf("non-cap response acquired observation sequence: %#v err=%v", projected, err)
+		}
+	}
+	ordinary := map[string]any{"stopReason": "stop", "streamCompleted": true, "toolCallCount": float64(0)}
+	if projected, visible, err := ProjectPublicThreadEvent(threadID, thread, base("response_received", ordinary)); err != nil || !visible || projected["details"] != nil {
+		t.Fatalf("ordinary response public baseline changed: %#v err=%v", projected, err)
+	}
+	for _, details := range []map[string]any{nil, {"visibleRecovery": true, "recoveryAttempt": float64(1)}} {
+		projected, visible, err := ProjectPublicThreadEvent(threadID, thread, base("provider_retrying", details))
+		out, _ := projected["details"].(map[string]any)
+		if err != nil || !visible || out["retry"] != nil {
+			t.Fatalf("legacy retry upgraded: %#v err=%v", projected, err)
+		}
+	}
+}
+
+// Synthetic public-projector regression: this is the Core wire shape consumed
+// by Main, not a native detail or Host Question-admission acceptance.
+func TestOrdinarySteeringPublicProjectionMatchesClosedWireSchema(t *testing.T) {
+	expectedRich := map[string]any{
+		"id": "entry_public", "clientUserMessageId": "client_public",
+		"text": "synthetic", "displayText": "synthetic display",
+		"attachmentIds":  []any{"attachment_public"},
+		"fileReferences": []any{map[string]any{"path": "fixtures/sample.txt", "relativePath": "fixtures/sample.txt", "name": "sample.txt", "kind": "file"}},
+		"admittedAt":     "2026-10-09T00:00:00Z", "status": "promoted",
+		"promotedAt": "2026-10-09T00:00:01Z", "promotedItemId": "item_public",
+		"cancelledAt": "2026-10-09T00:00:02Z", "cancelReason": "synthetic reason",
+	}
+	rich := contracts.CloneMap(expectedRich)
+	rich["authoritySignature"] = "synthetic_private_signature"
+	rich["authorityPublicKey"] = "synthetic_private_key"
+	rich["contextDigest"] = strings.Repeat("a", 64)
+	rich["privateBody"] = "synthetic_private_body"
+	rich["fileReferences"].([]any)[0].(map[string]any)["privateBody"] = "synthetic_private_reference_body"
+	for _, scenario := range []struct {
+		name     string
+		entry    any
+		expected any
+	}{
+		{"legacy_string", "synthetic legacy", "synthetic legacy"},
+		{"sparse_defaults", map[string]any{"text": "synthetic", "authoritySignature": "synthetic_private_signature"}, map[string]any{"text": "synthetic", "attachmentIds": []any{}, "fileReferences": []any{}}},
+		{"all_public_fields", rich, expectedRich},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			source := map[string]any{"id": "thread_public_steering", "status": "running", "turns": []any{map[string]any{
+				"id": "turn_public_steering", "threadId": "thread_public_steering", "status": "running", "prompt": "synthetic",
+				"createdAt": "2026-10-09T00:00:00Z", "steering": []any{scenario.entry}, "items": []any{},
+			}}}
+			before := contracts.CloneMap(source)
+			projected, err := ProjectPublicThread(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := projected["turns"].([]any)[0].(map[string]any)["steering"].([]any)[0]
+			if !reflect.DeepEqual(entry, scenario.expected) {
+				t.Fatal("Core steering does not equal the complete closed public schema")
+			}
+			encoded, err := json.Marshal(entry)
+			if err != nil || strings.Contains(string(encoded), "synthetic_private_") {
+				t.Fatal("public steering leaked private authority or body")
+			}
+			if !reflect.DeepEqual(source, before) {
+				t.Fatal("public steering projection mutated durable authority")
+			}
+		})
+	}
+}
+
+func TestOrdinarySteeringPublicProjectionRetainsQuestionCodecBeforeClosing(t *testing.T) {
+	questions, answers := []any{}, []any{}
+	for index := 0; index < 3; index++ {
+		questions = append(questions, map[string]any{"question": "Synthetic detail?", "header": "", "options": []any{}, "multiSelect": false})
+		answers = append(answers, map[string]any{"selected": []any{}, "custom": strings.Repeat(string(rune('a'+index)), 400000)})
+	}
+	body, err := json.Marshal(map[string]any{"kind": "question_reply_content", "questions": questions, "answers": answers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := map[string]any{"kind": "user_message", "delivery": "steer", "text": string(body), "authoritySignature": "synthetic_private_signature"}
+	thread := map[string]any{"id": "thread_public_question", "status": "running", "turns": []any{map[string]any{"id": "turn_public_question", "threadId": "thread_public_question", "status": "running", "items": []any{}, "steering": []any{entry}}}}
+	before := contracts.CloneMap(thread)
+	projected, err := ProjectPublicThread(thread)
+	if err != nil {
+		t.Fatal("legal closed Question was processed with an ordinary string budget", err)
+	}
+	public := projected["turns"].([]any)[0].(map[string]any)["steering"].([]any)[0]
+	if !reflect.DeepEqual(public, map[string]any{"text": string(body), "attachmentIds": []any{}, "fileReferences": []any{}}) {
+		t.Fatal("Question body changed or carrier/private authority reached the wire")
+	}
+	if !reflect.DeepEqual(thread, before) {
+		t.Fatal("public Question projection changed durable carrier/authority")
+	}
+	metadata, err := MetadataSidecarEntryCheckedV1(thread, "2026-10-09T00:00:00Z")
+	if err != nil {
+		t.Fatal("validated internal Question carrier was lost before metadata validation", err)
+	}
+	internal := metadata["thread"].(map[string]any)["turns"].([]any)[0].(map[string]any)["steering"].([]any)[0].(map[string]any)
+	if internal["text"] != string(body) || internal["kind"] != "user_message" || internal["delivery"] != "steer" {
+		t.Fatal("metadata changed complete Question bytes or lost the existing carrier")
+	}
+	if !reflect.DeepEqual(thread, before) {
+		t.Fatal("internal metadata projection changed the source Question")
+	}
+	// A body shape alone and incomplete carrier metadata still cannot grant
+	// the established Question codec budget. This is a content-codec check,
+	// not a fake Host admission or accepted late reply.
+	for _, fake := range []map[string]any{
+		{"text": string(body)},
+		{"kind": "user_message", "text": string(body)},
+		{"kind": "user_message", "delivery": "other", "text": string(body)},
+		{"kind": "user_message", "delivery": "steer", "text": `{"kind":"question_reply_content","questions":[],"answers":[]}`},
+	} {
+		candidate := contracts.CloneMap(thread)
+		candidate["turns"].([]any)[0].(map[string]any)["steering"] = []any{fake}
+		if public, err := ProjectPublicThread(candidate); err == nil || public != nil {
+			t.Fatal("invalid or unbound Question carrier acquired a public codec slot")
+		}
+		if metadata, err := MetadataSidecarEntryCheckedV1(candidate, "2026-10-09T00:00:00Z"); err == nil || metadata != nil {
+			t.Fatal("invalid or unbound Question carrier acquired an internal metadata codec slot")
+		}
+	}
+}
+
+func TestOrdinarySteeringPublicProjectionPreservesPrivacyAndRejectsMalformedFields(t *testing.T) {
+	const account = "6222020000000000000"
+	const privatePath = "/Users/private-owner/SYNTHETIC-PII.csv"
+	entry := map[string]any{"text": "account " + account + " Source: " + privatePath, "displayText": "account " + account, "authoritySignature": "synthetic_private_signature"}
+	thread := map[string]any{"id": "thread_steering_privacy", "status": "running", "turns": []any{map[string]any{"id": "turn_steering_privacy", "threadId": "thread_steering_privacy", "status": "running", "items": []any{}, "steering": []any{entry}}}}
+	before := contracts.CloneMap(thread)
+	projected, err := ProjectPublicThread(thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(projected)
+	if strings.Contains(string(encoded), account) || strings.Contains(string(encoded), privatePath) || strings.Contains(string(encoded), "synthetic_private_signature") || !strings.Contains(string(encoded), "[ACCOUNT]") || !strings.Contains(string(encoded), "[PRIVATE_PATH]") {
+		t.Fatal("steering closure bypassed established prose privacy")
+	}
+	if !reflect.DeepEqual(thread, before) {
+		t.Fatal("steering privacy projection changed original authority/body")
+	}
+	for _, malformed := range []map[string]any{
+		{"text": "synthetic", "attachmentIds": nil},
+		{"text": "synthetic", "fileReferences": nil},
+		{"text": "synthetic", "attachmentIds": []any{""}},
+		{"text": "synthetic", "fileReferences": []any{"invalid"}},
+		{"text": "synthetic", "fileReferences": []any{map[string]any{"path": "x", "relativePath": "x"}}},
+		{"text": "synthetic", "status": "invented"},
+	} {
+		candidate := contracts.CloneMap(thread)
+		candidate["turns"].([]any)[0].(map[string]any)["steering"] = []any{malformed}
+		if value, err := ProjectPublicThread(candidate); err == nil || value != nil {
+			t.Fatal("invalid present field was silently repaired")
+		}
+	}
+}
+
+func TestDiscardHistoryPublicProjectionRejectsMixedOrMalformedNamespaceV1(t *testing.T) {
+	_, inert := discardedForkHistoryFixtureV1(t)
+	for _, mutate := range []func(map[string]any){
+		func(e map[string]any) { e["cancelReason"] = "user_input_discarded" },
+		func(e map[string]any) { e[forkHistoryCancellationReasonV1] = "invented" },
+		func(e map[string]any) { e["status"] = "pending" },
+		func(e map[string]any) { delete(e, "cancelledAt") },
+	} {
+		entry := contracts.CloneMap(inert)
+		mutate(entry)
+		thread := map[string]any{"id": "thr_history", "status": "idle", "turns": []any{map[string]any{"id": "turn_history", "threadId": "thr_history", "status": "completed", "items": []any{}, "steering": []any{entry}}}}
+		before := contracts.CloneMap(thread)
+		if result, err := ProjectPublicThread(thread); err == nil || result != nil {
+			t.Fatal("public history accepted a malformed cancellation fact")
+		}
+		if !reflect.DeepEqual(thread, before) {
+			t.Fatal("failed public projection rewrote durable history")
+		}
+	}
+}
+
+func TestPublicLogicalStepPipelineDetailsRemainClosedV1(t *testing.T) {
+	thread := map[string]any{"id": "ordinary", "turns": []any{map[string]any{"id": "turn", "items": []any{}}}}
+	for _, stage := range []string{"logical_step_started", "logical_step_assembled", "logical_step_closed"} {
+		details := map[string]any{"schemaVersion": float64(1), "logicalStepId": "f13e1680-e522-4d40-bc18-40dde3bb66ea"}
+		if stage == "logical_step_closed" {
+			details["assistantMessageAssembled"] = true
+			details["llmMs"] = float64(0)
+		}
+		event := map[string]any{"kind": "pipeline_stage", "threadId": "ordinary", "turnId": "turn", "stage": stage, "details": details, "label": "PRIVATE_LABEL", "trace": map[string]any{"private": "PRIVATE_BODY"}}
+		projected, visible, err := ProjectPublicThreadEvent("ordinary", thread, event)
+		body, _ := json.Marshal(projected)
+		if err != nil || !visible || !reflect.DeepEqual(projected["details"], details) || strings.Contains(string(body), "PRIVATE") {
+			t.Fatalf("wire projection: %#v %t %v", projected, visible, err)
+		}
+		details["privatePath"] = "PRIVATE_PATH"
+		if _, visible, err := ProjectPublicThreadEvent("ordinary", thread, event); err != nil || visible {
+			t.Fatalf("malformed facts visible: %t %v", visible, err)
+		}
+	}
+	event := map[string]any{"kind": "pipeline_stage", "threadId": "ordinary", "turnId": "turn", "stage": "post_start", "details": map[string]any{"maxModelSteps": float64(3), "logicalStepMetricsVersion": float64(1)}}
+	got, visible, err := ProjectPublicThreadEvent("ordinary", thread, event)
+	if err != nil || !visible || got["details"].(map[string]any)["logicalStepMetricsVersion"] != float64(1) {
+		t.Fatal("coverage marker stripped")
+	}
+	event["details"].(map[string]any)["logicalStepMetricsVersion"] = nil
+	if _, visible, _ := ProjectPublicThreadEvent("ordinary", thread, event); visible {
+		t.Fatal("null marker accepted")
+	}
+}
+
+func TestCaseLogicalStepSanitizerToPublicProjectionV1(t *testing.T) {
+	context := newTrustedProjectionContext("case-logical", "turn-case-logical", "case-logical", "snapshot-logical", 2)
+	thread := map[string]any{"id": context.ThreadID, "securityState": publicProjectionSecurityRecord(context), "turns": []any{map[string]any{"id": context.TurnID, "threadId": context.ThreadID, "securityContext": publicProjectionSecurityRecord(context), "items": []any{}}}}
+	for _, stage := range []string{"post_start", "logical_step_started", "logical_step_assembled", "logical_step_closed"} {
+		details := map[string]any{"schemaVersion": float64(1), "logicalStepId": "f13e1680-e522-4d40-bc18-40dde3bb66ea"}
+		if stage == "logical_step_closed" {
+			details["assistantMessageAssembled"] = true
+			details["llmMs"] = float64(0)
+		}
+		if stage == "post_start" {
+			details = map[string]any{"logicalStepMetricsVersion": float64(1), "maxModelSteps": float64(3)}
+		}
+		event := map[string]any{"kind": "pipeline_stage", "threadId": context.ThreadID, "turnId": context.TurnID, "stage": stage, "details": details, "seq": float64(1), "timestamp": "2026-10-12T00:00:00Z", "trace": map[string]any{"private": "PRIVATE_REASONING"}, "modelResponse": "PRIVATE_RESPONSE"}
+		durable, err := appturn.SanitizeCaseEventPublication(thread, event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		public, visible, err := ProjectPublicThreadEvent(context.ThreadID, thread, durable)
+		body, _ := json.Marshal(public)
+		if err != nil || !visible || public["details"] == nil || strings.Contains(string(body), "PRIVATE") {
+			t.Fatalf("case stats seam: %#v %t %v", public, visible, err)
+		}
+		if stage != "post_start" {
+			event["details"].(map[string]any)["privatePath"] = "PRIVATE_PATH"
+			if _, visible, _ := ProjectPublicThreadEvent(context.ThreadID, thread, event); visible {
+				t.Fatal("private statistics passed actual case sanitizer")
+			}
+		}
+	}
+	unknown := map[string]any{"kind": "pipeline_stage", "threadId": context.ThreadID, "turnId": "unknown-turn", "stage": "post_start", "details": map[string]any{"logicalStepMetricsVersion": float64(1)}}
+	for _, turnID := range []any{nil, "", "unknown-turn"} {
+		unknown["turnId"] = turnID
+		if _, visible, _ := ProjectPublicThreadEvent(context.ThreadID, thread, unknown); visible {
+			t.Fatal("missing/unknown-turn case coverage marker exposed")
+		}
+	}
+
 }

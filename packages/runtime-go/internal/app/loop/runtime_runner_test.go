@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	providerstream "analytix.local/runtime-go/internal/adapters/outbound/provider/stream"
 	executiongrantapp "analytix.local/runtime-go/internal/app/executiongrant"
 	appmodel "analytix.local/runtime-go/internal/app/model"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
+	"analytix.local/runtime-go/internal/contracts"
 	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -2261,7 +2265,7 @@ func TestRuntimeRunnerPersistsPreSendBeforeProviderTransport(t *testing.T) {
 	if !provider.transported {
 		t.Fatal("provider transport did not run")
 	}
-	if !reflect.DeepEqual(events.batchSizes, []int{9, 1}) {
+	if !reflect.DeepEqual(events.batchSizes, []int{10, 1, 1, 1}) {
 		t.Fatalf("runtime pipeline batch boundaries changed: %#v", events.batchSizes)
 	}
 	stages := make([]string, 0, len(events.events))
@@ -2271,9 +2275,9 @@ func TestRuntimeRunnerPersistsPreSendBeforeProviderTransport(t *testing.T) {
 		}
 	}
 	if want := []string{
-		"setup", "pre_start", "post_start", "input_received", "input_cached",
+		"setup", "pre_start", "post_start", "input_received", "input_cached", "logical_step_started",
 		"input_routed", "input_compressed", "input_remembered",
-		"pre_send", "post_send", "response_received",
+		"pre_send", "post_send", "response_received", "logical_step_assembled", "logical_step_closed",
 	}; !reflect.DeepEqual(stages, want) {
 		t.Fatalf("runtime pipeline stage order changed: got=%#v want=%#v", stages, want)
 	}
@@ -2608,7 +2612,7 @@ func TestRuntimeRunnerFlushesProviderSendStagesBeforeRetryEvent(t *testing.T) {
 	if err != nil || result.AssistantText != "retry completed" || provider.calls != 2 {
 		t.Fatalf("runtime provider retry pipeline failed: calls=%d result=%#v err=%v", provider.calls, result, err)
 	}
-	if !reflect.DeepEqual(events.batchSizes, []int{9, 1, 1, 1}) {
+	if !reflect.DeepEqual(events.batchSizes, []int{10, 1, 1, 1, 1, 1}) {
 		t.Fatalf("runtime retry pipeline batch boundaries changed: %#v", events.batchSizes)
 	}
 	stages := make([]string, 0, len(events.events))
@@ -2618,12 +2622,55 @@ func TestRuntimeRunnerFlushesProviderSendStagesBeforeRetryEvent(t *testing.T) {
 		}
 	}
 	if want := []string{
-		"setup", "pre_start", "post_start", "input_received", "input_cached",
+		"setup", "pre_start", "post_start", "input_received", "input_cached", "logical_step_started",
 		"input_routed", "input_compressed", "input_remembered",
-		"pre_send", "post_send", "provider_retrying",
-		"pre_send", "post_send", "response_received",
+		"pre_send", "post_send", "provider_retrying", "provider_retrying",
+		"pre_send", "post_send", "response_received", "logical_step_assembled", "logical_step_closed",
 	}; !reflect.DeepEqual(stages, want) {
 		t.Fatalf("runtime retry pipeline stage order changed: got=%#v want=%#v", stages, want)
+	}
+	var logicalID string
+	logicalStages := 0
+	for _, event := range events.events {
+		if event["stage"] != "logical_step_started" && event["stage"] != "logical_step_assembled" && event["stage"] != "logical_step_closed" {
+			continue
+		}
+		id := event["details"].(map[string]any)["logicalStepId"].(string)
+		if logicalID == "" {
+			logicalID = id
+		}
+		if id != logicalID || !contracts.IsCanonicalOpaqueUUIDV4(id) {
+			t.Fatal("provider retry changed the logical lifecycle identity")
+		}
+		logicalStages++
+	}
+	if logicalStages != 3 {
+		t.Fatal("provider retry duplicated a logical lifecycle stage")
+	}
+	var phases []string
+	for _, event := range events.events {
+		if event["stage"] != "provider_retrying" {
+			continue
+		}
+		details, _ := event["details"].(map[string]any)
+		retry, _ := details["retry"].(map[string]any)
+		if retry["source"] != "provider_retry" || retry["logicalSequence"] != float64(1) || retry["outerAttempt"] != float64(2) || retry["physicalAttempt"] != nil || event["attempt"] != float64(2) || event["maxAttempt"] != float64(2) {
+			t.Fatalf("retry changed its logical call or frozen invocation budget: %#v", event)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, event["timestamp"].(string)); err != nil {
+			t.Fatal("retry owner timestamp missing")
+		}
+		phase, _ := retry["phase"].(string)
+		phases = append(phases, phase)
+		if phase == "scheduled" && (retry["delayMs"] == nil || retry["deadlineUnixMs"] == nil) {
+			t.Fatal("schedule did not freeze its wait")
+		}
+		if phase == "started" && (retry["delayMs"] != nil || retry["deadlineUnixMs"] != nil || retry["cancelReason"] != nil) {
+			t.Fatal("started retained scheduled metadata")
+		}
+	}
+	if !reflect.DeepEqual(phases, []string{"scheduled", "started"}) {
+		t.Fatalf("retry lifecycle order=%#v", phases)
 	}
 }
 
@@ -2821,6 +2868,48 @@ func runtimeRunnerTestDependencies(provider *providerStreamStub, events *runtime
 	}
 }
 
+func TestRuntimeRunnerCapturesActualModelVisibleRequestDefinitionV1(t *testing.T) {
+	workspace := t.TempDir()
+	securityContext, err := securitycontexttest.HostGeneralOnlyExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: "thread-inspect-request", TurnID: "turn-inspect-request", WorkspaceRealPath: workspace, ContextEpoch: 1, IssuedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &providerStreamStub{responses: []providerStreamResponse{
+		{callbackChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkToolCallStart, ToolCall: domainmodel.ToolCall{ID: "wire-inspect", Name: "ls"}}}, resultChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkToolCall, ToolCall: domainmodel.ToolCall{ID: "wire-inspect", Name: "ls", Arguments: []byte(`{}`)}}}},
+	}}
+	schema := zeroArgumentToolSchemas("ls")[0]
+	schema.Description = "ACTUAL_REQUEST_DEFINITION"
+	schema.OutputSchema = json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{},"description":"HOST_ONLY_OUTPUT_CONTRACT"}`)
+	deps := runtimeRunnerTestDependencies(provider, &runtimeLoopEventRecorderStub{})
+	deps.ToolDriver = &toolStepDriverStub{readOnly: map[string]bool{"ls": true}}
+	deps.ResolveToolCatalog = func(bool, RuntimeProviderStep) RuntimeRunnerToolCatalog {
+		return RuntimeRunnerToolCatalog{PromptRoute: "tool_agent", Schemas: []domainmodel.ToolSchema{schema}}
+	}
+	var observed *domainmodel.ToolDefinitionSnapshotV1
+	deps.ProcessToolReady = func(pending appmodel.PendingToolCall) {
+		observed = domainmodel.CloneToolDefinitionSnapshotV1(pending.ModelVisibleToolDefinition)
+	}
+	// Observe the real dispatch -> pending -> approval pause seam. Result
+	// settlement and its provider continuation have separate production tests.
+	result, err := RunRuntimeAgentLoop(context.Background(), RuntimeRunnerInput{
+		ThreadID: securityContext.ThreadID, TurnID: securityContext.TurnID, Workspace: workspace,
+		Prompt: "inspect directory", ProviderID: "provider", Model: "model",
+		ProviderConfig: domainmodel.TurnConfig{ProviderID: "provider", Model: "model", EndpointFormat: "chat_completions", BaseURL: "https://provider.invalid"},
+		ApprovalPolicy: "always", SandboxMode: "read-only", EffectiveMaxModelSteps: 1,
+		SecurityContext: securityContext, Messages: []domainmodel.Message{{Role: "system", Content: "system"}, {Role: "user", Content: "inspect directory"}},
+	}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Paused || len(provider.requests) != 1 || len(provider.requests[0].Tools) != 1 || observed == nil {
+		t.Fatal("real loop did not retain the model-visible request definition")
+	}
+	expected, _ := json.Marshal(provider.requests[0].Tools[0])
+	if observed.SchemaJSON != string(expected) || strings.Contains(observed.SchemaJSON, "HOST_ONLY_OUTPUT_CONTRACT") {
+		t.Fatal("Inspect definition differs from the dispatched model request")
+	}
+}
+
 func ordinaryRuntimeSteeringBatch(prompt string) RuntimeSteeringBatch {
 	return runtimeSteeringBatch(prompt, domainsecurity.LogicalEffectOrdinary, true)
 }
@@ -2833,5 +2922,723 @@ func runtimeSteeringBatch(
 	return RuntimeSteeringBatch{
 		Messages: []domainmodel.Message{{Role: "user", Content: prompt}}, Prompt: prompt,
 		LogicalEffect: logicalEffect, OrdinaryWork: ordinaryWork,
+	}
+}
+
+func TestRuntimeRunnerStampsProcessSequenceAndKeepsDisplayOutOfGenericEvents(t *testing.T) {
+	workspace := t.TempDir()
+	securityContext, err := securitycontexttest.HostGeneralOnlyExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: "thread-process-sequence", TurnID: "turn-process-sequence", WorkspaceRealPath: workspace,
+		ContextEpoch: 1, IssuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const firstPrivate = "PRIVATE_PROCESS_FIRST_PROVIDER_SEQUENCE"
+	const secondPrivate = "PRIVATE_PROCESS_SECOND_PROVIDER_SEQUENCE"
+	response := func(reasoning, text string) providerStreamResponse {
+		chunks := []domainmodel.Chunk{
+			processFrameChunkForTest("start", 1, 8, ""),
+			processFrameChunkForTest("delta", 1, 8, reasoning),
+			processFrameChunkForTest("end", 1, 8, ""),
+			{Kind: domainmodel.ChunkText, Text: text},
+		}
+		for _, chunk := range chunks {
+			if chunk.ProcessFrame != nil {
+				chunk.ProcessFrame.ProviderSequence = 999
+			}
+		}
+		return providerStreamResponse{callbackChunks: chunks}
+	}
+	provider := &providerStreamStub{responses: []providerStreamResponse{
+		response(firstPrivate, "first draft"),
+		response(secondPrivate, "steered final"),
+	}}
+	events := &runtimeLoopEventRecorderStub{}
+	deps := runtimeRunnerTestDependencies(provider, events)
+	var frames []domainmodel.ProcessFrameV1
+	var units []uint64
+	var unitActive []bool
+	deps.ProcessUnit = func(n domaincontinuation.ProviderContinuationNamespaceV1, active bool) {
+		units = append(units, n.ProviderCallSequence)
+		unitActive = append(unitActive, active)
+	}
+	deps.ProcessDisplay = func(frame domainmodel.ProcessFrameV1) { frames = append(frames, frame) }
+	promotions := 0
+	deps.PromoteSteering = func(context.Context) (RuntimeSteeringBatch, error) {
+		promotions++
+		if promotions == 2 {
+			return ordinaryRuntimeSteeringBatch("Mid-turn user follow-up for the current task:\nFinish the revised answer."), nil
+		}
+		return RuntimeSteeringBatch{}, nil
+	}
+	result, err := RunRuntimeAgentLoop(context.Background(), RuntimeRunnerInput{
+		ThreadID: securityContext.ThreadID, TurnID: securityContext.TurnID, Workspace: workspace,
+		Prompt: "Start the answer.", ProviderID: "provider", Model: "model",
+		ApprovalPolicy: "on-request", SandboxMode: "workspace-write", EffectiveMaxModelSteps: 1,
+		SecurityContext: securityContext,
+		Messages:        []domainmodel.Message{{Role: "system", Content: "system"}, {Role: "user", Content: "Start the answer."}},
+	}, deps)
+	if result.ReleaseCandidateTerminal != nil {
+		defer result.ReleaseCandidateTerminal()
+	}
+	if err != nil || len(provider.requests) != 2 || result.AssistantText != "steered final" {
+		t.Fatalf("display wiring changed terminal steering outcome: calls=%d err=%v", len(provider.requests), err)
+	}
+	var sequences []uint64
+	var privateText []string
+	for _, frame := range frames {
+		if frame.ProviderSequence == 0 || frame.ProviderSequence == 999 {
+			t.Fatalf("runtime accepted a provider-controlled logical sequence: %#v", frame)
+		}
+		if frame.Kind == "delta" {
+			sequences = append(sequences, frame.ProviderSequence)
+			privateText = append(privateText, frame.Text)
+		}
+	}
+	if !reflect.DeepEqual(units, []uint64{1, 1, 2, 2}) || !reflect.DeepEqual(unitActive, []bool{true, false, true, false}) {
+		t.Fatal("unit entry/exit missing")
+	}
+	if !reflect.DeepEqual(sequences, []uint64{1, 2}) || !reflect.DeepEqual(privateText, []string{firstPrivate, secondPrivate}) {
+		t.Fatalf("process frames lost their logical provider sequence: %#v", frames)
+	}
+	for _, value := range []any{events.events, result.LastResult, provider.requests[1].Messages} {
+		encoded, marshalErr := json.Marshal(value)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if strings.Contains(string(encoded), firstPrivate) || strings.Contains(string(encoded), secondPrivate) ||
+			strings.Contains(string(encoded), "processFrame") {
+			t.Fatal("display bytes entered generic events, results, or model-visible history")
+		}
+	}
+}
+
+func TestRuntimeRunnerProcessDisplayPanicDoesNotFailTerminalCandidate(t *testing.T) {
+	workspace := t.TempDir()
+	securityContext, err := securitycontexttest.HostGeneralOnlyExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: "thread-process-panic", TurnID: "turn-process-panic", WorkspaceRealPath: workspace,
+		ContextEpoch: 1, IssuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &providerStreamStub{responses: []providerStreamResponse{{
+		callbackChunks: []domainmodel.Chunk{
+			processFrameChunkForTest("start", 1, 8, ""),
+			processFrameChunkForTest("delta", 1, 8, "PRIVATE_RUNTIME_DISPLAY_PANIC_TEXT"),
+			processFrameChunkForTest("end", 1, 8, ""),
+			{Kind: domainmodel.ChunkText, Text: "completed candidate"},
+		},
+	}}}
+	deps := runtimeRunnerTestDependencies(provider, &runtimeLoopEventRecorderStub{})
+	callbacks := 0
+	deps.ProcessUnit = func(domaincontinuation.ProviderContinuationNamespaceV1, bool) { panic("display unit unavailable") }
+	deps.ProcessDisplay = func(domainmodel.ProcessFrameV1) {
+		callbacks++
+		panic("display renderer unavailable")
+	}
+	result, err := RunRuntimeAgentLoop(context.Background(), RuntimeRunnerInput{
+		ThreadID: securityContext.ThreadID, TurnID: securityContext.TurnID, Workspace: workspace,
+		Prompt: "Complete the answer.", ProviderID: "provider", Model: "model",
+		ApprovalPolicy: "on-request", SandboxMode: "workspace-write", EffectiveMaxModelSteps: 1,
+		SecurityContext: securityContext,
+		Messages:        []domainmodel.Message{{Role: "system", Content: "system"}, {Role: "user", Content: "Complete the answer."}},
+	}, deps)
+	if result.ReleaseCandidateTerminal != nil {
+		defer result.ReleaseCandidateTerminal()
+	}
+	if err != nil || callbacks < 3 || len(provider.requests) != 1 || result.AssistantText != "completed candidate" {
+		t.Fatalf("display callback panic affected terminal completion: callbacks=%d calls=%d err=%v", callbacks, len(provider.requests), err)
+	}
+}
+
+type capObservationProviderStub struct {
+	calls           int
+	cancel          context.CancelFunc
+	callbackFailure bool
+}
+
+func (*capObservationProviderStub) RequiresDurablePipelineStagesV1() {}
+func (stub *capObservationProviderStub) Stream(_ context.Context, request domainmodel.Request) (domainmodel.Result, error) {
+	stub.calls++
+	for _, stage := range []string{"pre_send", "post_send"} {
+		if request.OnPipelineStage != nil {
+			if err := request.OnPipelineStage(domainmodel.PipelineStage{Stage: stage, At: time.Now().UTC()}); err != nil {
+				return domainmodel.Result{Usage: domainmodel.Usage{FinishReason: "length"}}, err
+			}
+		}
+	}
+	if stub.cancel != nil {
+		stub.cancel()
+	}
+	err := error(domainfailure.NewError(domainfailure.CodeProviderStreamInterrupted, nil))
+	if stub.callbackFailure {
+		err = ProviderStreamCallbackError{Err: errors.New("host callback failure")}
+	}
+	return domainmodel.Result{Usage: domainmodel.Usage{FinishReason: "length", CompletionTokens: 9}, StreamCompleted: false}, err
+}
+func TestRuntimeRunnerObservesOutputCapBeforeErrorWithHostFailurePriority(t *testing.T) {
+	for _, name := range []string{"length", "context", "callback", "dispatch_record"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			provider := &capObservationProviderStub{callbackFailure: name == "callback"}
+			if name == "context" {
+				provider.cancel = cancel
+			}
+			events := &runtimeLoopEventRecorderStub{}
+			if name == "dispatch_record" {
+				events.batchErr = errors.New("post send record failed")
+				events.batchErrAt = 2
+			}
+			deps := runtimeRunnerTestDependencies(&providerStreamStub{}, events)
+			deps.Provider = provider
+			_, err := RunRuntimeAgentLoop(ctx, RuntimeRunnerInput{ThreadID: "fixture", TurnID: "fixture-turn", Prompt: "synthetic question", ProviderID: "fixture", Model: "model", ApprovalPolicy: "never", SandboxMode: "read-only", EffectiveMaxModelSteps: 1, Messages: []domainmodel.Message{{Role: "user", Content: "synthetic question"}}}, deps)
+			if err == nil || provider.calls != 1 {
+				t.Fatalf("cap changed call budget: calls=%d err=%v", provider.calls, err)
+			}
+			caps := 0
+			capIndex := -1
+			errorIndex := -1
+			for i, event := range events.events {
+				if event["stage"] == "response_received" {
+					caps++
+					capIndex = i
+					details := event["details"].(map[string]any)
+					if details["stopReason"] != "length" || details["streamCompleted"] != false || details["logicalSequence"] != float64(1) {
+						t.Fatalf("cap observation=%#v", details)
+					}
+				}
+				if event["kind"] == "provider_error" {
+					errorIndex = i
+				}
+			}
+			if name == "length" {
+				if caps != 1 || errorIndex >= 0 && capIndex >= errorIndex {
+					t.Fatalf("cap order=%d error=%d count=%d", capIndex, errorIndex, caps)
+				}
+			} else if caps != 0 {
+				t.Fatal("host/dispatch failure authorized cap publication")
+			}
+		})
+	}
+}
+
+// Runs the real protocol parser and production assembler/loop with synthetic
+// provider bytes. No live provider, credential, or user state is involved.
+type outputCapParserProvider struct {
+	format   string
+	payloads []string
+	requests []domainmodel.Request
+}
+
+func (*outputCapParserProvider) RequiresDurablePipelineStagesV1() {}
+func (provider *outputCapParserProvider) Stream(_ context.Context, request domainmodel.Request) (domainmodel.Result, error) {
+	provider.requests = append(provider.requests, request)
+	index := len(provider.requests) - 1
+	if index >= len(provider.payloads) {
+		return domainmodel.Result{}, errors.New("unexpected cap request")
+	}
+	for _, name := range []string{"pre_send", "post_send"} {
+		if request.OnPipelineStage != nil {
+			if err := request.OnPipelineStage(domainmodel.PipelineStage{Stage: name, At: time.Now().UTC()}); err != nil {
+				return domainmodel.Result{}, err
+			}
+		}
+	}
+	chunks, usage, err := providerstream.ParseSSEWithCallback(provider.format, strings.NewReader(provider.payloads[index]), request.OnChunk)
+	completed := false
+	for _, chunk := range chunks {
+		if chunk.Kind == domainmodel.ChunkDone {
+			completed = true
+		}
+	}
+	return domainmodel.Result{Chunks: chunks, Usage: usage, StreamCompleted: completed}, err
+}
+func outputCapRunnerFixture(t *testing.T, provider *outputCapParserProvider) (RuntimeRunnerInput, RuntimeRunnerDependencies) {
+	t.Helper()
+	workspace := t.TempDir()
+	securityContext, err := securitycontexttest.HostGeneralOnlyExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: "output-cap-thread", TurnID: "output-cap-turn", WorkspaceRealPath: workspace, ContextEpoch: 1, IssuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := runtimeRunnerTestDependencies(&providerStreamStub{}, &runtimeLoopEventRecorderStub{})
+	deps.Provider = provider
+	deps.ResolveToolCatalog = func(bool, RuntimeProviderStep) RuntimeRunnerToolCatalog {
+		return RuntimeRunnerToolCatalog{PromptRoute: "tool_agent", Schemas: zeroArgumentToolSchemas("ls")}
+	}
+	input := RuntimeRunnerInput{
+		ThreadID: securityContext.ThreadID, TurnID: securityContext.TurnID, Workspace: workspace,
+		Prompt: "Review ordinary code.", ProviderID: "fixture", Model: "fixture", ApprovalPolicy: "never", SandboxMode: "read-only",
+		EffectiveMaxModelSteps: 2, SecurityContext: securityContext,
+		ProviderConfig: domainmodel.TurnConfig{ProviderID: "fixture", Model: "fixture", EndpointFormat: provider.format, BaseURL: "https://provider.invalid"},
+		Messages:       []domainmodel.Message{{Role: "system", Content: "system"}, {Role: "user", Content: "Review ordinary code."}},
+	}
+	return input, deps
+}
+func TestRuntimeRunnerOutputCapDropsAllToolsAndDoesNotRetryEmpty(t *testing.T) {
+	for _, text := range []string{"safe capped text", ""} {
+		for _, args := range []string{`{}`, `{"truncated":`} {
+			textJSON, _ := json.Marshal(text)
+			argsJSON, _ := json.Marshal(args)
+			payload := `data: {"choices":[{"delta":{"content":` + string(textJSON) + `,"tool_calls":[{"index":0,"id":"cap-call","type":"function","function":{"name":"ls","arguments":` + string(argsJSON) + `}}]}}]}` +
+				"\n\n" + `data: {"choices":[{"delta":{},"finish_reason":"length"}]}` + "\n\ndata: [DONE]\n\n"
+			provider := &outputCapParserProvider{format: "chat_completions", payloads: []string{payload}}
+			input, deps := outputCapRunnerFixture(t, provider)
+			events := &runtimeLoopEventRecorderStub{}
+			deps.Events = NewRuntimeEventRecorder(events)
+			ready := 0
+			deps.ProcessToolReady = func(appmodel.PendingToolCall) { ready++ }
+			executions := 0
+			deps.ToolDriver = ToolStepDriverFuncs{
+				ExecuteAndSettleFunc: func(context.Context, appmodel.PendingToolCall, any, ToolOutputTransform) (SettledToolExecution, error) {
+					executions++
+					return SettledToolExecution{}, errors.New("capped tool executed")
+				},
+				ExecuteAuthorizedBatchFunc: func(context.Context, []appmodel.PendingToolCall) (string, []domainmodel.Message, error) {
+					executions++
+					return "", nil, errors.New("capped batch executed")
+				},
+			}
+			result, err := RunRuntimeAgentLoop(context.Background(), input, deps)
+			if result.ReleaseCandidateTerminal != nil {
+				result.ReleaseCandidateTerminal()
+			}
+			if err != nil || len(provider.requests) != 1 || ready != 0 || executions != 0 || result.AssistantText != text || RuntimeCompletionEndReason(result) == nil {
+				t.Fatalf("capped response dispatched/retried/lost text: result=%#v calls=%d ready=%d err=%v", result, len(provider.requests), ready, err)
+			}
+			if !result.LastResult.StreamCompleted {
+				t.Fatal("cap rewrote the raw Provider protocol completion")
+			}
+			caps := 0
+			for _, event := range events.events {
+				if event["stage"] != "response_received" {
+					continue
+				}
+				caps++
+				details, _ := event["details"].(map[string]any)
+				if details["stopReason"] != "length" || details["streamCompleted"] != false || details["logicalSequence"] != float64(1) {
+					t.Fatal("cap did not retain the closed logical completion observation")
+				}
+			}
+			if caps != 1 {
+				t.Fatal("cap observation was omitted or duplicated")
+			}
+			if result.LastResult.Usage.HasCompletionTokens || (text == "" && result.OrdinaryResult != nil) {
+				t.Fatal("empty/missing usage cap fabricated a slot or native usage")
+			}
+		}
+	}
+}
+func TestRuntimeRunnerOutputCapStaysStickyOnlyAcrossExistingContinuation(t *testing.T) {
+	for _, finalReason := range []string{"stop", "content_filter"} {
+		provider := &outputCapParserProvider{format: "chat_completions", payloads: []string{
+			`data: {"choices":[{"delta":{"content":"accepted capped prefix"},"finish_reason":"length"}]}` + "\n\ndata: [DONE]\n\n",
+			`data: {"choices":[{"delta":{"content":"later answer"},"finish_reason":"` + finalReason + `"}]}` + "\n\ndata: [DONE]\n\n",
+		}}
+		input, deps := outputCapRunnerFixture(t, provider)
+		promotions := 0
+		deps.PromoteSteering = func(context.Context) (RuntimeSteeringBatch, error) {
+			promotions++
+			if promotions == 2 {
+				return ordinaryRuntimeSteeringBatch("Continue with my existing correction."), nil
+			}
+			return RuntimeSteeringBatch{}, nil
+		}
+		result, err := RunRuntimeAgentLoop(context.Background(), input, deps)
+		if result.ReleaseCandidateTerminal != nil {
+			result.ReleaseCandidateTerminal()
+		}
+		if len(provider.requests) != 2 || (finalReason == "stop") != (err == nil) || result.OutputCapLogicalSequence != 1 {
+			t.Fatalf("sticky cap continuation mismatch: result=%#v calls=%d err=%v", result, len(provider.requests), err)
+		}
+		found := false
+		for _, message := range provider.requests[1].Messages {
+			if message.Role == "assistant" && message.Content == "accepted capped prefix" {
+				found = true
+			}
+			if len(message.ToolCalls) != 0 {
+				t.Fatal("capped tool call entered semantic replay")
+			}
+		}
+		if !found {
+			t.Fatal("later request lost earlier legally admitted capped semantic history")
+		}
+		if err == nil && RuntimeCompletionEndReason(result) == nil {
+			t.Fatal("ordinary later step cleared the sticky cap")
+		}
+		// A new turn has no receipt-scoped output-cap fact.
+		fresh := RuntimeAgentLoopResult{}
+		if RuntimeCompletionEndReason(fresh) != nil {
+			t.Fatal("output cap leaked to a fresh turn")
+		}
+	}
+}
+
+func TestOutputCapUnfinishedToolArgumentsStillConsumeHostBudget(t *testing.T) {
+	oversized, _ := json.Marshal(strings.Repeat("x", 16*1024+1))
+	fixtures := map[string]string{
+		"responses": `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n" +
+			`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"unnamed-call","type":"function_call"}}` + "\n\n" +
+			`data: {"type":"response.function_call_arguments.delta","output_index":1,"item_id":"unnamed-call","delta":` + string(oversized) + `}` + "\n\n" +
+			`data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}` + "\n\n",
+		"chat_completions": `data: {"choices":[{"delta":{"content":"ok","tool_calls":[{"index":0,"id":"unnamed-call","type":"function","function":{"arguments":` + string(oversized) + `}}]}}]}` + "\n\n" +
+			`data: {"choices":[{"delta":{},"finish_reason":"length"}]}` + "\n\ndata: [DONE]\n\n",
+		"messages": `data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}` + "\n\n" +
+			`data: {"type":"content_block_start","index":1,"content_block":{"id":"unnamed-call","type":"tool_use","input":{}}}` + "\n\n" +
+			`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":` + string(oversized) + `}}` + "\n\n" +
+			`data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}` + "\n\n" + `data: {"type":"message_stop"}` + "\n\n",
+	}
+	for format, payload := range fixtures {
+		t.Run(format, func(t *testing.T) {
+			for _, maxBytes := range []int{16 * 1024, 0} {
+				provider := &outputCapParserProvider{format: format, payloads: []string{payload}}
+				result, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider,
+					Request: domainmodel.Request{MaxOutputTokens: 2048}, MaxAttempts: 1, MaxOutputBytes: maxBytes})
+				if err == nil || (maxBytes > 0 && !errors.Is(err, ErrProviderOutputByteBudgetExceeded)) ||
+					(maxBytes == 0 && !errors.Is(err, ErrProviderOutputTokenBudgetExceeded)) || result.Text != "" {
+					t.Errorf("capped unfinished arguments bypassed host budget: maxBytes=%d text=%q err=%v", maxBytes, result.Text, err)
+				}
+			}
+			// A bounded cap still retains safe text, with no replay/tool material or
+			// invented native usage after the original host budget is satisfied.
+			small := strings.Replace(payload, string(oversized), `"PRIVATE_CAP_ARGUMENT"`, 1)
+			provider := &outputCapParserProvider{format: format, payloads: []string{small}}
+			result, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider,
+				Request: domainmodel.Request{MaxOutputTokens: 2048}, MaxAttempts: 1, MaxOutputBytes: 16 * 1024})
+			if err != nil || result.Text != "ok" || !result.Result.StreamCompleted || result.Result.Usage.HasCompletionTokens {
+				t.Fatalf("bounded capped response changed behavior: text=%q err=%v", result.Text, err)
+			}
+			for _, chunk := range result.Result.Chunks {
+				if chunk.DiscardedToolMaterial != "" || chunk.Kind == domainmodel.ChunkToolCall || chunk.Kind == domainmodel.ChunkToolCallStart {
+					t.Fatal("private cap/tool material escaped the assembler")
+				}
+			}
+			wire, _ := json.Marshal(result.Result)
+			if strings.Contains(string(wire), "PRIVATE_CAP_ARGUMENT") || strings.Contains(string(wire), "DiscardedToolMaterial") {
+				t.Fatal("private budget material escaped wire")
+			}
+		})
+	}
+}
+
+func TestRuntimeRunnerLogicalStepsCloseAcrossRecoveryAndFailureV1(t *testing.T) {
+	input := RuntimeRunnerInput{ThreadID: "thread-logical", TurnID: "turn-logical", Prompt: "finish", ProviderID: "provider", Model: "model", ApprovalPolicy: "on-request", SandboxMode: "workspace-write", EffectiveMaxModelSteps: 2, Messages: []domainmodel.Message{{Role: "user", Content: "finish"}}}
+	t.Run("empty recovery and assembled final", func(t *testing.T) {
+		provider := &providerStreamStub{responses: []providerStreamResponse{{}, {callbackChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkText, Text: "final"}}}}}
+		events := &runtimeLoopEventRecorderStub{}
+		result, err := RunRuntimeAgentLoop(context.Background(), input, runtimeRunnerTestDependencies(provider, events))
+		if err != nil || result.AssistantText != "final" {
+			t.Fatalf("recovery failed: %v", err)
+		}
+		started := map[string]bool{}
+		closes := 0
+		for _, event := range events.events {
+			details, _ := event["details"].(map[string]any)
+			id, _ := details["logicalStepId"].(string)
+			if event["stage"] == "logical_step_started" {
+				if !contracts.IsCanonicalOpaqueUUIDV4(id) || started[id] {
+					t.Fatal("invalid/reused identity")
+				}
+				started[id] = true
+			}
+			if event["stage"] == "logical_step_closed" {
+				closes++
+				if !started[id] || details["assistantMessageAssembled"] != true || details["llmMs"] == nil {
+					t.Fatalf("unproven assembly: %#v", event)
+				}
+				delete(started, id)
+			}
+		}
+		if closes != 2 || len(started) != 0 {
+			t.Fatalf("unclosed logical recovery: %d %#v", closes, started)
+		}
+	})
+	t.Run("preparation failure closes without timing", func(t *testing.T) {
+		events := &runtimeLoopEventRecorderStub{}
+		deps := runtimeRunnerTestDependencies(&providerStreamStub{}, events)
+		expected := errors.New("prepare rejected")
+		deps.PromoteSteering = func(context.Context) (RuntimeSteeringBatch, error) { return RuntimeSteeringBatch{}, expected }
+		_, err := RunRuntimeAgentLoop(context.Background(), input, deps)
+		if !errors.Is(err, expected) {
+			t.Fatalf("failure lost: %v", err)
+		}
+		closes := 0
+		for _, event := range events.events {
+			if event["stage"] == "logical_step_closed" {
+				closes++
+				details := event["details"].(map[string]any)
+				if details["assistantMessageAssembled"] != false || len(details) != 3 {
+					t.Fatalf("failure invented timing: %#v", event)
+				}
+			}
+		}
+		if closes != 1 {
+			t.Fatalf("failure closes=%d", closes)
+		}
+	})
+	t.Run("close failure is propagated", func(t *testing.T) {
+		expected := errors.New("close persistence failed")
+		events := &runtimeLoopEventRecorderStub{batchErr: expected, batchErrAt: 4}
+		deps := runtimeRunnerTestDependencies(&providerStreamStub{}, events)
+		deps.Provider = &pipelineStageProviderStub{}
+		_, err := RunRuntimeAgentLoop(context.Background(), input, deps)
+		if !errors.Is(err, expected) {
+			t.Fatalf("close write failure hidden: %v", err)
+		}
+		for _, event := range events.events {
+			if event["stage"] == "logical_step_closed" {
+				t.Fatal("failed close was persisted")
+			}
+		}
+	})
+	t.Run("atomic recorder required", func(t *testing.T) {
+		events := &runtimeNonAtomicEventRecorderStub{}
+		deps := runtimeRunnerTestDependencies(&providerStreamStub{}, &runtimeLoopEventRecorderStub{})
+		deps.Events = NewRuntimeEventRecorder(events)
+		_, err := RunRuntimeAgentLoop(context.Background(), input, deps)
+		if err == nil || len(events.events) != 0 {
+			t.Fatalf("partial start allowed: events=%d err=%v", len(events.events), err)
+		}
+	})
+}
+
+func TestLogicalStepAssemblyUsesFinalOutputAndEarliestObservedTokenV1(t *testing.T) {
+	started := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+	observation := domaincache.ProviderCallObservationV1{SchemaVersion: domaincache.ProviderCallObservationV1SchemaVersion, Shape: domaincache.CacheVisibleShapeV1{SchemaVersion: domaincache.CacheVisibleShapeV1SchemaVersion, LogicalCallHMAC: strings.Repeat("a", 64), Attempt: 1, ProviderFamily: domaincache.ProviderFamilyDeepSeek, ModelHMAC: strings.Repeat("b", 64), Endpoint: domaincache.EndpointFormatChatCompletions, EndpointHMAC: strings.Repeat("c", 64), WireBodyHMAC: strings.Repeat("d", 64), CredentialScopeHMAC: strings.Repeat("e", 64), ProviderConfigHMAC: strings.Repeat("f", 64), DigestEpoch: 1, StartedAt: started.Format(time.RFC3339Nano)}, Status: domaincache.ProviderCallStatusFailed, SettledAt: started.Add(time.Second).Format(time.RFC3339Nano), FirstTokenAt: started.Add(200 * time.Millisecond).Format(time.RFC3339Nano)}
+	second := observation
+	second.Shape.Attempt = 2
+	second.Shape.StartedAt = started.Add(time.Second).Format(time.RFC3339Nano)
+	second.SettledAt = started.Add(4 * time.Second).Format(time.RFC3339Nano)
+	second.FirstTokenAt = started.Add(2 * time.Second).Format(time.RFC3339Nano)
+	second.Status = domaincache.ProviderCallStatusSucceeded
+	usage := domainmodel.Usage{UsagePresenceKnown: true, HasCompletionTokens: true, CompletionTokens: 20, OutputTokensFinality: domaincache.ProviderOutputTokensFinalV1}
+	got := logicalStepAssemblyDetailsV1("f13e1680-e522-4d40-bc18-40dde3bb66ea", started, started.Add(4*time.Second), usage, []domaincache.ProviderCallObservationV1{second, observation})
+	if got["llmMs"] != float64(4000) || got["ttftMs"] != float64(200) || got["decodeMs"] != float64(3800) || got["decodeTokens"] != float64(20) {
+		t.Fatalf("logical timing/output drift: %#v", got)
+	}
+	for _, scenario := range []string{"absent", "provisional", "zero"} {
+		t.Run(scenario, func(t *testing.T) {
+			u := usage
+			switch scenario {
+			case "absent":
+				u.HasCompletionTokens = false
+			case "provisional":
+				u.OutputTokensFinality = ""
+			case "zero":
+				u.CompletionTokens = 0
+			}
+			details := logicalStepAssemblyDetailsV1("f13e1680-e522-4d40-bc18-40dde3bb66ea", started, started.Add(4*time.Second), u, []domaincache.ProviderCallObservationV1{observation})
+			if scenario == "zero" {
+				if details["decodeTokens"] != float64(0) {
+					t.Fatal("explicit zero lost")
+				}
+			} else if details["decodeTokens"] != nil || details["decodeMs"] != nil {
+				t.Fatal("unknown/provisional output qualified")
+			}
+		})
+	}
+}
+
+// The sink capability is exercised here without importing the storage
+// adapter into its own dependency loop. The concrete AtomicAppendError method
+// is covered by the eventlog owner regression.
+type logicalCommittedAppendErrorV1 struct{ cause error }
+
+func (err *logicalCommittedAppendErrorV1) Error() string             { return err.cause.Error() }
+func (err *logicalCommittedAppendErrorV1) Unwrap() error             { return err.cause }
+func (*logicalCommittedAppendErrorV1) AtomicAppendCommittedV1() bool { return true }
+
+type logicalCommittedEventRecorderV1 struct {
+	runtimeLoopEventRecorderStub
+	cause error
+}
+
+func (recorder *logicalCommittedEventRecorderV1) RecordEventsAtomic(events []map[string]any) ([]map[string]any, []string, error) {
+	stored, ids, err := recorder.runtimeLoopEventRecorderStub.RecordEventsAtomic(events)
+	if err == nil && recorder.batchCalls == 1 {
+		err = &logicalCommittedAppendErrorV1{cause: recorder.cause}
+	}
+	return stored, ids, err
+}
+func TestRuntimeRunnerClosesConfirmedStartWithoutDispatchAfterCommitErrorV1(t *testing.T) {
+	for _, preparation := range []bool{false, true} {
+		t.Run(fmt.Sprint(preparation), func(t *testing.T) {
+			cause := errors.New("synthetic committed append acknowledgement failure")
+			recorder := &logicalCommittedEventRecorderV1{cause: cause}
+			deps := runtimeRunnerTestDependencies(&providerStreamStub{}, &runtimeLoopEventRecorderStub{})
+			deps.Events = NewRuntimeEventRecorder(recorder)
+			provider := &pipelineStageProviderStub{}
+			deps.Provider = provider
+			if preparation {
+				deps.PromoteSteering = func(context.Context) (RuntimeSteeringBatch, error) {
+					return RuntimeSteeringBatch{}, errors.New("synthetic preparation failure")
+				}
+			}
+			_, err := RunRuntimeAgentLoop(context.Background(), RuntimeRunnerInput{ThreadID: "thread-commit-error", TurnID: "turn-commit-error", Prompt: "finish", ProviderID: "provider", Model: "model", ApprovalPolicy: "on-request", SandboxMode: "workspace-write", EffectiveMaxModelSteps: 1, Messages: []domainmodel.Message{{Role: "user", Content: "finish"}}}, deps)
+			if !errors.Is(err, cause) || provider.transported {
+				t.Fatalf("committed error became dispatch/success: %t %v", provider.transported, err)
+			}
+			starts, closes := 0, 0
+			for _, event := range recorder.events {
+				if event["stage"] == "logical_step_started" {
+					starts++
+				}
+				if event["stage"] == "logical_step_closed" {
+					closes++
+					if event["details"].(map[string]any)["assistantMessageAssembled"] != false {
+						t.Fatal("failed dispatch claimed assembly")
+					}
+				}
+			}
+			if starts != 1 || closes != 1 {
+				t.Fatalf("confirmed start/close duplicated or lost: %d/%d", starts, closes)
+			}
+		})
+	}
+}
+
+// The atomic sink controls the assembly commit boundary independently from
+// tool admission; a rejected append must never advance into the tool driver.
+type logicalAssemblyEventRecorderV1 struct {
+	runtimeLoopEventRecorderStub
+	assemblyErr      error
+	atomicAssemblies int
+}
+
+func (recorder *logicalAssemblyEventRecorderV1) RecordEventsAtomic(events []map[string]any) ([]map[string]any, []string, error) {
+	for _, event := range events {
+		if event["stage"] == "logical_step_assembled" {
+			recorder.atomicAssemblies++
+			if recorder.assemblyErr != nil {
+				return nil, nil, recorder.assemblyErr
+			}
+		}
+	}
+	return recorder.runtimeLoopEventRecorderStub.RecordEventsAtomic(events)
+}
+
+func TestRuntimeRunnerCommitsAssemblyBeforeBlockedToolAdmissionV1(t *testing.T) {
+	for _, failAssembly := range []bool{false, true} {
+		t.Run(fmt.Sprint(failAssembly), func(t *testing.T) {
+			workspace := t.TempDir()
+			securityContext, err := securitycontexttest.HostGeneralOnlyExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+				ThreadID: "thread-assembly", TurnID: "turn-assembly", WorkspaceRealPath: workspace, ContextEpoch: 1, IssuedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder := &logicalAssemblyEventRecorderV1{}
+			appendErr := errors.New("assembly commit rejected")
+			if failAssembly {
+				recorder.assemblyErr = appendErr
+			}
+			provider := &providerStreamStub{responses: []providerStreamResponse{
+				runtimeRunnerTerminalToolResponse("assembly-tool", "ls", `{}`),
+			}}
+			deps := runtimeRunnerTestDependencies(provider, &runtimeLoopEventRecorderStub{})
+			deps.Events = NewRuntimeEventRecorder(recorder)
+			deps.ResolveToolCatalog = func(bool, RuntimeProviderStep) RuntimeRunnerToolCatalog {
+				return RuntimeRunnerToolCatalog{PromptRoute: "tool_agent", Schemas: zeroArgumentToolSchemas("ls")}
+			}
+			entered, release := make(chan struct{}), make(chan struct{})
+			toolErr := errors.New("tool admission blocked")
+			driver := &toolStepDriverStub{readOnly: map[string]bool{"ls": true}}
+			driver.admissionHook = func(ctx context.Context, _ appmodel.PendingToolCall) error {
+				close(entered)
+				select {
+				case <-release:
+					return toolErr
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			deps.ToolDriver = driver
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			before := time.Now()
+			done := make(chan error, 1)
+			go func() {
+				_, err := RunRuntimeAgentLoop(ctx, RuntimeRunnerInput{
+					ThreadID: securityContext.ThreadID, TurnID: securityContext.TurnID, Workspace: workspace,
+					Prompt: "inspect directory", ProviderID: "provider", Model: "model",
+					ProviderConfig: domainmodel.TurnConfig{ProviderID: "provider", Model: "model", EndpointFormat: "chat_completions", BaseURL: "https://provider.invalid"},
+					ApprovalPolicy: "never", SandboxMode: "read-only", EffectiveMaxModelSteps: 1,
+					SecurityContext: securityContext, Messages: []domainmodel.Message{{Role: "user", Content: "inspect directory"}},
+				}, deps)
+				done <- err
+			}()
+			if failAssembly {
+				select {
+				case err := <-done:
+					if !errors.Is(err, appendErr) || PublicFailureForError(err).Code() != domainfailure.CodeHostResponseEventFailed {
+						t.Fatalf("assembly append failure lost its cause or host phase: %v", err)
+					}
+				case <-entered:
+					t.Fatal("tool admission advanced past failed assembly commit")
+				}
+				for _, event := range recorder.events {
+					if event["stage"] == "logical_step_assembled" {
+						t.Fatal("failed assembly append claimed durable publication")
+					}
+				}
+				return
+			}
+			select {
+			case <-entered:
+			case err := <-done:
+				t.Fatalf("tool admission was not reached: %v", err)
+			}
+			blockedAt := time.Now()
+			var start, assembly map[string]any
+			for _, event := range recorder.events {
+				switch event["stage"] {
+				case "logical_step_started":
+					start = event
+				case "logical_step_assembled":
+					if assembly != nil {
+						t.Fatal("assembly duplicated")
+					}
+					assembly = event
+				case "logical_step_closed":
+					t.Fatal("logical step closed before blocked tool admission settled")
+				}
+			}
+			if start == nil || assembly == nil || recorder.atomicAssemblies != 1 || assembly["label"] != "Logical step assembled" {
+				t.Fatal("tool admission lacks committed assembly")
+			}
+			identity := start["details"].(map[string]any)
+			if !reflect.DeepEqual(identity, assembly["details"]) || len(identity) != 2 {
+				t.Fatal("assembly identity differs or copied private/metric fields")
+			}
+			startAt, startErr := time.Parse(time.RFC3339Nano, start["timestamp"].(string))
+			assembledAt, assembledErr := time.Parse(time.RFC3339Nano, assembly["timestamp"].(string))
+			if startErr != nil || assembledErr != nil || startAt.Before(before) || assembledAt.Before(startAt) || assembledAt.After(blockedAt) {
+				t.Fatal("assembly does not retain the actual ordered Host timestamps")
+			}
+			release <- struct{}{}
+			var failure TurnFailureError
+			if err := <-done; !errors.As(err, &failure) || failure.Code != "execution_grant_admission_rejected" {
+				t.Fatalf("blocked admission did not stop at its public failure boundary: %v", err)
+			}
+			closes := 0
+			for _, event := range recorder.events {
+				if event["stage"] != "logical_step_closed" {
+					continue
+				}
+				closes++
+				details := event["details"].(map[string]any)
+				closedAt, closeErr := time.Parse(time.RFC3339Nano, event["timestamp"].(string))
+				if closeErr != nil || closedAt.Before(blockedAt) || details["logicalStepId"] != identity["logicalStepId"] || details["assistantMessageAssembled"] != true {
+					t.Fatal("later close lost identity, assembly fact or Host order")
+				}
+			}
+			if closes != 1 || len(driver.ready) != 0 || len(driver.executed) != 0 {
+				t.Fatal("blocked tool dispatched or lifecycle closed more than once")
+			}
+		})
 	}
 }

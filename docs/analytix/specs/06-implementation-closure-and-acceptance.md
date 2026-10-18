@@ -28,19 +28,9 @@ The goal is not to add another broad redesign. The goal is to close the loop:
 
 ## 2. Inputs
 
-Implementation must read these documents before editing:
-
-```text
-/Users/sun/Projects/analytix/重构升级方案.md
-/Users/sun/Projects/analytix/docs/analytix/specs/01-identity-runtime-schema-reset.md
-/Users/sun/Projects/analytix/docs/analytix/specs/02-release-packaging-channels.md
-/Users/sun/Projects/analytix/docs/analytix/specs/03-brand-assets-visual-system.md
-/Users/sun/Projects/analytix/docs/analytix/specs/04-analytix-derived-thread-virtualizer.md
-/Users/sun/Projects/analytix/docs/analytix/specs/05-architecture-code-upgrade-inventory.md
-/Users/sun/Projects/analytix/docs/analytix/specs/06-implementation-closure-and-acceptance.md
-```
-
-`AGENTS.md` and `docs/AGENTS.md` must be read only to identify stale Kun instructions and update them. They must not override the user-confirmed analytix decisions when they still mention `kun/`, `window.kunGui`, `agents.kun`, or `kun serve`.
+Start with [the documentation map](../README.md), applicable `AGENTS.md`, and
+fresh Git state. Read only the accepted scope and real dependencies selected
+there; current code and fresh evidence establish implementation.
 
 ## 3. Frozen Decisions
 

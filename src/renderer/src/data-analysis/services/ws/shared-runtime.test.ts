@@ -54,7 +54,8 @@ function sentControlRequests(socket: FakeWebSocket): Array<Record<string, unknow
 
 function captureWindowTimerCallbacks(): Array<() => void> {
   const callbacks: Array<() => void> = [];
-  vi.mocked(window.setTimeout).mockImplementation((handler: TimerHandler) => {
+  const browserWindow: Window = window;
+  vi.mocked(browserWindow.setTimeout).mockImplementation((handler: TimerHandler) => {
     if (typeof handler === "function") {
       callbacks.push(() => handler());
     }

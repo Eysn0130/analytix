@@ -1998,11 +1998,116 @@ func checkImports(t *testing.T, root string, relDir string, banned []string) {
 		if !productionBoundarySourceV1(file) {
 			continue
 		}
-		parsed := parseGoFile(t, file, parser.ImportsOnly)
-		if violations := forbiddenLayerImportsV1(parsed, banned); len(violations) != 0 {
+		parsed := parseGoFile(t, file, 0)
+		var violations []string
+		for _, dependency := range forbiddenLayerImportsV1(parsed, banned) {
+			if dependency == "path/filepath" && exactLayerFilepathCallsV1(parsed, rel(t, root, file)) {
+				continue
+			}
+			violations = append(violations, dependency)
+		}
+		if len(violations) != 0 {
 			t.Errorf("%s imports forbidden dependencies %q for %s", rel(t, root, file), violations, relDir)
 		}
 	}
+}
+
+// Only these exact owners may call lexical filepath operations directly.
+// Every other package reference, including a function value, remains forbidden.
+func exactLayerFilepathCallsV1(parsed *ast.File, location string) bool {
+	packageName, functionName, receiverName := "toolresult", "", ""
+	operations := map[string]bool{"IsAbs": true, "Clean": true}
+	switch location {
+	case "internal/domain/toolresult/protected_present_v1.go":
+		functionName = "ValidateProtectedPresentTargetsV1"
+	case "internal/domain/toolresult/protected_snapshot_v1.go":
+		functionName = "ValidateProtectedCaptureV1"
+	case "internal/app/documentgeneration/user_create.go":
+		packageName, functionName, receiverName = "documentgeneration", "Create", "UserCreator"
+		operations = map[string]bool{"Join": true}
+	default:
+		return false
+	}
+	if parsed.Name.Name != packageName {
+		return false
+	}
+	alias := ""
+	for _, item := range parsed.Imports {
+		path, err := strconv.Unquote(item.Path.Value)
+		if err != nil || path != "path/filepath" {
+			continue
+		}
+		if alias != "" {
+			return false
+		}
+		alias = "filepath"
+		if item.Name != nil {
+			alias = item.Name.Name
+			if alias == "." || alias == "_" {
+				return false
+			}
+		}
+	}
+	if alias == "" {
+		return false
+	}
+	allowed := map[*ast.Ident]bool{}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != functionName || function.Body == nil {
+			continue
+		}
+		if receiverName == "" {
+			if function.Recv != nil {
+				continue
+			}
+		} else {
+			if function.Recv == nil || len(function.Recv.List) != 1 {
+				continue
+			}
+			pointer, ok := function.Recv.List[0].Type.(*ast.StarExpr)
+			if !ok {
+				continue
+			}
+			receiver, ok := pointer.X.(*ast.Ident)
+			if !ok || receiver.Name != receiverName {
+				continue
+			}
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if _, nested := node.(*ast.FuncLit); nested {
+				return false
+			}
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || !operations[selector.Sel.Name] {
+				return true
+			}
+			identifier, ok := selector.X.(*ast.Ident)
+			if ok && identifier.Name == alias && identifier.Obj == nil {
+				allowed[identifier] = true
+			}
+			return true
+		})
+	}
+	if len(allowed) == 0 {
+		return false
+	}
+	valid := true
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		if _, imported := node.(*ast.ImportSpec); imported {
+			return false
+		}
+		identifier, ok := node.(*ast.Ident)
+		if ok && identifier.Name == alias && identifier.Obj == nil && !allowed[identifier] {
+			valid = false
+		}
+		return valid
+	})
+	return valid
 }
 
 func productionBoundarySourceV1(file string) bool {

@@ -1,6 +1,8 @@
 package runtimeapp
 
 import (
+	"errors"
+	"math"
 	"path/filepath"
 	"time"
 
@@ -63,6 +65,54 @@ func loadRuntimeSkillCatalog(config Config, document map[string]any, ok bool) (t
 			LoadPackage:       filestore.LoadSkillPackage,
 		},
 	)
+}
+
+// loadRuntimeUserInputConfig distinguishes an absent opt-in from an explicit
+// policy. Defaults never mutate the frozen source document or its digest.
+func loadRuntimeUserInputConfig(document map[string]any, ok bool) (toolcatalogapp.UserInputConfig, bool, error) {
+	config := toolcatalogapp.UserInputConfig{}
+	runtimeConfig, _ := document["runtime"].(map[string]any)
+	if !ok || runtimeConfig == nil {
+		normalized, err := toolcatalogapp.NormalizeUserInputConfig(config)
+		return normalized, false, err
+	}
+	raw, present := runtimeConfig["userInput"]
+	if !present {
+		normalized, err := toolcatalogapp.NormalizeUserInputConfig(config)
+		return normalized, false, err
+	}
+	leaf, object := raw.(map[string]any)
+	if !object || leaf == nil {
+		return config, true, errors.New("runtime.userInput must be an object")
+	}
+	for key := range leaf {
+		if key != "policy" && key != "defaultTimeoutSeconds" {
+			return config, true, errors.New("runtime.userInput contains an unsupported field")
+		}
+	}
+	policy, valid := leaf["policy"].(string)
+	if !valid || (policy != "legacy" && policy != "timed") {
+		return config, true, errors.New("runtime.userInput.policy must be legacy or timed")
+	}
+	config.Mode = policy
+	if rawTimeout, exists := leaf["defaultTimeoutSeconds"]; exists && rawTimeout != nil {
+		seconds, number := rawTimeout.(float64)
+		if !number || math.IsNaN(seconds) || math.IsInf(seconds, 0) || math.Trunc(seconds) != seconds || seconds < -1 || seconds == 0 || seconds > 2147483 {
+			return config, true, errors.New("runtime.userInput.defaultTimeoutSeconds must be null, -1, or an integer from 1 to 2147483")
+		}
+		value := int(seconds)
+		config.TimeoutSeconds = &value
+	}
+	normalized, err := toolcatalogapp.NormalizeUserInputConfig(config)
+	return normalized, true, err
+}
+
+// Keep the original input sequence byte-for-byte when the opt-in leaf is absent.
+func runtimeUserInputConfigurationDigest(config toolcatalogapp.UserInputConfig, present bool, legacyValues ...any) (string, error) {
+	if present {
+		legacyValues = append(legacyValues, config)
+	}
+	return runtimeStartupConfigurationDigest(legacyValues...)
 }
 
 func loadRuntimeSubagentConfig(document map[string]any, ok bool) (subagentapp.ProfileSettings, error) {

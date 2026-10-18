@@ -11,6 +11,8 @@ export type ActiveStreamSnapshot = {
   liveAssistantContent: string
   lastSeq: number
   startedAt: number | null
+  /** Set only by an admitted turn_started event, never by a draft or local busy state. */
+  runtimeRunning: boolean
   version: number
 }
 
@@ -22,6 +24,8 @@ export type ActiveStreamMetrics = {
   contentLength: number
   lastSeq: number
   startedAt: number | null
+  /** Set only by an admitted turn_started event, never by a draft or local busy state. */
+  runtimeRunning: boolean
   version: number
 }
 
@@ -42,6 +46,7 @@ const EMPTY_SNAPSHOT: ActiveStreamSnapshot = {
   liveAssistantContent: '',
   lastSeq: 0,
   startedAt: null,
+  runtimeRunning: false,
   version: 0
 }
 
@@ -53,6 +58,7 @@ const EMPTY_METRICS: ActiveStreamMetrics = {
   contentLength: 0,
   lastSeq: 0,
   startedAt: null,
+  runtimeRunning: false,
   version: 0
 }
 
@@ -86,6 +92,8 @@ type ActiveStreamState = {
   estimateMetrics: ActiveStreamEstimateMetrics | null
   lastSeq: number
   startedAt: number | null
+  /** Set only by an admitted turn_started event, never by a draft or local busy state. */
+  runtimeRunning: boolean
   version: number
 }
 
@@ -222,6 +230,7 @@ function streamSnapshot(state: ActiveStreamState): ActiveStreamSnapshot {
     liveAssistantContent: assistantDisplayContent(state),
     lastSeq: state.lastSeq,
     startedAt: state.startedAt,
+    runtimeRunning: state.runtimeRunning,
     version: state.version
   }
   return state.snapshot
@@ -238,6 +247,7 @@ function streamMetrics(state: ActiveStreamState): ActiveStreamMetrics {
     contentLength,
     lastSeq: state.lastSeq,
     startedAt: state.startedAt,
+    runtimeRunning: state.runtimeRunning,
     version: state.version
   }
   return state.metrics
@@ -287,6 +297,7 @@ function replaceStream(input: Omit<ActiveStreamSnapshot, 'version' | 'liveAssist
     estimateMetrics: null,
     lastSeq: input.lastSeq,
     startedAt: input.startedAt,
+    runtimeRunning: input.runtimeRunning,
     version
   }
   getThreadStreams(threadId).set(turnId, nextState)
@@ -401,7 +412,8 @@ export function resetActiveStream(threadId: string | null, options: {
     turnId: normalizedTurnId,
     liveAssistant: options.liveAssistant ?? '',
     lastSeq: options.lastSeq ?? 0,
-    startedAt: options.startedAt ?? null
+    startedAt: options.startedAt ?? null,
+    runtimeRunning: false
   })
 }
 
@@ -411,25 +423,28 @@ export function appendActiveStreamDeltas(input: {
   assistant?: string
   lastSeq?: number
   startedAt?: number | null
+  runtimeRunning?: true
 }): void {
   const threadId = normalize(input.threadId)
   const turnId = normalize(input.turnId)
   if (!threadId || !turnId) return
   const existing = streamsByThread.get(threadId)?.get(turnId)
   const lastSeq = Math.max(existing?.lastSeq ?? 0, input.lastSeq ?? 0)
-  if (existing?.lastSeq === lastSeq) return
+  if (existing?.lastSeq === lastSeq && input.runtimeRunning !== true) return
   if (!existing) {
     replaceStream({
       threadId,
       turnId,
       liveAssistant: '',
       lastSeq,
-      startedAt: input.startedAt ?? Date.now()
+      startedAt: input.startedAt ?? null,
+      runtimeRunning: input.runtimeRunning === true
     })
     return
   }
   existing.lastSeq = lastSeq
-  existing.startedAt = existing.startedAt ?? input.startedAt ?? Date.now()
+  existing.startedAt = input.runtimeRunning === true ? input.startedAt ?? null : existing.startedAt ?? input.startedAt ?? null
+  existing.runtimeRunning = existing.runtimeRunning || input.runtimeRunning === true
   existing.version = ++version
   existing.snapshot = null
   existing.metrics = null
@@ -483,6 +498,7 @@ export function migrateActiveStreamTurn(
     estimateMetrics: null,
     lastSeq: Math.max(target.lastSeq, source.lastSeq),
     startedAt: target.startedAt ?? source.startedAt,
+    runtimeRunning: target.runtimeRunning || source.runtimeRunning,
     version
   }
   getThreadStreams(normalizedThreadId).set(normalizedToTurnId, nextState)

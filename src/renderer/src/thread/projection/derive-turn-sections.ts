@@ -15,7 +15,10 @@ export type TurnAssistantBlock = Extract<ChatBlock, { kind: 'assistant' }>
 export type TurnCompactionBlock = Extract<ChatBlock, { kind: 'compaction' }>
 
 export type TurnSections = {
+  goalBlocks?: Extract<ChatBlock, {kind: 'goal'}>[]
   processBlocks: ChatBlock[]
+  /** Actual public reply boundaries retained when the answer moves outside processBlocks. */
+  processReplyBoundaryAfterIds?: readonly string[]
   assistantContentBlocks: TurnAssistantBlock[]
   compactionBlocks: TurnCompactionBlock[]
   generatedFileBlocks: ToolBlock[]
@@ -82,6 +85,8 @@ function hasRewindPlan(block: ToolBlock): boolean {
 function findLastAssistantContentIndex(blocks: ChatBlock[]): number {
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index]
+    // A reply followed by steering stays on its actual side of that input.
+    if (block.kind === 'user') return -1
     if (block.kind === 'assistant' && splitThink(block.text).content.trim()) {
       return index
     }
@@ -97,17 +102,22 @@ export function deriveTurnSections({
   workspaceRoot
 }: DeriveTurnSectionsInput): TurnSections {
   const processBlocks: ChatBlock[] = []
+  const processReplyBoundaryAfterIds: string[] = []
   const assistantContentBlocks: TurnAssistantBlock[] = []
   const compactionBlocks: TurnCompactionBlock[] = []
+  const goalBlocks: Extract<ChatBlock,{kind:'goal'}>[] = []
   const finalAssistantContentIndex = isProcessing ? -1 : findLastAssistantContentIndex(turn.blocks)
 
   for (const [index, block] of turn.blocks.entries()) {
+    if (block.kind === 'goal') { goalBlocks.push(block); continue }
     if (block.kind === 'assistant') {
       const split = splitThink(block.text)
       if (split.content.trim()) {
         const contentBlock: TurnAssistantBlock = { ...block, text: split.content }
         if (index === finalAssistantContentIndex) {
           assistantContentBlocks.push(contentBlock)
+          const previousProcessBlock = processBlocks.at(-1)
+          if (previousProcessBlock) processReplyBoundaryAfterIds.push(previousProcessBlock.id)
         } else {
           processBlocks.push(contentBlock)
         }
@@ -115,10 +125,12 @@ export function deriveTurnSections({
       continue
     }
     if (block.kind === 'compaction') {
-      compactionBlocks.push(block)
+      // Keep the event at its actual side of the authorized final answer.
+      if (finalAssistantContentIndex < 0 || index < finalAssistantContentIndex) processBlocks.push(block)
+      else compactionBlocks.push(block)
       continue
     }
-    if (isProcessBlock(block)) {
+    if (block.kind === 'user' || isProcessBlock(block)) {
       processBlocks.push(block)
     }
   }
@@ -162,5 +174,5 @@ export function deriveTurnSections({
     (block): block is ToolBlock => block.kind === 'tool' && hasGeneratedFiles(block)
   )
 
-  return { processBlocks, assistantContentBlocks, compactionBlocks, generatedFileBlocks, turnFileChanges }
+  return { processBlocks, processReplyBoundaryAfterIds, assistantContentBlocks, compactionBlocks, generatedFileBlocks, turnFileChanges, goalBlocks }
 }

@@ -1,3 +1,6 @@
+import { Readable } from 'node:stream'
+import { canonicalScheduleUTC, preserveScheduleTaskHostDelivery, requestScheduleAdmission, scheduleAdmissionRequestSchemaV1, type StoredScheduledTaskV1, type ScheduleAdmissionRequestV1, type ScheduleRuntimeDeps } from './schedule-runtime-helpers'
+import { buildScheduleTaskUpdate, scheduleTaskEditable } from '../shared/schedule-task-mutation'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultClawSettings,
@@ -103,6 +106,16 @@ function createStore(initial: AppSettingsV1) {
   let current = initial
   return {
     load: vi.fn(async () => current),
+    loadFresh: vi.fn(async () => current),
+    mutateScheduleTasks: vi.fn(async <T>(mutator: (latest: AppSettingsV1) => { tasks: ScheduledTaskV1[]; enabled?: boolean; value: T }) => {
+      const result = mutator(current)
+      const changed = result.tasks !== current.schedule.tasks || (result.enabled !== undefined && result.enabled !== current.schedule.enabled)
+      current = { ...current, schedule: mergeScheduleSettings(current.schedule, {
+        tasks: result.tasks, ...(result.enabled === undefined ? {} : { enabled: result.enabled })
+      }) }
+      current.schedule.tasks = preserveScheduleTaskHostDelivery(current.schedule.tasks, result.tasks)
+      return { settings: current, value: result.value, changed }
+    }),
     patch: vi.fn(async (partial: AppSettingsPatch) => {
       current = {
         ...current,
@@ -689,5 +702,294 @@ describe('ScheduleRuntime', () => {
     ;(runtime as unknown as { syncPowerSaveBlocker: (settings: AppSettingsV1) => void })
       .syncPowerSaveBlocker({ ...scheduled, schedule: { ...scheduled.schedule, keepAwake: false } })
     expect(powerSaveBlocker.stop).toHaveBeenCalledWith(1)
+  })
+})
+
+
+describe('schedule task configuration transactions', () => {
+  it.each(['update', 'delete'] as const)('returns the committed normalized create receipt before a later %s', async operation => {
+    const { runtime, store } = createRuntime(settingsWith())
+    vi.spyOn(runtime, 'sync').mockImplementation(() => {})
+    let committed!: ScheduledTaskV1
+    const privateRuntime = runtime as unknown as { ensureNextRuns: () => Promise<void> }
+    vi.spyOn(privateRuntime, 'ensureNextRuns').mockImplementation(async () => {
+      committed = structuredClone(store.read().schedule.tasks[0])
+      await store.mutateScheduleTasks(latest => ({ tasks: operation === 'delete' ? [] : latest.schedule.tasks.map(task => ({
+        ...task, title: 'Later catalog title', prompt: 'Later catalog prompt', lastThreadId: 'later-run-thread'
+      })), value: undefined }))
+    })
+    const readback = vi.spyOn(runtime, 'listTasks')
+    const receipt = await runtime.createTaskFromInput({ title: '  Created title  ', prompt: 'Created prompt',
+      schedule: { kind: 'interval', everyMinutes: 30 } })
+    expect(receipt).toEqual(committed)
+    expect(receipt).toMatchObject({ title: 'Created title', prompt: 'Created prompt', lastThreadId: '', schedule: { kind: 'interval', everyMinutes: 30 } })
+    expect(receipt.id).toBeTruthy()
+    expect(readback).not.toHaveBeenCalled()
+    expect(store.read().schedule.tasks).toEqual(operation === 'delete' ? [] : [expect.objectContaining({ title: 'Later catalog title' })])
+  })
+  it('merges different editable fields but rejects a second edit of the same field', async () => {
+    const baseline = makeTask()
+    const { runtime, store } = createRuntime(settingsWith([baseline]))
+    vi.spyOn(runtime, 'sync').mockImplementation(() => {})
+    const rename = buildScheduleTaskUpdate(baseline, { ...scheduleTaskEditable(baseline), title: 'Renamed' })
+    const reprompt = buildScheduleTaskUpdate(baseline, { ...scheduleTaskEditable(baseline), prompt: 'Changed prompt' })
+    expect((await runtime.updateTaskConfiguration(rename)).kind).toBe('success')
+    expect((await runtime.updateTaskConfiguration(reprompt)).kind).toBe('success')
+    expect((await runtime.updateTaskConfiguration({ ...rename, patch: { title: 'Stale title' } })).kind).toBe('conflict')
+    expect(store.read().schedule.tasks[0]).toMatchObject({ title: 'Renamed', prompt: 'Changed prompt' })
+  })
+
+  it('preserves latest one-time completion and next run fields during a title-only edit', async () => {
+    const baseline = makeTask()
+    const { runtime, store } = createRuntime(settingsWith([baseline]))
+    vi.spyOn(runtime, 'sync').mockImplementation(() => {})
+    await store.mutateScheduleTasks(latest => ({ tasks: latest.schedule.tasks.map(task => ({
+      ...task, enabled: false, lastStatus: 'success', lastMessage: 'schedule_task_completed',
+      nextRunAt: '2027-01-01T00:00:00.000Z', lastThreadId: 'actual-thread', updatedAt: 'runtime-update'
+    })), value: undefined }))
+    const result = await runtime.updateTaskConfiguration(buildScheduleTaskUpdate(baseline, { ...scheduleTaskEditable(baseline), title: 'After completion' }))
+    expect(result).toMatchObject({ kind: 'success', task: { title: 'After completion', enabled: false,
+      lastStatus: 'success', lastThreadId: 'actual-thread', nextRunAt: '2027-01-01T00:00:00.000Z' } })
+  })
+
+  it('does not resurrect a deleted task through late background updates or next-run maintenance', async () => {
+    const task = settingsWith([makeTask()]).schedule.tasks[0]
+    const { runtime, store } = createRuntime(settingsWith([task]))
+    vi.spyOn(runtime, 'sync').mockImplementation(() => {})
+    await runtime.deleteTask({ taskId: task.id, expected: scheduleTaskEditable(task) })
+    const privateRuntime = runtime as unknown as {
+      updateTask: (id: string, updater: (task: ScheduledTaskV1) => ScheduledTaskV1) => Promise<AppSettingsV1>
+      ensureNextRuns: () => Promise<void>
+    }
+    await privateRuntime.updateTask(task.id, current => ({ ...current, lastStatus: 'success' }))
+    await privateRuntime.ensureNextRuns()
+    expect(store.read().schedule.tasks).toEqual([])
+    expect((await runtime.updateTaskConfiguration(buildScheduleTaskUpdate(task, { ...scheduleTaskEditable(task), title: 'Late' }))).kind).toBe('not_found')
+  })
+})
+
+
+it('commits delayed text detection against the latest task catalog', async () => {
+  const existing = makeTask()
+  const { runtime, store } = createRuntime(settingsWith([existing]))
+  vi.spyOn(runtime, 'sync').mockImplementation(() => {})
+  let finish!: (value: unknown) => void
+  let entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const detection = new Promise<unknown>(resolve => { finish = resolve })
+  vi.spyOn(runtime as unknown as { runPrompt: (settings: AppSettingsV1, options: Record<string, unknown>) => Promise<unknown> }, 'runPrompt')
+    .mockImplementation(async () => { entered(); return detection })
+  const creation = runtime.createScheduledTaskFromText('Remind me tomorrow to ship the review.')
+  await started
+  await runtime.updateTaskConfiguration(buildScheduleTaskUpdate(existing, { ...scheduleTaskEditable(existing), title: 'Edited while detecting' }))
+  finish({ ok: true, text: JSON.stringify({ shouldCreateTask: true, scheduleAt: '2099-06-03T09:00:00.000Z', reminderBody: 'ship the review', taskName: 'Ship review' }) })
+  expect(await creation).toMatchObject({ kind: 'created' })
+  expect(store.read().schedule.tasks).toHaveLength(2)
+  expect(store.read().schedule.tasks.find(task => task.id === existing.id)?.title).toBe('Edited while detecting')
+})
+
+it.each([false, true])('does not resurrect a deleted task after a late monitor result (failure=%s)', async failure => {
+  const task = settingsWith([makeTask()]).schedule.tasks[0]
+  const { runtime, store } = createRuntime(settingsWith([task]))
+  vi.spyOn(runtime, 'sync').mockImplementation(() => {})
+  let complete!: () => void
+  let reject!: (error: Error) => void
+  const wait = new Promise<void>((resolve, fail) => { complete = resolve; reject = fail })
+  const privateRuntime = runtime as unknown as {
+    waitForAssistantText: (...args: unknown[]) => Promise<void>
+    monitorTaskTurn: (taskId: string, threadId: string, turnId: string) => Promise<void>
+  }
+  vi.spyOn(privateRuntime, 'waitForAssistantText').mockReturnValue(wait)
+  const pending = privateRuntime.monitorTaskTurn(task.id, 'actual-thread', 'actual-turn')
+  await Promise.resolve()
+  await runtime.deleteTask({ taskId: task.id, expected: scheduleTaskEditable(task) })
+  if (failure) reject(new Error('Synthetic monitor failure')); else complete()
+  await pending
+  expect(store.read().schedule.tasks).toEqual([])
+})
+
+describe('Schedule actual saved delivery pages', () => {
+  it('paginates saved ACK identities in Host append order and does not infer legacy origin/history from lastThreadId', async () => {
+    const origin = { threadId: 'original-thread', turnId: 'original-turn', toolCallId: 'call_host_' + 'a'.repeat(64), grantId: 'historical-grant' }
+    const records = Array.from({ length: 23 }, (_, index) => ({ attemptId: `attempt-${index}`, scheduledAt: '2026-10-11T10:00:00.000Z', deliveredAt: '2026-10-11T10:00:01.000Z', messageId: `message-${index}`, prompt: `SAVED_${index}` }))
+    const settings = settingsWith([makeTask({ id: 'native', lastThreadId: 'last-run' }), makeTask({ id: 'legacy', lastThreadId: 'legacy-last-run' })])
+    Object.assign(settings.schedule.tasks[0], { hostDelivery: { schemaVersion: 1, origin, records } })
+    const { runtime } = createRuntime(settings)
+    const first = await runtime.readTaskHistory({ taskId: 'native', limit: 20 })
+    expect(first.kind).toBe('success')
+    if (first.kind !== 'success') throw new Error('Expected page')
+    expect(first.records.map(record => record.attemptId)).toEqual(records.slice(3).reverse().map(record => record.attemptId))
+    records.push({ ...records[0], attemptId: 'new-ack', messageId: 'new-message' })
+    const older = await runtime.readTaskHistory({ taskId: 'native', limit: 20, before: first.nextBefore })
+    expect(older).toMatchObject({ kind: 'success', records: [...records.slice(0, 3)].reverse() })
+    expect(await runtime.readTaskHistory({ taskId: 'legacy', limit: 20 })).toEqual({ kind: 'success', records: [], deliveryKind: 'legacy-headless' })
+    expect(await runtime.readTaskHistory({ taskId: 'native', limit: 20, before: 'foreign-task-cursor' })).toMatchObject({ kind: 'conflict' })
+    expect((await runtime.listTasks())[0]).toMatchObject({ originalThreadId: 'original-thread', lastThreadId: 'last-run' })
+    expect(JSON.stringify(await runtime.listTasks())).not.toContain('historical-grant')
+  })
+})
+
+
+describe('Schedule origin admission and frozen recovery', () => {
+  const origin = { threadId: 'original-thread', turnId: 'original-turn', toolCallId: 'call_host_' + 'a'.repeat(64), grantId: 'historical-grant' }
+  const receiptFor = (request: ScheduleAdmissionRequestV1, delivery: 'start' | 'steer' = 'start') => ({
+    taskId: request.taskId, attemptId: request.attemptId, scheduledAt: request.scheduledAt,
+    threadId: origin.threadId, turnId: 'actual-turn', messageId: 'actual-message',
+    delivery, deliveredAt: '2026-10-12T11:00:01.123456789Z'
+  })
+  const native = () => Object.assign(makeTask({ id: 'native', prompt: '  FROZEN_PROMPT 😀  ', model: 'selected-model', providerId: 'selected-provider' }),
+    { hostDelivery: { schemaVersion: 1 as const, origin, records: [] } })
+  const setup = (localDisplayRequest: NonNullable<ScheduleRuntimeDeps['localDisplayRequest']>, initial?: AppSettingsV1) => {
+    const settings = initial ?? settingsWith([], { enabled: false })
+    if (!initial) settings.schedule.tasks = [native()]
+    const store = createStore(settings), runtimeRequest = vi.fn(), runtime = new ScheduleRuntime({ store: store as never,
+      runtimeRequest, localDisplayRequest, logError: vi.fn() })
+    vi.spyOn(runtime, 'sync').mockImplementation(() => {})
+    return { runtime, store, runtimeRequest }
+  }
+  it.each(['start', 'steer'] as const)('persists before submit and records only a real typed %s ACK, without creating or patching a thread', async delivery => {
+    let read!: () => AppSettingsV1
+    const local = vi.fn(async (_settings, path: string, body: string) => {
+      const request = JSON.parse(body) as ScheduleAdmissionRequestV1
+      expect(path).toBe('/v1/local-display/schedule-admission')
+      expect((read().schedule.tasks[0] as StoredScheduledTaskV1).hostDelivery?.pending).toEqual(request)
+      return { ok: true, status: 200, body: JSON.stringify({ schemaVersion: 1, status: 'accepted', receipt: receiptFor(request, delivery) }) }
+    })
+    const { runtime, store, runtimeRequest } = setup(local); read = store.read
+    const preferences = structuredClone(store.read().runtime)
+    expect(await runtime.runTask('native')).toMatchObject({ ok: true, threadId: 'original-thread', turnId: 'actual-turn' })
+    expect(runtimeRequest).not.toHaveBeenCalled()
+    const request = JSON.parse(local.mock.calls[0][2])
+    expect(request).toMatchObject({ kind: 'submit', origin, prompt: '  FROZEN_PROMPT 😀  ', execution: { model: 'selected-model', providerId: 'selected-provider', mode: 'agent' } })
+    expect(request.scheduledAt).not.toMatch(/\.000Z$/)
+    const saved = store.read().schedule.tasks[0] as StoredScheduledTaskV1
+    expect(saved.hostDelivery?.pending).toBeUndefined()
+    expect(saved.hostDelivery?.records).toEqual([{ attemptId: request.attemptId, scheduledAt: request.scheduledAt,
+      deliveredAt: '2026-10-12T11:00:01.123456789Z', messageId: 'actual-message', prompt: request.prompt }])
+    expect(saved.lastMessage).toBe('schedule_task_accepted')
+    expect(store.read().runtime).toEqual(preferences)
+  })
+  it('queries the same persisted identity after restart and edits, retaining immutable prompt and selection after an unknown submit', async () => {
+    const first = vi.fn(async () => { throw new Error('Synthetic lost ACK') })
+    const { runtime, store } = setup(first)
+    expect(await runtime.runTask('native')).toMatchObject({ ok: false })
+    const frozen = (store.read().schedule.tasks[0] as StoredScheduledTaskV1).hostDelivery!.pending!
+    expect((await runtime.readTaskHistory({ taskId: 'native', limit: 20 }))).toMatchObject({ records: [] })
+    const before = store.read().schedule.tasks[0]
+    await runtime.updateTaskConfiguration(buildScheduleTaskUpdate(before, { ...scheduleTaskEditable(before), prompt: 'CURRENT_PROMPT', enabled: false, model: 'current-model' }))
+    const query = vi.fn(async (_settings, _path, body: string) => ({ ok: true, status: 200,
+      body: JSON.stringify({ schemaVersion: 1, status: 'accepted', receipt: receiptFor(JSON.parse(body)) }) }))
+    const restarted = new ScheduleRuntime({ store: store as never, runtimeRequest: vi.fn(), localDisplayRequest: query, logError: vi.fn() })
+    expect(await restarted.runTask('native')).toMatchObject({ ok: true })
+    expect(JSON.parse(query.mock.calls[0][2])).toEqual({ ...frozen, kind: 'query' })
+    expect((store.read().schedule.tasks[0] as StoredScheduledTaskV1).hostDelivery?.records[0].prompt).toBe(frozen.prompt)
+    expect(store.read().schedule.tasks[0].prompt).toBe('CURRENT_PROMPT')
+    expect(store.read().schedule.tasks[0].enabled).toBe(false)
+  })
+  it('retains pending on 503 and query not_found, and never submits a fresh attempt automatically', async () => {
+    const local = vi.fn().mockResolvedValueOnce({ ok: false, status: 503, body: JSON.stringify({ schemaVersion: 1, status: 'unknown', code: 'schedule_admission_unavailable' }) })
+      .mockResolvedValue({ ok: true, status: 200, body: JSON.stringify({ schemaVersion: 1, status: 'not_found' }) })
+    const { runtime, store } = setup(local)
+    await runtime.runTask('native'); await runtime.runTask('native'); await runtime.runTask('native')
+    const requests = local.mock.calls.map(call => JSON.parse(call[2]))
+    expect(requests.map(item => item.kind)).toEqual(['submit', 'query', 'query'])
+    expect(new Set(requests.map(item => item.attemptId)).size).toBe(1)
+    expect((store.read().schedule.tasks[0] as StoredScheduledTaskV1).hostDelivery?.records).toEqual([])
+    expect(store.read().schedule.tasks[0].lastRunAt).toBe('')
+  })
+  it.each([['rejected', 409, 'schedule_admission_unavailable'], ['conflict', 409, 'schedule_admission_conflict'], ['invalid', 400, undefined]] as const)('honors typed non-2xx %s without creating a History entry', async (status, http, code) => {
+    const local = vi.fn(async () => ({ ok: false, status: http, body: JSON.stringify({ schemaVersion: 1, status, ...(code ? { code } : {}) }) }))
+    const { runtime, store } = setup(local)
+    expect(await runtime.runTask('native')).toMatchObject({ ok: false })
+    const saved = store.read().schedule.tasks[0] as StoredScheduledTaskV1
+    expect(saved.hostDelivery?.pending).toBeUndefined(); expect(saved.hostDelivery?.records).toEqual([])
+    expect(saved.lastStatus).toBe('error'); expect(saved.lastRunAt).toBe('')
+  })
+  it('does not resurrect a deleted task on late acceptance', async () => {
+    let respond!: (value: { ok: boolean; status: number; body: string }) => void
+    const local = vi.fn((_settings: AppSettingsV1, _path: string, _body: string) => new Promise<{ ok: boolean; status: number; body: string }>(resolve => { respond = resolve }))
+    const { runtime, store } = setup(local), pending = runtime.runTask('native')
+    await vi.waitFor(() => expect(local).toHaveBeenCalledTimes(1))
+    const request = JSON.parse(local.mock.calls[0][2])
+    await runtime.deleteTask({ taskId: 'native', expected: scheduleTaskEditable(store.read().schedule.tasks[0]) })
+    respond({ ok: true, status: 200, body: JSON.stringify({ schemaVersion: 1, status: 'accepted', receipt: receiptFor(request) }) })
+    expect(await pending).toMatchObject({ ok: false }); expect(store.read().schedule.tasks).toEqual([])
+  })
+  it('treats mismatched or malformed receipts as unknown and preserves the frozen attempt', async () => {
+    const local = vi.fn(async (_settings, _path, body: string) => ({ ok: true, status: 200,
+      body: JSON.stringify({ schemaVersion: 1, status: 'accepted', receipt: { ...receiptFor(JSON.parse(body)), threadId: 'foreign-thread' } }) }))
+    const { runtime, store } = setup(local)
+    expect(await runtime.runTask('native')).toMatchObject({ ok: false })
+    expect((store.read().schedule.tasks[0] as StoredScheduledTaskV1).hostDelivery?.pending).toBeDefined()
+    expect((store.read().schedule.tasks[0] as StoredScheduledTaskV1).hostDelivery?.records).toEqual([])
+  })
+  it('recovers a pending ACK from the existing timer even after scheduling is disabled, without a new submit', async () => {
+    const local = vi.fn(async (_settings: AppSettingsV1, _path: string, body: string) => {
+      const request = JSON.parse(body) as ScheduleAdmissionRequestV1
+      return request.kind === 'submit' ? { ok: false, status: 503, body: JSON.stringify({ schemaVersion: 1, status: 'unknown', code: 'schedule_admission_unavailable' }) }
+        : { ok: true, status: 200, body: JSON.stringify({ schemaVersion: 1, status: 'accepted', receipt: receiptFor(request) }) }
+    })
+    const { runtime, store } = setup(local)
+    await runtime.runTask('native')
+    await (runtime as unknown as { tick: () => Promise<void> }).tick()
+    await vi.waitFor(() => expect((store.read().schedule.tasks[0] as StoredScheduledTaskV1).hostDelivery?.records).toHaveLength(1))
+    const requests = local.mock.calls.map(call => JSON.parse(call[2]))
+    expect(requests.map(item => item.kind)).toEqual(['submit', 'query'])
+    expect(requests[1]).toEqual({ ...requests[0], kind: 'query' })
+    expect(store.read().schedule.enabled).toBe(false)
+  })
+  it('freezes the real due instant for an automatic delivery and advances only after acceptance', async () => {
+    const settings = settingsWith([], { enabled: true })
+    settings.schedule.tasks = [{ ...native(), nextRunAt: '2026-10-11T10:00:00.000Z',
+      schedule: { kind: 'interval', everyMinutes: 60, timeOfDay: '09:00', atTime: '' } }]
+    const local = vi.fn(async (_settings: AppSettingsV1, _path: string, body: string) => ({ ok: true, status: 200,
+      body: JSON.stringify({ schemaVersion: 1, status: 'accepted', receipt: receiptFor(JSON.parse(body)) }) }))
+    const { runtime, store } = setup(local, settings)
+    expect(await (runtime as unknown as { runTaskInternal: (task: ScheduledTaskV1, scheduled: boolean) => Promise<unknown> }).runTaskInternal(settings.schedule.tasks[0], true)).toMatchObject({ ok: true })
+    expect(JSON.parse(local.mock.calls[0][2]).scheduledAt).toBe('2026-10-11T10:00:00Z')
+    expect(Date.parse(store.read().schedule.tasks[0].nextRunAt)).toBeGreaterThan(Date.now())
+  })
+  it('validates exact UTC and UTF-8 request bounds before private transport', async () => {
+    const request = { schemaVersion: 1, kind: 'submit', taskId: 'native', origin, attemptId: '00000000-0000-4000-8000-000000000000', scheduledAt: '2026-10-12T10:00:00Z', prompt: '😀', execution: {} } as const
+    expect(canonicalScheduleUTC('2026-10-12T10:00:00.000Z')).toBe(request.scheduledAt)
+    expect(canonicalScheduleUTC('2026-10-12T10:00:00.123400000Z')).toBe('2026-10-12T10:00:00.1234Z')
+    expect(scheduleAdmissionRequestSchemaV1.safeParse(request).success).toBe(true)
+    for (const patch of [{ origin: { ...origin, toolCallId: 'invented' } }, { prompt: '\ud800' }, { scheduledAt: '2026-10-12T10:00:00.000Z' }, { execution: { model: '字'.repeat(86) } }, { schemaVersion: 2 }]) {
+      expect(scheduleAdmissionRequestSchemaV1.safeParse({ ...request, ...patch }).success).toBe(false)
+    }
+    const localDisplayRequest = vi.fn(async () => ({ ok: false, status: 409, body: JSON.stringify({ schemaVersion: 1, status: 'conflict', code: 'schedule_admission_conflict' }) }))
+    expect(await requestScheduleAdmission({ localDisplayRequest } as never, settingsWith(), request)).toMatchObject({ status: 'conflict' })
+    expect(localDisplayRequest).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+describe('Main authenticated native Schedule creation', () => {
+  const origin = { threadId: 'original-thread', turnId: 'original-turn', toolCallId: 'call_host_' + 'a'.repeat(64), grantId: 'historical-grant' }
+  const input = { title: 'Native', prompt: 'Create prompt', schedule: { kind: 'manual' } }
+  async function request(secret: string, headers: Record<string, string>, body: unknown) {
+    const { runtime, store } = createRuntime(settingsWith([], { enabled: false, internal: { port: 8787, secret } }))
+    vi.spyOn(runtime, 'sync').mockImplementation(() => {})
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { method: 'POST', url: '/schedule/internal/create', headers })
+    let status = 0, response = ''
+    const res = { writeHead: (value: number) => { status = value }, end: (value: string) => { response = value } }
+    await (runtime as unknown as { handleInternalRequest: (req: unknown, res: unknown) => Promise<void> }).handleInternalRequest(req, res)
+    return { status, response: JSON.parse(response), store }
+  }
+  it('atomically persists the four exact Host identities under current helper Bearer and keeps receipt origin-free', async () => {
+    const result = await request('helper-secret', { authorization: 'Bearer helper-secret', 'x-analytix-schedule-origin': 'typed-v1' }, { input, origin })
+    expect(result.status).toBe(200)
+    expect((result.store.read().schedule.tasks[0] as StoredScheduledTaskV1).hostDelivery).toEqual({ schemaVersion: 1, origin, records: [] })
+    expect(JSON.stringify(result.response)).not.toContain('historical-grant')
+  })
+  it.each([
+    ['', { 'x-analytix-schedule-origin': 'typed-v1' }, { input, origin }, 401],
+    ['helper-secret', { authorization: 'Bearer other', 'x-analytix-schedule-origin': 'typed-v1' }, { input, origin }, 401],
+    ['helper-secret', { authorization: 'Bearer helper-secret' }, { input, origin }, 400],
+    ['helper-secret', { authorization: 'Bearer helper-secret', 'x-analytix-schedule-origin': 'typed-v1' }, { input, origin: null }, 400],
+    ['helper-secret', { authorization: 'Bearer helper-secret' }, { input: { ...input, origin } }, 400]
+  ])('rejects unauthenticated or mixed origin input before a task write', async (secret, headers, body, expected) => {
+    const result = await request(secret as string, headers as Record<string, string>, body)
+    expect(result.status).toBe(expected); expect(result.store.read().schedule.tasks).toEqual([])
   })
 })

@@ -16,14 +16,22 @@ import (
 	"testing"
 	"time"
 
+	cachetelemetrystore "analytix.local/runtime-go/internal/adapters/outbound/cachetelemetrystore"
 	casestore "analytix.local/runtime-go/internal/adapters/outbound/casethreadauthority"
+	"analytix.local/runtime-go/internal/adapters/outbound/evidenceregistry"
+	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	finaladapter "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	pendingstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
+	turnterminalstore "analytix.local/runtime-go/internal/adapters/outbound/turnterminalstore"
+	cachetelemetryapp "analytix.local/runtime-go/internal/app/cachetelemetry"
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
 	contextepochapp "analytix.local/runtime-go/internal/app/contextepoch"
+	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
+	gateprojection "analytix.local/runtime-go/internal/app/gateprojection"
 	pendingapp "analytix.local/runtime-go/internal/app/pendingwork"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	turnapp "analytix.local/runtime-go/internal/app/turn"
+	turnterminalapp "analytix.local/runtime-go/internal/app/turnterminal"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	authorityport "analytix.local/runtime-go/internal/ports/finalauthority"
@@ -106,12 +114,34 @@ func newRuntimeActiveHistoryFixtureV1(t *testing.T, derivation string, cutoff bo
 	if err := fixture.durable.BindPrimaryThreadReaderV1(fixture.primary); err != nil {
 		t.Fatal(err)
 	}
-	fixture.projector = threadapp.NewTrustedPublicProjectorWithPrimaryCAS(nil, fixture.registry, nil, fixture.primary)
+	var projection *gateprojection.TrustedFinalProjectionIndex
+	var currentAuthority threadapp.CurrentCaseThreadAuthorityValidator
+	if cutoff {
+		projection = gateprojection.NewTrustedFinalProjectionIndexWithReadback(fixture.authority,
+			startupFinalEventIOForTest(fixture.durable, fixture.primary).Readback)
+		currentAuthority = threadapp.NewCurrentCaseThreadAuthorityValidator(fixture.registry, filestore.CaseBindingReader{}, nil)
+	}
+	fixture.projector = threadapp.NewTrustedPublicProjectorWithPrimaryCAS(projection, fixture.registry, currentAuthority, fixture.primary)
 	fixture.durable.SetActiveHistorySourceAdmissionV1(func(source map[string]any) error {
 		_, err := fixture.projector.ProjectThread(source)
 		return err
 	})
 	workspace := workspacetest.New(t)
+	var binding domainsecurity.CaseBinding
+	if cutoff {
+		reader := filestore.CaseBindingReader{}
+		observation, identity, err := reader.ObserveMissingImportWorkspace(workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reader.CreateForMainSelectedImport(ctx, workspace, observation, identity, "case_active_cutoff", time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		binding, err = reader.ReadCurrentBinding(workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	created, err := fixture.durable.CreateThread(map[string]any{"title": "active history source"}, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -120,9 +150,19 @@ func newRuntimeActiveHistoryFixtureV1(t *testing.T, derivation string, cutoff bo
 	for index := 0; index < 2; index++ {
 		at := time.Date(2026, 9, 9, 1, 0, index, 0, time.UTC)
 		turnID := fmt.Sprintf("turn_active_source_%d", index)
-		frozen, err := securitytest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		contextInput := domainsecurity.TurnSecurityContextInput{
 			ThreadID: sourceID, TurnID: turnID, WorkspaceRealPath: workspace, ContextEpoch: uint64(index + 1), IssuedAt: at,
-		})
+		}
+		if cutoff {
+			// The cutoff terminal remains in the current CASE snapshot; this
+			// fixture does not grant historical fact authority across epochs.
+			contextInput.ContextEpoch = 1
+			contextInput.CaseID = binding.CaseID
+			contextInput.CaseBindingHash = binding.CaseBindingHash
+			contextInput.DatasetSnapshotID = securitytest.DatasetSnapshotID(sourceID)
+			contextInput.SourceManifestHash = domainsecurity.SHA256Hex([]byte("active-history-cutoff:" + sourceID))
+		}
+		frozen, err := securitytest.CaseExecutionContextV2(contextInput)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,14 +183,73 @@ func newRuntimeActiveHistoryFixtureV1(t *testing.T, derivation string, cutoff bo
 				"text": fmt.Sprintf("PRIVATE_INHERITED_CANARY_%d", index),
 			}},
 		}
+		var startEvents []map[string]any
+		if cutoff && index == 0 {
+			start := turnapp.BuildStartRecord(turnapp.StartRecordInput{
+				ThreadID: sourceID, TurnID: turnID, UserItemID: fmt.Sprintf("user_active_%d", index),
+				Prompt: fmt.Sprintf("PRIVATE_INHERITED_CANARY_%d", index), CreatedAt: stamp,
+			})
+			turn = start.Turn
+			turn["securityContext"] = frozen
+			turn["contextEpochSnapshot"] = contextepochapp.PublicSnapshot(state.AcceptedSnapshot)
+			startEvents = []map[string]any{start.TurnStartedEvent, start.UserItemCreatedEvent}
+		}
 		if err := fixture.durable.AppendTurnToThread(sourceID, turn, "synthetic-provider", map[string]any{
 			"securityState": frozen, "contextEpochState": contextepochapp.PublicState(state),
 		}); err != nil {
 			t.Fatal(err)
 		}
+		if len(startEvents) > 0 {
+			if _, _, err := fixture.durable.RecordEventsAtomic(startEvents); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := casethreadapp.CommitRequired(ctx, fixture.registry, frozen, state, at); err != nil {
 			t.Fatal(err)
 		}
+		if cutoff && index == 0 {
+			registry, err := evidenceregistry.NewStore(filepath.Join(privateRoot, "evidence-registry"), fixture.authority)
+			if err != nil {
+				t.Fatal(err)
+			}
+			telemetryStore, err := cachetelemetrystore.NewStore(filepath.Join(privateRoot, "provider-cache-telemetry"), access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			telemetry, err := cachetelemetryapp.NewDurableService(fixture.authority, telemetryStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			terminals, err := turnterminalstore.NewStore(filepath.Join(privateRoot, "turn-terminal-authority"), access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinator, err := turnterminalapp.NewCoordinator(fixture.authority, finals, terminals, telemetry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			finalizer := evidenceapp.NewCasePublicationFinalizerWithPublicationSnapshots(registry, registry, fixture.authority, finals,
+				startupFinalEventIOForTest(fixture.durable, fixture.primary), coordinator, nil, projection)
+			result, err := finalizer.PersistBoundary(ctx, evidenceapp.PersistCaseBoundaryInput{
+				Store: fixture.durable, Context: frozen, TerminalReason: evidenceapp.TerminalProviderFailure,
+				ThreadID: sourceID, TurnID: turnID, AcceptedAt: at.Add(time.Minute),
+			})
+			if err != nil || !result.Persistence.Changed {
+				t.Fatalf("real cutoff terminal boundary did not commit: %v", err)
+			}
+		}
+	}
+	if cutoff {
+		// Produce the signed inert CASE prefix through the real whole-fork
+		// path before asking the bounded producer to select its first turn.
+		inherited, err := fixture.durable.ForkThread(sourceID, map[string]any{})
+		if err != nil {
+			t.Fatalf("real inherited cutoff source producer: %v", err)
+		}
+		if inherited["activeInheritedHistoryReceipt"] == nil {
+			t.Fatal("real cutoff source lacks signed inherited authority")
+		}
+		sourceID = inherited["id"].(string)
 	}
 	source, err := fixture.primary.ReadPrimaryThreadSnapshotV1(ctx, sourceID)
 	if err != nil {
@@ -166,10 +265,14 @@ func newRuntimeActiveHistoryFixtureV1(t *testing.T, derivation string, cutoff bo
 		targetID = result["thread_id"].(string)
 	} else {
 		request := map[string]any{}
+		var result map[string]any
+		var err error
 		if cutoff {
 			request["turnId"] = "turn_active_source_0"
+			result, err = fixture.durable.ForkThreadWithProjectionV1(sourceID, request, fixture.projector)
+		} else {
+			result, err = fixture.durable.ForkThread(sourceID, request)
 		}
-		result, err := fixture.durable.ForkThread(sourceID, request)
 		if err != nil {
 			t.Fatalf("real fork producer: %v", err)
 		}

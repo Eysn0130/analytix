@@ -1,0 +1,42 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+.row, .menu, .backing {
+  --dsw-radius-md: 12px; --dsw-radius-lg: 16px;
+  --dsw-alias-label-primary: rgb(15, 17, 21);
+  --dsw-alias-label-tertiary: rgb(129, 133, 140);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-bg-module-platform: rgb(245, 246, 247);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-menu-surface-fill: rgba(248, 249, 250, 0.58);
+  --dsw-alias-bg-base: rgb(255, 255, 255);
+  --dsw-elevation-stroke-color: rgba(0, 0, 0, 0.04);
+  --dsw-elevation-prominent: 0 0 0 0.5px var(--dsw-elevation-stroke-color), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05);
+}
+:global([data-theme='dark']) .row, :global([data-theme='dark']) .menu, :global([data-theme='dark']) .backing {
+  --dsw-alias-label-primary: rgb(249, 250, 251);
+  --dsw-alias-label-tertiary: rgb(173, 178, 184);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-bg-module-platform: rgb(53, 54, 56);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-menu-surface-fill: rgba(67, 69, 74, 0.45);
+  --dsw-alias-bg-base: rgb(21, 21, 23);
+  --dsw-elevation-stroke-color: rgba(255, 255, 255, 0.16);
+}
+.row { display: flex; align-items: center; gap: 8px; padding: 16px 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
+.rowText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-right: 48px; }
+.title { font-size: 14px; font-weight: 400; line-height: 22px; color: var(--dsw-alias-label-primary); }
+.desc { font-size: 12px; font-weight: 400; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.root { position: relative; display: inline-flex; }
+.selector { display: inline-flex; align-items: center; gap: 12px; height: 36px; padding: 0 14px; border: none; border-radius: var(--dsw-radius-md); background: var(--dsw-alias-bg-module-platform); font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); cursor: pointer; }
+.selector:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.selector[data-dsh-automatic-focus]:focus { outline: none; }
+.chevron { flex: none; }
+.menu { position: fixed; z-index: 1100; box-sizing: border-box; padding: 4px; display: flex; flex-direction: column; min-width: 144px; max-width: 360px; max-height: calc(100vh - 12px - max(12px, var(--dsh-frame-overlay-top, 12px))); border: 0; border-radius: var(--dsw-radius-lg); box-shadow: var(--dsw-elevation-prominent); anchor-name: var(--dsh-menu-anchor); isolation: isolate; }
+.material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--dsw-menu-surface-fill); backdrop-filter: blur(40px) saturate(150%); pointer-events: none; }
+.viewport { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 34px; padding: 6px 8px; border: none; border-radius: var(--dsw-radius-md); background: transparent; cursor: pointer; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); text-align: left; }
+.item:hover, .item:focus-visible { background: var(--dsw-alias-interactive-bg-hover); outline: none; }
+.itemText { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.check { width: 14px; height: 14px; flex: none; }
+.backing { display: none; border-radius: var(--dsw-radius-lg); }
+:global(html[data-platform='darwin']) .backing { display: block; position: fixed; position-anchor: var(--dsh-menu-anchor); top: anchor(top); left: anchor(left); width: anchor-size(width, 0px); height: anchor-size(height, 0px); z-index: -1; background: var(--dsw-alias-bg-base); pointer-events: none; }

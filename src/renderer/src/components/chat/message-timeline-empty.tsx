@@ -1,9 +1,12 @@
+/* Selected hero/phase presentation adapted from DeepSeek Harness
+ * 5badb15009ae1756c3afe0ae0cef1faafc290ccc; Copyright (c) 2026 DeepSeek.
+ * MIT; see THIRD_PARTY_NOTICES.md. Analytix retains its runtime/workspace/Claw/Fork owners. */
 import { Fragment, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { GitFork, RefreshCw, Settings } from '../../design/AnalytixUiIcons'
 import type { ClawImChannelV1 } from '@shared/app-settings'
 import { AnalytixBrandMark } from '../brand/AnalytixBrandMark'
-import { InitialSessionUsageHeatmap } from './InitialSessionUsageHeatmap'
+import type { ConversationPresentationPhase } from './ConversationWidthControls'
 import { AnalytixHeroStage } from './AnalytixHeroStage'
 
 /**
@@ -178,35 +181,37 @@ function RuntimeWakeHero({
 }
 
 export function MessageTimelineEmptyHero({
+  phase,
   route,
   ready,
   hasWorkspace,
+  hasComposerWorkspacePicker = false,
   runtimeError,
   activeClawChannel,
   onPickWorkspace,
   onRetry,
   onOpenSettings,
-  onSelectSuggestion,
-  focusModeEnabled = false
+  onSelectSuggestion
 }: {
+  phase?: ConversationPresentationPhase
   route: 'chat' | 'claw'
   ready: boolean
   hasWorkspace: boolean
+  hasComposerWorkspacePicker?: boolean
   runtimeError?: string | null
   activeClawChannel: ClawImChannelV1 | null
   onPickWorkspace: () => void
   onRetry: () => void
   onOpenSettings: () => void
   onSelectSuggestion?: (prompt: string) => void
-  focusModeEnabled?: boolean
-}): ReactElement {
+}): ReactElement | null {
   const { t } = useTranslation('common')
 
   if (!ready) {
     return <RuntimeWakeHero runtimeError={runtimeError} onRetry={onRetry} onOpenSettings={onOpenSettings} />
   }
 
-  if (!hasWorkspace) {
+  if (!hasWorkspace && route === 'claw') {
     return (
       <div className="ds-home-transition ds-no-drag flex flex-col items-center justify-center px-6 py-24 text-center">
         <AnalytixBrandMark className="mb-4 h-16 w-16" />
@@ -236,7 +241,29 @@ export function MessageTimelineEmptyHero({
     )
   }
 
-  return <InitialSessionUsageHeatmap hideHero={focusModeEnabled} />
+  if (phase === 'active' && hasWorkspace) return null
+
+  if (phase === 'settling' && hasWorkspace) {
+    return <div className="dsh-conversation-settling ds-no-drag" role="status" aria-live="polite">{t('loading')}</div>
+  }
+
+  return (
+    <section data-analytix-conversation-hero className="dsh-conversation-hero ds-no-drag" aria-label={t('conversationHeroTitle')}>
+      <div className="dsh-conversation-hero-headline">
+        <AnalytixBrandMark className="dsh-conversation-hero-mark" />
+        <h1>
+          <span>{t('conversationHeroTitle')}</span>
+          <span className="dsh-conversation-preview">{t('conversationHeroPreview')}</span>
+        </h1>
+      </div>
+      {hasWorkspace || hasComposerWorkspacePicker ? null : <>
+        <p>{t('emptyHeroSubNoWorkspace')}</p>
+        <button type="button" className="ds-chip rounded-full px-5 py-2.5 text-[13px] font-medium text-ds-ink" onClick={onPickWorkspace}>
+          {t('selectWorkspace')}
+        </button>
+      </>}
+    </section>
+  )
 }
 
 export function ThreadForkBanner({ parentTitle }: { parentTitle: string }): ReactElement {

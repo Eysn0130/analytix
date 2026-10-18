@@ -27,13 +27,17 @@ import {
   acceptedFinalUsageSnapshotsEqual
 } from '../agent/accepted-final-projection-receipt'
 import { getProvider } from '../agent/registry'
-import { projectToolEventForRenderer } from '../agent/analytix-mapper'
+import { restoreThreadDisplayHistory } from '../agent/analytix-runtime'
+import { mergeGoalHistoryBlocks, normalizeProviderOutputCapForRenderer, normalizeProviderRetryLifecycleForRenderer, providerRetryStatusItemId, projectToolEventForRenderer, mergeTurnUsageById, reconcileTurnUsageById, turnUsageEntryFromBatch } from '../agent/analytix-mapper'
+import { TurnEndReasonSchema } from '../../../../packages/runtime/src/contracts/turns'
+import { countedGoalRefV1 } from '../../../../packages/runtime/src/contracts/threads'
 import { generatedArtifactMetadataSchema } from '../../../../packages/runtime/src/contracts/generated-artifact'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
 import { describeRuntimeError, formatRuntimeError, getRuntimeErrorCode } from '../lib/format-runtime-error'
 import { invalidateThreadDetailCache } from '../lib/thread-detail-cache'
 import {
+  isPublicProjectionRevoked,
   markPublicProjectionRevoked,
   threadReferencesRevokedProjection
 } from '../lib/public-projection-revocation'
@@ -41,16 +45,21 @@ import { isClawWorkspacePath, isInternalTemporaryWorkspace, normalizeWorkspaceRo
 import type { ClawImChannelV1 } from '@shared/app-settings'
 import { redactSecretText } from '@shared/secret-redaction'
 import { projectOrdinaryPublicText } from '@shared/ordinary-log-pii-projection'
-import type { ChatState } from './chat-store-types'
+import type { ChatState, QueuedMessagePauseReason, QueuedUserMessage } from './chat-store-types'
+import { consumeAcceptedQueuedMessages, recoverQueuedMessages, queueMessagesPatch, queuePausePatch, queuedMessagesForThread, queuedPauseReason, terminalQueuePausePatch, retireQueuedThreads } from './chat-store-queue'
 import { isClawThread } from './chat-store-helpers'
 import {
   clearedThreadSelection,
   collectAssistantTextForTurn,
   findLatestUserBlockId,
+  findUserInputStatusBlockIndex,
   reconcileOptimisticUserBlock,
   settlePendingRuntimeWorkAfterInterrupt,
+  retireProviderRetryStatusesForTurn,
+  isNeutralProviderRequestStage,
   threadSnapshotLooksRunning,
-  upsertUserBlock
+  upsertUserBlock,
+  upsertUserInputBlock
 } from './chat-store-runtime-helpers'
 import {
   isWriteThreadId,
@@ -102,7 +111,8 @@ export const MAX_WATCHED_COMPLETION_NOTIFICATIONS = 200
 export const MAX_PENDING_CLAW_FEISHU_MIRRORS = 50
 const completionNotificationKeys: string[] = []
 const completionNotificationKeySet = new Set<string>()
-const watchCompletionNotificationKeys = new Map<string, string>()
+type WatchedCompletionNotificationTicket = { dedupeKey: string }
+const watchCompletionNotificationKeys = new Map<string, WatchedCompletionNotificationTicket>()
 
 export type PendingClawFeishuMirror = {
   threadId: string
@@ -112,7 +122,7 @@ export type PendingClawFeishuMirror = {
 
 const pendingClawFeishuMirrors = new Map<string, PendingClawFeishuMirror>()
 
-function trimBlocksForThreadRewind(blocks: ChatBlock[], removedTurnIds: string[]): {
+export function trimBlocksForThreadRewind(blocks: ChatBlock[], removedTurnIds: string[]): {
   blocks: ChatBlock[]
   droppedUserIds: string[]
 } {
@@ -138,7 +148,7 @@ export function watchTurnCompletionNotification(threadId: string, now = Date.now
   const normalizedThreadId = threadId.trim()
   if (!normalizedThreadId) return
   watchCompletionNotificationKeys.delete(normalizedThreadId)
-  watchCompletionNotificationKeys.set(normalizedThreadId, `watch:${normalizedThreadId}:${now}`)
+  watchCompletionNotificationKeys.set(normalizedThreadId, { dedupeKey: `watch:${normalizedThreadId}:${now}` })
   while (watchCompletionNotificationKeys.size > MAX_WATCHED_COMPLETION_NOTIFICATIONS) {
     const oldestThreadId = watchCompletionNotificationKeys.keys().next().value
     if (!oldestThreadId) break
@@ -152,7 +162,7 @@ export function completionNotificationDedupeKeyForWatchedThread(
 ): string {
   const normalizedThreadId = threadId?.trim()
   if (!normalizedThreadId) return `watch:unknown:${now}`
-  return watchCompletionNotificationKeys.get(normalizedThreadId) ?? `watch:${normalizedThreadId}:${now}`
+  return watchCompletionNotificationKeys.get(normalizedThreadId)?.dedupeKey ?? `watch:${normalizedThreadId}:${now}`
 }
 
 export function clearWatchedCompletionNotifications(): void {
@@ -391,33 +401,6 @@ export function flushLiveBlocks(state: ChatState, base: Partial<ChatState> = {})
   }
 }
 
-function goalStatusText(status: string): string {
-  switch (status) {
-    case 'active':
-      return i18n.t('common:goalStatusActive')
-    case 'paused':
-      return i18n.t('common:goalStatusPaused')
-    case 'blocked':
-      return i18n.t('common:goalStatusBlocked')
-    case 'usageLimited':
-      return i18n.t('common:goalStatusUsageLimited')
-    case 'budgetLimited':
-      return i18n.t('common:goalStatusBudgetLimited')
-    case 'complete':
-      return i18n.t('common:goalStatusComplete')
-    default:
-      return status
-  }
-}
-
-function goalTimelineText(goal: NonNullable<ChatState['activeThreadGoal']> | null, cleared?: boolean): string {
-  if (!goal || cleared) return i18n.t('common:goalClearedTimeline')
-  return i18n.t('common:goalUpdatedTimeline', {
-    status: goalStatusText(goal.status),
-    objective: goal.objective
-  })
-}
-
 export function shouldOpenSettingsForError(error: unknown): boolean {
   return describeRuntimeError(error).settingsAction === 'agents'
 }
@@ -506,9 +489,9 @@ function runtimeStatusText(event: RuntimeStatusEventPayload): string {
     return i18n.t('common:compactionSummaryFallbackStatus')
   }
   if (event.kind === 'pipeline_stage') {
-    if (event.stage === 'pre_send') return i18n.t('common:providerRequestPreparingStatus')
-    if (event.stage === 'post_send') return i18n.t('common:providerRequestStartedStatus')
-    if (event.stage === 'response_received') return i18n.t('common:providerResponseReceivedStatus')
+    // Neutral request stages remain available through the existing diagnostics
+    // transport; they do not create or split ordinary chat messages.
+    if (isNeutralProviderRequestStage(event.stage)) return runtimeStatusMeta(event)?.providerError ? i18n.t('common:providerErrorStatus') : ''
     if (event.stage === 'provider_retrying') {
       return i18n.t('common:providerRetryingStatus', { defaultValue: '模型服务正在重试' })
     }
@@ -574,7 +557,10 @@ function normalizeProviderRetryDiagnostic(event: RuntimeStatusEventPayload): Run
   const details = readRecord(meta?.details)
   const attempt = event.attempt ?? readNumberField(meta ?? {}, 'attempt') ?? readNumberField(details ?? {}, 'attempt')
   const maxAttempt = event.maxAttempt ?? readNumberField(meta ?? {}, 'maxAttempt') ?? readNumberField(details ?? {}, 'maxAttempt')
+  const lifecycle = event.stage === 'provider_retrying' && details?.visibleRecovery !== true
+    ? normalizeProviderRetryLifecycleForRenderer(event.retry ?? details?.retry) : undefined
   const retry: RuntimeProviderRetryDiagnosticsMetadata = {
+    ...(lifecycle ? { lifecycle } : {}),
     ...(attempt !== undefined ? { attempt } : {}),
     ...(maxAttempt !== undefined ? { maxAttempt } : {})
   }
@@ -714,12 +700,16 @@ function runtimeStatusMeta(event: RuntimeStatusEventPayload): RuntimeDisclosureM
     normalizeProviderErrorDiagnostic(details?.providerError)
   const providerRetry = normalizeProviderRetryDiagnostic(event)
   const providerRecovery = normalizeProviderRecoveryDiagnostic(event)
+  const providerOutputCap = event.stage === 'response_received'
+    ? normalizeProviderOutputCapForRenderer(event.providerOutputCap) : undefined
   const disclosure: RuntimeDisclosureMetadata = {
+    ...(event.stage === 'pre_send' || event.stage === 'post_send' || event.stage === 'response_received' ? { stage: event.stage } : {}),
     ...(event.turnId ? { turnId: event.turnId } : {}),
     ...(event.child ? { child: event.child } : {}),
     ...(jobDiagnostics ? { diagnostics: jobDiagnostics } : {}),
     ...(providerError ? { providerError } : {}),
     ...(providerRetry ? { providerRetry } : {}),
+    ...(providerOutputCap ? { providerOutputCap } : {}),
     ...(providerRecovery ? { providerRecovery } : {})
   }
   return Object.keys(disclosure).length > 0 ? disclosure : undefined
@@ -739,34 +729,29 @@ function runtimeErrorPayloadToError(event: {
   }))
 }
 
-function recoverPendingSteeringBlocks(
-  state: ChatState,
-  reason: ChatState['queuedMessagesPausedReason']
-): Partial<ChatState> {
+function recoverPendingSteeringBlocks(state: ChatState, reason: QueuedMessagePauseReason): Partial<ChatState> {
+  const threadId = state.activeThreadId
+  if (!threadId) return {}
   const pending = state.blocks.filter((block): block is Extract<ChatBlock, { kind: 'user' }> =>
-    block.kind === 'user' &&
-    (block.meta?.steeringStatus === 'pending' || block.meta?.steeringStatus === 'admitted')
-  )
+    block.kind === 'user' && (block.meta?.steeringStatus === 'pending' || block.meta?.steeringStatus === 'admitted'))
   if (pending.length === 0) return {}
-  return {
-    blocks: state.blocks.filter((block) =>
-      !(block.kind === 'user' &&
-        (block.meta?.steeringStatus === 'pending' || block.meta?.steeringStatus === 'admitted'))
-    ),
-    queuedMessages: [
-      ...state.queuedMessages,
-      ...pending.map((block, index) => ({
-        id: block.meta?.clientUserMessageId || `q-steer-${Date.now()}-${index}`,
-        text: block.text,
-        ...(block.meta?.displayText ? { displayText: block.meta.displayText } : {}),
-        ...(block.modelLabel ? { modelLabel: block.modelLabel } : {}),
-        ...(block.meta?.attachmentIds?.length ? { attachmentIds: block.meta.attachmentIds } : {}),
-        ...(block.meta?.attachments?.length ? { attachments: block.meta.attachments } : {}),
-        ...(block.meta?.fileReferences?.length ? { fileReferences: block.meta.fileReferences } : {})
-      }))
-    ],
-    queuedMessagesPausedReason: reason
-  }
+  const messages = pending.map(block => {
+    const id = block.meta?.clientUserMessageId || block.id
+    // This retry draft is local renderer metadata; it is not a wire field.
+    const captured = (block.meta as (RuntimeDisclosureMetadata & { steeringQueue?: QueuedUserMessage }) | undefined)?.steeringQueue
+    if (captured?.threadId === threadId && captured.id === id && typeof captured.text === 'string' &&
+        projectOrdinaryPublicText(captured.text) === captured.text) return captured
+    return { threadId, id, text: block.text,
+      ...(block.meta?.displayText ? { displayText: block.meta.displayText } : {}),
+      ...(block.modelLabel ? { modelLabel: block.modelLabel } : {}),
+      ...(block.meta?.attachmentIds?.length ? { attachmentIds: block.meta.attachmentIds } : {}),
+      ...(block.meta?.attachments?.length ? { attachments: block.meta.attachments } : {}),
+      ...(block.meta?.fileReferences?.length ? { fileReferences: block.meta.fileReferences } : {}) }
+  })
+  return { blocks: state.blocks.filter(block =>
+    !(block.kind === 'user' && (block.meta?.steeringStatus === 'pending' || block.meta?.steeringStatus === 'admitted'))),
+    ...recoverQueuedMessages(state, messages),
+    ...queuePausePatch(state, queuedPauseReason(state, threadId) ?? reason, threadId) }
 }
 
 function normalizeRuntimeErrorText(value: string | undefined): string {
@@ -833,7 +818,7 @@ export function armBusyWatchdog(
         liveAssistant: '',
         currentTurnId: state.currentTurnId,
         currentTurnUserId: state.currentTurnUserId,
-        queuedMessagesPausedReason: 'failed'
+        ...terminalQueuePausePatch(state, true)
       }
     },
     busyTimeoutMessage: () => i18n.t('common:busyTimeout', { minutes: Math.round((BUSY_WATCHDOG_MS * MAX_BUSY_RECOVERY_ATTEMPTS) / 60_000) }),
@@ -846,33 +831,96 @@ export function syncTurnCompletionPoll(
   get: () => ChatState
 ): void {
   syncTurnCompletionPollImpl(set, get, {
+    captureThreadOwner: (state, threadId) => {
+      const provider = getProvider()
+      const current = get()
+      if (
+        current.runtimeConnection !== 'ready' || !current.watchTurnCompletion[threadId] ||
+        current.deletedUserInputDraftThreadIds?.[threadId] || isPublicProjectionRevoked(threadId)
+      ) return null
+      // Admit a legacy or cap-expired watch only before dispatching a fresh read.
+      if (!watchCompletionNotificationKeys.has(threadId)) watchTurnCompletionNotification(threadId)
+      const ticket = watchCompletionNotificationKeys.get(threadId)
+      if (!ticket || !state.watchTurnCompletion[threadId]) return null
+      return () => (
+        watchCompletionNotificationKeys.get(threadId) === ticket && getProvider() === provider &&
+        !get().deletedUserInputDraftThreadIds?.[threadId] && !isPublicProjectionRevoked(threadId)
+      )
+    },
     loadThreadState: async (state, threadId) => {
       const provider = getProvider()
       return provider.getThreadDetail(threadId)
     },
     threadLooksRunning: threadSnapshotLooksRunning,
-    onCompletedThreads: async (doneIds, state, setState, getState) => {
+    onCompletedThreads: async (doneIds, state, setState, getState, isOwnerCurrent) => {
+      const provider = getProvider()
+      const tickets = new Map<string, WatchedCompletionNotificationTicket>()
       for (const id of doneIds) {
+        const ticket = watchCompletionNotificationKeys.get(id)
+        if (ticket && isOwnerCurrent(id)) tickets.set(id, ticket)
+      }
+      const ownsTicket = (id: string, snapshot = getState()): boolean => (
+        tickets.has(id) && isOwnerCurrent(id) &&
+        getProvider() === provider && watchCompletionNotificationKeys.get(id) === tickets.get(id) &&
+        !snapshot.deletedUserInputDraftThreadIds?.[id] && !isPublicProjectionRevoked(id)
+      )
+      const live = (id: string, snapshot = getState()): boolean => (
+        ownsTicket(id, snapshot) && snapshot.watchTurnCompletion[id] === true
+      )
+      const observed: string[] = []
+      for (const id of doneIds) {
+        if (!live(id)) continue
         clearActiveStream(id)
+        if (!live(id)) continue
         notifyTurnComplete(
           id,
           state,
-          completionNotificationDedupeKeyForWatchedThread(id)
+          tickets.get(id)!.dedupeKey
         )
-        clearWatchedCompletionNotification(id)
+        if (live(id)) observed.push(id)
       }
+      if (observed.length === 0) return
+      const claimed: string[] = []
       setState((snapshot) => {
         const watchTurnCompletion = { ...snapshot.watchTurnCompletion }
         const unreadThreadIds = { ...snapshot.unreadThreadIds }
-        for (const id of doneIds) {
+        for (const id of observed) {
+          if (!live(id, snapshot)) continue
+          claimed.push(id)
           delete watchTurnCompletion[id]
           unreadThreadIds[id] = true
         }
-        return { watchTurnCompletion, unreadThreadIds }
+        return claimed.length > 0 ? { watchTurnCompletion, unreadThreadIds } : {}
       })
-      void getState().refreshThreads()
+      const ownsRefresh = (): boolean => (
+        getState().error === state.error && getState().runtimeErrorDetail === state.runtimeErrorDetail &&
+        claimed.some((id) => ownsTicket(id) && !getState().watchTurnCompletion[id])
+      )
+      // Retain this bounded ticket for reads admitted by refresh after the callback returns.
+      try {
+        if (ownsRefresh()) await getState().refreshThreads({ isCurrent: ownsRefresh })
+      } catch {
+        // The existing refresh action owns its error; completion stays confirmed.
+      }
     }
   })
+}
+
+function notifyPrimarySddChatTranscriptMirror(get: () => ChatState): void {
+  const state = get()
+  const threadId = state.activeThreadId
+  const thread = state.threads.find(candidate => candidate.id === threadId)
+  if (!threadId || !isSddAssistantThread(thread ?? { id: threadId }) || !state.blocks.some(block => block.kind === 'compaction')) {
+    notifySddChatTranscriptMirror(get)
+    return
+  }
+  // The display transcript is enlarged by public replay; existing file mirrors
+  // retain their primary-snapshot input rather than persisting that UI projection.
+  void getProvider().getThreadDetail(threadId).then(detail => {
+    const current = get()
+    if (detail.latestSeq < state.lastSeq || current.activeThreadId === threadId && current.lastSeq > detail.latestSeq) return
+    notifySddChatTranscriptMirror(() => ({ ...state, blocks: detail.blocks }))
+  }).catch(() => undefined)
 }
 
 export type ThreadEventSinkBinding = {
@@ -1084,6 +1132,7 @@ export function quarantineTerminalTurnDraft(input: {
   turnId: string | null | undefined
   userBlockId: string | null | undefined
   busy: boolean
+  markUserInputUncertain?: boolean
   eventSeq?: number
   set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void
   get: () => ChatState
@@ -1102,7 +1151,10 @@ export function quarantineTerminalTurnDraft(input: {
       return {}
     }
     return {
-      blocks: stripProvisionalAssistantForTurn(state.blocks, expectedTurnId, expectedUserBlockId),
+      blocks: stripProvisionalAssistantForTurn(state.blocks, expectedTurnId, expectedUserBlockId).map(block =>
+        input.markUserInputUncertain && block.kind === 'user_input' && block.status === 'pending' &&
+          (block.meta?.turnId == null || block.meta.turnId === expectedTurnId)
+          ? { ...block, status: 'error' as const, errorMessage: 'User input outcome is unavailable.' } : block),
       liveAssistant: '',
       busy: input.busy,
       currentTurnId: expectedTurnId,
@@ -1145,6 +1197,7 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
   }
 
   try {
+    const goalEpoch = input.get().goalStateEpoch
     const detail = await input.loadThreadDetail(threadId)
     if (input.isCurrent && !input.isCurrent()) return false
     const detailTurnId = detail.latestTurnId?.trim()
@@ -1179,14 +1232,16 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
     input.set((state) => {
       if (input.isCurrent && !input.isCurrent()) return {}
       if (state.activeThreadId !== threadId) return {}
-      if (!stateTurnMatchesExpected(state.currentTurnId, expectedTurnId)) return {}
+      if (!stateTurnMatchesExpected(state.currentTurnId, expectedTurnId) || state.lastSeq > detail.latestSeq) return {}
       applied = true
       const settledBlocks = settlePendingRuntimeWorkAfterInterrupt(detail.blocks)
+      const consumed = consumeAcceptedQueuedMessages(state, threadId, settledBlocks)
       const steeringRecovery = recoverPendingSteeringBlocks(
-        { ...state, blocks: settledBlocks },
+        { ...state, ...consumed, blocks: settledBlocks },
         input.terminalStatus === 'aborted' ? 'interrupted' : 'failed'
       )
-      const blocks = steeringRecovery.blocks ?? settledBlocks
+      const restoredBlocks = steeringRecovery.blocks ?? settledBlocks
+      const blocks = state.goalStateEpoch === goalEpoch ? restoredBlocks : mergeGoalHistoryBlocks(restoredBlocks,state.blocks.filter(block => block.kind === 'goal'))
       const timing = finalizeTurnTiming({
         ...state,
         currentTurnId: expectedTurnId,
@@ -1201,17 +1256,21 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
         ...timing,
         blocks,
         lastSeq: Math.max(state.lastSeq, detail.latestSeq, input.eventSeq ?? 0),
+        turnUsageById: reconcileTurnUsageById(threadId, detail.turnUsageById, state.turnUsageById, detail.turnUsageThroughSeq, state.rewoundTurnIds),
         liveAssistant: '',
         busy: false,
         currentTurnId: null,
         currentTurnUserId: null,
-        activeThreadGoal: detail.goal ?? state.activeThreadGoal,
+        activeThreadGoal: state.goalStateEpoch !== goalEpoch || detail.goal === undefined ? state.activeThreadGoal : detail.goal,
+        goalStateEpoch: state.goalStateEpoch === goalEpoch && detail.goal !== undefined ? (state.goalStateEpoch ?? 0) + 1 : state.goalStateEpoch,
+        activeGoalActivation: state.goalStateEpoch !== goalEpoch || detail.goal === undefined ? state.activeGoalActivation : detail.goal?.id === state.activeGoalActivation?.id && detail.goal?.revision === state.activeGoalActivation?.revision ? state.activeGoalActivation : null,
         activeThreadTodos: detail.todos ?? state.activeThreadTodos,
         error: input.terminalStatus === 'failed' ? input.terminalError ?? null : null,
         runtimeErrorDetail: input.terminalStatus === 'failed' ? input.terminalErrorDetail ?? null : null,
-        queuedMessagesPausedReason: null,
+        ...terminalQueuePausePatch(state, input.terminalStatus === 'failed', threadId),
         watchTurnCompletion,
         unreadThreadIds,
+        ...consumed,
         ...steeringRecovery
       }
     })
@@ -1233,7 +1292,7 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
         currentTurnUserId: expectedUserBlockId,
         error: i18n.t(RUNTIME_FINAL_SNAPSHOT_UNAVAILABLE_KEY),
         runtimeErrorDetail: null,
-        queuedMessagesPausedReason: 'failed',
+        ...terminalQueuePausePatch(state, true, threadId),
         ...(input.eventSeq !== undefined ? { lastSeq: Math.max(state.lastSeq, input.eventSeq) } : {})
       }
     })
@@ -1248,6 +1307,50 @@ export async function reconcileTerminalTurnFromThreadDetail(input: {
   }
 }
 
+/** A fresh snapshot may preserve an existing atomic batch association, never mint one. */
+export function retainGeneralTerminalProjectionReceipts(
+  current: ChatBlock[], incoming: ChatBlock[], threadId: string, latestSeq: number
+): ChatBlock[] {
+  const committed = new Map(current.filter(block => block.kind === 'assistant' || block.kind === 'user')
+    .map(block => [block.id, block] as const))
+  return incoming.map(block => {
+    if (block.kind !== 'assistant' && block.kind !== 'user') return block
+    // Hydrated history cannot mint a renderer commit association.
+    const snapshot = block.generalTerminalProjectionReceipt === undefined
+      ? block : { ...block, generalTerminalProjectionReceipt: undefined }
+    const previous = committed.get(block.id)
+    const receipt = previous?.generalTerminalProjectionReceipt
+    if (!previous || previous.kind !== block.kind || !receipt) return snapshot
+    if (receipt.schemaVersion !== 1 || receipt.threadId !== threadId || receipt.itemId !== block.id ||
+        receipt.turnId !== block.meta?.turnId || receipt.turnId !== previous.meta?.turnId ||
+        !/^[a-f0-9]{64}$/.test(receipt.batchDigest) || receipt.status !== 'completed' ||
+        !Number.isSafeInteger(receipt.firstSeq) || receipt.firstSeq <= 0 ||
+        !Number.isSafeInteger(receipt.lastSeq) || receipt.lastSeq !== receipt.firstSeq + (block.kind === 'user' ? 1 : 2) ||
+        !Number.isSafeInteger(latestSeq) || latestSeq < receipt.lastSeq ||
+        block.kind === 'user' && receipt.endReason?.kind !== 'max-tokens' ||
+        block.kind === 'assistant' && (block.acceptedFinalView || previous?.kind === 'assistant' && previous.acceptedFinalView) ||
+        block.text !== previous.text || block.createdAt !== previous.createdAt) return snapshot
+    return { ...snapshot, generalTerminalProjectionReceipt: receipt }
+  })
+}
+
+/** Commit only sanitized GET/replay output; keep a matching live receipt committed during replay. */
+export function mergeRestoredGeneralTerminalProjectionReceipts(
+  current: ChatBlock[], restored: ChatBlock[], threadId: string, latestSeq: number
+): ChatBlock[] {
+  const retained = retainGeneralTerminalProjectionReceipts(current, restored, threadId, latestSeq)
+  return restored.map((block, index) => {
+    if (block.kind !== 'assistant' && block.kind !== 'user') return block
+    const receipt = block.generalTerminalProjectionReceipt
+    return receipt && (block.kind === 'user' ? receipt.endReason?.kind === 'max-tokens' && receipt.status === 'completed' : !block.acceptedFinalView) && receipt.schemaVersion === 1 &&
+      receipt.threadId === threadId && receipt.itemId === block.id && receipt.turnId === block.meta?.turnId &&
+      /^[a-f0-9]{64}$/.test(receipt.batchDigest) && ['completed', 'failed', 'aborted'].includes(receipt.status) &&
+      Number.isSafeInteger(receipt.firstSeq) && receipt.firstSeq > 0 && Number.isSafeInteger(receipt.lastSeq) &&
+      receipt.lastSeq === receipt.firstSeq + (block.kind === 'user' ? 1 : 2) && Number.isSafeInteger(latestSeq) && latestSeq >= receipt.lastSeq
+      ? block : retained[index]
+  })
+}
+
 async function reconcileThreadSnapshotFromDetail(input: {
   event: SnapshotRequiredEventPayload
   fallbackThreadId: string | null | undefined
@@ -1259,24 +1362,32 @@ async function reconcileThreadSnapshotFromDetail(input: {
   const threadId = input.event.threadId?.trim() || input.fallbackThreadId?.trim()
   if (!threadId) return
   const cursorSeq = Math.max(input.event.seq ?? 0, input.event.highestSeq ?? 0)
+  const goalEpoch = input.get().goalStateEpoch
 
   try {
     const detail = await input.loadThreadDetail(threadId)
     // A pending GET can outlive navigation or its original stream binding.
     if (!input.isCurrentStream() || input.get().activeThreadId !== threadId) return
     input.set((state) => {
-      if (!input.isCurrentStream() || state.activeThreadId !== threadId) return {}
-      const busy = threadSnapshotLooksRunning(detail.blocks, detail.threadStatus)
-      const blocks = busy ? detail.blocks : settlePendingRuntimeWorkAfterInterrupt(detail.blocks)
+      if (!input.isCurrentStream() || state.activeThreadId !== threadId ||
+          state.lastSeq > detail.latestSeq || detail.latestSeq < cursorSeq) return {}
+      const restored = mergeRestoredGeneralTerminalProjectionReceipts(state.blocks, detail.blocks, threadId, detail.latestSeq)
+      const busy = threadSnapshotLooksRunning(restored, detail.threadStatus)
+      const restoredBlocks = busy ? restored : settlePendingRuntimeWorkAfterInterrupt(restored)
+      const blocks = state.goalStateEpoch === goalEpoch ? restoredBlocks : mergeGoalHistoryBlocks(restoredBlocks,state.blocks.filter(block => block.kind === 'goal'))
       clearActiveStream(threadId)
       return {
         blocks,
         liveAssistant: '',
+        usageRefreshKey: state.usageRefreshKey + 1,
         lastSeq: Math.max(state.lastSeq, detail.latestSeq, cursorSeq),
+        turnUsageById: reconcileTurnUsageById(threadId, detail.turnUsageById, state.turnUsageById, detail.turnUsageThroughSeq, state.rewoundTurnIds),
         busy,
         currentTurnId: busy ? detail.latestTurnId ?? state.currentTurnId : null,
         currentTurnUserId: busy ? detail.latestUserMessageId ?? state.currentTurnUserId : null,
-        activeThreadGoal: detail.goal ?? state.activeThreadGoal,
+        activeThreadGoal: state.goalStateEpoch !== goalEpoch || detail.goal === undefined ? state.activeThreadGoal : detail.goal,
+        goalStateEpoch: state.goalStateEpoch === goalEpoch && detail.goal !== undefined ? (state.goalStateEpoch ?? 0) + 1 : state.goalStateEpoch,
+        activeGoalActivation: state.goalStateEpoch !== goalEpoch || detail.goal === undefined ? state.activeGoalActivation : detail.goal?.id === state.activeGoalActivation?.id && detail.goal?.revision === state.activeGoalActivation?.revision ? state.activeGoalActivation : null,
         activeThreadTodos: detail.todos ?? state.activeThreadTodos,
         error: clearRuntimeStreamRecoveringError(state.error)
       }
@@ -1296,7 +1407,16 @@ export function buildThreadEventSink(
   binding: ThreadEventSinkBinding = {}
 ): ThreadEventSink {
   const boundThreadId = binding.threadId?.trim() ?? ''
-  const loadThreadDetail = binding.getThreadDetail ?? ((threadId: string) => getProvider().getThreadDetail(threadId))
+  const loadThreadDetail = async (threadId: string) => {
+    const provider = getProvider()
+    const incoming = await (binding.getThreadDetail
+      ? binding.getThreadDetail(threadId) : provider.getThreadDetail(threadId))
+    // A bare GET cannot mint proof; verified bounded replay may restore a new receipt afterwards.
+    const snapshot = { ...incoming, blocks: retainGeneralTerminalProjectionReceipts(
+      get().activeThreadId === threadId ? get().blocks : [], incoming.blocks, threadId, incoming.latestSeq
+    ) }
+    return binding.getThreadDetail ? snapshot : restoreThreadDisplayHistory(provider, threadId, snapshot, binding.signal)
+  }
   const traceSink = new PersistedThreadTraceSink()
   const traceThreadId = (): string | undefined => boundThreadId || get().activeThreadId || undefined
   const recordTerminalCommit = (threadId: string | null | undefined, lastSeq: number, acceptedFinal: boolean, turnId?: string | null): void => {
@@ -1314,9 +1434,12 @@ export function buildThreadEventSink(
     }
   }
   let appliedDeltaSeqFloor = binding.sinceSeq ?? 0
+  let userMessageSeqFloor = binding.sinceSeq ?? 0
   const legacyLiveAssistant = createLiveTextBuffer(get().liveAssistant ?? '')
   let legacyLiveStoreLastPublishedAt = 0
   let terminalEventBarrier = false
+  let committedTerminal: { turnId: string; lastSeq: number } | null = null
+  let runtimeStatusSeqFloor = binding.sinceSeq ?? 0
   const isCurrentStream = (): boolean => {
     if (binding.signal?.aborted) return false
     return !boundThreadId || get().activeThreadId === boundThreadId
@@ -1502,23 +1625,21 @@ export function buildThreadEventSink(
     },
     onTurnStarted: (ev) => {
       if (!isCurrentStream()) return
-      terminalEventBarrier = false
+      if (ev.threadId && ev.threadId !== (boundThreadId || get().activeThreadId)) return
       const turnId = ev.turnId?.trim()
-      if (!turnId) return
+      if (!turnId || get().rewoundTurnIds?.[turnId] === true ||
+        ev.seq !== undefined && ev.seq <= appliedDeltaSeqFloor || committedTerminal && (turnId === committedTerminal.turnId ||
+        !Number.isSafeInteger(ev.seq) || ev.seq! <= committedTerminal.lastSeq)) return
+      terminalEventBarrier = false
       invalidateBoundThreadDetail(ev.threadId)
       flushPendingStreamingDeltas()
       const threadId = ev.threadId?.trim() || traceThreadId()
       const previousTurnId = get().currentTurnId
       if (threadId && previousTurnId && isPendingActiveStreamTurnId(previousTurnId) && previousTurnId !== turnId) {
         migrateActiveStreamTurn(threadId, previousTurnId, turnId)
-      } else {
-        appendActiveStreamDeltas({
-          threadId,
-          turnId,
-          lastSeq: ev.seq,
-          startedAt: runtimeEventStartedAt(ev.createdAt)
-        })
       }
+      appendActiveStreamDeltas({ threadId, turnId, lastSeq: ev.seq,
+        startedAt: ev.createdAt && Number.isFinite(Date.parse(ev.createdAt)) ? runtimeEventStartedAt(ev.createdAt) : null, runtimeRunning: true })
       set((s) => {
         resetBusyRecoveryAttempts()
         const currentUserId = s.currentTurnUserId ?? findLatestUserBlockId(s.blocks)
@@ -1560,33 +1681,61 @@ export function buildThreadEventSink(
       if (!isCurrentStream()) return
       const clientUserMessageId = ev.clientUserMessageId?.trim()
       if (!clientUserMessageId) return
-      set((s) => ({
-        blocks: s.blocks.map((block) =>
-          block.kind === 'user' && block.meta?.clientUserMessageId === clientUserMessageId
-            ? {
-                ...block,
-                meta: {
-                  ...(block.meta ?? {}),
-                  steeringStatus: 'admitted' as const,
-                  ...(ev.admittedSeq !== undefined ? { admittedSeq: ev.admittedSeq } : {})
-                }
-              }
-            : block
+      set((s) => {
+        const index = s.blocks.findIndex((block) =>
+          block.kind === 'user' && block.meta?.clientUserMessageId === clientUserMessageId &&
+          (block.meta?.steeringStatus === 'pending' || block.meta?.steeringStatus === 'admitted') &&
+          (!ev.turnId || block.meta?.turnId === ev.turnId) &&
+          !(ev.admittedSeq !== undefined && block.meta?.admittedSeq !== undefined && ev.admittedSeq < block.meta.admittedSeq)
         )
-      }))
+        if (index < 0) return {}
+        const block = s.blocks[index]
+        if (block.kind !== 'user') return {}
+        const blocks = [...s.blocks]
+        blocks[index] = {
+          ...block,
+          meta: {
+            ...(block.meta ?? {}),
+            steeringStatus: 'admitted',
+            ...(ev.admittedSeq !== undefined ? { admittedSeq: ev.admittedSeq } : {})
+          }
+        }
+        return { blocks }
+      })
     },
     onUserMessage: (ev) => {
-      if (!isCurrentStream()) return
+      if (!isCurrentStream() || ev.turnId && get().rewoundTurnIds?.[ev.turnId] === true) return
       invalidateBoundThreadDetail()
       flushPendingStreamingDeltas()
       set((s) => {
         if (!isCurrentStream()) return {}
+        const turnId = ev.turnId?.trim() || ev.meta?.turnId?.trim()
+        const clientUserMessageId = ev.meta?.clientUserMessageId?.trim()
+        const isSteering = Boolean(clientUserMessageId || ev.meta?.delivery === 'steer')
+        const matches = s.blocks.filter((block) => block.kind === 'user' &&
+          (block.id === ev.itemId || clientUserMessageId && block.meta?.clientUserMessageId === clientUserMessageId))
+        // A client ID can replace its pending UUID, never a different accepted item or turn.
+        if (matches.length > 1 || matches.some((block) => block.kind === 'user' && (
+          turnId && block.meta?.turnId && !isPendingActiveStreamTurnId(block.meta.turnId) && block.meta.turnId !== turnId ||
+          block.meta?.steeringStatus === 'accepted' && block.id !== ev.itemId
+          || block.id === ev.itemId && ((block.meta?.clientUserMessageId?.trim() ?? '') !== (clientUserMessageId ?? '') ||
+            block.meta?.delivery !== ev.meta?.delivery)
+        ))) return {}
+        const historical = terminalEventBarrier ||
+          ev.seq !== undefined && (!Number.isSafeInteger(ev.seq) || ev.seq <= userMessageSeqFloor) ||
+          turnId && s.currentTurnId && !isPendingActiveStreamTurnId(s.currentTurnId) && turnId !== s.currentTurnId ||
+          !s.busy && !s.currentTurnId || isSteering && !s.currentTurnId
+        if (historical || matches.some((block) => block.id === ev.itemId)) {
+          const blocks = upsertUserBlock(s.blocks, ev)
+          return { blocks, ...consumeAcceptedQueuedMessages(s, traceThreadId(), blocks) }
+        }
+        if (ev.seq !== undefined) userMessageSeqFloor = ev.seq
         resetBusyRecoveryAttempts()
         const flushed = flushLiveBlocksAndResetStream(s)
         const baseBlocks = flushed.blocks ?? s.blocks
         const optimisticCurrentUserId = s.currentTurnUserId
         const reconciledBlocks =
-          optimisticCurrentUserId &&
+          !isSteering && optimisticCurrentUserId &&
           optimisticCurrentUserId !== ev.itemId &&
           baseBlocks.some((block) => block.kind === 'user' && block.id === optimisticCurrentUserId)
             ? reconcileOptimisticUserBlock(
@@ -1607,6 +1756,7 @@ export function buildThreadEventSink(
         return {
           ...flushed,
           blocks: nextBlocks,
+          ...consumeAcceptedQueuedMessages(s, traceThreadId(), nextBlocks),
           busy: true,
           currentTurnId: ev.turnId ?? s.currentTurnId,
           currentTurnUserId: ev.itemId,
@@ -1720,6 +1870,9 @@ export function buildThreadEventSink(
       flushPendingStreamingDeltas()
       set((s) => {
         resetBusyRecoveryAttempts()
+        const idx = s.blocks.findIndex((b) => b.kind === 'compaction' && b.id === ev.itemId)
+        const previous = idx >= 0 ? s.blocks[idx] : undefined
+        if (previous?.kind === 'compaction' && (previous.status === 'success' || previous.status === 'error') && ev.status === 'running') return {}
         const base: Partial<ChatState> = {
           ...adoptTurnIdPatch(s, ev.turnId)
         }
@@ -1727,7 +1880,7 @@ export function buildThreadEventSink(
           base.busy = true
           armBusyWatchdog(set, get)
         }
-        const idx = s.blocks.findIndex((b) => b.kind === 'compaction' && b.id === ev.itemId)
+        if (ev.status !== 'running' && !ev.auto) base.busy = false
         if (idx >= 0) {
           const cur = s.blocks[idx]
           if (cur.kind !== 'compaction') return { ...base }
@@ -1736,6 +1889,7 @@ export function buildThreadEventSink(
             summary: ev.summary || cur.summary,
             status: ev.status,
             detail: ev.detail ?? cur.detail,
+            summaryKind: ev.summaryKind ?? cur.summaryKind,
             auto: ev.auto ?? cur.auto,
             messagesBefore: ev.messagesBefore ?? cur.messagesBefore,
             messagesAfter: ev.messagesAfter ?? cur.messagesAfter,
@@ -1763,6 +1917,7 @@ export function buildThreadEventSink(
           summary: ev.summary,
           status: ev.status,
           detail: ev.detail,
+          summaryKind: ev.summaryKind,
           auto: ev.auto,
           messagesBefore: ev.messagesBefore,
           messagesAfter: ev.messagesAfter,
@@ -1891,12 +2046,23 @@ export function buildThreadEventSink(
     onUserInput: (req) => {
       if (!isCurrentStream()) return
       flushPendingStreamingDeltas()
-      resetBusyRecoveryAttempts()
-      clearBusyWatchdog()
       set((s) => {
-        if (s.blocks.some((b) => b.kind === 'user_input' && b.requestId === req.requestId)) {
-          return {}
+        const block: Extract<ChatBlock, { kind: 'user_input' }> = {
+          kind: 'user_input',
+          id: req.itemId,
+          createdAt: new Date().toISOString(),
+          requestId: req.requestId,
+          questions: req.questions,
+          timedWait: req.timedWait,
+          status: 'pending',
+          meta: {
+            ...(req.meta ?? {}),
+            ...(req.turnId ? { turnId: req.turnId } : {})
+          }
         }
+        if (upsertUserInputBlock(s.blocks, block) === s.blocks) return {}
+        resetBusyRecoveryAttempts()
+        clearBusyWatchdog()
         const base: Partial<ChatState> = {
           ...adoptTurnIdPatch(s, req.turnId)
         }
@@ -1908,85 +2074,111 @@ export function buildThreadEventSink(
         return {
           ...base,
           ...flushed,
-          blocks: [
-            ...baseBlocks,
-            {
-              kind: 'user_input',
-              id: req.itemId,
-              createdAt: new Date().toISOString(),
-              requestId: req.requestId,
-              questions: req.questions,
-              status: 'pending' as const,
-              meta: {
-                ...(req.meta ?? {}),
-                ...(req.turnId ? { turnId: req.turnId } : {})
-              }
-            }
-          ],
-          error: clearRuntimeStreamRecoveringError(s.error)
+          blocks: upsertUserInputBlock(baseBlocks, block),
+          error: clearRuntimeStreamRecoveringError(s.error),
+          ...(boundThreadId || s.activeThreadId ? { userInputPanel: { threadId: boundThreadId || s.activeThreadId!, requestId: req.requestId } } : {})
         }
       })
     },
     onUserInputStatus: (ev) => {
       if (!isCurrentStream()) return
       flushPendingStreamingDeltas()
+      const resolvedIndex = findUserInputStatusBlockIndex(get().blocks, ev)
+      if (resolvedIndex < 0) return
+      const resolvedBlock = get().blocks[resolvedIndex]
+      const sourceThread = boundThreadId || get().activeThreadId
+      if (ev.status !== 'error' && resolvedBlock.kind === 'user_input' && sourceThread && typeof resolvedBlock.meta?.turnId === 'string') {
+        getProvider().settleUserInputWait?.({ threadId: sourceThread, turnId: resolvedBlock.meta.turnId, itemId: resolvedBlock.id, requestId: resolvedBlock.requestId })
+      }
       resetBusyRecoveryAttempts()
-      if (ev.status === 'submitted' && get().busy) {
+      if ((ev.status === 'submitted' || ev.status === 'continued') && get().busy) {
         armBusyWatchdog(set, get)
       }
-      set((s) => ({
-        error: clearRuntimeStreamRecoveringError(s.error),
-        blocks: s.blocks.map((b) =>
-          b.kind === 'user_input' && (b.id === ev.itemId || b.requestId === ev.itemId || b.requestId === ev.requestId)
-            ? b.status === 'submitted' && ev.status === 'error' && isUserInputInterruptError(ev.errorMessage)
-              ? b
-              : {
-                  ...b,
+      set((s) => {
+        const blockIndex = findUserInputStatusBlockIndex(s.blocks, ev)
+        if (blockIndex < 0) return {}
+        return {
+          error: clearRuntimeStreamRecoveringError(s.error),
+          blocks: s.blocks.map((block, index) =>
+            index === blockIndex && block.kind === 'user_input'
+              ? {
+                  ...block,
                   status: ev.status,
-                  answers: ev.answers ?? b.answers,
-                  errorMessage: ev.errorMessage ?? b.errorMessage
+                  answers: ev.answers ?? block.answers,
+                  errorMessage: ev.errorMessage ?? block.errorMessage
                 }
-            : b
-        )
-      }))
+              : block
+          )
+        }
+      })
     },
-	    onRuntimeStatus: (ev) => {
-	      if (!isCurrentStream()) return
-	      flushPendingStreamingDeltas()
-	      const text = runtimeStatusText(ev)
-	      const childOnlyStatus = Boolean(ev.child) && !text
-	      set((s) => {
-	        if (childOnlyStatus) {
-	          return {
-	            error: clearRuntimeStreamRecoveringError(s.error)
-	          }
-	        }
-	        resetBusyRecoveryAttempts()
-	        const base: Partial<ChatState> = {
-	          ...adoptTurnIdPatch(s, ev.turnId)
-	        }
+    onRuntimeStatus: (ev) => {
+      if (!isCurrentStream()) return
+      const state = get()
+      if (ev.threadId && ev.threadId !== (boundThreadId || state.activeThreadId)) return
+      const turnScoped = Boolean(ev.turnId) || ev.kind === 'pipeline_stage' || ev.kind === 'tool_result_upload_wait'
+      if (turnScoped && terminalEventBarrier) return
+      const currentTurnId = state.currentTurnId?.trim()
+      if (turnScoped && !state.busy && (!currentTurnId || !isPendingActiveStreamTurnId(currentTurnId))) return
+      if (ev.turnId && currentTurnId && !isPendingActiveStreamTurnId(currentTurnId) &&
+          currentTurnId !== ev.turnId) return
+      if (ev.seq !== undefined) {
+        if (!Number.isSafeInteger(ev.seq) || ev.seq <= runtimeStatusSeqFloor) return
+        runtimeStatusSeqFloor = ev.seq
+      }
+      const text = runtimeStatusText(ev)
+      if (ev.kind === 'pipeline_stage' && isNeutralProviderRequestStage(ev.stage) && !text && !ev.child) return
+      if (!turnScoped) {
+        if (!text) return
+        const meta = runtimeStatusMeta(ev)
+        set(s => {
+          const block: ChatBlock = { kind: 'system', id: ev.itemId,
+            createdAt: ev.createdAt ?? new Date().toISOString(), text, ...(meta ? { meta } : {}) }
+          const blocks = [...s.blocks]
+          const index = blocks.findIndex(candidate => candidate.kind === 'system' && candidate.id === ev.itemId)
+          if (index >= 0) blocks[index] = block
+          else blocks.push(block)
+          return { blocks }
+        })
+        return
+      }
+      flushPendingStreamingDeltas()
+      const childOnlyStatus = Boolean(ev.child) && !text
+      set((s) => {
+        if (childOnlyStatus) {
+          return {
+            error: clearRuntimeStreamRecoveringError(s.error)
+          }
+        }
+        resetBusyRecoveryAttempts()
+        const base: Partial<ChatState> = {
+          ...adoptTurnIdPatch(s, ev.turnId)
+        }
         if (!s.busy) {
           base.busy = true
           armBusyWatchdog(set, get)
-	        }
-	        const flushed = flushLiveBlocksAndResetStream(s)
-	        const baseBlocks = flushed.blocks ?? s.blocks
-	        if (!text) {
-	          return {
-	            ...base,
+        }
+        const flushed = flushLiveBlocksAndResetStream(s)
+        const baseBlocks = flushed.blocks ?? s.blocks
+        if (!text) {
+          return {
+            ...base,
             ...flushed,
             error: clearRuntimeStreamRecoveringError(s.error)
           }
         }
         const meta = runtimeStatusMeta(ev)
+        const retry = meta?.providerRetry?.lifecycle
+        const itemId = retry && ev.turnId
+          ? providerRetryStatusItemId(boundThreadId || s.activeThreadId || '', ev.turnId, retry) : ev.itemId
         const block: ChatBlock = {
           kind: 'system',
-          id: ev.itemId,
+          id: itemId,
           createdAt: ev.createdAt ?? new Date().toISOString(),
           text,
           ...(meta ? { meta } : {})
         }
-        const idx = baseBlocks.findIndex((candidate) => candidate.kind === 'system' && candidate.id === ev.itemId)
+        const idx = baseBlocks.findIndex((candidate) => candidate.kind === 'system' && candidate.id === itemId)
         const blocks = [...baseBlocks]
         if (idx >= 0) blocks[idx] = block
         else blocks.push(block)
@@ -2047,16 +2239,19 @@ export function buildThreadEventSink(
     onThreadRewound: (ev) => {
       if (!isCurrentStream()) return
       invalidateBoundThreadDetail(ev.threadId)
-      flushPendingStreamingDeltas()
+      discardPendingStreamingDeltas()
+      const removedTurnIds = ev.removedTurnIds.length ? ev.removedTurnIds : [ev.turnId]
+      for (const turnId of removedTurnIds) clearActiveStream(ev.threadId, turnId)
+      if (ev.seq !== undefined) {
+        appliedDeltaSeqFloor = Math.max(appliedDeltaSeqFloor, ev.seq)
+        runtimeStatusSeqFloor = Math.max(runtimeStatusSeqFloor, ev.seq)
+      }
+      if (get().currentTurnId && removedTurnIds.includes(get().currentTurnId!)) terminalEventBarrier = true
       clearBusyWatchdog()
       set((s) => {
-        const removedTurnIds = ev.removedTurnIds.length ? ev.removedTurnIds : [ev.turnId]
         const trimmed = trimBlocksForThreadRewind(s.blocks, removedTurnIds)
-        if (trimmed.blocks === s.blocks) {
-          return {
-            ...(ev.seq !== undefined ? { lastSeq: Math.max(s.lastSeq, ev.seq) } : {})
-          }
-        }
+        const turnUsageById = Object.fromEntries(Object.entries(s.turnUsageById ?? {})
+          .filter(([turnId, entry]) => entry.threadId === ev.threadId && !removedTurnIds.includes(turnId)))
         const turnStartedAtByUserId = { ...s.turnStartedAtByUserId }
         const turnDurationByUserId = { ...s.turnDurationByUserId }
         for (const id of trimmed.droppedUserIds) {
@@ -2066,13 +2261,15 @@ export function buildThreadEventSink(
         const currentTurnRemoved = s.currentTurnId ? removedTurnIds.includes(s.currentTurnId) : false
         return {
           blocks: trimmed.blocks,
+          turnUsageById,
+          rewoundTurnIds: { ...s.rewoundTurnIds, ...Object.fromEntries(removedTurnIds.map(id => [id, true as const])) },
           liveAssistant: '',
           busy: currentTurnRemoved ? false : s.busy,
           currentTurnId: currentTurnRemoved ? null : s.currentTurnId,
           currentTurnUserId: currentTurnRemoved ? null : s.currentTurnUserId,
           turnStartedAtByUserId,
           turnDurationByUserId,
-          queuedMessages: currentTurnRemoved ? [] : s.queuedMessages,
+          ...(currentTurnRemoved ? { ...queueMessagesPatch(s, ev.threadId, []), ...queuePausePatch(s, null, ev.threadId) } : {}),
           ...(ev.seq !== undefined ? { lastSeq: Math.max(s.lastSeq, ev.seq) } : {}),
           error: clearRuntimeStreamRecoveringError(s.error)
         }
@@ -2099,22 +2296,41 @@ export function buildThreadEventSink(
         if (!currentThread) {
           return { threads: nextThreads }
         }
-        const flushed = flushLiveBlocksAndResetStream(s)
-        const baseBlocks = flushed.blocks ?? s.blocks
-        const block: ChatBlock = {
-          kind: 'system',
-          id: `goal-${ev.threadId}-${updatedAt}-${ev.goal?.status ?? 'cleared'}`,
-          createdAt: updatedAt,
-          text: goalTimelineText(ev.goal, ev.cleared)
-        }
         return {
-          ...flushed,
           activeThreadGoal: ev.goal,
+          activeGoalActivation: null,
+          goalStateEpoch: (s.goalStateEpoch ?? 0) + 1,
           threads: nextThreads,
-          blocks: [...baseBlocks, block],
           error: clearRuntimeStreamRecoveringError(s.error)
         }
       })
+    },
+    onGoalActivation: (ev) => {
+      if (!isCurrentStream() || get().activeThreadId !== ev.threadId) return
+      const epoch = (get().goalStateEpoch ?? 0) + 1
+      set(state => {
+        const ref = countedGoalRefV1(state.activeThreadGoal)
+        const matching = ev.activation && ref && ev.activation.id === ref.id && ev.activation.revision === ref.revision
+        return { goalStateEpoch: epoch,
+          ...(ev.activation === null || !matching ? { activeGoalActivation: null }
+            : matching && ev.activation.activation === 'disarmed' ? { activeGoalActivation: ev.activation } : {}) }
+      })
+      invalidateThreadDetailCache(ev.threadId)
+      const provider = getProvider()
+      // Consume revocation synchronously. A pending authority read must never
+      // hold up a later stop signal in the renderer's SSE dispatch chain.
+      void (async () => {
+        const goalState = await provider.getThreadGoalState?.(ev.threadId)
+        const detail = provider.getThreadGoalState ? null : await loadThreadDetail(ev.threadId)
+        if (!isCurrentStream() || get().activeThreadId !== ev.threadId || get().goalStateEpoch !== epoch) return
+        set(state => {
+          if (!isCurrentStream() || state.activeThreadId !== ev.threadId || state.goalStateEpoch !== epoch) return {}
+          const goal = goalState ? goalState.goal : detail?.goal ?? null
+          return {activeThreadGoal:goal,activeGoalActivation:goalState?.activation ?? null,goalStateEpoch:epoch+1,
+            blocks:mergeGoalHistoryBlocks(state.blocks,goalState?.historyBlocks ?? detail!.blocks.filter((block):block is Extract<ChatBlock,{kind:'goal'}> => block.kind==='goal')),
+            threads:state.threads.map(thread => thread.id===ev.threadId ? {...thread,goal} : thread)}
+        })
+      })().catch(() => { /* A failed bounded read cannot restore revoked activation. */ })
     },
     onTodos: (ev) => {
       if (!isCurrentStream()) return
@@ -2177,6 +2393,11 @@ export function buildThreadEventSink(
           relatedThreadIds.add(thread.id)
         }
       }
+      for (const threads of Object.values(currentState.caseProjectThreadsById)) {
+        for (const thread of threads) {
+          if (threadReferencesRevokedProjection(thread, revokedThreadId)) relatedThreadIds.add(thread.id)
+        }
+      }
       for (const conversation of Object.values(currentState.sideConversations)) {
         if (
           conversation.threadId === revokedThreadId ||
@@ -2232,6 +2453,7 @@ export function buildThreadEventSink(
           threads: state.threads.filter((thread) => (
             !threadReferencesRevokedProjection(thread, revokedThreadId)
           )),
+          ...retireQueuedThreads(state, relatedThreadIds),
           caseProjectThreadsById: nextCaseProjectThreadsById,
           sideConversations: nextSideConversations,
           sidePanel: state.sidePanel.activeSideId && relatedThreadIds.has(state.sidePanel.activeSideId)
@@ -2243,6 +2465,8 @@ export function buildThreadEventSink(
             : null,
           watchTurnCompletion: nextWatch,
           unreadThreadIds: nextUnread,
+          turnUsageById: Object.fromEntries(Object.entries(state.turnUsageById ?? {})
+            .filter(([, entry]) => !relatedThreadIds.has(entry.threadId))),
           lastTurnUsage: state.lastTurnUsage && relatedThreadIds.has(state.lastTurnUsage.threadId)
             ? null
             : state.lastTurnUsage,
@@ -2258,6 +2482,7 @@ export function buildThreadEventSink(
       })
     },
     onGeneralTerminalBatch: async (batch: GeneralTerminalProjectionBatch) => {
+      if (get().rewoundTurnIds?.[batch.turnId] === true) throw new Error('general terminal delivery belongs to a rewound turn')
       if (!isCurrentStream()) {
         throw new Error('general terminal delivery belongs to an inactive stream')
       }
@@ -2286,7 +2511,7 @@ export function buildThreadEventSink(
               busy: false,
               currentTurnId: null,
               currentTurnUserId: null,
-              queuedMessagesPausedReason: 'failed',
+              ...terminalQueuePausePatch(state, true, batch.threadId),
               watchTurnCompletion,
               error: i18n.t(RUNTIME_FINAL_SNAPSHOT_UNAVAILABLE_KEY),
               runtimeErrorDetail: null
@@ -2296,6 +2521,10 @@ export function buildThreadEventSink(
         throw new Error(message)
       }
       const before = get()
+      if (batch.terminal.endReason !== undefined && (!TurnEndReasonSchema.safeParse(batch.terminal.endReason).success ||
+          batch.terminal.status !== 'completed' || !['success', 'approval', 'user_input', 'resume', 'background_completion'].includes(batch.terminal.terminalReason))) {
+        return reject('general terminal end reason is invalid')
+      }
       if (!/^[a-f0-9]{64}$/.test(batch.batchDigest) || batch.firstSeq <= 0 ||
           batch.lastSeq < batch.firstSeq || before.activeThreadId !== batch.threadId ||
           before.currentTurnId?.trim() !== batch.turnId || before.lastSeq !== batch.firstSeq - 1 ||
@@ -2323,9 +2552,26 @@ export function buildThreadEventSink(
         const withoutDuplicateTerminal = batch.terminalItem
           ? withoutProvisional.filter((block) => block.id !== batch.terminalItem?.id)
           : withoutProvisional
+        const terminalItem = batch.terminalItem?.kind === 'assistant' ? {
+          ...batch.terminalItem,
+          generalTerminalProjectionReceipt: {
+            schemaVersion: 1 as const, batchDigest: batch.batchDigest,
+            threadId: batch.threadId, turnId: batch.turnId, itemId: batch.terminalItem.id,
+            firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, status: batch.terminal.status,
+            ...(batch.terminal.endReason ? { endReason: batch.terminal.endReason } : {})
+          }
+        } : batch.terminalItem
         const blocks: ChatBlock[] = [
-          ...settlePendingRuntimeWorkAfterInterrupt(withoutDuplicateTerminal),
-          ...(batch.terminalItem ? [batch.terminalItem] : [])
+          ...settlePendingRuntimeWorkAfterInterrupt(retireProviderRetryStatusesForTurn(withoutDuplicateTerminal, batch.turnId)).map(block =>
+            !terminalItem && batch.terminal.endReason && block.kind === 'user' &&
+              block.id === expectedUserBlockId && block.meta?.turnId === batch.turnId
+              ? { ...block, generalTerminalProjectionReceipt: {
+                schemaVersion: 1 as const, batchDigest: batch.batchDigest,
+                threadId: batch.threadId, turnId: batch.turnId, itemId: block.id,
+                firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, status: batch.terminal.status,
+                endReason: batch.terminal.endReason
+              } } : block),
+          ...(terminalItem ? [terminalItem] : [])
         ]
         const timing = finalizeTurnTiming({
           ...state,
@@ -2347,18 +2593,22 @@ export function buildThreadEventSink(
           lastSeq: batch.lastSeq,
           usageRefreshKey: state.usageRefreshKey + 1,
           lastTurnUsage: { threadId: batch.threadId, snapshot: batch.usage },
+          turnUsageById: mergeTurnUsageById(batch.threadId, state.turnUsageById,
+            { [batch.turnId]: turnUsageEntryFromBatch(batch) }),
           busy: false,
           currentTurnId: null,
           currentTurnUserId: null,
           error: null,
           runtimeErrorDetail: null,
-          queuedMessagesPausedReason: batch.terminal.status === 'failed' ? 'failed' : null,
+          ...terminalQueuePausePatch(state, batch.terminal.status === 'failed', batch.threadId),
+          ...consumeAcceptedQueuedMessages(state, batch.threadId, blocks),
           watchTurnCompletion,
           unreadThreadIds
         }
       })
       if (!committed) return reject('general terminal delivery could not be committed atomically')
 
+      committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
       recordTerminalCommit(batch.threadId, batch.lastSeq, false, batch.turnId)
 
       clearActiveStream(batch.threadId)
@@ -2382,13 +2632,14 @@ export function buildThreadEventSink(
         `general-terminal-batch:${batch.batchDigest}`
       )
       notifyWriteWorkspaceFileRefresh(get)
-      notifySddChatTranscriptMirror(get)
+      notifyPrimarySddChatTranscriptMirror(get)
       syncTurnCompletionPoll(set, get)
       void get().refreshThreads()
-      if (get().queuedMessages.length === 0) releaseThreadWorktreeIfNeeded(batch.threadId)
-      void get().drainQueuedMessages()
+      if (queuedMessagesForThread(get(), batch.threadId).length === 0) releaseThreadWorktreeIfNeeded(batch.threadId)
+      void get().drainQueuedMessages(batch.threadId)
     },
     onAcceptedFinalBatch: async (batch: AcceptedFinalProjectionBatch) => {
+      if (get().rewoundTurnIds?.[batch.turnId] === true) throw new Error('accepted-final delivery belongs to a rewound turn')
       if (!isCurrentStream()) {
         throw new Error('accepted-final delivery belongs to an inactive stream')
       }
@@ -2431,7 +2682,9 @@ export function buildThreadEventSink(
             currentTurnId: stateCurrentTurnMatches ? null : state.currentTurnId,
             currentTurnUserId: stateCurrentTurnMatches ? null : state.currentTurnUserId,
             lastTurnUsage: stateHasCandidate ? null : state.lastTurnUsage,
-            queuedMessagesPausedReason: 'failed',
+            turnUsageById: Object.fromEntries(Object.entries(state.turnUsageById ?? {})
+              .filter(([turnId, entry]) => entry.threadId !== batch.threadId || turnId !== batch.turnId)),
+            ...terminalQueuePausePatch(state, true, batch.threadId),
             watchTurnCompletion,
             error: i18n.t(RUNTIME_FINAL_SNAPSHOT_UNAVAILABLE_KEY),
             runtimeErrorDetail: null
@@ -2442,19 +2695,25 @@ export function buildThreadEventSink(
         quarantineRejectedProjection()
         throw new Error(message)
       }
+      if (batch.terminal.endReason !== undefined && (!TurnEndReasonSchema.safeParse(batch.terminal.endReason).success ||
+          batch.terminal.status !== 'completed' || !['success', 'approval', 'user_input', 'resume', 'background_completion'].includes(batch.terminal.terminalReason))) {
+        return reject('accepted-final terminal end reason is invalid')
+      }
       if (!acceptedFinalProjectionBatchIsSelfConsistent(batch)) {
         return reject('accepted-final delivery binding is invalid')
       }
       if (before.activeThreadId !== batch.threadId) {
         return reject('accepted-final delivery could not be committed atomically')
       }
-      if (acceptedFinalProjectionIsAlreadyCommitted(before.blocks, before.lastSeq, batch)) {
+      if (acceptedFinalProjectionIsAlreadyCommitted(before.blocks, before.lastSeq, batch) && before.blocks.some(block =>
+          block.kind === 'assistant' && block.id === batch.assistant.id &&
+          block.acceptedFinalProjectionTerminal?.endReason?.kind === batch.terminal.endReason?.kind)) {
         const terminalStateComplete = before.busy === false && before.liveAssistant === '' &&
           before.currentTurnId === null && before.currentTurnUserId === null &&
           before.lastTurnUsage?.threadId === batch.threadId &&
           acceptedFinalUsageSnapshotsEqual(before.lastTurnUsage.snapshot, batch.usage) &&
-          before.queuedMessagesPausedReason ===
-            (batch.terminal.status === 'failed' ? 'failed' : null)
+          // Explicit queue pauses belong to the user, not the terminal receipt.
+          (batch.terminal.status !== 'failed' || queuedPauseReason(before, batch.threadId) !== null)
         if (!terminalStateComplete) {
           return reject('accepted-final delivery could not be committed atomically')
         }
@@ -2465,6 +2724,7 @@ export function buildThreadEventSink(
         clearBusyWatchdog()
         clearActiveStream(batch.threadId)
         clearWatchedCompletionNotification(batch.threadId)
+        committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
         return batch.receipt
       }
       if (acceptedFinalProjectionHasCandidateReceipt(before.blocks, batch) ||
@@ -2495,7 +2755,7 @@ export function buildThreadEventSink(
         const withoutDuplicateTerminal = withoutProvisional.filter((block) =>
           block.id !== batch.assistant.id && block.id !== batch.terminalError?.id
         )
-        const settledBlocks = settlePendingRuntimeWorkAfterInterrupt(withoutDuplicateTerminal)
+        const settledBlocks = settlePendingRuntimeWorkAfterInterrupt(retireProviderRetryStatusesForTurn(withoutDuplicateTerminal, batch.turnId))
         const assistant = {
           ...batch.assistant,
           acceptedFinalProjectionReceipt: batch.receipt,
@@ -2524,12 +2784,15 @@ export function buildThreadEventSink(
           lastSeq: batch.lastSeq,
           usageRefreshKey: state.usageRefreshKey + 1,
           lastTurnUsage: { threadId: batch.threadId, snapshot: batch.usage },
+          turnUsageById: mergeTurnUsageById(batch.threadId, state.turnUsageById,
+            { [batch.turnId]: turnUsageEntryFromBatch(batch) }),
           busy: false,
           currentTurnId: null,
           currentTurnUserId: null,
           error: null,
           runtimeErrorDetail: null,
-          queuedMessagesPausedReason: batch.terminal.status === 'failed' ? 'failed' : null,
+          ...terminalQueuePausePatch(state, batch.terminal.status === 'failed', batch.threadId),
+          ...consumeAcceptedQueuedMessages(state, batch.threadId, blocks),
           watchTurnCompletion,
           unreadThreadIds
         }
@@ -2538,6 +2801,7 @@ export function buildThreadEventSink(
         return reject('accepted-final delivery could not be committed atomically')
       }
 
+      committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
       recordTerminalCommit(batch.threadId, batch.lastSeq, true, batch.turnId)
 
       clearActiveStream(batch.threadId)
@@ -2561,11 +2825,11 @@ export function buildThreadEventSink(
         `accepted-final-batch:${batch.batchId}`
       )
       notifyWriteWorkspaceFileRefresh(get)
-      notifySddChatTranscriptMirror(get)
+      notifyPrimarySddChatTranscriptMirror(get)
       syncTurnCompletionPoll(set, get)
       void get().refreshThreads()
-      if (get().queuedMessages.length === 0) releaseThreadWorktreeIfNeeded(batch.threadId)
-      void get().drainQueuedMessages()
+      if (queuedMessagesForThread(get(), batch.threadId).length === 0) releaseThreadWorktreeIfNeeded(batch.threadId)
+      void get().drainQueuedMessages(batch.threadId)
       return batch.receipt
     },
     onTurnComplete: async (ev?: TurnCompletedEventPayload) => {
@@ -2615,6 +2879,7 @@ export function buildThreadEventSink(
         eventSeq,
         terminalStatus: 'completed',
         acceptedFinalDigest: ev?.acceptedFinalDigest,
+        isCurrent: isCurrentStream,
         loadThreadDetail,
         set,
         get
@@ -2642,13 +2907,13 @@ export function buildThreadEventSink(
       }
       notifyTurnComplete(completedThreadId, settledState, completedKey)
       notifyWriteWorkspaceFileRefresh(get)
-      notifySddChatTranscriptMirror(get)
+      notifyPrimarySddChatTranscriptMirror(get)
       syncTurnCompletionPoll(set, get)
       void get().refreshThreads()
-      if (get().queuedMessages.length === 0) {
+      if (queuedMessagesForThread(get(), completedThreadId).length === 0) {
         releaseThreadWorktreeIfNeeded(completedThreadId)
       }
-      void get().drainQueuedMessages()
+      if (completedThreadId) void get().drainQueuedMessages(completedThreadId)
     },
     onError: async (err, options) => {
       if (!isCurrentStream()) return
@@ -2696,6 +2961,7 @@ export function buildThreadEventSink(
         acceptedFinalDigest: options?.acceptedFinalDigest,
         terminalError: interrupted ? null : message,
         terminalErrorDetail: interrupted ? null : detail || null,
+        isCurrent: isCurrentStream,
         loadThreadDetail,
         set,
         get
@@ -2704,10 +2970,10 @@ export function buildThreadEventSink(
       takePendingClawFeishuMirror(eventTurnId)
       syncTurnCompletionPoll(set, get)
       void get().refreshThreads?.()
-      if (get().queuedMessages.length === 0) {
+      if (queuedMessagesForThread(get(), eventThreadId).length === 0) {
         releaseThreadWorktreeIfNeeded(eventThreadId)
       }
-      void get().drainQueuedMessages?.()
+      if (eventThreadId) void get().drainQueuedMessages?.(eventThreadId)
     },
     onUsage: (usage) => {
       if (!isCurrentStream()) return

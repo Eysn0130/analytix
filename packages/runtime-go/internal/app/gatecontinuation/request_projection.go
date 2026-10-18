@@ -34,6 +34,9 @@ func ProjectVerifiedGateRequestV1(receipt domaincontinuation.Receipt) (GateReque
 		return GateRequestProjectionV1{}, err
 	}
 	payload := receipt.Payload
+	if payload.UserInputReplyCapture != nil {
+		return GateRequestProjectionV1{}, errors.New("audit-only late capture is not a Gate request")
+	}
 	switch payload.Kind {
 	case domaincontinuation.KindApproval:
 		item, event := appturn.ApprovalRequestRecords(appturn.ApprovalRequestInput{
@@ -55,12 +58,17 @@ func ProjectVerifiedGateRequestV1(receipt domaincontinuation.Receipt) (GateReque
 		if err := json.Unmarshal(payload.Arguments, &args); err != nil {
 			return GateRequestProjectionV1{}, errors.New("user-input continuation arguments are invalid")
 		}
+		args, err := toolcatalogapp.UserInputArgumentsForTool(payload.ToolName, args)
+		if err != nil {
+			return GateRequestProjectionV1{}, err
+		}
 		prompt := privacyprojectionapp.ProjectOrdinaryText(firstText(args["prompt"], args["question"], "User input required"))
 		questions := toolcatalogapp.UserInputQuestions(args, payload.GateID, prompt)
 		item, event := appturn.UserInputRequestRecords(appturn.UserInputRequestInput{
 			ThreadID: payload.ThreadID, TurnID: payload.TurnID, ItemID: payload.ItemID,
 			InputID: payload.GateID, CreatedAt: payload.IssuedAt, Prompt: prompt,
 			Questions: questions, ContinuationReceiptID: receipt.ReceiptID,
+			TimedWait: appturn.UserInputTimedWaitViewV1(payload.UserInputTimedWait, payload.IssuedAt),
 		})
 		return GateRequestProjectionV1{
 			Kind: payload.Kind, GateID: payload.GateID, ManagerLabel: prompt,
