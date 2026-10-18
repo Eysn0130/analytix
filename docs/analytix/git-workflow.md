@@ -43,6 +43,15 @@ git push -u origin HEAD
 gh pr create --base main
 ```
 
+Keep GitHub source available for review as work progresses. After completing
+an independently reviewable small batch and its scoped checks, use the focused
+normal commit/push already authorized for the task branch, then confirm its
+remote SHA matches local `HEAD`. Do not leave completed batches accumulating
+only locally. A PR may stay draft while acceptance is incomplete; clearly list
+unverified checks and known failures. Synchronization does not establish passing
+checks or merge readiness: `main` still requires applicable required CI and
+acceptance.
+
 First push sets the feature branch's own upstream. Later `git pull --ff-only`
 and `git push` synchronize that branch, **not** `main`. To incorporate a newer
 main into an open branch, first preserve/commit current work, then use
