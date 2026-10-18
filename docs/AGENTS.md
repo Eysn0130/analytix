@@ -35,9 +35,14 @@ Use these status terms consistently:
   A schema accepting a field does not prove the production runtime uses it.
 - Prefer repository-relative links. Keep machine-specific paths in explicitly
   scoped host or provenance documentation.
-- Preserve historical reports as history; add a currentness note rather than
-  silently rewriting old evidence. Remove or redact material only when keeping
-  it creates a privacy, secret, or active safety risk.
+- Preserve retained historical evidence's original results and candidate and
+  environment bindings; add currentness notes rather than rewriting evidence.
+  Authorized cleanup may remove duplicate or superseded history after preserving
+  unique current decisions, admission/attribution records, unresolved blockers,
+  and evidence still consumed by current gates, checking references, and confirming
+  a Git-recoverable version. Do not create another archive copy by default.
+  Remove or redact retained material when keeping it creates a privacy, secret,
+  or active safety risk.
 - Update Chinese and English counterparts together when they express the same
   current product fact.
 - Keep the repository authoritative. Follow
