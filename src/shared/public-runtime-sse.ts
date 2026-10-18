@@ -876,8 +876,8 @@ function validateUserInputEvent(event: Record<string, unknown>, diagnostic?: Dia
 }
 
 function validateCompactionEvent(event: Record<string, unknown>): boolean {
+  if (event.schemaVersion === 3) return eventHasTurnWithOptionalItem(event) && CompactionEvent.safeParse(event).success
   if (!eventHasTurn(event)) return false
-  if (event.schemaVersion === 3) return CompactionEvent.safeParse(event).success
   if (event.kind === 'compaction_failed') return false
   if (['compactionId', 'summaryKind', 'summaryDigest', 'checkpointDigest', 'shadowedItemCount', 'tokenCountKind',
     'tokenEstimatorVersion', 'turn', 'createdAt', 'startedAt', 'finishedAt', 'reasonCode'].some(key => event[key] !== undefined)) return false

@@ -10,6 +10,7 @@ import {
 } from '../../packages/runtime/src/contracts/events'
 import { ToolCallTurnItem } from '../../packages/runtime/src/contracts/items'
 import { PublicRuntimeEventFilter } from '../shared/public-runtime-content'
+import { isStrictPublicRuntimeSseErrorPayload, isStrictPublicRuntimeSseIpcPayload } from '../shared/public-runtime-sse'
 import {
   defaultClawSettings,
   defaultKeyboardShortcuts,
@@ -24,7 +25,8 @@ import { sseAckPayloadSchema } from './ipc/app-ipc-schemas'
 import type { ThreadTraceEventPayload } from '../shared/thread-trace'
 import {
   acceptedFinalPublicationEventId,
-  acceptedFinalPublicationPayloadDigest
+  acceptedFinalPublicationPayloadDigest,
+  verifiedAcceptedFinalDeliveryBatch
 } from './accepted-final-publication'
 
 type IpcHandler = (event: { sender: WebContents }, args?: unknown) => Promise<unknown>
@@ -2251,57 +2253,99 @@ describe('registerRuntimeSseIpc', () => {
       runtimePid: staleRuntime.pin.runtimePid + 1,
       generation: staleRuntime.pin.generation + 1
     }
+    expect(isStrictPublicRuntimeSseIpcPayload({
+      streamId: 'stream-stale-connection-pin', events: [freshRuntime.batch]
+    })).toBe(true)
+    expect(verifiedAcceptedFinalDeliveryBatch(freshRuntime.batch, freshPin)).not.toBeNull()
     const overrides = { authorityPin: staleRuntime.pin }
     const encoder = new TextEncoder()
-    let staleController: ReadableStreamDefaultController<Uint8Array> | undefined
-    const staleStream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        staleController = controller
+    const controlledConnection = () => {
+      let controller!: ReadableStreamDefaultController<Uint8Array>
+      const stream = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+      return {
+        stream,
+        enqueue(frame: string) { controller.enqueue(encoder.encode(frame)) },
+        close() {
+          try { controller.close() } catch { /* The reader may already have cancelled the stream. */ }
+        }
       }
-    })
+    }
+    const staleConnection = controlledConnection()
+    const freshConnection = controlledConnection()
+    const deferred = () => {
+      let resolve!: () => void
+      const promise = new Promise<void>(done => { resolve = done })
+      return { promise, resolve }
+    }
+    const firstFetch = deferred(), secondFetch = deferred(), firstEvent = deferred()
+    let rejectSse!: (error: Error) => void
+    const sseError = new Promise<never>((_, reject) => { rejectSse = reject })
+    const waitForBarrier = (barrier: ReturnType<typeof deferred>) => Promise.race([barrier.promise, sseError])
     const seenSinceSeq: string[] = []
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       seenSinceSeq.push(new URL(String(input)).searchParams.get('since_seq') ?? '')
       if (fetchMock.mock.calls.length === 1) {
-        return new Response(staleStream, {
+        firstFetch.resolve()
+        return new Response(staleConnection.stream, {
           status: 200,
           headers: { 'content-type': 'text/event-stream' }
         })
       }
-      return responseFor([
-        strictFrame(freshRuntime.batch.lastSeq, 'accepted_final_batch', freshRuntime.batch)
-      ])
+      secondFetch.resolve()
+      return new Response(freshConnection.stream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' }
+      })
     })
     const { handlers } = registerHarness(fetchMock as typeof fetch, overrides)
     const sender = makeSender()
-
-    await handlers.get('runtime:sse:start')?.({ sender }, {
-      threadId: staleRuntime.batch.threadId,
-      sinceSeq: 0,
-      streamId: 'stream-stale-connection-pin'
+    sender.send.mockImplementation((channel: string, payload: unknown) => {
+      if (channel === 'runtime:sse-error') {
+        const diagnostic = isStrictPublicRuntimeSseErrorPayload(payload)
+          ? { code: payload.code, status: payload.status, reasonCode: payload.reasonCode } : {}
+        rejectSse(new Error(`Stale-pin SSE diagnostics: ${JSON.stringify(diagnostic)}`))
+      }
+      if (channel === 'runtime:sse-event') firstEvent.resolve()
     })
-    await waitForCondition(() => fetchMock.mock.calls.length === 1)
-    overrides.authorityPin = freshPin
-    staleController?.enqueue(encoder.encode(
-      strictFrame(staleRuntime.batch.lastSeq, 'accepted_final_batch', staleRuntime.batch)
-    ))
-    await waitForCondition(() => sseEventCalls(sender).length === 1)
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(seenSinceSeq).toEqual(['0', '0'])
-    expect(sseEventCalls(sender)[0]?.[1]).toEqual({
-      streamId: 'stream-stale-connection-pin',
-      events: [freshRuntime.batch]
-    })
-    expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
-    expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
-      streamId: 'stream-stale-connection-pin',
-      seq: freshRuntime.batch.lastSeq,
-      batchId: freshRuntime.batch.batchId,
-      threadId: freshRuntime.batch.threadId,
-      turnId: freshRuntime.batch.turnId,
-      publicationCommitId: freshRuntime.batch.publicationCommitId
-    })).toBe(true)
+    try {
+      await handlers.get('runtime:sse:start')?.({ sender }, {
+        threadId: staleRuntime.batch.threadId,
+        sinceSeq: 0,
+        streamId: 'stream-stale-connection-pin'
+      })
+      await waitForBarrier(firstFetch)
+      overrides.authorityPin = freshPin
+      staleConnection.enqueue(strictFrame(staleRuntime.batch.lastSeq, 'accepted_final_batch', staleRuntime.batch))
+      await waitForBarrier(secondFetch)
+      expect(sseEventCalls(sender)).toHaveLength(0)
+      expect(seenSinceSeq).toEqual(['0', '0'])
+      freshConnection.enqueue(strictFrame(freshRuntime.batch.lastSeq, 'accepted_final_batch', freshRuntime.batch))
+      await waitForBarrier(firstEvent)
+
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(seenSinceSeq).toEqual(['0', '0'])
+      expect(sseEventCalls(sender)[0]?.[1]).toEqual({
+        streamId: 'stream-stale-connection-pin',
+        events: [freshRuntime.batch]
+      })
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      expect(await handlers.get('runtime:sse:ack')?.({ sender }, {
+        streamId: 'stream-stale-connection-pin',
+        seq: freshRuntime.batch.lastSeq,
+        batchId: freshRuntime.batch.batchId,
+        threadId: freshRuntime.batch.threadId,
+        turnId: freshRuntime.batch.turnId,
+        publicationCommitId: freshRuntime.batch.publicationCommitId
+      })).toBe(true)
+    } finally {
+      try {
+        await handlers.get('runtime:sse:stop')?.({ sender }, 'stream-stale-connection-pin')
+      } finally {
+        staleConnection.close()
+        freshConnection.close()
+      }
+    }
   })
 
   it.each(['separate', 'coalesced'])('delivers an ordinary general terminal batch alone and waits for its atomic renderer ACK (%s)', async (chunking) => {

@@ -3,8 +3,9 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { CompactResponse } from '../../../../packages/runtime/src/contracts/turns'
+import type { RuntimeEventKind } from '../../../../packages/runtime/src/contracts/events'
 import type { SseErrorPayload } from '@shared/analytix-api'
-import { isStrictPublicRuntimeSseErrorPayload } from '@shared/public-runtime-sse'
+import { isStrictPublicRuntimeSseErrorPayload, type PublicRuntimeSseDecodeDiagnostic } from '@shared/public-runtime-sse'
 import {
   defaultClawSettings, defaultKeyboardShortcuts, defaultAnalytixRuntimeSettings,
   defaultModelProviderSettings, defaultScheduleSettings, defaultWriteSettings, type AppSettingsV1
@@ -19,6 +20,62 @@ import { clearBusyWatchdog, stopTurnCompletionPoll } from './chat-store-schedule
 import { useChatStore } from './chat-store'
 
 vi.mock('electron', () => ({ app: { getPath: () => { throw new Error('Unexpected live Electron profile access.') } } }))
+
+type RejectedSseFrame = {
+  kind: RuntimeEventKind | 'unknown'
+  seq?: number
+  schemaVersion?: number
+  diagnostic?: PublicRuntimeSseDecodeDiagnostic
+}
+const rejectedSseFrames = vi.hoisted(() => [] as RejectedSseFrame[])
+vi.mock('@shared/public-runtime-sse', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@shared/public-runtime-sse')>()
+  const { RuntimeEventKind } = await import('../../../../packages/runtime/src/contracts/events')
+  return { ...actual, projectPublicRuntimeSseBlock: (...args: Parameters<typeof actual.projectPublicRuntimeSseBlock>) => {
+    const [block, expectedThreadId, filter, onDiagnostic] = args
+    let metadata: Omit<RejectedSseFrame, 'diagnostic'> = { kind: 'unknown' }
+    let captured = false
+    let diagnostic: PublicRuntimeSseDecodeDiagnostic | undefined
+    const originalParse = JSON.parse
+    // Plain forwarding functions keep no mock history of frame text or parsed records.
+    // Observe the decoder's existing synchronous parse; do not parse the frame again.
+    JSON.parse = function (this: unknown, ...parseArgs: Parameters<typeof JSON.parse>) {
+      const value: unknown = Reflect.apply(originalParse, this, parseArgs)
+      try {
+        if (!captured) {
+          captured = true
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            const event = value as Record<string, unknown>
+            const kind = RuntimeEventKind.safeParse(event.kind)
+            metadata = { kind: kind.success ? kind.data : 'unknown',
+              ...(Number.isSafeInteger(event.seq) ? { seq: event.seq as number } : {}),
+              ...(Number.isSafeInteger(event.schemaVersion) ? { schemaVersion: event.schemaVersion as number } : {}) }
+          }
+        }
+      } catch { /* Diagnostic observation must not change parsing. */ }
+      return value
+    }
+    let result: ReturnType<typeof actual.projectPublicRuntimeSseBlock>
+    try {
+      result = actual.projectPublicRuntimeSseBlock(block, expectedThreadId, filter, onDiagnostic && (value => {
+        try {
+          diagnostic = { validation: value.validation, stage: value.stage, reason: value.reason, fieldPaths: [...value.fieldPaths] }
+        } catch { /* Always forward the original observer. */ }
+        onDiagnostic(value)
+      }))
+    } finally {
+      JSON.parse = originalParse
+    }
+    if (result?.status === 'invalid' || result?.status === 'withheld') {
+      try {
+        const rejection = { ...metadata, ...(diagnostic ? { diagnostic } : {}) }
+        rejectedSseFrames.push(rejection)
+        console.info('COMPACTION_HISTORY_REJECTED_FRAME', JSON.stringify(rejection))
+      } catch { /* Diagnostic observation must not change the decoder result. */ }
+    }
+    return result
+  } }
+})
 
 type Child = {
   pid?: number
@@ -67,6 +124,7 @@ describe('closed CompactResponse production compatibility', () => {
 // The only Provider is an owned loopback fixture; no live credentials or profile
 // are read, and no event IDs or recovered transcript are handwritten.
 it('restores publicly authorized ordinary history after production compaction and restart without enlarging model primary', async () => {
+  rejectedSseFrames.length = 0
   const fs = await vi.importActual<{
     appendFile: (path: string, value: string) => Promise<void>
     mkdtemp: (prefix: string) => Promise<string>
@@ -98,7 +156,8 @@ it('restores publicly authorized ordinary history after production compaction an
   }>('node:http')
   const { registerRuntimeSseIpc } = await vi.importActual<{
     registerRuntimeSseIpc: (options: { ipcMain: { handle: (channel: string, handler: Handler) => void };
-      store: { load: () => Promise<AppSettingsV1> }; ensureRuntime: () => Promise<void>; logError: () => void }) => void
+      store: { load: () => Promise<AppSettingsV1> }; ensureRuntime: () => Promise<void>;
+      logError: (category: string, message: string, detail?: unknown) => void }) => void
   }>('../../../main/runtime-sse-ipc')
   const { runtimeRequestViaHost } = await vi.importActual<{
     runtimeRequestViaHost: (settings: AppSettingsV1, path: string, init: { method?: string; body?: string },
@@ -151,6 +210,7 @@ it('restores publicly authorized ordinary history after production compaction an
   const endListeners = new Set<Parameters<RuntimeApi['onSseEnd']>[0]>()
   const errorListeners = new Set<Parameters<RuntimeApi['onSseError']>[0]>()
   const sseErrorDiagnostics: Array<Pick<SseErrorPayload, 'code' | 'status' | 'reasonCode'>> = []
+  const decodeDiagnostics: PublicRuntimeSseDecodeDiagnostic[] = []
   const streams = new Set<string>()
   const sender = { id: 9001, isDestroyed: () => false, send: (channel: string, payload: unknown) => {
     if (channel === 'runtime:sse-event') dataListeners.forEach(fn => fn(payload as Parameters<typeof fn>[0]))
@@ -391,8 +451,16 @@ it('restores publicly authorized ordinary history after production compaction an
       keyboardShortcuts: defaultKeyboardShortcuts(), write: defaultWriteSettings(), claw: defaultClawSettings(),
       schedule: defaultScheduleSettings(), guiUpdate: { channel: 'stable' }, codePromptPrefix: '', disabledSkillIds: [] }
     registerRuntimeSseIpc({ ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
-      store: { load: async () => settings }, ensureRuntime: async () => undefined, logError: () => undefined })
-    const bridge: Pick<RuntimeApi, 'runtimeRequest' | 'startSse' | 'ackSseEvent' | 'stopSse' | 'onSseEvent' | 'onSseEnd' | 'onSseError'> = {
+      store: { load: async () => settings }, ensureRuntime: async () => undefined,
+      logError: (category, message, detail) => {
+        if (category !== 'sse' || message !== 'SSE event rejected' || record(detail).code !== 'sse_event_rejected') return
+        const diagnostic = record(detail).diagnostic
+        if (!diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic) ||
+            !Array.isArray(record(diagnostic).fieldPaths)) return
+        const { validation, stage, reason, fieldPaths } = diagnostic as PublicRuntimeSseDecodeDiagnostic
+        decodeDiagnostics.push({ validation, stage, reason, fieldPaths: [...fieldPaths] })
+      } })
+    const bridge: Pick<RuntimeApi, 'runtimeRequest' | 'startSse' | 'ackSseEvent' | 'stopSse' | 'onSseEvent' | 'onSseEnd' | 'onSseError' | 'onRuntimeStatus'> = {
       runtimeRequest: (route, method, body) => runtimeRequestViaHost(settings, route, { method, body }, async () => undefined),
       startSse: async (id, sinceSeq, streamId, replay) => {
         const result = await handlers.get('runtime:sse:start')!({ sender }, { threadId: id, sinceSeq, streamId, ...replay }) as { streamId: string }
@@ -402,7 +470,8 @@ it('restores publicly authorized ordinary history after production compaction an
       stopSse: async streamId => await handlers.get('runtime:sse:stop')!({ sender }, streamId) === true,
       onSseEvent: fn => { dataListeners.add(fn); return () => { dataListeners.delete(fn) } },
       onSseEnd: fn => { endListeners.add(fn); return () => { endListeners.delete(fn) } },
-      onSseError: fn => { errorListeners.add(fn); return () => { errorListeners.delete(fn) } }
+      onSseError: fn => { errorListeners.add(fn); return () => { errorListeners.delete(fn) } },
+      onRuntimeStatus: () => () => undefined
     }
     window.analytix = { settings: { getSettings: async () => settings }, runtime: bridge,
       logs: { error: async () => undefined } } as unknown as Window['analytix']
@@ -434,7 +503,7 @@ it('restores publicly authorized ordinary history after production compaction an
     const requestCount = providerRequests.length
     await act(async () => useChatStore.getState().selectThread(threadId))
     const displayed = useChatStore.getState()
-    expect(displayed.error, `Thread selection SSE diagnostics: ${JSON.stringify(sseErrorDiagnostics)}`).toBeNull()
+    expect(displayed.error, `Thread selection SSE diagnostics: ${JSON.stringify({ sseErrorDiagnostics, decodeDiagnostics, rejectedSseFrames })}`).toBeNull()
     expect(displayed.activeThreadId).toBe(threadId)
     expect(displayed.lastSeq).toBe(restartedPrimary.latestSeq)
     expect(displayed.blocks.filter(block => block.kind === 'compaction')).toHaveLength(1)
@@ -466,8 +535,23 @@ it('restores publicly authorized ordinary history after production compaction an
     expect(scroller.scrollTop).toBe(previousTop + scroller.scrollHeight - previousHeight)
     for (const prompt of prompts) expect(container.textContent).toContain(prompt)
     for (const block of old) if (block.kind === 'assistant') expect(container.textContent).toContain(block.text)
+    const marker = displayed.blocks.find(block => block.kind === 'compaction')
+    expect(marker?.summaryKind).toBe('conversation')
+    const summaryText = marker?.detail?.trim()
+    expect(summaryText).toBeTruthy()
     const markerButton = container.querySelector<HTMLButtonElement>('[data-analytix-compaction] button')
-    expect(markerButton?.disabled).toBe(true); expect(markerButton?.hasAttribute('aria-expanded')).toBe(false)
+    expect(markerButton).not.toBeNull()
+    expect(markerButton!.disabled).toBe(false)
+    expect(markerButton!.getAttribute('aria-expanded')).toBe('false')
+    const markerBodyId = markerButton!.getAttribute('aria-controls')
+    expect(markerBodyId).toBeTruthy()
+    expect(document.getElementById(markerBodyId!)).toBeNull()
+    await act(async () => markerButton!.click())
+    expect(markerButton!.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById(markerBodyId!)?.textContent).toContain(summaryText!)
+    await act(async () => markerButton!.click())
+    expect(markerButton!.getAttribute('aria-expanded')).toBe('false')
+    expect(document.getElementById(markerBodyId!)).toBeNull()
     expect((await provider.getThreadDetail(threadId)).blocks).toEqual(restartedPrimary.blocks)
     await act(async () => useChatStore.getState().selectThread(String(other.id)))
     await act(async () => useChatStore.getState().selectThread(threadId))

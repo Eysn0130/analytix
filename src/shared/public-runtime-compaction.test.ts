@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CompactionEvent } from '../../packages/runtime/src/contracts/events'
 import { isPublicSseIpcPayload, PublicRuntimeEventFilter } from './public-runtime-content'
 import { isClosedPublicRuntimeSseEvent, projectPublicRuntimeSseBlock } from './public-runtime-sse'
 
@@ -6,14 +7,8 @@ const digest = (value: string): string => value.repeat(64)
 
 describe('actual conversation summary public item', () => {
   it('accepts complete V5 facts while preventing a legacy notice from acquiring them', () => {
-    const event = automaticCompactionEvent()
+    const event = conversationCompactionItemEvent()
     const item = event.item as Record<string, unknown>
-    Object.assign(item, { schemaVersion: 5, providerHistoryProjectionVersion: 3,
-      summary: 'Continue the accepted task using recorded decisions.', summaryKind: 'conversation', compactionId: item.id,
-      summaryDigest: digest('c'), checkpointDigest: digest('d'), shadowedItemCount: 7,
-      tokenCountKind: 'estimated', tokenEstimatorVersion: 1,
-      createdAt: '2026-07-22T00:00:00Z', finishedAt: '2026-07-22T00:00:00Z' })
-    delete item.assistantProseExcluded
     expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
     item.schemaVersion = 4
     expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
@@ -78,6 +73,43 @@ function automaticCompactionEvent(): Record<string, unknown> {
   }
 }
 
+function conversationCompactionItemEvent(auto = true): Record<string, unknown> {
+  const event = automaticCompactionEvent()
+  const item = event.item as Record<string, unknown>
+  Object.assign(item, { schemaVersion: 5, providerHistoryProjectionVersion: 3,
+    summary: 'Continue the accepted task using recorded decisions.', summaryKind: 'conversation', compactionId: item.id,
+    summaryDigest: digest('c'), checkpointDigest: digest('d'), shadowedItemCount: 7,
+    tokenCountKind: 'estimated', tokenEstimatorVersion: 1, auto,
+    createdAt: '2026-07-22T00:00:00Z', finishedAt: '2026-07-22T00:00:00Z' })
+  delete item.assistantProseExcluded
+  if (!auto) delete item.taskContinuation
+  return event
+}
+
+const compactionLifecycleKinds = ['compaction_started', 'compaction_completed', 'compaction_failed'] as const
+
+function conversationCompactionLifecycleEvent(
+  kind: typeof compactionLifecycleKinds[number], auto = false
+): Record<string, unknown> {
+  const itemEvent = conversationCompactionItemEvent(auto)
+  const item = itemEvent.item as Record<string, unknown>
+  const event: Record<string, unknown> = {
+    seq: 43, kind, timestamp: itemEvent.timestamp, threadId: item.threadId, turnId: item.turnId,
+    itemId: item.id, compactionId: item.compactionId, schemaVersion: 3, auto
+  }
+  if (kind === 'compaction_started') return { ...event, startedAt: item.createdAt }
+  if (kind === 'compaction_failed') return { ...event, finishedAt: item.finishedAt, reasonCode: 'summary_unavailable' }
+  for (const key of ['summary', 'replacedTokens', 'pinnedConstraints', 'sourceDigest', 'digestMarker', 'sourceItemIds',
+    'summaryKind', 'summaryDigest', 'checkpointDigest', 'shadowedItemCount', 'tokenCountKind', 'tokenEstimatorVersion',
+    'createdAt', 'finishedAt', 'reasoningExcluded', 'reasoningExclusionProof']) event[key] = item[key]
+  event.turn = {
+    id: item.turnId, threadId: item.threadId, status: 'completed', prompt: '/compact',
+    createdAt: item.createdAt, startedAt: item.createdAt, finishedAt: item.finishedAt, items: [item],
+    steering: [], attachmentIds: [], activeSkillIds: [], injectedMemoryIds: []
+  }
+  return event
+}
+
 function caseCompactionItemEvent(): Record<string, unknown> {
   const timestamp = '2026-07-22T00:00:00.000Z'
   return {
@@ -135,7 +167,7 @@ function caseCompactionCompletedEvent(): Record<string, unknown> {
 }
 
 function frame(event: Record<string, unknown>): string {
-  return `id: 41\nevent: item_completed\ndata: ${JSON.stringify(event)}`
+  return `id: ${String(event.seq)}\nevent: ${String(event.kind)}\ndata: ${JSON.stringify(event)}`
 }
 
 describe('public automatic compaction projection', () => {
@@ -200,6 +232,8 @@ describe('public automatic compaction projection', () => {
     const completion = caseCompactionCompletedEvent()
     completion.itemId = 'private-item'
     expect(isClosedPublicRuntimeSseEvent(completion)).toBe(false)
+    expect(projectPublicRuntimeSseBlock(frame(completion), 'thread-case-compaction',
+      new PublicRuntimeEventFilter())).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
 
     for (const mutate of [
       (event: Record<string, unknown>) => { event.summary = 'case history compacted' },
@@ -214,6 +248,58 @@ describe('public automatic compaction projection', () => {
       const invalid = caseCompactionCompletedEvent()
       mutate(invalid)
       expect(isClosedPublicRuntimeSseEvent(invalid)).toBe(false)
+    }
+  })
+})
+
+
+describe('public V3 compaction lifecycle', () => {
+  it.each(compactionLifecycleKinds)('admits the schema-bound %s identity', kind => {
+    for (const auto of [false, true]) {
+      const event = conversationCompactionLifecycleEvent(kind, auto)
+      expect(CompactionEvent.safeParse(event).success).toBe(true)
+      expect(projectPublicRuntimeSseBlock(frame(event), String(event.threadId),
+        new PublicRuntimeEventFilter())).toEqual({ status: 'emit', seq: event.seq, event })
+    }
+  })
+
+  it.each(compactionLifecycleKinds)('rejects missing, mismatched or unsafe %s identity', kind => {
+    const mutations: Array<[string, (event: Record<string, unknown>) => void]> = [
+      ['missing itemId', event => { delete event.itemId }],
+      ['mismatched compactionId', event => { event.compactionId = 'other-compaction' }],
+      ['unsafe turnId', event => {
+        event.turnId = 'invalid turn id'
+        if (event.turn) {
+          const turn = event.turn as Record<string, unknown>
+          turn.id = event.turnId
+          ;(turn.items as Array<Record<string, unknown>>)[0].turnId = event.turnId
+        }
+      }]
+    ]
+    for (const [label, mutate] of mutations) {
+      const event = conversationCompactionLifecycleEvent(kind)
+      mutate(event)
+      if (label === 'unsafe turnId') expect(CompactionEvent.safeParse(event).success).toBe(true)
+      expect(projectPublicRuntimeSseBlock(frame(event), String(event.threadId),
+        new PublicRuntimeEventFilter()), label).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+    }
+  })
+
+  it('rejects a schema-valid unsafe operation item identity', () => {
+    const event = conversationCompactionLifecycleEvent('compaction_started')
+    event.itemId = event.compactionId = 'invalid item id'
+    expect(CompactionEvent.safeParse(event).success).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame(event), String(event.threadId),
+      new PublicRuntimeEventFilter())).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+  })
+
+  it('rejects completion without its exact committed summary turn', () => {
+    for (const omitTurn of [false, true]) {
+      const event = conversationCompactionLifecycleEvent('compaction_completed')
+      if (omitTurn) delete event.turn
+      else (event.turn as Record<string, unknown>).items = []
+      expect(projectPublicRuntimeSseBlock(frame(event), String(event.threadId),
+        new PublicRuntimeEventFilter())).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
     }
   })
 })
