@@ -862,9 +862,17 @@ body.is-resizing .card {
 }
 
 .btn.primary {
-  border-color: rgba(31, 111, 235, 0.26);
-  background: rgba(31, 111, 235, 0.12);
-  color: rgba(31, 111, 235, 0.96);
+  border-color: var(--color-accent, #3659ef);
+  background: var(--color-accent, #3659ef);
+  color: var(--color-on-accent, #ffffff);
+}
+
+.btn.primary:hover {
+  background: color-mix(in srgb, var(--color-accent, #3659ef) 96%, black);
+}
+
+.btn.primary:active {
+  background: color-mix(in srgb, var(--color-accent, #3659ef) 92%, black);
 }
 
 .btn.ghost {

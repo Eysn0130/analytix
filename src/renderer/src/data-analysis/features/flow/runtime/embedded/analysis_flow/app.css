@@ -1308,9 +1308,17 @@ body [contenteditable="plaintext-only"] {
 }
 
 .drillBtn.primary {
-  border-color: rgba(31, 111, 235, 0.4);
-  background: linear-gradient(180deg, rgba(31, 111, 235, 0.18), rgba(31, 111, 235, 0.12));
-  color: rgba(31, 111, 235, 0.95);
+  border-color: var(--color-accent, #3659ef);
+  background: var(--color-accent, #3659ef);
+  color: var(--color-on-accent, #ffffff);
+}
+
+.drillBtn.primary:hover {
+  background: color-mix(in srgb, var(--color-accent, #3659ef) 96%, black);
+}
+
+.drillBtn.primary:active {
+  background: color-mix(in srgb, var(--color-accent, #3659ef) 92%, black);
 }
 
 .drillBtn.ghost {

@@ -251,8 +251,8 @@ summary,
 }
 
 [data-theme='dark'] .write-codemirror-host > .cm-editor {
-  --write-selection-bg: rgba(111, 176, 232, 0.58);
-  --write-selection-text: #f8fbff;
+  --write-selection-bg: var(--ax-selection);
+  --write-selection-text: var(--ds-text);
 }
 
 .write-markdown-preview {
@@ -526,7 +526,7 @@ summary,
 .cm-write-md-task input {
   width: 1.02em;
   height: 1.02em;
-  accent-color: var(--ds-accent);
+  accent-color: var(--ax-accent-text);
   cursor: pointer;
 }
 
@@ -628,7 +628,7 @@ summary,
 }
 
 .cm-write-live-preview .cm-write-md-codeblock-copy[data-copied='true'] {
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
 }
 
 .cm-write-live-preview .cm-write-md-codeblock-copy[data-copy-failed='true'] {
@@ -835,7 +835,7 @@ html[data-theme='dark'] .cm-write-md-code-block-html > pre span {
 }
 
 .write-inline-agent-block-item.is-active {
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
   background: color-mix(in srgb, var(--ds-accent) 12%, transparent);
 }
 
@@ -869,7 +869,7 @@ html[data-theme='dark'] .cm-write-md-code-block-html > pre span {
 
 .write-inline-agent-format:hover {
   background: color-mix(in srgb, var(--ds-accent) 12%, transparent);
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
 }
 
 .write-inline-agent-actions {
@@ -975,7 +975,7 @@ html[data-theme='dark'] .cm-write-md-code-block-html > pre span {
 
 .write-inline-agent-secondary:hover {
   background: color-mix(in srgb, var(--ds-accent) 10%, var(--ds-card));
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
   transform: translateY(-1px);
 }
 
@@ -995,7 +995,7 @@ html[data-theme='dark'] .cm-write-md-code-block-html > pre span {
   border: 1px solid color-mix(in srgb, var(--ds-accent) 84%, transparent);
   border-radius: 12px;
   background: var(--ds-accent);
-  color: white;
+  color: var(--ax-on-primary);
   box-shadow: 0 10px 22px color-mix(in srgb, var(--ds-accent) 22%, transparent);
   transition: filter 140ms ease, transform 140ms ease, opacity 140ms ease;
 }
@@ -1339,7 +1339,7 @@ html[data-theme='dark'] .cm-write-md-code-block-html > pre span {
 
 .write-html-embed-action:hover {
   color: var(--ds-text);
-  border-color: var(--ds-accent);
+  border-color: var(--ax-accent-text);
 }
 
 .write-html-embed-body {
@@ -1372,7 +1372,7 @@ html[data-theme='dark'] .cm-write-md-code-block-html > pre span {
   height: 52px;
   border-radius: 9999px;
   font-size: 18px;
-  color: #fff;
+  color: var(--ax-on-primary);
   background: var(--ds-accent);
   box-shadow: 0 10px 26px color-mix(in srgb, var(--ds-accent) 35%, transparent);
   transition: transform 140ms ease;

@@ -27,6 +27,42 @@ async function flushThemeMutation(): Promise<void> {
 }
 
 describe("embedded flow display theme ownership", () => {
+  it("forwards only the controlled root button foreground and observes its lifecycle", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--ax-on-primary", "#140b02");
+    root.style.setProperty("--private-unrelated-value", "not-forwarded");
+    const { surface, target } = createSurfaceFrame();
+    surface.style.setProperty("--ax-on-primary", "#ffffff");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("#140b02");
+    expect(target.style.getPropertyValue("--ax-on-primary")).toBe("");
+    expect(target.style.getPropertyValue("--private-unrelated-value")).toBe("");
+    root.style.setProperty("--ax-on-primary", "#2b1a08");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("#2b1a08");
+    root.style.removeProperty("--ax-on-primary");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("");
+    root.style.setProperty("--ax-on-primary", "#ffffff");
+    await flushThemeMutation();
+    cleanups.splice(0).forEach((cleanup) => cleanup());
+    root.style.setProperty("--ax-on-primary", "#140b02");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("#ffffff");
+  });
+
+  it.each(["var(--unrelated)", "url(https://invalid.example/value)", "red", "#fff"])(
+    "does not forward a non-palette expression %s as a button foreground", async (value) => {
+      const root = document.documentElement;
+      root.style.setProperty("--ax-on-primary", "#140b02");
+      const { target } = createSurfaceFrame();
+      expect(target.style.getPropertyValue("--color-on-accent")).toBe("#140b02");
+      root.style.setProperty("--ax-on-primary", value);
+      await flushThemeMutation();
+      expect(target.style.getPropertyValue("--color-on-accent")).toBe("");
+    },
+  );
+
   it("uses the independent surface theme rather than the desktop root", async () => {
     applyTheme("dark", document.documentElement);
     const { surface, target } = createSurfaceFrame();

@@ -165,7 +165,7 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                     onClick={() => setScopeFilter(scope)}
                     className={`rounded-lg px-2 py-1 font-medium transition ${
                       scopeFilter === scope
-                        ? 'bg-ds-ink text-ds-main'
+                        ? 'bg-accent-soft text-accent'
                         : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
                     }`}
                   >
@@ -176,7 +176,7 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
               <button
                 type="button"
                 onClick={beginCreate}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-ds-ink px-2.5 py-1.5 text-[12px] font-semibold text-ds-main transition hover:opacity-85"
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
               >
                 <Plus className="h-3.5 w-3.5" strokeWidth={2} />
                 {t('memoryCreate')}
@@ -246,7 +246,7 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                     type="button"
                     onClick={() => void saveDraft()}
                     disabled={!draft.content.trim() || editor.current.workspace !== workspace}
-                    className="rounded-lg bg-ds-ink px-2.5 py-1 text-[12px] font-semibold text-ds-main transition hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-45"
+                    className="rounded-lg px-2.5 py-1 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
                   >
                     {t('memorySave')}
                   </button>

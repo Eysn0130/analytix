@@ -578,7 +578,7 @@ export function createNavigationActions(
         })()
         const needsInitialSetup = readiness.kind === 'setup'
         const needsProviderRecovery = readiness.kind === 'recovery'
-        applyTheme(settings.theme)
+        applyTheme(settings.theme, settings.accentColor)
         applyUiFontScale(settings.uiFontScale)
         applyMotionPreference(settings.motionPreference)
         applyCursorSpotlight(settings.cursorSpotlight !== false)

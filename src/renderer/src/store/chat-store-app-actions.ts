@@ -26,7 +26,7 @@ type CreateAppActionsOptions = {
   fallbackComposerModel: (pickList: readonly string[], runtimeDefault: string) => string
   getComposerModelLoadPromise: () => Promise<void> | null
   setComposerModelLoadPromise: (promise: Promise<void> | null) => void
-  applyTheme: (theme: AppSettingsV1['theme']) => void
+  applyTheme: (theme: AppSettingsV1['theme'], accentColor?: AppSettingsV1['accentColor']) => void
   applyUiFontScale: (scale: AppSettingsV1['uiFontScale']) => void
   applyMotionPreference: (preference: AppSettingsV1['motionPreference']) => void
   applyCursorSpotlight: (enabled: boolean) => void
@@ -274,7 +274,7 @@ export function createAppActions(options: CreateAppActionsOptions): Pick<
       if (typeof window.analytix === 'undefined') return
       const settings = await rendererRuntimeClient.getSettings({ forceRefresh: true })
       const workspaceRoot = normalizeWorkspaceRoot(settings.workspaceRoot)
-      applyTheme(settings.theme)
+      applyTheme(settings.theme, settings.accentColor)
       applyUiFontScale(settings.uiFontScale)
       applyMotionPreference(settings.motionPreference)
       applyCursorSpotlight(settings.cursorSpotlight !== false)

@@ -579,7 +579,7 @@ export function ConnectPhoneView({
                     type="button"
                     onClick={() => void connectTelegramBot()}
                     disabled={saving || hasExistingChannel}
-                    className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-[10px] bg-[#222323] px-3.5 py-2 text-[12.5px] font-semibold text-white shadow-sm transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-55 dark:bg-white dark:text-black"
+                    className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-[10px] px-3.5 py-2 text-[12.5px] font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
                   >
                     {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.9} /> : <Send className="h-3.5 w-3.5" strokeWidth={1.9} />}
                     {saving ? t('connectPhoneTelegramConnecting') : t('connectPhoneTelegramConnect')}
@@ -605,7 +605,7 @@ export function ConnectPhoneView({
                     type="button"
                     onClick={() => void startOfficialInstallQr()}
                     disabled={hasExistingChannel}
-                    className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-xl bg-[#222323] px-3.5 py-2 text-[12.5px] font-semibold text-white shadow-sm transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-55 dark:bg-white dark:text-black"
+                    className="inline-flex min-h-[36px] items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-[12.5px] font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
                   >
                     {t('connectPhoneGenerateQr')}
                   </button>
@@ -1306,7 +1306,7 @@ export function ConnectPhoneSidebarPanel({
                   type="button"
                   onClick={() => void connectTelegramBot()}
                   disabled={saving}
-                  className="inline-flex min-h-[32px] w-full items-center justify-center gap-1.5 rounded-[8px] bg-[#222323] px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-black"
+                  className="inline-flex min-h-[32px] w-full items-center justify-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
                 >
                   {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} /> : <Send className="h-3.5 w-3.5" strokeWidth={1.8} />}
                   {saving ? t('connectPhoneTelegramConnecting') : t('connectPhoneTelegramConnect')}
@@ -1333,7 +1333,7 @@ export function ConnectPhoneSidebarPanel({
                   <button
                     type="button"
                     onClick={() => void startOfficialInstallQr()}
-                    className="inline-flex min-h-[32px] items-center justify-center gap-1.5 rounded-[8px] bg-[#222323] px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:bg-black dark:bg-white dark:text-black"
+                    className="inline-flex min-h-[32px] items-center justify-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] font-semibold shadow-sm transition bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
                   >
                     {t('connectPhoneGenerateQr')}
                   </button>

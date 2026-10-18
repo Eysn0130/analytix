@@ -131,7 +131,7 @@ export function SettingsCard({
 }): ReactElement {
   return (
     <section
-      className={`rounded-2xl border border-ds-border bg-ds-card/95 shadow-sm shadow-black/5 dark:shadow-black/25 ${className}`}
+      className={`ax-settings-card rounded-2xl border border-ds-border bg-ds-card/95 shadow-sm shadow-black/5 dark:shadow-black/25 ${className}`}
     >
       <div className="border-b border-ds-border-muted px-5 py-3">
         <h2 className="text-[16px] font-semibold text-ds-ink">{title}</h2>
@@ -163,7 +163,7 @@ export function SettingRow({
 
   return (
     <div
-      className={`flex flex-wrap gap-3 px-3 py-4 ${
+      className={`ax-settings-row flex flex-wrap gap-3 px-3 py-4 ${
         wideControl
           ? 'flex-col sm:gap-3.5'
           : 'flex-col sm:flex-row sm:items-start sm:justify-between sm:gap-8'
@@ -344,7 +344,7 @@ export function Toggle({
       onClick={() => {
         if (!disabled) onChange(!checked)
       }}
-      className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-out ${
+      className={`ax-settings-toggle relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-out ${
         checked ? 'bg-accent' : 'bg-ds-faint'
       } ${disabled ? 'cursor-not-allowed opacity-60' : 'active:scale-[0.98]'}`}
     >

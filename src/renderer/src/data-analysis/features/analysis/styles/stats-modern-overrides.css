@@ -777,7 +777,7 @@
 }
 
 .stats-react-shell .app.ui-classic-refined .treeSwitchChip.active {
-  color: var(--color-bg);
+  color: var(--ax-on-primary);
 }
 
 .stats-react-shell .app.ui-classic-refined .treeSwitchChip:hover:not(.active) {
@@ -903,7 +903,7 @@
 .stats-react-shell .app.ui-classic-refined .qBtn.active {
   border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 84%, var(--color-border));
   background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
-  color: var(--color-bg);
+  color: var(--ax-on-primary);
   box-shadow: var(--sidebar-segment-active-shadow);
 }
 
@@ -1829,7 +1829,7 @@
 }
 
 .statsDateEditorPopover {
-  --stats-datepicker-on-accent: #fcfcfc;
+  --stats-datepicker-on-accent: var(--ax-on-primary);
   --stats-datepicker-border: var(--left-control-border, #dddddd);
   --stats-datepicker-text: var(--sidebar-nav-active-text, var(--color-text, #0d0d0d));
   --stats-datepicker-muted: var(--color-text-muted, #5d5d5d);
@@ -1837,8 +1837,8 @@
   --stats-datepicker-surface-muted: var(--sidebar-surface, #f3f3f3);
   --stats-datepicker-hover: var(--sidebar-hover, #ebebeb);
   --stats-datepicker-range: var(--sidebar-nav-active-bg, #ebebeb);
-  --stats-datepicker-accent-start: var(--sidebar-segment-active-start, #0d0d0d);
-  --stats-datepicker-accent-end: var(--sidebar-segment-active-end, #0d0d0d);
+  --stats-datepicker-accent-start: var(--ax-primary);
+  --stats-datepicker-accent-end: var(--ax-primary);
   position: fixed;
   top: 0;
   left: 0;
@@ -2179,7 +2179,7 @@
 .stats-react-shell .stats-page-topbar__content .quickSwitchChip.active,
 .stats-react-shell .txnModal .quickSwitchChip.active,
 .stats-react-shell .txnModal .quickSwitchChip.workbench-ui-segmented__option--active {
-  color: var(--color-bg);
+  color: var(--ax-on-primary);
 }
 
 .stats-react-shell .app.ui-classic-refined .quickSwitchChip:hover:not(.active),
@@ -2385,7 +2385,7 @@
 
 .statsDateEditorPopover[data-theme="dark"],
 .data-analysis-surface[data-theme="dark"] .statsDateEditorPopover {
-  --stats-datepicker-on-accent: #181818;
+  --stats-datepicker-on-accent: var(--ax-on-primary);
   --stats-datepicker-border: var(--color-border, #383838);
   --stats-datepicker-text: var(--color-text, #ececec);
   --stats-datepicker-muted: var(--color-text-muted, #b4b4b4);
@@ -2393,8 +2393,8 @@
   --stats-datepicker-surface-muted: color-mix(in oklab, var(--color-bg-elevated, #212121) 88%, var(--color-bg-subtle, #2f2f2f));
   --stats-datepicker-hover: color-mix(in oklab, var(--color-accent, #ececec) 12%, var(--color-bg-subtle, #2f2f2f));
   --stats-datepicker-range: color-mix(in oklab, var(--color-accent, #ececec) 18%, var(--color-bg-elevated, #212121));
-  --stats-datepicker-accent-start: color-mix(in oklab, var(--color-accent, #ececec) 88%, #ffffff 12%);
-  --stats-datepicker-accent-end: color-mix(in oklab, var(--color-accent-strong, #ececec) 86%, var(--color-accent, #ececec));
+  --stats-datepicker-accent-start: var(--ax-primary);
+  --stats-datepicker-accent-end: var(--ax-primary);
   border-color: var(--stats-datepicker-border);
   background: var(--stats-datepicker-surface);
   color: var(--stats-datepicker-text);
@@ -2999,3 +2999,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.stats-react-shell .app.ui-classic-refined .btn.primary:hover:not(:disabled) { background: var(--ax-primary-hover); }
+.stats-react-shell .app.ui-classic-refined .btn.primary:active:not(:disabled) { background: var(--ax-primary-pressed); }

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { atomicWriteFile } from '../../packages/runtime/src/adapters/file/atomic-write'
 import {
+  APP_ACCENT_COLORS,
   DEFAULT_APPROVAL_POLICY,
   analytixRuntimeSettingsEqual,
   defaultAnalytixRuntimeSettings,
@@ -3331,4 +3332,27 @@ it('keeps the derived-config lease until the accepted write and fences an Aâ†’Bâ
     expect(rollbackProjected).toBe(false)
     expect(retained.runtime.model).toBe('same-model')
   } finally { await rm(fixture, { recursive: true, force: true }) }
+})
+
+
+describe('isolated accent settings persistence', () => {
+  it('saves every preset, preserves it through unrelated patches and reopens legacy files', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-settings-accent-'))
+    try {
+      const userDataDir = join(fixture, 'profile')
+      const options = { homeRoot: fixture }
+      const store = new JsonSettingsStore(userDataDir, options)
+      expect((await store.load()).accentColor).toBe('blue')
+      for (const accentColor of APP_ACCENT_COLORS) {
+        await store.patch({ accentColor })
+        await store.patch({ locale: 'en' })
+        expect((await new JsonSettingsStore(userDataDir, options).load()).accentColor).toBe(accentColor)
+      }
+      const path = join(userDataDir, 'analytix-settings.json')
+      const legacy = JSON.parse(await readFile(path, 'utf8')) as AppSettingsV1
+      delete legacy.accentColor
+      await writeFile(path, JSON.stringify(legacy))
+      expect((await new JsonSettingsStore(userDataDir, options).load()).accentColor).toBe('blue')
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  }, 30_000)
 })

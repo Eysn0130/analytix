@@ -721,7 +721,7 @@ export function ScheduleTasksView({
                 onChange={(event) => void toggleKeepAwake(event.target.checked)}
                 className="sr-only"
               />
-              <span className={`relative h-5 w-9 rounded-full transition ${schedule?.keepAwake ? 'bg-ds-ink' : 'bg-ds-border-strong'}`}>
+              <span className={`relative h-5 w-9 rounded-full transition ${schedule?.keepAwake ? 'bg-primary' : 'bg-ds-border-strong'}`}>
                 <span className={`absolute top-0.5 h-4 w-4 rounded-full shadow transition ${schedule?.keepAwake ? 'left-[18px] bg-[var(--ds-composer-primary-action-fg)]' : 'left-0.5 bg-ds-card'}`} />
               </span>
             </label>
@@ -827,7 +827,7 @@ export function ScheduleTasksView({
                             onChange={(event) => void updateTask(task.id, { enabled: event.target.checked })}
                             className="sr-only"
                           />
-                          <span className={`relative h-5 w-9 rounded-full transition ${task.enabled ? 'bg-ds-ink' : 'bg-ds-border-strong'}`}>
+                          <span className={`relative h-5 w-9 rounded-full transition ${task.enabled ? 'bg-primary' : 'bg-ds-border-strong'}`}>
                             <span className={`absolute top-0.5 h-4 w-4 rounded-full shadow transition ${task.enabled ? 'left-[18px] bg-[var(--ds-composer-primary-action-fg)]' : 'left-0.5 bg-ds-card'}`} />
                           </span>
                         </label>
@@ -1280,7 +1280,7 @@ function ScheduleTaskDialog({
                       <Power className="h-4 w-4 shrink-0" strokeWidth={1.8} />
                       <span className="truncate">{t('scheduleTaskEnabled')}</span>
                     </span>
-                    <span className={`relative h-5 w-9 shrink-0 rounded-full transition ${draft.enabled ? 'bg-ds-ink' : 'bg-ds-border-strong'}`}>
+                    <span className={`relative h-5 w-9 shrink-0 rounded-full transition ${draft.enabled ? 'bg-primary' : 'bg-ds-border-strong'}`}>
                       <span className={`absolute top-0.5 h-4 w-4 rounded-full shadow transition ${draft.enabled ? 'left-[18px] bg-[var(--ds-composer-primary-action-fg)]' : 'left-0.5 bg-ds-card'}`} />
                     </span>
                   </button>

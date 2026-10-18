@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import {
   DEFAULT_WRITE_INLINE_COMPLETION_BASE_URL,
   DEFAULT_WRITE_WORKSPACE_ROOT,
+  DEFAULT_APP_MOTION_PREFERENCE,
+  DEFAULT_APP_ACCENT_COLOR,
   type AnalytixRuntimeSettingsPatchV1,
   type AppSettingsPatch,
   getAnalytixRuntimeSettings,
@@ -30,9 +32,11 @@ import type { SkillRootListItem } from '@shared/analytix-api'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
 import { useChatStore, type SettingsRouteSection } from '../store/chat-store'
 import { AnalytixLoadingPage } from './brand/AnalytixLoadingPage'
-import { SettingsSidebar, settingsCategoryLabelKey } from './SettingsSidebar'
+import { SettingsSidebar, settingsTabForCategory } from './SettingsSidebar'
 import { adoptPerformanceUsageHostReadback } from './chat/presentation/chat/TurnUsagePanel'
-import { NavigationRail } from './shell/NavigationRail'
+import { Dialog } from '../data-analysis/components/overlay/Dialog'
+import type { ProviderSettingsActions } from './settings-section-providers'
+import './settings-modal.css'
 import { WriteDebugLogModal } from './settings-debug-log'
 import { useSettingsGuiUpdate } from './use-settings-gui-update'
 import {
@@ -81,6 +85,33 @@ type InlineNotice = {
 const SETTINGS_SKILL_ROOTS_STALE_MS = 60_000
 const RUNTIME_CONFIG_STALE_MS = 60_000
 
+// Settings may refresh while a modal draft is open. Submit only the user's
+// changes against its starting snapshot, never stale fields echoed by a read.
+function ordinaryDraftPatch(baseline: AppSettingsV1, draft: AppSettingsV1): AppSettingsPatch {
+  const difference = (before: unknown, after: unknown): unknown => {
+    if (JSON.stringify(before) === JSON.stringify(after)) return undefined
+    if (before && after && typeof before === 'object' && typeof after === 'object' &&
+        !Array.isArray(before) && !Array.isArray(after)) {
+      const patch: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(after)) {
+        const changed = difference((before as Record<string, unknown>)[key], value)
+        if (changed !== undefined) patch[key] = changed
+      }
+      return Object.keys(patch).length ? patch : undefined
+    }
+    return after
+  }
+  const patch = (difference(ordinarySettingsPatch(baseline), ordinarySettingsPatch(draft)) ?? {}) as AppSettingsPatch
+  // Model preferences have their own explicit Provider facade operation.
+  if (patch.provider) {
+    const { modelPreferences: _preferences, ...providerPatch } = patch.provider
+    void _preferences
+    if (Object.keys(providerPatch).length) patch.provider = providerPatch
+    else delete patch.provider
+  }
+  return patch
+}
+
 const DeprecatedHubCompatibilitySection = lazy(async () => {
   const module = await import('./settings-section-account')
   return { default: module.AccountProfileSettingsSection }
@@ -93,9 +124,6 @@ export function SettingsView(): ReactElement {
   const settingsReturnRoute = useChatStore((s) => s.settingsReturnRoute)
   const settingsSection = useChatStore((s) => s.settingsSection)
   const openCode = useChatStore((s) => s.openCode)
-  const openWrite = useChatStore((s) => s.openWrite)
-  const openClaw = useChatStore((s) => s.openClaw)
-  const openSchedule = useChatStore((s) => s.openSchedule)
   const openPlugins = useChatStore((s) => s.openPlugins)
   const applyI18n = useChatStore((s) => s.applyI18nFromSettings)
   const reloadUiSettings = useChatStore((s) => s.reloadUiSettings)
@@ -108,7 +136,17 @@ export function SettingsView(): ReactElement {
   const [category, setCategory] = useState<SettingsCategory>(() => categoryForSettingsSection(settingsSection))
   const previousSettingsSection = useRef<SettingsRouteSection>(settingsSection)
   const providerDraftDirty = useRef(false)
-  const onProviderDraftDirtyChange = useCallback((dirty: boolean): void => { providerDraftDirty.current = dirty }, [])
+  const [providerDirty, setProviderDirty] = useState(false)
+  const providerActionsRef = useRef<ProviderSettingsActions | null>(null)
+  const [providerActions, setProviderActions] = useState<ProviderSettingsActions | null>(null)
+  const onProviderActionsChange = useCallback((actions: ProviderSettingsActions | null): void => {
+    providerActionsRef.current = actions
+    setProviderActions(actions)
+  }, [])
+  const onProviderDraftDirtyChange = useCallback((dirty: boolean): void => {
+    providerDraftDirty.current = dirty
+    setProviderDirty(dirty)
+  }, [])
   const acceptSettingsSection = useCallback((section: SettingsRouteSection): boolean => {
     const selected = categoryForSettingsSection(section)
     if (category === 'providers' && selected !== category && providerDraftDirty.current) {
@@ -136,6 +174,19 @@ export function SettingsView(): ReactElement {
   const [clawWorkspacePickerError, setClawWorkspacePickerError] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveActionPending, setSaveActionPending] = useState(false)
+  const saveActionInFlight = useRef(false)
+  const settingsWritesPending = useRef(0)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const keepEditingRef = useRef<HTMLButtonElement | null>(null)
+  const discardPromptOpener = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (confirmDiscard) keepEditingRef.current?.focus()
+    else if (discardPromptOpener.current?.isConnected) {
+      discardPromptOpener.current.focus({ preventScroll: true })
+      discardPromptOpener.current = null
+    }
+  }, [confirmDiscard])
   const [showRuntimeToken, setShowRuntimeToken] = useState(false)
   const [logPath, setLogPath] = useState('')
   const [logDirOpenError, setLogDirOpenError] = useState<string | null>(null)
@@ -160,13 +211,11 @@ export function SettingsView(): ReactElement {
   const [writeCompletionDebugSelectedId, setWriteCompletionDebugSelectedId] = useState<string | null>(null)
   const [writeDebugLoading, setWriteDebugLoading] = useState(false)
   const [writeDebugError, setWriteDebugError] = useState<string | null>(null)
-  const saveTimer = useRef<ReturnType<Window['setTimeout']> | null>(null)
   const statusTimer = useRef<ReturnType<Window['setTimeout']> | null>(null)
   const draftVersion = useRef(0)
   const acceptedDraftVersion = useRef(0)
   const runtimeRejectedDraftVersion = useRef<number | null>(null)
   const settingsHostReadbackVersion = useRef(0)
-  const settingsNavigationRequest = useRef(0)
   const settingsSaveQueue = useRef<Promise<unknown>>(Promise.resolve())
   const settingsWriteRequest = useRef(0)
   const settingsReadRequest = useRef(0)
@@ -175,6 +224,14 @@ export function SettingsView(): ReactElement {
   const profileIntentRevision = useRef(0)
   const settingsEntryActive = useRef(true)
   const latestForm = useRef<AppSettingsV1 | null>(null)
+  const acceptedSettings = useRef<AppSettingsV1 | null>(null)
+  const settingsFormBaseline = useRef<AppSettingsV1 | null>(null)
+  const lastSubmittedDraft = useRef<{
+    version: number; form: AppSettingsV1; baseline: AppSettingsV1; accepted: AppSettingsV1
+  } | null>(null)
+  const hostRecoveryId = useRef(0)
+  const hostRecoveryPending = useRef(false)
+  const [recoveringHostSettings, setRecoveringHostSettings] = useState(false)
   const memoryWorkspaceEpoch = useRef(0)
   const memoryEntryEpoch = useRef(0)
   const memoryListRequest = useRef(0)
@@ -206,6 +263,7 @@ export function SettingsView(): ReactElement {
     if (notice) showTopNotice({ tone: notice.tone, message: notice.message })
   }, [showTopNotice])
   const formTheme = form?.theme
+  const formAccentColor = form?.accentColor
   const formUiFontScale = form?.uiFontScale
   const formMotionPreference = form?.motionPreference
   const formCursorSpotlight = form?.cursorSpotlight
@@ -269,6 +327,9 @@ export function SettingsView(): ReactElement {
       : rendererRuntimeClient.getSettings({ forceRefresh: true })).then(s => {
       if (!isCurrent()) return
       const next = coerceRendererSettings(s)
+      acceptedSettings.current = next
+      settingsFormBaseline.current = next
+      acceptedDraftVersion.current = loadVersion
       modelPreferencesReadback.current = next.provider.modelPreferences
       applyForm(next)
       adoptPerformanceUsageHostReadback(next)
@@ -282,11 +343,11 @@ export function SettingsView(): ReactElement {
 
   useEffect(() => {
     if (!formTheme || !formUiFontScale) return
-    applyTheme(formTheme)
+    applyTheme(formTheme, formAccentColor)
     applyUiFontScale(formUiFontScale)
     applyMotionPreference(formMotionPreference)
     applyCursorSpotlight(formCursorSpotlight !== false)
-  }, [formTheme, formUiFontScale, formMotionPreference, formCursorSpotlight])
+  }, [formTheme, formAccentColor, formUiFontScale, formMotionPreference, formCursorSpotlight])
 
   // Live-preview the Write editor typography as the form changes, mirroring the
   // theme/scale preview above. Keyed on the scalar fields so it only re-applies
@@ -309,9 +370,9 @@ export function SettingsView(): ReactElement {
       if (!status.rolledBack && status.code !== 'settings_apply_failed') return
       const version = draftVersion.current
       const write = settingsWriteRequest.current
-      const failedForm = latestForm.current
+      const visibleForm = latestForm.current
       const pending = pendingSettingsWrite.current
-      if (!failedForm || (acceptedDraftVersion.current !== version &&
+      if (!visibleForm || (acceptedDraftVersion.current !== version &&
           !(pending?.request === write && pending.version === version))) return
       runtimeRejectedDraftVersion.current = version
       const hostVersion = ++settingsHostReadbackVersion.current
@@ -319,18 +380,32 @@ export function SettingsView(): ReactElement {
       statusTimer.current = null
       setSaveStatus('error')
       setSaveError(t(status.rolledBack && status.code !== 'settings_rollback_failed' ? 'settingsRuntimeRolledBack' : 'settingsRuntimeRollbackFailed'))
+      const submitted = lastSubmittedDraft.current?.version === version ? lastSubmittedDraft.current : null
+      const failedForm = submitted?.form ?? visibleForm
+      if (submitted) {
+        // Keep the original field ownership: Host refreshes were never local
+        // edits, even if the committed readback briefly appeared before rollback.
+        settingsFormBaseline.current = submitted.baseline
+        applyForm(failedForm)
+      }
       if (!status.rolledBack) return
+      if (submitted) acceptedSettings.current = submitted.accepted
+      const recovery = ++hostRecoveryId.current
+      hostRecoveryPending.current = true
+      setRecoveringHostSettings(true)
       void rendererRuntimeClient.readSettingsFromHost().then(s => {
         if (!settingsEntryActive.current || version !== draftVersion.current || write !== settingsWriteRequest.current ||
             hostVersion !== settingsHostReadbackVersion.current || latestForm.current !== failedForm) return
         const accepted = coerceRendererSettings(s)
         rendererRuntimeClient.invalidateSettings()
         modelPreferencesReadback.current = accepted.provider.modelPreferences
-        applyForm({ ...failedForm, runtime: accepted.runtime, provider: accepted.provider,
-          performanceUsageMode: accepted.performanceUsageMode })
-        acceptedDraftVersion.current = version
+        acceptedSettings.current = accepted
         adoptPerformanceUsageHostReadback(accepted)
-      }).catch(() => undefined)
+      }).catch(() => undefined).finally(() => {
+        if (recovery !== hostRecoveryId.current) return
+        hostRecoveryPending.current = false
+        if (settingsEntryActive.current) setRecoveringHostSettings(false)
+      })
     })
   }, [applyForm, t])
 
@@ -340,9 +415,13 @@ export function SettingsView(): ReactElement {
       if (next) {
         settingsHostReadbackVersion.current += 1
         const readback = coerceRendererSettings(next)
+        acceptedSettings.current = readback
         modelPreferencesReadback.current = readback.provider.modelPreferences
         // Host refreshes must not replace a newer local draft waiting for its own save.
-        if (acceptedDraftVersion.current === draftVersion.current) applyForm(readback)
+        if (acceptedDraftVersion.current === draftVersion.current && runtimeRejectedDraftVersion.current !== draftVersion.current) {
+          settingsFormBaseline.current = readback
+          applyForm(readback)
+        }
       }
     }
     window.addEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)
@@ -389,6 +468,8 @@ export function SettingsView(): ReactElement {
       if (category !== 'general') return
       const target = logsSectionRef.current
       if (!target) return
+      const disclosure = target.closest('details')
+      if (disclosure) disclosure.open = true
       const frame = window.requestAnimationFrame(() => {
         target.scrollIntoView({ behavior: 'auto', block: 'start' })
       })
@@ -426,7 +507,7 @@ export function SettingsView(): ReactElement {
     const target = refs[settingsSection]
     if (!target) return
     const frame = window.requestAnimationFrame(() => {
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      target.scrollIntoView({ behavior: 'auto', block: 'start' })
     })
     return () => window.cancelAnimationFrame(frame)
   }, [category, settingsLoaded, settingsSection])
@@ -436,7 +517,6 @@ export function SettingsView(): ReactElement {
     return () => {
       settingsEntryActive.current = false
       draftVersion.current += 1
-      if (saveTimer.current) window.clearTimeout(saveTimer.current)
       if (statusTimer.current) window.clearTimeout(statusTimer.current)
     }
   }, [])
@@ -709,40 +789,45 @@ export function SettingsView(): ReactElement {
       skill: skillSectionRef.current,
       mcp: mcpSectionRef.current
     }
-    refs[target]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    refs[target]?.scrollIntoView({ behavior: 'auto', block: 'start' })
+  }
+
+  const finishSettingsWrite = (): void => {
+    settingsWritesPending.current -= 1
+    if (settingsEntryActive.current && settingsWritesPending.current === 0) {
+      setSaveStatus(current => current === 'saving' ? 'idle' : current)
+    }
   }
 
   const persistSettings = (
     snapshot: AppSettingsV1,
-    version: number,
-    useLatestDraft = false
+    version: number
   ): Promise<AppSettingsV1> => {
-    let savedVersion = version
+    const savedVersion = version
+    settingsWritesPending.current += 1
     let saveRequest = 0
     let saveCompletionHostVersion: number | null = null
     const pending = settingsSaveQueue.current.then(async () => {
       if (!settingsEntryActive.current) throw new Error('Settings entry is no longer current.')
-      if (!useLatestDraft && version !== draftVersion.current) return latestForm.current ?? snapshot
-      const current = useLatestDraft ? latestForm.current ?? snapshot : snapshot
+      if (version !== draftVersion.current) return latestForm.current ?? snapshot
+      const current = snapshot
       if (!hasValidPort(current)) throw new Error('Invalid runtime port.')
-      if (useLatestDraft) {
-        savedVersion = draftVersion.current
-        if (saveTimer.current) window.clearTimeout(saveTimer.current)
-        saveTimer.current = null
-      }
       saveRequest = ++settingsWriteRequest.current
       setSaveStatus('saving')
       setSaveError(null)
       pendingSettingsWrite.current = { request: saveRequest, version: savedVersion }
       const saveHostVersion = settingsHostReadbackVersion.current
       saveCompletionHostVersion = saveHostVersion
-      const patch = ordinarySettingsPatch(current)
+      const baseline = settingsFormBaseline.current ?? current
+      const patch = ordinaryDraftPatch(baseline, current)
+      lastSubmittedDraft.current = { version: savedVersion, form: current, baseline,
+        accepted: acceptedSettings.current ?? baseline }
       const profiles = getAnalytixRuntimeSettings(current).subagents.profiles
       const deletionIntents = new Map(profileDeletionIntents.current)
       const removedProfiles = Object.fromEntries([...deletionIntents.keys()]
         .filter(name => !Object.hasOwn(profiles, name)).map(name => [name, null]))
-      patch.runtime = { ...patch.runtime, subagents: { ...patch.runtime?.subagents,
-        profiles: { ...profiles, ...removedProfiles } } }
+      if (Object.keys(removedProfiles).length) patch.runtime = { ...patch.runtime, subagents: { ...patch.runtime?.subagents,
+        profiles: { ...patch.runtime?.subagents?.profiles, ...removedProfiles } } }
       const next = coerceRendererSettings(await rendererRuntimeClient.setSettings(patch))
       if (!settingsEntryActive.current || saveHostVersion !== settingsHostReadbackVersion.current) return next
       for (const [name, intent] of deletionIntents) {
@@ -750,6 +835,9 @@ export function SettingsView(): ReactElement {
             profileDeletionIntents.current.get(name) === intent) profileDeletionIntents.current.delete(name)
       }
       modelPreferencesReadback.current = next.provider.modelPreferences
+      acceptedSettings.current = next
+      settingsFormBaseline.current = next
+      adoptPerformanceUsageHostReadback(next)
       if (savedVersion !== draftVersion.current) return next
       applyForm(next)
       emitRendererSettingsChanged(next)
@@ -771,177 +859,195 @@ export function SettingsView(): ReactElement {
     }).catch((error: unknown) => {
       if (settingsEntryActive.current && savedVersion === draftVersion.current &&
           (saveCompletionHostVersion === null || saveCompletionHostVersion === settingsHostReadbackVersion.current)) {
-        const message = error instanceof Error ? error.message : String(error)
-        setSaveError(message)
+        setSaveError(t('settingsSaveFailed'))
         setSaveStatus('error')
-        void window.analytix?.logs?.error?.('settings', 'Failed to apply settings', { message }).catch(() => undefined)
+        void window.analytix?.logs?.error?.('settings', 'Failed to apply settings', { code: 'SETTINGS_APPLY_FAILED' }).catch(() => undefined)
         const failedForm = latestForm.current
         const failedHostReadbackVersion = settingsHostReadbackVersion.current
         // Read the Host directly: recovery must neither hold the save queue nor overwrite its query cache.
-        if (saveRequest !== 0) void (async () => {
-          try {
-            const accepted = coerceRendererSettings(await rendererRuntimeClient.readSettingsFromHost())
-            if (settingsEntryActive.current && saveRequest === settingsWriteRequest.current &&
-                savedVersion === draftVersion.current &&
-                failedHostReadbackVersion === settingsHostReadbackVersion.current &&
-                failedForm && latestForm.current === failedForm) {
-              // Failed IPC may follow a Host commit: retire stale cached settings only for this current recovery.
-              rendererRuntimeClient.invalidateSettings()
-              // Recover this display preference only; keep unrelated native draft behavior and the save error.
-              applyForm({ ...failedForm, performanceUsageMode: accepted.performanceUsageMode })
-              adoptPerformanceUsageHostReadback(accepted)
-            }
-          } catch { /* Host readback unavailable: keep the pending UI choice and existing error. */ }
-        })()
+        if (saveRequest !== 0) {
+          const recovery = ++hostRecoveryId.current
+          hostRecoveryPending.current = true
+          setRecoveringHostSettings(true)
+          void (async () => {
+            try {
+              const accepted = coerceRendererSettings(await rendererRuntimeClient.readSettingsFromHost())
+              if (settingsEntryActive.current && saveRequest === settingsWriteRequest.current &&
+                  savedVersion === draftVersion.current &&
+                  failedHostReadbackVersion === settingsHostReadbackVersion.current &&
+                  failedForm && latestForm.current === failedForm) {
+                // Failed IPC may follow a Host commit: retire stale cached settings only for this current recovery.
+                rendererRuntimeClient.invalidateSettings()
+                // Recover accepted preview values while retaining the failed form and its error.
+                acceptedSettings.current = accepted
+                adoptPerformanceUsageHostReadback(accepted)
+              }
+            } catch { /* Keep the last accepted preview and the failed local draft. */ }
+          })().finally(() => {
+            if (recovery !== hostRecoveryId.current) return
+            hostRecoveryPending.current = false
+            if (settingsEntryActive.current) setRecoveringHostSettings(false)
+          })
+        }
       }
       throw error
     })
     // A failed write is drained; it cannot poison the next normal save.
     const retireWrite = (): void => {
+      finishSettingsWrite()
       if (pendingSettingsWrite.current?.request === saveRequest) pendingSettingsWrite.current = null
     }
     settingsSaveQueue.current = pending.then(retireWrite, retireWrite)
     return pending
   }
 
+  // Provider model preferences are an explicit, independent facade action. Save
+  // only that patch so a Registry readback cannot commit unrelated form drafts.
   const saveModelPreferences = (partial: SettingsPatch): Promise<AppSettingsV1> => {
-    const current = latestForm.current
-    if (!current || !settingsEntryActive.current) return Promise.reject(new Error('Settings entry is unavailable.'))
-    const next = mergeSettings(current, partial)
-    draftVersion.current += 1
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    if (statusTimer.current) window.clearTimeout(statusTimer.current)
-    saveTimer.current = null
-    statusTimer.current = null
-    applyForm(next)
-    return persistSettings(next, draftVersion.current, true)
-  }
-
-  const scheduleSave = (next: AppSettingsV1): void => {
-    draftVersion.current += 1
-    const version = draftVersion.current
-
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    if (statusTimer.current) window.clearTimeout(statusTimer.current)
-    statusTimer.current = null
-    setSaveError(null)
-
-    if (!hasValidPort(next)) {
-      setSaveStatus('idle')
-      return
+    if (!latestForm.current || !settingsEntryActive.current) {
+      return Promise.reject(new Error('Settings entry is unavailable.'))
     }
-
+    settingsWritesPending.current += 1
     setSaveStatus('saving')
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null
-      void persistSettings(next, version).catch(() => undefined)
-    }, 450)
-  }
-
-  const flushPendingSave = async (): Promise<number | null> => {
-    const current = latestForm.current
-    const version = draftVersion.current
-    if (!current) return version
-    if (!hasValidPort(current)) return null
-    if (acceptedDraftVersion.current === version) return version
-    if (runtimeRejectedDraftVersion.current === version) return null
-
-    if (saveTimer.current) {
-      window.clearTimeout(saveTimer.current)
-      saveTimer.current = null
-    }
-    if (statusTimer.current) {
-      window.clearTimeout(statusTimer.current)
-      statusTimer.current = null
-    }
-
-    try {
-      await persistSettings(current, version)
-    } catch {
-      // persistSettings retains the current error and draft; another explicit action can retry.
-      return null
-    }
-    return settingsEntryActive.current && version === draftVersion.current &&
-      acceptedDraftVersion.current === version ? version : null
-  }
-
-  const leaveSettings = (leave: () => void | Promise<void>, reload = true): void => {
-    if (providerDraftDirty.current) {
-      showTopNotice({ tone: 'info', message: t('modelProviderUnsavedChanges') })
-      return
-    }
-    const request = ++settingsNavigationRequest.current
-    let version: number | null = null
-    const current = (): boolean => settingsEntryActive.current && request === settingsNavigationRequest.current &&
-      version !== null && version === draftVersion.current
-    void (async () => {
-      version = await flushPendingSave()
-      if (!current()) return
-      if (reload) await reloadUiSettings()
-      if (!current()) return
-      await leave()
-    })().catch((error: unknown) => {
-      if (!current()) return
-      // The draft is already saved; a failed departure must not masquerade as a save failure.
-      showTopNotice({ tone: 'error', message: error instanceof Error ? error.message : String(error) })
+    const pending = settingsSaveQueue.current.then(async () => {
+      if (!settingsEntryActive.current) throw new Error('Settings entry is no longer current.')
+      const hostVersion = settingsHostReadbackVersion.current
+      const next = coerceRendererSettings(await rendererRuntimeClient.setSettings(ordinarySettingsPatch(partial)))
+      if (!settingsEntryActive.current || hostVersion !== settingsHostReadbackVersion.current) return next
+      acceptedSettings.current = next
+      modelPreferencesReadback.current = next.provider.modelPreferences
+      if (acceptedDraftVersion.current === draftVersion.current) {
+        settingsFormBaseline.current = next
+        applyForm(next)
+      }
+      else if (latestForm.current) applyForm(mergeSettings(latestForm.current, {
+        provider: { modelPreferences: next.provider.modelPreferences }
+      }))
+      emitRendererSettingsChanged(next)
+      setSaveStatus('idle')
+      return next
+    }).catch((error: unknown) => {
+      if (settingsEntryActive.current) {
+        setSaveStatus('error')
+        setSaveError(t('settingsSaveFailed'))
+      }
+      throw error
     })
+    settingsSaveQueue.current = pending.then(finishSettingsWrite, finishSettingsWrite)
+    return pending
+  }
+
+  const markDraftChanged = (): void => {
+    draftVersion.current += 1
+    if (statusTimer.current) window.clearTimeout(statusTimer.current)
+    statusTimer.current = null
+    setSaveStatus('idle')
+    setSaveError(null)
+  }
+
+  const restorePreview = (settings: AppSettingsV1): void => {
+    applyTheme(settings.theme, settings.accentColor)
+    applyUiFontScale(settings.uiFontScale)
+    applyMotionPreference(settings.motionPreference)
+    applyCursorSpotlight(settings.cursorSpotlight !== false)
+    applyWriteTypography(settings.write.typography)
+    adoptPerformanceUsageHostReadback(settings)
+    void applyI18n(settings.locale)
+  }
+
+  const saving = saveActionPending || recoveringHostSettings || saveStatus === 'saving' || providerActions?.busy === true
+  const ordinaryDraftDirty = acceptedDraftVersion.current !== draftVersion.current || runtimeRejectedDraftVersion.current === draftVersion.current
+  const hasUnsavedChanges = ordinaryDraftDirty || providerDirty || providerActions?.dirty === true
+
+  const discardAndClose = (): void => {
+    // A dispatched write cannot be cancelled. Keep the modal open until it
+    // settles, and fence every queued/read callback before leaving.
+    if (saveActionInFlight.current || settingsWritesPending.current > 0 || hostRecoveryPending.current || providerActionsRef.current?.busy) return
+    providerActionsRef.current?.discard()
+    settingsEntryActive.current = false
+    draftVersion.current += 1
+    settingsReadRequest.current += 1
+    profileDeletionIntents.current.clear()
+    if (statusTimer.current) window.clearTimeout(statusTimer.current)
+    statusTimer.current = null
+    if (acceptedSettings.current) restorePreview(acceptedSettings.current)
+    setRoute(settingsReturnRoute)
   }
 
   const goBack = (): void => {
-    leaveSettings(async () => {
-      if (settingsReturnRoute === 'write') {
-        await openWrite()
-        return
-      }
-      if (settingsReturnRoute === 'claw') {
-        openClaw()
-        return
-      }
-      if (settingsReturnRoute === 'schedule') {
-        openSchedule()
-        return
-      }
-      if (settingsReturnRoute === 'plugins') {
-        setRoute('plugins')
-        return
-      }
-      await openCode()
-    }, latestForm.current !== null)
+    if (saving || saveActionInFlight.current || settingsWritesPending.current > 0 || hostRecoveryPending.current || providerActionsRef.current?.busy) return
+    if (confirmDiscard) { setConfirmDiscard(false); return }
+    if (hasUnsavedChanges) {
+      discardPromptOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      setConfirmDiscard(true)
+      return
+    }
+    discardAndClose()
   }
 
-  const navigateFromSettings = (destination: 'chat' | 'plugins' | 'schedule'): void => {
-    leaveSettings(async () => {
-      if (destination === 'plugins') openPlugins()
-      else if (destination === 'schedule') openSchedule()
-      else await openCode()
-    })
+  const savePreferences = async (): Promise<void> => {
+    if (saveActionInFlight.current || settingsWritesPending.current > 0 || hostRecoveryPending.current || providerActionsRef.current?.busy) return
+    const current = latestForm.current
+    if (!current || !hasValidPort(current)) return
+    saveActionInFlight.current = true
+    setSaveActionPending(true)
+    setSaveError(null)
+    const retryRejectedDraft = runtimeRejectedDraftVersion.current === draftVersion.current
+    runtimeRejectedDraftVersion.current = null
+    let submittedVersion: number | null = null
+    try {
+      // Registry/SecretStore remains the sole credential authority. Its facade
+      // owns key preservation and readback; ordinary settings never receive keys.
+      const actions = providerActionsRef.current
+      if (actions?.dirty && !await actions.save()) {
+        // A nested provider editor may still need Apply. The provider owns its
+        // precise error or pending message; false never means discard or close.
+        setSaveStatus('idle')
+        return
+      }
+      const snapshot = latestForm.current
+      if (snapshot && (acceptedDraftVersion.current !== draftVersion.current || retryRejectedDraft)) {
+        const version = draftVersion.current
+        submittedVersion = version
+        await persistSettings(snapshot, version)
+        if (!settingsEntryActive.current || version !== draftVersion.current ||
+            acceptedDraftVersion.current !== version || runtimeRejectedDraftVersion.current === version) return
+      }
+      if (settingsEntryActive.current) setSaveStatus('saved')
+    } catch {
+      // The owning persistence seam keeps the failed draft and error visible.
+      if (settingsEntryActive.current && submittedVersion === null) {
+        setSaveStatus('error')
+        setSaveError(t('settingsSaveFailed'))
+      }
+    } finally {
+      saveActionInFlight.current = false
+      if (settingsEntryActive.current) setSaveActionPending(false)
+    }
   }
 
-  const openProviderSettings = (): void => {
-    leaveSettings(() => { acceptSettingsSection('providers') }, false)
-  }
+  const openProviderSettings = (): void => { acceptSettingsSection('providers') }
 
   if (loadError) {
     const msg =
       loadError === 'PRELOAD_BRIDGE' ? t('preloadBridgeError') : t('settingsReadFailed')
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 bg-ds-main p-6 text-center">
-        <p role="alert" className="max-w-md text-sm text-red-700 dark:text-red-300">{msg}</p>
-        <button type="button" onClick={() => readSettingsForm(true)}
-          className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white">{t('settingsReadRetry')}</button>
-        <button
-          type="button"
-          className="rounded-xl bg-ds-userbubble px-4 py-2 text-sm font-medium text-ds-userbubbleFg"
-          onClick={goBack}
-        >
-          {t('back')}
-        </button>
-      </div>
+      <Dialog open title={t('title')} width={678} className="ax-settings-modal" maskClassName="ax-settings-modal-mask"
+        closeLabel="×" closeAriaLabel={t('settingsClose')} onClose={goBack}>
+        <div className="ax-settings-content flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <p role="alert">{msg}</p>
+          <button type="button" className="ax-settings-save" onClick={() => readSettingsForm(true)}>{t('settingsReadRetry')}</button>
+          <button type="button" className="ax-settings-cancel" onClick={discardAndClose}>{t('settingsCancel')}</button>
+        </div>
+      </Dialog>
     )
   }
 
   if (!form) {
-    return <AnalytixLoadingPage fillParent label={t('loading')} />
+    return <Dialog open title={t('title')} width={678} className="ax-settings-modal" maskClassName="ax-settings-modal-mask"
+      closeLabel="×" closeAriaLabel={t('settingsClose')} onClose={goBack}>
+      <AnalytixLoadingPage fillParent label={t('loading')} />
+    </Dialog>
   }
 
   const analytix = getAnalytixRuntimeSettings(form)
@@ -958,7 +1064,7 @@ export function SettingsView(): ReactElement {
     if (partial.guiUpdate?.channel && partial.guiUpdate.channel !== form.guiUpdate.channel) {
       resetGuiUpdateState()
     }
-    scheduleSave(next)
+    markDraftChanged()
   }
 
   const sharedBaseUrl = provider.baseUrl
@@ -1132,6 +1238,7 @@ export function SettingsView(): ReactElement {
     openPlugins,
     openSettingsSection: requestCategoryChange,
     onProviderDraftDirtyChange,
+    onProviderActionsChange,
     mcpConfigPath,
     mcpConfigExists,
     mcpConfigText,
@@ -1167,86 +1274,80 @@ export function SettingsView(): ReactElement {
     deleteThread
   }
 
-  const saveControls = category !== 'providers' ? <>
-    <span
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      className={`min-w-0 max-w-sm shrink break-words rounded-full px-3 py-1 text-[12px] font-medium ${
-        portError
-          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-200'
-          : saveStatus === 'saved'
-            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
-            : saveStatus === 'error'
-              ? 'bg-red-500/15 text-red-700 dark:text-red-200'
-              : 'bg-ds-subtle text-ds-muted'
-      }`}
-    >
-      {portError
-        ? t('autoApplyBlocked')
-        : saveStatus === 'saving'
-          ? t('applying')
-          : saveStatus === 'saved'
-            ? t('applied')
-            : saveStatus === 'error'
-              ? saveError || t('applyFailed')
-              : t('autoApplyHint')}
-    </span>
-    {saveStatus === 'error' && !portError && acceptedDraftVersion.current !== draftVersion.current &&
-      runtimeRejectedDraftVersion.current !== draftVersion.current ? <button type="button"
-      className="shrink-0 rounded-xl border border-ds-border px-3 py-1 text-[12px] text-ds-ink hover:bg-ds-hover"
-      onClick={() => { void flushPendingSave() }}>{t('retrySave')}</button> : null}
-  </> : null
+  const footer = confirmDiscard ? (
+    <div className="ax-settings-footer">
+      <div className="ax-settings-footer-actions">
+        <button ref={keepEditingRef} type="button" className="ax-settings-cancel" onClick={() => setConfirmDiscard(false)}>
+          {t('settingsKeepEditing')}
+        </button>
+        <button type="button" className="ax-settings-save" onClick={discardAndClose}>
+          {t('settingsDiscard')}
+        </button>
+      </div>
+    </div>
+  ) : (
+    <div className="ax-settings-footer">
+      {category === 'general' ? <button type="button" className="ax-settings-reset" disabled={saving}
+        title={t('settingsResetAppearanceDescription')}
+        onClick={() => update({ theme: 'light', accentColor: DEFAULT_APP_ACCENT_COLOR, uiFontScale: 'small',
+          motionPreference: DEFAULT_APP_MOTION_PREFERENCE, cursorSpotlight: true })}>
+        <span aria-hidden="true">↶</span> {t('settingsResetAppearance')}
+      </button> : <span />}
+      <span className="ax-settings-save-status" role="status" aria-live="polite" aria-atomic="true"
+        data-tone={saveStatus === 'error' || portError ? 'error' : undefined}>
+        {portError || (saveStatus === 'error' ? saveError || t('settingsSaveFailed')
+          : saving ? t('settingsSaving') : hasUnsavedChanges ? t('settingsUnsavedChanges')
+            : saveStatus === 'saved' ? t('settingsSaved') : '')}
+      </span>
+      <div className="ax-settings-footer-actions">
+        <button type="button" className="ax-settings-cancel" disabled={saving} onClick={discardAndClose}>
+          {t('settingsCancel')}
+        </button>
+        <button type="button" className="ax-settings-save" disabled={saving || !!portError || !hasUnsavedChanges}
+          onClick={() => { void savePreferences() }}>
+          {saving ? t('settingsSaving') : t('settingsSavePreferences')}
+        </button>
+      </div>
+    </div>
+  )
 
   return (
-    <div className="ds-product-body ds-settings-layout ds-drag flex h-full min-h-0 w-full min-w-0 bg-ds-main">
-      <NavigationRail active="settings"
-        onChat={() => navigateFromSettings('chat')}
-        onPlugins={() => navigateFromSettings('plugins')}
-        onSchedule={() => navigateFromSettings('schedule')}
-        onSettings={() => requestCategoryChange('general')}
-      />
-      <SettingsSidebar category={category} setCategory={requestCategoryChange} goBack={goBack} t={t} />
-
-      <div ref={settingsContentRef} className="ds-settings-content ds-page-scroll-edge ds-no-drag min-h-0 min-w-0 flex-1 overflow-y-auto px-10 py-10">
-        <div className={`mx-auto ${category === 'account' ? 'max-w-[732px]' : 'max-w-3xl'}`}>
-          {category !== 'account' && category !== 'browser' && category !== 'computerUse' ? (
-            <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <h1 className="text-2xl font-semibold tracking-tight text-ds-ink">{t(settingsCategoryLabelKey(category))}</h1>
-                <p className="mt-1 text-[14px] text-ds-muted">{t('subtitle')}</p>
-              </div>
-              {category === 'providers' ? (
-                <p className="max-w-sm text-[12px] leading-5 text-ds-muted">{t('modelProviderManualSaveHint')}</p>
-              ) : null}
-              {saveControls}
-            </div>
-          ) : null}
-
+    <Dialog open title={t('title')} width={678} className="ax-settings-modal" maskClassName="ax-settings-modal-mask"
+      closeLabel="×" closeAriaLabel={t('settingsClose')} onClose={goBack} footer={footer}>
+      {confirmDiscard ? <div className="ax-settings-discard-prompt" role="alert">
+        <h2>{t('settingsDiscardTitle')}</h2>
+        <p>{t('settingsDiscardDescription')}</p>
+      </div> : null}
+      <div className="ax-settings-panel" hidden={confirmDiscard}>
+        <fieldset disabled={saving} className="ax-settings-fields">
+          <SettingsSidebar category={category} setCategory={requestCategoryChange} goBack={goBack} t={t} />
+          <div ref={settingsContentRef} id="ax-settings-tabpanel" role="tabpanel"
+            aria-labelledby={`ax-settings-tab-${settingsTabForCategory(category).id}`} className="ax-settings-content">
           {category === 'account' ? (
             <Suspense fallback={<AnalytixLoadingPage />}>
               <DeprecatedHubCompatibilitySection ctx={settingsSectionContext} />
             </Suspense>
           ) : null}
           {category === 'general' ? <GeneralSettingsSection ctx={settingsSectionContext} /> : null}
-          {category === 'providers' ? <ProvidersSettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'providers' ? <>
+            <p className="mb-4 text-[13px] text-ds-muted">{t('modelProviderManualSaveHint')}</p>
+            <ProvidersSettingsSection ctx={settingsSectionContext} />
+          </> : null}
           {category === 'write' ? <WriteSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'imageGeneration' ? <ImageGenerationSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'speechToText' ? <SpeechToTextSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'agents' ? <AgentsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'permissions' ? <PermissionsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'browser' ? <BrowserSettingsSection ctx={settingsSectionContext} /> : null}
-          {category === 'computerUse' ? <>
-            <div className="mb-6 flex flex-wrap items-center gap-2">{saveControls}</div>
-            <ComputerUseSettingsSection ctx={settingsSectionContext} />
-          </> : null}
+          {category === 'computerUse' ? <ComputerUseSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'archives' ? <ArchivedThreadsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'worktree' ? <WorktreeSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'memory' ? <MemorySettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'shortcuts' ? <KeyboardShortcutsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'claw' ? <ClawSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'updates' ? <UpdatesSettingsSection ctx={settingsSectionContext} /> : null}
-        </div>
+          </div>
+        </fieldset>
       </div>
       {writeDebugModalOpen ? (
         <WriteDebugLogModal
@@ -1261,6 +1362,6 @@ export function SettingsView(): ReactElement {
           t={t}
         />
       ) : null}
-    </div>
+    </Dialog>
   )
 }

@@ -249,15 +249,15 @@
   grid-area: 1 / 1;
 }
 
-/* Checked: label-primary fill with a primary-foreground check — the pair
+/* Checked: brand fill with its paired foreground — the pair
    inverts with the theme (dark fill in light mode, light fill in dark mode). */
 .checkboxChecked {
   color: var(--dsw-alias-label-primary-foreground);
 }
 
 .checkboxChecked::before {
-  border-color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-label-primary);
+  border-color: var(--ax-primary);
+  background: var(--ax-primary);
 }
 
 .optionCopy {
@@ -482,3 +482,5 @@
 
 .waitStatus { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 24px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .waitButton { white-space: nowrap; }
+
+.primary:active:not(:disabled) { background: var(--ax-primary-pressed); }

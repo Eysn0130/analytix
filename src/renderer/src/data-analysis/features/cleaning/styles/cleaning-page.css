@@ -18,7 +18,7 @@
   --cleaning-status-info: color-mix(in oklab, #4355e6 88%, #1f51da);
   --page-topbar-accent: var(--cleaning-import-accent-end);
   --cleaning-import-accent-shadow: none;
-  --cleaning-primary-action-on-accent: var(--color-bg);
+  --cleaning-primary-action-on-accent: var(--ax-on-primary);
   --cleaning-hero-action-height: 32px;
   --cleaning-hero-action-radius: 6px;
   --cleaning-hero-action-pad-x: 22px;
@@ -1607,3 +1607,6 @@
     linear-gradient(180deg, color-mix(in oklab, var(--cleaning-surface) 94%, #172033) 0%, var(--cleaning-surface-muted) 100%);
   border-color: color-mix(in oklab, var(--cleaning-border) 84%, transparent);
 }
+
+.cleaning-hero__actions > .workbench-ui-toolbar-btn.workbench-ui-btn--accent:hover:not(:disabled) { background: var(--ax-primary-hover); }
+.cleaning-hero__actions > .workbench-ui-toolbar-btn.workbench-ui-btn--accent:active:not(:disabled) { background: var(--ax-primary-pressed); }

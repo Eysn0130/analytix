@@ -2698,7 +2698,7 @@ export function InputBar({
                   <button
                     type="button"
                     onClick={() => dictation.stop('send')}
-                    className="ds-no-drag flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-950 text-white shadow-[0_10px_22px_rgba(20,47,95,0.22)] transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                    className="ds-no-drag flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-[0_10px_22px_rgba(20,47,95,0.22)] transition bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
                     aria-label={t('composerVoiceSend')}
                     title={t('composerVoiceSend')}
                   >
