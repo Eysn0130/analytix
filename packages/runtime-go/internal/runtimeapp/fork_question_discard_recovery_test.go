@@ -395,9 +395,22 @@ func forkQuestionHistoryProductionV1(t *testing.T, acceptedHistory, acceptedAfte
 				continue
 			}
 			times, requested, resolved := map[string]any{}, 0, 0
+			inputProducers, withItemID, exactItemID := 0, 0, 0
 			for _, event := range frozenSourceEvents {
 				seq, ok := contracts.NumericSeq(event["seq"])
-				if !ok || seq > endSeq || event["threadId"] != threadID || event["turnId"] != turnID || event["itemId"] != question["id"] || event["inputId"] != question["inputId"] {
+				if !ok || seq > endSeq || event["threadId"] != threadID || event["turnId"] != turnID || event["inputId"] != question["inputId"] {
+					continue
+				}
+				if event["kind"] == "user_input_requested" || event["kind"] == "user_input_resolved" {
+					inputProducers++
+					if contracts.StringField(event, "itemId") != "" {
+						withItemID++
+					}
+					if event["itemId"] == question["id"] {
+						exactItemID++
+					}
+				}
+				if event["itemId"] != question["id"] {
 					continue
 				}
 				if event["kind"] == "user_input_requested" && event["status"] == "pending" {
@@ -410,7 +423,13 @@ func forkQuestionHistoryProductionV1(t *testing.T, acceptedHistory, acceptedAfte
 				}
 			}
 			if requested != 1 || resolved != 1 {
-				t.Fatal("committed_question_clock_producers_incomplete")
+				status := contracts.StringField(question, "status")
+				switch status {
+				case "pending", "continued", "submitted", "cancelled":
+				default:
+					status = "other"
+				}
+				t.Fatalf("committed_question_clock_producers_incomplete requested=%d resolved=%d questionStatus=%s inputProducers=%d withItemId=%d exactItemId=%d endSeq=%d frozenEvents=%d", requested, resolved, status, inputProducers, withItemID, exactItemID, endSeq, len(frozenSourceEvents))
 			}
 			for _, field := range []string{"createdAt", "finishedAt"} {
 				if _, err := time.Parse(time.RFC3339Nano, contracts.StringField(times, field)); err != nil {

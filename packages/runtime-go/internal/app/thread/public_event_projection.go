@@ -465,6 +465,13 @@ func projectOrdinaryPublicThreadEvent(event map[string]any) (map[string]any, boo
 			return nil, false
 		}
 		out := ordinaryEventFields(event, "inputId", "status", "prompt", "questions")
+		// Preserve canonical Question correlation when its digest resembles PII.
+		inputID := contracts.StringField(event, "inputId")
+		if strings.HasPrefix(inputID, "input_") && len(inputID) == len("input_")+64 &&
+			domainsecurity.IsSHA256Hex(strings.TrimPrefix(inputID, "input_")) &&
+			contracts.StringField(event, "itemId") == "item_"+inputID {
+			out["itemId"] = "item_" + inputID
+		}
 		if raw, present := event["timedWait"]; present {
 			if wait, valid := publicUserInputTimedWaitV1(raw); valid {
 				out["timedWait"] = wait

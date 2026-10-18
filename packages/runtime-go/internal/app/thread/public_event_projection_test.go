@@ -16,10 +16,12 @@ import (
 	appusage "analytix.local/runtime-go/internal/app/usage"
 	"analytix.local/runtime-go/internal/contracts"
 	domaincheckpointref "analytix.local/runtime-go/internal/domain/checkpointref"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
@@ -1608,6 +1610,65 @@ func TestHostToolItemIdentityIsNotMisclassifiedAsPII(t *testing.T) {
 	projected, visible, err := ProjectPublicThreadEvent("ordinary", thread, event)
 	if err != nil || !visible || contracts.StringField(projected, "itemId") != itemID {
 		t.Fatalf("host-issued tool item identity was not projected deterministically: %#v visible=%t err=%v", projected, visible, err)
+	}
+}
+
+func TestCanonicalQuestionEventIdentityIsNotMisclassifiedAsPIIV1(t *testing.T) {
+	const threadID, turnID = "ordinary-question", "turn-question"
+	inputID := domaincontinuation.GateID(domaincontinuation.KindUserInput, threadID, turnID,
+		strings.Repeat("a", 64), "synthetic-grant-53", "synthetic-question-call")
+	itemID, digest := "item_"+inputID, strings.TrimPrefix(inputID, "input_")
+	if !domainsecurity.IsSHA256Hex(digest) || !domainprivacy.ContainsRestrictedPII(itemID) {
+		t.Fatal("fixture no longer exercises a canonical Question digit-run collision")
+	}
+	thread := map[string]any{"id": threadID, "turns": []any{map[string]any{"id": turnID, "threadId": threadID, "items": []any{}}}}
+	_, requested := appturn.UserInputRequestRecords(appturn.UserInputRequestInput{
+		ThreadID: threadID, TurnID: turnID, ItemID: itemID, InputID: inputID,
+		Prompt: "Synthetic choice?", Questions: []map[string]any{{"id": "q", "question": "Synthetic choice?"}},
+		ContinuationReceiptID: "PRIVATE_RECEIPT_SENTINEL",
+	})
+	resolved := appturn.UserInputResolvedEvent(appturn.PendingGateCancellation{
+		ThreadID: threadID, TurnID: turnID, ItemID: itemID, ID: inputID, Prompt: "Synthetic choice?",
+	}, "continued")
+	for index, event := range []map[string]any{requested, resolved} {
+		t.Run(contracts.StringField(event, "kind"), func(t *testing.T) {
+			event["seq"], event["timestamp"] = index+1, "2026-10-18T00:00:00Z"
+			body, err := json.Marshal(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayed, err := domainjsonstrict.DecodeObject(append(body, '\n'), domainjsonstrict.Options{MaxBytes: len(body) + 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected, visible, err := ProjectPublicThreadEvent(threadID, thread, replayed)
+			if err != nil || !visible || projected["itemId"] != itemID || projected["inputId"] != inputID || projected["status"] != event["status"] || projected["continuationReceiptId"] != nil {
+				t.Fatalf("canonical Question correlation was not preserved: visible=%t err=%v itemExact=%t inputExact=%t statusExact=%t privateAbsent=%t", visible, err, projected["itemId"] == itemID, projected["inputId"] == inputID, projected["status"] == event["status"], projected["continuationReceiptId"] == nil)
+			}
+		})
+	}
+	for _, scenario := range []struct {
+		name, input, item string
+	}{
+		{"mismatched-input", "input_" + strings.Repeat("a", 64), itemID},
+		{"non-hex", "input_g" + digest[1:], "item_input_g" + digest[1:]},
+		{"uppercase", "input_" + strings.ToUpper(digest), "item_input_" + strings.ToUpper(digest)},
+		{"short", "input_" + digest[1:], "item_input_" + digest[1:]},
+		{"digest-whitespace", "input_ " + digest, "item_input_ " + digest},
+		{"trailing-whitespace", inputID + " ", itemID + " "},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			event := contracts.CloneMap(requested)
+			event["inputId"], event["itemId"] = scenario.input, scenario.item
+			projected, visible, err := ProjectPublicThreadEvent(threadID, thread, event)
+			if err != nil || visible && projected["itemId"] != nil {
+				t.Fatalf("noncanonical Question acquired an identity exemption: visible=%t err=%v itemPresent=%t", visible, err, projected["itemId"] != nil)
+			}
+		})
+	}
+	unrelated := map[string]any{"kind": "tool_progress", "threadId": threadID, "turnId": turnID, "itemId": itemID, "inputId": inputID, "toolName": "read_file", "status": "running"}
+	if projected, visible, err := ProjectPublicThreadEvent(threadID, thread, unrelated); err != nil || visible && projected["itemId"] != nil {
+		t.Fatalf("Question identity exemption widened to an unrelated event: visible=%t err=%v itemPresent=%t", visible, err, projected["itemId"] != nil)
 	}
 }
 
