@@ -654,7 +654,13 @@ func ProjectProviderRequestForEffect(
 			return domainmodel.Request{}, ErrUninspectableProviderPart
 		}
 		if message.PrivateUserInputPendingBinding != nil {
-			canonical, err := appmodel.PendingUserInputProviderMessageV1(request.Messages[messageIndex], context)
+			canonical, err := appmodel.UserInputProviderMessageForEffectV1(request.Messages[messageIndex], context, func(content string) (string, error) {
+				projected, _, err := projectProviderJSONValueForEffectV1(json.RawMessage(content), false, allowedCaseEntityReferences)
+				if err != nil {
+					return "", err
+				}
+				return projectProviderTextForEffectV1(string(projected), allowedCaseEntityReferences), nil
+			})
 			if err != nil {
 				return domainmodel.Request{}, ErrProviderPrivacyAuthorityUnavailable
 			}

@@ -140,7 +140,7 @@ func terminalCASPublicFieldsValidationViewV1(input PrepareTerminalCASInput, hasA
 	if err != nil {
 		return nil, err
 	}
-	currentStatus, found, terminal, err := InspectTerminalAuthorityV1(input.Thread, input.TurnID)
+	_, found, terminal, err := InspectTerminalAuthorityV1(input.Thread, input.TurnID)
 	if !found {
 		return nil, ErrTerminalCASTurnNotFound
 	}
@@ -148,15 +148,28 @@ func terminalCASPublicFieldsValidationViewV1(input PrepareTerminalCASInput, hasA
 		return nil, err
 	}
 	if terminal {
-		// The prospective-update validator requires an active target. A replay
-		// must instead match the existing canonical winner before receiving the
-		// same scanner view; ordinary replay fields are still scanned below.
+		turn, _ := securityTurnByID(input.Thread, strings.TrimSpace(input.TurnID))
+		frozen, frozenErr := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
 		commit, commitErr := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(commitValue)
-		binding, bindingErr := domainturnterminal.ParseGeneralTerminalCASBindingV1(input.Fields["generalTerminalCASBinding"])
-		if commitErr != nil || bindingErr != nil || input.Status != currentStatus ||
-			commit.TerminalStatus != input.Status || binding.BindingDigest != commit.AuthorityDigest ||
-			ValidateGeneralTerminalPublicationCommitForThreadV1(input.Thread, input.TurnID, commit) != nil {
-			return nil, errors.New("general terminal CAS replay outbox is detached")
+		if frozenErr != nil || commitErr != nil || !domainsecurity.TurnSecurityContextIsGeneral(frozen) ||
+			frozen.ThreadID != input.ThreadID || frozen.TurnID != strings.TrimSpace(input.TurnID) ||
+			commit.ThreadID != frozen.ThreadID || commit.TurnID != frozen.TurnID ||
+			commit.ContextDigest != frozen.ContextDigest || commit.ContextEpoch != frozen.ContextEpoch ||
+			commit.DatasetSnapshotID != frozen.DatasetSnapshotID {
+			return nil, errors.New("general terminal CAS loser context is detached")
+		}
+		// Validate the contender against its target's frozen context, even when
+		// a newer turn owns the current context. This active, empty target exists
+		// only for validation; the durable winner remains the first CAS result.
+		candidate := map[string]any{
+			"id": input.ThreadID, "securityState": turn["securityContext"],
+			"turns": []any{map[string]any{
+				"id": frozen.TurnID, "threadId": frozen.ThreadID, "status": "running",
+				"securityContext": turn["securityContext"], "items": []any{},
+			}},
+		}
+		if err := ValidateGeneralTerminalPublicationUpdateV1(candidate, input.TurnID, input.Status, input.AppendItems, input.Fields); err != nil {
+			return nil, err
 		}
 	} else if err := ValidateGeneralTerminalPublicationUpdateV1(
 		input.Thread, input.TurnID, input.Status, input.AppendItems, input.Fields,
@@ -204,13 +217,16 @@ func validateTerminalCASReplayWinner(
 	currentStatus string,
 ) error {
 	turn, found := securityTurnByID(input.Thread, strings.TrimSpace(input.TurnID))
-	if !found || strings.TrimSpace(currentStatus) != strings.TrimSpace(input.Status) {
+	if !found || (hasAcceptedFinal && strings.TrimSpace(currentStatus) != strings.TrimSpace(input.Status)) {
 		return errors.New("terminal CAS replay status or turn identity differs")
 	}
 	value, hasWinner := turn["acceptedFinal"]
 	if !hasAcceptedFinal {
 		if hasWinner && value != nil {
 			return errors.New("generic terminal replay cannot claim an accepted-final winner")
+		}
+		if input.Fields["generalTerminalCASBinding"] == nil || input.Fields["generalTerminalPublication"] == nil {
+			return errors.New("general terminal replay requires a context-bound publication outbox")
 		}
 		return nil
 	}

@@ -77,8 +77,9 @@ func (h *runtimeServerHandler) runtimeGateContinuationDependencies() gatecontinu
 			_, err := h.persistRuntimeToolResultAndMessage(ctx, pending, output, isError)
 			return err
 		},
-		Complete:        h.completeRuntimeContinuation,
-		CompleteSettled: h.completeRuntimeContinuationWithSettled,
+		SettleTerminalQuestion: h.persistTerminalQuestionResult,
+		Complete:               h.completeRuntimeContinuation,
+		CompleteSettled:        h.completeRuntimeContinuationWithSettled,
 		Finalize: func(ctx context.Context, pending runtimePendingToolCall, result runtimeAgentLoopResult, reason evidenceapp.TerminalReason) error {
 			return h.finalizeRuntimeTurnAfterLoop(ctx, pending, result, reason)
 		},

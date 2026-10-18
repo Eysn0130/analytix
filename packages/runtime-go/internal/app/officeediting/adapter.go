@@ -54,6 +54,8 @@ type Adapter struct {
 	kind          string
 	service       EditingService
 	ready         func(context.Context) bool
+
+	manualBeginObserver func(NativeManualBeginPhaseV1, error)
 }
 
 var _ adapterport.Adapter = (*Adapter)(nil)

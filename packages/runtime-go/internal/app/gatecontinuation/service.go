@@ -68,6 +68,7 @@ type Dependencies struct {
 	ValidateCatalog         func(appmodel.PendingToolCall) error
 	ExecuteAndSettle        func(context.Context, appmodel.PendingToolCall) (apploop.SettledToolExecution, error)
 	PersistToolResult       func(context.Context, appmodel.PendingToolCall, any, bool) error
+	SettleTerminalQuestion  func(context.Context, controlapp.DrainedGate[appmodel.PendingToolCall]) error
 	Complete                func(context.Context, appmodel.PendingToolCall, any, bool) (apploop.RuntimeAgentLoopResult, error)
 	CompleteSettled         func(context.Context, appmodel.PendingToolCall, apploop.SettledToolExecution) (apploop.RuntimeAgentLoopResult, error)
 	Finalize                func(context.Context, appmodel.PendingToolCall, apploop.RuntimeAgentLoopResult, evidenceapp.TerminalReason) error
@@ -908,7 +909,36 @@ func SettleDrainedForTerminal(
 	reason string,
 	dependencies Dependencies,
 ) ([]controlapp.PendingGateCancellation, error) {
-	return settleDrainedGateProjections(drained, reason, dependencies, true)
+	cancellations, err := settleDrainedGateProjections(drained, reason, dependencies, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, gate := range drained {
+		// A dispatched native Question owns an ordinary execution grant even
+		// while its UI is paused. Close that exact call before the terminal CAS.
+		if gate.Kind == domaincontinuation.KindUserInput &&
+			(gate.Pending.Call.Name == "user_input" || gate.Pending.Call.Name == "request_user_input") &&
+			gate.Pending.ExecutionGrant.ServerIdentity == "host:builtin" && !gate.Pending.ExecutionGrant.ReadOnly {
+			if dependencies.SettleTerminalQuestion == nil {
+				return nil, errors.New("terminal Question result settlement authority is unavailable")
+			}
+			gate, _, err = bindTrustedDisposition(gate, dependencies.Continuations)
+			if err != nil {
+				return nil, err
+			}
+			_, disposition, err := dependencies.Continuations.ResolveTrustedDisposition(context.Background(), gate.ID)
+			if err != nil {
+				return nil, err
+			}
+			if gate.TerminalStatus == "" && (disposition.Status == domaincontinuation.StatusInterrupted || disposition.Status == domaincontinuation.StatusRejected) {
+				gate.TerminalStatus, gate.TerminalReasonCode = disposition.Status, disposition.ReasonCode
+			}
+			if err := dependencies.SettleTerminalQuestion(context.Background(), gate); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return cancellations, nil
 }
 
 func settleDrainedGateProjections(

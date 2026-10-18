@@ -2152,3 +2152,254 @@ func assertPendingIdentityProofGuardsV1(t *testing.T, current domainsecurity.Tur
 		})
 	}
 }
+
+func submittedQuestionPrivacyFixtureV1(t *testing.T, format string) (appmodel.PendingToolCall, pendingPrivacyAuditV1, domainmodel.Message) {
+	t.Helper()
+	_, prior, frozen := pendingPrivacyHistoryFixtureV1(t, "call_host_"+strings.Repeat("a", 26)+"123456789012"+strings.Repeat("a", 26), "request_user_input")
+	payload := prior.receipt.Payload
+	payload.UserInputTimedWait = nil
+	payload.Arguments = json.RawMessage(`{"questions":[{"id":"legacy-question","question":"Choose","multiSelect":true,"options":[{"label":"account 6222020000000000000","description":"contact person@example.com"}]}]}`)
+	payload.ExecutionGrant.ArgsHash = domainsecurity.CanonicalJSONHash(payload.Arguments)
+	// Recreate the grant after changing the signed request arguments.
+	now, _ := time.Parse(time.RFC3339Nano, frozen.IssuedAt)
+	payload.ExecutionGrant = domainsecurity.NewExecutionGrant(domainsecurity.ExecutionGrantInput{
+		Context: frozen, Provider: payload.ProviderID, ServerIdentity: "host:builtin", ToolName: payload.ToolName, ToolCallID: payload.CallID,
+		ArgsHash: domainsecurity.CanonicalJSONHash(payload.Arguments), SchemaHash: domainsecurity.SHA256Hex([]byte("synthetic-schema")),
+		ScopeHash: payload.ExecutionGrant.ScopeHash, ReadOnly: false, ApprovalState: "not_required", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute),
+	})
+	payload.GateID = domaincontinuation.GateID(domaincontinuation.KindUserInput, payload.ThreadID, payload.TurnID, frozen.ContextDigest, payload.ExecutionGrant.GrantID, payload.CallID)
+	payload.ItemID = "item_" + payload.GateID
+	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x53}, ed25519.SeedSize))
+	public := private.Public().(ed25519.PublicKey)
+	sign := func(body []byte) ([]byte, error) { return ed25519.Sign(private, body), nil }
+	receipt, err := domaincontinuation.NewReceipt(payload, domainsecurity.SHA256Hex(public), public, sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qid := payload.GateID + "_1"
+	label, text := "account 6222020000000000000", "contact person@example.com"
+	submission := domaincontinuation.UserInputSubmissionV1{SchemaVersion: 1, Format: format}
+	answer := map[string]string{"id": qid, "label": label, "value": text}
+	if format == "legacy" {
+		submission.Answers, err = json.Marshal([]domaincontinuation.UserInputLegacyAnswerV1{{ID: "q1", QuestionID: qid, Value: text, Label: &label}})
+	} else {
+		optionIDs := []string{qid + "_option_1"}
+		submission.Answers, err = json.Marshal([]domaincontinuation.UserInputStructuredAnswerV1{{ID: qid, Kind: "answer", OptionIDs: &optionIDs, CustomText: &text}})
+		answer["kind"], answer["customText"] = "answer", text
+		answer["selectedOptions"] = appmodel.ToolResultContent([]map[string]string{{"label": label, "description": text}})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	disposition, err := domaincontinuation.NewUserInputSubmittedDisposition(receipt, submission, now.Add(2*time.Second), domainsecurity.SHA256Hex(public), public, sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := domainmodel.TurnConfig{ProviderID: payload.ProviderID, Model: payload.Model, BaseURL: "https://provider.invalid", EndpointFormat: "chat_completions"}
+	pending := appmodel.PendingToolCall{
+		ThreadID: payload.ThreadID, TurnID: payload.TurnID, ToolCallItemID: payload.ToolCallItemID,
+		Call:            domainmodel.ToolCall{ID: payload.CallID, Name: payload.ToolName, Arguments: payload.Arguments},
+		SecurityContext: frozen, ExecutionGrant: payload.ExecutionGrant, ProviderID: payload.ProviderID, Model: payload.Model, ProviderConfig: config,
+		Prompt: "synthetic historical prompt", LogicalEffect: payload.LogicalEffect, OrdinaryWork: payload.OrdinaryWork,
+		ProviderStepExact: payload.ProviderStepExact, OrdinaryResultInputIsolated: payload.OrdinaryResultInputIsolated,
+		ApprovalPolicy: payload.ApprovalPolicy, SandboxMode: payload.SandboxMode, ToolScope: payload.ToolScope,
+		ProviderNamespace: payload.ProviderNamespace,
+	}
+	message := domainmodel.Message{Role: "tool", Name: payload.ToolName, ToolCallID: payload.CallID,
+		Content: appmodel.ToolResultContent(map[string]any{"status": "submitted", "answers": []map[string]string{answer}, "answerCount": float64(1)})}
+	return pending, pendingPrivacyAuditV1{receipt: receipt, disposition: disposition, publicKey: public}, message
+}
+
+func TestSubmittedQuestionFinalProviderPreservesSignedCoreIDsAfterProjectingEveryAnswerField(t *testing.T) {
+	for _, format := range []string{"legacy", "structured"} {
+		t.Run(format, func(t *testing.T) {
+			pending, audit, message := submittedQuestionPrivacyFixtureV1(t, format)
+			original := message.Content
+			applicable, err := appmodel.BindPendingUserInputProviderMessageV1(context.Background(), audit, pending, &message)
+			if !applicable || err != nil || message.PrivateUserInputPendingBinding == nil {
+				t.Fatalf("signed current submission was not bound: %v", err)
+			}
+			history := []domainmodel.Message{{Role: "assistant", ToolCalls: []domainmodel.ToolCall{pending.Call}}, message}
+			for _, closed := range []bool{false, true} {
+				messages := appmodel.CloneProviderMessages(appmodel.CloneProviderMessages(history))
+				if closed {
+					messages, err = PrivateProtocolSafeHistoryV1(pending.SecurityContext, messages)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				projected, err := ProjectProviderRequestForEffect(pending.SecurityContext, domainmodel.Request{Messages: messages}, true)
+				if err != nil {
+					t.Fatalf("current submitted continuation failed final projection: %v", err)
+				}
+				result := projected.Messages[len(projected.Messages)-1]
+				content := result.Content
+				if closed {
+					var valid bool
+					content, valid = appmodel.CompletedPrivateProtocolSafeHistoryContentV1(content, pending.Call.Name)
+					if !valid || result.Role != "user" {
+						t.Fatal("submitted private protocol continuation lost its exact completed envelope")
+					}
+				}
+				var body struct {
+					Answers []map[string]string `json:"answers"`
+				}
+				if json.Unmarshal([]byte(content), &body) != nil || len(body.Answers) != 1 || body.Answers[0]["id"] != audit.receipt.Payload.GateID+"_1" {
+					t.Fatal("final effect lost the signed Core question ID")
+				}
+				if strings.Contains(content, "6222020000000000000") || strings.Contains(content, "person@example.com") || result.PrivateUserInputPendingBinding != nil {
+					t.Fatal("answer text or process authority crossed the final effect boundary")
+				}
+				if format == "structured" && (body.Answers[0]["selectedOptions"] == "" || body.Answers[0]["customText"] == "") {
+					t.Fatal("structured answer meaning was dropped instead of projected")
+				}
+				mutated := projected
+				mutated.Messages = appmodel.CloneProviderMessages(projected.Messages)
+				mutated.Messages[len(mutated.Messages)-1].Content += "changed"
+				if validateProviderRequestWithQuestionIdentitiesV1(mutated, nil, nil, nil, map[int]domainmodel.Message{len(mutated.Messages) - 1: result}) == nil {
+					t.Fatal("final validator accepted changed canonical submitted content")
+				}
+			}
+			if message.Content != original || message.PrivateUserInputPendingBinding == nil {
+				t.Fatal("final effect changed the reusable source continuation")
+			}
+		})
+	}
+}
+
+func TestSubmittedQuestionAuthorityRejectsForgedChangedAndDetachedBindings(t *testing.T) {
+	pending, audit, message := submittedQuestionPrivacyFixtureV1(t, "legacy")
+	if _, err := appmodel.BindPendingUserInputProviderMessageV1(context.Background(), audit, pending, &message); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*domainmodel.Message){
+		"forged": func(m *domainmodel.Message) { m.PrivateUserInputPendingBinding = map[string]any{"submitted": true} },
+		"call":   func(m *domainmodel.Message) { m.ToolCallID = "call_host_" + strings.Repeat("b", 64) },
+		"content": func(m *domainmodel.Message) {
+			m.Content = strings.ReplaceAll(m.Content, "person@example.com", "other@example.com")
+		},
+		"role": func(m *domainmodel.Message) { m.Role = "user" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := message
+			mutate(&bad)
+			if _, err := ProjectProviderRequestForEffect(pending.SecurityContext, domainmodel.Request{Messages: []domainmodel.Message{bad}}, true); err == nil {
+				t.Fatal("forged or changed submitted binding crossed final effect")
+			}
+		})
+	}
+	foreign := pending.SecurityContext
+	foreign.TurnID = "turn-after-submission"
+	if _, err := ProjectProviderRequestForEffect(foreign, domainmodel.Request{Messages: []domainmodel.Message{message}}, true); err == nil {
+		t.Fatal("submitted binding escaped its current turn")
+	}
+	for _, detached := range []domainmodel.Message{func() domainmodel.Message {
+		body, _ := json.Marshal(message)
+		var value domainmodel.Message
+		_ = json.Unmarshal(body, &value)
+		return value
+	}(), {Role: message.Role, Name: message.Name, ToolCallID: message.ToolCallID, Content: message.Content}} {
+		// Compare against the ordinary projection itself: serialized JSON and
+		// equal-looking result bodies cannot reacquire process-local identity.
+		if detached.PrivateUserInputPendingBinding != nil {
+			t.Fatal("serialization retained submitted process authority")
+		}
+		projected, err := ProjectProviderRequestForEffect(pending.SecurityContext, domainmodel.Request{Messages: []domainmodel.Message{detached}}, true)
+		if err != nil || strings.Contains(projected.Messages[0].Content, "6222020000000000000") || strings.Contains(projected.Messages[0].Content, "person@example.com") {
+			t.Fatal("detached result escaped ordinary privacy projection")
+		}
+	}
+	t.Run("mismatched_signed_question", func(t *testing.T) {
+		unbound := message
+		unbound.PrivateUserInputPendingBinding = nil
+		unbound.Content = strings.ReplaceAll(unbound.Content, audit.receipt.Payload.GateID+"_1", audit.receipt.Payload.GateID+"_2")
+		if applicable, err := appmodel.BindPendingUserInputProviderMessageV1(context.Background(), audit, pending, &unbound); !applicable || err == nil || unbound.PrivateUserInputPendingBinding != nil {
+			t.Fatal("answer ID absent from the signed submission minted authority")
+		}
+	})
+	t.Run("forged_submitted_shape", func(t *testing.T) {
+		unbound := message
+		unbound.PrivateUserInputPendingBinding = nil
+		forgedID := "input_" + strings.Repeat("a", 26) + "123456789012" + strings.Repeat("a", 26) + "_1"
+		unbound.Content = strings.ReplaceAll(unbound.Content, audit.receipt.Payload.GateID+"_1", forgedID)
+		projected, err := ProjectProviderRequestForEffect(pending.SecurityContext, domainmodel.Request{Messages: []domainmodel.Message{unbound}}, true)
+		if err != nil || strings.Contains(projected.Messages[0].Content, "123456789012") {
+			t.Fatal("submitted JSON shape conferred an unbound identity exception")
+		}
+	})
+	foreignContext, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: pending.ThreadID, TurnID: pending.TurnID, WorkspaceRealPath: pending.SecurityContext.WorkspaceRealPath,
+		ContextEpoch: pending.SecurityContext.ContextEpoch + 1,
+	})
+	if err != nil || !domainsecurity.TurnSecurityContextIsGeneral(foreignContext) || foreignContext.ContextDigest == pending.SecurityContext.ContextDigest {
+		t.Fatalf("wrong-context fixture must be a distinct valid General context: %v", err)
+	}
+	for name, mutate := range map[string]func(*appmodel.PendingToolCall, *pendingPrivacyAuditV1){
+		"wrong_call": func(p *appmodel.PendingToolCall, _ *pendingPrivacyAuditV1) {
+			p.Call.ID = "call_host_" + strings.Repeat("b", 64)
+		},
+		"wrong_context": func(p *appmodel.PendingToolCall, _ *pendingPrivacyAuditV1) {
+			p.SecurityContext = foreignContext
+		},
+		"wrong_receipt": func(_ *appmodel.PendingToolCall, a *pendingPrivacyAuditV1) {
+			a.receipt.ReceiptID = strings.Repeat("b", 64)
+		},
+		"unsigned_submission": func(_ *appmodel.PendingToolCall, a *pendingPrivacyAuditV1) {
+			copy := domaincontinuation.CloneUserInputSubmissionV1(*a.disposition.UserInputSubmission)
+			copy.Answers = json.RawMessage(`[{"id":"q1","questionId":"forged","value":"answer"}]`)
+			a.disposition.UserInputSubmission = &copy
+		},
+	} {
+		t.Run("mint/"+name, func(t *testing.T) {
+			badPending, badAudit, unbound := pending, audit, message
+			unbound.PrivateUserInputPendingBinding = nil
+			mutate(&badPending, &badAudit)
+			applicable, err := appmodel.BindPendingUserInputProviderMessageV1(context.Background(), badAudit, badPending, &unbound)
+			if !applicable {
+				t.Error("valid General wrong source was not checked")
+			}
+			if err == nil {
+				t.Error("wrong signed source was accepted without rejection")
+			}
+			if unbound.PrivateUserInputPendingBinding != nil {
+				t.Error("wrong signed source minted submitted authority")
+			}
+		})
+	}
+}
+
+func TestSubmittedQuestionPrivateAuditDoesNotReconstructAnswersIntoOldHistory(t *testing.T) {
+	pending, audit, _ := submittedQuestionPrivacyFixtureV1(t, "structured")
+	thread, _, _ := pendingPrivacyHistoryFixtureV1(t, pending.Call.ID, pending.Call.Name)
+	turn := thread["turns"].([]any)[0].(map[string]any)
+	items := turn["items"].([]any)
+	call, gate, result := items[0].(map[string]any), items[1].(map[string]any), items[2].(map[string]any)
+	call["executionGrant"] = pendingPrivacyRecordV1(pending.ExecutionGrant)
+	for _, record := range []map[string]any{call, result} {
+		record["executionGrantId"] = pending.ExecutionGrant.GrantID
+	}
+	gate["id"], gate["inputId"], gate["continuationReceiptId"], gate["status"] = audit.receipt.Payload.ItemID, audit.receipt.Payload.GateID, audit.receipt.ReceiptID, "submitted"
+	current, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: pending.ThreadID, TurnID: "turn-after-submitted-question", WorkspaceRealPath: pending.SecurityContext.WorkspaceRealPath,
+		ContextEpoch: pending.SecurityContext.ContextEpoch + 1, IssuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread["securityState"] = pendingPrivacyRecordV1(current)
+	thread["turns"] = append(thread["turns"].([]any), map[string]any{"id": current.TurnID, "status": "running", "securityContext": pendingPrivacyRecordV1(current), "items": []any{}})
+	encoded, _ := json.Marshal(thread)
+	var restored map[string]any
+	if json.Unmarshal(encoded, &restored) != nil {
+		t.Fatal("synthetic public history did not restore")
+	}
+	history := appmodel.ProviderHistoryBeforeTurnWithSteeringAuthority(restored, current.TurnID, nil, audit)
+	if len(history) != 2 {
+		t.Fatal("old submitted public call/result history was lost")
+	}
+	for _, message := range history {
+		if message.PrivateUserInputPendingBinding != nil || strings.Contains(message.Content, "6222020000000000000") || strings.Contains(message.Content, "person@example.com") || strings.Contains(message.Content, audit.receipt.Payload.GateID+"_1") {
+			t.Fatal("old private submitted audit reconstructed answer content or authority")
+		}
+	}
+}

@@ -307,6 +307,7 @@ const pendingUserInputProviderMessageV1 = "The question remains open for a later
 type pendingUserInputProviderBindingV1 struct {
 	threadID, contextDigest, sourceTurnID, receiptID, callID, toolName string
 	role, name, outerCallID, content                                   string
+	submittedQuestionIDs                                               string
 }
 
 func pendingUserInputProviderContentV1(callID string) string {
@@ -331,7 +332,7 @@ func trustedContinuedUserInputV1(receipt domaincontinuation.Receipt, disposition
 }
 
 // BindPendingUserInputProviderMessageV1 admits only the real settled original
-// call, independently read through current-installation audit authority.
+// pending or submitted call, read through current-installation audit authority.
 // Equal-looking JSON or a self-carried receipt is never a minting source.
 func BindPendingUserInputProviderMessageV1(
 	ctx context.Context,
@@ -342,9 +343,15 @@ func BindPendingUserInputProviderMessageV1(
 	// This binding matches the existing General pending-history contract.
 	// Other ordinary-effect Question lanes retain their prior privacy path.
 	if message == nil || !domainsecurity.TurnSecurityContextIsGeneral(pending.SecurityContext) ||
-		(pending.Call.Name != "request_user_input" && pending.Call.Name != "user_input") ||
-		message.Content != pendingUserInputProviderContentV1(pending.Call.ID) {
+		(pending.Call.Name != "request_user_input" && pending.Call.Name != "user_input") {
 		return false, nil
+	}
+	submitted := message.Content != pendingUserInputProviderContentV1(pending.Call.ID)
+	if submitted {
+		var record map[string]any
+		if json.Unmarshal([]byte(message.Content), &record) != nil || record["status"] != "submitted" {
+			return false, nil
+		}
 	}
 	if ctx == nil || authority == nil {
 		return true, errors.New("pending Question audit authority is unavailable")
@@ -353,7 +360,11 @@ func BindPendingUserInputProviderMessageV1(
 		pending.SecurityContext.ContextDigest, pending.ExecutionGrant.GrantID, pending.Call.ID)
 	receipt, disposition, err := authority.ResolveTrustedDispositionForAudit(ctx, gateID)
 	payload := receipt.Payload
-	if err != nil || !trustedContinuedUserInputV1(receipt, disposition) ||
+	trusted := trustedContinuedUserInputV1(receipt, disposition)
+	if submitted {
+		trusted = trustedSubmittedUserInputV1(receipt, disposition)
+	}
+	if err != nil || !trusted ||
 		payload.GateID != gateID || payload.ThreadID != pending.ThreadID || payload.TurnID != pending.TurnID ||
 		payload.CallID != pending.Call.ID || payload.ToolName != pending.Call.Name || payload.ToolCallItemID != pending.ToolCallItemID ||
 		payload.SecurityContext != pending.SecurityContext || payload.ExecutionGrant != pending.ExecutionGrant ||
@@ -369,6 +380,14 @@ func BindPendingUserInputProviderMessageV1(
 		payload.OutputCapLogicalSequence != pending.OutputCapLogicalSequence ||
 		!reflect.DeepEqual(payload.UserInputTimedWait, pending.UserInputTimedWait) {
 		return true, errors.New("pending Question signed source mismatch")
+	}
+	if submitted {
+		bound, err := bindSubmittedUserInputProviderMessageV1(*message, receipt, disposition, pending.SecurityContext)
+		if err != nil {
+			return true, err
+		}
+		*message = bound
+		return true, nil
 	}
 	bound, err := bindPendingUserInputProviderMessageV1(*message, receipt, pending.SecurityContext)
 	if err != nil {
@@ -412,7 +431,7 @@ func pendingUserInputProviderBindingMatchesV1(message domainmodel.Message, bindi
 // protocol message for one current request. It exposes no reusable carrier.
 func PendingUserInputProviderMessageV1(message domainmodel.Message, current domainsecurity.TurnSecurityContext) (domainmodel.Message, error) {
 	binding, ok := message.PrivateUserInputPendingBinding.(pendingUserInputProviderBindingV1)
-	if !ok || domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect(current) != nil ||
+	if !ok || binding.submittedQuestionIDs != "" || domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect(current) != nil ||
 		!domainsecurity.TurnSecurityContextIsGeneral(current) || binding.threadID != current.ThreadID ||
 		binding.contextDigest != current.ContextDigest || !pendingUserInputProviderBindingMatchesV1(message, binding) {
 		return domainmodel.Message{}, errors.New("pending Question provider identity is unavailable")
@@ -441,7 +460,7 @@ func rebindPendingUserInputSafeHistoryV1(source domainmodel.Message, projected *
 	binding, ok := source.PrivateUserInputPendingBinding.(pendingUserInputProviderBindingV1)
 	if !ok || !pendingUserInputProviderBindingMatchesV1(source, binding) ||
 		binding.role != "tool" || source.Name != binding.toolName || source.ToolCallID != binding.callID ||
-		source.Content != pendingUserInputProviderContentV1(binding.callID) ||
+		(binding.submittedQuestionIDs == "" && source.Content != pendingUserInputProviderContentV1(binding.callID)) ||
 		projected.Role != "user" || projected.Name != "" || projected.ToolCallID != "" ||
 		!pendingUserInputProviderMessageShapeV1(*projected) {
 		return
@@ -452,4 +471,140 @@ func rebindPendingUserInputSafeHistoryV1(source domainmodel.Message, projected *
 	}
 	binding.role, binding.name, binding.outerCallID, binding.content = projected.Role, projected.Name, projected.ToolCallID, projected.Content
 	projected.PrivateUserInputPendingBinding = binding
+}
+
+// Submitted identity is limited to the current settled continuation. Historical
+// public records never reconstruct submitted answers from this private audit.
+func trustedSubmittedUserInputV1(receipt domaincontinuation.Receipt, disposition domaincontinuation.Disposition) bool {
+	payload := receipt.Payload
+	issued, issuedErr := time.Parse(time.RFC3339Nano, payload.IssuedAt)
+	disposed, disposedErr := time.Parse(time.RFC3339Nano, disposition.DisposedAt)
+	return domaincontinuation.ValidateReceiptForExecution(receipt) == nil &&
+		domaincontinuation.ValidateDisposition(disposition) == nil &&
+		payload.Kind == domaincontinuation.KindUserInput &&
+		(payload.ToolName == "request_user_input" || payload.ToolName == "user_input") &&
+		payload.UserInputReplyCapture == nil && payload.UserInputDraft == nil &&
+		domainsecurity.TurnSecurityContextIsGeneral(payload.SecurityContext) &&
+		disposition.GateID == payload.GateID && disposition.ReceiptID == receipt.ReceiptID && disposition.Kind == payload.Kind &&
+		disposition.Status == domaincontinuation.StatusSubmitted && disposition.ReasonCode == "user_input_submitted" &&
+		disposition.UserInputSubmission != nil && disposition.UserInputReplySourceID == "" &&
+		issuedErr == nil && disposedErr == nil && !disposed.Before(issued)
+}
+
+// The closed result shape matches the current host continuation output. Every
+// answer string, including JSON-valued selectedOptions, remains untrusted text.
+func submittedUserInputProviderContentV1(content string) (map[string]any, []map[string]any, bool) {
+	var record map[string]any
+	if json.Unmarshal([]byte(content), &record) != nil || len(record) != 3 ||
+		record["status"] != "submitted" || ToolResultContent(record) != content {
+		return nil, nil, false
+	}
+	rawAnswers, ok := record["answers"].([]any)
+	if !ok || len(rawAnswers) < 1 || len(rawAnswers) > 3 || record["answerCount"] != float64(len(rawAnswers)) {
+		return nil, nil, false
+	}
+	answers := make([]map[string]any, 0, len(rawAnswers))
+	for _, raw := range rawAnswers {
+		answer, ok := raw.(map[string]any)
+		if !ok || len(answer) < 3 || len(answer) > 6 {
+			return nil, nil, false
+		}
+		for key, value := range answer {
+			if key != "id" && key != "kind" && key != "label" && key != "value" && key != "selectedOptions" && key != "customText" {
+				return nil, nil, false
+			}
+			if _, ok := value.(string); !ok {
+				return nil, nil, false
+			}
+		}
+		if answer["id"] == nil || answer["label"] == nil || answer["value"] == nil {
+			return nil, nil, false
+		}
+		answers = append(answers, answer)
+	}
+	return record, answers, true
+}
+
+func bindSubmittedUserInputProviderMessageV1(message domainmodel.Message, receipt domaincontinuation.Receipt, disposition domaincontinuation.Disposition, current domainsecurity.TurnSecurityContext) (domainmodel.Message, error) {
+	payload := receipt.Payload
+	if !trustedSubmittedUserInputV1(receipt, disposition) || current != payload.SecurityContext ||
+		message.PrivateUserInputPendingBinding != nil || !pendingUserInputProviderMessageShapeV1(message) ||
+		message.Role != "tool" || message.Name != payload.ToolName || message.ToolCallID != payload.CallID {
+		return message, errors.New("submitted Question model message mismatch")
+	}
+	_, answers, ok := submittedUserInputProviderContentV1(message.Content)
+	var records []map[string]any
+	if !ok || json.Unmarshal(disposition.UserInputSubmission.Answers, &records) != nil || len(records) != len(answers) {
+		return message, errors.New("submitted Question answer identity mismatch")
+	}
+	allowed := make(map[string]bool, len(records))
+	for _, record := range records {
+		id, _ := record["id"].(string)
+		if disposition.UserInputSubmission.Format == "legacy" {
+			id, _ = record["questionId"].(string)
+		}
+		allowed[id] = true
+	}
+	ids := make([]string, 0, len(answers))
+	for _, answer := range answers {
+		id, _ := answer["id"].(string)
+		if !allowed[id] {
+			return message, errors.New("submitted Question answer identity mismatch")
+		}
+		delete(allowed, id)
+		ids = append(ids, id)
+	}
+	if len(allowed) != 0 {
+		return message, errors.New("submitted Question answer identity mismatch")
+	}
+	message.PrivateUserInputPendingBinding = pendingUserInputProviderBindingV1{
+		threadID: current.ThreadID, contextDigest: current.ContextDigest,
+		sourceTurnID: payload.TurnID, receiptID: receipt.ReceiptID, callID: payload.CallID, toolName: payload.ToolName,
+		role: message.Role, name: message.Name, outerCallID: message.ToolCallID, content: message.Content,
+		submittedQuestionIDs: ToolResultContent(ids),
+	}
+	return message, nil
+}
+
+// UserInputProviderMessageForEffectV1 validates the immutable source message,
+// projects the complete submitted result, then restores only signed Core IDs.
+// The callback is the final effect's ordinary JSON and text privacy projection.
+func UserInputProviderMessageForEffectV1(message domainmodel.Message, current domainsecurity.TurnSecurityContext, project func(string) (string, error)) (domainmodel.Message, error) {
+	binding, ok := message.PrivateUserInputPendingBinding.(pendingUserInputProviderBindingV1)
+	if !ok || binding.submittedQuestionIDs == "" {
+		return PendingUserInputProviderMessageV1(message, current)
+	}
+	if project == nil || domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect(current) != nil ||
+		!domainsecurity.TurnSecurityContextIsGeneral(current) || binding.threadID != current.ThreadID ||
+		binding.contextDigest != current.ContextDigest || binding.sourceTurnID != current.TurnID ||
+		!pendingUserInputProviderBindingMatchesV1(message, binding) {
+		return domainmodel.Message{}, errors.New("submitted Question provider identity is unavailable")
+	}
+	content := message.Content
+	if binding.role == "user" {
+		var valid bool
+		content, valid = CompletedPrivateProtocolSafeHistoryContentV1(content, binding.toolName)
+		if !valid || binding.name != "" || binding.outerCallID != "" {
+			return domainmodel.Message{}, errors.New("submitted Question private history identity is unavailable")
+		}
+	} else if binding.role != "tool" || binding.name != binding.toolName || binding.outerCallID != binding.callID {
+		return domainmodel.Message{}, errors.New("submitted Question protocol identity is unavailable")
+	}
+	projected, err := project(content)
+	if err != nil {
+		return domainmodel.Message{}, err
+	}
+	record, answers, valid := submittedUserInputProviderContentV1(projected)
+	var ids []string
+	if !valid || json.Unmarshal([]byte(binding.submittedQuestionIDs), &ids) != nil || len(ids) != len(answers) {
+		return domainmodel.Message{}, errors.New("submitted Question projection shape is unavailable")
+	}
+	for index, id := range ids {
+		answers[index]["id"] = id
+	}
+	content = ToolResultContent(record)
+	if binding.role == "user" {
+		content = privateProtocolSafeHistoryPrefixV1 + ToolResultContent(deepSeekHistoricalToolResult{Tool: binding.toolName, Status: "completed", Content: content})
+	}
+	return domainmodel.Message{Role: binding.role, Name: binding.name, ToolCallID: binding.outerCallID, Content: content}, nil
 }

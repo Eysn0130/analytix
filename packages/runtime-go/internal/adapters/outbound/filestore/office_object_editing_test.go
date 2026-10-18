@@ -341,7 +341,7 @@ func TestOfficeObjectEditingAdapterSessionSaveAndRestart(t *testing.T) {
 			doc := opened["document"].(map[string]any)
 			unknownChange := strings.Repeat("e", 64)
 			input := map[string]any{"sessionId": doc["sessionId"], "threadId": "thread_main", "changeId": unknownChange, "operationId": nativeSaveID(unknownChange), "baseRevision": doc["revision"], "content": map[string]any{"encoding": "base64", "kind": kind, "byteLength": len(after), "sha256": digestAtomicText(after), "data": base64.StdEncoding.EncodeToString(after)}}
-			if out := call("commit-object", input); out["code"] != "operation_not_found" || writes != 0 {
+			if out := call("commit-object", input); out["code"] != "operation_mismatch" || writes != 0 {
 				t.Fatal("unapproved native commit reached CAS", out, writes)
 			}
 			capture := call("capture-selection", map[string]any{"sessionId": doc["sessionId"], "threadId": "thread_main", "selectionToken": "native_selection_01", "changeSequence": 0, "baseRevision": doc["revision"], "text": "Before", "editable": true})

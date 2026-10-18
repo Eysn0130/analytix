@@ -4,28 +4,19 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"io"
-	"os"
 
 	docapp "analytix.local/runtime-go/internal/app/documentgeneration"
-	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	docport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	fileport "analytix.local/runtime-go/internal/ports/objectediting"
 	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
 
-// One fixed failure-only stderr frame. This is diagnostic output, never part of
-// HTTP results, readiness, mutation authority or persisted document history.
-const nativeManualBeginPhasePrefixV1 = "ANALYTIX_NATIVE_MANUAL_BEGIN_PHASE_V1 "
-const nativeManualBeginPhaseMaxBytesV1 = 1024
-
-type nativeManualBeginPhaseV1 struct {
+// NativeManualBeginPhaseV1 contains closed failure-phase facts, never user content.
+type NativeManualBeginPhaseV1 struct {
 	Version              int    `json:"version"`
 	Phase                string `json:"phase"`
-	ErrorKind            string `json:"errorKind"`
 	ManualServicePresent bool   `json:"manualServicePresent"`
 	CaptureBound         bool   `json:"captureBound"`
 	CaptureEntered       bool   `json:"captureEntered"`
@@ -39,53 +30,19 @@ type nativeManualBeginPhaseV1 struct {
 	PrepareOK            bool   `json:"prepareOK"`
 }
 
-func nativeManualBeginErrorKindV1(err error) string {
-	for _, known := range [...]struct {
-		cause error
-		kind  string
-	}{
-		{context.Canceled, "context_canceled"}, {context.DeadlineExceeded, "context_deadline"},
-		{managededitingapp.ErrUnavailable, "capture_unavailable"}, {managededitingapp.ErrUnsafePath, "unsafe_path"},
-		{managededitingapp.ErrSessionMismatch, "capture_session_mismatch"}, {managededitingapp.ErrUncontainedExecution, "opaque_execution"},
-		{managededitingapp.ErrCaptureFailed, "baseline_failed"}, {os.ErrNotExist, "not_found"}, {os.ErrPermission, "permission"},
-		{fileport.ErrInvalidInput, "invalid_request"}, {editingapp.ErrSession, "session_invalid"},
-		{editingapp.ErrScope, "scope_invalid"}, {editingapp.ErrProjection, "projection_unavailable"},
-		{editingapp.ErrDraftStale, "draft_stale"}, {fileport.ErrConflict, "conflict"},
-		{fileport.ErrPersistence, "persistence_failure"}, {fileport.ErrOperationMismatch, "operation_mismatch"},
-		{fileport.ErrOperationNotFound, "operation_not_found"}, {fileport.ErrForbidden, "forbidden"},
-		{fileport.ErrNotText, "not_text"}, {fileport.ErrTooLarge, "too_large"}, {editingapp.ErrCapacity, "capacity"},
-		{ErrUnavailable, "unavailable"}, {editingapp.ErrUnavailable, "unavailable"},
-	} {
-		if errors.Is(err, known.cause) {
-			return known.kind
-		}
+// BindManualBeginObserverV1 binds failure diagnostics during trusted startup.
+// An unbound observer never changes operation results or capture cleanup.
+func (a *Adapter) BindManualBeginObserverV1(observer func(NativeManualBeginPhaseV1, error)) error {
+	if a == nil || a.kind != "docx" || observer == nil {
+		return ErrBinding
 	}
-	return "other"
-}
-
-func emitNativeManualBeginPhaseV1(output io.Writer, state nativeManualBeginPhaseV1) {
-	if output == nil || state.Version != 1 {
-		return
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.manualBeginObserver != nil || len(a.sessions) != 0 {
+		return ErrBinding
 	}
-	switch state.Phase {
-	case "input", "authority", "dependencies", "capture_conflict", "capture", "baseline_open", "baseline_session", "baseline_revision", "prepare", "prepared_contract":
-	default:
-		return
-	}
-	switch state.ErrorKind {
-	case "invalid_request", "session_invalid", "scope_invalid", "projection_unavailable", "draft_stale", "conflict", "persistence_failure", "operation_mismatch", "operation_not_found", "forbidden", "not_text", "too_large", "capacity", "unavailable", "capture_unavailable", "unsafe_path", "capture_session_mismatch", "opaque_execution", "baseline_failed", "context_canceled", "context_deadline", "not_found", "permission", "other":
-	default:
-		return
-	}
-	body, err := json.Marshal(state)
-	if err != nil || len(nativeManualBeginPhasePrefixV1)+len(body)+1 > nativeManualBeginPhaseMaxBytesV1 {
-		return
-	}
-	frame := append([]byte(nativeManualBeginPhasePrefixV1), body...)
-	frame = append(frame, '\n')
-	// One bounded write prevents interleaving fields. A diagnostic write failure
-	// is ignored and never changes the operation's result or cleanup.
-	_, _ = output.Write(frame)
+	a.manualBeginObserver = observer
+	return nil
 }
 
 type nativeManualService interface {
@@ -137,14 +94,16 @@ func (a *Adapter) releaseManualCapture(id, expectedChange string) {
 }
 func (a *Adapter) invokeManual(ctx context.Context, call adapterport.Call, input map[string]any) (adapterport.Result, error) {
 	_, manualServicePresent := a.service.(nativeManualService)
-	trace := nativeManualBeginPhaseV1{Version: 1, ManualServicePresent: manualServicePresent, CaptureBound: a.manualCapture != nil}
+	trace := NativeManualBeginPhaseV1{Version: 1, ManualServicePresent: manualServicePresent, CaptureBound: a.manualCapture != nil}
+	var traceCause error
 	fail := func(phase string, err error) (adapterport.Result, error) {
-		if call.Operation == "begin-manual-edit" {
+		if call.Operation == "begin-manual-edit" && a.manualBeginObserver != nil {
 			trace.Phase = phase
-			if trace.ErrorKind == "" {
-				trace.ErrorKind = nativeManualBeginErrorKindV1(err)
+			cause := traceCause
+			if cause == nil {
+				cause = err
 			}
-			emitNativeManualBeginPhaseV1(os.Stderr, trace)
+			a.manualBeginObserver(trace, cause)
 		}
 		return failure(err)
 	}
@@ -202,14 +161,14 @@ func (a *Adapter) invokeManual(ctx context.Context, call adapterport.Call, input
 			trace.SessionMatch = err == nil && current.SessionID == id
 			trace.RevisionMatch = err == nil && current.Revision == base
 			if err != nil {
-				trace.ErrorKind = nativeManualBeginErrorKindV1(err)
+				traceCause = err
 				return editingapp.ErrDraftStale
 			}
-			if !trace.SessionMatch {
+			if current.SessionID != id {
 				trace.Phase = "baseline_session"
 				return editingapp.ErrDraftStale
 			}
-			if !trace.RevisionMatch {
+			if current.Revision != base {
 				trace.Phase = "baseline_revision"
 				return editingapp.ErrDraftStale
 			}
@@ -219,7 +178,7 @@ func (a *Adapter) invokeManual(ctx context.Context, call adapterport.Call, input
 		if err != nil {
 			return fail(trace.Phase, err)
 		}
-		trace.CaptureAcquired, trace.ErrorKind = true, ""
+		trace.CaptureAcquired, traceCause = true, nil
 		session.release, session.manualChangeID, session.manualBaseRevision, session.leasePurpose, acquired = release, change, base, nativeLeaseManual, true
 	}
 	trace.PrepareEntered = true

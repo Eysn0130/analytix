@@ -47,6 +47,7 @@ import (
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	jobs "analytix.local/runtime-go/internal/jobs"
+	mcp "analytix.local/runtime-go/internal/mcp"
 	displayport "analytix.local/runtime-go/internal/ports/userinputdisplay"
 	runtimeprovider "analytix.local/runtime-go/internal/provider"
 
@@ -1360,6 +1361,9 @@ func TestTimedQuestionProductionUnknownAfterProcessCrashAndIdleWake(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Each reopen owns a fresh manager so production composition binds the
+		// current handler's managed-editing authority before connecting.
+		manager := mcp.NewProductionManagerWithOptions(nil, mcp.ProductionManagerOptions{CacheDir: filepath.Join(manifest.DataDir, "mcp-schema-cache"), ProtectedReadDirs: base.protectedReadDirs})
 		// The production composer restores before returning. Original stores and
 		// installation signer, plus the legal empty General lineage registry,
 		// are installed before that call; no restore guard is patched or skipped.
@@ -1369,7 +1373,7 @@ func TestTimedQuestionProductionUnknownAfterProcessCrashAndIdleWake(t *testing.T
 			// This fixture has no attachments or child jobs, but the normal
 			// worker still requires the same ordinary runtime services as base.
 			Jobs: base.jobs, ChildCompletions: base.childCompletions, ForegroundHandoffs: base.foregroundHandoffs,
-			MCP: base.mcp, MCPSearch: base.mcpSearch, Skills: base.skills, Subagents: base.subagents, AutoResearch: base.autoResearch,
+			MCP: manager, MCPSearch: base.mcpSearch, Skills: base.skills, Subagents: base.subagents, AutoResearch: base.autoResearch,
 			ToolResultSnapshots: base.toolSnapshots, ToolResultSnapshotHistoryValidate: base.toolSnapshotHistoryValidate,
 			CommandProbe: base.commandProbe, CommandHomeDir: base.commandHomeDir, WorkspaceProbe: base.workspaceProbe,
 			ShellRunner: base.shellRunner, GitStatusProbe: base.gitStatusProbe, WorktreeManager: base.worktreeManager,
@@ -1377,7 +1381,7 @@ func TestTimedQuestionProductionUnknownAfterProcessCrashAndIdleWake(t *testing.T
 			Web: base.web, VisionBridge: base.visionBridge,
 			Continuations: continuations, PendingWork: pendingworkapp.NewService(signer, pendingStore, store), SteeringAuthority: steeringauthorityapp.NewService(signer),
 			CaseFinalizer: base.caseFinalizer, Checkpoints: base.checkpoints, Memories: base.memories, Provider: base.provider, ProviderConfig: base.providerConfig,
-			NativeAuthority: native, SubagentState: state, G6Readiness: base.g6Readiness, StepLimits: base.stepLimits, ApprovalPolicy: base.approvalPolicy, SandboxMode: base.sandboxMode, SkipMCPConnect: true,
+			NativeAuthority: native, SubagentState: state, G6Readiness: base.g6Readiness, StepLimits: base.stepLimits, ApprovalPolicy: base.approvalPolicy, SandboxMode: base.sandboxMode,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1712,9 +1716,10 @@ func runTimedQuestionProductionBatchCapacityV1(t *testing.T, size int, escaped b
 		operationBudget = 240 * time.Second
 	}
 	operationStarted := time.Now()
+	phase, phaseStarted, phaseBudget := "initial", operationStarted, operationBudget
 	logStage := func(stage string) {
 		if extendedOperation {
-			t.Logf("synthetic900 stage=%s elapsedSeconds=%.3f operationBudgetSeconds=%.0f", stage, time.Since(operationStarted).Seconds(), operationBudget.Seconds())
+			t.Logf("synthetic900 phase=%s stage=%s phaseElapsedSeconds=%.3f totalElapsedSeconds=%.3f phaseBudgetSeconds=%.0f", phase, stage, time.Since(phaseStarted).Seconds(), time.Since(operationStarted).Seconds(), phaseBudget.Seconds())
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), operationBudget)
@@ -1960,7 +1965,13 @@ func runTimedQuestionProductionBatchCapacityV1(t *testing.T, size int, escaped b
 	}
 	assertTimedQuestionSingleSteeredEvent(t, restarted, selector.ThreadID, request.LateReply.ClientUserMessageID)
 	logStage("reopen_original_uuid_accepted")
-	if _, err := restarted.startRuntimeTurn(ctx, selector.ThreadID, startRuntimeTurnRequest{Prompt: "Continue ordinary synthetic work.", Model: syntheticQuestionCapacityModelV1, Async: true}); err != nil {
+	// Durable retry acceptance closes the initial phase. Replay is a separate
+	// bounded operation and retains the ordinary 90-second fixture budget.
+	phase, phaseStarted, phaseBudget = "replay", time.Now(), 90*time.Second
+	replayCtx, replayCancel := context.WithTimeout(context.Background(), phaseBudget)
+	defer replayCancel()
+	logStage("replay_started")
+	if _, err := restarted.startRuntimeTurn(replayCtx, selector.ThreadID, startRuntimeTurnRequest{Prompt: "Continue ordinary synthetic work.", Model: syntheticQuestionCapacityModelV1, Async: true}); err != nil {
 		t.Fatalf("replay start errorType=%T code=%s", err, asyncTurnErrorClassV1(err))
 	}
 	logStage("new_turn_started")
@@ -1969,10 +1980,10 @@ func runTimedQuestionProductionBatchCapacityV1(t *testing.T, size int, escaped b
 		assertTimedQuestionProviderBatchV1(t, replay, receipt.Payload.CallID, answers)
 		assertSyntheticQuestionWireCapacityV1(t, replay, contextWindowTokens)
 		assertTimedQuestionPendingProviderResult(t, replay, receipt.Payload.CallID)
-	case <-ctx.Done():
+	case <-replayCtx.Done():
 		t.Fatal("restored batch did not reach new Provider listener")
 	}
-	if err := restarted.runtimeControl().WaitForTurnOperations(ctx); err != nil {
+	if err := restarted.runtimeControl().WaitForTurnOperations(replayCtx); err != nil {
 		t.Fatal(err)
 	}
 	if restartCalls.Load() != 1 {

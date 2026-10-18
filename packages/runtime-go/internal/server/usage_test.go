@@ -924,23 +924,7 @@ func TestConversationUsagePublicQueryIncludesOpenAttemptsAndRebuildsAfterRestart
 	if err != nil {
 		t.Fatal(err)
 	}
-	history, err := reopened.conversationUsageHistoryV1(rawThread, replay.Events)
-	if err != nil {
-		t.Fatal(err)
-	}
-	historicalContexts, err := conversationUsageContextsV1(history, replay.Events)
-	if err != nil {
-		t.Fatal(err)
-	}
-	historicalInventories, err := reopenedRecorder.ObserveTurnInventoriesV1(ctx, historicalContexts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	inputs := []usageapp.TurnUsageInventoryV1{}
-	for i, inventory := range historicalInventories {
-		inputs = append(inputs, usageapp.TurnUsageInventoryV1{TurnID: historicalContexts[i].TurnID, Inventory: inventory})
-	}
-	historical, err := usageapp.BuildConversationUsageV1(history, replay.Events, inputs)
+	historical, err := usageapp.ObserveConversationUsageV1(ctx, rawThread, replay.Events, reopened.conversationUsageCommittedContextsV1(), reopenedRecorder)
 	if err != nil || historical.Billing.TotalTokens.ReportedValue != 230 || !historical.Billing.Closed {
 		t.Fatalf("compaction window lost full-log billing: %#v err=%v", historical, err)
 	}

@@ -102,7 +102,7 @@ type RuntimeServerComponents struct {
 	Provider            ports.ProviderClient
 	ProviderConfig      provider.RuntimeProviderConfigSet
 	ProviderExecution   ProviderExecutionResolver
-	ProviderUsage       ProviderUsageObserverV1
+	ProviderUsage       appusage.ProviderUsageObserverV1
 	ProviderRegistry    httpapi.ProviderRegistryService
 	MediaExecution      *mediaexecutionapp.Executor
 	InfoDataDir         string
@@ -329,6 +329,8 @@ func NewRuntimeServerHandlerFromComponents(config RuntimeServerConfig, component
 	}
 	handler.threads = threadapp.NewService(threadapp.Dependencies{
 		GoalMutation: handler.goalDriver.Mutate, GoalActivation: handler.goalDriver.Activation,
+		SummarizeCompaction:      handler.summarizeOrdinaryCompaction,
+		ProjectCompactionHistory: handler.projectOrdinaryCompactionHistory,
 		Repository:               handler.store,
 		DataDir:                  handler.dataDir,
 		DefaultApprovalPolicy:    handler.approvalPolicy,

@@ -2,7 +2,11 @@ package usage
 
 import (
 	appcache "analytix.local/runtime-go/internal/app/cachetelemetry"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
+	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
+	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -324,5 +328,60 @@ func TestConversationAssemblyDoesNotCountUsageOrBackfillLegacyV1(t *testing.T) {
 		if event["stage"] == "logical_step_assembled" {
 			t.Fatal("legacy history invented an assembly boundary")
 		}
+	}
+}
+
+type conversationUsageObserverFuncV1 func(context.Context, []domainsecurity.TurnSecurityContext) ([]appcache.TurnInventoryV1, error)
+
+func (observe conversationUsageObserverFuncV1) ObserveTurnInventoriesV1(ctx context.Context, contexts []domainsecurity.TurnSecurityContext) ([]appcache.TurnInventoryV1, error) {
+	return observe(ctx, contexts)
+}
+
+func TestObserveConversationUsagePreservesHistoricalScopeAndFailsClosed(t *testing.T) {
+	const threadID, turnID = "thread-usage", "turn-compacted"
+	frozen, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: threadID, TurnID: turnID, WorkspaceRealPath: t.TempDir(), ContextEpoch: 1,
+		IssuedAt: time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := map[string]any{"id": threadID, "turns": []any{}}
+	committed := []domainsecurity.TurnSecurityContext{frozen, frozen}
+	for _, test := range []struct {
+		name      string
+		snapshots []appcache.TurnInventoryV1
+		err       error
+		want      string
+	}{
+		{"observer error", nil, errors.New("private observer detail"), "conversation provider usage inventory is unavailable"},
+		{"missing inventory", nil, nil, "conversation provider usage inventory is incomplete"},
+		{"unsealed inventory", []appcache.TurnInventoryV1{{}}, nil, "conversation provider inventory scope is invalid or duplicated"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			observer := conversationUsageObserverFuncV1(func(_ context.Context, contexts []domainsecurity.TurnSecurityContext) ([]appcache.TurnInventoryV1, error) {
+				if len(contexts) != 1 || contexts[0].ContextDigest != frozen.ContextDigest {
+					t.Fatalf("committed historical scope lost or duplicated: %#v", contexts)
+				}
+				return test.snapshots, test.err
+			})
+			if _, err := ObserveConversationUsageV1(context.Background(), thread, nil, committed, observer); err == nil || err.Error() != test.want {
+				t.Fatalf("inventory did not fail closed: %v", err)
+			}
+		})
+	}
+	if len(thread["turns"].([]any)) != 0 {
+		t.Fatal("historical read view mutated the durable thread")
+	}
+	if _, err := ObserveConversationUsageV1(context.Background(), thread, nil, nil, nil); err == nil {
+		t.Fatal("missing observer accepted")
+	}
+	invalid := map[string]any{"id": threadID, "turns": []any{map[string]any{"id": "other-turn", "securityContext": frozen}}}
+	if _, err := ConversationUsageContextsV1(invalid, nil); err == nil {
+		t.Fatal("foreign turn scope accepted")
+	}
+	thread["generalTerminalPublicationArchive"] = map[string]any{}
+	if _, err := ConversationUsageHistoryV1(thread, nil, nil); err == nil {
+		t.Fatal("invalid historical terminal membership accepted")
 	}
 }

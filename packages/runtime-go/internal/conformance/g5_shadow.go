@@ -392,7 +392,7 @@ type G5DesktopSovereigntyCase struct {
 	RendererProviderEndpointMatrix     G5RendererProviderEndpointMatrix    `json:"rendererProviderEndpointMatrix"`
 	RendererProviderAliasGuardMatrix   G5RendererProviderAliasGuardMatrix  `json:"rendererProviderAliasGuardMatrix"`
 	RendererProviderFacadeSealMatrix   G5RendererProviderFacadeSealMatrix  `json:"rendererProviderFacadeSealMatrix"`
-	SideConversationRelationMatrix     G5SideConversationRelationMatrix    `json:"sideConversationRelationContractMatrix"`
+	SideConversationPromotionMatrix    G5SideConversationPromotionMatrix   `json:"sideConversationPromotionContractMatrix"`
 	RendererUsageRuntimeClientMatrix   G5RendererUsageRuntimeClientMatrix  `json:"rendererUsageRuntimeClientFacadeMatrix"`
 	RendererSettingsReadFacadeMatrix   G5RendererSettingsReadFacadeMatrix  `json:"rendererSettingsReadFacadeMatrix"`
 	PreloadRuntimeRequestBridgeMatrix  G5PreloadRuntimeRequestBridgeMatrix `json:"preloadRuntimeRequestBridgeMatrix"`
@@ -464,15 +464,15 @@ type G5DesktopSovereigntyOutput struct {
 	RendererProviderFacadeSealUsesRuntimeClient           bool `json:"rendererProviderFacadeSealUsesRuntimeClient"`
 	RendererProviderFacadeSealRejectsDirectBridge         bool `json:"rendererProviderFacadeSealRejectsDirectBridge"`
 	RendererProviderFacadeSealCoversArchiveRestore        bool `json:"rendererProviderFacadeSealCoversArchiveRestore"`
-	RendererProviderFacadeSealCoversRelationPatch         bool `json:"rendererProviderFacadeSealCoversRelationPatch"`
+	RendererProviderFacadeSealCoversSidePromotion         bool `json:"rendererProviderFacadeSealCoversSidePromotion"`
 	RendererProviderFacadeSealScanGuardPresent            bool `json:"rendererProviderFacadeSealScanGuardPresent"`
 	RendererProviderFacadeSealUnitEvidencePresent         bool `json:"rendererProviderFacadeSealUnitEvidencePresent"`
-	SideConversationRelationContractOptionalProvider      bool `json:"sideConversationRelationContractOptionalProvider"`
-	SideConversationRelationPromotesThroughProvider       bool `json:"sideConversationRelationPromotesThroughProvider"`
-	SideConversationRelationRefreshesAndCloses            bool `json:"sideConversationRelationRefreshesAndCloses"`
-	SideConversationRelationRejectsDirectBridge           bool `json:"sideConversationRelationRejectsDirectBridge"`
-	SideConversationRelationScanGuardPresent              bool `json:"sideConversationRelationScanGuardPresent"`
-	SideConversationRelationUnitEvidencePresent           bool `json:"sideConversationRelationUnitEvidencePresent"`
+	SideConversationPromotionContractOptionalProvider     bool `json:"sideConversationPromotionContractOptionalProvider"`
+	SideConversationPromotionPromotesThroughProvider      bool `json:"sideConversationPromotionPromotesThroughProvider"`
+	SideConversationPromotionReadsBackAndCloses           bool `json:"sideConversationPromotionReadsBackAndCloses"`
+	SideConversationPromotionRejectsDirectBridge          bool `json:"sideConversationPromotionRejectsDirectBridge"`
+	SideConversationPromotionScanGuardPresent             bool `json:"sideConversationPromotionScanGuardPresent"`
+	SideConversationPromotionUnitEvidencePresent          bool `json:"sideConversationPromotionUnitEvidencePresent"`
 	RendererUsageRuntimeClientCoversThreadUsage           bool `json:"rendererUsageRuntimeClientCoversThreadUsage"`
 	RendererUsageRuntimeClientCoversDailyUsage            bool `json:"rendererUsageRuntimeClientCoversDailyUsage"`
 	RendererUsageRuntimeClientCoversModelUsage            bool `json:"rendererUsageRuntimeClientCoversModelUsage"`
@@ -637,20 +637,22 @@ type G5RendererProviderFacadeSealMatrix struct {
 	SourceUsesRuntimeClient             bool     `json:"sourceUsesRuntimeClient"`
 	SourceRejectsDirectBridgeBypass     bool     `json:"sourceRejectsDirectBridgeBypass"`
 	ArchiveRestoreSourceEvidencePresent bool     `json:"archiveRestoreSourceEvidencePresent"`
-	RelationSourceEvidencePresent       bool     `json:"relationSourceEvidencePresent"`
+	PromotionSourceEvidencePresent      bool     `json:"promotionSourceEvidencePresent"`
 	LifecycleUnitEvidencePresent        bool     `json:"lifecycleUnitEvidencePresent"`
 	ScanGuardPresent                    bool     `json:"scanGuardPresent"`
 	ProviderFacadeTokenScanPresent      bool     `json:"providerFacadeTokenScanPresent"`
 }
 
-type G5SideConversationRelationMatrix struct {
+type G5SideConversationPromotionMatrix struct {
 	ProviderMethod                          string `json:"providerMethod"`
 	StoreAction                             string `json:"storeAction"`
 	Relation                                string `json:"relation"`
+	SoleIntent                              bool   `json:"soleIntent"`
+	LineagePreserved                        bool   `json:"lineagePreserved"`
 	ProviderContractOptional                bool   `json:"providerContractOptional"`
 	ProviderImplementationUsesRuntimeClient bool   `json:"providerImplementationUsesRuntimeClient"`
 	StoreUsesProviderContract               bool   `json:"storeUsesProviderContract"`
-	StoreRefreshesAndCloses                 bool   `json:"storeRefreshesAndCloses"`
+	StoreVerifiesReadbackAndCloses          bool   `json:"storeVerifiesReadbackAndCloses"`
 	StoreRejectsDirectRuntimeBridge         bool   `json:"storeRejectsDirectRuntimeBridge"`
 	UnitEvidencePresent                     bool   `json:"unitEvidencePresent"`
 	ScanGuardPresent                        bool   `json:"scanGuardPresent"`
@@ -3022,8 +3024,8 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 		input.RendererProviderFacadeSealMatrix.ArchiveRestoreSourceEvidencePresent &&
 			input.RendererProviderFacadeSealMatrix.LifecycleUnitEvidencePresent &&
 			stringInSlice("renderer-provider-facade-lifecycle-evidence", input.EvidenceIDs)
-	rendererProviderFacadeSealCoversRelationPatch :=
-		input.RendererProviderFacadeSealMatrix.RelationSourceEvidencePresent &&
+	rendererProviderFacadeSealCoversSidePromotion :=
+		input.RendererProviderFacadeSealMatrix.PromotionSourceEvidencePresent &&
 			input.RendererProviderFacadeSealMatrix.LifecycleUnitEvidencePresent &&
 			stringInSlice("renderer-provider-facade-lifecycle-evidence", input.EvidenceIDs)
 	rendererProviderFacadeSealScanGuardPresent :=
@@ -3032,38 +3034,40 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 			stringInSlice("renderer-provider-direct-bypass-scan-evidence", input.EvidenceIDs)
 	rendererProviderFacadeSealUnitEvidencePresent :=
 		len(input.RendererProviderFacadeSealMatrix.SealedMethods) == 2 &&
-			allStringInSlice([]string{"archiveThread", "updateThreadRelation"}, input.RendererProviderFacadeSealMatrix.SealedMethods) &&
+			allStringInSlice([]string{"archiveThread", "promoteSideThread"}, input.RendererProviderFacadeSealMatrix.SealedMethods) &&
 			rendererProviderFacadeSealUsesRuntimeClient &&
 			rendererProviderFacadeSealRejectsDirectBridge &&
 			rendererProviderFacadeSealCoversArchiveRestore &&
-			rendererProviderFacadeSealCoversRelationPatch &&
+			rendererProviderFacadeSealCoversSidePromotion &&
 			rendererProviderFacadeSealScanGuardPresent
-	sideConversationRelationContractOptionalProvider :=
-		input.SideConversationRelationMatrix.ProviderMethod == "updateThreadRelation" &&
-			input.SideConversationRelationMatrix.ProviderContractOptional &&
-			input.SideConversationRelationMatrix.ProviderImplementationUsesRuntimeClient &&
-			stringInSlice("side-conversation-relation-provider-contract", input.EvidenceIDs)
-	sideConversationRelationPromotesThroughProvider :=
-		input.SideConversationRelationMatrix.StoreAction == "promoteSideConversation" &&
-			input.SideConversationRelationMatrix.Relation == "primary" &&
-			input.SideConversationRelationMatrix.StoreUsesProviderContract &&
-			stringInSlice("side-conversation-relation-store-evidence", input.EvidenceIDs)
-	sideConversationRelationRefreshesAndCloses :=
-		input.SideConversationRelationMatrix.StoreRefreshesAndCloses &&
-			stringInSlice("side-conversation-relation-store-evidence", input.EvidenceIDs)
-	sideConversationRelationRejectsDirectBridge :=
-		input.SideConversationRelationMatrix.StoreRejectsDirectRuntimeBridge &&
+	sideConversationPromotionContractOptionalProvider :=
+		input.SideConversationPromotionMatrix.ProviderMethod == "promoteSideThread" &&
+			input.SideConversationPromotionMatrix.ProviderContractOptional &&
+			input.SideConversationPromotionMatrix.ProviderImplementationUsesRuntimeClient &&
+			stringInSlice("side-conversation-promotion-provider-contract", input.EvidenceIDs)
+	sideConversationPromotionPromotesThroughProvider :=
+		input.SideConversationPromotionMatrix.StoreAction == "promoteSideConversation" &&
+			input.SideConversationPromotionMatrix.Relation == "fork" &&
+			input.SideConversationPromotionMatrix.SoleIntent &&
+			input.SideConversationPromotionMatrix.LineagePreserved &&
+			input.SideConversationPromotionMatrix.StoreUsesProviderContract &&
+			stringInSlice("side-conversation-promotion-store-evidence", input.EvidenceIDs)
+	sideConversationPromotionReadsBackAndCloses :=
+		input.SideConversationPromotionMatrix.StoreVerifiesReadbackAndCloses &&
+			stringInSlice("side-conversation-promotion-store-evidence", input.EvidenceIDs)
+	sideConversationPromotionRejectsDirectBridge :=
+		input.SideConversationPromotionMatrix.StoreRejectsDirectRuntimeBridge &&
 			stringInSlice("side-conversation-direct-bypass-scan-evidence", input.EvidenceIDs)
-	sideConversationRelationScanGuardPresent :=
-		input.SideConversationRelationMatrix.ScanGuardPresent &&
+	sideConversationPromotionScanGuardPresent :=
+		input.SideConversationPromotionMatrix.ScanGuardPresent &&
 			stringInSlice("side-conversation-direct-bypass-scan-evidence", input.EvidenceIDs)
-	sideConversationRelationUnitEvidencePresent :=
-		input.SideConversationRelationMatrix.UnitEvidencePresent &&
-			sideConversationRelationContractOptionalProvider &&
-			sideConversationRelationPromotesThroughProvider &&
-			sideConversationRelationRefreshesAndCloses &&
-			sideConversationRelationRejectsDirectBridge &&
-			sideConversationRelationScanGuardPresent
+	sideConversationPromotionUnitEvidencePresent :=
+		input.SideConversationPromotionMatrix.UnitEvidencePresent &&
+			sideConversationPromotionContractOptionalProvider &&
+			sideConversationPromotionPromotesThroughProvider &&
+			sideConversationPromotionReadsBackAndCloses &&
+			sideConversationPromotionRejectsDirectBridge &&
+			sideConversationPromotionScanGuardPresent
 	rendererUsageRuntimeClientCoversThreadUsage :=
 		input.RendererUsageRuntimeClientMatrix.Facade == "rendererRuntimeClient.runtimeRequest" &&
 			stringInSlice("loadThreadUsage", input.RendererUsageRuntimeClientMatrix.UsageLoaders) &&
@@ -3217,15 +3221,15 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 		RendererProviderFacadeSealUsesRuntimeClient:           rendererProviderFacadeSealUsesRuntimeClient,
 		RendererProviderFacadeSealRejectsDirectBridge:         rendererProviderFacadeSealRejectsDirectBridge,
 		RendererProviderFacadeSealCoversArchiveRestore:        rendererProviderFacadeSealCoversArchiveRestore,
-		RendererProviderFacadeSealCoversRelationPatch:         rendererProviderFacadeSealCoversRelationPatch,
+		RendererProviderFacadeSealCoversSidePromotion:         rendererProviderFacadeSealCoversSidePromotion,
 		RendererProviderFacadeSealScanGuardPresent:            rendererProviderFacadeSealScanGuardPresent,
 		RendererProviderFacadeSealUnitEvidencePresent:         rendererProviderFacadeSealUnitEvidencePresent,
-		SideConversationRelationContractOptionalProvider:      sideConversationRelationContractOptionalProvider,
-		SideConversationRelationPromotesThroughProvider:       sideConversationRelationPromotesThroughProvider,
-		SideConversationRelationRefreshesAndCloses:            sideConversationRelationRefreshesAndCloses,
-		SideConversationRelationRejectsDirectBridge:           sideConversationRelationRejectsDirectBridge,
-		SideConversationRelationScanGuardPresent:              sideConversationRelationScanGuardPresent,
-		SideConversationRelationUnitEvidencePresent:           sideConversationRelationUnitEvidencePresent,
+		SideConversationPromotionContractOptionalProvider:     sideConversationPromotionContractOptionalProvider,
+		SideConversationPromotionPromotesThroughProvider:      sideConversationPromotionPromotesThroughProvider,
+		SideConversationPromotionReadsBackAndCloses:           sideConversationPromotionReadsBackAndCloses,
+		SideConversationPromotionRejectsDirectBridge:          sideConversationPromotionRejectsDirectBridge,
+		SideConversationPromotionScanGuardPresent:             sideConversationPromotionScanGuardPresent,
+		SideConversationPromotionUnitEvidencePresent:          sideConversationPromotionUnitEvidencePresent,
 		RendererUsageRuntimeClientCoversThreadUsage:           rendererUsageRuntimeClientCoversThreadUsage,
 		RendererUsageRuntimeClientCoversDailyUsage:            rendererUsageRuntimeClientCoversDailyUsage,
 		RendererUsageRuntimeClientCoversModelUsage:            rendererUsageRuntimeClientCoversModelUsage,

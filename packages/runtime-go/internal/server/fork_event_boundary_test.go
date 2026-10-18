@@ -344,7 +344,7 @@ func TestForkEventBoundaryReportsOnlyUnprovableLegacyHistoryUnavailable(t *testi
 	id, turnID := stringField(source, "id"), "turn_legacy_boundary"
 	now := time.Now().UTC().Truncate(time.Second)
 	frozen := newServerGeneralContextV2(t, domainsecurity.TurnSecurityContextInput{ThreadID: id, TurnID: turnID, WorkspaceRealPath: workspace, ContextEpoch: 1, IssuedAt: now})
-	start := turnapp.BuildStartRecord(turnapp.StartRecordInput{ThreadID: id, TurnID: turnID, Prompt: "legacy synthetic input", Model: "synthetic-model", CreatedAt: now.Format(time.RFC3339Nano)})
+	start := turnapp.BuildStartRecord(turnapp.StartRecordInput{ThreadID: id, TurnID: turnID, Prompt: "legacy synthetic input", Model: "synthetic-model", ApprovalPolicy: "on-request", SandboxMode: "workspace-write", CreatedAt: now.Format(time.RFC3339Nano)})
 	start.Turn["securityContext"] = turnsecurityapp.PublicRecord(frozen)
 	// Model the real legacy format: primary history existed, but its initial
 	// producer events were never in the durable log. Do not invent those events.

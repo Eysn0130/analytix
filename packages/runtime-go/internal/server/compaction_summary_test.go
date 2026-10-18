@@ -19,6 +19,7 @@ import (
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	turnapp "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
+	appusage "analytix.local/runtime-go/internal/app/usage"
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
@@ -34,7 +35,7 @@ func seedOrdinarySummaryTurnsForTest(t *testing.T, f inlineCompletionFixture) do
 func seedOrdinarySummaryTurnsRangeForTest(t *testing.T, f inlineCompletionFixture, first, end int) domainsecurity.TurnSecurityContext {
 	t.Helper()
 	h := f.handler
-	h.providerUsage = f.service.closer.(ProviderUsageObserverV1)
+	h.providerUsage = f.service.closer.(appusage.ProviderUsageObserverV1)
 	h.threads = nil
 	var current domainsecurity.TurnSecurityContext
 	for index := first; index < end; index++ {

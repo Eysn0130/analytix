@@ -2,7 +2,9 @@ package runtimeapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,9 +13,11 @@ import (
 	"analytix.local/runtime-go/internal/adapters/outbound/officeengineassets"
 	packagedauthority "analytix.local/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs"
 	docapp "analytix.local/runtime-go/internal/app/documentgeneration"
+	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	"analytix.local/runtime-go/internal/app/officeediting"
 	identityport "analytix.local/runtime-go/internal/ports/identity"
+	fileport "analytix.local/runtime-go/internal/ports/objectediting"
 	adapterport "analytix.local/runtime-go/internal/ports/pluginpackagehost"
 )
 
@@ -66,6 +70,13 @@ func composeOfficeEditingAdapters(config Config, identity identityport.Authority
 		}
 		adapter := officeediting.New(kind, editingapp.New(identity, files), current)
 		if kind == "docx" {
+			if err := adapter.BindManualBeginObserverV1(func(state officeediting.NativeManualBeginPhaseV1, cause error) {
+				emitNativeManualBeginPhaseV1(os.Stderr, nativeManualBeginPhaseV1{
+					NativeManualBeginPhaseV1: state, ErrorKind: nativeManualBeginErrorKindV1(cause),
+				})
+			}); err != nil {
+				continue
+			}
 			if err := adapter.BindUserCreator(docapp.NewUserCreator(identity, files)); err != nil {
 				continue
 			}
@@ -73,4 +84,63 @@ func composeOfficeEditingAdapters(config Config, identity identityport.Authority
 		result[id] = adapter
 	}
 	return result
+}
+
+// One fixed failure-only stderr frame. This is diagnostic output, never part of
+// HTTP results, readiness, mutation authority or persisted document history.
+const nativeManualBeginPhasePrefixV1 = "ANALYTIX_NATIVE_MANUAL_BEGIN_PHASE_V1 "
+const nativeManualBeginPhaseMaxBytesV1 = 1024
+
+type nativeManualBeginPhaseV1 struct {
+	officeediting.NativeManualBeginPhaseV1
+	ErrorKind string `json:"errorKind"`
+}
+
+func nativeManualBeginErrorKindV1(err error) string {
+	for _, known := range [...]struct {
+		cause error
+		kind  string
+	}{
+		{context.Canceled, "context_canceled"}, {context.DeadlineExceeded, "context_deadline"},
+		{managededitingapp.ErrUnavailable, "capture_unavailable"}, {managededitingapp.ErrUnsafePath, "unsafe_path"},
+		{managededitingapp.ErrSessionMismatch, "capture_session_mismatch"}, {managededitingapp.ErrUncontainedExecution, "opaque_execution"},
+		{managededitingapp.ErrCaptureFailed, "baseline_failed"}, {os.ErrNotExist, "not_found"}, {os.ErrPermission, "permission"},
+		{fileport.ErrInvalidInput, "invalid_request"}, {editingapp.ErrSession, "session_invalid"},
+		{editingapp.ErrScope, "scope_invalid"}, {editingapp.ErrProjection, "projection_unavailable"},
+		{editingapp.ErrDraftStale, "draft_stale"}, {fileport.ErrConflict, "conflict"},
+		{fileport.ErrPersistence, "persistence_failure"}, {fileport.ErrOperationMismatch, "operation_mismatch"},
+		{fileport.ErrOperationNotFound, "operation_not_found"}, {fileport.ErrForbidden, "forbidden"},
+		{fileport.ErrNotText, "not_text"}, {fileport.ErrTooLarge, "too_large"}, {editingapp.ErrCapacity, "capacity"},
+		{officeediting.ErrUnavailable, "unavailable"}, {editingapp.ErrUnavailable, "unavailable"},
+	} {
+		if errors.Is(err, known.cause) {
+			return known.kind
+		}
+	}
+	return "other"
+}
+
+func emitNativeManualBeginPhaseV1(output io.Writer, state nativeManualBeginPhaseV1) {
+	if output == nil || state.Version != 1 {
+		return
+	}
+	switch state.Phase {
+	case "input", "authority", "dependencies", "capture_conflict", "capture", "baseline_open", "baseline_session", "baseline_revision", "prepare", "prepared_contract":
+	default:
+		return
+	}
+	switch state.ErrorKind {
+	case "invalid_request", "session_invalid", "scope_invalid", "projection_unavailable", "draft_stale", "conflict", "persistence_failure", "operation_mismatch", "operation_not_found", "forbidden", "not_text", "too_large", "capacity", "unavailable", "capture_unavailable", "unsafe_path", "capture_session_mismatch", "opaque_execution", "baseline_failed", "context_canceled", "context_deadline", "not_found", "permission", "other":
+	default:
+		return
+	}
+	body, err := json.Marshal(state)
+	if err != nil || len(nativeManualBeginPhasePrefixV1)+len(body)+1 > nativeManualBeginPhaseMaxBytesV1 {
+		return
+	}
+	frame := append([]byte(nativeManualBeginPhasePrefixV1), body...)
+	frame = append(frame, '\n')
+	// One bounded write prevents interleaving fields. A diagnostic write failure
+	// is ignored and never changes the operation's result or cleanup.
+	_, _ = output.Write(frame)
 }

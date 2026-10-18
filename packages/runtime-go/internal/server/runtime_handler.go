@@ -149,7 +149,7 @@ type runtimeServerHandler struct {
 	turnSeq                      int
 	readRegistry                 *filetoolsapp.ReadRegistry
 	cachePrefixShapes            map[string]appusage.PrefixBaseline
-	providerUsage                ProviderUsageObserverV1
+	providerUsage                appusage.ProviderUsageObserverV1
 }
 
 func (h *runtimeServerHandler) resolveRuntimeTurnExecution(

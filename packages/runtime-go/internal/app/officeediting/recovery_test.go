@@ -1,12 +1,9 @@
 package officeediting
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"reflect"
 	"strings"
@@ -414,37 +411,14 @@ func (f *fakeManualEditing) PrepareNativeManual(_ context.Context, id string, d 
 	return status, nil
 }
 
-// This package's diagnostic cases are sequential: restore stderr before any
-// assertion can stop the subtest, and never capture document or transport bodies.
-func captureManualBeginPhaseV1(t *testing.T, run func() map[string]any) (map[string]any, []byte) {
-	t.Helper()
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal("diagnostic_pipe_unavailable")
-	}
-	original := os.Stderr
-	defer func() { os.Stderr = original; _ = writer.Close(); _ = reader.Close() }()
-	os.Stderr = writer
-	out := run()
-	os.Stderr = original
-	if writer.Close() != nil {
-		t.Fatal("diagnostic_writer_close_failed")
-	}
-	frame, err := io.ReadAll(io.LimitReader(reader, nativeManualBeginPhaseMaxBytesV1+1))
-	if err != nil {
-		t.Fatal("diagnostic_frame_read_failed")
-	}
-	return out, frame
-}
-
-func TestNativeManualBeginPhaseIsFailureOnlyClosedAndPreservesResult(t *testing.T) {
+func TestNativeManualBeginObserverIsFailureOnlyAndPreservesResult(t *testing.T) {
 	for _, name := range []string{"dependencies", "capture_path", "baseline_open", "baseline_session", "baseline_revision", "prepare", "prepared_contract", "success"} {
 		t.Run(name, func(t *testing.T) {
 			a, base, _, leases := selectionFixture(t)
 			fake := &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
 			a.service = fake
-			// Preserve the real Registry contract that any baseline callback error
-			// is hidden by ErrCaptureFailed, without a server/bootstrap fixture.
+			// Only the baseline Open error bypasses the Registry's deliberate
+			// ErrCaptureFailed wrapper in the diagnostic callback.
 			a.manualCapture = func(_ context.Context, _, _ string, read func() error) (func(), error) {
 				if read() != nil {
 					return nil, managededitingapp.ErrCaptureFailed
@@ -452,66 +426,64 @@ func TestNativeManualBeginPhaseIsFailureOnlyClosedAndPreservesResult(t *testing.
 				*leases++
 				return func() { *leases-- }, nil
 			}
+			var observed []NativeManualBeginPhaseV1
+			var causes []error
+			a.manualBeginObserver = func(state NativeManualBeginPhaseV1, cause error) {
+				observed = append(observed, state)
+				causes = append(causes, cause)
+			}
 			request := map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "operationId": "manual_phase_001", "baseRevision": base.document.Revision}
-			want := nativeManualBeginPhaseV1{Version: 1, ManualServicePresent: true, CaptureBound: true}
+			want := NativeManualBeginPhaseV1{Version: 1, ManualServicePresent: true, CaptureBound: true}
+			wantCause := ErrUnavailable
 			code := "unavailable"
 			switch name {
 			case "dependencies":
 				a.service = base
-				want.Phase, want.ErrorKind, want.ManualServicePresent = "dependencies", "unavailable", false
+				want.Phase, want.ManualServicePresent = "dependencies", false
 			case "capture_path":
 				a.manualCapture = func(context.Context, string, string, func() error) (func(), error) {
 					return nil, managededitingapp.ErrUnsafePath
 				}
-				want.Phase, want.ErrorKind, want.CaptureEntered = "capture", "unsafe_path", true
+				want.Phase, want.CaptureEntered, wantCause = "capture", true, managededitingapp.ErrUnsafePath
 			case "baseline_open", "baseline_session", "baseline_revision":
-				want.Phase, want.ErrorKind = name, "baseline_failed"
+				want.Phase, wantCause = name, managededitingapp.ErrCaptureFailed
 				want.CaptureEntered, want.BaselineEntered = true, true
 				want.BaselineOpenOK, want.SessionMatch, want.RevisionMatch = true, true, true
 				if name == "baseline_open" {
 					base.err = fmt.Errorf("SYNTH_PRIVATE_MANUAL_TRACE: %w", os.ErrPermission)
-					want.ErrorKind, want.BaselineOpenOK, want.SessionMatch, want.RevisionMatch = "permission", false, false, false
+					wantCause, want.BaselineOpenOK, want.SessionMatch, want.RevisionMatch = base.err, false, false, false
 				} else if name == "baseline_session" {
 					base.document.SessionID, want.SessionMatch = strings.Repeat("e", 48), false
 				} else {
 					base.document.Revision, want.RevisionMatch = strings.Repeat("e", 64), false
 				}
 			case "prepare", "prepared_contract", "success":
-				want.Phase, want.ErrorKind = name, "other"
+				want.Phase = name
 				want.CaptureEntered, want.BaselineEntered, want.BaselineOpenOK = true, true, true
 				want.SessionMatch, want.RevisionMatch, want.CaptureAcquired, want.PrepareEntered = true, true, true, true
 				if name == "prepare" {
 					fake.prepareErr = errors.New("SYNTH_PRIVATE_MANUAL_TRACE /private/example token=hidden")
+					wantCause = fake.prepareErr
 				} else if name == "prepared_contract" {
-					fake.committed, want.PrepareOK, want.ErrorKind, code = true, true, "conflict", "conflict"
+					fake.committed, want.PrepareOK, wantCause, code = true, true, fileport.ErrConflict, "conflict"
 				}
 			}
 			base.calls = nil
-			out, frame := captureManualBeginPhaseV1(t, func() map[string]any { return nativeInvoke(t, a, "begin-manual-edit", request) })
+			out := nativeInvoke(t, a, "begin-manual-edit", request)
 			if name == "success" {
-				if out["ok"] != true || len(frame) != 0 || *leases != 1 || !fake.prepared {
+				if out["ok"] != true || len(observed) != 0 || len(causes) != 0 || *leases != 1 || !fake.prepared {
 					t.Fatal("successful_begin_changed_or_emitted_diagnostic")
 				}
-				return
-			}
-			if out["ok"] != false || out["code"] != code || *leases != 0 || len(out) != 3 {
-				t.Fatal("diagnostic_changed_response_or_capture_cleanup")
-			}
-			if len(frame) > nativeManualBeginPhaseMaxBytesV1 || bytes.Count(frame, []byte("\n")) != 1 || !bytes.HasPrefix(frame, []byte(nativeManualBeginPhasePrefixV1)) {
-				t.Fatal("diagnostic_not_one_bounded_prefixed_frame")
-			}
-			for _, private := range []string{"SYNTH_PRIVATE", "/workspace", "/private", request["sessionId"].(string), request["baseRevision"].(string), request["operationId"].(string), "thread_main"} {
-				if bytes.Contains(frame, []byte(private)) {
-					t.Fatal("diagnostic_leaked_private_value")
+			} else {
+				if out["ok"] != false || out["code"] != code || *leases != 0 || len(out) != 3 {
+					t.Fatal("diagnostic_changed_response_or_capture_cleanup")
 				}
-			}
-			body := bytes.TrimSuffix(bytes.TrimPrefix(frame, []byte(nativeManualBeginPhasePrefixV1)), []byte("\n"))
-			var got nativeManualBeginPhaseV1
-			decoder := json.NewDecoder(bytes.NewReader(body))
-			decoder.DisallowUnknownFields()
-			var fields map[string]any
-			if decoder.Decode(&got) != nil || json.Unmarshal(body, &fields) != nil || len(fields) != 14 || got != want {
-				t.Fatal("diagnostic_closed_shape_or_phase_mismatch")
+				if len(observed) != 1 || len(causes) != 1 || observed[0] != want || causes[0] != wantCause {
+					t.Fatal("diagnostic_state_or_original_cause_changed")
+				}
+				if name == "baseline_open" && (!errors.Is(causes[0], os.ErrPermission) || errors.Is(causes[0], managededitingapp.ErrCaptureFailed)) {
+					t.Fatal("baseline_open_cause_was_replaced_by_capture_wrapper")
+				}
 			}
 			opens := 0
 			for _, call := range base.calls {
@@ -526,62 +498,66 @@ func TestNativeManualBeginPhaseIsFailureOnlyClosedAndPreservesResult(t *testing.
 	}
 }
 
-// Error text must never be evaluated by the classifier or fixed encoder.
-type manualPhasePrivateErrorV1 struct{}
-
-func (manualPhasePrivateErrorV1) Error() string { panic("private_error_text_evaluated") }
-
-type manualPhaseFailingWriterV1 struct{ writes int }
-
-func (w *manualPhaseFailingWriterV1) Write([]byte) (int, error) {
-	w.writes++
-	return 0, io.ErrClosedPipe
+func TestNativeManualBeginObserverBindingIsStartupOnly(t *testing.T) {
+	observer := func(NativeManualBeginPhaseV1, error) {}
+	a := New("docx", nil, func(context.Context) bool { return true })
+	if err := a.BindManualBeginObserverV1(nil); !errors.Is(err, ErrBinding) {
+		t.Fatal("nil_manual_begin_observer_accepted")
+	}
+	if err := a.BindManualBeginObserverV1(observer); err != nil {
+		t.Fatal("manual_begin_observer_binding_failed")
+	}
+	if err := a.BindManualBeginObserverV1(observer); !errors.Is(err, ErrBinding) {
+		t.Fatal("manual_begin_observer_rebinding_accepted")
+	}
+	opened, _, _, _ := selectionFixture(t)
+	if err := opened.BindManualBeginObserverV1(observer); !errors.Is(err, ErrBinding) {
+		t.Fatal("manual_begin_observer_bound_after_session_opened")
+	}
 }
 
-func TestNativeManualBeginPhaseEncoderRejectsUnboundedValuesAndIgnoresWriterFailure(t *testing.T) {
-	if nativeManualBeginErrorKindV1(manualPhasePrivateErrorV1{}) != "other" || nativeManualBeginErrorKindV1(fmt.Errorf("private: %w", context.Canceled)) != "context_canceled" {
-		t.Fatal("diagnostic_error_classification_changed")
-	}
-	valid := nativeManualBeginPhaseV1{Version: 1, Phase: "prepare", ErrorKind: "other"}
-	for _, field := range []string{"phase", "errorKind", "version"} {
-		invalid := valid
-		switch field {
-		case "phase":
-			invalid.Phase = strings.Repeat("PRIVATE", 1024)
-		case "errorKind":
-			invalid.ErrorKind = "PRIVATE"
-		case "version":
-			invalid.Version = 2
-		}
-		var buffer bytes.Buffer
-		emitNativeManualBeginPhaseV1(&buffer, invalid)
-		if buffer.Len() != 0 {
-			t.Fatal("unqualified_diagnostic_value_emitted")
-		}
-	}
-	writer := &manualPhaseFailingWriterV1{}
-	emitNativeManualBeginPhaseV1(writer, valid)
-	if writer.writes != 1 {
-		t.Fatal("diagnostic_retried_failed_write")
-	}
-	// Exercise the actual failure result when the process stderr handle is
-	// closed; best-effort diagnostics must not become operation failures.
-	a, base, _, leases := selectionFixture(t)
-	reader, closedWriter, err := os.Pipe()
-	if err != nil {
-		t.Fatal("closed_diagnostic_pipe_unavailable")
-	}
-	if reader.Close() != nil || closedWriter.Close() != nil {
-		t.Fatal("diagnostic_pipe_close_failed")
-	}
-	out := func() map[string]any {
-		original := os.Stderr
-		os.Stderr = closedWriter
-		defer func() { os.Stderr = original }()
-		return nativeInvoke(t, a, "begin-manual-edit", map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "operationId": "manual_closed_stderr_001", "baseRevision": base.document.Revision})
-	}()
-	if !reflect.DeepEqual(out, map[string]any{"ok": false, "code": "unavailable", "message": "The object operation could not be completed."}) || *leases != 0 {
-		t.Fatal("failed_diagnostic_write_changed_operation_result")
+func TestNativeManualBeginWithoutObserverPreservesFailure(t *testing.T) {
+	for _, name := range []string{"dependencies", "baseline_session", "baseline_revision", "prepare"} {
+		t.Run(name, func(t *testing.T) {
+			a, base, _, leases := selectionFixture(t)
+			if a.manualBeginObserver != nil {
+				t.Fatal("manual_begin_observer_should_be_optional")
+			}
+			request := map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "operationId": "manual_no_observer_001", "baseRevision": base.document.Revision}
+			fake := &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+			if name != "dependencies" {
+				a.service = fake
+			}
+			a.manualCapture = func(_ context.Context, _, _ string, read func() error) (func(), error) {
+				if read() != nil {
+					return nil, managededitingapp.ErrCaptureFailed
+				}
+				*leases++
+				return func() { *leases-- }, nil
+			}
+			switch name {
+			case "baseline_session":
+				base.document.SessionID = strings.Repeat("e", 48)
+			case "baseline_revision":
+				base.document.Revision = strings.Repeat("e", 64)
+			case "prepare":
+				fake.prepareErr = errors.New("SYNTH_PRIVATE_MANUAL_TRACE")
+			}
+			base.calls = nil
+			out := nativeInvoke(t, a, "begin-manual-edit", request)
+			if !reflect.DeepEqual(out, map[string]any{"ok": false, "code": "unavailable", "message": "The object operation could not be completed."}) || *leases != 0 || fake.prepared {
+				t.Fatal("absent_observer_changed_operation_result_or_capture_cleanup")
+			}
+			opens := 0
+			for _, call := range base.calls {
+				if call == "open" {
+					opens++
+				}
+			}
+			if name == "dependencies" && opens != 0 || name != "dependencies" && opens != 1 {
+				t.Fatal("absent_observer_changed_baseline_reads")
+			}
+		})
 	}
 }
 

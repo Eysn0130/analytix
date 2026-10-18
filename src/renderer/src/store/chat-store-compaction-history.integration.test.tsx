@@ -170,7 +170,11 @@ it('restores publicly authorized ordinary history after production compaction an
     // Runtime state still passes the internal APFS authority checks.
     stateRoot = await fs.mkdtemp(proc.platform === 'darwin'
       ? '/private/tmp/analytix-compaction-history-state-' : `${tmpdir()}/analytix-compaction-history-state-`)
-    dataDir = `${stateRoot}/data`; workspaceRoot = `${fixtureRoot}/workspace`
+    dataDir = `${stateRoot}/data`
+    // Ordinary workspace identity must remain outside the OS-internal temp roots.
+    const workspaceFixturesRoot = `${proc.cwd()}/.cache`
+    await fs.mkdir(workspaceFixturesRoot, { recursive: true, mode: 0o700 })
+    workspaceRoot = await fs.mkdtemp(`${workspaceFixturesRoot}/analytix-compaction-history-workspace-`)
     if (!reusePath) {
       binaryRoot = await fs.mkdtemp(`${tmpdir()}/analytix-compaction-history-build-`)
       executable = `${binaryRoot}/runtime-server${proc.platform === 'win32' ? '.exe' : ''}`
@@ -506,6 +510,7 @@ it('restores publicly authorized ordinary history after production compaction an
     receipt.ownedRuntimeProcessesExited = true; receipt.providerListenerClosed = true
     if (buildClosed) {
       if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true })
+      if (workspaceRoot) await fs.rm(workspaceRoot, { recursive: true, force: true })
       if (fixtureRoot) await fs.rm(fixtureRoot, { recursive: true, force: true })
       if (binaryRoot && !receipt.binaryInputsReceiptSha256) await fs.rm(binaryRoot, { recursive: true, force: true })
     }

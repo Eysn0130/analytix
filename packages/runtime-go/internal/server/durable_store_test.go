@@ -3819,12 +3819,15 @@ func TestDurableCompactionAdvancesContextEpochOnceAndPersistsRecoveryDigest(t *t
 	if stringField(result, "sourceDigest") == "" {
 		t.Fatalf("compaction recovery digest missing: %#v", result)
 	}
+	if stringField(result, "checkpointDigest") == "" {
+		t.Fatalf("compaction checkpoint digest missing: %#v", result)
+	}
 	reloaded, err := handler.store.GetThread(threadID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	state, ok, err := contextepochapp.StateFromThread(reloaded)
-	if err != nil || !ok || state.AcceptedSnapshot.Epoch != current.ContextEpoch+1 || state.AcceptedSnapshot.RecoveryDigest != stringField(result, "sourceDigest") {
+	if err != nil || !ok || state.AcceptedSnapshot.Epoch != current.ContextEpoch+1 || state.AcceptedSnapshot.RecoveryDigest != stringField(result, "checkpointDigest") {
 		t.Fatalf("compaction epoch state mismatch: state=%#v ok=%v err=%v", state, ok, err)
 	}
 	turns := listAny(reloaded["turns"])

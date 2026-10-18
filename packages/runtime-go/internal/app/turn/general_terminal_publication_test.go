@@ -14,6 +14,7 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 )
 
@@ -724,5 +725,200 @@ func TestGeneralTerminalCASRejectsNonJSONOutboxBeforeAuthorityParsingV1(t *testi
 				t.Fatal("non-JSON rejection changed the original outbox")
 			}
 		})
+	}
+}
+
+func TestGeneralTerminalCASLateLoserPreservesWinnerV1(t *testing.T) {
+	for _, outcome := range []struct {
+		name, winnerReason, loserReason string
+	}{
+		{name: "same status different accepted time", winnerReason: "success", loserReason: "success"},
+		{name: "completed winner failed loser", winnerReason: "success", loserReason: "timeout"},
+		{name: "failed winner completed loser", winnerReason: "timeout", loserReason: "success"},
+	} {
+		t.Run(outcome.name, func(t *testing.T) {
+			for _, advanced := range []bool{false, true} {
+				name := "same current context"
+				if advanced {
+					name = "newer current turn"
+				}
+				t.Run(name, func(t *testing.T) {
+					base := generalTerminalTelemetryCASInputV1(t)
+					frozen, err := domainsecurity.ParseTurnSecurityContext(base.Thread["securityState"])
+					if err != nil {
+						t.Fatal(err)
+					}
+					winnerInput := generalTerminalLateLoserInputV1(t, frozen, outcome.winnerReason, base.Now)
+					winner, err := PrepareTerminalCASMutation(winnerInput)
+					if err != nil || !winner.Applied || winner.Thread == nil {
+						t.Fatalf("could not commit the ordinary winner fixture: %v", err)
+					}
+					if advanced {
+						current := generalTerminalTestContext(t, frozen.ThreadID, "turn-newer-general-current", frozen.ContextEpoch+1)
+						winner.Thread["securityState"] = turnSecurityContextRecord(current)
+						winner.Thread["turns"] = append(winner.Thread["turns"].([]any), map[string]any{
+							"id": current.TurnID, "threadId": current.ThreadID, "status": "running",
+							"securityContext": turnSecurityContextRecord(current), "items": []any{},
+						})
+					}
+					loser := generalTerminalLateLoserInputV1(t, frozen, outcome.loserReason, base.Now.Add(time.Second))
+					loser.Thread = winner.Thread
+					winnerStatus := stringField(publicationFixtureTurn(winner.Thread), "status")
+					winnerCommit := publicationFixtureTurn(winner.Thread)["generalTerminalPublication"].(map[string]any)
+					loserCommit := loser.Fields["generalTerminalPublication"].(map[string]any)
+					if winnerCommit["committedAt"] == loserCommit["committedAt"] || winnerCommit["commitDigest"] == loserCommit["commitDigest"] {
+						t.Fatal("late loser fixture accidentally reused the exact winner")
+					}
+					loads := 0
+					loser.LoadGeneralTerminalEvents = func() ([]map[string]any, error) {
+						loads++
+						return nil, errors.New("late loser must not load publication inventory")
+					}
+					before, err := json.Marshal([]any{loser.Thread, loser.AppendItems, loser.Fields})
+					if err != nil {
+						t.Fatal(err)
+					}
+					result, err := PrepareTerminalCASMutation(loser)
+					if err != nil || result.Applied || result.CurrentStatus != winnerStatus || result.Thread != nil || result.HasAcceptedFinal || loads != 0 {
+						t.Fatalf("valid ordinary late loser did not preserve the winner: applied=%t status=%s returned_thread=%t accepted_final=%t inventory_loads=%d err=%v", result.Applied, result.CurrentStatus, result.Thread != nil, result.HasAcceptedFinal, loads, err)
+					}
+					after, err := json.Marshal([]any{loser.Thread, loser.AppendItems, loser.Fields})
+					if err != nil || !bytes.Equal(before, after) {
+						t.Fatal("late loser changed the original winner or contender payload")
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestGeneralTerminalCASLateLoserRejectsInvalidCandidateV1(t *testing.T) {
+	for name, mutate := range map[string]func(*testing.T, *PrepareTerminalCASInput){
+		"missing outbox": func(_ *testing.T, input *PrepareTerminalCASInput) {
+			delete(input.Fields, "generalTerminalPublication")
+		},
+		"missing binding": func(_ *testing.T, input *PrepareTerminalCASInput) {
+			delete(input.Fields, "generalTerminalCASBinding")
+		},
+		"status differs from own commit": func(_ *testing.T, input *PrepareTerminalCASInput) {
+			input.Status = "failed"
+		},
+		"wrong thread": func(_ *testing.T, input *PrepareTerminalCASInput) {
+			input.ThreadID = "other-thread"
+		},
+		"wrong target turn": func(_ *testing.T, input *PrepareTerminalCASInput) {
+			input.TurnID = "other-turn"
+		},
+		"different frozen context": func(t *testing.T, input *PrepareTerminalCASInput) {
+			other := generalTerminalTestContext(t, input.ThreadID, input.TurnID, 3)
+			foreign := generalTerminalLateLoserInputV1(t, other, "success", input.Now)
+			input.AppendItems, input.Fields = foreign.AppendItems, foreign.Fields
+		},
+		"different frozen context with authority override": func(t *testing.T, input *PrepareTerminalCASInput) {
+			other := generalTerminalTestContext(t, input.ThreadID, input.TurnID, 3)
+			foreign := generalTerminalLateLoserInputV1(t, other, "success", input.Now)
+			input.AppendItems, input.Fields = foreign.AppendItems, foreign.Fields
+			input.Fields["securityContext"] = turnSecurityContextRecord(other)
+		},
+		"digest bound unsafe telemetry": func(t *testing.T, input *PrepareTerminalCASInput) {
+			input.Fields["generalTerminalPublication"] = generalTerminalValidationViewDomainCommitV1(t, func(usage map[string]any) {
+				usage["cacheDiagnostics"].(map[string]any)["providerAttemptTelemetryError"] = "PRIVATE_PROVIDER_FAILURE"
+			})
+		},
+		"raw sibling": func(_ *testing.T, input *PrepareTerminalCASInput) {
+			input.Fields["lastError"] = "PRIVATE_PROVIDER_FAILURE"
+		},
+		"original resource budget": func(_ *testing.T, input *PrepareTerminalCASInput) {
+			input.Fields["oversized"] = strings.Repeat("x", (1<<20)+1)
+		},
+		"corrupt existing winner": func(_ *testing.T, input *PrepareTerminalCASInput) {
+			publicationFixtureTurn(input.Thread)["generalTerminalPublication"].(map[string]any)["commitDigest"] = strings.Repeat("b", 64)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := generalTerminalTelemetryCASInputV1(t)
+			winner, err := PrepareTerminalCASMutation(input)
+			if err != nil || !winner.Applied {
+				t.Fatalf("could not commit the ordinary winner fixture: %v", err)
+			}
+			input.Thread = winner.Thread
+			mutate(t, &input)
+			loads := 0
+			input.LoadGeneralTerminalEvents = func() ([]map[string]any, error) {
+				loads++
+				return nil, errors.New("invalid late loser must not load publication inventory")
+			}
+			before, err := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := PrepareTerminalCASMutation(input)
+			if err == nil || result.Applied || result.Thread != nil || loads != 0 {
+				t.Fatalf("invalid contender received ordinary terminal no-op success: applied=%t returned_thread=%t inventory_loads=%d err=%v", result.Applied, result.Thread != nil, loads, err)
+			}
+			after, err := json.Marshal([]any{input.Thread, input.AppendItems, input.Fields})
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("late loser rejection changed the original winner or contender payload")
+			}
+		})
+	}
+}
+
+func generalTerminalLateLoserInputV1(t *testing.T, frozen domainsecurity.TurnSecurityContext, reason string, acceptedAt time.Time) PrepareTerminalCASInput {
+	t.Helper()
+	base := generalTerminalTelemetryCASInputV1(t)
+	previous, err := domainturnterminal.ParseGeneralTerminalPublicationCommitV1(base.Fields["generalTerminalPublication"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, ok := domainturnterminal.GeneralTerminalStatusForReasonV1(reason)
+	if !ok {
+		t.Fatal("late loser fixture requires a known terminal reason")
+	}
+	text := ""
+	if reason == "success" {
+		text = GeneralProviderFinalQuarantinedText
+	}
+	binding, err := domainturnterminal.NewGeneralTerminalCASBindingForOutcomeV1(frozen, reason, status, text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := acceptedAt.UTC().Format(time.RFC3339Nano)
+	usage := contracts.CloneMap(previous.UsageEvent)
+	usage["threadId"], usage["turnId"], usage["timestamp"] = frozen.ThreadID, frozen.TurnID, stamp
+	terminal := map[string]any{
+		"kind": "turn_" + status, "threadId": frozen.ThreadID, "turnId": frozen.TurnID,
+		"status": status, "timestamp": stamp, "terminalReason": reason, "generalTerminalCASBindingDigest": binding.BindingDigest,
+	}
+	items := []map[string]any{}
+	var itemEvent map[string]any
+	if reason == "success" {
+		item := BuildAssistantTextItem(AssistantTextItemInput{
+			ThreadID: frozen.ThreadID, TurnID: frozen.TurnID, Text: text, Status: status, CreatedAt: stamp, FinishedAt: stamp,
+		})
+		item["generalTerminalCASBinding"] = domainturnterminal.GeneralTerminalCASBindingV1Map(binding)
+		items = append(items, item)
+		itemEvent = AssistantItemCompletedEvent(item)
+		itemEvent["timestamp"] = stamp
+	} else {
+		projection, ok := domainterminal.GeneralFailureProjectionV1(reason)
+		if !ok {
+			t.Fatal("late loser fixture requires a closed host failure projection")
+		}
+		usage["usageFinalStatus"] = status
+		terminal["code"], terminal["message"], terminal["error"], terminal["severity"] = projection.Code, projection.Message, projection.Message, projection.Severity
+	}
+	commit, err := BuildGeneralTerminalPublicationCommitForEventsV1(frozen, binding, itemEvent, usage, terminal, stamp, len(items) != 0)
+	if err != nil {
+		t.Fatalf("could not build a legal ordinary late loser fixture: %v", err)
+	}
+	return PrepareTerminalCASInput{
+		Thread: map[string]any{
+			"id": frozen.ThreadID, "status": "running", "securityState": turnSecurityContextRecord(frozen),
+			"turns": []any{map[string]any{"id": frozen.TurnID, "threadId": frozen.ThreadID, "status": "running", "securityContext": turnSecurityContextRecord(frozen), "items": []any{}}},
+		},
+		ThreadID: frozen.ThreadID, TurnID: frozen.TurnID, Status: status, AppendItems: items,
+		Fields: map[string]any{"generalTerminalCASBinding": domainturnterminal.GeneralTerminalCASBindingV1Map(binding), "generalTerminalPublication": domainturnterminal.GeneralTerminalPublicationCommitV1Map(commit)},
+		Now:    acceptedAt, LoadGeneralTerminalEvents: func() ([]map[string]any, error) { return nil, nil },
 	}
 }

@@ -13,6 +13,7 @@ import (
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	executiongrantapp "analytix.local/runtime-go/internal/app/executiongrant"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
+	gatecontinuationapp "analytix.local/runtime-go/internal/app/gatecontinuation"
 	apploop "analytix.local/runtime-go/internal/app/loop"
 	appmodel "analytix.local/runtime-go/internal/app/model"
 	privacyprojectionapp "analytix.local/runtime-go/internal/app/privacyprojection"
@@ -256,6 +257,181 @@ func (h *runtimeServerHandler) persistRuntimeToolResultWithProcessContext(ctx co
 		h.recordRuntimeToolProgress(pending, progressStatus, progressMessage)
 	}
 	return err
+}
+
+// A terminal Question has no answer or provider continuation. Its signed
+// disposition freezes this metadata-only result across every partial retry.
+func (h *runtimeServerHandler) persistTerminalQuestionResult(ctx context.Context, gate controlapp.DrainedGate[appmodel.PendingToolCall]) error {
+	ctx, cancel := newHostAuthorityContextFrom(ctx)
+	defer cancel()
+	pending := gate.Pending
+	if gate.Kind != domaincontinuation.KindUserInput ||
+		(pending.Call.Name != "user_input" && pending.Call.Name != "request_user_input") ||
+		pending.ExecutionGrant.ServerIdentity != "host:builtin" || pending.ExecutionGrant.ReadOnly {
+		return errors.New("terminal Question settlement identity is invalid")
+	}
+	receipt, err := h.continuations.ResolvePendingReceiptHost(gate.ID, gate.Record.ContinuationReceiptID, gate.Kind, gate.Record.ItemID, pending)
+	if err != nil {
+		return err
+	}
+	trusted, disposition, err := h.continuations.ResolveTrustedDisposition(ctx, gate.ID)
+	if err != nil || trusted.ReceiptID != receipt.ReceiptID {
+		return errors.Join(errors.New("terminal Question disposition is unavailable"), err)
+	}
+	cancellationAuthority := disposition.Status == domaincontinuation.StatusInterrupted || disposition.Status == domaincontinuation.StatusRejected
+	if cancellationAuthority {
+		if disposition.Status != gate.TerminalStatus || disposition.ReasonCode != gate.TerminalReasonCode {
+			return errors.New("terminal Question disposition conflicts with its claim")
+		}
+	} else if disposition.Status != gate.ResolutionStatus || disposition.ReasonCode != gate.ResolutionReasonCode {
+		return errors.New("terminal Question resolution conflicts with its claim")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, disposition.DisposedAt); err != nil {
+		return err
+	}
+	projection := toolcatalogapp.BuildPublicToolResultProjectionV1(pending.Call.Name, map[string]any{"code": "tool_cancelled"}, true)
+	records, err := toolcatalogapp.SettleToolResult(toolcatalogapp.ToolResultInput{
+		ThreadID: pending.ThreadID, TurnID: pending.TurnID, Call: pending.Call,
+		CreatedAt: disposition.DisposedAt, FinishedAt: disposition.DisposedAt,
+		Projection: projection, IsError: true,
+		ContextDigest: pending.SecurityContext.ContextDigest, ContextEpoch: pending.SecurityContext.ContextEpoch,
+		ExecutionGrantID: pending.ExecutionGrant.GrantID, CaseID: pending.SecurityContext.CaseID,
+		DatasetSnapshotID: pending.SecurityContext.DatasetSnapshotID, ServerIdentity: pending.ExecutionGrant.ServerIdentity,
+	})
+	if err != nil {
+		return err
+	}
+	if pending.PrivateProtocolObserved {
+		records.ResultItem["privateProtocolObserved"] = true
+	}
+	snapshot, err := h.store.ReadPrimaryThreadSnapshotV1(ctx, pending.ThreadID)
+	if err != nil {
+		return err
+	}
+	registry, err := executiongrantapp.RegistryFromThread(pending.ThreadID, snapshot.Thread, pending.TurnID)
+	if err != nil {
+		return err
+	}
+	if entry, found := domainsecurity.ExecutionGrantRegistryEntryByID(registry, pending.ExecutionGrant.GrantID); found && entry.Status == domainsecurity.GrantRegistrySettled {
+		durable, err := executiongrantapp.DurableSettlementFromThread(pending.ThreadID, snapshot.Thread, pending.TurnID, records.ResultItemID, pending.ExecutionGrant)
+		if err != nil {
+			return err
+		}
+		prior, err := domaintoolresult.ParsePublicToolResultProjectionV1(durable.ResultItem["output"])
+		if err != nil {
+			return err
+		}
+		if prior.Code != "tool_cancelled" {
+			// Completion can persist the real result before a later provider
+			// failure promotes this gate to terminal. Never replace that result.
+			_, changed, err := appturn.EnsureOrdinaryToolSettlementExact(appturn.OrdinaryToolSettlementInput{
+				Thread: snapshot.Thread, ThreadID: pending.ThreadID, TurnID: pending.TurnID,
+				ToolCallItemID: pending.ToolCallItemID, CallID: pending.Call.ID, ToolName: pending.Call.Name,
+				Status: stringField(durable.ResultItem, "status"), Timestamp: stringField(durable.ResultItem, "finishedAt"), ResultItem: durable.ResultItem,
+			})
+			if err != nil || changed {
+				return errors.Join(errors.New("terminal Question prior result is not exactly settled"), err)
+			}
+			isError, _ := durable.ResultItem["isError"].(bool)
+			original, err := toolcatalogapp.SettleToolResult(toolcatalogapp.ToolResultInput{
+				ThreadID: pending.ThreadID, TurnID: pending.TurnID, Call: pending.Call,
+				CreatedAt: stringField(durable.ResultItem, "createdAt"), FinishedAt: stringField(durable.ResultItem, "finishedAt"),
+				Projection: prior, IsError: isError,
+				ContextDigest: pending.SecurityContext.ContextDigest, ContextEpoch: pending.SecurityContext.ContextEpoch,
+				ExecutionGrantID: pending.ExecutionGrant.GrantID, CaseID: pending.SecurityContext.CaseID,
+				DatasetSnapshotID: pending.SecurityContext.DatasetSnapshotID, ServerIdentity: pending.ExecutionGrant.ServerIdentity,
+			})
+			if err != nil {
+				return err
+			}
+			h.gateCancellationMu.Lock()
+			defer h.gateCancellationMu.Unlock()
+			return recordTerminalQuestionToolResultEventV1(original.Event, h.runtimeGateEventOutboxDependencies())
+		}
+	}
+	_, changed, err := appturn.EnsureOrdinaryToolSettlementExact(appturn.OrdinaryToolSettlementInput{
+		Thread: snapshot.Thread, ThreadID: pending.ThreadID, TurnID: pending.TurnID,
+		ToolCallItemID: pending.ToolCallItemID, CallID: pending.Call.ID, ToolName: pending.Call.Name,
+		Status: records.Status, Timestamp: disposition.DisposedAt, ResultItem: records.ResultItem,
+	})
+	if err != nil {
+		return err
+	}
+	if changed {
+		if !cancellationAuthority {
+			return errors.New("resolved Question has no durable result and cannot be terminalized")
+		}
+		// Only inspect the existing native-dispatch predicate. No restart outcome
+		// authority, unknown result, or recovery append is created here.
+		dispatched, err := executiongrantapp.QuestionRestartSettlementCandidateV1(pending.ThreadID, snapshot.Thread, receipt)
+		if err != nil || !dispatched {
+			return errors.Join(errors.New("terminal Question lacks original dispatch authority"), err)
+		}
+		settlement, err := evidenceapp.PrepareToolSettlement(ctx, h.caseFinalizer, h.turnSecurity, filestore.CaseBindingReader{}, h.store, h.mcp, pending, map[string]any{"code": "tool_cancelled"}, true)
+		if err != nil {
+			return err
+		}
+		if !settlement.SettlementAuthorized || !settlement.IsError || settlement.Marker != nil ||
+			toolcatalogapp.BuildPublicToolResultProjectionV1(pending.Call.Name, settlement.Output, settlement.IsError) != projection {
+			return errors.New("terminal Question settlement lost current authority")
+		}
+		if err := h.store.EnsureOrdinaryToolResultSettlementExact(ctx, pending.ThreadID, pending.TurnID, pending.ToolCallItemID, records.ResultItem); err != nil {
+			return err
+		}
+	} else if err := h.store.EnsureOrdinaryToolResultSettlementExact(ctx, pending.ThreadID, pending.TurnID, pending.ToolCallItemID, records.ResultItem); err != nil {
+		return err
+	}
+	h.gateCancellationMu.Lock()
+	defer h.gateCancellationMu.Unlock()
+	return recordTerminalQuestionToolResultEventV1(records.Event, h.runtimeGateEventOutboxDependencies())
+}
+
+func recordTerminalQuestionToolResultEventV1(event map[string]any, deps gatecontinuationapp.EventOutboxDependencies) error {
+	threadID, turnID, itemID := stringField(event, "threadId"), stringField(event, "turnId"), stringField(event, "itemId")
+	item, _ := event["item"].(map[string]any)
+	callID := stringField(item, "callId")
+	if threadID == "" || turnID == "" || itemID == "" || callID == "" || stringField(event, "kind") != "tool_call_finished" || deps.GetThread == nil || deps.LoadEvents == nil || deps.RecordEvent == nil {
+		return errors.New("terminal Question result event authority is unavailable")
+	}
+	thread, err := deps.GetThread(threadID)
+	if err != nil {
+		return err
+	}
+	expected, err := appturn.SanitizeCaseEventPublication(thread, event)
+	if err != nil {
+		return err
+	}
+	match := func() (bool, error) {
+		events, err := deps.LoadEvents(threadID)
+		if err != nil {
+			return false, err
+		}
+		matches := 0
+		for _, existing := range events {
+			existingItem, _ := existing["item"].(map[string]any)
+			if stringField(existing, "kind") != "tool_call_finished" || stringField(existing, "threadId") != threadID || stringField(existing, "turnId") != turnID ||
+				(stringField(existing, "itemId") != itemID && stringField(existingItem, "callId") != callID) {
+				continue
+			}
+			if !gatecontinuationapp.ExactGateEventProjectionV1(existing, expected) {
+				return false, errors.New("terminal Question has a conflicting result event")
+			}
+			matches++
+		}
+		if matches > 1 {
+			return false, errors.New("terminal Question has duplicate result events")
+		}
+		return matches == 1, nil
+	}
+	if found, err := match(); err != nil || found {
+		return err
+	}
+	writeErr := deps.RecordEvent(event)
+	found, readErr := match()
+	if readErr == nil && found {
+		return nil
+	}
+	return errors.Join(writeErr, readErr, errors.New("terminal Question result event write verification failed"))
 }
 
 func privateCaseToolOutcomeForSettlement(projection domaintoolresult.PublicToolResultProjectionV1, output any) *domainevidence.ToolOutcome {

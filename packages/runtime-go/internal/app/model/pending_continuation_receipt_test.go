@@ -3,6 +3,7 @@ package model
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -228,5 +229,61 @@ func TestRebuildPendingRetainsSignedOutputCapAcrossRestart(t *testing.T) {
 	pending, err := RebuildPendingToolCallFromReceipt(restartedReceipt, continuationCloneRecord(thread), resolver)
 	if err != nil || pending.OutputCapLogicalSequence != 1 || pending.ProviderNamespace.ProviderCallSequence != 1 {
 		t.Fatalf("restart lost cap: %#v %v", pending, err)
+	}
+}
+
+func TestSubmittedQuestionEffectRestoresOnlyBoundIDsAfterCompleteContentProjection(t *testing.T) {
+	receipt, _, _, _ := pendingContinuationApprovalFixtureV1(t)
+	current := receipt.Payload.SecurityContext
+	qid := "input_" + strings.Repeat("a", 26) + "123456789012" + strings.Repeat("a", 26) + "_1"
+	content := ToolResultContent(map[string]any{"status": "submitted", "answerCount": float64(1),
+		"answers": []map[string]string{{"id": qid, "label": "account 6222020000000000000", "value": qid}}})
+	message := domainmodel.Message{Role: "tool", Name: "request_user_input", ToolCallID: receipt.Payload.CallID, Content: content}
+	// Same-package fixture isolates projection behavior; the external-package
+	// privacy regression separately proves the signed audit minting boundary.
+	message.PrivateUserInputPendingBinding = pendingUserInputProviderBindingV1{
+		threadID: current.ThreadID, contextDigest: current.ContextDigest, sourceTurnID: current.TurnID,
+		receiptID: receipt.ReceiptID, callID: message.ToolCallID, toolName: message.Name,
+		role: message.Role, name: message.Name, outerCallID: message.ToolCallID, content: message.Content,
+		submittedQuestionIDs: ToolResultContent([]string{qid}),
+	}
+	if _, err := PendingUserInputProviderMessageV1(message, current); err == nil {
+		t.Fatal("pending-only helper returned unprojected submitted answers")
+	}
+	for _, closed := range []bool{false, true} {
+		source := CloneProviderMessages(CloneProviderMessages([]domainmodel.Message{message}))[0]
+		if closed {
+			messages := DeepSeekReasoningSafeHistory([]domainmodel.Message{{Role: "assistant", ToolCalls: []domainmodel.ToolCall{{ID: source.ToolCallID, Name: source.Name}}}, source})
+			if len(messages) != 1 {
+				t.Fatal("submitted continuation was lost during protocol closure")
+			}
+			source = messages[0]
+		}
+		scanned := false
+		projected, err := UserInputProviderMessageForEffectV1(source, current, func(raw string) (string, error) {
+			scanned = raw == content
+			return strings.ReplaceAll(strings.ReplaceAll(raw, qid, "[ACCOUNT]"), "6222020000000000000", "[ACCOUNT]"), nil
+		})
+		if err != nil || !scanned || projected.PrivateUserInputPendingBinding != nil {
+			t.Fatal("complete submitted content was not scanned before identity restoration", err)
+		}
+		inner := projected.Content
+		if closed {
+			var valid bool
+			inner, valid = CompletedPrivateProtocolSafeHistoryContentV1(inner, "request_user_input")
+			if !valid {
+				t.Fatal("submitted protocol closure is not canonical")
+			}
+		}
+		_, answers, valid := submittedUserInputProviderContentV1(inner)
+		if !valid || answers[0]["id"] != qid || answers[0]["value"] != "[ACCOUNT]" || answers[0]["label"] != "account [ACCOUNT]" {
+			t.Fatal("identity restoration also restored an untrusted answer string")
+		}
+	}
+	if message.Content != content || message.PrivateUserInputPendingBinding == nil {
+		t.Fatal("clone or projection changed the immutable source carrier")
+	}
+	if _, err := UserInputProviderMessageForEffectV1(message, current, nil); err == nil {
+		t.Fatal("submitted answer escaped without its final effect projection")
 	}
 }
