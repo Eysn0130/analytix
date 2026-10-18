@@ -6,8 +6,10 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { applyTheme, applyUiFontScale } from '../../../lib/apply-theme'
 import { HoverCard } from './HoverCard'
 import { Tooltip } from './Tooltip'
+import { primaryPaletteCases, resolveThemeToken, themeVariables } from './theme-token-test-helpers'
 
 let tokens: ReturnType<typeof parse>
+let shellTokens: ReturnType<typeof parse>
 let compiledTokens: ReturnType<typeof parse>
 const gateConsumers: { css: ReturnType<typeof parse>; primary: string; button: string }[] = []
 beforeAll(async () => {
@@ -19,6 +21,7 @@ beforeAll(async () => {
     return fs.readFileSync(fileURLToPath(url.href), 'utf8')
   }
   tokens = parse(readCss('./tokens.css'))
+  shellTokens = parse(readCss('../../../styles/base-shell.css'))
   // Vite/esbuild must use Node's own typed-array realm, rather than jsdom's.
   const { execFileSync } = await vi.importActual<typeof import('node:child_process')>('node:child_process')
   const { dirname, resolve } = await vi.importActual<typeof import('node:path')>('node:path')
@@ -41,13 +44,14 @@ beforeAll(async () => {
   }
 })
 const origins = ['data-analytix-message-timeline-content', 'data-analytix-chat-view', 'data-analytix-gate-composer']
-let host: HTMLDivElement, root: Root, previousTheme: string | null, previousStyle: string | null
+let host: HTMLDivElement, root: Root, previousTheme: string | null, previousStyle: string | null, previousAccent: string | null
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect(): void {} })
   vi.useFakeTimers()
   previousTheme = document.documentElement.getAttribute('data-theme')
   previousStyle = document.documentElement.getAttribute('style')
+  previousAccent = document.documentElement.getAttribute('data-accent')
   applyTheme('light'); applyUiFontScale('small')
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
@@ -57,70 +61,67 @@ afterEach(async () => {
   else document.documentElement.setAttribute('data-theme', previousTheme)
   if (previousStyle === null) document.documentElement.removeAttribute('style')
   else document.documentElement.setAttribute('style', previousStyle)
+  if (previousAccent === null) document.documentElement.removeAttribute('data-accent')
+  else document.documentElement.setAttribute('data-accent', previousAccent)
 })
 
 // Follow the actual DOM ancestry and selectors. This exercises the CSS source
 // seam without pretending jsdom supplies native custom-property layout.
 function variables(element: Element, sheet = tokens): Map<string, string> {
-  const chain: Element[] = []
-  for (let node: Element | null = element; node; node = node.parentElement) chain.unshift(node)
-  const values = new Map<string, string>()
-  for (const node of chain) {
-    sheet.walkRules(rule => {
-      if (rule.selectors.some(selector => node.matches(selector))) {
-        rule.walkDecls(declaration => { if (declaration.prop.startsWith('--')) values.set(declaration.prop, declaration.value) })
-      }
-    })
-    if (node instanceof HTMLElement) for (let index = 0; index < node.style.length; index++) {
-      const name = node.style.item(index)
-      if (name.startsWith('--')) values.set(name, node.style.getPropertyValue(name))
-    }
-  }
-  return values
+  return themeVariables(element, [shellTokens, sheet])
 }
 
 // Resolve these two real consumer declarations against the compiled token
 // scope. Hover is an explicit selector state; this is not native computed style.
-function gateBackground(button: HTMLButtonElement, sheet: ReturnType<typeof parse>, hover: boolean): string | undefined {
-  let background: string | undefined
+function gatePaint(button: HTMLButtonElement, sheet: ReturnType<typeof parse>, property: 'background' | 'color', state: 'normal' | 'hover' | 'pressed'): string | undefined {
+  let paint: string | undefined
   sheet.walkRules(rule => {
     if (rule.parent?.type !== 'root') return
     let value: string | undefined
-    rule.walkDecls('background', declaration => { value = declaration.value })
+    rule.walkDecls(property, declaration => { value = declaration.value })
     if (value === undefined) return
     // Pseudo-elements do not style the button element's own background.
-    if (rule.selectors.some(selector => !selector.includes('::') && (!selector.includes(':hover') || hover) &&
-      button.matches(selector.replaceAll(':hover', '')))) background = value
+    if (rule.selectors.some(selector => !selector.includes('::') && (!selector.includes(':hover') || state !== 'normal') &&
+      (!selector.includes(':active') || state === 'pressed') &&
+      button.matches(selector.replaceAll(':hover', '').replaceAll(':active', '')))) paint = value
   })
-  const alias = background && /^var\((--[\w-]+)\)$/.exec(background)
-  return alias ? variables(button, compiledTokens).get(alias[1]) : background
+  return resolveThemeToken(paint, variables(button, compiledTokens))
 }
 
-it.each([
-  { theme: 'light' as const, fill: 'rgb(15, 17, 21)', hover: 'rgb(67, 69, 74)' },
-  { theme: 'dark' as const, fill: 'rgb(249, 250, 251)', hover: 'rgb(235, 238, 242)' }
-])('compiles both gate primary consumers with inherited $theme fill and hover in their actual token scopes', ({ theme, fill, hover }) => {
-  applyTheme(theme)
+it.each(primaryPaletteCases)('compiles both gate primary consumers with inherited $theme $label palette in their actual token scopes', ({ theme, accent, fill, foreground, hover, pressed }) => {
+  applyTheme(theme, accent)
   for (const origin of [...origins, 'data-analytix-chat-token-scope']) {
     host.setAttribute(origin, 'true')
     for (const consumer of gateConsumers) {
       const card = document.createElement('section'), button = document.createElement('button')
       button.className = `${consumer.button} ${consumer.primary}`
       card.append(button); host.append(card)
-      expect(gateBackground(button, consumer.css, false)).toBe(fill)
-      expect(gateBackground(button, consumer.css, true)).toBe(hover)
+      expect(gatePaint(button, consumer.css, 'background', 'normal')).toBe(fill)
+      expect(gatePaint(button, consumer.css, 'color', 'normal')).toBe(foreground)
+      expect(gatePaint(button, consumer.css, 'background', 'hover')).toBe(hover)
+      expect(gatePaint(button, consumer.css, 'background', 'pressed')).toBe(pressed)
       button.disabled = true
-      expect(gateBackground(button, consumer.css, true)).toBe(fill)
+      expect(gatePaint(button, consumer.css, 'background', 'hover')).toBe(fill)
+      expect(gatePaint(button, consumer.css, 'background', 'pressed')).toBe(fill)
+      const inherited = variables(button, compiledTokens)
+      expect(resolveThemeToken(inherited.get('--dsw-alias-label-primary'), inherited)).toBe(theme === 'dark' ? 'rgb(249, 250, 251)' : 'rgb(15, 17, 21)')
+      expect(resolveThemeToken(inherited.get('--dsw-alias-state-error-primary'), inherited)).toBe(theme === 'dark' ? 'rgb(242, 90, 90)' : 'rgb(236, 19, 19)')
       card.remove()
     }
     host.removeAttribute(origin)
   }
   for (const consumer of gateConsumers) {
     const button = document.createElement('button'); button.className = `${consumer.button} ${consumer.primary}`; host.append(button)
-    expect(gateBackground(button, consumer.css, false)).toBeUndefined()
-    expect(gateBackground(button, consumer.css, true)).toBeUndefined()
+    expect(gatePaint(button, consumer.css, 'background', 'normal')).toBeUndefined()
+    expect(gatePaint(button, consumer.css, 'background', 'hover')).toBeUndefined()
     button.remove()
   }
+})
+it('keeps missing and cyclic token chains unavailable instead of falling back to a root accent', () => {
+  const values = new Map([['--ax-primary', '#3659ef'], ['--cycle-a', 'var(--cycle-b)'], ['--cycle-b', 'var(--cycle-a)']])
+  expect(resolveThemeToken('var(--missing-scope)', values)).toBeUndefined()
+  expect(resolveThemeToken('var(--cycle-a)', values)).toBeUndefined()
+  expect(resolveThemeToken('var(--missing, var(--ax-primary))', values)).toBe('#3659ef')
 })
 async function enter(target: HTMLElement, pointer: boolean): Promise<void> {
   const event = new MouseEvent(pointer ? 'pointerover' : 'mouseover', { bubbles: true })

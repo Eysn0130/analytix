@@ -11,6 +11,11 @@ const labels: Record<string, string> = {
   deprecatedHubCompatibility: 'Deprecated Hub compatibility',
   back: 'Back',
   general: 'General',
+  settingsTabGeneral: 'General',
+  settingsTabModels: 'Models',
+  settingsTabWorkspace: 'Workspace',
+  settingsTabTools: 'Tools & permissions',
+  settingsSectionLabel: 'Settings section',
   write: 'Write',
   imageGen: 'Image generation',
   mediaGeneration: 'Media generation',
@@ -70,6 +75,18 @@ describe('AccountProfileSettingsSection', () => {
   })
 
   it('keeps deprecated Hub compatibility out of primary navigation while preserving its route label', () => {
+    for (const category of ['general', 'providers', 'write', 'agents'] as const) {
+      const primaryHtml = renderToStaticMarkup(createElement(SettingsSidebar, {
+        category,
+        goBack: () => undefined,
+        setCategory: () => undefined,
+        t
+      }))
+      expect(primaryHtml.match(/role="tab"/g)).toHaveLength(4)
+      expect(primaryHtml).not.toContain('Deprecated Hub compatibility')
+      expect(primaryHtml).not.toContain('value="account"')
+    }
+
     const html = renderToStaticMarkup(createElement(SettingsSidebar, {
       category: 'account',
       goBack: () => undefined,
@@ -77,9 +94,10 @@ describe('AccountProfileSettingsSection', () => {
       t
     }))
 
-    expect(html).not.toContain('Deprecated Hub compatibility')
-    expect(html).toContain('General')
-    expect(html).not.toContain('aria-current="page"')
+    expect(html.match(/role="tab"/g)).toHaveLength(4)
+    expect(html.match(/<button[^>]*aria-selected="true"[^>]*>([^<]*)<\/button>/)?.[1]).toBe('General')
+    expect(html.match(/value="account"/g)).toHaveLength(1)
+    expect(html.match(/<option[^>]*selected=""[^>]*>([^<]*)<\/option>/)?.[1]).toBe('Deprecated Hub compatibility')
     expect(settingsCategoryLabelKey('account')).toBe('deprecatedHubCompatibility')
   })
 })

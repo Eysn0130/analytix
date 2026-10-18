@@ -8,6 +8,8 @@ import { buildScheduleTaskUpdate, scheduleTaskEditable, type ScheduleTaskWriteRe
 import type { ScheduleTaskCatalogSnapshot } from './schedule-task-catalog'
 import { ScheduleTaskDetail, ScheduleDeliveryHistory, refreshScheduleTaskDraft, scheduleNextRunDistance } from './ScheduleTaskDetail'
 import i18n from '../../i18n'
+import { applyTheme } from '../../lib/apply-theme'
+import { primaryPaletteCases, resolveThemeToken, themeVariables } from '../chat/presentation/theme-token-test-helpers'
 
 const catalog = vi.hoisted(() => ({
   task: undefined as ScheduledTaskV1 | null | undefined,
@@ -70,10 +72,12 @@ describe('Schedule task detail staged edits', () => {
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('resolves the body-portal modal palette from the real theme and keeps close-button chrome independent', async () => {
+  it.each(primaryPaletteCases)('resolves the body-portal $theme $label palette and keeps close-button chrome independent', async ({ theme, accent, fill, foreground, hover, pressed }) => {
     const fs = await vi.importActual<{ readFileSync: (path: string, encoding: 'utf8') => string }>('node:fs')
     const readCss = (relative: string) => fs.readFileSync(decodeURIComponent(new URL(relative, import.meta.url).pathname), 'utf8')
     const detail = parse(readCss('./ScheduleTaskDetail.module.css'))
+    const shell = parse(readCss('../../styles/base-shell.css'))
+    const tokens = parse(readCss('../chat/presentation/tokens.css'))
     const values = (property: string, dark = false) => {
       const found: string[] = []
       detail.walkRules(rule => {
@@ -86,14 +90,40 @@ describe('Schedule task detail staged edits', () => {
     expect(values('--dsw-alias-bg-mask-1', true)).toEqual(['rgba(0, 0, 0, 0.5)'])
     expect(values('--dsw-alias-bg-layer-2')).toEqual(['rgb(255, 255, 255)'])
     expect(values('--dsw-alias-bg-layer-2', true)).toEqual(['rgb(44, 44, 46)'])
-    expect(values('--dsw-alias-button-primary-fill')).toEqual(['rgb(15, 17, 21)'])
-    expect(values('--dsw-alias-button-primary-fill', true)).toEqual(['rgb(249, 250, 251)'])
-    expect(values('--dsw-alias-button-primary-hover')).toEqual(['rgb(67, 69, 74)'])
-    expect(values('--dsw-alias-button-primary-hover', true)).toEqual(['rgb(235, 238, 242)'])
+    // Source seam for the real confirmation's body-portal origin, not native layout.
+    const portal = document.createElement('div')
+    portal.setAttribute('data-analytix-chat-view', 'true'); document.body.append(portal)
+    const previous = new Map(['style', 'data-theme', 'data-accent'].map(name => [name, document.documentElement.getAttribute(name)]))
+    try {
+      applyTheme(theme, accent)
+      const inherited = themeVariables(portal, [shell, tokens])
+      const localFill = values('--dsw-alias-button-primary-fill', theme === 'dark')
+      const localHover = values('--dsw-alias-button-primary-hover', theme === 'dark')
+      expect(localFill.map(value => resolveThemeToken(value, inherited))).toEqual([fill])
+      expect(localHover.map(value => resolveThemeToken(value, inherited))).toEqual([hover])
+      inherited.set('--dsw-alias-button-primary-fill', localFill[0])
+      inherited.set('--dsw-alias-button-primary-hover', localHover[0])
+      const paint = (selector: string, property: string) => {
+        let value: string | undefined
+        detail.walkRules(selector, rule => { rule.walkDecls(property, declaration => { value = declaration.value }) })
+        return resolveThemeToken(value, inherited)
+      }
+      expect(portal.parentElement).toBe(document.body)
+      expect(paint('.footer .saveButton', 'background')).toBe(fill)
+      expect(paint('.footer .saveButton', 'color')).toBe(foreground)
+      expect(paint('.footer .saveButton:hover:not(:disabled)', 'background')).toBe(hover)
+      expect(paint('.footer .saveButton:active:not(:disabled)', 'background')).toBe(pressed)
+      expect(resolveThemeToken(inherited.get('--dsw-alias-label-primary'), inherited)).toBe(theme === 'dark' ? 'rgb(249, 250, 251)' : 'rgb(15, 17, 21)')
+    } finally {
+      portal.remove()
+      for (const [name, value] of previous) {
+        if (value === null) document.documentElement.removeAttribute(name)
+        else document.documentElement.setAttribute(name, value)
+      }
+    }
     expect(values('--dsw-mask-blur')).toEqual(['none'])
     expect(values('--dsw-elevation-prominent')).toEqual(['var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05)'])
     detail.walkRules(rule => { expect(rule.selector).not.toMatch(/(?:^|,)\s*\.confirm\s+button(?:\s|,|$)/) })
-    const tokens = parse(readCss('../chat/presentation/tokens.css'))
     const scopedFont: string[] = [], scopedColors: string[] = []
     tokens.walkRules(rule => {
       if (!rule.selector.includes('[data-analytix-chat-view]')) return
