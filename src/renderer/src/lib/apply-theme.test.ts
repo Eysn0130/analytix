@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { APP_ACCENT_COLORS } from '@shared/app-settings'
+import { THEME_TOKENS } from '../data-analysis/theme/tokens'
 import { applyTheme, applyCursorSpotlight, applyDocumentLocale, applyMotionPreference, applyUiFontScale, isShellMotionReduced } from './apply-theme'
 
 function stubMotionEnvironment(initialMatches: boolean): {
@@ -226,6 +227,38 @@ describe('applyTheme accent preference', () => {
     applyTheme('light')
     expect(f.attributes.get('data-accent')).toBe('blue')
     expect(f.listeners.size).toBe(0)
+  })
+  it('keeps independent surface roles readable for both desktop and surface modes', () => {
+    const f = fixture()
+    const luminance = (hex: string) => {
+      const values = [1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16) / 255)
+        .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+      return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722
+    }
+    const contrast = (a: string, b: string) => {
+      const [low, high] = [luminance(a), luminance(b)].sort((x, y) => x - y)
+      return (high + 0.05) / (low + 0.05)
+    }
+    for (const desktopMode of ['light', 'dark'] as const) for (const accent of APP_ACCENT_COLORS) {
+      applyTheme(desktopMode, accent)
+      for (const surfaceMode of ['light', 'dark'] as const) {
+        const surface = THEME_TOKENS[surfaceMode]
+        const value = (role: string) => {
+          const reference = /^var\((--[a-z-]+)\)$/.exec(surface[role])
+          expect(reference).not.toBeNull()
+          expect(reference![1]).toMatch(new RegExp(`-${surfaceMode}$`))
+          return f.properties.get(reference![1])!
+        }
+        for (const background of ['color-bg', 'color-bg-elevated', 'color-bg-subtle']) {
+          expect(contrast(value('color-accent-strong'), surface[background])).toBeGreaterThanOrEqual(4.5)
+        }
+        expect(contrast(value('color-accent-strong'), value('color-accent-soft'))).toBeGreaterThanOrEqual(4.5)
+        for (const role of ['color-accent', 'color-accent-hover', 'color-accent-pressed']) {
+          expect(contrast(value('color-on-accent'), value(role))).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+      expect(f.attributes.get('data-theme')).toBe(desktopMode)
+    }
   })
   it('keeps all preset foregrounds readable in normal, hover and pressed states', () => {
     const f = fixture()

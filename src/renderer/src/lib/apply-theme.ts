@@ -65,6 +65,13 @@ export function applyTheme(pref: ThemePreference, accentColor?: AppAccentColor):
     ACCENT_PROPERTIES.forEach((property, index) => {
       root.style.setProperty(property, ACCENT_PALETTES[accent][mode][index])
     })
+    // Independent surfaces choose their own mode from this same preset table.
+    // CSS inheritance keeps them current without another theme state/listener.
+    for (const surfaceMode of ['light', 'dark'] as const) {
+      ACCENT_PROPERTIES.forEach((property, index) => {
+        root.style.setProperty(`${property}-${surfaceMode}`, ACCENT_PALETTES[accent][surfaceMode][index])
+      })
+    }
     // The saved brand preference also wins over legacy theme-plugin root aliases.
     for (const [property, value] of Object.entries({
       '--ds-accent': 'var(--ax-primary)',

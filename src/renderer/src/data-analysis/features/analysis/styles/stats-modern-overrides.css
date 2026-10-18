@@ -777,7 +777,7 @@
 }
 
 .stats-react-shell .app.ui-classic-refined .treeSwitchChip.active {
-  color: var(--ax-on-primary);
+  color: var(--color-on-accent);
 }
 
 .stats-react-shell .app.ui-classic-refined .treeSwitchChip:hover:not(.active) {
@@ -903,7 +903,7 @@
 .stats-react-shell .app.ui-classic-refined .qBtn.active {
   border-color: color-mix(in oklab, var(--sidebar-segment-active-end) 84%, var(--color-border));
   background: linear-gradient(136deg, var(--sidebar-segment-active-start) 0%, var(--sidebar-segment-active-end) 100%);
-  color: var(--ax-on-primary);
+  color: var(--color-on-accent);
   box-shadow: var(--sidebar-segment-active-shadow);
 }
 
@@ -1829,16 +1829,22 @@
 }
 
 .statsDateEditorPopover {
-  --stats-datepicker-on-accent: var(--ax-on-primary);
+  --color-accent-hover: var(--ax-primary-hover-light);
+  --color-accent-pressed: var(--ax-primary-pressed-light);
+  --color-accent-soft: var(--ax-primary-soft-light);
+  --color-on-accent: var(--ax-on-primary-light);
+  --color-accent-strong: var(--ax-accent-text-light);
+  --color-accent: var(--ax-primary-light);
+  --stats-datepicker-on-accent: var(--color-on-accent);
   --stats-datepicker-border: var(--left-control-border, #dddddd);
   --stats-datepicker-text: var(--sidebar-nav-active-text, var(--color-text, #0d0d0d));
   --stats-datepicker-muted: var(--color-text-muted, #5d5d5d);
   --stats-datepicker-surface: #ffffff;
   --stats-datepicker-surface-muted: var(--sidebar-surface, #f3f3f3);
   --stats-datepicker-hover: var(--sidebar-hover, #ebebeb);
-  --stats-datepicker-range: var(--sidebar-nav-active-bg, #ebebeb);
-  --stats-datepicker-accent-start: var(--ax-primary);
-  --stats-datepicker-accent-end: var(--ax-primary);
+  --stats-datepicker-range: var(--color-accent-soft);
+  --stats-datepicker-accent-start: var(--color-accent);
+  --stats-datepicker-accent-end: var(--color-accent);
   position: fixed;
   top: 0;
   left: 0;
@@ -2179,7 +2185,7 @@
 .stats-react-shell .stats-page-topbar__content .quickSwitchChip.active,
 .stats-react-shell .txnModal .quickSwitchChip.active,
 .stats-react-shell .txnModal .quickSwitchChip.workbench-ui-segmented__option--active {
-  color: var(--ax-on-primary);
+  color: var(--color-on-accent);
 }
 
 .stats-react-shell .app.ui-classic-refined .quickSwitchChip:hover:not(.active),
@@ -2385,16 +2391,22 @@
 
 .statsDateEditorPopover[data-theme="dark"],
 .data-analysis-surface[data-theme="dark"] .statsDateEditorPopover {
-  --stats-datepicker-on-accent: var(--ax-on-primary);
+  --color-accent-hover: var(--ax-primary-hover-dark);
+  --color-accent-pressed: var(--ax-primary-pressed-dark);
+  --color-accent-soft: var(--ax-primary-soft-dark);
+  --color-on-accent: var(--ax-on-primary-dark);
+  --color-accent-strong: var(--ax-accent-text-dark);
+  --color-accent: var(--ax-primary-dark);
+  --stats-datepicker-on-accent: var(--color-on-accent);
   --stats-datepicker-border: var(--color-border, #383838);
   --stats-datepicker-text: var(--color-text, #ececec);
   --stats-datepicker-muted: var(--color-text-muted, #b4b4b4);
   --stats-datepicker-surface: color-mix(in oklab, var(--color-bg-elevated, #212121) 94%, var(--color-bg-subtle, #2f2f2f));
   --stats-datepicker-surface-muted: color-mix(in oklab, var(--color-bg-elevated, #212121) 88%, var(--color-bg-subtle, #2f2f2f));
   --stats-datepicker-hover: color-mix(in oklab, var(--color-accent, #ececec) 12%, var(--color-bg-subtle, #2f2f2f));
-  --stats-datepicker-range: color-mix(in oklab, var(--color-accent, #ececec) 18%, var(--color-bg-elevated, #212121));
-  --stats-datepicker-accent-start: var(--ax-primary);
-  --stats-datepicker-accent-end: var(--ax-primary);
+  --stats-datepicker-range: var(--color-accent-soft);
+  --stats-datepicker-accent-start: var(--color-accent);
+  --stats-datepicker-accent-end: var(--color-accent);
   border-color: var(--stats-datepicker-border);
   background: var(--stats-datepicker-surface);
   color: var(--stats-datepicker-text);
@@ -3000,5 +3012,5 @@
   }
 }
 
-.stats-react-shell .app.ui-classic-refined .btn.primary:hover:not(:disabled) { background: var(--ax-primary-hover); }
-.stats-react-shell .app.ui-classic-refined .btn.primary:active:not(:disabled) { background: var(--ax-primary-pressed); }
+.stats-react-shell .app.ui-classic-refined .btn.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+.stats-react-shell .app.ui-classic-refined .btn.primary:active:not(:disabled) { background: var(--color-accent-pressed); }

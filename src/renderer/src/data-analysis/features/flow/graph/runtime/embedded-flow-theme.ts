@@ -40,10 +40,8 @@ function syncEmbeddedThemeToIframe(targetDocument: Document, sourceRoot: HTMLEle
   const sourceStyles = sourceWindow.getComputedStyle(sourceRoot);
 
   EMBEDDED_THEME_CUSTOM_PROPERTIES.forEach((propertyName) => {
-    // This one foreground comes only from the desktop's fixed preset palette.
-    const value = (propertyName === "--color-on-accent"
-      ? sourceWindow.getComputedStyle(sourceDocument.documentElement).getPropertyValue("--ax-on-primary")
-      : sourceStyles.getPropertyValue(propertyName)).trim();
+    // The owning surface has already resolved its independent theme mode.
+    const value = sourceStyles.getPropertyValue(propertyName).trim();
     if (value && (propertyName !== "--color-on-accent" || /^#[0-9a-f]{6}$/i.test(value))) {
       targetRoot.style.setProperty(propertyName, value);
     } else {

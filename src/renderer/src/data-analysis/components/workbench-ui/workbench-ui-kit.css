@@ -17,7 +17,7 @@
   --workbench-ui-accent-end: var(--sidebar-segment-active-end);
   --workbench-ui-accent-shadow: var(--sidebar-segment-active-shadow);
   --workbench-ui-accent-soft: color-mix(in oklab, var(--color-accent) 12%, var(--color-bg-elevated));
-  --workbench-ui-on-accent: var(--ax-on-primary);
+  --workbench-ui-on-accent: var(--color-on-accent);
   --workbench-ui-focus-ring: color-mix(in oklab, var(--color-accent) 22%, transparent);
   --workbench-ui-danger-surface: color-mix(in oklab, var(--color-danger) 6%, var(--sidebar-surface));
   --workbench-ui-danger-border: color-mix(in oklab, var(--color-danger) 26%, var(--workbench-ui-border));
@@ -57,7 +57,7 @@
   --workbench-ui-border: color-mix(in oklab, var(--color-border) 78%, transparent);
   --workbench-ui-border-strong: color-mix(in oklab, var(--color-accent) 30%, var(--color-border));
   --workbench-ui-accent-soft: color-mix(in oklab, var(--color-accent) 16%, var(--color-bg-elevated));
-  --workbench-ui-on-accent: var(--ax-on-primary);
+  --workbench-ui-on-accent: var(--color-on-accent);
   --workbench-ui-danger-surface: color-mix(in oklab, var(--color-danger) 14%, var(--color-bg-elevated));
   --workbench-ui-danger-border: color-mix(in oklab, var(--color-danger) 38%, var(--workbench-ui-border));
   --workbench-ui-danger-text: color-mix(in oklab, var(--color-danger) 78%, var(--color-text));
@@ -1007,6 +1007,6 @@
 .workbench-ui-btn--accent:hover:not(:disabled),
 .workbench-ui-btn--accent:focus-visible:not(:disabled),
 .workbench-ui-toolbar-btn.workbench-ui-btn--accent:hover:not(:disabled),
-.workbench-ui-toolbar-btn.workbench-ui-btn--accent:focus-visible:not(:disabled) { background: var(--ax-primary-hover); }
+.workbench-ui-toolbar-btn.workbench-ui-btn--accent:focus-visible:not(:disabled) { background: var(--color-accent-hover); }
 .workbench-ui-btn--accent:active:not(:disabled),
-.workbench-ui-toolbar-btn.workbench-ui-btn--accent:active:not(:disabled) { background: var(--ax-primary-pressed); }
+.workbench-ui-toolbar-btn.workbench-ui-btn--accent:active:not(:disabled) { background: var(--color-accent-pressed); }
