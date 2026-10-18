@@ -260,9 +260,9 @@ func (d *RoundDriverV1) Kick(threadID string) {
 			goal, _ := d.deps.ReadGoal(threadID)
 			d.publish(threadID, goal)
 		}
-		// A foreground completion may have woken us while this attempt still
-		// occupied the slot. Recheck readiness after releasing that slot.
-		if deferred {
+		// Finished can run before Send releases foreground preparation. Recheck
+		// after successful Send, or after a deferred claim releases its slot.
+		if deferred || err == nil {
 			d.Kick(threadID)
 		}
 	}()
