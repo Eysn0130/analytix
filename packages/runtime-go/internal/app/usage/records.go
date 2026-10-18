@@ -1014,7 +1014,11 @@ func intNumber(value any) int {
 	if !ok || number <= 0 || number >= -float64(math.MinInt) {
 		return 0
 	}
-	return int(number)
+	parsed, ok := contracts.NumericSeq(math.Trunc(number))
+	if !ok {
+		return 0
+	}
+	return parsed
 }
 
 func floatNumber(value any) float64 {
