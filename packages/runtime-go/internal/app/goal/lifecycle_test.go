@@ -3,7 +3,10 @@ package goal
 import (
 	domaingoal "analytix.local/runtime-go/internal/domain/goal"
 	"errors"
+	"reflect"
 	"testing"
+
+	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 )
 
 func lifecycleGoalV1(t *testing.T) map[string]any {
@@ -123,6 +126,46 @@ func TestAppendGoalClearHistoryUsesNilInterfaceSnapshot(t *testing.T) {
 				}
 			} else if _, present := entry["ref"]; present {
 				t.Fatal("legacy clear invented a counted reference", entry)
+			}
+		})
+	}
+}
+
+func TestAppendGoalHistoryPublishesSyntheticMetadata(t *testing.T) {
+	const now = "2026-10-18T09:11:13.123456789Z"
+	const id = "abcdefab-cdef-4abc-8def-131234567890"
+	for _, counted := range []bool{false, true} {
+		name, operation := "legacy-manual", "legacy_update"
+		patch := map[string]any{"objective": "Verify the deliverable"}
+		if counted {
+			name, operation = "counted", "create"
+			patch["operation"] = "create"
+		}
+		t.Run(name, func(t *testing.T) {
+			goal, err := ApplyLifecycleV1(StatePatchInput{ThreadID: "thread-goal", Patch: patch, Now: now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if counted {
+				goal["id"] = id
+			}
+			if _, _, _, known := domaingoal.CountedRecordV1(goal); known != counted {
+				t.Fatal("legacy mutation changed counted admission", goal)
+			}
+			thread := map[string]any{
+				"id": "thread-goal", "goal": goal, "status": "idle", "turns": []any{}, "createdAt": now, "updatedAt": now,
+			}
+			AppendHistoryV1(thread, nil, goal, operation, now)
+			snapshot := thread["goalHistory"].([]any)[0].(map[string]any)["goal"].(map[string]any)
+			if _, present := snapshot["evidenceLedger"]; present {
+				t.Fatal("history copied the evidence ledger")
+			}
+			if err := domainprivacy.ValidatePublicValue(thread); err != nil {
+				t.Fatal("ordinary Goal history publication rejected metadata", err)
+			}
+			projected, changed := domainprivacy.ProjectPublicValue(thread)
+			if changed || !reflect.DeepEqual(projected, thread) {
+				t.Fatal("ordinary Goal history projection changed metadata", projected)
 			}
 		})
 	}
