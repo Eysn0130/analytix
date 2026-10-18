@@ -62,6 +62,32 @@ const SSE_REPLAY_MAX_FRAME_CHARS = 64 * 1024 * 1024
 const sseControllers = new Map<string, SseControllerState>()
 const sseOwnerDestroyedHandlers = new WeakMap<WebContents, () => void>()
 
+function closedSseExceptionDiagnostic(error: unknown, capturedMessage?: string): Record<string, string> {
+  // Transport errors can contain credentials, URLs and response content. Only
+  // closed categories belong in diagnostics; never copy their message or stack.
+  try {
+    if (!(error instanceof Error)) return { reason: 'non_error', errorName: 'other', causeCode: 'other' }
+    const rawName = error.name, message = capturedMessage ?? error.message
+    const errorName = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'AbortError', 'TimeoutError']
+      .includes(rawName) ? rawName : 'other'
+    const cause = (error as Error & { cause?: unknown }).cause
+    const code = cause && typeof cause === 'object' ? (cause as { code?: unknown }).code : undefined
+    const causeCode = typeof code === 'string' && [
+      'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND',
+      'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+      'UND_ERR_SOCKET', 'UND_ERR_ABORTED'
+    ].includes(code) ? code : 'other'
+    const reason = message === 'sse start timeout' ? 'start_timeout'
+      : message === 'replay authority changed' ? 'authority_changed'
+        : message === 'fetch failed' ? 'fetch_failed'
+          : message === 'terminated' ? 'body_terminated'
+            : errorName === 'AbortError' ? 'aborted' : 'exception'
+    return { reason, errorName, causeCode }
+  } catch {
+    return { reason: 'unavailable', errorName: 'other', causeCode: 'other' }
+  }
+}
+
 function webContentsOwnerId(webContents: WebContents): number {
   const id = webContents.id
   if (!Number.isSafeInteger(id) || id < 0) throw new Error('sse_owner_unavailable')
@@ -256,8 +282,9 @@ export function registerRuntimeSseIpc(options: {
   resolveFinalPublicationAuthorityPin?: () => ManagedFinalPublicationAuthorityPinV1 | null
   isFinalPublicationAuthorityPinCurrent?: (pin: ManagedFinalPublicationAuthorityPinV1 | null) => boolean
   recordThreadTrace?: (event: ThreadTraceEventPayload) => void
-}): void {
+}): () => Promise<void> {
   const { ipcMain, store, ensureRuntime, logError } = options
+  const workers = new Set<Promise<void>>()
   const resolveAuthorityPin = options.resolveFinalPublicationAuthorityPin ?? captureCurrentFinalPublicationAuthorityPin
   const authorityPinIsCurrent = options.isFinalPublicationAuthorityPinCurrent ?? isCurrentFinalPublicationAuthorityPin
   const recordTerminalTrace = (
@@ -308,8 +335,23 @@ export function registerRuntimeSseIpc(options: {
     }
     sseControllers.set(id, state)
     ensureSseOwnerDestroyedObserver(event.sender)
+    const startedAt = performance.now()
+    let phase: 'ensure' | 'connect' | 'read' | 'project' | 'ack' = 'ensure'
+    let firstFailureRecorded = false
+    const recordFirstFailure = (diagnostic: () => Record<string, string | number>): void => {
+      if (firstFailureRecorded || state.stoppedByClient || ac.signal.aborted) return
+      firstFailureRecorded = true
+      try {
+        logError('sse', 'SSE first failure', {
+          role: replay ? 'replay' : 'live', phase,
+          ...diagnostic(),
+          elapsedMs: Math.round(performance.now() - startedAt)
+        })
+      } catch { /* Optional diagnostics cannot change retries or delivery. */ }
+    }
     const replayTimeout = replay ? setTimeout(() => {
       if (sseControllers.get(id) !== state || ac.signal.aborted) return
+      recordFirstFailure(() => ({ reason: 'replay_timeout' }))
       sendSseMessage(event.sender, 'runtime:sse-error', {
         streamId: id, ...publicSseError('', 'sse_stream_error')
       })
@@ -317,6 +359,9 @@ export function registerRuntimeSseIpc(options: {
       deleteControllerIfCurrent(id, state)
     }, SSE_REPLAY_TIMEOUT_MS) : undefined
 
+    let resolveWorker!: () => void
+    const workerSettled = new Promise<void>(resolve => { resolveWorker = resolve })
+    workers.add(workerSettled)
     ;(async () => {
       const wc = event.sender
       let s = loadedSettings
@@ -330,6 +375,7 @@ export function registerRuntimeSseIpc(options: {
         } catch (error) {
           const payload = runtimeEnsureErrorPayload(error)
           const canRetry = isRecoverableRuntimeEnsureError(error) && Date.now() < ensureDeadline
+          recordFirstFailure(() => closedSseExceptionDiagnostic(error, payload.message))
           if (!canRetry) {
             const publicError = publicSseError(payload.code, 'sse_setup_error')
             if (!sendSseMessage(wc, 'runtime:sse-error', {
@@ -358,6 +404,7 @@ export function registerRuntimeSseIpc(options: {
       try {
         while (!state.stoppedByClient && !ac.signal.aborted) {
           if (connectionAttempt > 0) {
+            phase = 'ensure'
             const reconnectEnsureDeadline = Date.now() + SSE_ENSURE_RETRY_WINDOW_MS
             while (!state.stoppedByClient && !ac.signal.aborted) {
               try {
@@ -369,6 +416,7 @@ export function registerRuntimeSseIpc(options: {
                 const payload = runtimeEnsureErrorPayload(error)
                 const canRetry = isRecoverableRuntimeEnsureError(error) &&
                   Date.now() < reconnectEnsureDeadline
+                recordFirstFailure(() => closedSseExceptionDiagnostic(error, payload.message))
                 if (!canRetry) {
                   const publicError = publicSseError(payload.code, 'sse_setup_error')
                   if (!sendSseMessage(wc, 'runtime:sse-error', {
@@ -390,6 +438,7 @@ export function registerRuntimeSseIpc(options: {
             if (state.stoppedByClient || ac.signal.aborted) return
           }
           connectionAttempt += 1
+          phase = 'connect'
           const base = getRuntimeBaseUrlForSettings(s)
           const capturedAuthorityPin = resolveAuthorityPin()
           const connectionAuthorityPin = capturedAuthorityPin &&
@@ -419,6 +468,7 @@ export function registerRuntimeSseIpc(options: {
               return
             }
             if (!res.ok || !res.body) {
+              recordFirstFailure(() => ({ reason: res.ok ? 'missing_body' : 'http_status', statusCode: res.status }))
               if (replay || isFatalSseStatus(res.status)) {
                 if (!sendSseMessage(wc, 'runtime:sse-error', { streamId: id, status: res.status })) {
                   stopSseController(state)
@@ -433,6 +483,7 @@ export function registerRuntimeSseIpc(options: {
               continue
             }
             reconnectDelayMs = SSE_RECONNECT_BASE_MS
+            phase = 'read'
             const reader = res.body.getReader()
             state.activeReader = reader
             const dec = new TextDecoder()
@@ -566,9 +617,11 @@ export function registerRuntimeSseIpc(options: {
 
             try {
               while (true) {
+                phase = 'read'
                 const { done, value } = await reader.read()
                 if (state.stoppedByClient || ac.signal.aborted) break
                 if (done) break
+                phase = 'project'
                 buffer += dec.decode(value, { stream: true })
                 let next: { block: string; rest: string } | null
                 let hasNewEvents = false
@@ -620,7 +673,9 @@ export function registerRuntimeSseIpc(options: {
                   if (!admitEvent(decision.event)) break
                   if (replay) {
                     if (!flushEvents()) break
+                    phase = 'ack'
                     await waitForSseAck(state, state.deliveredSinceSeq, ac.signal, null)
+                    phase = 'project'
                     if (state.stoppedByClient || ac.signal.aborted) break
                     if (!replayAuthorityIsCurrent()) {
                       protocolViolationReason = 'invalid_public_projection'
@@ -728,11 +783,13 @@ export function registerRuntimeSseIpc(options: {
               return
             }
             if (terminalRuntimeEventSeen && terminalAckRequired) {
+              phase = 'ack'
               await waitForSseAck(state, state.deliveredSinceSeq, ac.signal, null)
             }
             if (terminalRuntimeEventSeen) {
               return
             }
+            phase = 'ack'
             await waitForSseAck(state, state.deliveredSinceSeq, ac.signal, replay ? null : SSE_ACK_GRACE_MS)
             if (replay) {
               if (!state.stoppedByClient && !ac.signal.aborted && !replayAuthorityIsCurrent()) {
@@ -743,6 +800,7 @@ export function registerRuntimeSseIpc(options: {
           } catch (e) {
             if (state.stoppedByClient || ac.signal.aborted) return
             const rawMsg = e instanceof Error ? e.message : String(e)
+            recordFirstFailure(() => closedSseExceptionDiagnostic(e, rawMsg))
             if (!replay && (/sse start timeout/i.test(rawMsg) || /fetch failed/i.test(rawMsg) || /network/i.test(rawMsg))) {
               await sleepWithAbort(reconnectDelayMs, ac.signal)
               reconnectDelayMs = Math.min(reconnectDelayMs * 2, SSE_RECONNECT_MAX_MS)
@@ -762,7 +820,8 @@ export function registerRuntimeSseIpc(options: {
         }
         deleteControllerIfCurrent(id, state)
       }
-    })().catch(() => {
+    })().catch((error: unknown) => {
+      recordFirstFailure(() => closedSseExceptionDiagnostic(error))
       if (replay && !state.stoppedByClient && !ac.signal.aborted) {
         sendSseMessage(event.sender, 'runtime:sse-error', { streamId: id, ...publicSseError('', 'sse_stream_error') })
         stopSseController(state)
@@ -773,6 +832,8 @@ export function registerRuntimeSseIpc(options: {
       })
     }).finally(() => {
       if (replayTimeout !== undefined) clearTimeout(replayTimeout)
+      workers.delete(workerSettled)
+      resolveWorker()
     })
 
     return { streamId: id }
@@ -829,4 +890,9 @@ export function registerRuntimeSseIpc(options: {
     for (const notify of state.ackWaiters) notify()
     return true
   })
+  // A private fixture barrier after worker error handling and timer cleanup.
+  // Stopping a stream still has its existing immediate IPC semantics.
+  return async () => {
+    while (workers.size > 0) await Promise.all(Array.from(workers))
+  }
 }

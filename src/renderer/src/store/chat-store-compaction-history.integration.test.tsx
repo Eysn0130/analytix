@@ -157,7 +157,7 @@ it('restores publicly authorized ordinary history after production compaction an
   const { registerRuntimeSseIpc } = await vi.importActual<{
     registerRuntimeSseIpc: (options: { ipcMain: { handle: (channel: string, handler: Handler) => void };
       store: { load: () => Promise<AppSettingsV1> }; ensureRuntime: () => Promise<void>;
-      logError: (category: string, message: string, detail?: unknown) => void }) => void
+      logError: (category: string, message: string, detail?: unknown) => void }) => () => Promise<void>
   }>('../../../main/runtime-sse-ipc')
   const { runtimeRequestViaHost } = await vi.importActual<{
     runtimeRequestViaHost: (settings: AppSettingsV1, path: string, init: { method?: string; body?: string },
@@ -177,6 +177,8 @@ it('restores publicly authorized ordinary history after production compaction an
   let fixtureRoot = '', stateRoot = '', dataDir = '', workspaceRoot = '', executable = '', binaryRoot = ''
   const receipt: Record<string, unknown> = { sourceInputSha256,
     buildTags: ['analytix_prod'], runtimePids: [], runtimeUrls: [] }
+  let acceptancePhase = 'setup', diagnosticCount = 0, workerCrashed = false, acceptanceCompleted = false
+  let waitForSseWorkers: (() => Promise<void>) | undefined
   const goDir = `${proc.cwd()}/packages/runtime-go`
   const token = 'isolated-compaction-history-runtime'
   const providerRequests: string[] = []
@@ -212,6 +214,7 @@ it('restores publicly authorized ordinary history after production compaction an
   const sseErrorDiagnostics: Array<Pick<SseErrorPayload, 'code' | 'status' | 'reasonCode'>> = []
   const decodeDiagnostics: PublicRuntimeSseDecodeDiagnostic[] = []
   const streams = new Set<string>()
+  const pendingStarts = new Set<Promise<{ streamId: string }>>()
   const sender = { id: 9001, isDestroyed: () => false, send: (channel: string, payload: unknown) => {
     if (channel === 'runtime:sse-event') dataListeners.forEach(fn => fn(payload as Parameters<typeof fn>[0]))
     if (channel === 'runtime:sse-end') endListeners.forEach(fn => fn(payload as Parameters<typeof fn>[0]))
@@ -438,6 +441,7 @@ it('restores publicly authorized ordinary history after production compaction an
     const threadId = String(thread.id), path = `/v1/threads/${encodeURIComponent(threadId)}`
     const prompts = Array.from({ length: 26 }, (_, index) => `Implement ordinary fixture request ${index + 1}.`)
     const turnsStartedAt = Date.now()
+    acceptancePhase = 'fixture_turns'
     for (const prompt of prompts) {
       const started = await json(`${path}/turns`, { prompt, model: 'deepseek-chat', providerId: 'deepseek' })
       await waitFor(async () => list((await json(path)).turns).some(turn => turn.id === started.turnId && turn.status === 'completed'))
@@ -450,9 +454,18 @@ it('restores publicly authorized ordinary history after production compaction an
       appBehavior: { openAtLogin: false, startMinimized: false, closeToTray: false },
       keyboardShortcuts: defaultKeyboardShortcuts(), write: defaultWriteSettings(), claw: defaultClawSettings(),
       schedule: defaultScheduleSettings(), guiUpdate: { channel: 'stable' }, codePromptPrefix: '', disabledSkillIds: [] }
-    registerRuntimeSseIpc({ ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
+    waitForSseWorkers = registerRuntimeSseIpc({ ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler) } },
       store: { load: async () => settings }, ensureRuntime: async () => undefined,
       logError: (category, message, detail) => {
+        if (category === 'sse' && message === 'SSE worker crashed') workerCrashed = true
+        if (category === 'sse' && message === 'SSE first failure' && diagnosticCount < 32) {
+          // Main supplies closed categories only; never forward arbitrary log detail.
+          const { role, phase, reason, errorName, causeCode, elapsedMs, statusCode } = record(detail)
+          const diagnostic = { acceptancePhase, role, phase, reason, errorName, causeCode, elapsedMs, statusCode }
+          receipt.firstSseFailure ??= diagnostic
+          diagnosticCount++
+          console.info('COMPACTION_HISTORY_SSE_DIAGNOSTIC', JSON.stringify(diagnostic))
+        }
         if (category !== 'sse' || message !== 'SSE event rejected' || record(detail).code !== 'sse_event_rejected') return
         const diagnostic = record(detail).diagnostic
         if (!diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic) ||
@@ -463,8 +476,12 @@ it('restores publicly authorized ordinary history after production compaction an
     const bridge: Pick<RuntimeApi, 'runtimeRequest' | 'startSse' | 'ackSseEvent' | 'stopSse' | 'onSseEvent' | 'onSseEnd' | 'onSseError' | 'onRuntimeStatus'> = {
       runtimeRequest: (route, method, body) => runtimeRequestViaHost(settings, route, { method, body }, async () => undefined),
       startSse: async (id, sinceSeq, streamId, replay) => {
-        const result = await handlers.get('runtime:sse:start')!({ sender }, { threadId: id, sinceSeq, streamId, ...replay }) as { streamId: string }
-        streams.add(result.streamId); return result
+        const starting = (async () => {
+          const result = await handlers.get('runtime:sse:start')!({ sender }, { threadId: id, sinceSeq, streamId, ...replay }) as { streamId: string }
+          streams.add(result.streamId); return result
+        })()
+        pendingStarts.add(starting)
+        try { return await starting } finally { pendingStarts.delete(starting) }
       },
       ackSseEvent: async (streamId, seq, acceptedFinal) => await handlers.get('runtime:sse:ack')!({ sender }, acceptedFinal ? { streamId, seq, ...acceptedFinal } : { streamId, seq }) === true,
       stopSse: async streamId => await handlers.get('runtime:sse:stop')!({ sender }, streamId) === true,
@@ -481,10 +498,12 @@ it('restores publicly authorized ordinary history after production compaction an
     const old = before.blocks.filter(block => block.kind === 'user' || block.kind === 'assistant')
     expect(old.filter(block => block.kind === 'user')).toHaveLength(prompts.length)
     expect(old.filter(block => block.kind === 'assistant')).toHaveLength(prompts.length)
+    acceptancePhase = 'compaction'
     await provider.compactThread(threadId)
     const compacted = await provider.getThreadDetail(threadId)
     expect(compacted.blocks.some(block => block.kind === 'compaction')).toBe(true)
     expect(compacted.blocks.some(block => block.id === old[0].id)).toBe(false)
+    acceptancePhase = 'restart'
     await stopStreams(); await stopRuntime!(); stopRuntime = undefined
     runtimeUrl = await startRuntime(); settings.runtime!.baseUrl = runtimeUrl; settings.runtime!.port = Number(new URL(runtimeUrl).port)
     rendererRuntimeClient.invalidateSettings(); resetProviderCacheForTests()
@@ -501,11 +520,14 @@ it('restores publicly authorized ordinary history after production compaction an
     }
     await act(async () => uiRoot.render(createElement(TimelineFromStore)))
     const requestCount = providerRequests.length
+    acceptancePhase = 'select_after_restart'
     await act(async () => useChatStore.getState().selectThread(threadId))
     const displayed = useChatStore.getState()
-    expect(displayed.error, `Thread selection SSE diagnostics: ${JSON.stringify({ sseErrorDiagnostics, decodeDiagnostics, rejectedSseFrames })}`).toBeNull()
+    expect(displayed.error, `Thread selection SSE diagnostics: ${JSON.stringify({ sseErrorDiagnostics, decodeDiagnostics, rejectedSseFrames,
+      firstSseFailure: receipt.firstSseFailure })}`).toBeNull()
     expect(displayed.activeThreadId).toBe(threadId)
     expect(displayed.lastSeq).toBe(restartedPrimary.latestSeq)
+    acceptancePhase = 'history_interactions'
     expect(displayed.blocks.filter(block => block.kind === 'compaction')).toHaveLength(1)
     const markerIndex = displayed.blocks.findIndex(block => block.kind === 'compaction')
     for (const block of old) {
@@ -553,12 +575,14 @@ it('restores publicly authorized ordinary history after production compaction an
     expect(markerButton!.getAttribute('aria-expanded')).toBe('false')
     expect(document.getElementById(markerBodyId!)).toBeNull()
     expect((await provider.getThreadDetail(threadId)).blocks).toEqual(restartedPrimary.blocks)
+    acceptancePhase = 'navigation'
     await act(async () => useChatStore.getState().selectThread(String(other.id)))
     await act(async () => useChatStore.getState().selectThread(threadId))
     expect(useChatStore.getState().blocks.map(block => block.id)).toEqual(displayed.blocks.map(block => block.id))
     expect(providerRequests).toHaveLength(requestCount)
     // Send and interrupt through the actual store, with a Provider response
     // held until the runtime cancels it. No old display blocks become prompt.
+    acceptancePhase = 'send_after_restore'
     holdNextResponse = true
     await act(async () => {
       expect(await useChatStore.getState().sendMessage('Continue with only the compacted primary context.', 'agent',
@@ -573,6 +597,7 @@ it('restores publicly authorized ordinary history after production compaction an
         primary.id === block.id || 'text' in primary && primary.text === block.text)) continue
       expect(providerRequests.at(-1)).not.toContain(block.text)
     }
+    acceptancePhase = 'interrupt_after_restore'
     await act(async () => useChatStore.getState().interrupt())
     expect(useChatStore.getState().busy).toBe(false)
     expect(useChatStore.getState().currentTurnId).toBeNull()
@@ -590,15 +615,24 @@ it('restores publicly authorized ordinary history after production compaction an
       if ('text' in block) expect(container.textContent).toContain(block.text)
     }
     expect(useChatStore.getState().blocks.some(isOrdinaryDisplayHistoryBlock)).toBe(true)
-    receipt.acceptancePassed = true
+    acceptanceCompleted = true
   } finally {
+    receipt.acceptancePhaseBeforeCleanup = acceptancePhase
+    acceptancePhase = 'cleanup'
     if (acceptanceStartedAt) receipt.acceptanceDurationMs = Date.now() - acceptanceStartedAt
     releaseHeldResponse?.()
     await stopStreams(); clearBusyWatchdog(); stopTurnCompletionPoll()
     await act(async () => { uiRoot.unmount(); useChatStore.setState(initialState, true) })
-    container.remove(); rendererRuntimeClient.invalidateSettings(); resetProviderCacheForTests(); vi.unstubAllGlobals()
+    container.remove(); rendererRuntimeClient.invalidateSettings(); resetProviderCacheForTests()
+    // A start may still be loading settings after the first stop sweep.
+    while (pendingStarts.size > 0) await Promise.allSettled(Array.from(pendingStarts))
+    await stopStreams()
+    if (waitForSseWorkers) { await waitForSseWorkers(); receipt.sseWorkersSettled = true }
+    vi.unstubAllGlobals()
     if (originalBridge) Object.defineProperty(window, 'analytix', originalBridge)
     else Reflect.deleteProperty(window, 'analytix')
+    receipt.sseDiagnosticCount = diagnosticCount
+    if (acceptanceCompleted) receipt.acceptancePassed = !workerCrashed
     if (stopRuntime) await stopRuntime()
     await new Promise<void>(resolve => providerServer.close(resolve))
     receipt.providerRequests = providerRequests.length
@@ -616,5 +650,6 @@ it('restores publicly authorized ordinary history after production compaction an
         JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
     }
     console.info('COMPACTION_HISTORY_CLEANUP_RECEIPT', JSON.stringify(receipt))
+    if (acceptanceCompleted) expect(workerCrashed, 'SSE worker crashed before cleanup completed.').toBe(false)
   }
 }, 900_000)

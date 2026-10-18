@@ -84,7 +84,7 @@ function registerHarness(
   vi.stubGlobal('fetch', fetchImpl)
   const ensureRuntime = overrides.ensureRuntime ?? vi.fn(async () => undefined)
   const store = overrides.store ?? { load: vi.fn(async () => settingsForPort(9988)) }
-  registerRuntimeSseIpc({
+  const waitForWorkers = registerRuntimeSseIpc({
     ipcMain,
     store: store as never,
     ensureRuntime,
@@ -97,7 +97,7 @@ function registerHarness(
         }
       : {})
   })
-  return { handlers, logError, ensureRuntime, store }
+  return { handlers, logError, ensureRuntime, store, waitForWorkers }
 }
 
 function makeSender(isDestroyed = false, id = 1) {
@@ -761,7 +761,7 @@ describe('registerRuntimeSseIpc', () => {
       expect(requestHeader(init?.headers, 'Authorization')).toBe('Bearer runtime-token')
       return new Response('missing', { status: 404 })
     })
-    const { handlers } = registerHarness(fetchMock as typeof fetch)
+    const { handlers, logError, waitForWorkers } = registerHarness(fetchMock as typeof fetch)
     const sender = makeSender()
 
     const result = await handlers.get('runtime:sse:start')?.({
@@ -784,6 +784,10 @@ describe('registerRuntimeSseIpc', () => {
     expect(sender.send).toHaveBeenCalledWith('runtime:sse-error', {
       streamId,
       status: 404
+    })
+    await waitForWorkers()
+    expect(logError).toHaveBeenCalledWith('sse', 'SSE first failure', {
+      role: 'live', phase: 'connect', reason: 'http_status', statusCode: 404, elapsedMs: expect.any(Number)
     })
   })
 
@@ -2788,19 +2792,16 @@ describe('registerRuntimeSseIpc', () => {
     const fetchMock = vi.fn(async () => {
       throw new Error(`upstream rejected Authorization: Bearer ${syntheticRedactionToken}`)
     })
-    const { handlers, logError } = registerHarness(fetchMock as typeof fetch)
+    const { handlers, logError, waitForWorkers } = registerHarness(fetchMock as typeof fetch)
     const sender = makeSender()
 
     await handlers.get('runtime:sse:start')?.({
       sender
     }, { threadId: 'thread-secret', sinceSeq: 0, streamId: 'stream-secret' })
 
-    await waitForCondition(() =>
-      sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')
-    )
+    await waitForWorkers()
     const errorCall = sender.send.mock.calls.find(([channel]) => channel === 'runtime:sse-error')
-    const logCall = logError.mock.calls.find(([scope]) => scope === 'sse')
-    const serialized = JSON.stringify({ errorCall, logCall })
+    const serialized = JSON.stringify({ errorCall, logs: logError.mock.calls })
 
     expect(errorCall).toEqual([
       'runtime:sse-error',
@@ -2812,6 +2813,137 @@ describe('registerRuntimeSseIpc', () => {
     ])
     expect(serialized).not.toContain(syntheticRedactionToken)
     expect(serialized).not.toContain('Bearer sk-')
+  })
+
+  it.each([
+    { stage: 'connect', message: 'sse start timeout', name: 'Error', causeCode: 'PRIVATE_CAUSE',
+      reason: 'start_timeout', expectedCause: 'other' },
+    { stage: 'connect', message: 'fetch failed', name: 'TypeError', causeCode: 'ECONNREFUSED',
+      reason: 'fetch_failed', expectedCause: 'ECONNREFUSED' },
+    { stage: 'read', message: 'terminated', name: 'TypeError', causeCode: 'UND_ERR_SOCKET',
+      reason: 'body_terminated', expectedCause: 'UND_ERR_SOCKET' },
+    { stage: 'read', message: 'PRIVATE_RESPONSE_CONTENT', name: 'PRIVATE_ERROR_NAME', causeCode: 'PRIVATE_CAUSE',
+      reason: 'exception', expectedCause: 'other' },
+    { stage: 'connect', message: 'PRIVATE_OUTER_WORKER_CONTENT', name: 'Error', causeCode: 'PRIVATE_CAUSE',
+      reason: 'exception', expectedCause: 'other', outerWorker: true }
+  ])('records closed $stage failure categories without exposing exception content ($reason)', async testCase => {
+    const error = new Error(testCase.message)
+    error.name = testCase.name
+    error.stack = 'PRIVATE_STACK_WITH_URL_AND_CREDENTIAL'
+    Object.assign(error, { cause: { code: testCase.causeCode, message: 'PRIVATE_CAUSE_CONTENT' } })
+    const fetchMock = vi.fn(async () => {
+      if (testCase.stage === 'connect') throw error
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { controller.error(error) } }),
+        { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    })
+    const outerWorker = 'outerWorker' in testCase && testCase.outerWorker === true
+    const settings = settingsForPort(9988)
+    if (outerWorker) Object.defineProperty(settings.runtime!, 'baseUrl', { get: () => { throw error } })
+    const { handlers, logError, waitForWorkers } = registerHarness(fetchMock as typeof fetch,
+      outerWorker ? { store: { load: async () => settings } } : {})
+    const sender = makeSender()
+    let endedBeforeClassification = false
+    if (outerWorker) sender.send.mockImplementation(channel => {
+      if (channel === 'runtime:sse-end') {
+        endedBeforeClassification = !logError.mock.calls.some(([, message]) => message === 'SSE first failure')
+      }
+    })
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId: 'thread-diagnostic', sinceSeq: 0, streamId: 'stream-diagnostic', replayThroughSeq: 1
+    })
+    await waitForWorkers()
+    expect(fetchMock).toHaveBeenCalledTimes(outerWorker ? 0 : 1)
+    expect(sender.send.mock.calls.find(([channel]) => channel === 'runtime:sse-error')).toEqual([
+      'runtime:sse-error', { streamId: 'stream-diagnostic', code: 'sse_stream_error',
+        message: 'Runtime request failed (sse_stream_error).' }
+    ])
+    expect(logError).toHaveBeenCalledWith('sse', 'SSE first failure', {
+      role: 'replay', phase: testCase.stage,
+      elapsedMs: expect.any(Number), reason: testCase.reason,
+      errorName: testCase.name.startsWith('PRIVATE_') ? 'other' : testCase.name,
+      causeCode: testCase.expectedCause
+    })
+    if (outerWorker) {
+      expect(endedBeforeClassification).toBe(true)
+      expect(logError).toHaveBeenCalledWith('sse', 'SSE worker crashed', { code: 'sse_worker_error' })
+      const channels = sender.send.mock.calls.map(([channel]) => channel)
+      expect(channels.indexOf('runtime:sse-end')).toBeLessThan(channels.indexOf('runtime:sse-error'))
+    }
+    expect(JSON.stringify(logError.mock.calls)).not.toContain('PRIVATE_')
+  })
+
+  it('validates a single captured exception name before logging it', async () => {
+    const error = new Error('PRIVATE_RESPONSE_CONTENT')
+    let nameReads = 0
+    Object.defineProperty(error, 'name', { get: () => ++nameReads === 1 ? 'Error' : 'PRIVATE_ERROR_NAME' })
+    const { handlers, logError, waitForWorkers } = registerHarness(vi.fn(async () => { throw error }) as typeof fetch)
+    await handlers.get('runtime:sse:start')?.({ sender: makeSender() }, {
+      threadId: 'thread-diagnostic-getter', sinceSeq: 0, streamId: 'stream-diagnostic-getter', replayThroughSeq: 1
+    })
+    await waitForWorkers()
+    expect(nameReads).toBe(1)
+    expect(logError).toHaveBeenCalledWith('sse', 'SSE first failure', expect.objectContaining({
+      role: 'replay', phase: 'connect', reason: 'exception', errorName: 'Error', causeCode: 'other'
+    }))
+    expect(JSON.stringify(logError.mock.calls)).not.toContain('PRIVATE_')
+  })
+
+  it('records the first live failure before retry and waits for the worker after stop returns', async () => {
+    vi.useFakeTimers()
+    let releaseEnsure!: () => void
+    const ensureGate = new Promise<void>(resolve => { releaseEnsure = resolve })
+    let markReconnectEnsureStarted!: () => void
+    const reconnectEnsureStarted = new Promise<void>(resolve => { markReconnectEnsureStarted = resolve })
+    const ensureRuntime = vi.fn(async () => {
+      if (ensureRuntime.mock.calls.length === 2) {
+        markReconnectEnsureStarted()
+        await ensureGate
+      }
+    })
+    const error = new TypeError('fetch failed')
+    Object.assign(error, { cause: { code: 'ECONNREFUSED', message: 'PRIVATE_CAUSE_CONTENT' } })
+    const fetchMock = vi.fn(async () => { throw error })
+    const { handlers, logError, waitForWorkers } = registerHarness(fetchMock as typeof fetch, { ensureRuntime })
+    let markFirstFailure!: () => void
+    const firstFailure = new Promise<void>(resolve => { markFirstFailure = resolve })
+    logError.mockImplementation((_category, message) => {
+      if (message === 'SSE first failure') markFirstFailure()
+    })
+    const sender = makeSender()
+    await handlers.get('runtime:sse:start')?.({ sender }, {
+      threadId: 'thread-diagnostic-retry', sinceSeq: 0, streamId: 'stream-diagnostic-retry'
+    })
+    try {
+      await firstFailure
+      expect(logError).toHaveBeenCalledWith('sse', 'SSE first failure', {
+        role: 'live', phase: 'connect', reason: 'fetch_failed', errorName: 'TypeError',
+        causeCode: 'ECONNREFUSED', elapsedMs: expect.any(Number)
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(ensureRuntime).toHaveBeenCalledTimes(1)
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      await vi.advanceTimersByTimeAsync(749)
+      expect(ensureRuntime).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await reconnectEnsureStarted
+      expect(ensureRuntime).toHaveBeenCalledTimes(2)
+      let workerSettled = false
+      const barrier = waitForWorkers().then(() => { workerSettled = true })
+      await expect(handlers.get('runtime:sse:stop')?.({ sender }, 'stream-diagnostic-retry')).resolves.toBe(true)
+      await flushAsync()
+      expect(workerSettled).toBe(false)
+      releaseEnsure()
+      await barrier
+      expect(workerSettled).toBe(true)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(logError.mock.calls.filter(([, message]) => message === 'SSE first failure')).toHaveLength(1)
+      expect(sender.send.mock.calls.some(([channel]) => channel === 'runtime:sse-error')).toBe(false)
+      expect(JSON.stringify(logError.mock.calls)).not.toContain('PRIVATE_')
+    } finally {
+      releaseEnsure()
+      await handlers.get('runtime:sse:stop')?.({ sender }, 'stream-diagnostic-retry')
+      await waitForWorkers()
+    }
   })
 
   it('stops safely when the renderer is destroyed before forwarding events', async () => {
