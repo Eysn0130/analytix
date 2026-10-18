@@ -367,7 +367,18 @@ func projectTrustedStructuredOrdinaryV1(value any, scope trustedProjectionScopeV
 	if err != nil {
 		return nil
 	}
+	var restoreLogicalStepID func(any) (any, bool)
+	if scope == trustedProjectionEventRootV1 {
+		staged, restoreLogicalStepID = domainevent.StageClosedLogicalStepIDV1(staged)
+	}
 	projected := domainordinary.ProjectValueV1(staged)
+	if restoreLogicalStepID != nil {
+		var ok bool
+		projected, ok = restoreLogicalStepID(projected)
+		if !ok {
+			return nil
+		}
+	}
 	projected, ok := restoreQuestion(projected)
 	if !ok {
 		return nil
