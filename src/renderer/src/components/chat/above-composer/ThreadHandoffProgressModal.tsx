@@ -140,7 +140,7 @@ export function ThreadHandoffProgressModalContent({
             <button
               type="button"
               onClick={() => onRetry(operation.id)}
-              className="h-8 rounded-full bg-ds-ink px-4 text-sm font-semibold text-ds-main transition hover:opacity-85"
+              className="h-8 rounded-full px-4 text-sm font-semibold transition bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
             >
               {t('threadHandoffRetry')}
             </button>

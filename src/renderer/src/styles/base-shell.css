@@ -1,4 +1,13 @@
 :root {
+  --ax-primary: #3659ef;
+  --ax-on-primary: #ffffff;
+  --ax-accent-text: #3154db;
+  --ax-primary-hover: #2949da;
+  --ax-primary-pressed: #203bb8;
+  --ax-primary-soft: #edf1ff;
+  --ax-focus: var(--ax-accent-text);
+  --ax-selection: var(--ax-primary-soft);
+  --ds-primary-button-fg: var(--ax-on-primary);
   --ds-window-controls-safe-block: 0px;
   --ds-window-controls-safe-inset: 0px;
   --ds-titlebar-safe-header-left: max(var(--ds-window-controls-safe-inset), 0.5rem);
@@ -24,7 +33,7 @@
 
   --ax-border-subtle: #e6e7e8;
   --ax-border-strong: rgba(0, 0, 0, 0.16);
-  --ax-border-focus: #3a83f7;
+  --ax-border-focus: var(--ax-focus);
   --ax-border-danger: rgba(214, 73, 63, 0.56);
   --ax-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
   --ax-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.18);
@@ -80,8 +89,8 @@
   --ds-text-faint: var(--text-tertiary);
   --ds-bubble-user: #f0f0f0;
   --ds-bubble-user-fg: #0d0d0d;
-  --ds-accent: #0d0d0d;
-  --ds-accent-soft: rgba(0, 0, 0, 0.06);
+  --ds-accent: var(--ax-primary);
+  --ds-accent-soft: var(--ax-primary-soft);
   --ds-success: #128a4a;
   --ds-danger: #d6493f;
   --ds-diff-added: #128a4a;
@@ -130,7 +139,7 @@
   --ds-table-head-bg: #f3f3f3;
   --ds-scrollbar-thumb: rgba(0, 0, 0, 0.2);
   --ds-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
-  --ds-selection: rgba(0, 0, 0, 0.12);
+  --ds-selection: var(--ax-selection);
   --ds-shadow-card-soft: none;
   --ds-shadow-card-strong: var(--ax-shadow-floating);
   --ds-shadow-chip: none;
@@ -139,8 +148,8 @@
   --ds-sidebar-footer-hover: rgba(26, 28, 31, 0.05);
   --ds-sidebar-footer-active: rgba(26, 28, 31, 0.07);
   --ds-sidebar-footer-focus: rgba(26, 28, 31, 0.08);
-  --ds-composer-primary-action-bg: #1a1c1f;
-  --ds-composer-primary-action-fg: #ffffff;
+  --ds-composer-primary-action-bg: var(--ax-primary);
+  --ds-composer-primary-action-fg: var(--ax-on-primary);
   --ds-composer-primary-action-focus: var(--ax-border-focus);
 }
 
@@ -201,7 +210,7 @@
   overflow: hidden;
   vertical-align: baseline;
   white-space: nowrap;
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
   font-weight: 600;
   line-height: inherit;
 }
@@ -243,6 +252,15 @@
   outline-offset: 1px;
 }
 
+:root[data-theme='dark'] {
+  --ax-primary: #7291ff;
+  --ax-on-primary: #101a36;
+  --ax-accent-text: #a5b8ff;
+  --ax-primary-hover: #86a1ff;
+  --ax-primary-pressed: #6482ed;
+  --ax-primary-soft: #303c64;
+}
+
 [data-theme='dark'] {
   /* Desktop reference: quiet charcoal surfaces with restrained white contrast. */
   --bg-app: #343435;
@@ -263,7 +281,7 @@
 
   --ax-border-subtle: #414242;
   --ax-border-strong: rgba(255, 255, 255, 0.16);
-  --ax-border-focus: #3a83f7;
+  --ax-border-focus: var(--ax-focus);
   --ax-border-danger: rgba(248, 115, 106, 0.58);
   --ax-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.08);
   --ax-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.4);
@@ -286,8 +304,8 @@
   --ds-text-faint: var(--text-tertiary);
   --ds-bubble-user: #303030;
   --ds-bubble-user-fg: #ececec;
-  --ds-accent: #ececec;
-  --ds-accent-soft: rgba(255, 255, 255, 0.08);
+  --ds-accent: var(--ax-primary);
+  --ds-accent-soft: var(--ax-primary-soft);
   --ds-success: #40c977;
   --ds-danger: #f8736a;
   --ds-diff-added: #40c977;
@@ -336,7 +354,7 @@
   --ds-table-head-bg: #262626;
   --ds-scrollbar-thumb: rgba(255, 255, 255, 0.2);
   --ds-scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
-  --ds-selection: rgba(255, 255, 255, 0.16);
+  --ds-selection: var(--ax-selection);
   --ds-shadow-card-soft: none;
   --ds-shadow-card-strong: var(--ax-shadow-floating);
   --ds-shadow-chip: none;
@@ -345,8 +363,8 @@
   --ds-sidebar-footer-hover: rgba(255, 255, 255, 0.08);
   --ds-sidebar-footer-active: rgba(255, 255, 255, 0.12);
   --ds-sidebar-footer-focus: rgba(255, 255, 255, 0.08);
-  --ds-composer-primary-action-bg: #ffffff;
-  --ds-composer-primary-action-fg: #0d0d0d;
+  --ds-composer-primary-action-bg: var(--ax-primary);
+  --ds-composer-primary-action-fg: var(--ax-on-primary);
   --ds-composer-primary-action-focus: var(--ax-border-focus);
 }
 
@@ -2090,7 +2108,7 @@ pre {
   border-color: transparent;
   border-radius: 999px;
   background: var(--ds-accent);
-  color: white;
+  color: var(--ax-on-primary);
 }
 
 .ds-shell-update-button-text {
@@ -2107,12 +2125,12 @@ pre {
   white-space: nowrap;
 }
 
-.ds-shell-update-button:hover:not(:disabled),
-.ds-shell-update-button:active:not(:disabled) {
+.ds-shell-update-button:hover:not(:disabled) {
   border-color: transparent;
-  background: color-mix(in srgb, var(--ds-accent) 88%, black);
-  color: white;
+  background: var(--ax-primary-hover);
+  color: var(--ax-on-primary);
 }
+.ds-shell-update-button:active:not(:disabled) { background: var(--ax-primary-pressed); }
 
 .ds-left-sidebar-pane {
   position: relative;
@@ -2645,6 +2663,9 @@ pre {
   height: 28px;
 }
 
+.ds-composer-primary-action-button:hover:not(:disabled) { background: var(--ax-primary-hover); }
+.ds-composer-primary-action-button:active:not(:disabled) { background: var(--ax-primary-pressed); }
+
 .ds-composer-primary-action-button:disabled {
   cursor: default;
   opacity: 0.5;
@@ -2693,7 +2714,7 @@ pre {
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
 }
 
 .ds-right-panel-title {
@@ -3215,7 +3236,7 @@ pre {
 }
 
 .ds-session-actions-menu-item.is-active .ds-session-actions-menu-icon {
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
 }
 
 .ds-session-actions-menu-item.is-danger {
@@ -5079,7 +5100,7 @@ pre {
   border-radius: 999px;
   box-shadow:
     0 18px 42px color-mix(in srgb, var(--wake-shadow) 44%, transparent);
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
   display: grid;
   height: 104px;
   left: 50%;
@@ -5149,7 +5170,7 @@ pre {
 
 .ds-runtime-wake-zzz i {
   animation: ds-runtime-wake-zzz 3.6s ease-out infinite;
-  color: var(--ds-accent);
+  color: var(--ax-accent-text);
   display: block;
   font-size: 12px;
   font-style: normal;
@@ -6169,12 +6190,13 @@ pre {
   place-items: center;
   padding: 0;
   background: var(--dsw-alias-button-info-fill);
-  color: #fff;
+  color: var(--ax-on-primary);
   transition: background-color 100ms ease;
 }
 .dsh-input-bar[data-main-chat-composer] .ds-composer-primary-action-button:hover:not(:disabled) {
   background: var(--dsw-alias-button-info-hover);
 }
+.dsh-input-bar[data-main-chat-composer] .ds-composer-primary-action-button:active:not(:disabled) { background: var(--ax-primary-pressed); }
 .dsh-input-bar[data-main-chat-composer] .ds-composer-primary-action-button:disabled {
   opacity: 0.4;
 }

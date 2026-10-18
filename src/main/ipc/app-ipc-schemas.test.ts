@@ -1577,3 +1577,16 @@ it('keeps protected prototype authorization separate from external path opening'
   expect(writePrototypeFilePayloadSchema.safeParse(request).success).toBe(false)
   expect(writePrototypeAuthorizePayloadSchema.safeParse({ ...request, path: '/forged.html' }).success).toBe(false)
 })
+
+
+describe('accent settings IPC', () => {
+  it.each(['blue', 'teal', 'orange', 'magenta', 'green'])('admits the closed preset %s', accentColor => {
+    expect(settingsPatchSchema.parse({ accentColor })).toEqual({ accentColor })
+  })
+  it.each(['custom', '#123456', '', null, 0, {}])('rejects injected or arbitrary accent %j', accentColor => {
+    expect(settingsPatchSchema.safeParse({ accentColor }).success).toBe(false)
+  })
+  it('retains empty patch compatibility', () => {
+    expect(settingsPatchSchema.parse({})).toEqual({})
+  })
+})

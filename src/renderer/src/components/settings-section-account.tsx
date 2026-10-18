@@ -1168,7 +1168,7 @@ export function AccountProfileSettingsSection({ ctx }: { ctx: AccountSettingsCon
               <button
                 type="submit"
                 disabled={isSavingProfile}
-                className="rounded-full bg-ds-ink px-7 py-2.5 text-[15px] font-semibold text-ds-card transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-full px-7 py-2.5 text-[15px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
               >
                 {isSavingProfile ? '保存中...' : '保存'}
               </button>

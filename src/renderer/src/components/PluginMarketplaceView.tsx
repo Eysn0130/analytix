@@ -3468,7 +3468,7 @@ function HubSkillDetailModal({
             type="button"
             onClick={() => void handleTryInChat()}
             disabled={!canTryInChat}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#181818] px-4 text-[14px] font-semibold text-white shadow-sm transition hover:bg-[#2a2a2a] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-white/90"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-[14px] font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
           >
             <MessageCircleMore className="h-4 w-4" strokeWidth={1.8} />
             {t('pluginSkillTryInChat')}

@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
-import { useDocxEditorStore } from './office/docx-editor-store'
 import { useChatStore } from './store/chat-store'
 import { observeQuestionPlanAuthority } from './store/workspace-tabs-store'
 import { subscribeBeforeSharedActiveCaseContextChange } from './data-analysis/services/analysis/stats-case-overview-resource'
@@ -48,7 +47,6 @@ function RouteFallback(): React.ReactElement {
 export default function AppShell(): React.ReactElement {
   useEffect(() => observeQuestionPlanAuthority(window.analytix?.runtime, subscribeBeforeSharedActiveCaseContextChange), [])
   const route = useChatStore((s) => s.route)
-  const retainDocx = useDocxEditorStore(s => Object.keys(s.views).length > 0)
   const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const activeThreadId = useChatStore((s) => s.activeThreadId)
   const selectThread = useChatStore((s) => s.selectThread)
@@ -92,8 +90,8 @@ export default function AppShell(): React.ReactElement {
       <div className="flex min-h-0 flex-1 flex-col">
         <RuntimeStatusBanner />
         <Suspense fallback={<RouteFallback />}>
-          <div hidden={route === 'settings'} inert={route === 'settings'} className={route === 'settings' ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
-            {route !== 'settings' || retainDocx ? <Workbench /> : null}
+          <div inert={route === 'settings'} className="flex min-h-0 flex-1 flex-col">
+            <Workbench />
           </div>
           {route === 'settings' ? <SettingsView /> : null}
         </Suspense>

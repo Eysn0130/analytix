@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { normalizeAppSettings, type AppSettingsPatch, type AppSettingsV1 } from '@shared/app-settings'
 import { rendererRuntimeClient } from '../agent/runtime-client'
-import { useChatStore } from '../store/chat-store'
+import { useChatStore, type SettingsRouteSection } from '../store/chat-store'
 import { SETTINGS_CHANGED_EVENT } from '../lib/keyboard-shortcut-settings'
 import { mergeSettings } from './settings-utils'
 import i18n from '../i18n'
@@ -101,7 +101,7 @@ async function unmount() {
   root = null
 }
 
-async function advanceDebounce() {
+async function advanceFormerAutosaveWindow() {
   await act(async () => { await vi.advanceTimersByTimeAsync(450) })
 }
 
@@ -109,10 +109,33 @@ async function update(patch: AppSettingsPatch) {
   await act(async () => { context().update(patch) })
 }
 
-async function beginPreferenceSave() {
+function button(label: string, scope: ParentNode = host): HTMLButtonElement {
+  const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
+    node.textContent?.trim() === label || node.getAttribute('aria-label') === label)
+  expect(found).toBeDefined()
+  return found!
+}
+
+async function clickButton(label: string, scope: ParentNode = host) {
+  await act(async () => {
+    const target = button(label, scope)
+    expect(target.disabled).toBe(false)
+    target.click()
+  })
+}
+
+async function savePreferences() {
+  await clickButton(i18n.t('settingsSavePreferences', { ns: 'settings' }), host.querySelector('footer')!)
+}
+
+async function selectSection(section: SettingsRouteSection) {
+  await act(async () => { useChatStore.getState().openSettings(section) })
+}
+
+async function beginPreferenceSave(patch = preferencePatch()) {
   let pending!: Promise<AppSettingsV1>
   await act(async () => {
-    pending = context().saveModelPreferences(preferencePatch())
+    pending = context().saveModelPreferences(patch)
     // Attach immediately so intentional failure tests cannot produce an
     // unhandled rejection before their rejection assertion runs.
     void pending.catch(() => undefined)
@@ -152,6 +175,8 @@ beforeEach(async () => {
   } as unknown as Window['analytix']
   rendererRuntimeClient.invalidateSettings()
   useChatStore.setState({
+    route: 'settings',
+    settingsReturnRoute: 'chat',
     settingsSection: 'providers',
     applyI18nFromSettings: vi.fn(async () => undefined),
     reloadUiSettings: vi.fn(async () => undefined),
@@ -184,20 +209,47 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-describe('SettingsView normal model preference save queue', () => {
-  it('drains the actual older write before saving preferences against the latest form', async () => {
+describe('SettingsView explicit settings and model preference save queue', () => {
+  it('keeps ordinary edits local until footer Save, including after a model preference commit', async () => {
+    const acceptedPrefix = stored.codePromptPrefix
+    await update({ codePromptPrefix: 'Pending ordinary draft' })
+    await advanceFormerAutosaveWindow()
+    expect(writes).toHaveLength(0)
+
+    const { pending } = await beginPreferenceSave()
+    let saved!: AppSettingsV1
+    await act(async () => { saved = await pending })
+    expect(writes).toEqual([preferencePatch()])
+    expect(saved.codePromptPrefix).toBe(acceptedPrefix)
+    expect(saved.provider.modelPreferences).toEqual([preference])
+    expect(context().form.codePromptPrefix).toBe('Pending ordinary draft')
+    expect(context().form.provider.modelPreferences).toEqual([preference])
+    expect(events).toEqual([saved])
+    expect(await rendererRuntimeClient.getSettings({ forceRefresh: true })).toEqual(saved)
+    await advanceFormerAutosaveWindow()
+    expect(writes).toHaveLength(1)
+    expect(host.textContent).toContain(i18n.t('settingsUnsavedChanges', { ns: 'settings' }))
+
+    await savePreferences()
+    expect(writes).toHaveLength(2)
+    expect(writes[1]).toEqual({ codePromptPrefix: 'Pending ordinary draft' })
+    expect(stored.codePromptPrefix).toBe('Pending ordinary draft')
+    expect(stored.provider.modelPreferences).toEqual([preference])
+    expect(button(i18n.t('settingsSavePreferences', { ns: 'settings' })).disabled).toBe(true)
+  })
+
+  it('drains an older explicit ordinary write before saving only the preference patch', async () => {
     const older = deferred()
     gates.set(1, older)
-    await update({ codePromptPrefix: 'Older scheduled draft' })
-    await advanceDebounce()
+    await update({ codePromptPrefix: 'Issued ordinary draft' })
+    await savePreferences()
     expect(writes).toHaveLength(1)
-    expect(writes[0]?.codePromptPrefix).toBe('Older scheduled draft')
+    expect(writes[0]).toEqual({ codePromptPrefix: 'Issued ordinary draft' })
 
     const { pending } = await beginPreferenceSave()
     let settled = false
     void pending.then(() => { settled = true }, () => { settled = true })
-    // This ordinary edit happens while the explicit save waits for the older
-    // bridge write. It must remain in the form and in the eventual readback.
+    // A newer draft created while the Host write is pending must remain local.
     await update({ codePromptPrefix: 'Latest settings draft' })
     expect(writes).toHaveLength(1)
     expect(settled).toBe(false)
@@ -208,27 +260,25 @@ describe('SettingsView normal model preference save queue', () => {
       saved = await pending
     })
     expect(writes).toHaveLength(2)
-    expect(stored.codePromptPrefix).toBe('Latest settings draft')
+    expect(writes[1]).toEqual(preferencePatch())
+    expect(saved.codePromptPrefix).toBe('Issued ordinary draft')
     expect(saved.provider.modelPreferences).toEqual([preference])
     expect(context().form.codePromptPrefix).toBe('Latest settings draft')
     expect(context().form.provider.modelPreferences).toEqual([preference])
     expect(await rendererRuntimeClient.getSettings({ forceRefresh: true })).toEqual(saved)
+    await advanceFormerAutosaveWindow()
+    expect(writes).toHaveLength(2)
+
+    await savePreferences()
+    expect(writes).toHaveLength(3)
+    expect(writes[2]).toEqual({ codePromptPrefix: 'Latest settings draft' })
+    expect(stored.codePromptPrefix).toBe('Latest settings draft')
+    expect(stored.provider.modelPreferences).toEqual([preference])
   })
 
-  it('cancels an older scheduled snapshot before it can overwrite the committed preference', async () => {
-    await update({ codePromptPrefix: 'Pending ordinary draft' })
-    const { pending } = await beginPreferenceSave()
-    let saved!: AppSettingsV1
-    await act(async () => { saved = await pending })
-    expect(writes).toHaveLength(1)
-    await advanceDebounce()
-    expect(writes).toHaveLength(1)
-    expect(saved.codePromptPrefix).toBe('Pending ordinary draft')
-    expect((await rendererRuntimeClient.getSettings({ forceRefresh: true })).provider.modelPreferences)
-      .toEqual([preference])
-  })
-
-  it('rejects a failed normal write and allows a subsequent explicit Save to commit', async () => {
+  it('rejects a failed model preference write and allows a subsequent explicit retry', async () => {
+    const acceptedPrefix = stored.codePromptPrefix
+    await update({ codePromptPrefix: 'Retained ordinary draft' })
     const failed = { ...deferred(), failure: new Error('Synthetic settings persistence failure') }
     gates.set(1, failed)
     const { pending } = await beginPreferenceSave()
@@ -239,21 +289,25 @@ describe('SettingsView normal model preference save queue', () => {
     })
     expect(stored.provider.modelPreferences ?? []).toEqual([])
     expect(events).toHaveLength(0)
+    expect(context().form.codePromptPrefix).toBe('Retained ordinary draft')
 
     const retry = await beginPreferenceSave()
     let saved!: AppSettingsV1
     await act(async () => { saved = await retry.pending })
-    expect(writes).toHaveLength(2)
+    expect(writes).toEqual([preferencePatch(), preferencePatch()])
+    expect(saved.codePromptPrefix).toBe(acceptedPrefix)
     expect(saved.provider.modelPreferences).toEqual([preference])
+    expect(context().form.codePromptPrefix).toBe('Retained ordinary draft')
     expect((await rendererRuntimeClient.getSettings({ forceRefresh: true })).provider.modelPreferences)
       .toEqual([preference])
   })
 
-  it('drains an older failed scheduled write without poisoning the newer explicit Save', async () => {
+  it('drains a failed ordinary write without poisoning the queued preference save or footer retry', async () => {
+    const acceptedPrefix = stored.codePromptPrefix
     const older = { ...deferred(), failure: new Error('Synthetic older save failure') }
     gates.set(1, older)
     await update({ codePromptPrefix: 'Retain this ordinary edit' })
-    await advanceDebounce()
+    await savePreferences()
     const { pending } = await beginPreferenceSave()
     expect(writes).toHaveLength(1)
     let saved!: AppSettingsV1
@@ -262,8 +316,32 @@ describe('SettingsView normal model preference save queue', () => {
       saved = await pending
     })
     expect(writes).toHaveLength(2)
-    expect(saved.codePromptPrefix).toBe('Retain this ordinary edit')
+    expect(writes[1]).toEqual(preferencePatch())
+    expect(saved.codePromptPrefix).toBe(acceptedPrefix)
     expect(saved.provider.modelPreferences).toEqual([preference])
+    expect(context().form.codePromptPrefix).toBe('Retain this ordinary edit')
+    await savePreferences()
+    expect(writes).toHaveLength(3)
+    expect(writes[2]).toEqual({ codePromptPrefix: 'Retain this ordinary edit' })
+    expect(stored.codePromptPrefix).toBe('Retain this ordinary edit')
+    expect(stored.provider.modelPreferences).toEqual([preference])
+  })
+
+  it('discards ordinary drafts without an autosave or leave flush after Cancel', async () => {
+    const acceptedPrefix = stored.codePromptPrefix
+    await update({ codePromptPrefix: 'Discard this ordinary edit' })
+    await clickButton(i18n.t('settingsCancel', { ns: 'settings' }), host.querySelector('footer')!)
+    expect(useChatStore.getState().route).toBe('chat')
+    expect(writes).toHaveLength(0)
+    await unmount()
+    await advanceFormerAutosaveWindow()
+    expect(writes).toHaveLength(0)
+    expect(stored.codePromptPrefix).toBe(acceptedPrefix)
+
+    await selectSection('providers')
+    await mount()
+    expect(context().form.codePromptPrefix).toBe(acceptedPrefix)
+    expect(events).toHaveLength(0)
   })
 
   it('does not publish an older entry completion into a reopened settings form', async () => {
@@ -278,7 +356,7 @@ describe('SettingsView normal model preference save queue', () => {
 
     await act(async () => {
       older.resolve()
-      await pending.catch(() => undefined)
+      await pending
     })
     // A write already handed to Main may finish, but its old component must
     // not emit a settings-change event or replace the new entry's draft.
@@ -286,22 +364,32 @@ describe('SettingsView normal model preference save queue', () => {
     expect(context().form.codePromptPrefix).toBe('New entry draft')
     expect(context().form.provider.modelPreferences ?? []).toEqual([])
   })
+
+  it('retires an undispatched queued preference write when its settings entry unmounts', async () => {
+    const older = deferred()
+    gates.set(1, older)
+    const first = await beginPreferenceSave()
+    const queued = await beginPreferenceSave({ provider: { modelPreferences: [] } })
+    const rejection = expect(queued.pending).rejects.toThrow('Settings entry is no longer current.')
+    expect(writes).toHaveLength(1)
+    await unmount()
+    await mount()
+    await update({ codePromptPrefix: 'Reopened local draft' })
+    await act(async () => {
+      older.resolve()
+      await first.pending
+      await rejection
+    })
+    await advanceFormerAutosaveWindow()
+    expect(writes).toEqual([preferencePatch()])
+    expect(stored.provider.modelPreferences).toEqual([preference])
+    expect(context().form.codePromptPrefix).toBe('Reopened local draft')
+    expect(context().form.provider.modelPreferences ?? []).toEqual([])
+    expect(events).toHaveLength(0)
+  })
 })
 
-it('drops already-queued stale snapshots after a newer explicit Save drains the older write', async () => {
-  const older = deferred(); gates.set(1, older)
-  await update({ codePromptPrefix: 'Issued older write' }); await advanceDebounce()
-  const { pending } = await beginPreferenceSave()
-  await update({ codePromptPrefix: 'Queued stale draft' }); await advanceDebounce()
-  await update({ codePromptPrefix: 'Latest retained draft' })
-  await act(async () => { older.resolve(); await pending })
-  await advanceDebounce()
-  expect(writes).toHaveLength(2)
-  expect(stored.codePromptPrefix).toBe('Latest retained draft')
-  expect((await rendererRuntimeClient.getSettings({ forceRefresh: true })).provider.modelPreferences).toEqual([preference])
-})
-
-it.each([false, true])('keeps unapplied model preferences local, blocks departure, and retries final Provider Save %s', async (reenter) => {
+it.each([false, true])('keeps unapplied model preferences local, guards departure, and retries footer Save %s', async (reenter) => {
   await unmount()
   const registryProvider = { id: 'provider-alpha', kind: 'openai-compatible', endpoint: 'https://provider.invalid/v1',
     models: ['model-alpha'], mediaModels: [], selectedModel: 'model-alpha', selectedRoutes: ['provider:provider-alpha'],
@@ -318,10 +406,6 @@ it.each([false, true])('keeps unapplied model preferences local, blocks departur
   capture.realProviders = true
   await mount()
   const editLabel = i18n.t('providerModelEditAction', { ns: 'settings', model: 'model-alpha' })
-  const clickButton = async (label: string) => act(async () => {
-    const button = [...host.querySelectorAll('button')].find((node) => node.textContent?.trim() === label || node.getAttribute('aria-label') === label)
-    expect(button).toBeDefined(); expect(button!.disabled).toBe(false); button!.click()
-  })
   const editHighReasoning = async () => {
     await clickButton(editLabel)
     await act(async () => {
@@ -340,18 +424,25 @@ it.each([false, true])('keeps unapplied model preferences local, blocks departur
   expect(stored.provider.modelPreferences ?? []).toEqual([])
   expect(host.textContent).toContain(i18n.t('modelProviderManualSaveHint', { ns: 'settings' }))
   expect(host.textContent).not.toContain(i18n.t('autoApplyHint', { ns: 'settings' }))
+  expect([...host.querySelectorAll('button')].some((node) =>
+    node.textContent?.trim() === i18n.t('modelProviderSaveChanges', { ns: 'settings' }))).toBe(false)
   if (reenter) {
-    await clickButton(i18n.t('general', { ns: 'settings' }))
-    await clickButton(i18n.t('back', { ns: 'settings' }))
-    await act(async () => { useChatStore.setState({ settingsSection: 'agents' }) })
-    expect(host.textContent).toContain(i18n.t('modelProviderSaveChanges', { ns: 'settings' }))
+    await clickButton(i18n.t('settingsTabGeneral', { ns: 'settings' }))
+    expect(useChatStore.getState().settingsSection).toBe('providers')
+    await clickButton(i18n.t('settingsClose', { ns: 'settings' }))
+    expect(host.textContent).toContain(i18n.t('settingsDiscardTitle', { ns: 'settings' }))
+    expect(useChatStore.getState().route).toBe('settings')
+    await clickButton(i18n.t('settingsKeepEditing', { ns: 'settings' }))
+    await selectSection('agents')
+    expect(useChatStore.getState().settingsSection).toBe('providers')
+    expect(button(i18n.t('settingsSavePreferences', { ns: 'settings' })).disabled).toBe(false)
     expect(useChatStore.getState().showTopNotice).toHaveBeenCalledWith({
       tone: 'info', message: i18n.t('modelProviderUnsavedChanges', { ns: 'settings' })
     })
     expect(writes).toHaveLength(0)
   }
   const failed = { ...deferred(), failure: new Error('Synthetic first Provider Save failure') }; gates.set(1, failed)
-  await clickButton(i18n.t('modelProviderSaveChanges', { ns: 'settings' }))
+  await savePreferences()
   await act(async () => { failed.resolve() })
   expect(writes).toHaveLength(1)
   expect(stored.provider.modelPreferences ?? []).toEqual([])
@@ -360,10 +451,10 @@ it.each([false, true])('keeps unapplied model preferences local, blocks departur
     node.parentElement?.textContent?.startsWith(i18n.t('providerModelReasoningLabel', { ns: 'settings' })))!
   expect(toggle.getAttribute('aria-checked')).toBe('true')
   await clickButton(i18n.t('providerModelCancel', { ns: 'settings' }))
-  await clickButton(i18n.t('modelProviderSaveChanges', { ns: 'settings' }))
+  await savePreferences()
   expect(writes).toHaveLength(2)
   expect(stored.provider.modelPreferences?.[0].modelProfiles['model-alpha'].reasoning?.defaultEffort).toBe('high')
-  await clickButton(i18n.t('general', { ns: 'settings' }))
+  await clickButton(i18n.t('settingsTabGeneral', { ns: 'settings' }))
   expect(host.querySelector('[data-test-settings-form]')).not.toBeNull()
   if (reenter) {
     await act(async () => { await i18n.changeLanguage('zh') })
@@ -380,9 +471,11 @@ it('does not write a stale task catalog while saving an ordinary settings form',
   rendererRuntimeClient.invalidateSettings()
   await mount()
   await update({ codePromptPrefix: 'Synthetic ordinary edit' })
-  await advanceDebounce()
+  await advanceFormerAutosaveWindow()
+  expect(writes).toHaveLength(0)
+  await savePreferences()
   expect(writes).toHaveLength(1)
-  expect(writes[0].schedule).not.toHaveProperty('tasks')
+  expect(writes[0]).toEqual({ codePromptPrefix: 'Synthetic ordinary edit' })
   expect(stored.schedule.tasks[0].id).toBe('host-task')
 })
 
@@ -402,7 +495,7 @@ describe('SettingsView Memory workspace ownership', () => {
       records.push(record); return record
     })
     vi.spyOn(registry, 'getProvider').mockReturnValue({ listMemories: list, createMemory: create } as unknown as AgentProvider)
-    await act(async () => useChatStore.setState({ settingsSection: 'memory' }))
+    await selectSection('memory')
   })
   async function workspace(path: string) {
     stored = { ...stored, workspaceRoot: path }
@@ -463,8 +556,8 @@ describe('SettingsView Memory workspace ownership', () => {
     create.mockImplementationOnce(async () => { await held.promise; return memory('retired', '/synthetic/settings-queue') })
     let pending!: Promise<boolean>
     await act(async () => { pending = context().createMemoryRecord({ content: 'held' }) })
-    await act(async () => useChatStore.setState({ settingsSection: 'general' }))
-    await act(async () => useChatStore.setState({ settingsSection: 'memory' }))
+    await selectSection('general')
+    await selectSection('memory')
     await act(async () => { held.resolve(); await pending })
     expect(context().memoryRecords).toEqual([])
   })

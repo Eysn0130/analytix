@@ -55,6 +55,14 @@ export function analytixToolPermissionModeFromSettings(
   return 'custom'
 }
 export type UiFontScale = 'small' | 'medium' | 'large'
+export const APP_ACCENT_COLORS = ['blue', 'teal', 'orange', 'magenta', 'green'] as const
+export type AppAccentColor = (typeof APP_ACCENT_COLORS)[number]
+export const DEFAULT_APP_ACCENT_COLOR: AppAccentColor = 'blue'
+export function normalizeAppAccentColor(value: unknown): AppAccentColor {
+  return APP_ACCENT_COLORS.includes(value as AppAccentColor)
+    ? value as AppAccentColor
+    : DEFAULT_APP_ACCENT_COLOR
+}
 export const APP_MOTION_PREFERENCES = ['on', 'system', 'off'] as const
 export type AppMotionPreference = (typeof APP_MOTION_PREFERENCES)[number]
 export const DEFAULT_APP_MOTION_PREFERENCE: AppMotionPreference = 'on'
@@ -1070,6 +1078,7 @@ export type AppSettingsV1 = {
   version: 1
   locale: 'en' | 'zh'
   theme: 'system' | 'light' | 'dark'
+  accentColor?: AppAccentColor
   uiFontScale: UiFontScale
   motionPreference?: AppMotionPreference
   performanceUsageMode?: PerformanceUsageMode

@@ -2,8 +2,8 @@
 .detail, .empty, .confirmLayer {
   --dsw-alias-bg-layer-2: rgb(255, 255, 255);
   --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.24);
-  --dsw-alias-button-primary-fill: rgb(15, 17, 21);
-  --dsw-alias-button-primary-hover: rgb(67, 69, 74);
+  --dsw-alias-button-primary-fill: var(--ax-primary);
+  --dsw-alias-button-primary-hover: var(--ax-primary-hover);
   --dsw-radius-panel: 28px;
   --dsw-mask-blur: none;
 }
@@ -12,8 +12,8 @@
 :global([data-theme='dark']) .confirmLayer {
   --dsw-alias-bg-layer-2: rgb(44, 44, 46);
   --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.5);
-  --dsw-alias-button-primary-fill: rgb(249, 250, 251);
-  --dsw-alias-button-primary-hover: rgb(235, 238, 242);
+  --dsw-alias-button-primary-fill: var(--ax-primary);
+  --dsw-alias-button-primary-hover: var(--ax-primary-hover);
 }
 .detail { --detail-gutter: 24px; position: relative; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; color: var(--dsw-alias-label-primary, var(--ds-text)); background: var(--dsw-alias-bg-base, var(--ds-bg-canvas)); font-family: var(--dsw-font-family, inherit); }
 .tabsBar { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 20px; height: 37px; min-height: 37px; padding: 0 var(--detail-gutter); border-bottom: 0.5px solid var(--dsw-alias-border-l3, var(--ds-border-strong)); }
@@ -45,7 +45,7 @@
 .footer > button, .confirmActions > button, .empty > button { padding: 6px 12px; border: 0; border-radius: 8px; background: transparent; color: inherit; font-family: inherit; font-size: 12px; }
 .footer button { height: 32px; padding: 0 14px; border: 0; border-radius: 12px; background: transparent; font-size: 13px; cursor: pointer; }
 .footer button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, var(--ds-surface-hover)); }
-.footer .saveButton { background: var(--dsw-alias-button-primary-fill, var(--ds-text)); color: var(--dsw-alias-label-primary-foreground, var(--ds-bg-canvas)); }
+.footer .saveButton { background: var(--dsw-alias-button-primary-fill, var(--ds-text)); color: var(--ax-on-primary); }
 .footer .saveButton:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover, var(--ds-text-muted)); }
 .footer > :last-child { margin-right: -8px; }
 .empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; min-height: 0; height: 100%; color: var(--dsw-alias-label-tertiary); font-family: var(--dsw-font-family); font-size: 13px; }
@@ -95,3 +95,5 @@
 .savedPrompt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; margin: 6px 0 0; color: var(--dsw-alias-label-tertiary, var(--ds-text-faint)); font-size: 13px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .savedPrompt[data-expanded] { display: block; -webkit-line-clamp: none; line-clamp: none; }
 .savedPromptToggle { display: inline-flex; align-items: center; gap: 2px; margin: 2px 0 0 -6px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-tertiary, var(--ds-text-faint)); font: inherit; font-size: 12px; cursor: pointer; }
+
+.footer .saveButton:active:not(:disabled) { background: var(--ax-primary-pressed); }

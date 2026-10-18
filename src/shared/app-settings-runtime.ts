@@ -70,6 +70,7 @@ const APP_SETTINGS_V1_KEYS = new Set([
   'version',
   'locale',
   'theme',
+  'accentColor',
   'uiFontScale',
   'motionPreference',
   'performanceUsageMode',

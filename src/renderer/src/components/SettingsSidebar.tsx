@@ -1,26 +1,6 @@
-import { useMemo, useState, type Dispatch, type ReactElement, type SetStateAction } from 'react'
-import {
-  Archive,
-  Bot,
-  BrainCircuit,
-  ChevronLeft,
-  Code2,
-  Globe,
-  Globe2,
-  ImageIcon,
-  Keyboard,
-  Mic,
-  Monitor,
-  PencilLine,
-  RefreshCw,
-  Search,
-  Settings,
-  ShieldCheck,
-  Smartphone,
-  X
-} from '../design/AnalytixUiIcons'
+import { useId, useRef, type Dispatch, type KeyboardEvent, type ReactElement, type SetStateAction } from 'react'
 
-type SettingsCategory =
+export type SettingsCategory =
   | 'account'
   | 'general'
   | 'providers'
@@ -35,69 +15,53 @@ type SettingsCategory =
   | 'worktree'
   | 'memory'
   | 'shortcuts'
-
   | 'claw'
   | 'updates'
 
-type SidebarIcon = typeof Settings
+export type SettingsTabId = 'general' | 'models' | 'workspace' | 'tools'
 
-type NavItem = {
-  category: SettingsCategory
+type SettingsTab = {
+  id: SettingsTabId
   labelKey: string
-  icon: SidebarIcon
-  keywords: string[]
+  categories: readonly SettingsCategory[]
 }
 
-type NavGroup = {
-  headingKey: string
-  items: NavItem[]
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    headingKey: 'settingsNavPersonal',
-    items: [
-      { category: 'general', labelKey: 'general', icon: Globe, keywords: ['theme', 'ui plugin', 'locale', 'workspace', 'startup', 'logs', 'diagnostics', 'debug', 'troubleshooting'] },
-      { category: 'write', labelKey: 'write', icon: PencilLine, keywords: ['editor', 'completion', 'typing'] },
-      { category: 'imageGeneration', labelKey: 'imageGen', icon: ImageIcon, keywords: ['image', 'generation'] },
-      { category: 'speechToText', labelKey: 'speechToText', icon: Mic, keywords: ['speech', 'transcription', 'voice'] },
-      { category: 'shortcuts', labelKey: 'keyboardShortcuts', icon: Keyboard, keywords: ['keyboard', 'hotkey', 'shortcut'] },
-      { category: 'updates', labelKey: 'updates', icon: RefreshCw, keywords: ['version', 'release', 'update'] }
-    ]
-  },
-  {
-    headingKey: 'settingsNavIntegrations',
-    items: [
-      { category: 'providers', labelKey: 'providers', icon: Globe2, keywords: ['model', 'api', 'provider', 'local'] },
-      { category: 'browser', labelKey: 'browser', icon: Monitor, keywords: ['browser', 'web', 'chrome', 'permissions'] },
-      { category: 'computerUse', labelKey: 'computerUse', icon: Monitor, keywords: ['computer', 'screen', 'mouse', 'keyboard', 'analytix-computer-use'] },
-      { category: 'claw', labelKey: 'claw', icon: Smartphone, keywords: ['phone', 'connect', 'im'] }
-    ]
-  },
-  {
-    headingKey: 'settingsNavCoding',
-    items: [
-      { category: 'agents', labelKey: 'agents', icon: Bot, keywords: ['assistant', 'skill', 'mcp', 'runtime'] },
-      { category: 'permissions', labelKey: 'permissions', icon: ShieldCheck, keywords: ['approval', 'sandbox', 'access'] },
-      { category: 'worktree', labelKey: 'worktree', icon: Code2, keywords: ['git', 'branch', 'worktree'] },
-      { category: 'memory', labelKey: 'memory', icon: BrainCircuit, keywords: ['memory', 'remember', 'context'] }
-    ]
-  }
+export const SETTINGS_TABS: readonly SettingsTab[] = [
+  { id: 'general', labelKey: 'settingsTabGeneral', categories: ['general', 'shortcuts', 'updates'] },
+  { id: 'models', labelKey: 'settingsTabModels', categories: ['providers', 'imageGeneration', 'speechToText'] },
+  { id: 'workspace', labelKey: 'settingsTabWorkspace', categories: ['write', 'worktree', 'memory', 'archives'] },
+  { id: 'tools', labelKey: 'settingsTabTools', categories: ['agents', 'permissions', 'browser', 'computerUse', 'claw'] }
 ]
 
-const ARCHIVES_ITEM: NavItem = {
-  category: 'archives', labelKey: 'archives', icon: Archive, keywords: ['archive', 'history', 'threads']
+const CATEGORY_LABEL_KEYS: Record<SettingsCategory, string> = {
+  account: 'deprecatedHubCompatibility',
+  general: 'general',
+  providers: 'providers',
+  write: 'write',
+  imageGeneration: 'imageGen',
+  speechToText: 'speechToText',
+  agents: 'agents',
+  archives: 'archives',
+  permissions: 'permissions',
+  browser: 'browser',
+  computerUse: 'computerUse',
+  worktree: 'worktree',
+  memory: 'memory',
+  shortcuts: 'keyboardShortcuts',
+  claw: 'claw',
+  updates: 'updates'
 }
-const NAV_ITEMS = [...NAV_GROUPS.flatMap(group => group.items), ARCHIVES_ITEM]
 
 export function settingsCategoryLabelKey(category: SettingsCategory): string {
-  if (category === 'account') return 'deprecatedHubCompatibility'
-  return NAV_ITEMS.find(item => item.category === category)?.labelKey ?? 'title'
+  return CATEGORY_LABEL_KEYS[category] ?? 'title'
+}
+
+export function settingsTabForCategory(category: SettingsCategory): SettingsTab {
+  return SETTINGS_TABS.find(tab => tab.categories.includes(category)) ?? SETTINGS_TABS[0]!
 }
 
 export function SettingsSidebar({
   category,
-  goBack,
   setCategory,
   t
 }: {
@@ -106,123 +70,62 @@ export function SettingsSidebar({
   setCategory: Dispatch<SetStateAction<SettingsCategory>>
   t: (key: string) => string
 }): ReactElement {
-  const [query, setQuery] = useState('')
-  const normalizedQuery = query.trim().toLowerCase()
-
-  const visibleGroups = useMemo(() => {
-    if (!normalizedQuery) return NAV_GROUPS
-    return NAV_GROUPS
-      .map((group) => {
-        const heading = t(group.headingKey).toLowerCase()
-        const items = group.items.filter((item) => {
-          const label = t(item.labelKey).toLowerCase()
-          const aliases = item.category === 'general' ? [t('logTitle'), t('debug')] : []
-          return [heading, label, ...aliases, ...item.keywords].some((entry) => entry.toLowerCase().includes(normalizedQuery))
-        })
-        return { ...group, items }
-      })
-      .filter((group) => group.items.length > 0)
-  }, [normalizedQuery, t])
-  const archivesVisible = !normalizedQuery || [t(ARCHIVES_ITEM.labelKey), t('settingsNavArchived'), ...ARCHIVES_ITEM.keywords]
-    .some(entry => entry.toLowerCase().includes(normalizedQuery))
-
-  const catCls = (c: SettingsCategory): string =>
-    `flex h-[35px] w-full items-center gap-2 rounded-lg px-2.5 text-left text-[14px] font-normal transition ${
-      category === c
-        ? 'bg-ds-subtle text-ds-ink'
-        : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
-    }`
-
-  const renderNavButton = (item: NavItem, headingKey?: string): ReactElement => {
-    const Icon = item.icon
-    return (
-      <button
-        key={item.category}
-        type="button"
-        className={catCls(item.category)}
-        onClick={() => setCategory(item.category)}
-        aria-current={category === item.category ? 'page' : undefined}
-      >
-        <Icon className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
-        <span className="min-w-0 flex-1 truncate">{t(item.labelKey)}</span>
-        {headingKey && normalizedQuery ? (
-          <span className="shrink-0 truncate text-[11px] font-medium text-ds-faint">{t(headingKey)}</span>
-        ) : null}
-      </button>
-    )
+  const sectionId = useId()
+  const activeTab = settingsTabForCategory(category)
+  const tabButtons = useRef<Partial<Record<SettingsTabId, HTMLButtonElement | null>>>({})
+  const activateTab = (tab: SettingsTab): void => {
+    if (tab.id !== activeTab.id) setCategory(tab.categories[0]!)
+  }
+  const handleTabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return
+    const next = event.key === 'Home' ? 0
+      : event.key === 'End' ? SETTINGS_TABS.length - 1
+        : event.key === 'ArrowRight' ? (index + 1) % SETTINGS_TABS.length
+          : event.key === 'ArrowLeft' ? (index - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length
+            : null
+    if (next === null) return
+    event.preventDefault()
+    const tab = SETTINGS_TABS[next]!
+    activateTab(tab)
+    tabButtons.current[tab.id]?.focus()
   }
 
   return (
-    <aside className="ds-settings-sidebar ds-drag flex w-[288px] shrink-0 flex-col border-r border-ds-border bg-ds-sidebar">
-      <div className="px-3 pb-3 pt-3">
-        <div aria-hidden className="ds-titlebar-safe-block" />
-        <button
-          type="button"
-          onClick={goBack}
-          className="ds-no-drag flex items-center gap-2 rounded-lg px-2 py-2 text-[14px] text-ds-muted hover:bg-ds-hover hover:text-ds-ink"
+    <nav className="ax-settings-navigation" aria-label={t('title')}>
+      <div className="ax-settings-tabs" role="tablist" aria-label={t('title')}>
+        {SETTINGS_TABS.map((tab, index) => (
+          <button
+            key={tab.id}
+            ref={element => { tabButtons.current[tab.id] = element }}
+            type="button"
+            role="tab"
+            id={`ax-settings-tab-${tab.id}`}
+            aria-controls="ax-settings-tabpanel"
+            className="ax-settings-tab"
+            aria-selected={activeTab.id === tab.id}
+            tabIndex={activeTab.id === tab.id ? 0 : -1}
+            onClick={() => activateTab(tab)}
+            onKeyDown={event => handleTabKey(event, index)}
+          >
+            {t(tab.labelKey)}
+          </button>
+        ))}
+      </div>
+      <div className="ax-settings-section-picker">
+        <label htmlFor={sectionId}>{t('settingsSectionLabel')}</label>
+        <select
+          id={sectionId}
+          value={category}
+          onChange={event => setCategory(event.target.value as SettingsCategory)}
         >
-          <ChevronLeft className="h-4 w-4" strokeWidth={1.75} />
-          {t('back')}
-        </button>
-        <div className="ds-no-drag relative mt-3">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ds-faint" strokeWidth={1.75} />
-          <input
-            aria-label={t('settingsSearchLabel')}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t('settingsSearchPlaceholder')}
-            className="h-9 w-full rounded-lg border border-ds-border bg-ds-card/80 pl-8 pr-8 text-[13px] text-ds-ink shadow-sm outline-none placeholder:text-ds-faint focus:border-accent/40 focus:ring-1 focus:ring-accent/25"
-          />
-          {query ? (
-            <button
-              type="button"
-              aria-label={t('settingsSearchClear')}
-              title={t('settingsSearchClear')}
-              onClick={() => setQuery('')}
-              className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={1.9} />
-            </button>
+          {activeTab.categories.map(section => (
+            <option key={section} value={section}>{t(settingsCategoryLabelKey(section))}</option>
+          ))}
+          {category === 'account' ? (
+            <option value="account">{t(settingsCategoryLabelKey('account'))}</option>
           ) : null}
-        </div>
+        </select>
       </div>
-      <nav className="ds-no-drag min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {visibleGroups.length === 0 && !archivesVisible ? (
-          <div className="rounded-lg border border-ds-border-muted bg-ds-main/40 px-3 py-3 text-[12.5px] leading-5 text-ds-muted">
-            {t('settingsSearchEmpty')}
-          </div>
-        ) : normalizedQuery ? (
-          <div className="flex flex-col gap-1">
-            {visibleGroups.flatMap((group) => group.items.map((item) => renderNavButton(item, group.headingKey)))}
-            {archivesVisible ? renderNavButton(ARCHIVES_ITEM) : null}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {visibleGroups.map((group) => (
-              <section key={group.headingKey} aria-label={t(group.headingKey)} className="space-y-1">
-                <div className="px-2 text-[11px] font-semibold uppercase tracking-normal text-ds-faint">
-                  {t(group.headingKey)}
-                </div>
-                <div className="space-y-1">
-                  {group.items.map((item) => renderNavButton(item))}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
-      </nav>
-      <div className="ds-no-drag mt-auto border-t border-ds-border p-3">
-        {!normalizedQuery ? renderNavButton(ARCHIVES_ITEM) : null}
-        <div className="flex items-center gap-2 rounded-lg px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-ds-subtle text-ds-muted">
-            <Settings className="h-4 w-4" strokeWidth={1.75} />
-          </div>
-          <div className="min-w-0 text-[12px] text-ds-muted">
-            <div className="truncate font-medium text-ds-ink">Analytix</div>
-            <div className="truncate">{t('settingsFooter')}</div>
-          </div>
-        </div>
-      </div>
-    </aside>
+    </nav>
   )
 }

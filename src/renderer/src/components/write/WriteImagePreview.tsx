@@ -291,7 +291,7 @@ export function WriteImagePreview({
           />
           {owner && !editor.stale && snapshot ? editor.regions.map(entry => entry.region ? <div key={entry.regionId}
             data-testid={entry.regionId === editor.selectedRegionId ? 'image-region-overlay' : 'image-region-inactive-overlay'}
-            className={`pointer-events-none absolute border-2 ${entry.regionId === editor.selectedRegionId ? 'border-blue-600 bg-blue-500/15' : 'border-amber-500 bg-amber-500/10'}`}
+            className={`pointer-events-none absolute border-2 ${entry.regionId === editor.selectedRegionId ? 'border-accent bg-accent/15' : 'border-amber-500 bg-amber-500/10'}`}
             style={{ left: `${entry.region.x / snapshot.width * 100}%`, top: `${entry.region.y / snapshot.height * 100}%`,
               width: `${entry.region.width / snapshot.width * 100}%`, height: `${entry.region.height / snapshot.height * 100}%` }} /> : null) : null}
           </div>

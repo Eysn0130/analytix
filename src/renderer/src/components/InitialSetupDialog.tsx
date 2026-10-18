@@ -256,7 +256,7 @@ export function InitialSetupDialog(): ReactElement {
   const handleThemeChange = (theme: ThemePref) => {
     if (!formRef.current) return
     updateForm({ theme })
-    applyTheme(theme)
+    applyTheme(theme, formRef.current.accentColor)
   }
 
   const handleClose = () => {
@@ -383,7 +383,7 @@ export function InitialSetupDialog(): ReactElement {
           <p role={settingsReadFailed ? 'alert' : 'status'}>{t(settingsReadFailed ? 'settingsReadFailed' : 'loading')}</p>
           <div className="mt-3 flex flex-wrap gap-3">
             {settingsReadFailed ? <button type="button" onClick={() => readSetupSettings(true)}
-              className="rounded-lg bg-accent px-3 py-2 font-semibold text-white">{t('settingsReadRetry')}</button> : null}
+              className="rounded-lg bg-accent px-3 py-2 font-semibold text-accent-foreground">{t('settingsReadRetry')}</button> : null}
             <button type="button" onClick={closeAllowed ? handleClose : handleOpenLocalData}
               className="px-2 py-2 text-ds-muted hover:text-ds-ink">{t(closeAllowed ? 'firstRunClose' : 'firstRunOpenLocalData')}</button>
           </div>
@@ -545,7 +545,7 @@ export function InitialSetupDialog(): ReactElement {
               : <button type="button" disabled={saving} onClick={handleOpenLocalData}
                 className="h-10 px-2 text-sm text-ds-muted hover:text-ds-ink disabled:opacity-50">{t('firstRunOpenLocalData')}</button>}
             <button type="button" disabled={saving} onClick={handleSave}
-              className="min-h-10 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+              className="min-h-10 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground hover:opacity-90 disabled:opacity-50">
               {saving ? t('firstRunSaving') : t('firstRunSave')}
             </button>
           </div>

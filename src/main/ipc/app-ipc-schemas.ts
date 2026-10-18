@@ -129,7 +129,7 @@ export const providerOAuthSubscriptionPayloadSchema = z.object({
 }).strict()
 import { GUI_UPDATE_CHANNELS } from '../../shared/gui-update'
 import { THREAD_TRACE_EVENT_NAMES } from '../../shared/thread-trace'
-import { WINDOW_CLOSE_ACTIONS } from '../../shared/app-settings'
+import { APP_ACCENT_COLORS, WINDOW_CLOSE_ACTIONS } from '../../shared/app-settings'
 import { KEYBOARD_SHORTCUT_COMMANDS } from '../../shared/keyboard-shortcuts'
 import { WRITE_EXPORT_FORMATS } from '../../shared/write-export'
 import { WRITE_INFOGRAPHIC_MAX_TEXT_CHARS } from '../../shared/write-infographic'
@@ -1258,6 +1258,7 @@ const settingsPatchObjectSchema = z.object({
   version: z.literal(1).optional(),
   locale: localeSchema.optional(),
   theme: themeSchema.optional(),
+  accentColor: z.enum(APP_ACCENT_COLORS).optional(),
   uiFontScale: uiFontScaleSchema.optional(),
   motionPreference: motionPreferenceSchema.optional(),
   performanceUsageMode: z.enum(['compact', 'detailed']).optional(),

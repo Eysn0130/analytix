@@ -187,6 +187,13 @@ export function providerProfileFromRegistry(
 
 type ProviderRegistrySnapshotResult = Extract<ProviderRegistryResult, { providers: unknown }>
 
+export type ProviderSettingsActions = {
+  save: () => Promise<boolean>
+  discard: () => void
+  dirty: boolean
+  busy: boolean
+}
+
 export type ProviderRegistryRoutingDraft = {
   selectedModel: string
   selectedMediaModel: string
@@ -534,6 +541,18 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const providerDraftRevision = useRef(0)
   const [providerSettingsSaving, setProviderSettingsSaving] = useState(false)
   const [modelEditorOpen, setModelEditorOpen] = useState(false)
+  const modelEditorOpenRef = useRef(modelEditorOpen)
+  modelEditorOpenRef.current = modelEditorOpen
+  const [modelEditorRevision, setModelEditorRevision] = useState(0)
+  const [footerSavePending, setFooterSavePending] = useState(false)
+  const footerSavePendingRef = useRef(false)
+  const providerActionsRef = useRef<Pick<ProviderSettingsActions, 'save' | 'discard'> | null>(null)
+  const onProviderActionsChange = ctx.onProviderActionsChange as
+    ((actions: ProviderSettingsActions | null) => void) | undefined
+  const footerManaged = typeof onProviderActionsChange === 'function'
+  const saveProviderActions = useCallback(async (): Promise<boolean> =>
+    providerActionsRef.current?.save() ?? false, [])
+  const discardProviderActions = useCallback((): void => { providerActionsRef.current?.discard() }, [])
   useEffect(() => {
     // Form props may be optimistic drafts. Only normal successful readback
     // events and this component's verified Save acknowledge durable choices.
@@ -580,6 +599,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const [showApiKey, setShowApiKey] = useState(false)
   const [credentialDrafts, setCredentialDrafts] = useState<Record<string, string>>({})
   const credentialInputRevisions = useRef<Record<string, number>>({})
+  const credentialClearedRevisions = useRef<Record<string, number>>({})
   const credentialEntryRevision = useRef(0)
   const credentialOperationRevision = useRef(0)
   const credentialInputMounted = useRef(false)
@@ -589,6 +609,8 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       credentialInputMounted.current = false
       credentialEntryRevision.current += 1
       credentialInputRevisions.current = {}
+      credentialClearedRevisions.current = {}
+      providerActionsRef.current = null
     }
   }, [])
 
@@ -599,6 +621,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
   const clearCredentialDraft = (providerId: string): void => {
     credentialInputRevisions.current[providerId] = (credentialInputRevisions.current[providerId] ?? 0) + 1
+    credentialClearedRevisions.current[providerId] = credentialInputRevisions.current[providerId]
     setCredentialDrafts((current) => {
       const next = { ...current }
       delete next[providerId]
@@ -981,7 +1004,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     setProviderSettingsSaving(false)
     const registryProvider = registrySnapshot?.providers.find((provider) => provider.id === profile.id)
     if (registryProvider?.tombstone) {
-      showTopNotice({ tone: 'error', message: 'Disconnected Providers must be explicitly deleted before reconnecting.' })
+      showTopNotice({ tone: 'error', message: t('modelProviderDisconnectedReconnect') })
       return false
     }
     const routingDraft = routingDrafts[profile.id] ?? {
@@ -1038,10 +1061,10 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       if ((credentialInputRevisions.current[profile.id] ?? 0) === operation.input) {
         clearCredentialDraft(profile.id)
       }
-      return result.credentialConfigured
+      return true
     } catch {
       if (credentialOperationIsCurrent(operation)) {
-        showTopNotice({ tone: 'error', message: 'Provider settings update failed.' })
+        showTopNotice({ tone: 'error', message: t('modelProviderUpdateFailed') })
       }
       return false
     } finally {
@@ -1051,14 +1074,14 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     }
   }
 
-  const commitProviderDraft = async (): Promise<void> => {
-    if (!draftProvider) return
+  const commitProviderDraft = async (): Promise<boolean> => {
+    if (!draftProvider) return false
     const operation = beginCredentialOperation(draftProvider.id)
-    const configured = await persistCredentialDraft(draftProvider, operation)
-    if (!credentialOperationIsCurrent(operation)) return
-    if (!configured) {
+    const saved = await persistCredentialDraft(draftProvider, operation)
+    if (!saved || !credentialOperationIsCurrent(operation)) return false
+    if (!registrySnapshotRef.current?.providers.find((item) => item.id === draftProvider.id)?.credentialConfigured) {
       showTopNotice({ tone: 'error', message: t('modelProviderPresetMissingKeyForProbe') })
-      return
+      return false
     }
     let selected: ProviderRegistrySnapshotResult
     try {
@@ -1073,11 +1096,11 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       })
     } catch {
       if (credentialOperationIsCurrent(operation)) {
-        showTopNotice({ tone: 'error', message: 'Provider selection failed.' })
+        showTopNotice({ tone: 'error', message: t('modelProviderSelectionFailed') })
       }
-      return
+      return false
     }
-    if (!credentialOperationIsCurrent(operation)) return
+    if (!credentialOperationIsCurrent(operation)) return false
     applyRegistrySnapshot(selected, false)
     update(modelProvidersSettingsPatch({
       provider,
@@ -1087,6 +1110,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
     }))
     setDraftProvider(null)
     setSelectedProviderId(draftProvider.id)
+    return true
   }
 
   const cancelProviderDraft = (): void => {
@@ -1098,12 +1122,65 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   }
 
   const discardProviderChanges = (): void => {
-    if (!registrySnapshot || providerSettingsSaving || modelEditorOpen) return
     ++providerDraftRevision.current
     invalidateCredentialEntry()
+    ++credentialOperationRevision.current
     for (const id of Object.keys(credentialDrafts)) clearCredentialDraft(id)
-    applyRegistrySnapshot(registrySnapshot, false)
+    setDraftProvider(null)
+    setModelEditorOpen(false)
+    setModelEditorRevision((revision) => revision + 1)
+    setAddMenuOpen(false)
+    setProviderSettingsSaving(false)
+    const snapshot = registrySnapshotRef.current
+    if (snapshot) applyRegistrySnapshot(snapshot, false)
   }
+
+  providerActionsRef.current = {
+    save: async (): Promise<boolean> => {
+      if (!credentialInputMounted.current || footerSavePendingRef.current || providerSettingsSaving) return false
+      // Model Save first applies the editor's local form to the Provider draft.
+      // Do not acknowledge that unsaved inner form as a successful modal Save.
+      if (modelEditorOpen) {
+        showTopNotice({ tone: 'info', message: t('modelProviderUnsavedChanges') })
+        return false
+      }
+      if (!providerDraftDirtyRef.current) return true
+      if (registryLoadState !== 'ready' || !activeProvider || activeRegistryProvider?.tombstone) return false
+      const entry = credentialEntryRevision.current
+      const draft = providerDraftRevision.current
+      const inputs = { ...credentialInputRevisions.current }
+      footerSavePendingRef.current = true
+      setFooterSavePending(true)
+      try {
+        const saved = draftProvider
+          ? await commitProviderDraft()
+          : await persistCredentialDraft(activeProvider)
+        return saved && credentialInputMounted.current && !modelEditorOpenRef.current &&
+          entry === credentialEntryRevision.current && draft === providerDraftRevision.current &&
+          // A successful write may clear the submitted input. Any other revision
+          // means a newer in-memory draft must stay open for another explicit Save.
+          Object.entries(credentialInputRevisions.current).every(([id, revision]) =>
+            revision === (inputs[id] ?? 0) ||
+            (id === activeProvider.id && revision === (inputs[id] ?? 0) + 1 &&
+              credentialClearedRevisions.current[id] === revision))
+      } finally {
+        footerSavePendingRef.current = false
+        if (credentialInputMounted.current) setFooterSavePending(false)
+      }
+    },
+    discard: discardProviderChanges
+  }
+  useEffect(() => {
+    onProviderActionsChange?.({
+      save: saveProviderActions,
+      discard: discardProviderActions,
+      dirty: providerDraftDirty,
+      busy: providerSettingsSaving || footerSavePending
+    })
+  }, [onProviderActionsChange, saveProviderActions, discardProviderActions, providerDraftDirty, providerSettingsSaving, footerSavePending])
+  useEffect(() => () => {
+    onProviderActionsChange?.(null)
+  }, [onProviderActionsChange])
 
   const addModelProvider = (): void => {
     const baseId = 'custom-provider'
@@ -1204,7 +1281,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
         currentAnalytix: analytix
       }))
     } catch {
-      showTopNotice({ tone: 'error', message: 'Provider selection failed.' })
+      showTopNotice({ tone: 'error', message: t('modelProviderSelectionFailed') })
     }
   }
 
@@ -1226,7 +1303,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
         }))
       }
     } catch {
-      showTopNotice({ tone: 'error', message: 'Provider disconnect failed.' })
+      showTopNotice({ tone: 'error', message: t('modelProviderDisconnectFailed') })
     }
   }
 
@@ -1266,7 +1343,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
         requestProviderRegistry: (request) => window.analytix.providerRegistry.request(request)
       })
     } catch {
-      showTopNotice({ tone: 'error', message: 'Provider deletion failed.' })
+      showTopNotice({ tone: 'error', message: t('modelProviderDeleteFailed') })
       return
     }
     const next = await refreshRegistry()
@@ -1578,6 +1655,8 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       ? modelProviderTokenPlanProfile(tokenPlanPresetForProfileId(activeProvider.id)!)
       : null
   const classifiedMediaModelIds = new Set(activeCatalog ? providerMediaModelIds(activeCatalog) : [])
+  const isCustomProvider = Boolean(activeProvider && !activeCatalog)
+  const needsTextModel = Boolean(isCustomProvider && isDraftActive && activeProvider?.models.length === 0)
   const activeUnclassifiedMediaModelIds = activeProvider
     ? providerMediaModelIds(activeProvider).filter((model) => !classifiedMediaModelIds.has(model))
     : []
@@ -1585,6 +1664,104 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
   const activeTokenPlanRegions = activeProvider
     ? tokenPlanPresetForProfileId(activeProvider.id)?.tokenPlan?.regions ?? []
     : []
+
+  const modelManager = activeProvider ? (
+                  <ProviderModelsManager
+                    key={`${activeProvider.id}:${modelEditorRevision}`}
+                    provider={activeProvider}
+                    t={t}
+                    selectControlClass={selectControlClass}
+                    onChange={(next) => applyProviderModelProfile(activeProvider, next)}
+                    unclassifiedMediaModelIds={activeUnclassifiedMediaModelIds}
+                    onEditingChange={setModelEditorOpen}
+                  />
+  ) : null
+  const connectionFields = activeProvider ? <>
+                  <label className={fieldLabelClass}>
+                    {t('modelProviderBaseUrl')}
+                    <input
+                      className={textInputClass}
+                      value={activeProvider.baseUrl}
+                      placeholder={t('baseUrlPlaceholder')}
+                      spellCheck={false}
+                      onChange={(e) => updateModelProvider(activeProvider.id, { baseUrl: e.target.value })}
+                    />
+                    {activeBaseUrlInvalid ? (
+                      <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
+                        {t('modelProviderInvalidUrl')}
+                      </span>
+                    ) : null}
+                  </label>
+                  {activeTokenPlanRegions.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[12px] font-semibold text-ds-muted">
+                        {t('modelProviderTokenPlanRegion')}
+                      </span>
+                      {activeTokenPlanRegions.map((region) => {
+                        const active = activeProvider.baseUrl.trim() === region.baseUrl
+                        return (
+                          <button
+                            key={region.id}
+                            type="button"
+                            onClick={() => {
+                              const patch: Partial<ModelProviderProfileV1> = { baseUrl: region.baseUrl }
+                              const speech = activeProvider.speech
+                              if (speech && activeTokenPlanRegions.some((item) => item.baseUrl === speech.baseUrl.trim())) {
+                                patch.speech = { ...speech, baseUrl: region.baseUrl }
+                              }
+                              const textToSpeech = activeProvider.textToSpeech
+                              if (
+                                textToSpeech &&
+                                activeTokenPlanRegions.some((item) => item.baseUrl === textToSpeech.baseUrl.trim())
+                              ) {
+                                patch.textToSpeech = { ...textToSpeech, baseUrl: region.baseUrl }
+                              }
+                              updateModelProvider(activeProvider.id, patch)
+                            }}
+                            className={`inline-flex h-7 items-center rounded-full border px-2.5 text-[12px] font-medium transition ${
+                              active
+                                ? 'border-accent/60 bg-ds-main/45 text-ds-ink ring-1 ring-accent/30'
+                                : 'border-ds-border bg-ds-card text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
+                            }`}
+                          >
+                            {t(`firstRunRegion_${region.id}`)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                  <label className={fieldLabelClass}>
+                    {t('modelProviderEndpointFormat')}
+                    <select
+                      className={selectControlClass}
+                      disabled={Boolean(activeRegistryProvider)}
+                      value={activeProvider.registryKind ?? activeProvider.endpointFormat}
+                      onChange={(e) => updateModelProvider(activeProvider.id, {
+                        endpointFormat: e.target.value === 'deepseek-messages' ? 'messages' : e.target.value as ModelEndpointFormat,
+                        registryKind: e.target.value === 'deepseek-messages' ? 'deepseek-messages' : undefined
+                      })}
+                    >
+                      {MODEL_ENDPOINT_FORMATS.map((format) => (
+                        <option key={format} value={format}>
+                          {t(MODEL_ENDPOINT_FORMAT_LABEL_KEYS[format])}
+                        </option>
+                      ))}
+                      <option value="deepseek-messages">
+                        {t('providerModelReasoningProtocolDeepseekMessages')}
+                      </option>
+                    </select>
+                  </label>
+                  {activeRegistryProvider ? (
+                    <p className="text-[12px] leading-5 text-ds-muted">
+                      {t('modelProviderEndpointFormatCommitted')}
+                    </p>
+                  ) : null}
+                  {activeProvider.endpointFormat === 'custom_endpoint' ? (
+                    <p className="text-[12px] leading-5 text-ds-muted">
+                      {t('modelEndpointCustomEndpointDesc')}
+                    </p>
+                  ) : null}
+  </> : null
 
   const planProviders = displayProviders.filter((item) => isSubscriptionProviderId(item.id))
   const apiProviders = displayProviders.filter((item) => !isSubscriptionProviderId(item.id))
@@ -1703,28 +1880,6 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
         </div>
       )}
       <SettingRow
-        title={t('proxyUrl')}
-        description={t('proxyUrlDesc')}
-        control={
-          <div className="flex w-full min-w-0 flex-col gap-2 md:max-w-md">
-            <label className="flex items-center justify-between gap-3 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[13px] text-ds-muted shadow-sm">
-              <span>{t('proxyEnabled')}</span>
-              <Toggle
-                checked={providerProxy.enabled === true}
-                onChange={(enabled) => updateProviderProxy({ enabled })}
-              />
-            </label>
-            <input
-              className={textInputClass}
-              placeholder={t('proxyUrlPlaceholder')}
-              value={providerProxy.url}
-              spellCheck={false}
-              onChange={(e) => updateProviderProxy({ url: e.target.value })}
-            />
-          </div>
-        }
-      />
-      <SettingRow
         title={t('providers')}
         description={t('providersDesc')}
         wideControl
@@ -1803,7 +1958,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {activeRegistryProvider && !activeRegistryProvider.tombstone && !isDraftActive ? (
+                    {!footerManaged && activeRegistryProvider && !activeRegistryProvider.tombstone && !isDraftActive ? (
                       <button
                         type="button"
                         disabled={providerSettingsSaving}
@@ -1813,7 +1968,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                         {t('modelProviderSaveChanges')}
                       </button>
                     ) : null}
-                    {registrySnapshot && !isDraftActive && providerDraftDirty && !modelEditorOpen ? (
+                    {!footerManaged && registrySnapshot && !isDraftActive && providerDraftDirty && !modelEditorOpen ? (
                       <button type="button" disabled={providerSettingsSaving} onClick={discardProviderChanges}
                         className="inline-flex h-8 items-center rounded-full border border-ds-border px-3 text-[12px] font-medium text-ds-muted hover:bg-ds-hover disabled:opacity-60">
                         {t('modelProviderDiscardChanges')}
@@ -1831,59 +1986,9 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                         {t('modelProviderSelect')}
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      disabled={probeBusy || activeRegistryProvider?.tombstone === true}
-                      onClick={() => void runProbe(activeProvider, 'test')}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-ds-border bg-ds-card px-3 text-[12px] font-medium text-ds-muted shadow-sm transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {probeBusy && activeProbe?.mode === 'test'
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.9} />
-                        : <PlugZap className="h-3.5 w-3.5" strokeWidth={1.9} />}
-                      {t('modelProviderTestConnection')}
-                    </button>
-                    {activeRegistryProvider?.credentialConfigured ? (
-                      <button
-                        type="button"
-                        disabled={activeAccountObservationCurrent?.status === 'busy' || activeRegistryProvider.tombstone}
-                        onClick={() => void runAccountObservation(activeProvider)}
-                        className="inline-flex h-8 items-center rounded-full border border-ds-border bg-ds-card px-3 text-[12px] font-medium text-ds-muted shadow-sm transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {t('modelProviderQuotaRefresh')}
-                      </button>
-                    ) : null}
                   </div>
                 </div>
                 {probeNotice ? <InlineNoticeView notice={probeNotice} /> : null}
-                {accountObservationNotice ? <InlineNoticeView notice={accountObservationNotice} /> : null}
-                <DetailSection title={t('modelProviderSectionBasics')}>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label className={fieldLabelClass}>
-                      {t('modelProviderId')}
-                      <span className="relative block">
-                        <input
-                          className={`w-full min-w-0 rounded-xl border border-ds-border bg-ds-card px-3 py-2 font-mono text-[13px] font-normal shadow-sm ${
-                            canEditActiveProviderId
-                              ? 'text-ds-ink focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30'
-                              : 'pr-9 text-ds-faint'
-                          }`}
-                          value={activeProvider.id}
-                          readOnly={!canEditActiveProviderId}
-                          spellCheck={false}
-                          onChange={(e) => updateModelProviderId(activeProvider.id, e.target.value)}
-                        />
-                        {!canEditActiveProviderId ? (
-                          <span
-                            title={t('modelProviderIdLocked')}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-ds-faint"
-                          >
-                            <Lock className="h-3.5 w-3.5" strokeWidth={1.9} />
-                          </span>
-                        ) : null}
-                      </span>
-                    </label>
-                  </div>
-                </DetailSection>
                 <DetailSection title={t('modelProviderSectionConnection')}>
                   <label className={fieldLabelClass}>
                     {t('modelProviderApiKey')}
@@ -1915,90 +2020,114 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       <span className="text-[12px] font-normal text-ds-muted">{t('modelProviderApiKeySavedHint')}</span>
                     ) : null}
                   </label>
-                  <label className={fieldLabelClass}>
-                    {t('modelProviderBaseUrl')}
-                    <input
-                      className={textInputClass}
-                      value={activeProvider.baseUrl}
-                      placeholder={t('baseUrlPlaceholder')}
-                      spellCheck={false}
-                      onChange={(e) => updateModelProvider(activeProvider.id, { baseUrl: e.target.value })}
-                    />
-                    {activeBaseUrlInvalid ? (
-                      <span className="text-[12px] font-normal text-amber-600 dark:text-amber-300">
-                        {t('modelProviderInvalidUrl')}
-                      </span>
-                    ) : null}
-                  </label>
-                  {activeTokenPlanRegions.length > 0 ? (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[12px] font-semibold text-ds-muted">
-                        {t('modelProviderTokenPlanRegion')}
-                      </span>
-                      {activeTokenPlanRegions.map((region) => {
-                        const active = activeProvider.baseUrl.trim() === region.baseUrl
-                        return (
-                          <button
-                            key={region.id}
-                            type="button"
-                            onClick={() => {
-                              const patch: Partial<ModelProviderProfileV1> = { baseUrl: region.baseUrl }
-                              const speech = activeProvider.speech
-                              if (speech && activeTokenPlanRegions.some((item) => item.baseUrl === speech.baseUrl.trim())) {
-                                patch.speech = { ...speech, baseUrl: region.baseUrl }
-                              }
-                              const textToSpeech = activeProvider.textToSpeech
-                              if (
-                                textToSpeech &&
-                                activeTokenPlanRegions.some((item) => item.baseUrl === textToSpeech.baseUrl.trim())
-                              ) {
-                                patch.textToSpeech = { ...textToSpeech, baseUrl: region.baseUrl }
-                              }
-                              updateModelProvider(activeProvider.id, patch)
-                            }}
-                            className={`inline-flex h-7 items-center rounded-full border px-2.5 text-[12px] font-medium transition ${
-                              active
-                                ? 'border-accent/60 bg-ds-main/45 text-ds-ink ring-1 ring-accent/30'
-                                : 'border-ds-border bg-ds-card text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
-                            }`}
+                  {isCustomProvider ? <>
+                  {connectionFields}
+                  </> : null}
+                    <label className={fieldLabelClass}>
+                      {t('modelProviderSelectedModel')}
+                      <select
+                        className={selectControlClass}
+                        value={effectiveSelectedModel}
+                        onChange={(event) => {
+                          if (!activeRoutingDraft) return
+                          updateActiveRoutingDraft(providerRegistryRoutingDraftWithSelectedModel(
+                            activeRoutingDraft,
+                            activeProvider.id,
+                            event.target.value
+                          ))
+                        }}
+                      >
+                        <option value="">{t('modelProviderSelectionDisabled')}</option>
+                        {activeProvider.models.map((model) => (
+                          <option key={model} value={model}>{providerModelDisplayName(model)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  {needsTextModel ? <>
+                    <p className="text-[12px] text-ds-muted">{t('modelProviderRequiredTextModelHint')}</p>
+                    {modelManager}
+                  </> : null}
+                </DetailSection>
+                <details key={activeProvider.id} className="ax-settings-disclosure">
+                  <summary>{t('modelProviderAdvancedSettings')}</summary>
+                <DetailSection title={t('modelProviderSectionBasics')}>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className={fieldLabelClass}>
+                      {t('modelProviderId')}
+                      <span className="relative block">
+                        <input
+                          className={`w-full min-w-0 rounded-xl border border-ds-border bg-ds-card px-3 py-2 font-mono text-[13px] font-normal shadow-sm ${
+                            canEditActiveProviderId
+                              ? 'text-ds-ink focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30'
+                              : 'pr-9 text-ds-faint'
+                          }`}
+                          value={activeProvider.id}
+                          readOnly={!canEditActiveProviderId}
+                          spellCheck={false}
+                          onChange={(e) => updateModelProviderId(activeProvider.id, e.target.value)}
+                        />
+                        {!canEditActiveProviderId ? (
+                          <span
+                            title={t('modelProviderIdLocked')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-ds-faint"
                           >
-                            {t(`firstRunRegion_${region.id}`)}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  ) : null}
-                  <label className={fieldLabelClass}>
-                    {t('modelProviderEndpointFormat')}
-                    <select
-                      className={selectControlClass}
-                      disabled={Boolean(activeRegistryProvider)}
-                      value={activeProvider.registryKind ?? activeProvider.endpointFormat}
-                      onChange={(e) => updateModelProvider(activeProvider.id, {
-                        endpointFormat: e.target.value === 'deepseek-messages' ? 'messages' : e.target.value as ModelEndpointFormat,
-                        registryKind: e.target.value === 'deepseek-messages' ? 'deepseek-messages' : undefined
-                      })}
+                            <Lock className="h-3.5 w-3.5" strokeWidth={1.9} />
+                          </span>
+                        ) : null}
+                      </span>
+                    </label>
+                  </div>
+                </DetailSection>
+                  {!isCustomProvider ? <DetailSection title={t('modelProviderSectionConnection')}>
+                  {connectionFields}
+                  </DetailSection> : null}
+      <SettingRow
+        title={t('proxyUrl')}
+        description={t('proxyUrlDesc')}
+        control={
+          <div className="flex w-full min-w-0 flex-col gap-2 md:max-w-md">
+            <label className="flex items-center justify-between gap-3 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[13px] text-ds-muted shadow-sm">
+              <span>{t('proxyEnabled')}</span>
+              <Toggle
+                checked={providerProxy.enabled === true}
+                onChange={(enabled) => updateProviderProxy({ enabled })}
+              />
+            </label>
+            <input
+              className={textInputClass}
+              placeholder={t('proxyUrlPlaceholder')}
+              value={providerProxy.url}
+              spellCheck={false}
+              onChange={(e) => updateProviderProxy({ url: e.target.value })}
+            />
+          </div>
+        }
+      />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={probeBusy || activeRegistryProvider?.tombstone === true}
+                      onClick={() => void runProbe(activeProvider, 'test')}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-ds-border bg-ds-card px-3 text-[12px] font-medium text-ds-muted shadow-sm transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {MODEL_ENDPOINT_FORMATS.map((format) => (
-                        <option key={format} value={format}>
-                          {t(MODEL_ENDPOINT_FORMAT_LABEL_KEYS[format])}
-                        </option>
-                      ))}
-                      <option value="deepseek-messages">
-                        {t('providerModelReasoningProtocolDeepseekMessages')}
-                      </option>
-                    </select>
-                  </label>
-                  {activeRegistryProvider ? (
-                    <p className="text-[12px] leading-5 text-ds-muted">
-                      {t('modelProviderEndpointFormatCommitted')}
-                    </p>
-                  ) : null}
-                  {activeProvider.endpointFormat === 'custom_endpoint' ? (
-                    <p className="text-[12px] leading-5 text-ds-muted">
-                      {t('modelEndpointCustomEndpointDesc')}
-                    </p>
-                  ) : null}
+                      {probeBusy && activeProbe?.mode === 'test'
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.9} />
+                        : <PlugZap className="h-3.5 w-3.5" strokeWidth={1.9} />}
+                      {t('modelProviderTestConnection')}
+                    </button>
+                    {activeRegistryProvider?.credentialConfigured ? (
+                      <button
+                        type="button"
+                        disabled={activeAccountObservationCurrent?.status === 'busy' || activeRegistryProvider.tombstone}
+                        onClick={() => void runAccountObservation(activeProvider)}
+                        className="inline-flex h-8 items-center rounded-full border border-ds-border bg-ds-card px-3 text-[12px] font-medium text-ds-muted shadow-sm transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {t('modelProviderQuotaRefresh')}
+                      </button>
+                    ) : null}
+                  </div>
+                  {accountObservationNotice ? <InlineNoticeView notice={accountObservationNotice} /> : null}
+                <DetailSection title={t('modelProviderQuotaRefresh')}>
                   {canConfigureAccountObservation && activeRegistryProvider ? (
                     <div className="grid gap-2 rounded-xl border border-ds-border-muted bg-ds-main/30 p-3">
                       <label className={fieldLabelClass}>
@@ -2054,27 +2183,6 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     </button>
                   }
                 >
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label className={fieldLabelClass}>
-                      {t('modelProviderSelectedModel')}
-                      <select
-                        className={selectControlClass}
-                        value={effectiveSelectedModel}
-                        onChange={(event) => {
-                          if (!activeRoutingDraft) return
-                          updateActiveRoutingDraft(providerRegistryRoutingDraftWithSelectedModel(
-                            activeRoutingDraft,
-                            activeProvider.id,
-                            event.target.value
-                          ))
-                        }}
-                      >
-                        <option value="">{t('modelProviderSelectionDisabled')}</option>
-                        {activeProvider.models.map((model) => (
-                          <option key={model} value={model}>{providerModelDisplayName(model)}</option>
-                        ))}
-                      </select>
-                    </label>
                     <label className={fieldLabelClass}>
                       {t('modelProviderSelectedMediaModel')}
                       <select
@@ -2088,16 +2196,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                         ))}
                       </select>
                     </label>
-                  </div>
-                  <ProviderModelsManager
-                    key={activeProvider.id}
-                    provider={activeProvider}
-                    t={t}
-                    selectControlClass={selectControlClass}
-                    onChange={(next) => applyProviderModelProfile(activeProvider, next)}
-                    unclassifiedMediaModelIds={activeUnclassifiedMediaModelIds}
-                    onEditingChange={setModelEditorOpen}
-                  />
+                  {!needsTextModel ? modelManager : null}
                 </DetailSection>
                 <DetailSection title={t('modelProviderRoutePool')}>
                   <p className="text-[12px] leading-5 text-ds-faint">{t('modelProviderRoutePoolDesc')}</p>
@@ -2153,12 +2252,13 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                     })}
                   </div>
                 </DetailSection>
-                {isDraftActive ? (
+                </details>
+                {isDraftActive && !footerManaged ? (
                   <DetailSection title={t('modelProviderDraftSection')}>
                     <div className="flex flex-wrap items-center gap-3">
                       <button
                         type="button"
-                        onClick={commitProviderDraft}
+                        onClick={() => void commitProviderDraft()}
                         className="inline-flex h-9 w-fit items-center gap-2 rounded-full bg-accent px-4 text-[12.5px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:opacity-90"
                       >
                         <Plus className="h-3.5 w-3.5" strokeWidth={2} />
@@ -2178,8 +2278,9 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       </span>
                     </div>
                   </DetailSection>
-                ) : (
-                  <DetailSection title={t('modelProviderSectionDanger')}>
+                ) : !isDraftActive ? (
+                  <details className="ax-settings-disclosure">
+                    <summary>{t('modelProviderSectionDanger')}</summary>
                     <div className="flex flex-wrap items-center gap-3">
                       {activeRegistryProvider && !activeRegistryProvider.tombstone ? (
                         <button
@@ -2200,8 +2301,8 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                       </button>
                       <span className="text-[12px] text-ds-faint">{t('modelProviderDangerHint')}</span>
                     </div>
-                  </DetailSection>
-                )}
+                  </details>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -2212,8 +2313,8 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
           {t('modelProviderRecoveryTools')}
         </summary>
         <SettingRow
-          title="Portable manifest / protected credential recovery"
-          description="Complete ordinary portable manifest import first. Recovery files and confirmations stay in the Main process; only bounded status is shown here."
+          title={t('modelProviderRecoveryTitle')}
+          description={t('modelProviderRecoveryDescription')}
           wideControl
           control={
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-ds-border bg-ds-card p-3 text-[13px] text-ds-muted">
@@ -2224,7 +2325,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                 disabled={protectedRecoveryBusy !== null}
                 onClick={() => void runProtectedRecoveryAction('createDestinationRequest')}
               >
-                Prepare destination request
+                {t('modelProviderRecoveryPrepare')}
               </button>
               <button
                 type="button"
@@ -2232,7 +2333,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                 disabled={protectedRecoveryBusy !== null}
                 onClick={() => void runProtectedRecoveryAction('createSourceBundle')}
               >
-                Create source bundle
+                {t('modelProviderRecoveryCreate')}
               </button>
               <button
                 type="button"
@@ -2240,7 +2341,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                 disabled={protectedRecoveryBusy !== null}
                 onClick={() => void runProtectedRecoveryAction('applyDestinationBundle')}
               >
-                Apply destination bundle
+                {t('modelProviderRecoveryApply')}
               </button>
               <button
                 type="button"
@@ -2248,7 +2349,7 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
                 disabled={protectedRecoveryBusy !== null}
                 onClick={() => void runProtectedRecoveryAction('finalizeSourceReceipt')}
               >
-                Finalize source receipt
+                {t('modelProviderRecoveryFinalize')}
               </button>
               {protectedRecoveryStatus ? <span role="status">{protectedRecoveryStatus}</span> : null}
             </div>

@@ -160,7 +160,7 @@ export function ScheduleDefaultsDialog({
               onChange={(event) => update({ enabled: event.target.checked })}
               className="sr-only"
             />
-            <span className={`relative h-5 w-9 rounded-full transition ${draft.enabled ? 'bg-ds-ink' : 'bg-ds-border-strong'}`}>
+            <span className={`relative h-5 w-9 rounded-full transition ${draft.enabled ? 'bg-primary' : 'bg-ds-border-strong'}`}>
               <span className={`absolute top-0.5 h-4 w-4 rounded-full shadow transition ${draft.enabled ? 'left-[18px] bg-[var(--ds-composer-primary-action-fg)]' : 'left-0.5 bg-ds-card'}`} />
             </span>
           </label>

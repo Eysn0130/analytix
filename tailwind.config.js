@@ -10,7 +10,9 @@ export default {
       colors: {
         accent: {
           DEFAULT: 'var(--ds-accent)',
-          foreground: '#ffffff',
+          foreground: 'var(--ax-on-primary)',
+          hover: 'var(--ax-primary-hover)',
+          pressed: 'var(--ax-primary-pressed)',
           soft: 'var(--ds-accent-soft)'
         },
         background: 'var(--ds-bg-canvas)',
@@ -23,7 +25,9 @@ export default {
         sidebar: 'var(--ds-surface-subtle)',
         primary: {
           DEFAULT: 'var(--ds-accent)',
-          foreground: '#ffffff'
+          foreground: 'var(--ax-on-primary)',
+          hover: 'var(--ax-primary-hover)',
+          pressed: 'var(--ax-primary-pressed)'
         },
         ds: {
           main: 'var(--ds-bg-main)',
@@ -51,6 +55,10 @@ export default {
           userbubble: 'var(--ds-bubble-user)',
           userbubbleFg: 'var(--ds-bubble-user-fg)'
         }
+      },
+      textColor: {
+        accent: { DEFAULT: 'var(--ax-accent-text)', foreground: 'var(--ax-on-primary)' },
+        primary: { DEFAULT: 'var(--ax-accent-text)', foreground: 'var(--ax-on-primary)' }
       },
       boxShadow: {
         composer: 'var(--ds-shadow-composer)',
