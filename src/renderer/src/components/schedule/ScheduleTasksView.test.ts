@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ClawImChannelV1, ScheduledTaskV1 } from '@shared/app-settings'
 import {
+  editScheduleTiming,
   filterScheduledTasks,
   newScheduledTask,
   preferredScheduleImChannel,
@@ -33,7 +34,7 @@ function task(id: string, patch: Partial<ScheduledTaskV1> = {}): ScheduledTaskV1
     updatedAt: '2026-06-02T00:00:00.000Z',
     ...patch,
     schedule: {
-      ...newScheduledTask('/tmp/workspace').schedule,
+      kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '',
       ...patch.schedule
     }
   }
@@ -212,4 +213,27 @@ describe('ScheduleTasksView helpers', () => {
     } as unknown as ScheduledTaskV1
     expect(scheduledTaskMessageTranslationKey(hostileLegacyTask)).toBe('scheduleStatus_error')
   })
+})
+
+describe('Schedule calendar form timing edits', () => {
+  it('adds a zone only on a real legacy timing change and preserves invalid explicit input', () => {
+    const legacy = { kind: 'daily' as const, everyMinutes: 60, timeOfDay: '09:00', atTime: '' }
+    expect(editScheduleTiming(legacy, { kind: 'daily' })).toBe(legacy)
+    expect(editScheduleTiming(legacy, { timeOfDay: '10:00' }).timeZone).toBeTruthy()
+    expect(editScheduleTiming(legacy, { timeZone: '' }).timeZone).toBe('')
+    expect(newScheduledTask('/synthetic').schedule.timeZone).toBeTruthy()
+  })
+  it('builds weekly/cron drafts and removes irrelevant calendar fields on kind change', () => {
+    const created = newScheduledTask('/synthetic'), weekly = editScheduleTiming(created.schedule, { kind: 'weekly' })
+    expect(weekly.weekdays).toEqual([1, 2, 3, 4, 5])
+    expect(editScheduleTiming(weekly, { kind: 'cron' }).expression).toBe('0 9 * * *')
+    expect(editScheduleTiming(weekly, { kind: 'interval' })).toEqual({ kind: 'interval', everyMinutes: 60, timeOfDay: '09:00', atTime: '' })
+  })
+})
+
+
+it('labels native ACK as accepted and unresolved delivery as awaiting acceptance, without claiming model completion', () => {
+  expect(scheduledTaskMessageTranslationKey(task('native-ack', { deliveryKind: 'origin-delivery', lastStatus: 'success', lastMessage: 'schedule_task_accepted' }))).toBe('scheduleDeliveryAccepted')
+  expect(scheduledTaskMessageTranslationKey(task('native-pending', { deliveryKind: 'origin-delivery', lastStatus: 'running', lastMessage: 'schedule_task_running' }))).toBe('scheduleDeliveryPending')
+  expect(scheduledTaskMessageTranslationKey(task('legacy-done', { deliveryKind: 'legacy-headless', lastStatus: 'success', lastMessage: 'schedule_task_completed' }))).toBe('scheduleStatus_success')
 })

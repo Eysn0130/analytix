@@ -20,7 +20,9 @@ func NormalizePersistedRecordV1(record Record) Record {
 	record.Effort, _ = domainmodel.ProjectReasoningEffortV1(record.Effort)
 	record.ModelExecution = ProjectPersistedModelExecutionV1(record.ModelExecution)
 	record.CaseDelegation = CloneCaseDelegationContextV1(record.CaseDelegation)
+	record.HostChildInput = CloneHostChildInputIdentityV1(record.HostChildInput)
 	record.ChildCompletionReceipt = CloneChildCompletionReceiptV1(record.ChildCompletionReceipt)
+	record.ProtectedOutputSnapshot = CloneProtectedOutputSnapshotV1(record.ProtectedOutputSnapshot)
 	record.ForegroundChildHandoffReceipt = CloneForegroundChildHandoffReceiptV1(record.ForegroundChildHandoffReceipt)
 	record.Usage = ProjectPersistedUsageV1(record.Kind, record.Usage)
 	hostCasePrompt := record.CaseDelegation != nil && ValidateExecutableCaseDelegationV1(
@@ -112,7 +114,7 @@ func NormalizePersistedRecordV1(record Record) Record {
 			}
 		}
 	}
-	if record.SecurityBinding != nil && strings.TrimSpace(record.Kind) == "subagent" {
+	if (record.SecurityBinding != nil || record.HostChildInput != nil) && strings.TrimSpace(record.Kind) == "subagent" {
 		record.Output = ""
 		record.Error = ""
 		record.Usage = nil

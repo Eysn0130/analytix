@@ -1,0 +1,52 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+.details { position: fixed; z-index: 40; top: 64px; right: 16px; bottom: 16px; display: flex; flex-direction: column; min-width: 0; min-height: 0; max-width: calc(100vw - 32px); border: 0.5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }
+.details[data-presentation="embedded"] { position: relative; z-index: auto; inset: auto; box-sizing: border-box; width: 100%; max-width: 100%; border: 0; }
+.resizeHandle { position: absolute; z-index: 6; top: 0; bottom: 0; left: -4px; width: 8px; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; user-select: none; }
+.detailsHeader { display: flex; flex: none; align-items: center; justify-content: space-between; box-sizing: border-box; height: 42px; padding: 0 8px 0 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
+.detailsTitle { display: flex; align-items: center; min-width: 0; gap: 8px; color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
+.detailsLocation { min-width: 0; overflow: hidden; color: var(--dsw-alias-label-tertiary); font: 11px/16px var(--ds-font-family-code); text-overflow: ellipsis; white-space: nowrap; }
+.close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--dsw-radius-sm); color: var(--dsw-alias-label-secondary); background: transparent; cursor: pointer; font-size: 18px; line-height: 18px; }
+.close:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.detailTabs { display: flex; flex: none; box-sizing: border-box; width: 100%; min-width: 0; height: 34px; padding: 0 8px; overflow-x: auto; overflow-y: hidden; gap: 1px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); overscroll-behavior-x: contain; scrollbar-width: none; white-space: nowrap; }
+.detailTab { position: relative; flex: none; padding: 0 9px; border: 0; color: var(--dsw-alias-label-tertiary); background: transparent; cursor: pointer; font: var(--dsw-font-xs-13); }
+.detailTab:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover); }
+.detailTabActive { color: var(--dsw-alias-state-business-primary); }
+.detailTabActive::after { position: absolute; right: 9px; bottom: 0; left: 9px; height: 2px; border-radius: 1px 1px 0 0; background: var(--dsw-alias-state-business-primary); content: ''; }
+.details button:focus-visible { outline: 1px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: -1px; }
+.detailBody { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.actions { display: flex; gap: 8px; flex: none; padding: 6px 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
+.actions button, .textToggle { padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xs-13); cursor: pointer; }
+.actions button:hover, .textToggle:hover { color: var(--dsw-alias-label-primary); }
+.actions button:disabled { cursor: default; opacity: 0.5; }
+.overview { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 14px; color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
+.overview > div { display: grid; grid-template-columns: 94px minmax(0, 1fr); gap: 12px; }
+.overview dt { color: var(--dsw-alias-label-tertiary); }
+.overview dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.payload { box-sizing: border-box; min-height: 100%; margin: 0; padding: 14px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-markdown-code-block); font: 12px/19px var(--ds-font-family-code); tab-size: 2; }
+.wrapped, .unwrapped { margin: 0; font: inherit; }
+.wrapped { white-space: pre-wrap; overflow-wrap: anywhere; }
+.unwrapped { white-space: pre; }
+.jsonNode { min-width: 0; }
+.jsonRow { display: flex; align-items: start; min-height: 19px; gap: 3px; }
+.expander { flex: none; width: 14px; padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; cursor: pointer; }
+.jsonKey { flex: none; color: var(--dsw-alias-label-secondary); }
+.jsonValueWrapped { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.jsonValue { white-space: pre; }
+.jsonChildren { margin-left: 18px; }
+.textToggle { flex: none; margin-left: 4px; }
+.schema { min-height: 100%; background: var(--dsw-alias-bg-layer-1); }
+.schemaIntro { padding: 12px 14px 6px; }
+.schemaName { margin: 0; color: var(--dsw-alias-label-primary); font: 600 12px/18px var(--ds-font-family-code); }
+.schemaDescription { margin: 2px 0 0; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); white-space: pre-wrap; }
+.schemaParametersTitle { margin: 0; padding: 4px 14px 2px; color: var(--dsw-alias-label-tertiary); font: 600 11px/16px var(--dsw-font-family); }
+.unavailable, .truncated { padding: 0 14px; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xs-13); }
+.error { color: var(--ds-danger); }
+
+/* Keep the existing detail typography inside a containing Inspector's public summary styles. */
+.details[data-presentation="embedded"] .overview { display: flex; gap: 12px; }
+.details[data-presentation="embedded"] .overview dt { color: var(--dsw-alias-label-tertiary); }
+.details[data-presentation="embedded"] .overview dd { font: inherit; }
+.details[data-presentation="embedded"] .schemaName { margin: 0; font: 600 12px/18px var(--ds-font-family-code); }
+
+.details[data-presentation="embedded"] .schemaParametersTitle { margin: 0; font: 600 11px/16px var(--dsw-font-family); }

@@ -8,28 +8,13 @@ import { containsRestrictedEvidence } from './restricted-evidence-projection'
 import { redactSecretText } from './secret-redaction'
 
 const FORMAT_CHARACTERS = /\p{Cf}/gu
-const IDENTIFIER_SEPARATOR = String.raw`[\s\-‐‑‒–—―_/\\.·•]*`
-const CONTEXTUAL_IDENTIFIER_SEPARATOR = String.raw`[\s\-‐‑‒–—―_/\\.·•*]*`
+const FORMAT_CHARACTER = /\p{Cf}/u
+const DECIMAL_DIGIT = /\p{Nd}/u
+const WHITE_SPACE = /\p{White_Space}/u
 
 const MAC_ADDRESS = /(^|[^0-9A-Fa-f])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?=$|[^0-9A-Fa-f])/g
 const IPV4_ADDRESS = /(^|[^0-9])(?:\d{1,3}\.){3}\d{1,3}(?=$|[^0-9])/g
 const EMAIL_ADDRESS = /(^|[^A-Za-z0-9.!#$%&'*+/=?^_`{|}~-])(?:[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*)@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}(?=$|[^A-Za-z0-9.-])/g
-const IDENTITY_NUMBER = new RegExp(
-  `(^|[^0-9A-Za-z])(\\p{N}(?:${IDENTIFIER_SEPARATOR}\\p{N}){16}${IDENTIFIER_SEPARATOR}[0-9Xx])(?=$|[^0-9A-Za-z])`,
-  'gu'
-)
-const PHONE_NUMBER = new RegExp(
-  `(^|[^0-9])(1(?:${IDENTIFIER_SEPARATOR}\\p{N}){10})(?=$|[^0-9])`,
-  'gu'
-)
-const LONG_FINANCIAL_IDENTIFIER = new RegExp(
-  `(^|[^\\p{N}])(\\p{N}(?:${IDENTIFIER_SEPARATOR}\\p{N}){11,})(?=$|[^\\p{N}])`,
-  'gu'
-)
-const CONTEXTUAL_FINANCIAL_IDENTIFIER = new RegExp(
-  `((?:(?:银行)?(?:账号|帐号|账户|卡号|账卡号)|(?:bank\\s*)?(?:account|acct|card)(?:[\\s_-]*(?:id|no|number))?)\\s*[:：=]?\\s*)(\\p{N}(?:${CONTEXTUAL_IDENTIFIER_SEPARATOR}\\p{N}){7,})`,
-  'giu'
-)
 
 // Only free-form display text uses this locator projection. Keep ordinary
 // relative code paths and HTTP(S) URL tokens intact; structured path fields
@@ -341,26 +326,181 @@ export function projectOrdinaryLogPII(text: string): string {
   return projectPIIIdentifiers(projectPrivateSourceLocators(String(text)))
 }
 
-// Detection must inspect the original identifiers, including those inside a
-// locator. A private path alone does not establish protected case data.
+type IdentifierSpan = { start: number; end: number; placeholder: string }
+type IdentifierRune = { rune: string; start: number; end: number }
+
+function decimalDigit(rune: string): string | undefined {
+  if (rune >= '0' && rune <= '9') return rune
+  if (rune >= '\uff10' && rune <= '\uff19') return String(rune.charCodeAt(0) - 0xff10)
+  // Core maps other decimal scripts to zero for classification, not coercion
+  // into an apparently valid identity, phone or timestamp.
+  return DECIMAL_DIGIT.test(rune) ? '0' : undefined
+}
+
+function identifierSeparator(rune: string): boolean {
+  return rune !== '\r' && rune !== '\n' && WHITE_SPACE.test(rune) ||
+    '-/_.*·•‐‑‒–—―−﹘﹣－'.includes(rune)
+}
+
+function validCalendarDate(value: string): boolean {
+  const year = Number(value.slice(0, 4)), month = Number(value.slice(4, 6)), day = Number(value.slice(6, 8))
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return value.length === 8 && month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1]
+}
+
+function validChineseIdentity(value: string): boolean {
+  if (value.slice(0, 6) === '000000') return false
+  if (value.length === 15) {
+    const shortYear = Number(value.slice(6, 8))
+    return validCalendarDate(`${shortYear >= 69 ? '19' : '20'}${value.slice(6, 12)}`)
+  }
+  if (value.length !== 18 || !validCalendarDate(value.slice(6, 14))) return false
+  const weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+  const sum = weights.reduce((total, weight, index) => total + Number(value[index]) * weight, 0)
+  return value[17] === '10X98765432'[sum % 11]
+}
+
+function calendarTimestamp(digits: string): boolean {
+  return (digits.length === 12 || digits.length === 14) && validCalendarDate(digits.slice(0, 8)) &&
+    Number(digits.slice(8, 10)) <= 23 && Number(digits.slice(10, 12)) <= 59 &&
+    (digits.length === 12 || Number(digits.slice(12, 14)) <= 59)
+}
+
+function explicitAccountLabelBefore(units: readonly IdentifierRune[], start: number): boolean {
+  const inline = (rune: string) => rune !== '\r' && rune !== '\n' &&
+    (WHITE_SPACE.test(rune) || FORMAT_CHARACTER.test(rune))
+  let cursor = start
+  while (cursor > 0 && inline(units[cursor - 1].rune)) cursor -= 1
+  if (cursor === 0 || !':：='.includes(units[cursor - 1].rune)) return false
+  cursor -= 1
+  while (cursor > 0 && inline(units[cursor - 1].rune)) cursor -= 1
+  // Core's independent labels use original runes and ASCII case folding.
+  // Only the whitespace around the delimiter is unbounded; the semantic cue
+  // window below stays at 32 runes, and an unrelated later measure stays safe.
+  const label = units.slice(Math.max(0, cursor - 14), cursor)
+    .map(({ rune }) => rune >= 'A' && rune <= 'Z' ? rune.toLowerCase() : rune).join('')
+  return ['账号', '帐号', '账户', '卡号', 'account number', 'card number', 'account', 'card']
+    .some(candidate => label.endsWith(candidate))
+}
+
+function lastNumericCue(context: string, cues: readonly string[]): number {
+  let latest = -1
+  for (const cue of cues) {
+    for (let at = context.indexOf(cue); at >= 0; at = context.indexOf(cue, at + cue.length)) {
+      if (/^[a-z]+$/.test(cue) && (/[A-Za-z0-9_]/.test(context[at - 1] ?? '') ||
+          /[A-Za-z0-9_]/.test(context[at + cue.length] ?? ''))) continue
+      latest = Math.max(latest, at)
+    }
+  }
+  return latest
+}
+
+function classifyNumericIdentifier(
+  units: readonly IdentifierRune[], start: number, digits: string, groups: readonly number[], separated: boolean, trailingX: boolean
+): string | undefined {
+  if (validChineseIdentity(digits + (trailingX ? 'X' : ''))) return '[IDENTITY]'
+  if (digits.length === 11 && /^1[3-9]/.test(digits)) return '[PHONE]'
+  if (digits.length >= 8 && explicitAccountLabelBefore(units, start)) return '[ACCOUNT]'
+  // The window is cut in original runes before removing Cf or folding fullwidth
+  // ASCII. Normalizing the entire string first changes Core's 32-rune authority.
+  const context = units.slice(Math.max(0, start - 32), start).map(({ rune }) => {
+    if (FORMAT_CHARACTER.test(rune)) return ''
+    const code = rune.charCodeAt(0)
+    const folded = code >= 0xff01 && code <= 0xff5e ? String.fromCodePoint(code - 0xff01 + 33) :
+      rune === '\u3000' ? ' ' : rune
+    // Core uses Unicode simple lowercase: U+0130 maps to one rune, rather
+    // than JavaScript's expanding mapping that would introduce a cue boundary.
+    return folded === '\u0130' ? 'i' : folded.toLowerCase()
+  }).join('')
+  if ([14, 15, 16].includes(digits.length) && ['设备', '终端', 'imei', 'device', 'fingerprint', 'mac'].some(cue => context.includes(cue))) return '[DEVICE]'
+  const account = lastNumericCue(context, ['账号', '帐号', '账户', '卡号', '银行卡', 'account', 'acct', 'card'])
+  const measure = lastNumericCue(context, ['金额', '余额', '合计', '总计', '数量', '笔数', '计数', '时间戳', '时间', '时点', '日期',
+    'amount', 'balance', 'total', 'count', 'timestamp', 'time', 'date'])
+  if (digits.length < 12) return account >= 0 && account > measure && digits.length >= 8 ? '[ACCOUNT]' : undefined
+  if (digits.length > 32) return '[ACCOUNT]'
+  if (measure >= 0 && account <= measure) return undefined
+  const epoch = digits.length === 13 && Number(digits) >= 946684800000 && Number(digits) <= 4102444800000
+  if (account < 0 && !separated && (calendarTimestamp(digits) || epoch)) return undefined
+  if (separated && groups.length > 1 && groups.some(size => size < 3 || size > 6) && account < 0) return undefined
+  return '[ACCOUNT]'
+}
+
+function numericIdentifierSpans(units: readonly IdentifierRune[]): IdentifierSpan[] {
+  const spans: IdentifierSpan[] = []
+  for (let start = 0; start < units.length;) {
+    if (decimalDigit(units[start].rune) === undefined || start > 0 && decimalDigit(units[start - 1].rune) !== undefined) {
+      start += 1
+      continue
+    }
+    const digits: string[] = [], groups: number[] = []
+    let end = start, groupSize = 0, separated = false, trailingX = false
+    for (; end < units.length; end += 1) {
+      const rune = units[end].rune, digit = decimalDigit(rune)
+      if (digit !== undefined) { digits.push(digit); groupSize += 1; continue }
+      if ('xXＸｘ'.includes(rune) && digits.length === 17) { trailingX = true; end += 1; break }
+      if (identifierSeparator(rune)) {
+        if (groupSize > 0) { groups.push(groupSize); groupSize = 0 }
+        separated = true
+        continue
+      }
+      if (FORMAT_CHARACTER.test(rune)) continue
+      break
+    }
+    if (groupSize > 0) groups.push(groupSize)
+    let trimmedEnd = end
+    while (trimmedEnd > start && (identifierSeparator(units[trimmedEnd - 1].rune) || FORMAT_CHARACTER.test(units[trimmedEnd - 1].rune))) trimmedEnd -= 1
+    const placeholder = classifyNumericIdentifier(units, start, digits.join(''), groups, separated, trailingX)
+    if (placeholder) spans.push({ start: units[start].start, end: units[trimmedEnd - 1].end, placeholder })
+    start = end
+  }
+  return spans
+}
+
+function projectIdentifierPass(source: string): string {
+  let offset = 0, detectionText = ''
+  const starts: number[] = [], ends: number[] = []
+  // Stable positions are collected before inserting any placeholders. The
+  // other identifier patterns retain their normalized detection view; output
+  // outside a matched source span keeps its original bytes.
+  const units = Array.from(source, rune => {
+    const unit = { rune, start: offset, end: offset + rune.length }
+    offset = unit.end
+    const normalized = rune.normalize('NFKC').replace(FORMAT_CHARACTERS, '')
+    detectionText += normalized
+    for (let index = 0; index < normalized.length; index += 1) { starts.push(unit.start); ends.push(unit.end) }
+    return unit
+  })
+  const spans: IdentifierSpan[] = []
+  for (const [pattern, placeholder] of [[MAC_ADDRESS, '[DEVICE]'], [IPV4_ADDRESS, '[IP]'], [EMAIL_ADDRESS, '[EMAIL]']] as const) {
+    for (const match of detectionText.matchAll(pattern)) {
+      spans.push({ start: starts[match.index + match[1].length], end: ends[match.index + match[0].length - 1], placeholder })
+    }
+  }
+  spans.push(...numericIdentifierSpans(units))
+  spans.sort((left, right) => left.start - right.start || right.end - left.end)
+  const merged: IdentifierSpan[] = []
+  for (const span of spans) {
+    const prior = merged.at(-1)
+    if (prior && span.start < prior.end) prior.end = Math.max(prior.end, span.end)
+    else merged.push({ ...span })
+  }
+  let cursor = 0, projected = ''
+  for (const span of merged) { projected += source.slice(cursor, span.start) + span.placeholder; cursor = span.end }
+  return projected + source.slice(cursor)
+}
+
+// Detection also inspects identifiers inside locators. Match Core's bounded
+// fixed point: an earlier mask can expose a contextual identifier in the next
+// pass, but each pass classifies all original positions before replacing them.
 function projectPIIIdentifiers(text: string): string {
-  const original = String(text)
-  const detectionText = original.normalize('NFKC').replace(FORMAT_CHARACTERS, '')
-  let projected = detectionText
-  projected = projected.replace(MAC_ADDRESS, (_match, prefix: string) => `${prefix}[DEVICE]`)
-  projected = projected.replace(IPV4_ADDRESS, (_match, prefix: string) => `${prefix}[IP]`)
-  projected = projected.replace(EMAIL_ADDRESS, (_match, prefix: string) => `${prefix}[EMAIL]`)
-  projected = projected.replace(IDENTITY_NUMBER, (_match, prefix: string) => `${prefix}[IDENTITY]`)
-  projected = projected.replace(PHONE_NUMBER, (_match, prefix: string) => `${prefix}[PHONE]`)
-  projected = projected.replace(
-    CONTEXTUAL_FINANCIAL_IDENTIFIER,
-    (_match, prefix: string) => `${prefix}[ACCOUNT]`
-  )
-  projected = projected.replace(
-    LONG_FINANCIAL_IDENTIFIER,
-    (_match, prefix: string) => `${prefix}[ACCOUNT]`
-  )
-  return projected === detectionText ? original : projected
+  let current = String(text)
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = projectIdentifierPass(current)
+    if (next === current) return current
+    current = next
+  }
+  return '[ACCOUNT]'
 }
 
 /**
@@ -391,10 +531,11 @@ function hostUserInputQuestionsId(
       typeof record.inputId !== 'string' || !HOST_USER_INPUT_ID.test(record.inputId)) return undefined
   if (record.kind === 'user_input' && record.role === 'system' &&
       (record.status === 'pending' || record.status === 'submitted' ||
-        record.status === 'cancelled')) return record.inputId
+        record.status === 'cancelled' || record.status === 'continued')) return record.inputId
   if (record.kind === 'user_input_requested' && record.status === 'pending') return record.inputId
   if (record.kind === 'user_input_resolved' &&
-      (record.status === 'submitted' || record.status === 'cancelled')) return record.inputId
+      (record.status === 'submitted' || record.status === 'cancelled' ||
+        record.status === 'continued')) return record.inputId
   return undefined
 }
 
@@ -431,7 +572,7 @@ function containsPublicPII(
       const normalized = normalizePublicKey(key)
       // The Go host derives these correlation IDs from its gate digest. They
       // are structural only in a closed user-input record outside prose; all
-      // question text and any mismatched ID still receive the ordinary check.
+      // question/option text and any mismatched ID still receive the ordinary check.
       if (normalized === 'id' && expectedQuestionId !== undefined &&
           entry === expectedQuestionId) continue
       if (PUBLIC_OPAQUE_DIGEST_KEYS.has(normalized) &&
@@ -450,7 +591,10 @@ function containsPublicPII(
         inheritedText || PUBLIC_TEXT_KEYS.has(normalized) || TYPED_PII_KEYS.has(normalized),
         state,
         depth + 1,
-        hostUserInputQuestionsId(record, key, entry, inheritedText)
+        normalized === 'options' && expectedQuestionId !== undefined &&
+          record.id === expectedQuestionId && typeof record.question === 'string' && Array.isArray(entry)
+          ? `${expectedQuestionId}_option`
+          : hostUserInputQuestionsId(record, key, entry, inheritedText)
       )) {
         return true
       }

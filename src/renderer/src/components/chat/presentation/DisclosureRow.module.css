@@ -17,12 +17,10 @@
 
 .row {
   position: relative;
-  overflow: visible;
+  overflow: hidden;
   display: flex;
   align-items: center;
-  min-height: 32px;
-  height: auto;
-  padding-block: 4px;
+  height: calc(24px + var(--dsh-content-font-delta, 0px));
   min-width: 0;
   color: var(--dsw-alias-label-tertiary);
   transition: color 100ms ease;
@@ -87,8 +85,7 @@ button.leading {
 }
 
 .title {
-  min-width: 0;
-  overflow-wrap: anywhere;
+  flex: none;
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: calc(24px + var(--dsh-content-font-delta, 0px));
   color: inherit;
@@ -102,8 +99,6 @@ button.leading {
 
 .row:focus-visible, button.leading:focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -2px; border-radius: 6px; }
 
-.content { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.content { flex: 1; min-width: 0; }
 .actions { flex: none; display: flex; align-items: center; gap: 4px; }
-.row[data-error], .row[data-error]:hover { color: inherit; }
-.row[data-expandable]:active { background: var(--ds-surface-subtle); }
 :global(html[data-motion-reduced='true']) .row, :global(html[data-motion-reduced='true']) .iconIdle, :global(html[data-motion-reduced='true']) .chevronHover { transition: none; }

@@ -40,6 +40,7 @@ func AdaptBeginTransition[T CompactionTransition](begin func(context.Context, do
 }
 
 type CompactionCommitRequest struct {
+	SummaryFacts             *threaddomain.CompactionSummaryFactsV1
 	ThreadID                 string
 	Reason                   string
 	Auto                     bool
@@ -86,7 +87,8 @@ type PreparedCompaction struct {
 
 func (prepared PreparedCompaction) CommitRequest() CompactionCommitRequest {
 	return CompactionCommitRequest{
-		ThreadID: prepared.Result.ThreadID, Reason: prepared.Reason, Auto: prepared.Auto, Stamp: prepared.Stamp,
+		SummaryFacts: prepared.Result.SummaryFacts,
+		ThreadID:     prepared.Result.ThreadID, Reason: prepared.Reason, Auto: prepared.Auto, Stamp: prepared.Stamp,
 		ExpectedBaselineDigest: prepared.BaselineDigest, ExpectedContextDigest: prepared.SecurityContext.ContextDigest,
 		ExpectedTurnID:           prepared.Result.TurnID,
 		ExpectedEpochStateDigest: prepared.EpochState.StateDigest,
@@ -128,7 +130,14 @@ func PrepareCaseCompaction(
 	return prepareCompaction(thread, threadID, reason, at, auto, &authorization)
 }
 
-func prepareCompaction(thread map[string]any, threadID string, reason string, at time.Time, auto bool, caseAuthorization *CaseCompactionAuthorization) (PreparedCompaction, error) {
+func prepareCompaction(thread map[string]any, threadID string, reason string, at time.Time, auto bool, caseAuthorization *CaseCompactionAuthorization, summaryFacts ...*threaddomain.CompactionSummaryFactsV1) (PreparedCompaction, error) {
+	if len(summaryFacts) > 1 || (caseAuthorization != nil && len(summaryFacts) != 0) {
+		return PreparedCompaction{}, errors.New("compaction summary authority is ambiguous")
+	}
+	var facts *threaddomain.CompactionSummaryFactsV1
+	if len(summaryFacts) == 1 {
+		facts = summaryFacts[0]
+	}
 	threadID = strings.TrimSpace(threadID)
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
@@ -166,6 +175,8 @@ func prepareCompaction(thread map[string]any, threadID string, reason string, at
 			candidate, threadID, reason, stamp, now, auto,
 			caseAuthorization.Continuation, caseAuthorization.AuthorityTurnIDs, inherited,
 		)
+	} else if facts != nil {
+		plan = turnapp.BuildThreadCompactionWithSummary(candidate, threadID, reason, stamp, now, auto, *facts)
 	} else {
 		plan = turnapp.BuildThreadCompactionWithMode(candidate, threadID, reason, stamp, now, auto)
 	}
@@ -205,8 +216,12 @@ func prepareCompaction(thread map[string]any, threadID string, reason string, at
 		prepared.CaseAuthorityTurnIDs = authorityTurnIDs
 		prepared.ActiveInheritedHistory = cloneActiveInheritedHistoryRecordV1(caseAuthorization.ActiveInheritedHistory)
 	}
+	recoveryDigest := plan.Result.SourceDigest
+	if facts != nil {
+		recoveryDigest = facts.CheckpointDigest
+	}
 	authority, err := contextepochapp.PrepareAndAttachCompactionAuthority(
-		candidate, plan.NextTurns, current, threadID, plan.Result.TurnID, plan.Result.SourceDigest, at,
+		candidate, plan.NextTurns, current, threadID, plan.Result.TurnID, recoveryDigest, at,
 		caseAuthorization != nil,
 	)
 	if err != nil {
@@ -243,10 +258,15 @@ func ApplyCompactionCommit(thread map[string]any, request CompactionCommitReques
 			ActiveInheritedHistory: cloneActiveInheritedHistoryRecordV1(request.ActiveInheritedHistory),
 		}
 	}
-	prepared, err := prepareCompaction(
-		thread, strings.TrimSpace(request.ThreadID), strings.TrimSpace(request.Reason), time.Unix(0, request.Stamp).UTC(), request.Auto,
-		caseAuthorization,
-	)
+	var prepared PreparedCompaction
+	if request.SummaryFacts != nil {
+		if request.CaseBound {
+			return PreparedCompaction{}, errors.New("case compaction cannot carry an ordinary summary")
+		}
+		prepared, err = prepareCompaction(thread, strings.TrimSpace(request.ThreadID), strings.TrimSpace(request.Reason), time.Unix(0, request.Stamp).UTC(), request.Auto, nil, request.SummaryFacts)
+	} else {
+		prepared, err = prepareCompaction(thread, strings.TrimSpace(request.ThreadID), strings.TrimSpace(request.Reason), time.Unix(0, request.Stamp).UTC(), request.Auto, caseAuthorization)
+	}
 	if err != nil {
 		return PreparedCompaction{}, err
 	}

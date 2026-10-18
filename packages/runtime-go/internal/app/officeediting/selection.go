@@ -37,11 +37,22 @@ func nativeUTF16Length(text string) int {
 	return units
 }
 
+type nativeLeasePurpose uint8
+
+const (
+	nativeLeaseNone nativeLeasePurpose = iota
+	nativeLeaseStrict
+	nativeLeaseManual
+)
+
 type nativeSession struct {
-	document  editingapp.Opened
-	principal identitydomain.PrincipalV1
-	workspace string
-	release   func()
+	leasePurpose       nativeLeasePurpose
+	manualChangeID     string
+	manualBaseRevision string
+	document           editingapp.Opened
+	principal          identitydomain.PrincipalV1
+	workspace          string
+	release            func()
 }
 type nativeScope struct {
 	ID, SessionID, ThreadID, SelectionToken, BaseRevision string
@@ -227,6 +238,25 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		if !nativeThread.MatchString(thread) || !nativeSelectionToken.MatchString(token) || !revisionPattern.MatchString(revision) || !ok || len(text) > editingapp.MaxSelectionBytes || !utf8.ValidString(text) || !editableOK || !numberOK || err != nil || sequence < 0 || sequence > 9007199254740991 {
 			return failure(fileport.ErrInvalidInput)
 		}
+		// A discussion reference has no mutation lease. An editable reference
+		// must obtain its original strict lease and cannot inherit manual purpose.
+		if editable {
+			if session.release != nil && session.leasePurpose != nativeLeaseStrict {
+				return failure(fileport.ErrConflict)
+			}
+			if session.manualChangeID != "" {
+				return failure(fileport.ErrConflict)
+			}
+			if recovery, ok := a.service.(NativeRecoveryService); ok && a.kind == "docx" {
+				state, err := recovery.NativeRecovery(ctx, sessionID, thread)
+				if err != nil {
+					return failure(err)
+				}
+				if state.Pending != nil && state.Pending.Version == 2 {
+					return failure(fileport.ErrConflict)
+				}
+			}
+		}
 		if editable && input["workbook"] == nil && input["presentation"] == nil && nativeUTF16Length(text) > MaxNativeSelectionUTF16 {
 			return failure(editingapp.ErrProposal)
 		}
@@ -297,7 +327,7 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			if err != nil {
 				return failure(editingapp.ErrProjection)
 			}
-			session.release = release
+			session.release, session.leasePurpose = release, nativeLeaseStrict
 		}
 		if err := a.validateScope(ctx, scope, call.Principal); err != nil {
 			return failure(err)
@@ -407,7 +437,7 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			scope.operations[op] = digest
 			return output(map[string]any{"ok": true, "proposal": proposalOutput(proposal)})
 		}
-		if !scope.Editable {
+		if !scope.Editable || session.release == nil || session.leasePurpose != nativeLeaseStrict {
 			return failure(editingapp.ErrScope)
 		}
 		replacement, err := renderNativeProposal(scope, proposal.Parts)
@@ -520,7 +550,7 @@ func (a *Adapter) modelSelectionLocked(ctx context.Context, principal identitydo
 		}
 		return out, nil
 	}
-	if !scope.Editable || !operationPattern.MatchString(operationID) {
+	if !scope.Editable || !operationPattern.MatchString(operationID) || a.sessions[scope.SessionID].release == nil || a.sessions[scope.SessionID].leasePurpose != nativeLeaseStrict {
 		return nil, editingapp.ErrScope
 	}
 	var review *office.WorkbookReview

@@ -7,11 +7,80 @@ import (
 	"testing"
 	"time"
 
+	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
+
+// This fixture verifies runner orchestration only. Native mint authority is
+// exercised by the ProductionManager and server transport seam tests.
+type scheduleDiscardCallerV1 struct {
+	boundToolCallerStub
+	discards int
+}
+
+func (caller *scheduleDiscardCallerV1) DiscardHostScheduleReceiptV1(domainmcp.LosslessToolResult) {
+	caller.discards++
+}
+
+type scheduleReaderCallerV1 struct {
+	scheduleDiscardCallerV1
+	reads   int
+	matched bool
+}
+
+func (caller *scheduleReaderCallerV1) ConsumeHostScheduleReceiptV1(result domainmcp.LosslessToolResult, envelope domainmcp.HostContextEnvelope, outcome domainevidence.ToolOutcome) (domaintoolresult.ProtectedCaptureV1, bool) {
+	caller.reads++
+	contextValue, grant, err := envelope.Authority()
+	caller.matched = err == nil && result.HostPrivate != nil && outcome.ContextDigest == contextValue.ContextDigest && outcome.ExecutionGrantID == grant.GrantID && outcome.ToolCallID == grant.ToolCallID
+	taskID := "actual-task-id"
+	return domaintoolresult.ProtectedCaptureV1{Kind: "schedule", Status: "completed", Schedule: &domaintoolresult.ProtectedScheduleReceiptV1{Operation: "delete", Status: "success", Message: "Actual delete", TaskID: &taskID}}, caller.matched
+}
+
+func scheduleRunnerResultV1() map[string]any {
+	raw := json.RawMessage(`{"content":[],"structuredContent":{"status":"success","message":"Actual delete","taskId":"actual-task-id"}}`)
+	return map[string]any{"executed": true, "transportStatus": "success", domainmcp.HostRawToolResultKey: domainmcp.LosslessToolResult{RawResult: raw, RawSHA256: domainsecurity.SHA256Hex(raw), HostPrivate: &struct{}{}}}
+}
+
+func TestScheduleRunnerConsumesAfterNormalizationAndClearsPrivateCarrier(t *testing.T) {
+	caller := &scheduleReaderCallerV1{}
+	caller.result = scheduleRunnerResultV1()
+	ctx := domaintoolresult.WithProtectedCaptureV1(context.Background(), &domaintoolresult.ProtectedCaptureCollectorV1{})
+	output, isError := ExecuteTool(ctx, caller, toolRunInputForTest(t, "mcp__gui_schedule__gui_schedule_delete", map[string]any{}))
+	capture, present := domaintoolresult.ConsumeProtectedToolResultV1(ctx)
+	if isError || !present || capture.Schedule.TaskID == nil || *capture.Schedule.TaskID != "actual-task-id" || caller.reads != 1 || !caller.matched || caller.discards != 0 {
+		t.Fatal("normalized runner did not consume the exact orchestration fixture")
+	}
+	if output[domainmcp.HostRawToolResultKey].(domainmcp.LosslessToolResult).HostPrivate != nil {
+		t.Fatal("schedule carrier escaped runner")
+	}
+}
+
+func TestScheduleRunnerDiscardsWhenReaderIsUnavailable(t *testing.T) {
+	caller := &scheduleDiscardCallerV1{}
+	caller.result = scheduleRunnerResultV1()
+	output, isError := ExecuteTool(context.Background(), caller, toolRunInputForTest(t, "mcp__gui_schedule__gui_schedule_delete", map[string]any{}))
+	if isError || caller.discards != 1 || output[domainmcp.HostRawToolResultKey].(domainmcp.LosslessToolResult).HostPrivate != nil {
+		t.Fatal("unread schedule carrier survived")
+	}
+}
+
+func TestScheduleRunnerDiscardsInvalidLosslessOnNormalizationFailure(t *testing.T) {
+	caller := &scheduleReaderCallerV1{}
+	caller.result = scheduleRunnerResultV1()
+	lossless := caller.result[domainmcp.HostRawToolResultKey].(domainmcp.LosslessToolResult)
+	lossless.RawSHA256 = "invalid"
+	caller.result[domainmcp.HostRawToolResultKey] = lossless
+	caller.result["result"] = map[string]any{"partialCoverage": map[string]any{"unknown": true}}
+	output, isError := ExecuteTool(context.Background(), caller, toolRunInputForTest(t, "mcp__gui_schedule__gui_schedule_delete", map[string]any{}))
+	if !isError || output["code"] != "mcp_tool_outcome_invalid" || caller.discards != 1 || caller.reads != 0 || output[domainmcp.HostRawToolResultKey] != nil {
+		t.Fatal("failed normalization retained or consumed a carrier")
+	}
+}
 
 type toolCallerStub struct {
 	name       string
@@ -552,6 +621,70 @@ func TestDecodeArgumentsRejectsAmbiguousProviderJSON(t *testing.T) {
 	} {
 		if _, err := DecodeArguments(body); err == nil {
 			t.Fatalf("ambiguous provider arguments passed: %s", body)
+		}
+	}
+}
+
+func TestNormalizedGenericMCPTextUsesOnlyActualContentBlocksV1(t *testing.T) {
+	fixtureSchema := json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`)
+	for _, test := range []struct {
+		name, tool, raw, want string
+		failed                bool
+	}{
+		{"ordered mixed", "mcp__docs__lookup", `{"content":[{"type":"text","text":"first\r\n"},{"type":"image","data":"cG5n","mimeType":"image/png"},{"type":"text","text":"{\"n\":9007199254740993}"}],"structuredContent":{"text":"not-the-source"}}`, "first\r\n\n{\"n\":9007199254740993}", false},
+		{"structured only", "mcp__docs__lookup", `{"content":[],"structuredContent":{"text":"not-a-text-block"}}`, "", false},
+		{"empty", "mcp__docs__lookup", `{"content":[{"type":"text","text":""},{"type":"text","text":"  \r\n"}],"structuredContent":{}}`, "", false},
+		{"error", "mcp__docs__lookup", `{"isError":true,"content":[{"type":"text","text":"failed text"}]}`, "", true},
+		{"case excluded", "mcp__analytix_funds__lookup", `{"content":[{"type":"text","text":"private case semantics"}],"structuredContent":{}}`, "", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw := json.RawMessage(test.raw)
+			lossless := domainmcp.LosslessToolResult{RawResult: raw, RawSHA256: domainsecurity.SHA256Hex(raw)}
+			observation, inspectErr := InspectToolResultOutput(lossless, fixtureSchema)
+			if inspectErr != nil {
+				t.Fatal(inspectErr)
+			}
+			lossless.Observation = &observation
+			caller := &boundToolCallerStub{toolCallerStub: toolCallerStub{result: map[string]any{"executed": true, "transportStatus": "success", domainmcp.HostRawToolResultKey: lossless}}}
+			ctx := domaintoolresult.WithProtectedCaptureV1(context.Background(), &domaintoolresult.ProtectedCaptureCollectorV1{})
+			output, isError := ExecuteTool(ctx, caller, toolRunInputForTest(t, test.tool, map[string]any{}))
+			_, _, _, text := domaintoolresult.ConsumeProtectedToolObservationWithTextV1(ctx)
+			if isError != test.failed || output["toolOutcome"] == nil {
+				t.Fatal("actual normalization did not settle expected outcome")
+			}
+			if test.want == "" {
+				if text != nil {
+					t.Fatal("unadmitted content fabricated OUT")
+				}
+			} else if text == nil || text.Availability != "available" || text.Body != test.want {
+				t.Fatal("real text order or spelling changed")
+			}
+		})
+	}
+}
+
+func TestGenericTextNeverReopensClosedOrOverflowedParentCredentialsV1(t *testing.T) {
+	fixtureSchema := json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`)
+	for _, closed := range []bool{true, false} {
+		parent := domainprocess.WithKnownSecretsV1(context.Background(), "synthetic-parent-request-value-7493")
+		if closed {
+			domainprocess.ClearKnownSecretsV1(parent)
+		} else {
+			domainprocess.InvalidateKnownSecretsV1(parent)
+		}
+		raw := json.RawMessage(`{"content":[{"type":"text","text":"synthetic-parent-request-value-7493"}],"structuredContent":{}}`)
+		lossless := domainmcp.LosslessToolResult{RawResult: raw, RawSHA256: domainsecurity.SHA256Hex(raw)}
+		observation, inspectErr := InspectToolResultOutput(lossless, fixtureSchema)
+		if inspectErr != nil {
+			t.Fatal(inspectErr)
+		}
+		lossless.Observation = &observation
+		caller := &boundToolCallerStub{toolCallerStub: toolCallerStub{result: map[string]any{"executed": true, "transportStatus": "success", domainmcp.HostRawToolResultKey: lossless}}}
+		ctx := domaintoolresult.WithProtectedCaptureV1(parent, &domaintoolresult.ProtectedCaptureCollectorV1{})
+		output, isError := ExecuteTool(ctx, caller, toolRunInputForTest(t, "mcp__docs__lookup", map[string]any{}))
+		_, _, _, text := domaintoolresult.ConsumeProtectedToolObservationWithTextV1(ctx)
+		if isError || output["toolOutcome"] == nil || text != nil {
+			t.Fatal("invalid parent credential scope became readable, or changed tool success")
 		}
 	}
 }

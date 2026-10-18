@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	controlapp "analytix.local/runtime-go/internal/app/control"
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
@@ -53,14 +54,32 @@ func TestTurnStartCannotReuseCommittedIdentityBeforeWorkspaceEffects(t *testing.
 }
 
 type preparedBaselineCompactorStub struct {
+	input  threadapp.AutoCompactionInputV1
 	calls  int
 	result threadapp.AutoCompactionResultV1
 	err    error
 }
 
-func (stub *preparedBaselineCompactorStub) AutoCompactBeforeTurnV1(context.Context, threadapp.AutoCompactionInputV1) (threadapp.AutoCompactionResultV1, error) {
+func (stub *preparedBaselineCompactorStub) AutoCompactBeforeTurnV1(_ context.Context, input threadapp.AutoCompactionInputV1) (threadapp.AutoCompactionResultV1, error) {
+	stub.input = input
 	stub.calls++
 	return stub.result, stub.err
+}
+
+func TestPrepareStartBaselinePassesExactAdmissionWitness(t *testing.T) {
+	controller := controlapp.NewController(nil)
+	witness, release, err := controller.PrepareForegroundWithWitness(context.Background(), "thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	store := &preparedBaselineStoreStub{thread: map[string]any{"id": "thread"}, digest: "baseline"}
+	compactor := &preparedBaselineCompactorStub{}
+	_, _, err = PrepareStartBaselineV1(PrepareStartBaselineInputV1{Context: context.Background(), Store: store, Compactor: compactor,
+		ThreadID: "thread", MainThread: true, Reservation: witness, ContextWindowTokens: func(map[string]any) int { return 128_000 }})
+	if err != nil || compactor.calls != 1 || compactor.input.Reservation != witness {
+		t.Fatalf("witness was replaced or omitted: calls=%d err=%v", compactor.calls, err)
+	}
 }
 
 func (store *preparedBaselineStoreStub) ReadThreadStartBaseline(string) (map[string]any, string, error) {
@@ -183,5 +202,18 @@ func TestTurnStartBaselineBindsThreadAndWorkspace(t *testing.T) {
 		if err := ValidateBaseline(thread, mismatch.threadID, mismatch.workspace, digest); !errors.Is(err, ErrBaselineConflict) {
 			t.Fatalf("turn baseline identity mismatch was accepted: %#v err=%v", mismatch, err)
 		}
+	}
+}
+
+func TestPrepareStartBaselineRequestRiskRestrictionCannotRunCompactor(t *testing.T) {
+	store := &preparedBaselineStoreStub{thread: map[string]any{"id": "thread"}, digest: "baseline"}
+	compactor := &preparedBaselineCompactorStub{err: errors.New("unsafe request must not compact")}
+	thread, digest, err := PrepareStartBaselineV1(PrepareStartBaselineInputV1{
+		Context: context.Background(), Store: store, Compactor: compactor, ThreadID: "thread", MainThread: true,
+		ContextWindowTokens:   func(map[string]any) int { return 128000 },
+		AutoCompactionAllowed: func(map[string]any) bool { return false },
+	})
+	if err != nil || thread["id"] != "thread" || digest != "baseline" || compactor.calls != 0 {
+		t.Fatalf("request restriction invoked summary or changed baseline: err=%v calls=%d digest=%s", err, compactor.calls, digest)
 	}
 }

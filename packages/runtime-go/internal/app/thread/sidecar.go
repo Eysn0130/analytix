@@ -8,7 +8,7 @@ import (
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
-	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 )
@@ -114,10 +114,23 @@ func normalizeSidecarAuthorityKey(key string) string {
 }
 
 func MetadataSidecarEntry(thread map[string]any, now string) map[string]any {
-	thread = SanitizePublicHistory(thread)
+	entry, _ := MetadataSidecarEntryCheckedV1(thread, now)
+	return entry
+}
+
+// The checked producer lets a primary writer prove recovery completeness before
+// committing; legacy optional-sidecar callers retain their existing wrapper.
+func MetadataSidecarEntryCheckedV1(thread map[string]any, now string) (map[string]any, error) {
+	var err error
+	// The durable record is validated again below and must keep its existing
+	// Question codec slots. The closed DTO is reserved for public consumers.
+	thread, err = NewTrustedPublicProjector(nil).projectValidatedThreadV1(thread)
+	if err != nil {
+		return nil, err
+	}
 	id := strings.TrimSpace(stringField(thread, "id"))
 	if id == "" {
-		return nil
+		return nil, ErrDurableHistorySanitization
 	}
 	entry := map[string]any{
 		"kind":      "thread_metadata",
@@ -126,10 +139,10 @@ func MetadataSidecarEntry(thread map[string]any, now string) map[string]any {
 		"thread":    StripItemsForSidecar(thread),
 		"summary":   SidecarSummary(thread),
 	}
-	if domainevent.ValidatePublicRecord(entry) != nil {
-		return nil
+	if err := domainevent.ValidatePublicRecord(entry); err != nil {
+		return nil, err
 	}
-	return entry
+	return entry, nil
 }
 
 func MessageSidecarJSONByID(items []map[string]any) (map[string]string, error) {
@@ -255,11 +268,14 @@ func SanitizeDurableHistory(thread map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
+// Legacy durable-history migration sanitizes before producing metadata again.
+// Keep its validated codec carriers until that producer finishes record checks;
+// public HTTP/SSE consumers still use the closed ProjectThread result.
 func SanitizePublicHistory(thread map[string]any) map[string]any {
 	if thread == nil {
 		return nil
 	}
-	out, err := ProjectPublicThread(thread)
+	out, err := NewTrustedPublicProjector(nil).projectValidatedThreadV1(thread)
 	if err != nil || out == nil {
 		return map[string]any{}
 	}
@@ -276,7 +292,7 @@ func ValidatePublicHistory(thread map[string]any) error {
 			ordinaryContent[key] = value
 		}
 	}
-	if err := domainsecret.ValidateValueLimitsV1(ordinaryContent); err != nil {
+	if err := domainevent.ValidateQuestionReplyResourceLimitsV1(ordinaryContent); err != nil {
 		return errors.Join(domainevent.ErrCredentialProjection, err)
 	}
 	turns, ok := thread["turns"].([]any)
@@ -288,7 +304,7 @@ func ValidatePublicHistory(thread map[string]any) error {
 		if !ok || turn == nil {
 			return errors.New("public thread turn is invalid")
 		}
-		if err := domainsecret.ValidateValueLimitsV1(turn); err != nil {
+		if err := domainevent.ValidateQuestionReplyResourceLimitsV1(turn); err != nil {
 			return errors.Join(domainevent.ErrCredentialProjection, err)
 		}
 	}
@@ -313,7 +329,24 @@ func ValidatePublicHistory(thread map[string]any) error {
 			}
 		}
 	}
-	ordinaryContent["turns"] = turns
+	// Only a strict private metadata anchor survives Primary sanitation. It
+	// never enters the ordinary per-turn validation/model/public projection.
+	publicTurns := make([]any, 0, len(turns))
+	for _, rawTurn := range turns {
+		turn := rawTurn.(map[string]any)
+		view := turn
+		if raw, present := turn[domainprocess.SettledHistoryFieldV1]; present {
+			anchor, err := domainprocess.ParseSettledHistoryAnchorV1(raw)
+			frozen, frozenErr := domainsecurity.ParseTurnSecurityContext(turn["securityContext"])
+			if err != nil || frozenErr != nil || anchor.ThreadID != stringField(thread, "id") || anchor.TurnID != stringField(turn, "id") || anchor.ContextDigest != frozen.ContextDigest || anchor.Terminal.Status != stringField(turn, "status") || anchor.Terminal.FinishedAt != stringField(turn, "finishedAt") {
+				return domainprocess.ErrSettledHistoryV1
+			}
+			view = contracts.CloneMap(turn)
+			delete(view, domainprocess.SettledHistoryFieldV1)
+		}
+		publicTurns = append(publicTurns, view)
+	}
+	ordinaryContent["turns"] = publicTurns
 	if caseSensitive {
 		if err := validatePublicThreadRecordChunksV1(ordinaryContent); err != nil {
 			return errors.Join(errors.New("case thread ordinary projection is unsafe"), err)

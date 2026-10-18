@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 )
 
 func TestTerminalPublicationIntentCanonicalizesNumericTelemetry(t *testing.T) {
@@ -53,5 +55,30 @@ func TestTerminalPublicationIntentRejectsNonJSONTelemetry(t *testing.T) {
 		CacheDiagnostics: map[string]any{"invalid": func() {}},
 	}, "success"); err == nil {
 		t.Fatal("terminal publication intent accepted non-JSON telemetry")
+	}
+}
+
+func TestPublicationIntentOutputCapIsOptionalAndTerminalBound(t *testing.T) {
+	input := TerminalPublicationIntentInput{CreatedAt: time.Unix(1, 0).UTC().Format(time.RFC3339Nano), TerminalStatus: "completed"}
+	old, err := NewTerminalPublicationIntent(input, "success")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBytes, _ := json.Marshal(old)
+	legacyBytes := []byte(`{"schemaVersion":1,"createdAt":"1970-01-01T00:00:01Z","usage":{},"cacheDiagnostics":{},"terminalStatus":"completed","discard":false,"cancelled":false,"cancelledPendingGates":0}`)
+	if !bytes.Equal(oldBytes, legacyBytes) {
+		t.Fatal("legacy publication signing bytes changed")
+	}
+	input.EndReason = &domainterminal.EndReason{Kind: domainterminal.EndReasonMaxTokens}
+	intent, err := NewTerminalPublicationIntent(input, "success")
+	if err != nil || intent.EndReason == nil {
+		t.Fatal("valid cap intent rejected")
+	}
+	if _, err := NewTerminalPublicationIntent(input, "approval_denied"); err == nil {
+		t.Fatal("cap overrode denial")
+	}
+	input.EndReason.Kind = "private-provider-reason"
+	if _, err := NewTerminalPublicationIntent(input, "success"); err == nil {
+		t.Fatal("unknown cap vocabulary accepted")
 	}
 }

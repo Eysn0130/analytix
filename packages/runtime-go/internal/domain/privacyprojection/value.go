@@ -432,11 +432,81 @@ func projectHostUserInputQuestion(value any, expectedID string) (any, bool) {
 				continue
 			}
 		}
+		if normalizeFieldKey(key) == "options" && record["id"] == expectedID {
+			projected, childChanged := projectHostUserInputOptions(child, expectedID)
+			out[key] = projected
+			changed = changed || childChanged
+			continue
+		}
 		projected, childChanged := projectPublicValue(child, true, typedKindForKey(key))
 		out[key] = projected
 		changed = changed || childChanged
 	}
 	return out, changed
+}
+
+// Option ids are structural only beneath the exact host question and ordinal.
+// Labels, descriptions and unknown fields remain ordinary untrusted content.
+func projectHostUserInputOptions(value any, questionID string) (any, bool) {
+	project := func(record map[string]any, index int) (map[string]any, bool) {
+		out := make(map[string]any, len(record))
+		changed := false
+		expected := questionID + "_option_" + strconv.Itoa(index+1)
+		for key, child := range record {
+			if normalizeFieldKey(key) == "id" && child == expected {
+				out[key] = child
+				continue
+			}
+			projected, childChanged := projectPublicValue(child, true, typedKindForKey(key))
+			out[key] = projected
+			changed = changed || childChanged
+		}
+		return out, changed
+	}
+	switch current := value.(type) {
+	case []map[string]string:
+		out := make([]map[string]string, len(current))
+		changed := false
+		for index, option := range current {
+			record := make(map[string]any, len(option))
+			for key, child := range option {
+				record[key] = child
+			}
+			projected, childChanged := project(record, index)
+			out[index] = make(map[string]string, len(projected))
+			for key, child := range projected {
+				out[index][key], _ = child.(string)
+			}
+			changed = changed || childChanged
+		}
+		return out, changed
+	case []map[string]any:
+		out := make([]map[string]any, len(current))
+		changed := false
+		for index, option := range current {
+			projected, childChanged := project(option, index)
+			out[index] = projected
+			changed = changed || childChanged
+		}
+		return out, changed
+	case []any:
+		out := make([]any, len(current))
+		changed := false
+		for index, option := range current {
+			if record, ok := option.(map[string]any); ok {
+				projected, childChanged := project(record, index)
+				out[index] = projected
+				changed = changed || childChanged
+			} else {
+				projected, childChanged := projectPublicValue(option, true, "")
+				out[index] = projected
+				changed = changed || childChanged
+			}
+		}
+		return out, changed
+	default:
+		return projectPublicValue(value, true, "")
+	}
 }
 
 func numericMeasureKey(key string) bool {

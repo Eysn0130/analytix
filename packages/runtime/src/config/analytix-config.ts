@@ -158,12 +158,18 @@ export const ContextCompactionConfigSchema = z
     }
   })
 
+export const UserInputConfigSchemaV1 = z.object({
+  policy: z.enum(['legacy', 'timed']),
+  defaultTimeoutSeconds: z.number().int().refine(value => value === -1 || value >= 1 && value <= 2147483).nullable().optional()
+}).strict()
+
 export const RuntimeTuningConfigSchema = z
   .object({
     // Max idle gap (ms) between streaming chunks before a turn fails with
     // `stream_idle_timeout`. Local LLM servers prefilling a huge prompt can
     // stay silent well past the 45s default; `0` disables the guard entirely.
     streamIdleTimeoutMs: z.number().int().min(0).optional(),
+    userInput: UserInputConfigSchemaV1.optional(),
     stepLimits: z
       .object({
         defaultMaxModelSteps: z.number().int().min(0).optional(),

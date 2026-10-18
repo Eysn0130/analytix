@@ -10,6 +10,7 @@ import (
 )
 
 type MaterializeInput struct {
+	UserInputConfig            UserInputConfig
 	DocumentGeneration         bool
 	DocumentGenerationKinds    []string
 	NativeSelections           bool
@@ -99,6 +100,9 @@ func MaterializeToolSchemas(input MaterializeInput) []domainmodel.ToolSchema {
 	}
 	if input.PlanActive && !input.Subagent {
 		tools = append(tools, CreatePlanToolSchema())
+		if !input.DisableUserInput {
+			tools = append(tools, ExitPlanModeToolSchema())
+		}
 	}
 	if !input.Subagent && input.SubagentsEnabled && PromptRouteAllowsSubagentTools(input.PromptRoute, input.ToolScope) {
 		tools = append(tools, SubagentToolSchemas(input.SubagentProfileDescription)...)
@@ -108,7 +112,7 @@ func MaterializeToolSchemas(input MaterializeInput) []domainmodel.ToolSchema {
 		tools = append(tools, RunSkillToolSchema())
 	}
 	if !input.DisableUserInput && !input.Subagent {
-		tools = append(tools, UserInputToolSchemas()...)
+		tools = append(tools, UserInputToolSchemas(input.UserInputConfig)...)
 	}
 	if !input.Subagent && input.ReportDelivery &&
 		PromptExplicitlyRequestsReportDeliveryV1(input.Prompt) {
@@ -165,7 +169,7 @@ func CanRunInParallel(toolName string, mcpAvailable bool, mcpToolReadOnly bool) 
 func HostAuthorizesReadOnly(toolName string, mcpAvailable bool, mcpToolReadOnly bool) bool {
 	switch strings.TrimSpace(toolName) {
 	case "read", "read_file", "read_task_history", "ls", "find", "glob", "code_index", "grep", "web_fetch", "get_goal", "todo_list",
-		"wait", "list_jobs", "bash_output", "native_selection_read":
+		"wait", "list_jobs", "bash_output", "native_selection_read", "present":
 		return true
 	default:
 		return MCPToolServerID(toolName) != "" && mcpAvailable && mcpToolReadOnly

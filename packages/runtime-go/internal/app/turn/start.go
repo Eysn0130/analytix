@@ -8,27 +8,28 @@ import (
 )
 
 type StartRecordInput struct {
-	ThreadID              string
-	TurnID                string
-	UserItemID            string
-	Prompt                string
-	DisplayText           string
-	Model                 string
-	ProviderID            string
-	ReasoningEffort       string
-	ApprovalPolicy        string
-	SandboxMode           string
-	CreatedAt             string
-	Mode                  string
-	AttachmentIDs         []string
-	Attachments           []map[string]any
-	AttachmentPipeline    map[string]any
-	FileReferences        []any
-	WorkspaceCheckpointID string
-	GUIPlan               map[string]any
-	DisableUserInput      bool
-	DisableUserInputSet   bool
-	MaxModelSteps         *int
+	OmitInitialUserMessage bool
+	ThreadID               string
+	TurnID                 string
+	UserItemID             string
+	Prompt                 string
+	DisplayText            string
+	Model                  string
+	ProviderID             string
+	ReasoningEffort        string
+	ApprovalPolicy         string
+	SandboxMode            string
+	CreatedAt              string
+	Mode                   string
+	AttachmentIDs          []string
+	Attachments            []map[string]any
+	AttachmentPipeline     map[string]any
+	FileReferences         []any
+	WorkspaceCheckpointID  string
+	GUIPlan                map[string]any
+	DisableUserInput       bool
+	DisableUserInputSet    bool
+	MaxModelSteps          *int
 }
 
 type StartRecord struct {
@@ -187,6 +188,11 @@ func BuildStartRecord(input StartRecordInput) StartRecord {
 	}
 	if input.MaxModelSteps != nil {
 		turnStarted["maxModelSteps"] = float64(*input.MaxModelSteps)
+	}
+	if input.OmitInitialUserMessage {
+		turn["items"] = []any{}
+		turnStarted["turn"] = contracts.CloneMap(turn)
+		return StartRecord{Turn: turn, TurnStartedEvent: turnStarted}
 	}
 	return StartRecord{
 		UserItemID:       userItemID,

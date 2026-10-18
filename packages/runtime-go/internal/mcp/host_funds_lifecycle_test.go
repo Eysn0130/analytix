@@ -20,7 +20,7 @@ func TestProductionManagerHostFundsSourceReadLifecycleStopsAndFreshlyRecovers(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}, HostFundsServer: host,
 	})
 	if _, ok := manager.hostFundsSourceReadLifecycle.CurrentGrant(); ok || len(manager.Tools()) != 0 {
@@ -59,7 +59,7 @@ func TestProductionManagerHostFundsSourceReadLifecycleStopsAndFreshlyRecovers(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager2 := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager2 := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}, HostFundsServer: host2,
 	})
 	manager2.Connect()
@@ -142,7 +142,7 @@ func TestProductionManagerFundsOnlyDenialPreservesOrdinaryMCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := NewProductionManagerWithOptions([]ServerSpec{{
+	manager := newAdmissionTestManagerWithOptions([]ServerSpec{{
 		ID: "ordinary-docs", Transport: "http", URL: server.URL, TrustScope: "user",
 	}}, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}, HostFundsServer: host,
@@ -201,7 +201,7 @@ func TestProductionManagerHostFundsCurrentProvenanceDriftRevokesAndRequiresFullR
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}, HostFundsServer: host,
 	})
 	manager.Connect()
@@ -247,7 +247,7 @@ func newConnectedHostFundsLifecycleManagerV1(t *testing.T) *ProductionManager {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}, HostFundsServer: host,
 	})
 	manager.Connect()

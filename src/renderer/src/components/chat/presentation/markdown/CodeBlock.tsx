@@ -43,6 +43,12 @@ export interface CodeBlockProps {
   toolbarLabels?: CodeToolbarLabels | undefined
   /** With toolbarLabels, use the owner's wrapping preference and omit the toolbar's local wrap action. */
   wrap?: boolean | undefined
+  /** Caller-owned native Copy. The confirmation follows its actual acknowledgement. */
+  copyAction?: (() => Promise<boolean>) | undefined
+  /** Ordinary source extras/collapse remain the default; Question details render the full DSH body. */
+  sourceActions?: boolean | undefined
+  collapse?: boolean | undefined
+  questionIcons?: boolean | undefined
 }
 
 /**
@@ -72,7 +78,7 @@ function renderLine(line: readonly HighlightSpan[], index: number): ReactNode {
 }
 
 export function CodeBlock({
-  code, lang, streaming, className, contentRef, lineNumbers = false, showHeader = true, copyLabel, copiedLabel, toolbarLabels, wrap,
+  code, lang, streaming, className, contentRef, lineNumbers = false, showHeader = true, copyLabel, copiedLabel, toolbarLabels, wrap, copyAction, sourceActions = true, collapse = true, questionIcons = false,
 }: CodeBlockProps) {
   const trimmed = code.endsWith('\n') ? code.slice(0, -1) : code
   const sourceLines = lineNumbers ? trimmed.split('\n') : undefined
@@ -80,8 +86,8 @@ export function CodeBlock({
   const contentId = useId()
   const [expanded, setExpanded] = useState(false)
   const large = trimmed.length > 12000 || trimmed.split(/\r\n|\r|\n/).length > 240
-  const viewportHighlighting = useViewportHighlighting(rootRef, large && !expanded ? undefined : lang)
-  const highlighting = viewportHighlighting && (!large || expanded) && trimmed.length <= 24000 && trimmed.split(/\r\n|\r|\n/).length <= 700
+  const viewportHighlighting = useViewportHighlighting(rootRef, large && collapse && !expanded ? undefined : lang)
+  const highlighting = viewportHighlighting && (!large || !collapse || expanded)
   // Re-render when a lazy grammar finishes loading, so a fence that showed plain
   // text while its language's grammar imported picks up highlighting. The
   // snapshot value is opaque; only its change across renders drives the memo.
@@ -148,7 +154,7 @@ export function CodeBlock({
     }
     const tail = frame.tail.map((line, index) => renderLine(line, nextLine + index))
     const tailGroup = <Fragment key={nextLine - pending.length}>{[...pending, ...tail]}</Fragment>
-    const body = <pre {...SHIKI_PRE_PROPS}><code>{groups}{tailGroup}</code></pre>
+    const body = <pre {...SHIKI_PRE_PROPS}><code>{[...groups, tailGroup]}</code></pre>
     lineCacheRef.current = {
       code: trimmed, lang, generation: frame.generation, frame, groups, pending, nextLine, body,
     }
@@ -164,7 +170,7 @@ export function CodeBlock({
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => { if (copyTimer.current !== undefined) clearTimeout(copyTimer.current) }, [])
   const [localWrapped, setWrapped] = useState(true)
-  const collapsible = trimmed.split(/\r\n|\r|\n/).length > 12
+  const collapsible = collapse && trimmed.split(/\r\n|\r|\n/).length > 12
   const wrapped = wrap ?? localWrapped
 
   const onCopy = useCallback(() => {
@@ -172,12 +178,12 @@ export function CodeBlock({
     /* v8 ignore next -- both arms always mount a <pre>; trimmed is the
        typed fallback if the DOM shape ever diverges. */
     const text = trimmed
-    void writeClipboard(text).then((ok) => {
+    void (copyAction ? copyAction() : writeClipboard(text)).then((ok) => {
       if (!ok) return
       setCopied(true)
       copyTimer.current = setTimeout(() => { setCopied(false) }, 1000)
     })
-  }, [copied, trimmed])
+  }, [copied, trimmed, copyAction])
 
   // shiki's HTML output is a static span tree it generated from `code` (no
   // user HTML passes through), the sanctioned innerHTML consumption path per
@@ -206,9 +212,9 @@ export function CodeBlock({
       {showHeader && <div className={css.bannerWrap}>
         {toolbarLabels !== undefined ? <CodeToolbar
           lang={lang} labels={toolbarLabels} copyLabel={copyLabel} copiedLabel={copiedLabel}
-          copied={copied} wrapped={wrapped} onCopy={onCopy}
+          copied={copied} wrapped={wrapped} onCopy={onCopy} questionIcons={questionIcons}
           onWrap={wrap === undefined ? () => { setWrapped(value => !value) } : undefined}
-          extraActions={<CodeSourceActions contentId={contentId} code={trimmed} lang={lang} collapsible={collapsible} expanded={expanded} onToggle={() => setExpanded(value => !value)} />}
+          extraActions={sourceActions ? <CodeSourceActions contentId={contentId} code={trimmed} lang={lang} collapsible={collapsible} expanded={expanded} onToggle={() => setExpanded(value => !value)} /> : undefined}
         /> : <div className={css.banner} data-code-block-banner>
           <div className={css.infostring}>{lang ?? ''}</div>
           <div className={css.action}>

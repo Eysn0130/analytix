@@ -11,7 +11,7 @@ import {
   TurnItem
 } from './items.js'
 import { ThreadSchema, ThreadSummarySchema } from './threads.js'
-import { TurnReasoningEffortSchema, TurnStatus } from './turns.js'
+import { TurnEndReasonSchema, TurnReasoningEffortSchema, TurnStatus } from './turns.js'
 import { CostEstimateStatusSchema, CostKnownCurrenciesSchema, isConsistentCostCoverage } from './usage.js'
 
 const PublicThreadDetailUsageV1Schema = z.object({
@@ -69,6 +69,7 @@ const CaseBoundaryTurnV1Schema = z.object({
   id: z.string().min(1),
   threadId: z.string().min(1),
   status: TurnStatus,
+  endReason: TurnEndReasonSchema.optional(),
   model: z.string().optional(),
   reasoningEffort: TurnReasoningEffortSchema.optional(),
   createdAt: z.string(),
@@ -82,6 +83,11 @@ const CaseBoundaryTurnV1Schema = z.object({
   acceptedFinal: z.never().optional(),
   acceptedFinalView: AcceptedFinalPublicViewSchema.optional()
 }).strict().superRefine((turn, ctx) => {
+  if (turn.endReason && (turn.status !== 'completed' ||
+      (turn.acceptedFinalView && !['success', 'approval', 'user_input', 'resume', 'background_completion']
+        .includes(turn.acceptedFinalView.terminalReason)))) {
+    ctx.addIssue({ code: 'custom', path: ['endReason'], message: 'output cap requires completed candidate authority' })
+  }
   const acceptedItems = turn.items.filter((item) =>
     item.kind === 'assistant_text' &&
     (('acceptedFinal' in item && item.acceptedFinal !== undefined) ||
@@ -187,6 +193,7 @@ function refineAcceptedFinalHydration(
     const deliveryTurn = value.turns.find((turn) => turn.id === delivery.turnId)
     const assistantEvent = delivery.events[0]
     const assistantItem = assistantEvent?.kind === 'item_completed' ? assistantEvent.item : null
+    const terminalEvent = delivery.events[delivery.events.length - 1]
     const invalidIdentity = delivery.threadId !== value.id ||
       delivery.turnId !== reference.id ||
       delivery.publicationCommitId !== reference.digest ||
@@ -195,6 +202,8 @@ function refineAcceptedFinalHydration(
       seenTurns.has(delivery.turnId) ||
       seenCommits.has(delivery.publicationCommitId) ||
       assistantItem === null ||
+      deliveryTurn?.endReason?.kind !==
+        (terminalEvent?.kind === 'turn_completed' ? terminalEvent.endReason?.kind : undefined) ||
       JSON.stringify(assistantItem) !== JSON.stringify(reference.assistantItem)
     if (invalidIdentity) {
       ctx.addIssue({

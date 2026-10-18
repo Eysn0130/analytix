@@ -76,3 +76,19 @@ func TestLooksUTF16TextDetectsNoBOM(t *testing.T) {
 		t.Fatal("test fixture should contain NUL bytes")
 	}
 }
+
+func TestProtectedReadSelectionRetainsOriginalTerminatorsWithoutModelChrome(t *testing.T) {
+	for _, test := range []struct {
+		body       string
+		start, end int
+		expected   string
+	}{
+		{"a\r\nb\r\nc\r\n", 2, 2, "b\r\n"}, {"a\rb\rc\r", 1, 3, "a\rb\rc\r"}, {"a\n", 2, 2, ""},
+		{"", 0, 0, ""}, {"a\n", 8, 8, ""}, {"first\nsecond", 2, 2, "second"},
+	} {
+		got := OriginalReadTextSelectionV1(test.body, ReadTextView{StartLine: test.start, EndLine: test.end})
+		if got != test.expected {
+			t.Fatal("original selected newline bytes changed")
+		}
+	}
+}

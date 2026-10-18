@@ -3,6 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MarkdownTable, type MarkdownTableLabels } from './MarkdownTable'
+import { MarkdownText } from './MarkdownText'
 import type { MarkdownTableData } from './table-data'
 
 const labels: MarkdownTableLabels = { title: 'Table', copy: 'Copy table', copied: 'Copied', copyFailed: 'Copy failed', download: 'Download table', downloadFailed: 'Download failed', fullscreen: 'Fullscreen', close: 'Close table', csv: 'CSV', tsv: 'TSV', markdown: 'Markdown', exportHint: 'Export as text' }
@@ -132,3 +133,18 @@ it('exits a fullscreen format menu through actual visible links and skips hidden
   expect(document.activeElement).toBe(dialog.querySelector('a[href$="/visible"]'))
   expect(dialog.querySelector('[role="menu"]')).toBeNull()
 })
+
+
+it.each([{ columns: 3, quote: false, wide: false }, { columns: 4, quote: false, wide: true }, { columns: 4, quote: true, wide: false }])(
+  'limits the wide table hook to actual >=4-column non-quote content: %j', async ({ columns, quote, wide }) => {
+    const rows = [Array.from({ length: columns }, (_, index) => 'Header ' + index).join(' | '),
+      Array.from({ length: columns }, () => '---').join(' | '),
+      Array.from({ length: columns }, (_, index) => 'Cell ' + index).join(' | ')]
+    const text = rows.map(row => (quote ? '> ' : '') + '| ' + row + ' |').join('\n')
+    await act(async () => root.render(createElement(MarkdownText, { text, labels: {
+      table: labels, code: { copyLabel: 'Copy', copiedLabel: 'Copied' }, footnotes: 'Footnotes' } })))
+    expect(host.querySelectorAll('table')).toHaveLength(1)
+    expect(host.querySelector('.md-table-wide') !== null).toBe(wide)
+    expect(host.querySelectorAll('th')).toHaveLength(columns)
+    expect(host.querySelector('blockquote') !== null).toBe(quote)
+  })

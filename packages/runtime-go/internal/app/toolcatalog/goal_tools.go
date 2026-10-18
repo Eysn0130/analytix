@@ -18,7 +18,7 @@ func GoalAndTodoToolSchemas() []domainmodel.ToolSchema {
 		{
 			Name:        "create_goal",
 			Description: "Create a goal only when explicitly requested by the user or system/developer instructions; fails if an active goal already exists.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"objective":{"type":"string"},"token_budget":{"type":"integer"},"tokenBudget":{"type":"integer"},"strict_completion":{"type":"boolean"},"strictCompletion":{"type":"boolean"}},"required":["objective"],"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"objective":{"type":"string"},"max_goal_rounds":{"type":"integer","minimum":1,"maximum":9007199254740991},"maxGoalRounds":{"type":"integer","minimum":1,"maximum":9007199254740991},"token_budget":{"type":"integer"},"tokenBudget":{"type":"integer"},"strict_completion":{"type":"boolean"},"strictCompletion":{"type":"boolean"}},"required":["objective"],"additionalProperties":false}`),
 			Source:      "goal",
 		},
 		{
@@ -41,13 +41,13 @@ func GoalAndTodoToolSchemas() []domainmodel.ToolSchema {
 		},
 		{
 			Name:        "todo_write",
-			Description: "Replace the current thread todo list after strict lifecycle validation. At most one item may be in_progress; failed/canceled audit records cannot be created, retried, or deleted through replacement.",
+			Description: "Replace the current thread todo list after strict lifecycle validation. Multiple items may be in_progress when work is running in parallel; failed/canceled audit records cannot be created, retried, or deleted through replacement.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"todos":{"type":"array","maxItems":200,"items":{"type":"object","properties":{"id":{"type":"string"},"content":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","failed","canceled"]},"statusReasonCode":{"type":"string","enum":["execution_failed","dependency_failed","verification_failed","timeout","tool_failed","subagent_failed","runtime_failed","user_canceled","parent_canceled","runtime_canceled","superseded"]},"note":{"type":"string"}},"required":["content","status"],"additionalProperties":false}}},"required":["todos"],"additionalProperties":false}`),
 			Source:      "todo",
 		},
 		{
 			Name:        "todo_ops",
-			Description: "Apply ordered todo operations to the current thread todo list. Supports append/start/done/fail/cancel/retry/drop/note; fail/cancel require a fixed statusReasonCode and retry is the only way to reopen failed/canceled work.",
+			Description: "Apply ordered todo operations to the current thread todo list. Supports append/start/done/fail/cancel/retry/drop/note and preserves other in_progress items; fail/cancel require a fixed statusReasonCode and retry is the only way to reopen failed/canceled work.",
 			Parameters:  todoOpsParameters,
 			Source:      "todo",
 		},

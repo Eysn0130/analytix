@@ -282,8 +282,8 @@ analytix_cache_validate_directory() {
 analytix_cache_validate_private_tree() {
   local target="$1"
   local regular_mode="$2"
-  local entry entry_mode entry_device entry_uid entry_nlink
-  local -a entries
+  local entry entry_stat entry_mode entry_device entry_uid entry_nlink
+  local -a entries entry_fields
   [ -d "$target" ] || return 0
   entries=("$target"/**/*(DN))
   for entry in "${entries[@]}"; do
@@ -292,14 +292,22 @@ analytix_cache_validate_private_tree() {
       analytix_cache_fail "Analytix private cache output has an unsafe identity: $entry"
       return 1
     fi
-    if ! entry_device=$(/usr/bin/stat -f '%d' "$entry") ||
-      [ "$entry_device" != "$analytix_cache_mount_device_id" ] ||
-      ! entry_uid=$(/usr/bin/stat -f '%u' "$entry") ||
+    # Read one lstat record per entry; reject malformed fields before using them.
+    if ! entry_stat=$(/usr/bin/stat -f '%d:%u:%Lp:%l' "$entry") ||
+      [[ ! "$entry_stat" =~ '^[0-9]+:[0-9]+:[0-7]+:[0-9]+$' ]]; then
+      analytix_cache_fail "Cannot resolve Analytix private cache output metadata: $entry"
+      return 1
+    fi
+    entry_fields=("${(@s.:.)entry_stat}")
+    entry_device="${entry_fields[1]}"
+    entry_uid="${entry_fields[2]}"
+    entry_mode="${entry_fields[3]}"
+    entry_nlink="${entry_fields[4]}"
+    if [ "$entry_device" != "$analytix_cache_mount_device_id" ] ||
       [ "$entry_uid" != "$analytix_cache_effective_uid" ]; then
       analytix_cache_fail "Analytix private cache output escaped its owner or device: $entry"
       return 1
     fi
-    entry_mode=$(/usr/bin/stat -f '%Lp' "$entry") || return 1
     if [ -d "$entry" ]; then
       if [ "$entry_mode" != '700' ]; then
         analytix_cache_fail "Analytix private cache output directory must use mode 0700: $entry"
@@ -311,8 +319,7 @@ analytix_cache_validate_private_tree() {
         return 1
       fi
     elif [ "$regular_mode" = 'native' ]; then
-      if ! entry_nlink=$(/usr/bin/stat -f '%l' "$entry") ||
-        [ "$entry_nlink" != '1' ]; then
+      if [ "$entry_nlink" != '1' ]; then
         analytix_cache_fail "Analytix native cache file must have one link: $entry"
         return 1
       fi

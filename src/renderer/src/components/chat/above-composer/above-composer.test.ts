@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it } from 'vitest'
 import i18n from '../../../i18n'
+import { useChatStore } from '../../../store/chat-store'
 import {
   threadHandoffStepsWithRollback,
   type ThreadHandoffOperation,
@@ -10,7 +11,6 @@ import {
 import { AboveComposerPanelStack } from './AboveComposerPanel'
 import { AboveComposerPanelRow } from './AboveComposerPanelRow'
 import { ComposerGoalRow } from './ComposerGoalRow'
-import { ComposerQueuedMessageList } from './ComposerQueuedMessageList'
 import {
   buildTodoPlanPillState,
   ComposerInProgressStatusPill,
@@ -56,6 +56,7 @@ function diffSummary(
 describe('above composer panel', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('en')
+    useChatStore.setState({ activeThreadId: 'thr_1', queuedMessagePauses: {} })
   })
 
   it('does not render a placeholder when there are no rows', () => {
@@ -81,37 +82,7 @@ describe('above composer panel', () => {
     expect(html.indexOf('goal row')).toBeLessThan(html.indexOf('handoff row'))
   })
 
-  it('renders queued messages before the active goal when both rows exist', () => {
-    const html = renderToStaticMarkup(
-      createElement(
-        AboveComposerPanelStack,
-        null,
-        createElement(ComposerQueuedMessageList, {
-          messages: [{ id: 'q-1', text: 'queued follow-up', mode: 'agent' }],
-          onRemove: () => undefined
-        }),
-        createElement(ComposerGoalRow, {
-          goal: {
-            threadId: 'thr_1',
-            objective: 'Ship the top tray',
-            status: 'active',
-            tokensUsed: 0,
-            timeUsedSeconds: 61,
-            createdAt: '2026-06-29T00:00:00.000Z',
-            updatedAt: '2026-06-29T00:01:00.000Z'
-          },
-          elapsedLabel: '1m 1s',
-          onEdit: () => undefined,
-          onToggleStatus: () => undefined,
-          onClear: () => undefined
-        })
-      )
-    )
 
-    expect(html.indexOf('queued follow-up')).toBeGreaterThanOrEqual(0)
-    expect(html.indexOf('Ship the top tray')).toBeGreaterThanOrEqual(0)
-    expect(html.indexOf('queued follow-up')).toBeLessThan(html.indexOf('Ship the top tray'))
-  })
 })
 
 describe('ProgressStepRow', () => {

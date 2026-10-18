@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	eventlog "analytix.local/runtime-go/internal/adapters/outbound/eventlog"
 	finalauthorityadapter "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
 	contextepochapp "analytix.local/runtime-go/internal/app/contextepoch"
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
@@ -2365,6 +2366,7 @@ func TestDurableEventStoreSteeringAdmissionRejectsUnsafeTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create production store: %v", err)
 	}
+	configureDurableSteeringAuthority(t, store)
 	thread, err := store.CreateThread(map[string]any{
 		"title":     "Steering rejects",
 		"workspace": "/workspace/analytix",
@@ -4356,4 +4358,127 @@ func waitForDurableStoreCondition(t *testing.T, ok func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("durable store condition was not met")
+}
+
+// The injected cut occurs after real marked-primary staging but before the
+// real atomic event writer. The restarted owner must not publish this child.
+func TestForkEventBoundaryInterruptedCreationRemainsUnavailable(t *testing.T) {
+	store, err := newForkBoundaryStoreV1(t, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := workspacetest.New(t)
+	source, err := store.CreateThread(map[string]any{"title": "Synthetic interrupted fork", "workspace": workspace, "model": "synthetic-model"}, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := stringField(source, "id")
+	parent := appendForkLoggedParentV1(t, store, id, "turn_seed_crash", workspace)
+	finishForkFixtureV1(t, store, parent.Context)
+	cut := false
+	store.beforePersistEventHook = func() { cut = true; panic("synthetic fork creation cut") }
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("creation cut absent")
+			}
+		}()
+		_, _ = store.ForkThread(id, map[string]any{})
+	}()
+	store.beforePersistEventHook = nil
+	if !cut {
+		t.Fatal("real atomic append seam not reached")
+	}
+	children, err := os.ReadDir(store.threadsDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := ""
+	for _, entry := range children {
+		if entry.Name() != id {
+			child = entry.Name()
+		}
+	}
+	if child == "" {
+		t.Fatal("marked primary missing after cut")
+	}
+	if _, err := store.GetThread(child); !errors.Is(err, errForkCreationPendingV1) {
+		t.Fatalf("unclosed child usable: %v", err)
+	}
+	listed, err := store.ListThreads(false, false, true, "")
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("pending child poisoned inventory or became visible: count=%d err=%v", len(listed), err)
+	}
+	reopened, err := newForkBoundaryStoreV1(t, store.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.GetThread(child); !errors.Is(err, errForkCreationPendingV1) {
+		t.Fatal("restart guessed seed from primary")
+	}
+	listed, err = reopened.ListThreads(false, false, true, "")
+	if err != nil || len(listed) != 1 {
+		t.Fatal("restart published incomplete child")
+	}
+	idle, err := reopened.RuntimeTurnsIdleForMaintenance(context.Background())
+	if err != nil || !idle {
+		t.Fatalf("pending creation blocks unrelated idle maintenance: %v", err)
+	}
+}
+
+func TestForkEventBoundaryCommittedAppendErrorUsesExactReadback(t *testing.T) {
+	store, err := newForkBoundaryStoreV1(t, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := workspacetest.New(t)
+	source, err := store.CreateThread(map[string]any{"title": "Synthetic committed fork", "workspace": workspace, "model": "synthetic-model"}, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := stringField(source, "id")
+	parent := appendForkLoggedParentV1(t, store, id, "turn_seed_commit", workspace)
+	finishForkFixtureV1(t, store, parent.Context)
+	calls := 0
+	store.forkCreationAtomicAppend = func(id string, events []map[string]any, frontier eventlog.EventLogFrontierV1) error {
+		calls++
+		if err := store.eventLog.AppendEventsAtomicAtFrontier(id, events, frontier); err != nil {
+			return err
+		}
+		return &eventlog.AtomicAppendError{Committed: true, Cause: errors.New("synthetic error after real commit")}
+	}
+	fork, err := store.ForkThread(id, map[string]any{})
+	if err != nil || calls != 1 {
+		t.Fatalf("committed error allocated/reappended: calls=%d err=%v", calls, err)
+	}
+	replay, err := store.LoadEventsSince(stringField(fork, "id"), 0)
+	if err != nil || len(replay.Events) < 3 {
+		t.Fatal("complete real bundle missing")
+	}
+	seed, end, err := threadapp.ReadForkCreatedSeedV1(fork, replay.Events)
+	if err != nil || end != len(replay.Events) || seed == nil {
+		t.Fatalf("same complete bundle readback failed: %v", err)
+	}
+	if fork[forkCreationPendingFieldV1] != nil {
+		t.Fatal("committed child remained pending")
+	}
+	// Simulate the cut after log commit and before marker removal, using the
+	// exact producer digest. A later normal event must not invalidate E.
+	digest, _ := forkCreationEventsDigestV1(replay.Events)
+	marked := cloneMap(fork)
+	marked[forkCreationPendingFieldV1] = map[string]any{"schemaVersion": float64(1), "threadId": stringField(fork, "id"), "parentThreadId": id, "createdAt": fork["createdAt"], "endSeq": float64(end), "eventBundleSHA256": digest}
+	body, _ := json.Marshal(marked)
+	if err := os.WriteFile(store.threadPath(stringField(fork, "id")), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.RecordEvent(map[string]any{"kind": "thread_updated", "threadId": stringField(fork, "id"), "status": "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := newForkBoundaryStoreV1(t, store.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.GetThread(stringField(fork, "id")); err != nil {
+		t.Fatalf("valid immutable creation prefix invalidated by later event: %v", err)
+	}
 }

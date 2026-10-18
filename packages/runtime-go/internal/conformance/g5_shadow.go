@@ -423,10 +423,8 @@ type G5DesktopSovereigntySourceFiles struct {
 	RendererModelUsage        string `json:"rendererModelUsage"`
 	RendererModelUsageTest    string `json:"rendererModelUsageTest"`
 	RendererSettingsAgents    string `json:"rendererSettingsAgents"`
-	RendererLlmDebug          string `json:"rendererLlmDebug"`
 	RendererKeyboardSettings  string `json:"rendererKeyboardShortcutSettings"`
 	RendererVoiceDictation    string `json:"rendererVoiceDictation"`
-	RendererInitialUsage      string `json:"rendererInitialUsageHeatmap"`
 	PreloadRuntimeRequestTest string `json:"preloadRuntimeRequestTest"`
 	PreloadSseBridgeTest      string `json:"preloadSseBridgeTest"`
 }
@@ -484,7 +482,6 @@ type G5DesktopSovereigntyOutput struct {
 	RendererUsageRuntimeClientUnitEvidencePresent         bool `json:"rendererUsageRuntimeClientUnitEvidencePresent"`
 	RendererSettingsReadFacadeCoversKeyboardShortcuts     bool `json:"rendererSettingsReadFacadeCoversKeyboardShortcuts"`
 	RendererSettingsReadFacadeCoversSpeechToText          bool `json:"rendererSettingsReadFacadeCoversSpeechToText"`
-	RendererSettingsReadFacadeCoversUsageModelLabel       bool `json:"rendererSettingsReadFacadeCoversUsageModelLabel"`
 	RendererSettingsReadFacadePreservesSettingsEvent      bool `json:"rendererSettingsReadFacadePreservesSettingsChangedEvent"`
 	RendererSettingsReadFacadeRejectsDirectBridge         bool `json:"rendererSettingsReadFacadeRejectsDirectBridge"`
 	RendererSettingsReadFacadeScanGuardPresent            bool `json:"rendererSettingsReadFacadeScanGuardPresent"`
@@ -668,7 +665,6 @@ type G5RendererUsageRuntimeClientMatrix struct {
 	DailyUsageSourceUsesRuntimeClient   bool     `json:"dailyUsageSourceUsesRuntimeClient"`
 	ModelUsageSourceUsesRuntimeClient   bool     `json:"modelUsageSourceUsesRuntimeClient"`
 	TokenEconomySourceUsesRuntimeClient bool     `json:"tokenEconomySourceUsesRuntimeClient"`
-	LlmDebugSourceUsesRuntimeClient     bool     `json:"llmDebugSourceUsesRuntimeClient"`
 	SourceRejectsDirectBridgeBypass     bool     `json:"sourceRejectsDirectBridgeBypass"`
 	UsageUnitEvidencePresent            bool     `json:"usageUnitEvidencePresent"`
 	ScanGuardPresent                    bool     `json:"scanGuardPresent"`
@@ -681,7 +677,6 @@ type G5RendererSettingsReadFacadeMatrix struct {
 	SettingsReaders                          []string `json:"settingsReaders"`
 	KeyboardShortcutSourceUsesSettingsClient bool     `json:"keyboardShortcutSourceUsesSettingsClient"`
 	SpeechToTextSourceUsesSettingsClient     bool     `json:"speechToTextSourceUsesSettingsClient"`
-	UsageHeatmapSourceUsesSettingsClient     bool     `json:"usageHeatmapSourceUsesSettingsClient"`
 	SettingsChangedEventPreserved            bool     `json:"settingsChangedEventPreserved"`
 	SourceRejectsDirectSettingsBypass        bool     `json:"sourceRejectsDirectSettingsBypass"`
 	ScanGuardPresent                         bool     `json:"scanGuardPresent"`
@@ -3092,9 +3087,7 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 			stringInSlice("renderer-usage-runtime-client-unit-evidence", input.EvidenceIDs)
 	rendererUsageRuntimeClientCoversSettingsDiagnostics :=
 		stringInSlice("loadTokenEconomySavingsSummary", input.RendererUsageRuntimeClientMatrix.DiagnosticsLoaders) &&
-			stringInSlice("LlmDebugSettingsSection", input.RendererUsageRuntimeClientMatrix.DiagnosticsLoaders) &&
 			input.RendererUsageRuntimeClientMatrix.TokenEconomySourceUsesRuntimeClient &&
-			input.RendererUsageRuntimeClientMatrix.LlmDebugSourceUsesRuntimeClient &&
 			stringInSlice("renderer-usage-runtime-client-settings-diagnostics-evidence", input.EvidenceIDs)
 	rendererUsageRuntimeClientRejectsDirectBridge :=
 		input.RendererUsageRuntimeClientMatrix.ForbiddenDirectBridge == "window.analytix.runtime.runtimeRequest" &&
@@ -3121,11 +3114,6 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 		input.RendererSettingsReadFacadeMatrix.Facade == "rendererRuntimeClient.getSettings" &&
 			stringInSlice("useSpeechToTextEnabled", input.RendererSettingsReadFacadeMatrix.SettingsReaders) &&
 			input.RendererSettingsReadFacadeMatrix.SpeechToTextSourceUsesSettingsClient &&
-			stringInSlice("renderer-settings-read-facade-source-evidence", input.EvidenceIDs)
-	rendererSettingsReadFacadeCoversUsageModelLabel :=
-		input.RendererSettingsReadFacadeMatrix.Facade == "rendererRuntimeClient.getSettings" &&
-			stringInSlice("InitialSessionUsageHeatmapView", input.RendererSettingsReadFacadeMatrix.SettingsReaders) &&
-			input.RendererSettingsReadFacadeMatrix.UsageHeatmapSourceUsesSettingsClient &&
 			stringInSlice("renderer-settings-read-facade-source-evidence", input.EvidenceIDs)
 	rendererSettingsReadFacadePreservesSettingsChangedEvent :=
 		input.RendererSettingsReadFacadeMatrix.SettingsChangedEventPreserved &&
@@ -3247,7 +3235,6 @@ func replayG5DesktopSovereignty(input G5DesktopSovereigntyCase) G5DesktopSoverei
 		RendererUsageRuntimeClientUnitEvidencePresent:         rendererUsageRuntimeClientUnitEvidencePresent,
 		RendererSettingsReadFacadeCoversKeyboardShortcuts:     rendererSettingsReadFacadeCoversKeyboardShortcuts,
 		RendererSettingsReadFacadeCoversSpeechToText:          rendererSettingsReadFacadeCoversSpeechToText,
-		RendererSettingsReadFacadeCoversUsageModelLabel:       rendererSettingsReadFacadeCoversUsageModelLabel,
 		RendererSettingsReadFacadePreservesSettingsEvent:      rendererSettingsReadFacadePreservesSettingsChangedEvent,
 		RendererSettingsReadFacadeRejectsDirectBridge:         rendererSettingsReadFacadeRejectsDirectBridge,
 		RendererSettingsReadFacadeScanGuardPresent:            rendererSettingsReadFacadeScanGuardPresent,

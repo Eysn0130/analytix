@@ -910,12 +910,73 @@ SOFTWARE.
 
 ## DeepSeek Harness presentation leaves
 
-Selected renderer-only Markdown, code, disclosure and interaction primitives
-are ported and adapted from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+Selected renderer Markdown, code, disclosure, central chat composition,
+capped process-group scrolling, public searchable folding, main Conversation width controls, generated Office delivery cards/groups and generation process rows, submitted readonly Plan history cards/card CSS, tool/card, turn/status, question and approval presentation primitives, and the
+selected exact Footer Fork event-prefix semantics implemented in the existing
+Analytix Go owners, single-message rating actions, optional feedback modal/category
+text, selected Like/Dislike/Warning/CheckCircle artwork and canonical-log feedback
+semantics, selected Schedule create/turn cards, native-rule right task-detail
+presentation, current-catalog adaptations and Clock Regular artwork, selected Subagent
+Started/detail rows and Todo failure-input/parallel-active summary presentation, selected Present declaration/process cards, grouped file deliveries, per-file application menus and Reveal controls, are ported or semantically adapted from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 at commit `5badb15009ae1756c3afe0ae0cef1faafc290ccc`. Exact source and destination bindings are recorded in
-`docs/analytix/upstreams/deepseek-harness-presentation-sync.md`. The DSH
-runtime, session store, raw tool payloads, private reasoning, artwork and
-provider authority are not included.
+[presentation source ledger](docs/analytix/upstreams/deepseek-harness-presentation-sync.md),
+including its [selected Schedule source record](docs/analytix/upstreams/deepseek-harness-presentation-sync.md#schedule-presentation-source-candidate-2026-10-11)
+and [selected Subagent/Todo source record](docs/analytix/upstreams/deepseek-harness-presentation-sync.md#subagent-and-todo-local-integration-2026-10-11). The DSH
+runtime, session store, raw tool payloads, private reasoning content and
+provider authority are not included. The selected non-brand utility Browse icon
+source is also adapted: `BrowseOutlineArtwork` from `icons/shared-artwork.tsx`
+(blob `ab7b4083246dbb3c8ec4be78c6ecae89e9821532`) and its Regular 14px wrapper
+from `icons/index.tsx` (blob `d22cbdd06d50289f15154996564b250b2af4163a`),
+at the same fixed commit. The selected Plan/ListPen five-path and AgentPreset
+four-path artwork and their Regular wrappers from that same `icons/index.tsx`
+blob are also included for process-group headers. The same `icons/index.tsx`
+blob supplies the selected DeliverDoc five-path artwork and Regular wrapper
+for Office generation rows. Selected file contour/fold, spreadsheet-grid and
+W/P/MD type paths from `FileTypeIcon.tsx` (blob
+`1fbcee6750c0870029a9ac37710aa1ed3ce06b44`), with only their category colors
+from `FileTypeIcon.module.css` (blob
+`4de4d946e08ac80e26883e3be91752f99a8e53fa`), are shared by Office and
+submitted Markdown Plan cards through Analytix `DeliverableIcons.tsx`.
+Selected local palette fallbacks come from `packages/client/ui-theme/src/styles/design-platform.css`
+(blob `eb67869c92bf53162dbd443c8a0e4fe8baabb11b`). All source paths above
+are under `packages/client/ui-primitives/src/` unless otherwise stated and
+use the same fixed commit. No separate artwork license or third-party
+attribution was found for the selected inline paths; the scoped license
+review and exact destination bindings are recorded in the provenance ledger.
+
+Submitted Plan history selects only ordered cards/exact-call Open from
+`packages/client/ui-plan/src/client/PlanCard.tsx` (blob
+`e629b024c3a8e67991fa01d37a033c0d2d99bd1b`) and the card subset of
+`PlanPreview.module.css` (blob `6344ddeb79deca18d1f9a384c974d61d164c5387`).
+No upstream Plan runtime, review store or auto-open owner is included.
+
+Selected Present controls also adapt `packages/client/ui-open-in-app/src/client/OpenTargetButton.tsx`
+(blob `93d4c6762545b5f99dd03c755069daf7f5ae0f8c`) and selected labels from
+its `locales.ts` (blob `2e8a9204aa4aa5062a02d889460b3fea89f37676`) and
+`packages/client/ui-deliverables/src/client/locales.ts` (blob
+`6a1a8813d3f36181590488b6270c3d5f52e864cb`). The selected FolderOpen
+Regular 1px paths from the already listed `icons/index.tsx` blob are included.
+The [Present source checkpoint](docs/analytix/upstreams/deepseek-harness-presentation-sync.md#present-declaration-file-actions-and-local-integration-2026-10-11)
+records the exact card/row/order/CSS mapping, local source integration and
+bounded renderer-build evidence.
+
+The running indicator additionally includes the fixed-pin
+`packages/client/ui-chat/src/client/chat/RunningWhaleTail.tsx` (blob
+`d528c7502a0d51f50575ba1a152b488e39e493b9`), the unchanged APNG
+`running-whale@2x.png` (blob `daa680536c0a2b9044adc5b310a396deb0308a80`),
+and only the running-indicator subset of `ChatView.module.css` (blob
+`ff121998a6ba3dad6df5583200750642066abea9`). Their local destinations are
+`RunningWhaleTail.tsx`, `running-whale@2x.png` and `TurnState.module.css`
+under `src/renderer/src/components/chat/presentation/chat/turn-state/`.
+The exact source, adaptations and validation boundary are recorded in the
+[running indicator intake](docs/analytix/upstreams/code-reuse-provenance.md#dsh-running-indicator-source-intake--2026-10-13-utc).
+
+These selected source paths retain the upstream MIT source notice below.
+`CodeFileIcon`, `CODE_FILE_ARTWORK`, code-language icons and the
+`ui-primitives` package's `simple-icons` dependency/artwork are excluded.
+Other artwork, brand assets, fonts, images, icon packages and animated pets
+remain excluded; this bounded inclusion makes no independent original-
+authorship, trademark-rights or rights warranty.
 
 ```text
 MIT License
@@ -940,3 +1001,109 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Temporal calendar dependency (Schedule rules)
+
+`@js-temporal/polyfill` 0.5.1 is a regular npm production dependency used only
+by the Main Schedule calendar adapter. It uses the ISC license; its unmodified
+license notice follows. Its transitive dependency `jsbi` 4.3.2 uses Apache-2.0
+and retains its package `LICENSE` and copyright notice. Package/license inclusion
+remains subject to the normal artifact admission checks; no packaged claim is made.
+
+```text
+Copyright 2017, 2018, 2019, 2020 ECMA International
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+```
+
+The selected DSH Schedule timezone, cron and calendar functions are adapted from
+`packages/schedule/schedule/src/domain.ts` at the existing fixed pin
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`. They inherit the complete MIT notice
+under “DeepSeek Harness presentation leaves” above.
+
+
+## Additional selected DSH History and Excel candidate sources
+
+The existing fixed DeepSeek Harness MIT notice above also covers the selected
+History adaptation from `packages/client/ui-schedule/src/client/DeliveryHistory.tsx`
+(blob `2e6c1f3a3679fc4d25522efa26d26bc197a0d22f`) and History subset of
+`TaskManagerPage.module.css` (blob `25b573fcd4c84b938632d9ed90fb4a48ed2ca8b7`).
+See the [source integration checkpoint](docs/analytix/upstreams/deepseek-harness-presentation-sync.md#schedule-original-session-combination-checkpoint-2026-10-12-utc).
+
+The selected Excel parser/style/locale sources under
+`packages/client/ui-sidebar-documentpreview/src/client/excel/` retain that same
+pin and MIT source notice, with exact blobs/destinations in the
+[intake ledger](docs/analytix/upstreams/code-reuse-provenance.md#dsh-excel-parser-and-viewer-source-intake--2026-10-12-utc).
+FortuneSheet's full original MIT notice is additionally retained at
+[src/renderer/src/components/file-preview/excel/licenses/FortuneSheet.txt](src/renderer/src/components/file-preview/excel/licenses/FortuneSheet.txt).
+This source preparation has not installed or packaged FortuneSheet, ExcelJS or
+SheetJS and does not establish dependency or artifact admission completion.
+
+
+## Records overlay and current bounded candidate
+
+The selected Records marker and composer-seat adaptation retains the existing
+fixed DeepSeek Harness MIT notice. Its exact source objects and the current
+Overlay/media/logical-usage/Settings validation boundary are recorded in the
+[current candidate checkpoint](docs/analytix/upstreams/deepseek-harness-presentation-sync.md#overlay-media-logical-usage-and-settings-candidate-2026-10-12-utc).
+This batch adds no dependency, font, icon package or third-party license. The
+separate Excel preparation above remains outside this batch's source evidence.
+
+
+## Fixed ExcelJS patch source preparation
+
+The selected local ExcelJS4.4.0 patch retains the fixed DeepSeek Harness MIT
+adaptation notice above and the original ExcelJS license below. Official
+registry source bytes were inspected without package execution; normal
+installation, transitive notices and packaged artifact admission remain pending.
+
+The MIT License (MIT)
+
+Copyright (c) 2014-2019 Guyon Roche
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## SuperDoc 2.24.0 / React wrapper 2.19.0
+
+The published SuperDoc package retains this upstream NOTICE:
+
+```text
+SuperDoc is licensed under AGPL-3.0 or a separate commercial agreement. See LICENSE.
+
+SuperDoc 2 depends on the separately published @superdoc/docx-engine package.
+The SuperDoc npm tarball does not contain the engine implementation or its
+license files. The exact engine version is declared in package.json.
+
+The engine package carries its own license and notices:
+https://docs.superdoc.dev/resources/docx-engine-license
+```
+
+The separately published proprietary engine retains its own license and
+THIRD_PARTY_NOTICES in the dependency. This integration does not describe the
+complete runtime as open source.

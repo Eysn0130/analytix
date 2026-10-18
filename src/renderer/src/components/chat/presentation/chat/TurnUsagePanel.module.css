@@ -1,0 +1,199 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+/* Icon-row Turn-usage pill (data icon + turn total); its click-open dialog
+   wears the shared stat-dialog.module.css skin. */
+
+.root {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* Adjacent stat pills (usage then time) rebate part of their combined internal
+   padding so the pair reads as one cluster inside the row's 8px flex gap,
+   while keeping 2px clear between their hover backgrounds. */
+.root + .root {
+  margin-left: -6px;
+}
+
+/* The information pills use the action icons' resting color. */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: calc(28px + var(--dsh-content-font-delta, 0px));
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  font-variant-numeric: tabular-nums;
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* A narrow column trims the label to an ellipsis instead of overflowing the
+   pill; the data glyph never shrinks. */
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trigger svg {
+  width: calc(15px + var(--dsh-content-font-delta, 0px));
+  height: calc(15px + var(--dsh-content-font-delta, 0px));
+  flex: none;
+}
+
+.trigger:hover,
+.trigger[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Narrow viewport: the pills collapse to bare icons with the sibling
+   `.action` geometry (28px circle, 6px padding, centered glyph); the
+   label-padding rebate no longer applies, so the pair keeps the row's plain
+   8px rhythm. The dialogs keep the words. */
+@media (max-width: 480px) {
+  .trigger {
+    justify-content: center;
+    width: calc(28px + var(--dsh-content-font-delta, 0px));
+    padding: 6px;
+  }
+
+  .trigger .label {
+    display: none;
+  }
+
+  .root + .root {
+    margin-left: 0;
+  }
+}
+
+/* Icon pills under the composer, each one composer-dock entry laid out by the
+   dock's flex row; 12/20 tertiary text tier with a hover-pill affordance; each
+   pill's click-open panel wears the shared stat-dialog.module.css skin. */
+
+/* Entry root and dialog anchor: shrink-wraps its pill so the panel clamp
+   measures the pill. */
+.anchor {
+  display: inline-flex;
+  min-width: 0;
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: none;
+  border-radius: 999px;
+  corner-shape: round;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: inherit;
+  white-space: nowrap;
+}
+
+.pill svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* Only the button form (a pill with dialog rows to open) invites interaction;
+   the static span form keeps the resting tertiary reading. */
+button.pill {
+  cursor: pointer;
+}
+
+button.pill:hover,
+button.pill[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sep {
+  color: var(--dsw-alias-label-caption);
+  margin: 0 6px;
+}
+
+/* Dialog heading row: the section name left, the section's headline value
+   right, both at the primary weight. */
+.title {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+/* Rule under each section heading, above its rows. */
+.titleRule {
+  margin-bottom: 10px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.titleValue {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Section-heading glyph seated left of the section name. */
+.titleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.titleLabel svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.details dt,
+.details dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.details dd {
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.details .route {
+  overflow-wrap: anywhere;
+}
+
+.reasoning {
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}

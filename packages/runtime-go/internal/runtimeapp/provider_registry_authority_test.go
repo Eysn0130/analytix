@@ -3,13 +3,18 @@ package runtimeapp
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
+	apploop "analytix.local/runtime-go/internal/app/loop"
 	providerregistryapp "analytix.local/runtime-go/internal/app/providerregistry"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainregistry "analytix.local/runtime-go/internal/domain/providerregistry"
 	secretstoreport "analytix.local/runtime-go/internal/ports/secretstore"
 	provider "analytix.local/runtime-go/internal/provider"
@@ -519,4 +524,59 @@ func writeProviderRegistryCorruptionFixtureV1(directory string, content []byte) 
 		return err
 	}
 	return os.WriteFile(filepath.Join(directory, "registry.v1.json"), content, 0o600)
+}
+
+func TestProviderRegistryPresendDiagnosticKeepsResolverFailureUnknownAndMakesZeroProviderCalls(t *testing.T) {
+	t.Parallel()
+	var posts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	dataDir := t.TempDir()
+	seedProviderRegistryExecutionAuthorityV1(t, dataDir, "synthetic-diagnostic-provider", upstream.URL+"/v1",
+		[]string{"synthetic-diagnostic-model"}, "synthetic-diagnostic-model", "synthetic-diagnostic-credential")
+	ctx := context.Background()
+	authority, err := openProviderRegistryAuthorityV1(ctx, dataDir)
+	if err != nil {
+		t.Fatal("open synthetic Provider Registry authority")
+	}
+	defer authority.Close()
+	resolver := newProviderRegistryExecutionResolverV1(authority.Manager())
+	intent, err := resolver.ResolveTurnIntent(ctx, provider.TurnExecutionInput{})
+	if err != nil || intent.Config.BaseURL != upstream.URL+"/v1" || intent.Config.APIKey != "" {
+		t.Fatal("synthetic Registry intent did not resolve the connected loopback endpoint")
+	}
+	response, err := upstream.Client().Get(intent.Config.BaseURL)
+	if err != nil {
+		t.Fatal("synthetic loopback endpoint is unavailable")
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatal("synthetic loopback endpoint did not return GET 200")
+	}
+	var resolverErr error
+	_, err = apploop.StreamProviderWithRetry(ctx, apploop.ProviderStreamInput{
+		Provider: provider.NewHTTPProviderClient(upstream.Client()), OrdinaryEffect: true,
+		Request: domainmodel.Request{ProviderID: intent.ProviderID, Model: intent.Model, BaseURL: intent.Config.BaseURL},
+		Callbacks: apploop.ProviderStreamCallbacks{
+			AcquireProviderAttempt: func(ctx context.Context, _ int) (context.Context, func(), error) {
+				return ctx, func() {}, nil
+			},
+			PrepareProviderAttempt: func(ctx context.Context, _ int, _ domainmodel.Request) (domainmodel.Request, apploop.ProviderAttemptSettlement, error) {
+				_, resolverErr = resolver.ResolveTurnExecution(ctx, provider.TurnExecutionInput{RequestModel: "synthetic-unlisted-model"})
+				return domainmodel.Request{}, nil, resolverErr
+			},
+		},
+	})
+	stage, cause := apploop.ProviderFailureDiagnosticV1(err)
+	if resolverErr == nil || !errors.Is(err, resolverErr) || stage != "prepare" || cause != "unknown" || posts.Load() != 0 {
+		t.Fatalf("synthetic resolver diagnostic = %q/%q, model POSTs=%d", stage, cause, posts.Load())
+	}
+	if stage, cause := apploop.ProviderFailureDiagnosticV1(resolverErr); stage != "unknown" || cause != "unknown" {
+		t.Fatalf("ordinary resolver failure classification = %q/%q", stage, cause)
+	}
 }

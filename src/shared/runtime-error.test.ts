@@ -135,3 +135,8 @@ describe('runtime public error projection', () => {
 		})
   })
 })
+
+it('keeps the fixed desktop late-too-large error without raw Host diagnostics', () => {
+  expect(parseRuntimeErrorBody(JSON.stringify({ code: 'user_input_late_reply_too_large', message: privateSentinel }), 'fallback'))
+    .toEqual({ code: 'user_input_late_reply_too_large', message: 'The late answer is too large. Edit it and submit a new attempt.' })
+})

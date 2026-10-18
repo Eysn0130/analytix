@@ -14,13 +14,15 @@ import (
 	domainidentity "analytix.local/runtime-go/internal/domain/identity"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	contextsourceport "analytix.local/runtime-go/internal/ports/contextsource"
 	identityport "analytix.local/runtime-go/internal/ports/identity"
 )
 
 type SecurityRecords struct {
-	Turn             map[string]any
-	TurnStartedEvent map[string]any
-	ThreadPatch      map[string]any
+	PrepareContextSources func(context.Context, domainsecurity.TurnSecurityContext) ([]domaincontextepoch.SourceEntry, contextsourceport.Reader, error)
+	Turn                  map[string]any
+	TurnStartedEvent      map[string]any
+	ThreadPatch           map[string]any
 }
 
 type SecurityPreparation struct {
@@ -179,11 +181,26 @@ func PrepareSecurityTransition(
 	if err != nil {
 		return SecurityPreparation{}, err
 	}
+	var sources []domaincontextepoch.SourceEntry
+	var contextReader contextsourceport.Reader
+	if records.PrepareContextSources != nil {
+		sources, contextReader, err = records.PrepareContextSources(ctx, securityContext)
+		if err != nil {
+			return SecurityPreparation{}, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return SecurityPreparation{}, err
+	}
 	prepared, err := contextepochapp.PrepareAndAttachStartRecords(ctx, contextepochapp.PrepareStartRecordsInput{
 		Thread: thread, SecurityContext: securityContext, Source: source, At: issuedAt,
+		Sources: sources, Reader: contextReader,
 		Turn: records.Turn, TurnStartedEvent: records.TurnStartedEvent, ThreadPatch: records.ThreadPatch,
 	})
 	if err != nil {
+		return SecurityPreparation{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return SecurityPreparation{}, err
 	}
 	securityContext = prepared.SecurityContext

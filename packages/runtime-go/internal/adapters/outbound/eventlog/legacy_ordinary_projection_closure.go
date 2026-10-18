@@ -20,6 +20,7 @@ const LegacyOrdinaryProjectionClosureVersion = 1
 type LegacyOrdinaryProjectionClosureInput struct {
 	Root                string
 	RestartPreservation *SemanticRestartPreservationV1
+	forkSeeds           map[string]map[string]any
 }
 
 // preflightSemanticStartupCurrentAuthorityV1 runs before any semantic content
@@ -132,6 +133,14 @@ func MigrateLegacyOrdinaryProjectionClosure(input LegacyOrdinaryProjectionClosur
 	if err := input.RestartPreservation.revalidate(context.Background(), input.Root, ""); err != nil {
 		return err
 	}
+	seeds := input.forkSeeds
+	if seeds == nil {
+		var err error
+		seeds, err = readLegacyForkHistorySeedsV1(input.Root, input.RestartPreservation)
+		if err != nil {
+			return err
+		}
+	}
 	threadsDir := filepath.Join(strings.TrimSpace(input.Root), "threads")
 	entries, err := os.ReadDir(threadsDir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -148,7 +157,7 @@ func MigrateLegacyOrdinaryProjectionClosure(input LegacyOrdinaryProjectionClosur
 			continue
 		}
 		threadDir := filepath.Join(threadsDir, entry.Name())
-		if err := closeLegacyOrdinaryProjectionDirectoryV1(threadDir, entry.Name()); err != nil {
+		if err := closeLegacyOrdinaryProjectionDirectoryV1(threadDir, entry.Name(), seeds[entry.Name()]); err != nil {
 			return fmt.Errorf("legacy ordinary projection closure ordinal %d: %w", ordinal, err)
 		}
 	}
@@ -187,9 +196,9 @@ func validatePreservedLegacyOrdinaryProjectionFixedPointV1(root string, preserve
 	return nil
 }
 
-func closeLegacyOrdinaryProjectionDirectoryV1(threadDir, threadID string) error {
+func closeLegacyOrdinaryProjectionDirectoryV1(threadDir, threadID string, seed map[string]any) error {
 	threadPath := filepath.Join(threadDir, "thread.json")
-	thread, threadChanged, err := prepareLegacyOrdinaryPrimaryClosureV1(threadPath, threadID)
+	thread, threadChanged, err := prepareLegacyOrdinaryPrimaryClosureV1(threadPath, threadID, seed)
 	if err != nil {
 		return err
 	}
@@ -214,7 +223,7 @@ func closeLegacyOrdinaryProjectionDirectoryV1(threadDir, threadID string) error 
 	return validateClosedLegacyOrdinaryDirectoryV1(threadDir, threadID)
 }
 
-func prepareLegacyOrdinaryPrimaryClosureV1(path, threadID string) (map[string]any, bool, error) {
+func prepareLegacyOrdinaryPrimaryClosureV1(path, threadID string, seed map[string]any) (map[string]any, bool, error) {
 	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
@@ -235,7 +244,7 @@ func prepareLegacyOrdinaryPrimaryClosureV1(path, threadID string) (map[string]an
 		}
 		return thread, false, nil
 	}
-	projected, changed, err := closeLegacyOrdinaryThreadItemsV1(thread, threadID)
+	projected, changed, err := closeLegacyOrdinaryThreadItemsWithSeedV1(thread, threadID, seed)
 	if err != nil {
 		return nil, false, err
 	}
@@ -246,13 +255,20 @@ func prepareLegacyOrdinaryPrimaryClosureV1(path, threadID string) (map[string]an
 }
 
 func closeLegacyOrdinaryThreadItemsV1(thread map[string]any, threadID string) (map[string]any, bool, error) {
-	projected := contracts.CloneMap(thread)
+	return closeLegacyOrdinaryThreadItemsWithSeedV1(thread, threadID, nil)
+}
+
+func closeLegacyOrdinaryThreadItemsWithSeedV1(thread map[string]any, threadID string, seed map[string]any) (map[string]any, bool, error) {
+	projected, inherited, err := restoreLegacyForkHistoryItemsV1(thread, seed)
+	if err != nil {
+		return nil, false, err
+	}
 	// A legacy ordinary snapshot has no frozen TurnSecurityContext and cannot
 	// establish continuation or execution authority after restart. Close its
 	// public lifecycle in the isolated migration stage instead of asking the
 	// runtime restore path to invent authority for an old in-flight turn.
 	// Current authority containers never reach this function.
-	changed := false
+	changed := !sameMigrationJSON(thread, projected)
 	if strings.TrimSpace(migrationStringField(projected, "status")) == "running" {
 		projected["status"] = "idle"
 		changed = true
@@ -296,7 +312,7 @@ func closeLegacyOrdinaryThreadItemsV1(thread map[string]any, threadID string) (m
 				return nil, false, errors.New("legacy ordinary thread contains an invalid item")
 			}
 			kind := strings.TrimSpace(migrationStringField(item, "kind"))
-			if kind == "tool_call" || kind == "tool_result" || kind == "execution_grant_transition" {
+			if ((kind == "tool_call" || kind == "tool_result") && !inherited[turnID]) || kind == "execution_grant_transition" {
 				changed = true
 				continue
 			}
@@ -442,4 +458,134 @@ func readClosedLegacyOrdinaryThreadV1(threadDir, threadID string) (map[string]an
 		return record, false, nil
 	})
 	return latest, err
+}
+
+// Freeze the closed creation seed before any legacy transform can erase a
+// disagreement with the primary. This is provenance for inert history only;
+// it does not preserve or mint execution/publication authority.
+func readLegacyForkHistorySeedsV1(root string, preserved *SemanticRestartPreservationV1) (map[string]map[string]any, error) {
+	seeds := map[string]map[string]any{}
+	threadsDir := filepath.Join(strings.TrimSpace(root), "threads")
+	entries, err := os.ReadDir(threadsDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return seeds, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || contracts.SafeRecordID(entry.Name()) != entry.Name() {
+			return nil, errors.New("fork history preflight found an invalid thread directory")
+		}
+		if preserved.ownsThread(entry.Name()) {
+			continue
+		}
+		dir := filepath.Join(threadsDir, entry.Name())
+		body, err := os.ReadFile(filepath.Join(dir, "thread.json"))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		thread, err := strictMigrationObject(body, 64*1024*1024)
+		if err != nil || migrationStringField(thread, "id") != entry.Name() {
+			return nil, errors.New("fork history preflight primary is invalid")
+		}
+		events, _, err := readStrictMigrationRecords(filepath.Join(dir, "events.jsonl"), func(record map[string]any, _ int, _ string) (map[string]any, bool, error) {
+			return record, false, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		seed, _, err := threadapp.ReadForkCreatedSeedV1(thread, events)
+		if err != nil {
+			return nil, errors.New("fork history creation seed is invalid")
+		}
+		if seed == nil {
+			continue
+		}
+		if _, _, err := restoreLegacyForkHistoryItemsV1(thread, seed); err != nil {
+			return nil, err
+		}
+		seeds[entry.Name()] = seed
+	}
+	return seeds, nil
+}
+
+// Only completed tools missing from an otherwise exact, ordered inherited
+// prefix can be recovered. Rebuild in seed order; never consult an ancestor's
+// latest state, overwrite changed items, or exempt later turns from closure.
+func restoreLegacyForkHistoryItemsV1(thread, seed map[string]any) (map[string]any, map[string]bool, error) {
+	projected := contracts.CloneMap(thread)
+	inherited := map[string]bool{}
+	if seed == nil {
+		return projected, inherited, nil
+	}
+	turns, ok := projected["turns"].([]any)
+	seedTurns, seedOK := seed["turns"].([]any)
+	if !ok || !seedOK || len(turns) < len(seedTurns) {
+		return nil, nil, errors.New("fork history inherited turn inventory differs from seed")
+	}
+	for index, rawSeedTurn := range seedTurns {
+		seedTurn, seedOK := rawSeedTurn.(map[string]any)
+		turn, ok := turns[index].(map[string]any)
+		if !ok || !seedOK {
+			return nil, nil, errors.New("fork history inherited turn is invalid")
+		}
+		// Older whole-thread producers retained these two execution policy
+		// values while their complete seed already excluded them. Validate
+		// only that known shape; all remaining metadata must still match raw.
+		turn, err := threadapp.NormalizeInertForkTurnPolicyV1(turn)
+		if err != nil {
+			return nil, nil, errors.New("fork history inherited turn metadata differs from seed")
+		}
+		metadata, seedMetadata := contracts.CloneMap(turn), contracts.CloneMap(seedTurn)
+		delete(metadata, "items")
+		delete(seedMetadata, "items")
+		if !sameMigrationJSON(metadata, seedMetadata) {
+			return nil, nil, errors.New("fork history inherited turn metadata differs from seed")
+		}
+		items, ok := turn["items"].([]any)
+		seedItems, seedOK := seedTurn["items"].([]any)
+		if !ok || !seedOK {
+			return nil, nil, errors.New("fork history inherited item inventory is invalid")
+		}
+		seen, next := map[string]bool{}, 0
+		for _, raw := range seedItems {
+			item, ok := raw.(map[string]any)
+			id := migrationStringField(item, "id")
+			if !ok || id == "" || seen[id] {
+				return nil, nil, errors.New("fork history seed item identity is invalid")
+			}
+			seen[id] = true
+			if next < len(items) {
+				current, ok := items[next].(map[string]any)
+				if !ok {
+					return nil, nil, errors.New("fork history inherited item is invalid")
+				}
+				if migrationStringField(current, "id") == id {
+					// Compatibility removes only the three known native promotion
+					// markers. Tool bytes and every other field still match raw.
+					inert, err := threadapp.NormalizeInertForkSteeringItemV1(current)
+					if err != nil || !sameMigrationJSON(inert, item) {
+						return nil, nil, errors.New("fork history inherited item differs from seed")
+					}
+					next++
+					continue
+				}
+			}
+			kind := migrationStringField(item, "kind")
+			if (kind != "tool_call" && kind != "tool_result") || item["status"] != "completed" {
+				return nil, nil, errors.New("fork history missing item is not a completed inert tool")
+			}
+		}
+		if next != len(items) {
+			return nil, nil, errors.New("fork history inherited item order differs from seed")
+		}
+		turn["items"] = contracts.CloneValue(seedItems)
+		turns[index] = turn
+		inherited[migrationStringField(turn, "id")] = true
+	}
+	return projected, inherited, nil
 }

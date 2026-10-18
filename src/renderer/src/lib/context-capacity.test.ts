@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatBlock } from '../agent/types'
+import type { ModelProviderModelGroup } from '@shared/analytix-api'
 import {
   buildContextCapacity,
+  resolveComposerContextWindow,
   estimateBlockTokens,
   estimateTokensFromText
 } from './context-capacity'
@@ -137,5 +139,37 @@ describe('estimateBlockTokens', () => {
         createdAt: ''
       } as unknown as ChatBlock)
     ).toBe(0)
+  })
+})
+
+
+describe('composer closure capacity identity', () => {
+  const profile = (contextWindowTokens?: number, aliases?: string[]) => ({ contextWindowTokens, aliases,
+    inputModalities: ['text' as const], outputModalities: ['text' as const], supportsToolCalling: true, messageParts: [] })
+  const groups: ModelProviderModelGroup[] = [
+    { providerId: 'one', label: 'One', modelIds: ['shared'], modelProfiles: { shared: profile(4096, ['alias']), unknown: profile() } },
+    { providerId: 'two', label: 'Two', modelIds: ['shared'], modelProfiles: { shared: profile(8192) } }
+  ]
+  it('uses only the selected provider profile, including its aliases', () => {
+    expect(resolveComposerContextWindow({ model: 'shared', providerId: 'one', groups })).toBe(4096)
+    expect(resolveComposerContextWindow({ model: 'shared', providerId: 'two', groups })).toBe(8192)
+    expect(resolveComposerContextWindow({ model: 'alias', providerId: 'one', groups })).toBe(4096)
+    expect(resolveComposerContextWindow({ model: 'shared', providerId: 'missing', groups })).toBeUndefined()
+  })
+  it('never borrows a runtime denominator from a different provider or model', () => {
+    const runtimeModel = { id: 'shared', providerId: 'two', contextWindowTokens: 32000 }
+    expect(resolveComposerContextWindow({ model: 'unknown', providerId: 'one', groups, runtimeModel })).toBeUndefined()
+    expect(resolveComposerContextWindow({ model: 'unknown', providerId: 'two', groups, runtimeModel })).toBeUndefined()
+    expect(resolveComposerContextWindow({ model: 'auto', providerId: 'one', groups, runtimeModel })).toBeUndefined()
+    expect(resolveComposerContextWindow({ model: 'auto', groups, runtimeModel })).toBe(32000)
+  })
+  it('accepts matched runtime aliases but hides missing or invalid capacity', () => {
+    const noCapacity = [{ ...groups[0], modelProfiles: { shared: profile(undefined, ['alias']) } }]
+    expect(resolveComposerContextWindow({ model: 'alias', providerId: 'one', groups: noCapacity,
+      runtimeModel: { id: 'shared', providerId: 'one', contextWindowTokens: 16000 } })).toBe(16000)
+    for (const value of [undefined, 0, -1, Infinity, NaN]) {
+      expect(resolveComposerContextWindow({ model: 'alias', providerId: 'one', groups: noCapacity,
+        runtimeModel: { id: 'shared', providerId: 'one', contextWindowTokens: value } })).toBeUndefined()
+    }
   })
 })

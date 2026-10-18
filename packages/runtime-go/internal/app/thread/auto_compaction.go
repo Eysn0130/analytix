@@ -1,6 +1,7 @@
 package thread
 
 import (
+	controlapp "analytix.local/runtime-go/internal/app/control"
 	"context"
 	"errors"
 	"strings"
@@ -10,6 +11,7 @@ import (
 )
 
 type AutoCompactionInputV1 struct {
+	Reservation         *controlapp.ForegroundReservation
 	ThreadID            string
 	Prompt              string
 	ContextWindowTokens int
@@ -49,7 +51,7 @@ func (s *Service) AutoCompactBeforeTurnV1(ctx context.Context, input AutoCompact
 	if result.BeforeTokens < result.Thresholds.SoftThresholdTokens {
 		return result, nil
 	}
-	response, err := s.compact(ctx, threadID, "automatic_context_threshold", true)
+	response, err := s.compact(ctx, threadID, "automatic_context_threshold", true, input.Reservation)
 	if err != nil {
 		// A protected case archive is an additive capability, not a global
 		// turn-start prerequisite. The raw preflight runs before the host has

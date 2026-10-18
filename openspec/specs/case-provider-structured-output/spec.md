@@ -68,15 +68,76 @@ Every provider family's streamed or non-streamed tool call SHALL be reconstructe
 - **THEN** execution is rejected identically across all endpoint families
 
 ### Requirement: Provider Reasoning Is Not A Product Event
-Reasoning/thinking tokens and signatures SHALL be treated as provider-protocol internals, SHALL NOT be sent to product SSE/history or logs, and SHALL NOT affect claim support.
+Reasoning/thinking tokens and signatures SHALL be treated as provider-protocol
+internals, SHALL NOT be sent to generic product SSE/events, durable history or
+logs, and SHALL NOT affect claim support. A provider adapter MAY emit private
+process-local framing only for actual plaintext native block boundaries for
+the protected completed-block sink in `case-claim-publication-gate`. Such
+framing SHALL be excluded from generic serialization, stored result chunks,
+provider input and public stream events.
+
+Private frames SHALL carry the actual physical attempt and native source
+index or ID, with the logical Provider call sequence assigned by the host.
+Adapters SHALL NOT synthesize identities from markup, summaries, deltas or
+tool calls. Duplicate, mismatched, reused, missing or cross-type native source
+identities SHALL invalidate further framing for that source in the physical
+attempt; a later start SHALL NOT revive its open builder. A source-exact copy
+completed by a real matching native end before a later conflict MAY retain
+its bounded local availability, without accepting any later bytes into that
+copy. Opaque encrypted/redacted items SHALL NOT create an
+empty plaintext completion. Genuine empty native plaintext start/end is
+allowed. Signatures and private continuation material SHALL never become
+frame text or display DTO fields.
+
+The host SHALL supply actual prepared-request credential inputs for the
+complete local projection, including keys used by prior attempts of the same
+turn and subsequent Tool capture. Untrusted frame fields SHALL NOT supply or
+replace host-known credentials. A failed, unavailable or over-budget display
+callback SHALL NOT change Provider outcome, continuation bytes, tool parsing,
+grants, cache usage or final publication. Incomplete blocks and physical
+attempt termination SHALL yield metadata only; retry SHALL NOT concatenate
+reasoning bodies from different attempts.
+
+The protected V2 display SHALL correlate real host logical units using the
+original security binding and actual provider continuation namespace. Native
+sources SHALL retain producer/unit identity, host provider sequence, physical
+attempt, native index and a source ordinal fixed at real native start. Tool
+sources SHALL bind the actual host call ID and persisted call item; result item
+identity SHALL appear only after exact closed durable settlement. A started
+sequence SHALL come only from an exact successful committed started event and
+SHALL NOT assert physical effect. Unit descriptors SHALL carry actual current
+and preceding call anchors, including tools without private capture, and an
+explicit anchored/pending/unit_only placement. Distinct coordinate domains
+SHALL NOT be compared or joined using titles, paths, wall time or array order.
+
+Exact correlation-registration/replay duplicates SHALL retain existing labels,
+ordinals, rows and effects. Conflicting identities SHALL be rejected without
+fallback matching. This idempotence SHALL NOT relax native framing duplicate,
+conflict or identity-reuse invalidation. Child producers SHALL remain within
+their own real thread/turn/source scope. Unit/call metadata, presence and display
+copies SHALL remain bounded and protected-local, excluded from public events,
+SSE, history, model requests and logs. This unit boundary contract does not
+assert a total interleave of arbitrary public events.
+
+#### Scenario: Same-name tools complete and report started events in reverse order
+- **WHEN** two persisted host calls of one unit settle or deliver committed started callbacks in reverse order
+- **THEN** each capture enhances its own actual call anchor, native source ordinals stay fixed and exact replay creates no extra row or effect
 
 #### Scenario: DeepSeek emits reasoning before a final
-- **WHEN** a DeepSeek-compatible stream contains reasoning tokens
-- **THEN** they are excluded from product events and durable history while usage may retain only numeric reasoning-token counts
+- **WHEN** a DeepSeek-compatible stream contains reasoning tokens without a supported native block identity and end
+- **THEN** they are excluded from product events, durable history and completed local block bodies while usage may retain only numeric reasoning-token counts
 
 #### Scenario: Anthropic returns signed thinking
 - **WHEN** a messages endpoint requires a signed thinking block for the immediate tool continuation
-- **THEN** the runtime keeps it ephemerally for that request chain and discards it before durability/export
+- **THEN** the runtime preserves the original protocol continuation unchanged for that request chain; only complete plaintext thinking may produce a separate protected local copy, while the signature and capsule remain private and are discarded before durability/export
+
+#### Scenario: Responses contains only encrypted reasoning
+- **WHEN** an item contains encrypted or redacted protocol content without an admitted complete plaintext native block
+- **THEN** continuation handling remains unchanged and protected display truthfully reports no completed plaintext body rather than manufacturing an empty Think block
+
+#### Scenario: Native source identity conflicts within one attempt
+- **WHEN** an index or ID is duplicated, changes type, mismatches its end, or loses required identity
+- **THEN** from the conflict onward no further completed body is admitted for that source or concatenated with its open builder; a copy already validly completed before the conflict may remain bounded and protected, without altering original text/signature continuation or tool-call reconstruction
 
 ### Requirement: Private Tool Continuation Is Attempt-Local
 Provider adapters MAY receive only a verified host-compiled semantic tool

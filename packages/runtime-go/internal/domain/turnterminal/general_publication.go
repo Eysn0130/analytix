@@ -15,6 +15,7 @@ import (
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 )
 
 const (
@@ -293,6 +294,7 @@ func validateGeneralTerminalPublicationDrafts(
 			if generalTerminalString(candidate.Draft, "kind") != expectedKind ||
 				generalTerminalString(candidate.Draft, "status") != binding.TerminalStatus ||
 				generalTerminalString(candidate.Draft, "terminalReason") != binding.TerminalReason ||
+				!domainterminal.ValidEndReasonRecord(candidate.Draft) ||
 				generalTerminalString(candidate.Draft, "generalTerminalCASBindingDigest") != binding.BindingDigest ||
 				!validGeneralTerminalInterruptMetadataV1(candidate.Draft, binding.TerminalReason) {
 				return errors.New("general terminal lifecycle draft is invalid")
@@ -379,6 +381,7 @@ func validCommittedGeneralTerminalLifecycleEvent(commit GeneralTerminalPublicati
 		generalTerminalString(event, "timestamp") == commit.CommittedAt &&
 		generalTerminalString(event, "terminalReason") == commit.TerminalReason &&
 		generalTerminalString(event, "generalTerminalCASBindingDigest") == commit.AuthorityDigest &&
+		domainterminal.ValidEndReasonRecord(event) &&
 		validGeneralTerminalInterruptMetadataV1(event, commit.TerminalReason)
 }
 

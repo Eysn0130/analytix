@@ -2,6 +2,8 @@ package privacyprojection
 
 import (
 	"bytes"
+	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,16 +13,26 @@ import (
 	"time"
 
 	appmodel "analytix.local/runtime-go/internal/app/model"
+	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	domaincaseentity "analytix.local/runtime-go/internal/domain/caseentity"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 	domainthread "analytix.local/runtime-go/internal/domain/thread"
+	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
+
+// This credential-shaped fixture is built only from a public hexadecimal alphabet.
+// Local synthetic test fixture; never sourced from an account.
+const syntheticProviderRequestTestCredentialV1 = "sk-0123456789abcdef0123456789abcdef"
 
 func TestProjectProviderRequestProjectsToolArgumentsAndSerializedDiffWithoutRebindingSource(t *testing.T) {
 	const path = "/Users/private-owner/Case Files/source.csv"
@@ -782,12 +794,180 @@ func TestProjectProviderRequestAcceptsSensitiveLookingSchemaIdentifiersWithoutCo
 	}
 }
 
+func TestProjectProviderRequestPreservesXLSXToolSchemaMetadata(t *testing.T) {
+	securityContext := providerPrivacyCaseContext(t)
+	var schema domainmodel.ToolSchema
+	for _, candidate := range toolcatalogapp.BuiltinToolSchemas(toolcatalogapp.BuiltinToolSchemaInput{
+		DocumentGeneration: true, DocumentGenerationKinds: []string{"xlsx"},
+	}) {
+		if candidate.Name == "generate_office_document" {
+			schema = candidate
+			break
+		}
+	}
+	if schema.Name == "" {
+		t.Fatal("canonical XLSX tool schema is missing")
+	}
+	request := domainmodel.Request{Tools: []domainmodel.ToolSchema{schema}}
+	for _, ordinaryEffect := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ordinary=%t", ordinaryEffect), func(t *testing.T) {
+			projected, err := ProjectProviderRequestForEffect(securityContext, request, ordinaryEffect)
+			if err != nil {
+				t.Fatalf("canonical XLSX schema failed provider projection: %v", err)
+			}
+			if !reflect.DeepEqual(projected.Tools, request.Tools) {
+				t.Fatal("provider projection rewrote the canonical XLSX schema")
+			}
+			if err := ValidateProviderRequest(projected); err != nil {
+				t.Fatalf("canonical XLSX schema failed final validation: %v", err)
+			}
+		})
+	}
+}
+
+func TestProjectProviderRequestClassifiesSchemaMetadataWithoutPII(t *testing.T) {
+	securityContext := providerPrivacyCaseContext(t)
+	cases := map[string][]string{
+		"minLength": {"0", "-0", "1.0", "1e1", "9007199254740993"},
+		"maxLength": {"16"}, "minItems": {"0"}, "maxItems": {"16"},
+		"minProperties": {"0"}, "maxProperties": {"16"}, "minContains": {"0"}, "maxContains": {"16"},
+		"minimum": {"-1.25"}, "maximum": {"-0.125"}, "exclusiveMinimum": {"-2.5"}, "exclusiveMaximum": {"1e1"},
+		"multipleOf":  {"0.1", "1e-1"},
+		"uniqueItems": {"true", "false"}, "readOnly": {"true", "false"},
+		"writeOnly": {"true", "false"}, "deprecated": {"true", "false"},
+	}
+	for keyword, values := range cases {
+		for _, value := range values {
+			for _, ordinaryEffect := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/ordinary=%t", keyword, value, ordinaryEffect), func(t *testing.T) {
+					parameters := providerSchemaMetadataParametersForTest(keyword, value)
+					request := domainmodel.Request{Tools: []domainmodel.ToolSchema{{Name: "lookup", Description: "lookup", Parameters: parameters}}}
+					projected, err := ProjectProviderRequestForEffect(securityContext, request, ordinaryEffect)
+					if err != nil {
+						t.Fatalf("structural metadata was mistaken for PII content: %v", err)
+					}
+					if !bytes.Equal(projected.Tools[0].Parameters, parameters) {
+						t.Fatal("provider projection changed structural metadata bytes")
+					}
+					if err := ValidateProviderRequest(projected); err != nil {
+						t.Fatalf("structural metadata failed final validation: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestProjectProviderRequestRejectsInvalidSchemaMetadata(t *testing.T) {
+	securityContext := providerPrivacyCaseContext(t)
+	counts := []string{"minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties", "minContains", "maxContains"}
+	numeric := append(append([]string{}, counts...), "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf")
+	booleans := []string{"uniqueItems", "readOnly", "writeOnly", "deprecated"}
+	cases := map[string][]string{}
+	for _, keyword := range numeric {
+		cases[keyword] = []string{`"16"`, "true", "null", "[]", "{}"}
+	}
+	for _, keyword := range counts {
+		cases[keyword] = append(cases[keyword], "-1", "0.5", "1e-1")
+	}
+	cases["multipleOf"] = append(cases["multipleOf"], "0", "-0", "-0.5")
+	for _, keyword := range booleans {
+		cases[keyword] = []string{`"false"`, "0", "null", "[]", "{}"}
+	}
+	cases["maxLength"] = append(cases["maxLength"], "1e10001", strings.Repeat("1", 4097))
+	for keyword, values := range cases {
+		for index, value := range values {
+			for _, ordinaryEffect := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%d/ordinary=%t", keyword, index, ordinaryEffect), func(t *testing.T) {
+					parameters := providerSchemaMetadataParametersForTest(keyword, value)
+					request := domainmodel.Request{Tools: []domainmodel.ToolSchema{{Name: "lookup", Description: "lookup", Parameters: parameters}}}
+					if _, err := ProjectProviderRequestForEffect(securityContext, request, ordinaryEffect); !errors.Is(err, ErrProviderSchemaContainsPII) {
+						t.Fatalf("invalid structural metadata was not rejected: %v", err)
+					}
+					if err := ValidateProviderRequest(request); !errors.Is(err, ErrProviderSchemaContainsPII) {
+						t.Fatalf("invalid structural metadata passed final validation: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestProjectProviderRequestMetadataKeepsContentPrivacyChecks(t *testing.T) {
+	securityContext := providerPrivacyCaseContext(t)
+	contents := map[string]string{
+		"description": `"address: 12 Synthetic Lane"`,
+		"examples":    `["12 Synthetic Lane"]`, "example": `"12 Synthetic Lane"`,
+		"default": `"12 Synthetic Lane"`, "const": `"12 Synthetic Lane"`,
+		"enum":            `["fixture.person@example.test"]`,
+		"unknown keyword": "16",
+	}
+	for keyword, content := range contents {
+		if keyword == "unknown keyword" {
+			keyword = "x-content"
+		}
+		for _, ordinaryEffect := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/ordinary=%t", keyword, ordinaryEffect), func(t *testing.T) {
+				parameters := json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"address":{"type":"string","maxLength":16,%q:%s}},"additionalProperties":false}`, keyword, content))
+				request := domainmodel.Request{Tools: []domainmodel.ToolSchema{{Name: "lookup", Description: "lookup", Parameters: parameters}}}
+				if _, err := ProjectProviderRequestForEffect(securityContext, request, ordinaryEffect); !errors.Is(err, ErrProviderSchemaContainsPII) {
+					t.Fatalf("restricted schema content crossed provider projection: %v", err)
+				}
+				if err := ValidateProviderRequest(request); !errors.Is(err, ErrProviderSchemaContainsPII) {
+					t.Fatalf("restricted schema content passed final validation: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestProviderSchemaMetadataPreservesBudgets(t *testing.T) {
+	for _, value := range []any{json.Number("16"), true} {
+		keyword := "maxLength"
+		if _, ok := value.(bool); ok {
+			keyword = "readOnly"
+		}
+		t.Run(keyword, func(t *testing.T) {
+			budget := &providerSchemaBudget{}
+			projected, changed, err := projectProviderSchemaKeyword(keyword, value, budget, maxProviderSchemaDepth, "address")
+			if err != nil || changed || projected != value || budget.nodes != 1 {
+				t.Fatalf("metadata did not preserve its leaf and node cost: changed=%t nodes=%d err=%v", changed, budget.nodes, err)
+			}
+			if _, _, err := projectProviderSchemaKeyword(keyword, value, &providerSchemaBudget{}, maxProviderSchemaDepth+1, "address"); err == nil {
+				t.Fatal("metadata crossed schema depth budget")
+			}
+			if _, _, err := projectProviderSchemaKeyword(keyword, value, &providerSchemaBudget{nodes: maxProviderSchemaNodes}, 1, "address"); err == nil {
+				t.Fatal("metadata crossed schema node budget")
+			}
+		})
+	}
+}
+
+func providerSchemaMetadataParametersForTest(keyword, value string) json.RawMessage {
+	kind := "number"
+	children := ""
+	switch keyword {
+	case "minLength", "maxLength", "readOnly", "writeOnly", "deprecated":
+		kind = "string"
+	case "minItems", "maxItems", "minContains", "maxContains", "uniqueItems":
+		kind = "array"
+		children = `,"items":{"type":"number"},"contains":{"type":"number"}`
+	case "minProperties", "maxProperties":
+		kind = "object"
+		children = `,"additionalProperties":false`
+	}
+	return json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"address":{"type":%q,%q:%s%s}},"additionalProperties":false}`, kind, keyword, value, children))
+}
+
 func TestProjectProviderRequestProjectsCredentialsAcrossTextAndArguments(t *testing.T) {
 	securityContext := providerPrivacyCaseContext(t)
 	const (
 		rawAccount = "6222020000000000000"
-		rawToken   = "sk-providercredential123"
+		rawToken   = syntheticProviderRequestTestCredentialV1
 	)
+	if !domainsecret.ContainsCredentialV1(rawToken) {
+		t.Fatal("synthetic credential fixture must exercise credential projection")
+	}
 	request := domainmodel.Request{
 		SystemPrompt: "Authorization: Bearer " + rawToken + "; account " + rawAccount,
 		Messages: []domainmodel.Message{{
@@ -910,7 +1090,10 @@ func TestProjectProviderRequestRejectsCaseReferencesInToolSchemaForEveryEffect(t
 
 func TestProjectProviderRequestRejectsCredentialBearingToolIdentityAndSchemas(t *testing.T) {
 	securityContext := providerPrivacyCaseContext(t)
-	const rawToken = "sk-providercredential123"
+	const rawToken = syntheticProviderRequestTestCredentialV1
+	if !domainsecret.ContainsCredentialV1(rawToken) {
+		t.Fatal("synthetic credential fixture must exercise credential projection")
+	}
 	for name, request := range map[string]domainmodel.Request{
 		"tool call name": {
 			Messages: []domainmodel.Message{{
@@ -991,8 +1174,11 @@ func TestProjectProviderRequestRejectsNonObjectOrInvalidSchemaJSON(t *testing.T)
 func TestValidateProviderRequestRejectsUnprojectedCredentialAndPII(t *testing.T) {
 	const (
 		rawAccount = "6222020000000000000"
-		rawToken   = "sk-providercredential123"
+		rawToken   = syntheticProviderRequestTestCredentialV1
 	)
+	if !domainsecret.ContainsCredentialV1(rawToken) {
+		t.Fatal("synthetic credential fixture must exercise credential projection")
+	}
 	for name, request := range map[string]domainmodel.Request{
 		"message credential": {Messages: []domainmodel.Message{{Role: "user", Content: "Bearer " + rawToken}}},
 		"arguments PII": {Messages: []domainmodel.Message{{Role: "assistant", ToolCalls: []domainmodel.ToolCall{{
@@ -1077,8 +1263,11 @@ func TestProjectProviderRequestRejectsPIIInAdvertisedSchema(t *testing.T) {
 	securityContext := providerPrivacyCaseContext(t)
 	const (
 		rawAccount = "6222020000000000000"
-		rawToken   = "sk-providercredential123"
+		rawToken   = syntheticProviderRequestTestCredentialV1
 	)
+	if !domainsecret.ContainsCredentialV1(rawToken) {
+		t.Fatal("synthetic credential fixture must exercise credential projection")
+	}
 	for name, schema := range map[string]domainmodel.ToolSchema{
 		"description":             {Name: "lookup", Description: "Example account " + rawAccount, Parameters: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
 		"parameter title":         {Name: "lookup", Description: "lookup", Parameters: json.RawMessage(`{"type":"object","title":"account ` + rawAccount + `","additionalProperties":false}`)},
@@ -1103,8 +1292,11 @@ func TestProjectProviderRequestProjectsGeneralOrdinaryTextWithoutMintingCaseAuth
 	securityContext := providerPrivacyGeneralContext(t)
 	const (
 		rawAccount = "6222020000000000000"
-		rawToken   = "sk-providercredential123"
+		rawToken   = syntheticProviderRequestTestCredentialV1
 	)
+	if !domainsecret.ContainsCredentialV1(rawToken) {
+		t.Fatal("synthetic credential fixture must exercise credential projection")
+	}
 	request := domainmodel.Request{
 		SystemPrompt: "Authorization: Bearer " + rawToken,
 		Messages: []domainmodel.Message{{
@@ -1435,5 +1627,528 @@ func TestContinuationProviderReferenceSurvivesFinalPrivacyProjection(t *testing.
 	}
 	if snapshot.UserHistory.Sources[0].Reference != raw {
 		t.Fatal("provider view rewrote sealed source")
+	}
+}
+
+// This final-boundary fixture signs a projection directly. It does not supply
+// the production timer/late admission evidence owned by the server fixture.
+func lateQuestionPrivacyProjectionFixtureV1(t *testing.T, modifyContent ...func(*domainsteering.UserInputReplyContentV1)) (domainsecurity.TurnSecurityContext, domainmodel.Message) {
+	t.Helper()
+	current := providerPrivacyGeneralContext(t)
+	inputID := "input_" + strings.Repeat("a", 26) + "123456789012" + strings.Repeat("a", 26)
+	qid := inputID + "_1"
+	identity := domainsteering.UserInputReplyIdentityV1{CallID: ("call_host_" + strings.Repeat("a", 26) + "123456789012" + strings.Repeat("a", 26)), ToolName: "request_user_input", Questions: []domainsteering.UserInputReplyQuestionIdentityV1{{ID: qid, OptionIDs: []string{qid + "_option_1"}, SelectedOptionIDs: []string{qid + "_option_1"}}}}
+	const secret = "6222020000000000000"
+	content := domainsteering.UserInputReplyContentV1{Kind: domainsteering.UserInputReplyContentKindV1, Questions: []domainsteering.UserInputReplyQuestionContentV1{{Question: "question " + secret, MultiSelect: true, Header: "header " + secret, Detail: "detail " + secret, Options: []domainsteering.UserInputReplyOptionContentV1{{Label: "option " + secret, Description: "description " + secret}}}}, Answers: []domainsteering.UserInputReplyAnswerContentV1{{Selected: []string{"option " + secret}, Custom: "answer " + secret}}}
+	for _, modify := range modifyContent {
+		modify(&content)
+	}
+	encoded, _ := json.Marshal(content)
+	clientID := "00000000-0000-4000-8000-000000000082"
+	entryID := domainsteering.EntryIDV1(current.TurnID, clientID)
+	entry, err := domainsteering.BindPendingEntryV1(map[string]any{"id": entryID, "clientUserMessageId": clientID, "text": string(encoded), "delivery": "steer", "admittedAt": "2026-07-18T01:02:03Z", "userInputId": inputID, "userInputCaptureReceiptId": strings.Repeat("b", 64), "userInputReplyIdentity": domainsteering.UserInputReplyIdentityMapV1(identity)}, current.ContextDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID := domainsecurity.SHA256Hex(publicKey)
+	signing, err := domainsteering.PendingEntrySigningBytesV1(entry, current.ContextDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err = domainsteering.SealPendingEntryAuthorityV1(entry, current.ContextDigest, keyID, publicKey, ed25519.Sign(privateKey, signing))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry["status"], entry["promotedAt"], entry["promotedItemId"] = "promoted", "2026-07-18T01:02:04Z", entryID
+	signing, err = domainsteering.PromotedEntrySigningBytesV1(entry, current.ContextDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err = domainsteering.SealPromotedEntryAuthorityV1(entry, current.ContextDigest, keyID, publicKey, ed25519.Sign(privateKey, signing))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := map[string]any{"id": entryID, "turnId": current.TurnID, "threadId": current.ThreadID, "role": "user", "status": "completed", "kind": "user_message", "delivery": "steer", "text": string(encoded), "createdAt": "2026-07-18T01:02:03Z", "finishedAt": "2026-07-18T01:02:04Z", "clientUserMessageId": clientID, "contextDigest": current.ContextDigest, "steeringOrigin": "ordinary", "steeringProjectionVersion": float64(domainsteering.ProjectionVersionV1), "steeringContentDigest": entry["contentDigest"]}
+	out := appmodel.BuildPromotedSteering(appmodel.PromotedSteeringInput{ThreadID: current.ThreadID, TurnID: current.TurnID, Entries: []map[string]any{entry}, Items: []map[string]any{item}})
+	if len(out.Messages) != 1 || out.Messages[0].PrivateUserInputReplyBinding == nil {
+		t.Fatal("signed late final-boundary fixture did not bind")
+	}
+	return current, out.Messages[0]
+}
+func TestLateQuestionFinalProviderProjectsContentAndPreservesOnlyBoundHostIdentity(t *testing.T) {
+	current, message := lateQuestionPrivacyProjectionFixtureV1(t)
+	projected, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: []domainmodel.Message{message}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := projected.Messages[0].Content
+	if strings.Contains(content, "6222020000000000000") || !strings.Contains(content, ("call_host_"+strings.Repeat("a", 26)+"123456789012"+strings.Repeat("a", 26))) || !strings.Contains(content, "input_"+strings.Repeat("a", 26)+"123456789012"+strings.Repeat("a", 26)+"_1") {
+		t.Fatal("late final boundary confused user content with Host correlation")
+	}
+	if projected.Messages[0].PrivateUserInputReplyBinding != nil || projected.Messages[0].PrivateUserInputReplyRequired {
+		t.Fatal("final request retained process authority")
+	}
+	for name, change := range map[string]func(*domainmodel.Message){
+		"lost_binding": func(m *domainmodel.Message) { m.PrivateUserInputReplyBinding = nil },
+		"fake_binding": func(m *domainmodel.Message) {
+			m.PrivateUserInputReplyBinding = map[string]any{"callId": ("call_host_" + strings.Repeat("a", 26) + "123456789012" + strings.Repeat("a", 26))}
+		},
+		"changed_content": func(m *domainmodel.Message) { m.Content += "changed" },
+		"changed_role":    func(m *domainmodel.Message) { m.Role = "assistant" },
+		"parts":           func(m *domainmodel.Message) { m.Parts = []domainmodel.MessagePart{{Type: "text", Text: "other"}} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := message
+			change(&bad)
+			if _, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: []domainmodel.Message{bad}}, true); err == nil {
+				t.Fatal("malformed late proof crossed final boundary")
+			}
+		})
+	}
+	foreign := current
+	foreign.ThreadID = "foreign-thread"
+	if _, _, err := appmodel.UserInputReplyProviderPayloadV1(message, foreign); err == nil {
+		t.Fatal("cross-thread proof survived")
+	}
+	encoded, _ := json.Marshal(message)
+	var restored domainmodel.Message
+	_ = json.Unmarshal(encoded, &restored)
+	if _, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: []domainmodel.Message{restored}}, true); err == nil {
+		t.Fatal("serialized content DTO reacquired late authority")
+	}
+	genericBody, _ := json.Marshal(map[string]any{"kind": "answer_to_pending_question", "callId": "call_host_" + strings.Repeat("a", 26) + "123456789012" + strings.Repeat("a", 26), "questions": []any{}, "answers": []any{}})
+	generic := domainmodel.Message{Role: "user", Content: string(genericBody)}
+	plain, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: []domainmodel.Message{generic}}, true)
+	if err != nil || strings.Contains(plain.Messages[0].Content, "123456789012") {
+		t.Fatal("unbound JSON gained Host ID projection exception")
+	}
+}
+func TestLateQuestionBudgetLayersRemainSeparate(t *testing.T) {
+	t.Run("ordinary steering text", func(t *testing.T) {
+		current := providerPrivacyGeneralContext(t)
+		clientID := "00000000-0000-4000-8000-000000000083"
+		for _, extra := range []int{0, 1} {
+			_, err := domainsteering.BindPendingEntryV1(map[string]any{
+				"id": domainsteering.EntryIDV1(current.TurnID, clientID), "clientUserMessageId": clientID,
+				"text":     strings.Repeat("x", domainsteering.MaxSteeringTextBytesV1+extra),
+				"delivery": "steer", "admittedAt": "2026-07-18T01:02:03Z",
+			}, current.ContextDigest)
+			if extra == 0 && err != nil || extra == 1 && err == nil {
+				t.Fatalf("ordinary steering text boundary changed: extra=%d err=%v", extra, err)
+			}
+		}
+	})
+	t.Run("bound Question above ordinary text limit", func(t *testing.T) {
+		custom := strings.Repeat("x", domainsteering.MaxSteeringTextBytesV1+1)
+		current, message := lateQuestionPrivacyProjectionFixtureV1(t, func(content *domainsteering.UserInputReplyContentV1) {
+			content.Answers[0].Custom = custom
+		})
+		projected, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: []domainmodel.Message{message}}, true)
+		if err != nil {
+			t.Fatalf("legal bound Question inherited the ordinary text limit: %v", err)
+		}
+		if len(projected.Messages) != 1 || len(projected.Messages[0].Content) <= domainsteering.MaxSteeringTextBytesV1 ||
+			!strings.Contains(projected.Messages[0].Content, custom) || strings.Contains(projected.Messages[0].Content, "6222020000000000000") {
+			t.Fatal("bound Question content was lost or sensitive content was retained")
+		}
+	})
+	t.Run("complete Question envelope", func(t *testing.T) {
+		current, message := lateQuestionPrivacyProjectionFixtureV1(t)
+		identity, content, err := appmodel.UserInputReplyProviderPayloadV1(message, current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Distribute escaped text across legal leaves. This isolates encoded
+		// envelope overhead without inventing an over-limit Custom field.
+		// Event/turn admission remains owned by the existing server fixtures.
+		const leafBytes = 1 << 20
+		q := &content.Questions[0]
+		q.Question, q.Header, q.Detail = strings.Repeat(`"`, leafBytes), strings.Repeat(`"`, leafBytes), strings.Repeat(`"`, leafBytes)
+		q.Options[0] = domainsteering.UserInputReplyOptionContentV1{Label: "option", Description: ""}
+		content.Answers[0].Selected, content.Answers[0].Custom = []string{"option"}, "x"
+		base, err := domainsteering.UserInputReplyEnvelopeV1(identity, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		remaining := domainsteering.MaxUserInputReplyEnvelopeBytesV1 - len(base)
+		if remaining < 0 || (remaining+1)/2 >= leafBytes {
+			t.Fatal("fixture cannot isolate complete envelope boundary")
+		}
+		q.Options[0].Description = strings.Repeat(`"`, remaining/2) + strings.Repeat("x", remaining%2)
+		exact, err := domainsteering.UserInputReplyEnvelopeV1(identity, content)
+		if err != nil || len(exact) != domainsteering.MaxUserInputReplyEnvelopeBytesV1 {
+			t.Fatal("exact complete Question envelope limit changed")
+		}
+		final, err := projectUserInputReplyProviderEnvelopeV1(identity, content, nil)
+		prefix := strings.TrimSuffix(appmodel.SteeringProviderContent("payload", nil), "payload")
+		if err != nil || strings.TrimPrefix(final, prefix) != exact {
+			t.Fatal("final boundary changed exact complete Question envelope limit")
+		}
+		q.Options[0].Description += "x"
+		encoded, err := json.Marshal(content)
+		if err != nil || len(encoded) >= domainsteering.MaxUserInputReplyEnvelopeBytesV1 {
+			t.Fatal("fixture failed to isolate envelope metadata overhead")
+		}
+		if _, err := domainsteering.ParseUserInputReplyContentV1(string(encoded), identity); err != nil {
+			t.Fatalf("envelope fixture exceeded a different content limit: %v", err)
+		}
+		if _, err := domainsteering.UserInputReplyEnvelopeV1(identity, content); !errors.Is(err, domainsteering.ErrUserInputReplyCapacityV1) {
+			t.Fatalf("metadata overhead bypassed complete envelope limit: %v", err)
+		}
+		if _, err := projectUserInputReplyProviderEnvelopeV1(identity, content, nil); err == nil {
+			t.Fatal("final boundary bypassed complete envelope limit")
+		}
+	})
+	t.Run("real string leaf", func(t *testing.T) {
+		current, message := lateQuestionPrivacyProjectionFixtureV1(t)
+		identity, content, err := appmodel.UserInputReplyProviderPayloadV1(message, current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		const leafBytes = 1 << 20
+		content.Answers[0].Custom = strings.Repeat("x", leafBytes)
+		encoded, _ := json.Marshal(content)
+		if _, err := domainsteering.ParseUserInputReplyContentV1(string(encoded), identity); err != nil {
+			t.Fatalf("exact real string limit changed: %v", err)
+		}
+		content.Answers[0].Custom += "x"
+		encoded, _ = json.Marshal(content)
+		if len(encoded) >= domainsteering.MaxUserInputReplyEnvelopeBytesV1 {
+			t.Fatal("leaf fixture exceeded the container budget")
+		}
+		if _, err := domainsteering.ParseUserInputReplyContentV1(string(encoded), identity); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+			t.Fatalf("over-limit real string entered Question content: %v", err)
+		}
+	})
+}
+
+// The positive cases rebuild from durable, signed source fixtures. The
+// negative cases prove that an equal-looking JSON body is not authority.
+// Neither path calls a Provider or establishes timer/reopen acceptance.
+func TestPendingQuestionProtocolJSONRemainsUntrusted(t *testing.T) {
+	for name, callID := range map[string]string{
+		"alphabetic":  "call_host_" + strings.Repeat("a", 64),
+		"numeric_run": "call_host_" + strings.Repeat("a", 26) + "123456789012" + strings.Repeat("a", 26),
+	} {
+		for _, toolName := range []string{"request_user_input", "user_input"} {
+			for _, privateProtocol := range []bool{false, true} {
+				t.Run(fmt.Sprintf("trusted_history/%s/%s/private_%t", name, toolName, privateProtocol), func(t *testing.T) {
+					thread, audit, frozen := pendingPrivacyHistoryFixtureV1(t, callID, toolName)
+					turn := thread["turns"].([]any)[0].(map[string]any)
+					if privateProtocol {
+						turn["items"].([]any)[2].(map[string]any)["privateProtocolObserved"] = true
+					}
+					current, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+						ThreadID: frozen.ThreadID, TurnID: "turn-after-pending-history", WorkspaceRealPath: frozen.WorkspaceRealPath,
+						ContextEpoch: frozen.ContextEpoch + 1, IssuedAt: time.Now().UTC(),
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					thread["securityState"] = pendingPrivacyRecordV1(current)
+					thread["turns"] = append(thread["turns"].([]any), map[string]any{
+						"id": current.TurnID, "status": "running", "securityContext": pendingPrivacyRecordV1(current), "items": []any{},
+					})
+					// Simulate a fresh source read; no model Message or process
+					// carrier is persisted and then reused as authority.
+					encoded, err := json.Marshal(thread)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var restored map[string]any
+					if err := json.Unmarshal(encoded, &restored); err != nil {
+						t.Fatal(err)
+					}
+					history := appmodel.ProviderHistoryBeforeTurnWithSteeringAuthority(restored, current.TurnID, nil, audit)
+					resultIndex := 1
+					if privateProtocol {
+						resultIndex = 0
+						if len(history) != 1 || history[0].Role != "user" {
+							t.Fatal("verified history reopened closed private protocol roles")
+						}
+					} else if len(history) != 2 || history[0].Role != "assistant" || len(history[0].ToolCalls) != 1 || history[0].ToolCalls[0].ID != callID || history[1].Role != "tool" || history[1].ToolCallID != callID {
+						t.Fatal("verified history lost original Host call/result pairing")
+					}
+					history = appmodel.CloneProviderMessages(appmodel.CloneProviderMessages(history))
+					if name == "numeric_run" && toolName == "request_user_input" && !privateProtocol {
+						assertPendingIdentityProofGuardsV1(t, current, history)
+					}
+					projected, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: history}, true)
+					if err != nil || len(projected.Messages) != len(history) {
+						t.Fatal("verified source history failed final Provider projection")
+					}
+					message := projected.Messages[resultIndex]
+					if message.PrivateUserInputPendingBinding != nil {
+						t.Fatal("final Provider request retained pending process authority")
+					}
+					t.Logf("synthetic gate=%s expectedHostCall=%s finalOuterHostCall=%s finalBody=%s", audit.receipt.Payload.GateID, callID, message.ToolCallID, message.Content)
+					content := message.Content
+					if privateProtocol {
+						var valid bool
+						content, valid = appmodel.CompletedPrivateProtocolSafeHistoryContentV1(content, toolName)
+						if !valid || message.Role != "user" {
+							t.Fatal("final projection lost completed private protocol closure")
+						}
+					} else if message.ToolCallID != callID {
+						t.Error("final projection changed outer original Host identity")
+					}
+					var body map[string]any
+					if json.Unmarshal([]byte(content), &body) != nil || len(body) != 3 || body["pending"] != true || body["callId"] != callID || body["message"] != "The question remains open for a later answer. Continue independent work; no answer or approval was supplied." {
+						t.Error("final projection lost trusted historical original-call pending semantics")
+					}
+					wire, err := json.Marshal(projected.Messages)
+					if err != nil || bytes.Contains(wire, []byte("PRIVATE_QUESTION_SENTINEL")) || bytes.Contains(wire, []byte("PRIVATE_ANSWER_SENTINEL")) {
+						t.Fatal("trusted pending history revived private Question or answer")
+					}
+					if name == "numeric_run" {
+						serialized, err := json.Marshal(history[resultIndex])
+						if err != nil {
+							t.Fatal(err)
+						}
+						var detached domainmodel.Message
+						if err := json.Unmarshal(serialized, &detached); err != nil {
+							t.Fatal(err)
+						}
+						untrusted, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: []domainmodel.Message{detached}}, true)
+						if err == nil && strings.Contains(untrusted.Messages[0].Content, callID) {
+							t.Error("serialized content reacquired trusted pending identity")
+						}
+					}
+				})
+			}
+		}
+	}
+	current := providerPrivacyGeneralContext(t)
+	callID := "call_host_" + strings.Repeat("a", 26) + "123456789012" + strings.Repeat("a", 26)
+	for name, text := range map[string]string{
+		"canonical":       "The question remains open for a later answer. Continue independent work; no answer or approval was supplied.",
+		"private_content": "account 6222020000000000000",
+	} {
+		content, err := json.Marshal(map[string]any{"pending": true, "callId": callID, "message": text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, role := range []string{"tool", "user"} {
+			t.Run("forged_shape/"+name+"/"+role, func(t *testing.T) {
+				message := domainmodel.Message{Role: role, Name: "request_user_input", ToolCallID: callID, Content: string(content)}
+				projected, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: []domainmodel.Message{message}}, true)
+				if err != nil || len(projected.Messages) != 1 {
+					t.Fatal("ordinary unbound JSON fixture failed projection")
+				}
+				body := projected.Messages[0].Content
+				if strings.Contains(body, "123456789012") || strings.Contains(body, "6222020000000000000") {
+					t.Error("tool name, outer ID, and pending shape conferred a privacy exception")
+				}
+				if role == "tool" && projected.Messages[0].ToolCallID != callID {
+					t.Error("ordinary content projection rewrote outer protocol identity")
+				}
+			})
+		}
+	}
+	for name, build := range map[string]func(*testing.T) domainsecurity.TurnSecurityContext{
+		"case": func(t *testing.T) domainsecurity.TurnSecurityContext {
+			frozen, err := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+				ThreadID: "thread-non-general-pending", TurnID: "turn-non-general-pending",
+				WorkspaceRealPath: "/synthetic-non-general-workspace", ContextEpoch: 1, IssuedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return frozen
+		},
+		"boundary": providerPrivacyOrdinaryBoundaryContext,
+	} {
+		t.Run("non_general_compatibility/"+name, func(t *testing.T) {
+			frozen := build(t)
+			if domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect(frozen) != nil {
+				t.Fatal("non-General fixture is not an admitted ordinary-effect context")
+			}
+			content := appmodel.ToolResultContent(map[string]any{
+				"pending": true, "callId": callID,
+				"message": "The question remains open for a later answer. Continue independent work; no answer or approval was supplied.",
+			})
+			message := domainmodel.Message{Role: "tool", Name: "request_user_input", ToolCallID: callID, Content: content}
+			pending := appmodel.PendingToolCall{SecurityContext: frozen, Call: domainmodel.ToolCall{ID: callID, Name: message.Name}}
+			applicable, err := appmodel.BindPendingUserInputProviderMessageV1(context.Background(), nil, pending, &message)
+			if err != nil || applicable || message.PrivateUserInputPendingBinding != nil || message.Content != content {
+				t.Fatal("General-only binding blocked or altered an existing non-General Question lane")
+			}
+			projected, err := ProjectProviderRequestForEffect(frozen, domainmodel.Request{Messages: []domainmodel.Message{message}}, true)
+			if err != nil || len(projected.Messages) != 1 || strings.Contains(projected.Messages[0].Content, "123456789012") ||
+				projected.Messages[0].ToolCallID != callID {
+				t.Fatal("non-General Question no longer follows its existing privacy projection")
+			}
+		})
+	}
+}
+
+func pendingPrivacyRecordV1(value any) map[string]any {
+	body, _ := json.Marshal(value)
+	var record map[string]any
+	_ = json.Unmarshal(body, &record)
+	return record
+}
+
+// Synthetic installed-key audit only; the source checks and history assembly
+// are production owners, while real file-store reopen evidence remains separate.
+type pendingPrivacyAuditV1 struct {
+	receipt     domaincontinuation.Receipt
+	disposition domaincontinuation.Disposition
+	publicKey   ed25519.PublicKey
+}
+
+func (audit pendingPrivacyAuditV1) ResolveTrustedDispositionForAudit(_ context.Context, inputID string) (domaincontinuation.Receipt, domaincontinuation.Disposition, error) {
+	keyID, public, signature, err := domaincontinuation.AuthorityMaterial(audit.receipt)
+	if err != nil || inputID != audit.receipt.Payload.GateID || keyID != domainsecurity.SHA256Hex(audit.publicKey) || !bytes.Equal(public, audit.publicKey) || !ed25519.Verify(public, domaincontinuation.ReceiptSigningBytes(audit.receipt), signature) {
+		return domaincontinuation.Receipt{}, domaincontinuation.Disposition{}, errors.New("synthetic receipt audit rejected")
+	}
+	keyID, public, signature, err = domaincontinuation.DispositionAuthorityMaterial(audit.disposition)
+	if err != nil || keyID != domainsecurity.SHA256Hex(audit.publicKey) || !bytes.Equal(public, audit.publicKey) || !ed25519.Verify(public, domaincontinuation.DispositionSigningBytes(audit.disposition), signature) {
+		return domaincontinuation.Receipt{}, domaincontinuation.Disposition{}, errors.New("synthetic disposition audit rejected")
+	}
+	return audit.receipt, audit.disposition, nil
+}
+
+func pendingPrivacyHistoryFixtureV1(t *testing.T, callID, toolName string) (map[string]any, pendingPrivacyAuditV1, domainsecurity.TurnSecurityContext) {
+	t.Helper()
+	threadID := "thread-final-pending-history"
+	now := time.Date(2026, 10, 9, 1, 2, 3, 0, time.UTC)
+	frozen, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: threadID, TurnID: "turn-signed-pending-history", WorkspaceRealPath: "/synthetic-workspace", ContextEpoch: 3, SourceManifestHash: domainsecurity.SHA256Hex([]byte("synthetic-history-manifest")), IssuedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := json.RawMessage(`{"prompt":"PRIVATE_QUESTION_SENTINEL","questions":[{"question":"PRIVATE_QUESTION_SENTINEL"}]}`)
+	scope := []string{toolName}
+	scopeBody, _ := json.Marshal(scope)
+	grant := domainsecurity.NewExecutionGrant(domainsecurity.ExecutionGrantInput{Context: frozen, Provider: "synthetic", ServerIdentity: "host:builtin", ToolName: toolName, ToolCallID: callID, ArgsHash: domainsecurity.CanonicalJSONHash(arguments), SchemaHash: domainsecurity.SHA256Hex([]byte("synthetic-schema")), ScopeHash: domainsecurity.SHA256Hex(scopeBody), ReadOnly: true, ApprovalState: "not_required", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
+	gateID := domaincontinuation.GateID(domaincontinuation.KindUserInput, threadID, frozen.TurnID, frozen.ContextDigest, grant.GrantID, callID)
+	config := domainmodel.TurnConfig{ProviderID: "synthetic", Model: "synthetic", BaseURL: "https://provider.invalid", EndpointFormat: "chat_completions"}
+	payload := domaincontinuation.Payload{Version: domaincontinuation.ContractVersionV3, Kind: domaincontinuation.KindUserInput, GateID: gateID, ThreadID: threadID, TurnID: frozen.TurnID, ItemID: "item_" + gateID, CallID: callID, ToolName: toolName, ToolCallItemID: domaintoolcall.ToolCallItemIDV1(frozen.TurnID, callID), Arguments: arguments, ProviderID: config.ProviderID, Model: config.Model, ProviderRouteHash: appmodel.ProviderContinuationRouteHash(config), ApprovalPolicy: "never", SandboxMode: "workspace-write", ToolScope: scope, LogicalEffect: domainsecurity.LogicalEffectOrdinary, OrdinaryWork: true, ProviderStepExact: true, OrdinaryResultInputIsolated: true, ProviderStepPromptSHA256: domaincontinuation.CanonicalProviderStepPromptSHA256("synthetic historical prompt"), ProviderNamespace: domaincontinuation.NewProviderContinuationNamespaceV1("turn", "", 1, nil), SecurityContext: frozen, ExecutionGrant: grant, IssuedAt: now.Add(time.Second).Format(time.RFC3339Nano)}
+	payload.UserInputTimedWait = &domaincontinuation.UserInputTimedWaitV1{TimeoutSeconds: 120}
+	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x53}, ed25519.SeedSize))
+	public := private.Public().(ed25519.PublicKey)
+	sign := func(body []byte) ([]byte, error) { return ed25519.Sign(private, body), nil }
+	receipt, err := domaincontinuation.NewReceipt(payload, domainsecurity.SHA256Hex(public), public, sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, reason, gateStatus := domaincontinuation.StatusContinued, "user_input_continued", "continued"
+	disposition, err := domaincontinuation.NewDisposition(receipt, status, reason, now.Add(2*time.Second), domainsecurity.SHA256Hex(public), public, sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := map[string]any{"id": payload.ToolCallItemID, "threadId": threadID, "turnId": frozen.TurnID, "kind": "tool_call", "status": "completed", "callId": callID, "toolName": payload.ToolName, "arguments": domaintoolcall.PublicToolCallArgumentsProjectionRecordV1(), "executionGrant": pendingPrivacyRecordV1(grant)}
+	result := map[string]any{"id": domaintoolresult.ToolResultItemIDV1(frozen.TurnID, callID), "threadId": threadID, "turnId": frozen.TurnID, "kind": "tool_result", "role": "tool", "status": "completed", "callId": callID, "toolName": payload.ToolName, "toolKind": "tool_call", "isError": false, "output": domaintoolresult.PublicToolResultProjectionRecordV1(domaintoolresult.WithheldProjectionV1("completed", "tool_output_private"))}
+	for _, item := range []map[string]any{call, result} {
+		item["contextDigest"] = frozen.ContextDigest
+		item["contextEpoch"] = float64(frozen.ContextEpoch)
+		item["executionGrantId"] = grant.GrantID
+	}
+	gate := map[string]any{"id": payload.ItemID, "kind": "user_input", "inputId": gateID, "status": gateStatus, "continuationReceiptId": receipt.ReceiptID, "prompt": "PRIVATE_QUESTION_SENTINEL", "questions": []any{map[string]any{"question": "PRIVATE_QUESTION_SENTINEL"}}, "submission": "PRIVATE_ANSWER_SENTINEL"}
+	thread := map[string]any{"id": threadID, "securityState": pendingPrivacyRecordV1(frozen), "turns": []any{map[string]any{"id": frozen.TurnID, "status": "completed", "securityContext": pendingPrivacyRecordV1(frozen), "items": []any{call, gate, result}}}}
+	return thread, pendingPrivacyAuditV1{receipt: receipt, disposition: disposition, publicKey: public}, frozen
+}
+
+func assertPendingIdentityProofGuardsV1(t *testing.T, current domainsecurity.TurnSecurityContext, history []domainmodel.Message) {
+	t.Helper()
+	good := history[1]
+	if good.PrivateUserInputPendingBinding == nil {
+		t.Fatal("trusted source history did not mint pending identity proof")
+	}
+	t.Run("retry_clone", func(t *testing.T) {
+		for attempt := 0; attempt < 3; attempt++ {
+			request := domainmodel.Request{Messages: appmodel.SanitizeToolPairing(appmodel.CloneProviderMessages(history))}
+			projected, err := ProjectProviderRequestForEffect(current, request, true)
+			if err != nil || len(projected.Messages) != 2 || projected.Messages[1].Content != good.Content ||
+				projected.Messages[1].PrivateUserInputPendingBinding != nil || history[1].PrivateUserInputPendingBinding == nil {
+				t.Fatal("retry clone lost original source identity or retained final process authority")
+			}
+		}
+	})
+	t.Run("live_private_protocol_wrapper", func(t *testing.T) {
+		closed, err := PrivateProtocolSafeHistoryV1(current, appmodel.CloneProviderMessages(history))
+		if err != nil || len(closed) != 1 {
+			t.Fatal("production privacy wrapper failed exact source closure")
+		}
+		projected, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: closed}, true)
+		if err != nil || len(projected.Messages) != 1 || projected.Messages[0].PrivateUserInputPendingBinding != nil {
+			t.Fatal("production privacy wrapper lost pending proof before final boundary")
+		}
+		content, valid := appmodel.CompletedPrivateProtocolSafeHistoryContentV1(projected.Messages[0].Content, good.Name)
+		if !valid || content != good.Content {
+			t.Fatal("production wrapper changed original pending identity")
+		}
+	})
+	for name, mutate := range map[string]func(*domainmodel.Message){
+		"fake_proof": func(m *domainmodel.Message) {
+			m.PrivateUserInputPendingBinding = map[string]any{"callId": good.ToolCallID}
+		},
+		"copied_proof_foreign_call": func(m *domainmodel.Message) {
+			foreign := "call_host_" + strings.Repeat("b", 64)
+			m.Content = strings.ReplaceAll(m.Content, good.ToolCallID, foreign)
+			m.ToolCallID = foreign
+		},
+		"role":       func(m *domainmodel.Message) { m.Role = "user" },
+		"tool_name":  func(m *domainmodel.Message) { m.Name = "user_input" },
+		"outer_call": func(m *domainmodel.Message) { m.ToolCallID = "call_host_" + strings.Repeat("b", 64) },
+		"content":    func(m *domainmodel.Message) { m.Content += " account 6222020000000000000" },
+		"parts":      func(m *domainmodel.Message) { m.Parts = []domainmodel.MessagePart{{Type: "text", Text: "other"}} },
+		"calls": func(m *domainmodel.Message) {
+			m.ToolCalls = []domainmodel.ToolCall{{ID: good.ToolCallID, Name: good.Name, Arguments: json.RawMessage("{}")}}
+		},
+		"other_authority": func(m *domainmodel.Message) { m.PrivateProviderReferenceBinding = map[string]any{} },
+	} {
+		t.Run("proof_guard/"+name, func(t *testing.T) {
+			bad := good
+			mutate(&bad)
+			if _, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: []domainmodel.Message{bad}}, true); err == nil {
+				t.Error("altered pending proof crossed final Provider boundary")
+			}
+		})
+	}
+	t.Run("proof_guard/foreign_scope", func(t *testing.T) {
+		foreign, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+			ThreadID: current.ThreadID, TurnID: "turn-foreign-pending-request", WorkspaceRealPath: current.WorkspaceRealPath,
+			ContextEpoch: current.ContextEpoch + 1, IssuedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ProjectProviderRequestForEffect(foreign, domainmodel.Request{Messages: []domainmodel.Message{good}}, true); err == nil {
+			t.Error("pending identity proof crossed request scope")
+		}
+	})
+	for name, mutate := range map[string]func([]domainmodel.Message) []domainmodel.Message{
+		"orphan":            func(messages []domainmodel.Message) []domainmodel.Message { return messages[1:] },
+		"duplicate_results": func(messages []domainmodel.Message) []domainmodel.Message { return append(messages, messages[1]) },
+		"duplicate_calls": func(messages []domainmodel.Message) []domainmodel.Message {
+			messages[0].ToolCalls = append(messages[0].ToolCalls, messages[0].ToolCalls[0])
+			return messages
+		},
+		"truncated": func(messages []domainmodel.Message) []domainmodel.Message {
+			messages[1].Content = strings.Repeat("x", 1024*1024+1)
+			return messages
+		},
+		"changed_result": func(messages []domainmodel.Message) []domainmodel.Message {
+			messages[1].Content += "changed"
+			return messages
+		},
+	} {
+		t.Run("safe_history_guard/"+name, func(t *testing.T) {
+			input := mutate(appmodel.CloneProviderMessages(history))
+			closed, _ := appmodel.PrivateProtocolSafeHistoryWithOriginsV1(input)
+			projected, err := ProjectProviderRequestForEffect(current, domainmodel.Request{Messages: closed}, true)
+			if err != nil {
+				return
+			}
+			body, _ := json.Marshal(projected.Messages)
+			if bytes.Contains(body, []byte(good.ToolCallID)) {
+				t.Error("unpaired, duplicated, or altered source acquired closed pending identity")
+			}
+		})
 	}
 }

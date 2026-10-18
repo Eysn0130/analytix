@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -11,7 +13,10 @@ import (
 	"time"
 
 	domainjob "analytix.local/runtime-go/internal/domain/job"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	"analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/ports"
+	jobsecuritytest "analytix.local/runtime-go/internal/testsupport/jobsecurity"
 )
 
 func TestTaskJobServiceWaitOutputAndKill(t *testing.T) {
@@ -1867,5 +1872,140 @@ func taskJobReviewedIsolationRecord(jobID, parentThreadID string) domainjob.Reco
 		CurrentCommit:  "current",
 		MergeStatus:    "review_requested",
 		ChangedFiles:   []domainjob.ChangedFile{{Path: "src/app.go", Status: "M"}},
+	}
+}
+
+// This owner fixture uses actual Manager reservation, claim and persistence.
+// The Service authority dependency is explicit; it is not a Host UI/worker run.
+func terminalHostRecoverManagerFixtureV1(t *testing.T) (*jobs.Manager, string, domainjob.Record, domainjob.Record) {
+	t.Helper()
+	root := t.TempDir()
+	manager, err := jobs.NewManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceRequest := domainjob.StartRequest{
+		ParentGoalID: "goal_host_recover", ParentThreadID: "thread_host_recover", ParentTurnID: "turn_parent_host_recover",
+		ChildThreadID: "thread_child_host_recover", ChildTurnID: "turn_prior_host_recover", Kind: "subagent", Name: "prior recover source",
+		Status: "completed", Background: true,
+	}
+	jobsecuritytest.BindDelegatedToolManifestRequest(t, &sourceRequest)
+	source, err := manager.StartChildRun(sourceRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := &domainjob.HostChildInputIdentityV1{SchemaVersion: 1, ClientMessageID: "afe0dc12-7924-4cb4-ab18-0bbd425bfeda", InputDigest: domainsecurity.SHA256Hex([]byte("terminal Host recovery input"))}
+	reservation, err := manager.ReserveHostChildInputRunV1(context.Background(), source.ParentThreadID, source.ChildThreadID, "turn_terminal_host_recover", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := manager.StartReservedHostChildInputRunV1(context.Background(), domainjob.StartRequest{
+		HostChildInput: identity, ParentGoalID: source.ParentGoalID, ParentThreadID: source.ParentThreadID, ParentTurnID: source.ParentTurnID,
+		ChildThreadID: source.ChildThreadID, ChildTurnID: "turn_terminal_host_recover", Kind: "subagent", Name: "terminal Host recovery",
+		Prompt: "finish child work", Status: "queued", Background: true, ContinueFrom: source.ID, SourceRef: source.ID,
+		ToolScope: source.ToolScope, ToolSchemaHash: source.ToolSchemaHash, DelegatedToolManifest: source.DelegatedToolManifest,
+	}, reservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = manager.UpdateChildRun(record.ID, domainjob.UpdateRequest{Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = manager.ClaimChildRunStart(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = manager.UpdateChildRun(record.ID, domainjob.UpdateRequest{Status: "completed"})
+	if err != nil || domainjob.ValidateHostChildInputRecordV1(record) != nil || record.HostChildInput.ClaimedAt == "" || record.CompletionDeliveryID != "" || record.RecoveryStatus != "" || !manager.RuntimeIdleForMaintenance() {
+		t.Fatal("terminal Host fixture is not durably complete and idle", err)
+	}
+	return manager, root, source, record
+}
+
+func TestTaskJobHTTPTerminalHostRecoveryPreservesDeliveryAndMaintenanceIdleV1(t *testing.T) {
+	manager, root, source, record := terminalHostRecoverManagerFixtureV1(t)
+	path := filepath.Join(root, record.ID+".json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizations, lifecycles := 0, 0
+	service := NewService(Dependencies{Jobs: manager, AuthorizeRecord: func(parent string, candidate domainjob.Record) bool {
+		authorizations++
+		return parent == record.ParentThreadID && candidate.ID == record.ID && domainjob.ValidateHostChildInputRecordV1(candidate) == nil
+	}})
+	httpService := NewTaskJobHTTPService(TaskJobHTTPServiceDeps{Service: service, Jobs: manager, RecordLifecycle: func(domainjob.Record, string, string) { lifecycles++ }})
+	for attempt := 0; attempt < 2; attempt++ {
+		result := httpService.RecoverTaskJob(record.ParentThreadID, TaskJobRecoverRequest{JobID: record.ID, DeliveryID: "delivery_caller_supplied", Reason: "manual_recovery"})
+		loaded, err := manager.LoadChildRun(record.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// On the old owner this records retry/recovering and false maintenance
+		// idle before reporting the response mismatch, retaining the counterexample.
+		if !reflect.DeepEqual(record, loaded) || !manager.RuntimeIdleForMaintenance() {
+			t.Errorf("terminal Host recover polluted persisted delivery/maintenance: delivery=%q status=%q recovery=%q idle=%t", loaded.CompletionDeliveryID, loaded.CompletionDeliveryStatus, loaded.RecoveryStatus, manager.RuntimeIdleForMaintenance())
+		}
+		if result.IsError || result.Response["result"] != "already_terminal" || result.Response["status"] != "completed" || !reflect.DeepEqual(result.Record, record) {
+			t.Errorf("terminal Host recover must return existing already_terminal without mutation: result=%v status=%v", result.Response["result"], result.Response["status"])
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !reflect.DeepEqual(before, after) || authorizations != 2 || lifecycles != 0 {
+		t.Errorf("terminal Host recover changed file or bypassed authority: err=%v authorizations=%d lifecycles=%d", err, authorizations, lifecycles)
+	}
+	reopened, err := jobs.NewManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := reopened.LoadChildRun(record.ID)
+	if err != nil || !reflect.DeepEqual(record, persisted) || !reopened.RuntimeIdleForMaintenance() {
+		t.Error("cold reopen retained a polluted Host delivery", err)
+	}
+	prior, err := reopened.LoadChildRun(source.ID)
+	if err != nil || !reflect.DeepEqual(source, prior) {
+		t.Error("Host recover changed prior source result", err)
+	}
+}
+
+func TestTaskJobHTTPTerminalHostRecoveryStillRequiresAuthorityV1(t *testing.T) {
+	manager, _, _, record := terminalHostRecoverManagerFixtureV1(t)
+	authorizations := 0
+	service := NewService(Dependencies{Jobs: manager, AuthorizeRecord: func(string, domainjob.Record) bool { authorizations++; return false }})
+	httpService := NewTaskJobHTTPService(TaskJobHTTPServiceDeps{Service: service, Jobs: manager, RecordLifecycle: func(domainjob.Record, string, string) { t.Error("unauthorized recovery reached lifecycle") }})
+	result := httpService.RecoverTaskJob(record.ParentThreadID, TaskJobRecoverRequest{JobID: record.ID})
+	if !result.IsError || result.ErrorCode != TaskJobErrorNotFound || authorizations != 1 {
+		t.Fatal("Host terminal fast path bypassed authority", result.ErrorCode, authorizations)
+	}
+	loaded, err := manager.LoadChildRun(record.ID)
+	if err != nil || !reflect.DeepEqual(record, loaded) || !manager.RuntimeIdleForMaintenance() {
+		t.Fatal("unauthorized recover altered Host delivery", err)
+	}
+}
+
+func TestTaskJobHTTPLegacyTerminalRecoveryRetainsDeliveryLifecycleV1(t *testing.T) {
+	manager, err := jobs.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := manager.StartChildRun(domainjob.StartRequest{ParentGoalID: "goal_legacy_recover", ParentThreadID: "thread_legacy_recover", ParentTurnID: "turn_legacy_recover", Kind: "background-shell", Name: "legacy completed job", Status: "completed", Background: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycles := 0
+	httpService := NewTaskJobHTTPService(TaskJobHTTPServiceDeps{Service: NewService(Dependencies{Jobs: manager}), Jobs: manager, RecordLifecycle: func(candidate domainjob.Record, status, _ string) {
+		lifecycles++
+		if candidate.ID != record.ID || status != "completed" || candidate.CompletionDeliveryID == "" || candidate.CompletionDeliveryStatus != "retry" || candidate.RecoveryStatus != "recovering" {
+			t.Error("legacy recovery skipped its real delivery retry")
+		}
+		if _, err := manager.UpdateChildRun(candidate.ID, domainjob.UpdateRequest{CompletionDeliveryStatus: "delivered", RecoveryStatus: "recovered"}); err != nil {
+			t.Error(err)
+		}
+	}})
+	result := httpService.RecoverTaskJob(record.ParentThreadID, TaskJobRecoverRequest{JobID: record.ID})
+	loaded, err := manager.LoadChildRun(record.ID)
+	if err != nil || result.IsError || result.Response["result"] != "recovered" || loaded.CompletionDeliveryID == "" || loaded.CompletionDeliveryStatus != "delivered" || loaded.RecoveryStatus != "recovered" || lifecycles != 1 || !manager.RuntimeIdleForMaintenance() {
+		t.Fatal("legacy authorized recovery no longer settles delivery", err, result.Response["result"], lifecycles)
 	}
 }

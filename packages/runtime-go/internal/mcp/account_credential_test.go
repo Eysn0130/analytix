@@ -157,6 +157,35 @@ func accountState(scope domainregistry.PrivateAccountScope, generation uint64) p
 	}
 }
 
+func TestMCPAccountCredentialAdmissionPrecedesDelayedConstructor(t *testing.T) {
+	scope := domainregistry.PrivateAccountScope{SchemaVersion: 1, Owner: "mcp", Provider: "server-a", AccountID: "account-a", ChannelID: "server-a", Purpose: "mcp-oauth-access-token"}
+	resolver := &mcpAccountResolverTestDouble{
+		credential: []byte(protectedMCPOAuthBundle(t, "mcp-oauth-bundle", "mcp", "server-a", "account-a", "server-a", "synthetic-generation-1", 0)),
+		state:      accountState(scope, 1), current: true,
+	}
+	constructors, effects := 0, 0
+	client := &mcpAccountCredentialBoundClient{
+		spec: ServerSpec{ID: "server-a", Transport: "http", URL: "https://mcp.invalid/mcp",
+			AccountCredential: &domainmcp.AccountCredentialScope{Owner: "mcp", Provider: "server-a", AccountID: "account-a", Purpose: "mcp-oauth-access-token", BindingFingerprint: mcpAccountBindingFingerprint},
+			OAuthBinding:      mcpOAuthMetadata()},
+		resolver: resolver,
+		newTransport: func(ServerSpec, string, []string) (mcpTransportClient, error) {
+			constructors++
+			return &mcpAccountClientTestDouble{onEffect: func() { effects++ }}, nil
+		},
+	}
+	for _, admission := range []func(context.Context) error{nil, func(context.Context) error { return errMCPEffectAdmission }} {
+		client.admitConstructor = admission
+		if _, err := client.CallToolContext(context.Background(), "lookup", nil); !errors.Is(err, errMCPEffectAdmission) || constructors != 0 || effects != 0 || shouldRetryMCPCall(err) {
+			t.Fatal("credential constructor/effect ran without admission")
+		}
+	}
+	client.admitConstructor = allowMCPTestEffect
+	if _, err := client.CallToolContext(context.Background(), "lookup", nil); err != nil || constructors != 1 || effects != 1 {
+		t.Fatalf("admitted credential effect failed: %v", err)
+	}
+}
+
 func TestMCPAccountCredentialIsResolvedForEveryEffectAndStaleResultsFailClosed(t *testing.T) {
 	scope := domainregistry.PrivateAccountScope{
 		SchemaVersion: 1, Owner: "mcp", Provider: "server-a", AccountID: "account-a",
@@ -178,7 +207,8 @@ func TestMCPAccountCredentialIsResolvedForEveryEffectAndStaleResultsFailClosed(t
 			},
 			OAuthBinding: mcpOAuthMetadata(),
 		},
-		resolver: resolver,
+		resolver:         resolver,
+		admitConstructor: allowMCPTestEffect,
 		newTransport: func(spec ServerSpec, _ string, _ []string) (mcpTransportClient, error) {
 			created := &mcpAccountClientTestDouble{authorization: spec.Headers["Authorization"]}
 			mu.Lock()
@@ -277,6 +307,7 @@ func TestExtensionAccountCredentialBindingRequiresVerifiedInstalledIdentity(t *t
 	requests := 0
 	client := &mcpAccountCredentialBoundClient{
 		spec: valid, resolver: resolver,
+		admitConstructor: allowMCPTestEffect,
 		newTransport: func(spec ServerSpec, _ string, _ []string) (mcpTransportClient, error) {
 			requests++
 			if got := spec.Headers["Authorization"]; got != "Bearer synthetic-extension-access" {
@@ -322,7 +353,8 @@ func TestExpiredMCPOAuthBundleCausesZeroRemoteEffect(t *testing.T) {
 			},
 			OAuthBinding: mcpOAuthMetadata(),
 		},
-		resolver: resolver,
+		resolver:         resolver,
+		admitConstructor: allowMCPTestEffect,
 		newTransport: func(ServerSpec, string, []string) (mcpTransportClient, error) {
 			requests++
 			return &mcpAccountClientTestDouble{}, nil

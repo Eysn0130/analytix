@@ -20,9 +20,9 @@ let annotation: ImageAnnotation, root: Root, container: HTMLDivElement, request:
 let handler: ReturnType<typeof createWriteShutdownHandler>
 const state = () => useWriteWorkspaceStore.getState()
 const button = (key: string) => [...container.querySelectorAll('button')].find(item => item.textContent === key)!
-const render = async (mimeType = 'image/png') => {
+const render = async (mimeType = 'image/png', zoomControlTarget?: HTMLElement | null) => {
   await act(async () => root.render(createElement(WriteImagePreview, { src: 'data:image/gif;base64,OLDPREVIEW', filePath: path,
-    workspaceRoot: workspace, mimeType, size: 3 })))
+    workspaceRoot: workspace, mimeType, size: 3, zoomControlTarget })))
 }
 function pointer(type: string, x: number, y: number) {
   const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 })
@@ -86,7 +86,9 @@ test('reference only adds a discussion scope without sending or replacing a comp
 })
 test('rotated pointer selection saves original coordinates and turning during a gesture cancels only that gesture', async () => {
   await render()
-  const rotate = () => container.querySelector<HTMLButtonElement>('[aria-label="writeImageRotatePreview"]')!
+  const menu = container.querySelector<HTMLDetailsElement>('details.write-image-zoom-menu')!
+  menu.open = true
+  const rotate = () => menu.querySelector<HTMLButtonElement>('[aria-label="writeImageRotatePreview"]')!
   expect(rotate()).not.toBeNull()
   await act(async () => rotate().click())
   const img = container.querySelector('img')!
@@ -206,4 +208,32 @@ test('mounted multi-region controls preserve each note, overlays and stable iden
   expect(state().imageRegionEditor).toMatchObject({ selectedRegionId: secondId, note: 'second note', dirty: true })
   await act(async () => button('imageRegionSave').click())
   expect(annotation.regions).toEqual([expect.objectContaining({ regionId: secondId, note: 'second note' })])
+})
+
+
+test('portals real zoom controls without scaling chrome or changing a confirmed region and note', async () => {
+  const header = document.createElement('header'), target = document.createElement('div')
+  header.className = 'ds-file-viewer-header'; header.append(target); document.body.append(header)
+  try {
+    await render('image/png', target); await draw()
+    await act(async () => { state().updateImageRegion({ note: 'keep confirmed note' }); await state().flushSave(workspace) })
+    const confirmed = state().imageRegionEditor!
+    const region = { ...confirmed.region! }, regionId = confirmed.selectedRegionId
+    const writes = request.mock.calls.filter(([r]) => r.action === 'image-annotation-write').length
+    const menu = target.querySelector<HTMLDetailsElement>('details.write-image-zoom-menu')!
+    expect(menu).not.toBeNull(); expect(container.querySelector('.ds-file-viewer-header')).toBeNull()
+    menu.open = true
+    await act(async () => menu.querySelector<HTMLButtonElement>('[aria-label="writeImageZoomIn"]')!.click())
+    expect(container.querySelector('[data-testid="image-preview-plane"]')?.getAttribute('style')).toContain('width: 500px')
+    expect(menu.querySelector('summary')?.textContent).toBe('125%')
+    expect(header.style.transform).toBe(''); expect(target.style.transform).toBe('')
+    expect(state().imageRegionEditor).toMatchObject({ region, selectedRegionId: regionId, note: 'keep confirmed note', dirty: false })
+    expect(request.mock.calls.filter(([r]) => r.action === 'image-annotation-write')).toHaveLength(writes)
+    const summary = menu.querySelector('summary')!
+    await act(async () => summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(menu.open).toBe(false); expect(document.activeElement).toBe(summary)
+    await render('image/png', null)
+    expect(target.querySelector('details')).toBeNull()
+    expect(container.querySelector('.ds-file-viewer-header')).not.toBeNull()
+  } finally { header.remove() }
 })

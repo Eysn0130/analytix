@@ -42,10 +42,14 @@ type ProviderStreamCallbacks struct {
 	// callback. The callback must finish before the request is discarded and
 	// the effect lease is released.
 	PrepareProviderAttempt func(context.Context, int, domainmodel.Request) (domainmodel.Request, ProviderAttemptSettlement, error)
-	OnTextDelta            func(string) error
-	OnTextChunk            func(domainmodel.Chunk) error
-	OnToolCallStart        func(domainmodel.ToolCall) error
-	OnProviderRetrying     func(attempt int, maxAttempts int, cause error) error
+	// OnProcessFrame receives only ephemeral native framing or private drafts. Failure of
+	// this optional observer cannot change Provider outcomes or continuation.
+	OnProcessFrame           func(domainmodel.ProcessFrameV1)
+	OnTextDelta              func(string) error
+	OnTextChunk              func(domainmodel.Chunk) error
+	OnToolCallStart          func(domainmodel.ToolCall) error
+	OnProviderRetrying       func(attempt int, maxAttempts int, cause error) error
+	OnProviderRetryLifecycle func(domainmodel.ProviderRetryV1, int, error) error
 }
 
 type ProviderAttemptSettlement func(context.Context, string, string) error
@@ -171,6 +175,72 @@ func (err providerAttemptPrepareError) Unwrap() error {
 	return err.Err
 }
 
+// ProviderFailureDiagnosticV1 returns only closed diagnostic labels. It does
+// not inspect error text, request data or failure Details, and grants no retry
+// or recovery authority. Only the existing attempt markers identify an exact
+// pre-transport callback; a privacy sentinel identifies its semantic boundary.
+func ProviderFailureDiagnosticV1(err error) (stage, cause string) {
+	var acquire providerAttemptAcquireError
+	if errors.As(err, &acquire) {
+		return "acquire", providerFailureCauseV1(acquire.Err)
+	}
+	var prepare providerAttemptPrepareError
+	if errors.As(err, &prepare) {
+		return "prepare", providerFailureCauseV1(prepare.Err)
+	}
+	if cause, ok := providerPrivacyFailureCauseV1(err); ok {
+		return "privacy_projection", cause
+	}
+	return "unknown", providerFailureCauseV1(err)
+}
+
+func providerPrivacyFailureCauseV1(err error) (string, bool) {
+	for _, candidate := range []struct {
+		err   error
+		cause string
+	}{
+		{privacyprojectionapp.ErrProviderPrivacyAuthorityUnavailable, "provider_privacy_authority_unavailable"},
+		{privacyprojectionapp.ErrUninspectableProviderPart, "uninspectable_provider_part"},
+		{privacyprojectionapp.ErrProviderSchemaContainsPII, "provider_schema_contains_pii"},
+		{privacyprojectionapp.ErrOrdinaryProviderContainsCaseEffect, "ordinary_provider_contains_case_effect"},
+		{privacyprojectionapp.ErrProviderLogicalEffectInvalid, "provider_logical_effect_invalid"},
+	} {
+		if errors.Is(err, candidate.err) {
+			return candidate.cause, true
+		}
+	}
+	return "", false
+}
+
+func providerFailureCauseV1(err error) string {
+	if cause, ok := providerPrivacyFailureCauseV1(err); ok {
+		return cause
+	}
+	if errors.Is(err, context.Canceled) {
+		return "context_canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "context_deadline_exceeded"
+	}
+	var failure TurnFailureError
+	var failurePointer *TurnFailureError
+	code := ""
+	if errors.As(err, &failure) {
+		code = failure.Code
+	} else if errors.As(err, &failurePointer) && failurePointer != nil {
+		code = failurePointer.Code
+	}
+	switch code {
+	case "turn_security_authority_unavailable", "turn_security_identity_mismatch",
+		"turn_security_workspace_mismatch", "turn_security_case_binding_mismatch",
+		"turn_security_dataset_snapshot_mismatch", "turn_security_risk_policy_mismatch",
+		"turn_security_context_invalid", "source_probe_unavailable", "tool_source_unavailable":
+		return code
+	default:
+		return "unknown"
+	}
+}
+
 func StreamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (ProviderStreamOutput, error) {
 	if err := domainmodel.ValidateReasoningEffortV1(input.Request.ReasoningEffort); err != nil {
 		return ProviderStreamOutput{}, err
@@ -258,6 +328,7 @@ func (budget *providerOutputTokenBudgetV1) Observe(chunk domainmodel.Chunk) erro
 		return nil
 	}
 	budget.observed = true
+	budget.estimate.WriteString(chunk.DiscardedToolMaterial)
 	switch chunk.Kind {
 	case domainmodel.ChunkReasoning, domainmodel.ChunkText:
 		budget.estimate.WriteString(chunk.Text)
@@ -304,7 +375,46 @@ func providerReportedOutputTokensV1(usage domainmodel.Usage) int {
 	return reported
 }
 
-func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (ProviderStreamOutput, error) {
+func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (output ProviderStreamOutput, retErr error) {
+	var pendingRetry *domainmodel.ProviderRetryV1
+	notifyRetry := func(retry domainmodel.ProviderRetryV1, max int, cause error) error {
+		if input.Callbacks.OnProviderRetryLifecycle != nil {
+			if err := input.Callbacks.OnProviderRetryLifecycle(retry, max, cause); err != nil {
+				return err
+			}
+		}
+		if retry.Phase == "scheduled" && input.Callbacks.OnProviderRetrying != nil {
+			target := retry.OuterAttempt
+			if retry.Source == "transport_reconnect" {
+				target = retry.PhysicalAttempt
+			}
+			if err := input.Callbacks.OnProviderRetrying(target, max, cause); err != nil {
+				// The new observer already accepted scheduled. A legacy admission
+				// callback can still reject before invocation; close that observation.
+				if input.Callbacks.OnProviderRetryLifecycle != nil {
+					retry.Phase, retry.At = "cancelled", time.Now().UTC()
+					retry.DelayMs, retry.DeadlineUnixMs = nil, nil
+					retry.CancelReason = domainmodel.ProviderRetryCancelReasonV1(ctx.Err(), err)
+					return errors.Join(err, input.Callbacks.OnProviderRetryLifecycle(retry, max, err))
+				}
+				return err
+			}
+		}
+		return nil
+	}
+	defer func() {
+		if pendingRetry == nil {
+			return
+		}
+		retry := *pendingRetry
+		retry.Phase, retry.At = "cancelled", time.Now().UTC()
+		retry.DelayMs, retry.DeadlineUnixMs = nil, nil
+		retry.CancelReason = domainmodel.ProviderRetryCancelReasonV1(ctx.Err(), retErr)
+		if err := notifyRetry(retry, input.MaxAttempts, retErr); err != nil {
+			output = sealFailedProviderStreamOutput(output)
+			retErr = errors.Join(retErr, ProviderStreamCallbackError{Err: err})
+		}
+	}()
 	if input.Provider == nil {
 		return ProviderStreamOutput{}, errors.New("provider client is not configured")
 	}
@@ -313,9 +423,15 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultProviderStreamMaxAttempts
 	}
-	var output ProviderStreamOutput
+	input.MaxAttempts = maxAttempts
 	var err error
 	var cacheObservations []domaincache.ProviderCallObservationV1
+	var processAttemptCount uint64
+	if binding := input.Request.PrivateProviderTelemetry; binding != nil && binding.StepStartedAt.IsZero() {
+		copyBinding := *binding
+		copyBinding.StepStartedAt = time.Now().UTC()
+		input.Request.PrivateProviderTelemetry = &copyBinding
+	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return output, err
@@ -465,9 +581,121 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 				firstTokenLatencyMs = providerFirstTokenLatencyMillis(providerStartedAt, observedAt, time.Now())
 			}
 		}
+		processAttemptBase := processAttemptCount
+		processLocalAttempt := uint64(1)
+		processAttemptOpened := false
+		processAttemptTerminal := false
+		acceptProcessFrame := func(frame domainmodel.ProcessFrameV1) {
+			if frame.Source != "" && frame.Source != "assistant_draft" && frame.Source != "provider_reasoning" && frame.Source != "tool_preparation" {
+				return
+			}
+			if frame.ReasoningForm != "" && (frame.ReasoningForm != "summary" || frame.Source != "" && frame.Source != "provider_reasoning") {
+				return
+			}
+			localAttempt := frame.Attempt
+			if localAttempt == 0 {
+				localAttempt = processLocalAttempt
+			}
+			if localAttempt < processLocalAttempt {
+				return
+			}
+			if localAttempt > processLocalAttempt {
+				processLocalAttempt = localAttempt
+				processAttemptOpened = false
+				processAttemptTerminal = false
+			}
+			frame.Attempt = processAttemptBase + processLocalAttempt
+			frame.ProjectionSecrets = []string{request.APIKey}
+			if frame.Attempt > processAttemptCount {
+				processAttemptCount = frame.Attempt
+			}
+			if !processAttemptOpened {
+				if frame.Kind == "terminal" {
+					return
+				}
+				processAttemptOpened = true
+				notifyProcessDisplayV1(input.Callbacks.OnProcessFrame, domainmodel.ProcessFrameV1{Kind: "reset", Attempt: frame.Attempt, ProjectionSecrets: []string{request.APIKey}})
+			}
+			if frame.Kind == "reset" || processAttemptTerminal {
+				return
+			}
+			switch frame.Kind {
+			case "start", "delta", "end":
+				if frame.Source == "" && frame.NativeIndex < 0 {
+					return
+				}
+				if frame.Source == "tool_preparation" {
+					if frame.ToolPreparation == nil || (frame.Kind != "start" && frame.Kind != "delta" && frame.Kind != "end") || frame.ToolPreparation.Index < 0 || uint64(frame.ToolPreparation.Index) > 1<<53-1 || len(frame.ToolPreparation.ToolName) > 1024 || len(frame.ToolPreparation.Arguments) > 1024*1024 {
+						return
+					}
+					preparation := *frame.ToolPreparation
+					if frame.Kind == "start" {
+						if preparation.ToolName != "" || preparation.Arguments != "" || frame.Text != "" {
+							return
+						}
+						// A slot observation never mints a call. The actual named
+						// delta/start/final still share the one existing issuer.
+						preparation.CallID = ""
+					} else {
+						issued, err := toolCallIDs.issue(preparation.CallID)
+						if err != nil || issued == "" {
+							return
+						}
+						preparation.CallID = issued
+					}
+					frame.ToolPreparation = &preparation
+					frame.NativeIndex, frame.NativeID, frame.Text = 0, "", ""
+				} else if frame.Source == "provider_reasoning" {
+					if frame.HostSegmentOrdinal == 0 || frame.HostSegmentOrdinal > 128 {
+						return
+					}
+					frame.NativeIndex, frame.NativeID = 0, ""
+					if frame.Kind != "delta" {
+						frame.Text = ""
+					}
+				} else if frame.Source == "assistant_draft" {
+					if frame.Kind != "delta" || (frame.ContentClassification != "provider_text" && frame.ContentClassification != "unclassified_inline") {
+						return
+					}
+					frame.NativeIndex, frame.NativeID = 0, ""
+				} else if frame.Kind != "delta" {
+					frame.Text = ""
+				}
+				if len(frame.Text) > 1024*1024 {
+					// A display capture bound must not truncate a native block into
+					// an apparently complete body or alter provider continuation.
+					frame = domainmodel.ProcessFrameV1{Kind: "terminal", Attempt: frame.Attempt, ProjectionSecrets: []string{request.APIKey}}
+					processAttemptTerminal = true
+				}
+			case "terminal":
+				frame.NativeIndex, frame.NativeID, frame.Text = 0, "", ""
+				frame.ReasoningForm = ""
+				processAttemptTerminal = true
+			default:
+				return
+			}
+			notifyProcessDisplayV1(input.Callbacks.OnProcessFrame, frame)
+		}
 		request.OnChunk = func(chunk domainmodel.Chunk) error {
+			// Lifecycle settlement carries no Provider bytes. Cancellation cannot
+			// suppress its observation; ordinary output remains fenced below.
+			if chunk.Kind == domainmodel.ChunkRetrying && chunk.Retry != nil && chunk.Retry.Phase != "scheduled" {
+				if chunk.Retry.Phase != "started" && chunk.Retry.Phase != "cancelled" {
+					return ProviderStreamCallbackError{Err: errInvalidPipelineTelemetry}
+				}
+				if err := notifyRetry(*chunk.Retry, chunk.RetryMax, nil); err != nil {
+					return ProviderStreamCallbackError{Err: err}
+				}
+				return nil
+			}
 			if err := attemptCtx.Err(); err != nil {
 				return ProviderStreamCallbackError{Err: err}
+			}
+			if chunk.ProcessFrame != nil {
+				acceptProcessFrame(*chunk.ProcessFrame)
+				if chunk.Kind == domainmodel.ChunkReasoning && chunk.Text == "" && chunk.Signature == "" {
+					return nil
+				}
 			}
 			if input.MaxOutputBytes > 0 {
 				size := providerChunkBytes(chunk)
@@ -563,6 +791,12 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 				if attemptOutput.PartialTextStarted || attemptOutput.PartialToolStarted {
 					return providerReconnectAfterOutputError{}
 				}
+				acceptProcessFrame(domainmodel.ProcessFrameV1{Kind: "terminal", Attempt: processLocalAttempt})
+				nextProcessAttempt := processLocalAttempt + 1
+				if chunk.RetryAttempt > 0 && uint64(chunk.RetryAttempt) > nextProcessAttempt {
+					nextProcessAttempt = uint64(chunk.RetryAttempt)
+				}
+				acceptProcessFrame(domainmodel.ProcessFrameV1{Kind: "reset", Attempt: nextProcessAttempt})
 				// A transport reconnect starts a new physical provider attempt.
 				// Nothing buffered from the failed attempt has crossed the public
 				// callback boundary, so discard both its text candidate and its
@@ -587,7 +821,12 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 				if message == "" {
 					message = "provider stream retrying before first output"
 				}
-				if input.Callbacks.OnProviderRetrying != nil {
+				if chunk.Retry != nil {
+					if err := notifyRetry(*chunk.Retry, retryMax, errors.New(message)); err != nil {
+						return ProviderStreamCallbackError{Err: err}
+					}
+				} else if input.Callbacks.OnProviderRetrying != nil {
+					// Legacy chunks retain their scheduled-only behavior without inventing phase.
 					if err := input.Callbacks.OnProviderRetrying(retryAttempt, retryMax, errors.New(message)); err != nil {
 						return ProviderStreamCallbackError{Err: err}
 					}
@@ -633,7 +872,39 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 				return output, ProviderStreamCallbackError{Err: errors.Join(callbackErr, settleErr)}
 			}
 		}
+		invocationErr := ctx.Err()
+		if invocationErr == nil {
+			invocationErr = attemptCtx.Err()
+		}
+		if invocationErr == nil && pendingRetry != nil {
+			retry := *pendingRetry
+			retry.Phase, retry.At = "started", time.Now().UTC()
+			retry.DelayMs, retry.DeadlineUnixMs = nil, nil
+			// A failed recording cannot establish either phase durably. Preserve the
+			// consumer's unresolved observation and prevent the invocation.
+			pendingRetry = nil
+			invocationErr = notifyRetry(retry, maxAttempts, nil)
+		}
+		if invocationErr != nil {
+			var settleErr error
+			if settleAttempt != nil {
+				settleCtx, cancelSettle := context.WithTimeout(context.WithoutCancel(attemptCtx), 15*time.Second)
+				status, reason := "failed", "provider_invocation_rejected"
+				if ctx.Err() != nil || attemptCtx.Err() != nil {
+					status, reason = "cancelled", "provider_attempt_cancelled"
+				}
+				settleErr = settleAttempt(settleCtx, status, reason)
+				cancelSettle()
+			}
+			request = domainmodel.Request{}
+			releaseAttempt()
+			return output, ProviderStreamCallbackError{Err: errors.Join(invocationErr, settleErr)}
+		}
+		// Reserve the first physical attempt even if this provider has no native
+		// display framing. Actual reconnect ordinals are supplied by the client.
+		processAttemptCount = processAttemptBase + 1
 		result, streamErr := input.Provider.Stream(attemptCtx, request)
+		acceptProcessFrame(domainmodel.ProcessFrameV1{Kind: "terminal", Attempt: processLocalAttempt})
 		hostTiming.FinishedAt = time.Now()
 		if input.Callbacks.AfterProviderAttempt != nil {
 			if callbackErr := input.Callbacks.AfterProviderAttempt(attempt, streamErr); callbackErr != nil {
@@ -673,16 +944,45 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 				streamErr = errors.Join(streamErr, outputBytesErr)
 			}
 		}
+		nativeTiming := result.HostTiming
 		result = appmodel.NormalizeProviderResult(request, result)
+		if nativeTiming.FirstContentPresenceKnown {
+			hostTiming.FirstContentPresenceKnown = true
+			hostTiming.FirstContentAt = time.Time{}
+			firstTokenLatencyMs = -1
+			// Preserve explicit absence through normalization and cancellation;
+			// display callbacks and control frames cannot fill it in.
+			if !nativeTiming.FirstContentAt.IsZero() && !nativeTiming.FirstContentAt.Before(providerStartedAt) && !nativeTiming.FirstContentAt.After(time.Now()) {
+				hostTiming.FirstContentAt = nativeTiming.FirstContentAt
+				firstTokenLatencyMs = nativeTiming.FirstContentAt.Sub(providerStartedAt).Milliseconds()
+				result.FirstTokenLatencyMs, result.HasFirstTokenLatency = firstTokenLatencyMs, true
+			}
+			result.HostTiming = hostTiming
+		}
 		if budgetErr := outputBudget.ValidateResult(result); budgetErr != nil {
 			streamErr = errors.Join(streamErr, budgetErr)
 		}
-		normalizedResult, identityErr := toolCallIDs.normalizeResult(result)
-		if identityErr != nil {
-			result.Chunks = nil
-			streamErr = errors.Join(streamErr, identityErr)
+		if streamErr == nil && providerResultOutputCapped(result) {
+			// A capped response can legitimately end with an unfinished tool
+			// block. Drop it before requiring an executable transcript; callback
+			// identity errors and provider/context errors still take precedence.
+			kept := make([]domainmodel.Chunk, 0, len(result.Chunks))
+			for _, chunk := range result.Chunks {
+				if chunk.Kind != domainmodel.ChunkToolCallStart && chunk.Kind != domainmodel.ChunkToolCall {
+					chunk.ProcessFrame = nil
+					chunk.DiscardedToolMaterial = ""
+					kept = append(kept, chunk)
+				}
+			}
+			result.Chunks = kept
 		} else {
-			result = normalizedResult
+			normalizedResult, identityErr := toolCallIDs.normalizeResult(result)
+			if identityErr != nil {
+				result.Chunks = nil
+				streamErr = errors.Join(streamErr, identityErr)
+			} else {
+				result = normalizedResult
+			}
 		}
 		cacheObservations = append(cacheObservations, result.CacheObservations...)
 		result.CacheObservations = append([]domaincache.ProviderCallObservationV1(nil), cacheObservations...)
@@ -766,9 +1066,6 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 		if firstTokenLatencyMs >= 0 {
 			result.FirstTokenLatencyMs = firstTokenLatencyMs
 			result.HasFirstTokenLatency = true
-		} else if ProviderResultHasVisibleOutput(result) {
-			result.FirstTokenLatencyMs = result.DurationMs
-			result.HasFirstTokenLatency = true
 		}
 		if firstReasoningLatencyMs >= 0 {
 			result.FirstReasoningLatencyMs = firstReasoningLatencyMs
@@ -794,24 +1091,52 @@ func streamProviderWithRetry(ctx context.Context, input ProviderStreamInput) (Pr
 			return sealFailedProviderStreamOutput(output), err
 		}
 		output = sealFailedProviderStreamOutput(output)
-		if input.Callbacks.OnProviderRetrying != nil {
-			if retryErr := input.Callbacks.OnProviderRetrying(attempt+1, maxAttempts, err); retryErr != nil {
-				return output, ProviderStreamCallbackError{Err: retryErr}
-			}
+		// Failed settlement and the retry predicate above precede scheduling.
+		// Authority is rechecked inside the next effect lease after this wait.
+		delay := ProviderRetryDelay(err)
+		if delay < 0 {
+			delay = 0
 		}
-		if delay := ProviderRetryDelay(err); delay > 0 {
-			select {
-			case <-ctx.Done():
-				return sealFailedProviderStreamOutput(output), ctx.Err()
-			case <-time.After(delay):
-			}
+		frozenAt := time.Now()
+		at := frozenAt.UTC()
+		deadline := frozenAt.Add(delay)
+		delayMs, deadlineMs := delay.Milliseconds(), deadline.UnixMilli()
+		sequence := input.ContinuationAuthority.Sequence
+		if input.Request.PrivateProviderTelemetry != nil {
+			sequence = input.Request.PrivateProviderTelemetry.LogicalSequence
 		}
+		retry := domainmodel.ProviderRetryV1{SchemaVersion: 1, Source: "provider_retry", Phase: "scheduled", LogicalSequence: sequence, OuterAttempt: attempt + 1, DelayMs: &delayMs, DeadlineUnixMs: &deadlineMs, At: at}
+		timer := time.NewTimer(time.Until(deadline))
+		if retryErr := notifyRetry(retry, maxAttempts, err); retryErr != nil {
+			timer.Stop()
+			return output, ProviderStreamCallbackError{Err: retryErr}
+		}
+		pendingRetry = &retry
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return sealFailedProviderStreamOutput(output), ctx.Err()
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
 	return sealFailedProviderStreamOutput(output), err
 }
 
 type providerOutputStartedError interface {
 	ProviderOutputStarted() bool
+}
+
+func notifyProcessDisplayV1(callback func(domainmodel.ProcessFrameV1), frame domainmodel.ProcessFrameV1) {
+	if callback == nil {
+		return
+	}
+	if frame.ToolPreparation != nil {
+		preparation := *frame.ToolPreparation
+		frame.ToolPreparation = &preparation
+	}
+	defer func() { _ = recover() }()
+	callback(frame)
 }
 
 type providerOutputObservationError interface {
@@ -934,6 +1259,8 @@ func (issuer *providerToolCallIDIssuerV1) normalizeResult(result domainmodel.Res
 	resultStarts := map[string]string{}
 	resultFinals := map[string]string{}
 	for index, chunk := range result.Chunks {
+		normalized.Chunks[index].ProcessFrame = nil
+		normalized.Chunks[index].DiscardedToolMaterial = ""
 		switch chunk.Kind {
 		case domainmodel.ChunkToolCallStart, domainmodel.ChunkToolCall:
 			raw := chunk.ToolCall.ID
@@ -1022,5 +1349,5 @@ func providerFirstTokenLatencyMillis(startedAt time.Time, observedAt time.Time, 
 }
 
 func providerChunkBytes(chunk domainmodel.Chunk) int {
-	return len(chunk.Text) + len(chunk.Signature) + len(chunk.ToolCall.ID) + len(chunk.ToolCall.Name) + len(chunk.ToolCall.Arguments)
+	return len(chunk.Text) + len(chunk.Signature) + len(chunk.ToolCall.ID) + len(chunk.ToolCall.Name) + len(chunk.ToolCall.Arguments) + len(chunk.DiscardedToolMaterial)
 }

@@ -81,3 +81,20 @@ func TestProjectStringRecordsMasksEveryUntrustedAnswerField(t *testing.T) {
 		t.Fatalf("caller-owned answers were mutated: %#v", answers)
 	}
 }
+
+func TestProjectHostValidatedUserInputAnswersPreservesOnlyBoundIdentity(t *testing.T) {
+	const inputID = "input_123456789012"
+	questions := []map[string]any{{"id": inputID + "_1"}}
+	values := []map[string]string{{"id": inputID + "_1", "kind": "answer", "value": "账号 6222020000000000000", "opaque": "13800138000"}}
+	projected := ProjectHostValidatedUserInputAnswers(inputID, questions, values)
+	if projected[0]["id"] != values[0]["id"] || projected[0]["value"] != "账号 [ACCOUNT]" || projected[0]["opaque"] != "[PHONE]" {
+		t.Fatalf("bound answer projection = %#v", projected)
+	}
+	if values[0]["value"] != "账号 6222020000000000000" {
+		t.Fatal("projection mutated private answer")
+	}
+	unbound := ProjectHostValidatedUserInputAnswers(inputID, []map[string]any{{"id": "6222020000000000000"}}, []map[string]string{{"id": "6222020000000000000", "value": "safe"}})
+	if unbound[0]["id"] != "[ACCOUNT]" {
+		t.Fatalf("unbound id escaped projection: %#v", unbound)
+	}
+}

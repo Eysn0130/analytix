@@ -174,6 +174,17 @@ func (projector *TrustedPublicProjector) retainedFactsForThreadV1(thread map[str
 }
 
 func (projector *TrustedPublicProjector) ProjectThread(thread map[string]any) (map[string]any, error) {
+	out, err := projector.projectValidatedThreadV1(thread)
+	if err != nil {
+		return nil, err
+	}
+	return closePublicThreadSteeringV1(out)
+}
+
+// Internal history producers retain the established Question codec carriers
+// through their own record/seed checks. This is the same complete authority and
+// privacy pipeline as the public method; only the final wire closure differs.
+func (projector *TrustedPublicProjector) projectValidatedThreadV1(thread map[string]any) (map[string]any, error) {
 	retained, originals, err := projector.retainedFactsForThreadV1(thread)
 	if err != nil {
 		return nil, err
@@ -349,7 +360,19 @@ func projectTrustedStructuredOrdinaryV1(value any, scope trustedProjectionScopeV
 	planDigestEntries := []trustedTerminalProjectionEntryV1{}
 	staged = stageTrustedPlanDigestV1(staged, nil, &planDigestEntries)
 	bindTrustedTerminalProjectionCountV1(planDigestEntries)
+	if domainevent.ValidateQuestionReplyResourceLimitsV1(staged) != nil {
+		return nil
+	}
+	staged, restoreQuestion, err := domainevent.StageQuestionReplyContentV1(staged)
+	if err != nil {
+		return nil
+	}
 	projected := domainordinary.ProjectValueV1(staged)
+	projected, ok := restoreQuestion(projected)
+	if !ok {
+		return nil
+	}
+
 	restored, ok := restoreTrustedTerminalAuthorityV1(projected, planDigestEntries)
 	if !ok {
 		return nil

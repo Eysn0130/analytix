@@ -1,8 +1,10 @@
 package thread
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -11,9 +13,11 @@ import (
 	appusage "analytix.local/runtime-go/internal/app/usage"
 	"analytix.local/runtime-go/internal/contracts"
 	domaincheckpointref "analytix.local/runtime-go/internal/domain/checkpointref"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
+	domaingoal "analytix.local/runtime-go/internal/domain/goal"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
@@ -24,6 +28,8 @@ import (
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 	finalauthorityport "analytix.local/runtime-go/internal/ports/finalauthority"
 )
+
+var initialPublicSkillIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$`)
 
 // ProjectPublicThreadEvent applies the same boundary-only case projection to
 // SSE replay and live events as ProjectPublicThread applies to snapshots.
@@ -36,6 +42,9 @@ func projectPublicThreadEvent(routeThreadID string, thread, event map[string]any
 }
 
 func projectPublicThreadEventWithRetainedFactsV1(routeThreadID string, thread, event map[string]any, trusted *gateprojection.TrustedFinalProjectionIndex, caseThreads CaseThreadAuthority, currentAuthority CurrentCaseThreadAuthorityValidator, primaryCAS finalauthorityport.AcceptedFinalCASReader, retained map[string]bool) (map[string]any, bool, error) {
+	if event["kind"] == "message_feedback_put" || event["kind"] == "message_feedback_delete" {
+		return nil, false, nil
+	}
 	routeThreadID = strings.TrimSpace(routeThreadID)
 	threadID := strings.TrimSpace(contracts.StringField(thread, "id"))
 	eventThreadID := strings.TrimSpace(contracts.StringField(event, "threadId"))
@@ -61,6 +70,10 @@ func projectPublicThreadEventWithRetainedFactsV1(routeThreadID string, thread, e
 			return nil, false, nil
 		}
 		projected, visible := projectOrdinaryPublicThreadEvent(event)
+		if !governed && visible {
+			// Only an exact committed terminal event can introduce this fact.
+			delete(projected, "endReason")
+		}
 		if governed && visible && !projectGeneralTerminalOrdinaryResultV1(event, projected) {
 			return nil, false, nil
 		}
@@ -165,6 +178,21 @@ func projectPublicThreadEventWithRetainedFactsV1(routeThreadID string, thread, e
 	}
 	kind := strings.TrimSpace(contracts.StringField(projectedEvent, "kind"))
 	switch kind {
+	case "pipeline_stage":
+		stage := contracts.StringField(projectedEvent, "stage")
+		details, _ := projectedEvent["details"].(map[string]any)
+		if stage == "logical_step_started" || stage == "logical_step_assembled" || stage == "logical_step_closed" {
+			if _, valid := appusage.ProjectLogicalStepDetailsV1(stage, details); valid {
+				return projectedEvent, true, nil
+			}
+		}
+		if stage == "post_start" {
+			version, valid := nonNegativePublicInteger(details["logicalStepMetricsVersion"])
+			if valid && version == appusage.LogicalStepMetricsVersionV1 {
+				return projectedEvent, true, nil
+			}
+		}
+		return nil, false, nil
 	case "turn_started":
 		if !projectedThreadHasTurn(projectedThread, contracts.StringField(projectedEvent, "turnId")) {
 			return nil, false, nil
@@ -336,14 +364,26 @@ func projectOrdinaryPublicThreadEvent(event map[string]any) (map[string]any, boo
 		return out, true
 	case "thread_rewound":
 		return ordinaryEventFields(event, "rewindTurnId", "removedTurns", "remainingTurns", "removedTurnIds"), true
-	case "turn_started", "turn_completed", "turn_failed", "turn_aborted", "turn_steered":
+	case "turn_steered":
+		if _, valid := publicTurnLifecycleEventStatusV1(kind, event); !valid {
+			return nil, false
+		}
+		// Steering prose belongs to the private durable record and promoted
+		// user-message item. The closed public notice carries metadata only.
+		out := ordinaryEventFields(event,
+			"clientUserMessageId", "admittedSeq", "model", "providerId", "approvalPolicy",
+			"sandboxMode", "mode", "disableUserInput", "maxModelSteps", "workspaceCheckpointId",
+		)
+		delete(out, "itemId")
+		return out, true
+	case "turn_started", "turn_completed", "turn_failed", "turn_aborted":
 		status, valid := publicTurnLifecycleEventStatusV1(kind, event)
 		if !valid {
 			return nil, false
 		}
 		out := ordinaryEventFields(event,
 			"status", "text", "clientUserMessageId", "admittedSeq", "message", "code", "details", "severity",
-			"acceptedFinalDigest", "terminalReason", "discard", "cancelled", "cancelledPendingGates", "model", "providerId", "approvalPolicy",
+			"acceptedFinalDigest", "terminalReason", "endReason", "discard", "cancelled", "cancelledPendingGates", "model", "providerId", "approvalPolicy",
 			"sandboxMode", "mode", "disableUserInput", "maxModelSteps", "workspaceCheckpointId",
 		)
 		if status == "" {
@@ -425,23 +465,60 @@ func projectOrdinaryPublicThreadEvent(event map[string]any) (map[string]any, boo
 			return nil, false
 		}
 		out := ordinaryEventFields(event, "inputId", "status", "prompt", "questions")
+		if raw, present := event["timedWait"]; present {
+			if wait, valid := publicUserInputTimedWaitV1(raw); valid {
+				out["timedWait"] = wait
+			} else {
+				return nil, false
+			}
+		}
 		out["status"] = status
 		return out, true
 	case "compaction_started":
 		out := ordinaryEventFields(event,
 			"summary", "replacedTokens", "auto", "pinnedConstraints", "sourceDigest", "digestMarker", "sourceItemIds",
+			"compactionId", "schemaVersion", "startedAt",
 		)
-		delete(out, "itemId")
+		if !numericEqualsV1(event["schemaVersion"], 3) {
+			delete(out, "itemId")
+		}
 		return out, true
+	case "compaction_failed":
+		if !numericEqualsV1(event["schemaVersion"], 3) || contracts.StringField(event, "compactionId") != contracts.StringField(event, "itemId") ||
+			contracts.StringField(event, "reasonCode") != "summary_unavailable" {
+			return nil, false
+		}
+		return ordinaryEventFields(event, "compactionId", "schemaVersion", "auto", "reasonCode", "finishedAt"), true
 	case "compaction_completed":
 		out := ordinaryEventFields(event,
 			"summary", "replacedTokens", "auto", "pinnedConstraints", "sourceDigest", "digestMarker", "sourceItemIds",
 			"schemaVersion", "reasoningExcluded", "reasoningExclusionProof",
+			"compactionId", "summaryKind", "summaryDigest", "checkpointDigest", "shadowedItemCount", "tokenCountKind", "tokenEstimatorVersion",
+			"createdAt", "finishedAt", "turn",
 		)
-		delete(out, "itemId")
+		if !numericEqualsV1(event["schemaVersion"], 3) {
+			delete(out, "itemId")
+			delete(out, "turn")
+		}
 		return out, true
 	case "goal_updated":
 		return nil, false
+	case "goal_activation_changed":
+		if len(event) != 4 || event["seq"] != nil || event["turnId"] != nil || event["itemId"] != nil {
+			return nil, false
+		}
+		out := selectPublicFields(event, []string{"kind", "threadId", "timestamp", "activation"})
+		if event["activation"] == nil {
+			return out, true
+		}
+		activation, ok := event["activation"].(map[string]any)
+		if !ok || len(activation) != 3 || !oneOfPublicValue(contracts.StringField(activation, "activation"), "armed", "disarmed") {
+			return nil, false
+		}
+		if _, valid := domaingoal.RefFromRecordV1(activation); !valid {
+			return nil, false
+		}
+		return out, true
 	case "goal_cleared":
 		return ordinaryEventFields(event, "cleared"), event["cleared"] == true && event["goal"] == nil
 	case "goal_evidence_audit":
@@ -479,6 +556,29 @@ func projectOrdinaryPublicThreadEvent(event map[string]any) (map[string]any, boo
 		out["stage"] = stage
 		out["label"] = label
 		projectedDetails := projectOrdinaryPipelineDetails(stage, details)
+		_, hasRetry := details["retry"]
+		_, hasSequence := details["logicalSequence"]
+		_, hasMetricsVersion := details["logicalStepMetricsVersion"]
+		if stage == "provider_retrying" && hasRetry {
+			retry, valid := projectedDetails["retry"].(map[string]any)
+			attempt, attemptOK := nonNegativePublicInteger(event["attempt"])
+			maximum, maximumOK := nonNegativePublicInteger(event["maxAttempt"])
+			target := retry["outerAttempt"]
+			if retry["source"] == "transport_reconnect" {
+				target = retry["physicalAttempt"]
+			}
+			stamp, stampOK := event["timestamp"].(string)
+			_, stampErr := time.Parse(time.RFC3339Nano, stamp)
+			if !valid || !attemptOK || !maximumOK || attempt < 1 || maximum < attempt || maximum > 1e15 || float64(attempt) != target || !stampOK || stampErr != nil {
+				return nil, false
+			}
+		}
+		if stage == "response_received" && hasSequence && projectedDetails["logicalSequence"] == nil {
+			return nil, false
+		}
+		if (stage == "logical_step_started" || stage == "logical_step_assembled" || stage == "logical_step_closed" || stage == "post_start" && hasMetricsVersion) && len(projectedDetails) == 0 {
+			return nil, false
+		}
 		if stage == "provider_admission_rejected" && len(projectedDetails) == 0 {
 			return nil, false
 		}
@@ -679,6 +779,30 @@ func projectOrdinaryPublicEventItem(item map[string]any) (map[string]any, bool) 
 			"id", "turnId", "threadId", "role", "status", "createdAt", "finishedAt", "kind", "text", "displayText",
 			"delivery", "clientUserMessageId", "attachmentIds", "fileReferences", "workspaceCheckpointId",
 		})
+		if raw, present := item["activeSkillIds"]; present && item["delivery"] != "steer" {
+			ids, ok := raw.([]any)
+			if !ok || len(ids) > 16 {
+				return nil, false
+			}
+			seen := map[string]bool{}
+			for _, value := range ids {
+				id, valid := value.(string)
+				if !valid || !initialPublicSkillIDPattern.MatchString(id) || seen[id] {
+					return nil, false
+				}
+				seen[id] = true
+			}
+			if len(ids) > 0 {
+				projected["activeSkillIds"] = contracts.CloneValue(ids)
+			}
+		}
+		if raw, present := item["source"]; present {
+			source, valid := domaingoal.ParseRoundSourceV1(raw)
+			if !valid {
+				return nil, false
+			}
+			projected["source"] = domaingoal.RoundSourceRecordV1(source)
+		}
 	case "assistant_text":
 		projected = selectPublicFields(item, []string{
 			"id", "turnId", "threadId", "role", "status", "createdAt", "finishedAt", "kind", "text",
@@ -691,12 +815,20 @@ func projectOrdinaryPublicEventItem(item map[string]any) (map[string]any, bool) 
 		projected = selectPublicFields(item, []string{
 			"id", "turnId", "threadId", "role", "status", "createdAt", "finishedAt", "kind", "inputId", "prompt", "questions",
 		})
+		if raw, present := item["timedWait"]; present {
+			if wait, valid := publicUserInputTimedWaitV1(raw); valid {
+				projected["timedWait"] = wait
+			} else {
+				return nil, false
+			}
+		}
 	case "compaction":
 		projected = selectPublicFields(item, []string{
 			"id", "turnId", "threadId", "role", "status", "createdAt", "finishedAt", "kind", "summary", "replacedTokens",
 			"auto", "pinnedConstraints", "sourceDigest", "digestMarker", "sourceItemIds", "schemaVersion", "reasoningExcluded",
 			"reasoningExclusionProof", "assistantProseExcluded", "toolPayloadsExcluded", "caseFactsExcluded",
 			"providerHistoryProjectionVersion", "caseHistoryProjectionVersion", "taskContinuation",
+			"compactionId", "summaryKind", "summaryDigest", "checkpointDigest", "shadowedItemCount", "tokenCountKind", "tokenEstimatorVersion",
 		})
 	case "review":
 		projected = selectPublicFields(item, []string{
@@ -769,7 +901,7 @@ func publicGateEventStatusV1(kind string, status string) (string, bool) {
 	case "approval_resolved":
 		return status, oneOfPublicValue(status, "allowed", "denied", "expired")
 	case "user_input_resolved":
-		return status, oneOfPublicValue(status, "submitted", "cancelled")
+		return status, oneOfPublicValue(status, "submitted", "cancelled", "continued")
 	default:
 		return "", false
 	}
@@ -786,7 +918,7 @@ func publicOrdinaryItemStatusV1(kind string, status string) (string, bool) {
 	case "approval":
 		valid = oneOfPublicValue(status, "pending", "allowed", "denied", "expired")
 	case "user_input":
-		valid = oneOfPublicValue(status, "pending", "submitted", "cancelled")
+		valid = oneOfPublicValue(status, "pending", "submitted", "cancelled", "continued")
 	case "compaction", "review":
 		valid = status == "completed"
 	case "error":
@@ -834,7 +966,7 @@ func ordinaryItemEventLifecycleValidV1(eventKind string, item map[string]any) bo
 		case "approval":
 			return oneOfPublicValue(status, "allowed", "denied", "expired")
 		case "user_input":
-			return oneOfPublicValue(status, "submitted", "cancelled")
+			return oneOfPublicValue(status, "submitted", "cancelled", "continued")
 		case "error":
 			return oneOfPublicValue(status, "completed", "failed", "aborted")
 		case "tool_call", "tool_result":
@@ -877,7 +1009,8 @@ func publicOrdinaryPipelineStageV1(value string) (string, string) {
 		"input_compressed": "Input Compressed", "input_remembered": "Input Remembered",
 		"pre_send": "Pre-Send", "post_send": "Post-Send", "response_received": "Response Received",
 		"provider_admission_rejected": "Provider admission rejected",
-		"provider_retrying":           "Retrying provider stream", "step_limit_finalizing": "Model step budget reached",
+		"logical_step_started":        "Logical step started", "logical_step_assembled": "Logical step assembled", "logical_step_closed": "Logical step closed",
+		"provider_retrying": "Retrying provider stream", "step_limit_finalizing": "Model step budget reached",
 		"provider_error": "Provider stream failed", "empty_final_recovered": "Provider returned an empty final response",
 		"loop_guard": "Loop guard",
 	}
@@ -915,6 +1048,13 @@ func projectOrdinaryPipelineDetails(stage string, details map[string]any) map[st
 	if details == nil {
 		return nil
 	}
+	if stage == "logical_step_started" || stage == "logical_step_assembled" || stage == "logical_step_closed" {
+		projected, valid := appusage.ProjectLogicalStepDetailsV1(stage, details)
+		if !valid {
+			return nil
+		}
+		return projected
+	}
 	if stage == "provider_admission_rejected" {
 		if len(details) != 4 || contracts.StringField(details, "reasonCode") != "context_window_hard_limit" {
 			return nil
@@ -933,6 +1073,41 @@ func projectOrdinaryPipelineDetails(stage string, details map[string]any) map[st
 		"visibleRecovery", "recoveryKind", "recoveryAttempt", "maxRecoveryAttempt", "maxRecoveryAttempts",
 		"recoveryExhausted", "partialToolStarted", "maxModelSteps", "toolName", "guardKind", "stormCount",
 	})
+	if stage == "post_start" {
+		if value, exists := details["logicalStepMetricsVersion"]; exists {
+			version, valid := nonNegativePublicInteger(value)
+			if !valid || version != appusage.LogicalStepMetricsVersionV1 {
+				return nil
+			}
+			out["logicalStepMetricsVersion"] = float64(version)
+		}
+	}
+	_, hasRetry := details["retry"]
+	_, hasSequence := details["logicalSequence"]
+	if stage == "provider_retrying" && hasRetry {
+		retry, retryOK := details["retry"].(map[string]any)
+		projected, valid := domainmodel.ProjectProviderRetryDetailsV1(retry)
+		if !retryOK || !valid || details["visibleRecovery"] == true {
+			return nil
+		}
+		out["retry"] = projected
+	}
+	if stage == "response_received" && hasSequence {
+		sequence, sequenceOK := nonNegativePublicInteger(details["logicalSequence"])
+		reason, reasonOK := details["stopReason"].(string)
+		completed, completedOK := details["streamCompleted"].(bool)
+		if !sequenceOK || sequence < 1 || sequence > 1e15 || !reasonOK || reason != "length" || !completedOK || completed {
+			return nil
+		}
+		out["logicalSequence"], out["stopReason"], out["streamCompleted"] = float64(sequence), reason, completed
+		if count, exists := details["toolCallCount"]; exists {
+			value, ok := nonNegativePublicInteger(count)
+			if !ok || value > 1e15 {
+				return nil
+			}
+			out["toolCallCount"] = float64(value)
+		}
+	}
 	if diagnostic, _ := details["providerError"].(map[string]any); diagnostic != nil {
 		if projected := projectOrdinaryProviderDiagnostic(diagnostic); len(projected) > 0 {
 			out["providerError"] = projected
@@ -1454,7 +1629,7 @@ func publicBasePipelineStageV1(value string) bool {
 	switch strings.TrimSpace(value) {
 	case "setup", "pre_start", "post_start", "input_received", "input_cached", "input_routed",
 		"input_compressed", "input_remembered", "pre_send", "post_send", "response_received",
-		"provider_admission_rejected":
+		"provider_admission_rejected", "logical_step_started", "logical_step_assembled", "logical_step_closed":
 		return true
 	default:
 		return false
@@ -1691,25 +1866,70 @@ func validOrdinaryCompactionCompletedEventV1(thread, event map[string]any) bool 
 	}
 	itemID := strings.TrimSpace(contracts.StringField(event, "itemId"))
 	item, ok := projectedThreadItem(thread, contracts.StringField(event, "turnId"), itemID)
+	if !ok && numericEqualsV1(event["schemaVersion"], 3) {
+		// A later compaction can remove this marker from primary history. The
+		// complete closed event remains historical display data, never current
+		// model history or evidence authority. It must carry its own exact turn.
+		turn, turnOK := event["turn"].(map[string]any)
+		items, itemsOK := turn["items"].([]any)
+		if !turnOK || !itemsOK || len(items) != 1 || contracts.StringField(turn, "id") != contracts.StringField(event, "turnId") ||
+			contracts.StringField(turn, "threadId") != contracts.StringField(thread, "id") {
+			return false
+		}
+		item, ok = items[0].(map[string]any)
+		if !ok || !domainevent.ValidGeneralCompactionProviderHistoryItemV5(item) {
+			return false
+		}
+		public, err := ProjectPublicThread(map[string]any{"id": contracts.StringField(thread, "id"), "turns": []any{turn}})
+		if err != nil || !compactionJSONEqualV1(public["turns"].([]any)[0], turn) {
+			return false
+		}
+	}
 	if !ok || itemID == "" || !domainevent.ValidGeneralCompactionProviderHistoryItem(item) {
 		return false
+	}
+	expectedVersion := 2
+	if domainevent.ValidGeneralCompactionProviderHistoryItemV5(item) {
+		expectedVersion = 3
 	}
 	if contracts.StringField(item, "threadId") != strings.TrimSpace(contracts.StringField(event, "threadId")) ||
 		contracts.StringField(item, "turnId") != strings.TrimSpace(contracts.StringField(event, "turnId")) ||
 		contracts.StringField(item, "id") != itemID ||
 		event["reasoningExcluded"] != true ||
-		!numericEqualsV1(event["schemaVersion"], 2) ||
+		!numericEqualsV1(event["schemaVersion"], expectedVersion) ||
 		contracts.StringField(event, "reasoningExclusionProof") != contracts.StringField(item, "reasoningExclusionProof") {
 		return false
 	}
 	for _, key := range []string{
 		"summary", "replacedTokens", "auto", "pinnedConstraints", "sourceDigest", "digestMarker", "sourceItemIds",
 	} {
-		if !reflect.DeepEqual(event[key], item[key]) {
+		if !compactionJSONEqualV1(event[key], item[key]) {
 			return false
 		}
 	}
+	if domainevent.ValidGeneralCompactionProviderHistoryItemV5(item) {
+		for _, key := range []string{"compactionId", "summaryKind", "summaryDigest", "checkpointDigest", "shadowedItemCount", "tokenCountKind", "tokenEstimatorVersion", "createdAt", "finishedAt"} {
+			if !compactionJSONEqualV1(event[key], item[key]) {
+				return false
+			}
+		}
+		if _, present := projectedThreadItem(thread, contracts.StringField(event, "turnId"), itemID); present {
+			expected, err := OrdinaryCompactionCompletedEventV3(thread, contracts.StringField(event, "turnId"))
+			if err != nil || !compactionJSONEqualV1(expected["turn"], event["turn"]) {
+				return false
+			}
+		}
+	}
 	return true
+}
+
+// Compaction integer fields are validated before comparing their JSON value.
+// Exact integer json.Number replay and the in-memory representation are equal;
+// fractional, malformed or overflowing schema/count values remain invalid.
+func compactionJSONEqualV1(a, b any) bool {
+	left, leftErr := json.Marshal(a)
+	right, rightErr := json.Marshal(b)
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
 }
 
 func numericEqualsV1(value any, expected int) bool {
@@ -1726,4 +1946,47 @@ func numericEqualsV1(value any, expected int) bool {
 	default:
 		return false
 	}
+}
+
+// A closed, non-content wait DTO is admitted only for ordinary Question views.
+// Case publication continues to use its existing metadata boundary unchanged.
+func publicUserInputTimedWaitV1(raw any) (any, bool) {
+	if raw == nil {
+		return nil, true
+	}
+	record, ok := raw.(map[string]any)
+	if !ok || len(record) != 2 {
+		return nil, false
+	}
+	var seconds float64
+	switch value := record["timeoutSeconds"].(type) {
+	case float64:
+		seconds = value
+	case int:
+		seconds = float64(value)
+	case json.Number:
+		integer, err := value.Int64()
+		if err != nil {
+			return nil, false
+		}
+		seconds = float64(integer)
+	default:
+		return nil, false
+	}
+	if seconds < -1 || seconds > 2147483 || seconds != float64(int(seconds)) || !domaincontinuation.ValidUserInputTimeoutSeconds(int(seconds)) {
+		return nil, false
+	}
+	deadline, exists := record["deadlineAt"]
+	if !exists {
+		return nil, false
+	}
+	if int(seconds) == -1 {
+		return map[string]any{"timeoutSeconds": float64(-1), "deadlineAt": nil}, deadline == nil
+	}
+	timestamp, ok := deadline.(string)
+	parsed, err := time.Parse(time.RFC3339Nano, timestamp)
+	if !ok || err != nil || parsed.UTC().Format(time.RFC3339Nano) != timestamp {
+		return nil, false
+	}
+	return map[string]any{"timeoutSeconds": seconds, "deadlineAt": timestamp}, true
 }

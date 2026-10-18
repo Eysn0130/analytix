@@ -114,17 +114,24 @@ export function writeUiScale(): number {
 
 export function inlineAgentPosition(selection: {
   anchorRect?: { left: number; top: number; bottom: number; width: number } | null
-}, options: { compact?: boolean } = {}): WriteInlineAgentPosition | null {
+}, options: {
+  compact?: boolean
+  /** Visible container edges in the same client coordinates as anchorRect. */
+  bounds?: { left: number; right: number }
+} = {}): WriteInlineAgentPosition | null {
   const rect = selection.anchorRect
   if (!rect) return null
   const scale = writeUiScale()
   const viewportWidth = window.innerWidth / scale
-  const availableWidth = Math.max(0, viewportWidth - 32)
+  const minLeft = Math.max(0, options.bounds?.left ?? 0) / scale + 16
+  const maxRight = Math.min(window.innerWidth, options.bounds?.right ?? window.innerWidth) / scale - 16
+  const availableWidth = Math.max(0, maxRight - minLeft)
+  if (availableWidth === 0) return null
   const minWidth = options.compact ? 240 : INLINE_AGENT_MIN_WIDTH
   const maxWidth = options.compact ? 320 : INLINE_AGENT_MAX_WIDTH
   const targetRatio = options.compact ? 0.22 : 0.28
   const width = clamp(Math.round(viewportWidth * targetRatio), Math.min(minWidth, availableWidth), Math.min(maxWidth, availableWidth))
-  const left = clamp((rect.left + rect.width / 2) / scale - width / 2, 16, viewportWidth - width - 16)
+  const left = clamp((rect.left + rect.width / 2) / scale - width / 2, minLeft, maxRight - width)
   return {
     left,
     width,

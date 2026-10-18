@@ -6,10 +6,10 @@
  * cache frozen blocks as React elements. Local regression tests cover the
  * visible rendering and the host-owned actions added around public content.
  *
- * External link and image destinations pass a protocol allowlist; settled
- * local file links use an explicit owner callback. Images additionally require
- * absolute HTTP(S), raw HTML renders as literal text (no HTML enters the
- * DOM), and KaTeX runs without trusted commands. Fragment-anchor URLs fail
+ * External link destinations pass a protocol allowlist. Settled ordinary
+ * local links and images use the existing validated workspace Host chain;
+ * remote images require absolute HTTP(S). Raw HTML renders as literal text
+ * (no HTML enters the DOM), and KaTeX runs without trusted commands. Fragment-anchor URLs fail
  * the allowlist, so footnote references and back-references render as plain
  * text rather than in-page links.
  *
@@ -18,7 +18,7 @@
  * may add node types this renderer has no mapping for.
  */
 
-import { Fragment, createElement } from 'react'
+import { Fragment, createElement, useState } from 'react'
 import type { Key, ReactNode } from 'react'
 import type * as Md from 'mdast'
 import type {} from 'mdast-util-math'
@@ -119,53 +119,24 @@ export function collectReferenceTargets(
 }
 
 /**
- * Local-path image vocabulary for image destinations: the owner maps an
- * authored destination that fails the remote-URL allowlist (an absolute local
- * file path, for example) to a displayable URL it can vouch for. Absent
- * wherever no such vocabulary exists, authored local destinations keep their
- * documented fallback (the image's alt text). Rewritten destinations must be
- * absolute; the renderer re-checks their protocol before emitting them.
- */
-export interface MarkdownPathImages {
-  /**
-   * Resolve one authored image destination.
-   * @param value - The destination exactly as the markdown author wrote it.
-   * @returns A displayable absolute URL, or undefined when the destination
-   * names no displayable image — it then stays inert alt text.
-   */
-  resolve(value: string): string | undefined
-}
-
-/**
- * File-mention affordance for inline code: the owner resolves an authored
- * token to the file it names, using its own vocabulary of real files — the
- * renderer never guesses at what looks like a path.
- */
-export interface MarkdownFileMentions {
-  /**
-   * Resolve one inline-code token.
-   * @param value - The authored token, exactly as written.
-   * @returns The opener with its accessible label and full-path title, or
-   * undefined when the token names no known file — it then stays inert code.
-   */
-  resolve(value: string): { open: () => void; label: string; title: string } | undefined
-}
-
-/**
  * One render pass's state: immutable options and targets plus the footnote
  * numbering accumulated in document order while references render.
  */
+export interface MarkdownQuestionDetail {
+  /** Native actions derive bytes from the current Host-owned detail, never from caller-provided text or URLs. */
+  copyCode: (span: { start: number; end: number }) => Promise<boolean>
+  openLink: (span: { start: number; end: number }) => Promise<boolean>
+}
+
 export interface MarkdownRenderContext {
+  readonly questionDetail?: MarkdownQuestionDetail | undefined
+  readonly viewOnly?: boolean
   /** Streaming arm: fences highlight incrementally as they grow; TeX (including ```math fences) stays literal until the settled pass. */
   readonly streaming: boolean
   /** Localized fence copy-button labels. */
   readonly labels: MarkdownLabels
   /** Inside a blockquote's children: tables there always fill the quote's width. */
   readonly inBlockquote?: boolean
-  /** Inline-code file mentions; absent wherever no opener vocabulary exists. */
-  readonly fileMentions: MarkdownFileMentions | undefined
-  /** Local-path image vocabulary; absent wherever no rewriting owner exists. */
-  readonly pathImages: MarkdownPathImages | undefined
   /** Inside an anchor's children: interactive mentions must not nest there. */
   readonly inLink?: boolean
   /** Reference targets visible to this pass. */
@@ -246,7 +217,7 @@ function renderChildren(
 function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderContext): ReactNode {
   switch (node.type) {
     case 'text':
-      return context.streaming || context.inLink ? node.value : <TextFileReferences key={key} text={node.value} />
+      return context.viewOnly || context.questionDetail || context.streaming || context.inLink ? node.value : <TextFileReferences key={key} text={node.value} />
     case 'paragraph':
       return <p key={key}>{renderChildren(node.children, context)}</p>
     case 'heading':
@@ -279,8 +250,10 @@ function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderConte
       // commands, partial URLs, and other schemes stay inert. The value is
       // authored text, not a parsed destination, so no normalizeUri: port,
       // path, and query render unchanged.
+      if (context.viewOnly) return <code key={key}>{value}</code>
       const href = inlineCodeHttpUrl(value)
-      if (href !== undefined) return <code key={key}>{renderSafeLink(href, [value], 'link')}</code>
+      if (context.questionDetail) return <code key={key}>{href === undefined || context.inLink ? value : renderQuestionLink(node, href, [value], 'link', context)}</code>
+      if (href !== undefined && !context.inLink) return <code key={key}>{renderSafeLink(href, [value], 'link')}</code>
       return context.streaming || context.inLink ? <code key={key}>{value}</code> : <InlineFileMention key={key} value={value} />
     }
     case 'html':
@@ -300,6 +273,8 @@ function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderConte
     case 'table':
       return renderTable(node, key, context)
     case 'link':
+      if (context.viewOnly) return <Fragment key={key}>{renderChildren(node.children, { ...context, inLink: true })}</Fragment>
+      if (context.questionDetail) return renderQuestionLink(node, node.url, renderChildren(node.children, { ...context, inLink: true }), key, context)
       return renderAnchor(
         node.url, renderChildren(node.children, { ...context, inLink: true }), key,
         !anchorWrapsOnlyImages(node.children), context.streaming,
@@ -357,9 +332,17 @@ function renderCode(node: Md.Code, key: Key, context: MarkdownRenderContext): Re
       // has no content yet and took the empty-fence arm above, so `lang`
       // here is final: it can never re-resolve to a different grammar.
       streaming={context.streaming}
+      showHeader={!context.viewOnly}
       copyLabel={context.labels.code.copyLabel}
       copiedLabel={context.labels.code.copiedLabel}
       toolbarLabels={context.labels.code.toolbarLabels}
+      copyAction={context.questionDetail === undefined ? undefined : () => {
+        const span = sourceSpan(node)
+        return span === null ? Promise.resolve(false) : context.questionDetail!.copyCode(span)
+      }}
+      sourceActions={context.questionDetail === undefined}
+      collapse={false}
+      questionIcons={context.questionDetail !== undefined}
     />
   )
 }
@@ -435,16 +418,14 @@ function renderTable(node: Md.Table, key: Key, context: MarkdownRenderContext): 
   // column. Narrower tables — and any table inside a blockquote — fill the
   // column and wrap instead (deepsuite chat TableWrapper parity).
   const wide = columns >= 4 && context.inBlockquote !== true
-  return (
-    <MarkdownTable key={key} data={publicTableData(node)} labels={context.labels.table} wide={wide} busy={context.streaming} table={<table>
-        {headRow !== undefined && <thead>{renderTableRow(headRow, 'th', align, 0, context)}</thead>}
-        {bodyRows.length > 0 && (
-          <tbody>
-            {bodyRows.map((row, index) => renderTableRow(row, 'td', align, index + 1, context))}
-          </tbody>
-        )}
-      </table>} />
-  )
+  const table = <table>
+    {headRow !== undefined && <thead>{renderTableRow(headRow, 'th', align, 0, context)}</thead>}
+    {bodyRows.length > 0 && <tbody>{bodyRows.map((row, index) => renderTableRow(row, 'td', align, index + 1, context))}</tbody>}
+  </table>
+  if (context.viewOnly || context.questionDetail) return <div key={key}
+    className={`${css.tableScroll} ${wide ? 'md-table-wide' : css.tableFill}`}
+    tabIndex={0} role="region" aria-label={context.labels.table.title}>{table}</div>
+  return <MarkdownTable key={key} data={publicTableData(node)} labels={context.labels.table} wide={wide} busy={context.streaming} table={table} />
 }
 
 function renderTableRow(
@@ -481,6 +462,23 @@ function anchorWrapsOnlyImages(children: Md.PhrasingContent[]): boolean {
   return children.length > 0 && children.every(child => child.type === 'image' || child.type === 'imageReference')
 }
 
+function sourceSpan(node: Md.RootContent): { start: number; end: number } | null {
+  const start = node.position?.start.offset, end = node.position?.end.offset
+  return typeof start === 'number' && typeof end === 'number' && end > start ? { start, end } : null
+}
+
+function renderQuestionLink(node: Md.RootContent, url: string, children: ReactNode[], key: Key, context: MarkdownRenderContext): ReactNode {
+  const span = sourceSpan(node)
+  const safeHref = sanitizeUrl(url)
+  if (!span || safeHref === '') return <Fragment key={key}>{children}</Fragment>
+  // Keep the real local link identity for normal browser selection/copy. Every
+  // activated click still asks the native owner to derive the current span.
+  return <a key={key} href={safeHref} target="_blank" rel="noopener noreferrer" onClick={event => { event.preventDefault(); void context.questionDetail?.openLink(span) }}
+    onAuxClick={event => { if (event.button !== 1) return; event.preventDefault(); void context.questionDetail?.openLink(span) }}>
+    {!((node.type === 'link' || node.type === 'linkReference') && anchorWrapsOnlyImages(node.children)) && <LinkIconMedium kind="url" href={safeHref} className={css.linkIcon} />}
+    {children}</a>
+}
+
 /** Anchor over an already-authored href: allowlisted or unwrapped, with optional owner navigation for HTTP(S). */
 function renderSafeLink(href: string, children: ReactNode[], key: Key, glyph = true): ReactNode {
   const safeHref = sanitizeUrl(href)
@@ -512,7 +510,7 @@ function MarkdownAnchor({ href, glyph, children }: {
   )
 }
 
-/** Local destinations use the scoped file delegate after settlement. */
+/** Local destinations use validated workspace previews after settlement. */
 function renderAnchor(url: string, children: ReactNode[], key: Key, glyph = true, streaming = false): ReactNode {
   const file = streaming ? undefined : (parseFileReferenceHref(url) ?? parseFileLink(url))
   if (file !== undefined) {
@@ -545,14 +543,39 @@ function inlineCodeHttpUrl(value: string): string | undefined {
 }
 
 function renderImage(url: string, alt: string, key: Key, context: MarkdownRenderContext): ReactNode {
+  if (context.viewOnly) return <Fragment key={key}>{alt}</Fragment>
+  if (context.questionDetail) {
+    const remote = remoteImageUrl(url)
+    return remote === undefined ? <span key={key} className={css.imageAlt}>{alt}</span> : <QuestionMarkdownImage key={`${key}:${remote}`} src={remote} alt={alt} destination={url} />
+  }
   return <MarkdownImage key={`${key}:${url}`} destination={url} alt={alt}
-    pathImages={context.pathImages} streaming={context.streaming} inLink={context.inLink === true} />
+    streaming={context.streaming} inLink={context.inLink === true} />
+}
+
+// The pinned Question seat has no file-image delegate. Preserve its ordinary
+// lazy image and failure fallback without importing the ChatView lightbox.
+function QuestionMarkdownImage({ src, alt, destination }: { src: string; alt: string; destination: string }): ReactNode {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <span className={css.imageAlt}>{alt || destination}</span>
+  return <img className={css.image} src={src} alt={alt} onError={() => setFailed(true)}
+    loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+}
+
+/** Legacy image suffixes are metadata; encoded delimiters remain part of the filename. */
+function parseMarkdownImageFile(destination: string): ReturnType<typeof parseFileLink> {
+  const exact = parseFileLink(destination)
+  if (exact !== undefined) return exact
+  const suffix = destination.search(/[?#]/)
+  if (suffix < 0) return undefined
+  // Feed the raw prefix to the existing parser so it decodes exactly one layer.
+  const local = parseFileLink(destination.slice(0, suffix))
+  return local !== undefined && /^(?:\/(?!\/)|[a-z]:[\\/])/i.test(local.path) ? local : undefined
 }
 
 function MarkdownImage({ destination, alt, streaming, inLink }: {
-  destination: string; alt: string; pathImages: MarkdownPathImages | undefined; streaming: boolean; inLink: boolean
+  destination: string; alt: string; streaming: boolean; inLink: boolean
 }): ReactNode {
-  return <WorkspaceMarkdownImage destination={destination} alt={alt} local={streaming ? undefined : parseFileLink(destination)} inLink={inLink} />
+  return <WorkspaceMarkdownImage destination={destination} alt={alt} local={streaming ? undefined : parseMarkdownImageFile(destination)} inLink={inLink} />
 }
 
 /** The bracketed source text a reference reverts to when its definition is missing. */
@@ -567,6 +590,7 @@ function renderLinkReference(
   key: Key,
   context: MarkdownRenderContext,
 ): ReactNode {
+  if (context.viewOnly) return <Fragment key={key}>{renderChildren(node.children, { ...context, inLink: true })}</Fragment>
   const definition = context.targets.definitions.get(node.identifier.toUpperCase())
   if (definition === undefined) {
     // The grammar only emits references whose definitions exist somewhere in
@@ -576,6 +600,7 @@ function renderLinkReference(
     return <Fragment key={key}>{'['}{renderChildren(node.children, context)}{referenceSuffix(node)}</Fragment>
   }
   const rendered = renderChildren(node.children, { ...context, inLink: true })
+  if (context.questionDetail) return renderQuestionLink(node, definition.url, rendered, key, context)
   return renderAnchor(definition.url, rendered, key, !anchorWrapsOnlyImages(node.children), context.streaming)
 }
 
@@ -584,6 +609,7 @@ function renderImageReference(
   key: Key,
   context: MarkdownRenderContext,
 ): ReactNode {
+  if (context.viewOnly) return <Fragment key={key}>{node.alt ?? ''}</Fragment>
   const definition = context.targets.definitions.get(node.identifier.toUpperCase())
   if (definition === undefined) return `![${node.alt ?? ''}${referenceSuffix(node)}`
   return renderImage(definition.url, node.alt ?? '', key, context)

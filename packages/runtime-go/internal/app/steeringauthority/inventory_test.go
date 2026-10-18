@@ -64,7 +64,7 @@ func TestPublicSteeringAuthorityInventoryIsInstallationBound(t *testing.T) {
 			"turns": []any{
 				map[string]any{"id": pendingContext.TurnID, "securityContext": inventorySecurityRecord(t, pendingContext), "steering": []any{pending}, "items": []any{}},
 				map[string]any{"id": promotedContext.TurnID, "securityContext": inventorySecurityRecord(t, promotedContext), "steering": promotedTurn["steering"], "items": promotedTurn["items"]},
-				map[string]any{"id": cancelledContext.TurnID, "securityContext": inventorySecurityRecord(t, cancelledContext), "steering": []any{cancelled}, "items": []any{}},
+				map[string]any{"id": cancelledContext.TurnID, "status": "aborted", "finishedAt": "2026-07-18T01:02:05Z", "securityContext": inventorySecurityRecord(t, cancelledContext), "steering": []any{cancelled}, "items": []any{}},
 			},
 		}},
 	}
@@ -213,4 +213,56 @@ func copyAuthorityEntry(entry map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func TestQuestionDiscardInventorySurvivesJSONAndRejectsProofDowngrade(t *testing.T) {
+	service := NewService(newAuthorityStub(0x41))
+	frozen := inventorySecurityContext(t, "thread-discard", "turn-discard", 1)
+	pending := sealedQuestionDiscardPendingForTest(t, service, frozen, "00000000-0000-4000-8000-000000000091")
+	candidate := copyAuthorityEntry(pending)
+	candidate["status"], candidate["cancelledAt"], candidate["cancelReason"] = "cancelled", "2026-07-18T01:02:04Z", domainsteering.UserInputDiscardReasonV1
+	cancelled, err := service.CancelUserInput(context.Background(), candidate, frozen.ContextDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(entry map[string]any, status, finished string) error {
+		thread := map[string]any{"id": frozen.ThreadID, "turns": []any{map[string]any{"id": frozen.TurnID, "status": status, "finishedAt": finished, "securityContext": inventorySecurityRecord(t, frozen), "steering": []any{entry}, "items": []any{}}}}
+		body, err := json.Marshal(thread)
+		if err != nil {
+			t.Fatal(err)
+		}
+		restored := map[string]any{}
+		if json.Unmarshal(body, &restored) != nil {
+			t.Fatal("fixture restore failed")
+		}
+		return VerifyTrustedInventoryV1(context.Background(), authorityInventoryReaderStub{ids: []string{frozen.ThreadID}, threads: map[string]map[string]any{frozen.ThreadID: restored}}, service)
+	}
+	if err := check(cancelled, "running", ""); err != nil {
+		t.Fatal("running signed discard failed inventory", err)
+	}
+	if err := check(cancelled, "completed", "2026-07-18T01:02:05Z"); err != nil {
+		t.Fatal("finished signed discard failed inventory", err)
+	}
+	for _, key := range []string{"authoritySignature", "cancellationAuthoritySignature", "cancellationAuthorityKeyId"} {
+		v := copyAuthorityEntry(cancelled)
+		delete(v, key)
+		if check(v, "running", "") == nil {
+			t.Fatal("partial proof was downgraded", key)
+		}
+	}
+	stripped := copyAuthorityEntry(cancelled)
+	for _, key := range []string{"cancellationAuthorityKeyId", "cancellationAuthorityPublicKey", "cancellationAuthoritySignature"} {
+		delete(stripped, key)
+	}
+	if check(stripped, "aborted", "2026-07-18T01:02:04Z") == nil {
+		t.Fatal("explicit discard marker lost proof")
+	}
+	legacy := copyAuthorityEntry(pending)
+	legacy["status"], legacy["cancelledAt"], legacy["cancelReason"] = "cancelled", "2026-07-18T01:02:04Z", "aborted"
+	if check(legacy, "running", "") == nil || check(legacy, "aborted", "2026-07-18T01:02:05Z") == nil {
+		t.Fatal("legacy cancellation lacked terminal binding")
+	}
+	if err := check(legacy, "aborted", "2026-07-18T01:02:04Z"); err != nil {
+		t.Fatal("legacy terminal cancellation changed", err)
+	}
 }

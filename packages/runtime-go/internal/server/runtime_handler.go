@@ -17,6 +17,7 @@ import (
 	controlapp "analytix.local/runtime-go/internal/app/control"
 	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
+	appgoal "analytix.local/runtime-go/internal/app/goal"
 	loopapp "analytix.local/runtime-go/internal/app/loop"
 	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	mediaexecutionapp "analytix.local/runtime-go/internal/app/mediaexecution"
@@ -24,6 +25,7 @@ import (
 	objecteditingapp "analytix.local/runtime-go/internal/app/objectediting"
 	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
 	packagehostapp "analytix.local/runtime-go/internal/app/pluginpackagehost"
+	processapp "analytix.local/runtime-go/internal/app/processdisplay"
 	runtimeinfoapp "analytix.local/runtime-go/internal/app/runtimeinfo"
 	sessionapp "analytix.local/runtime-go/internal/app/session"
 	steeringauthorityapp "analytix.local/runtime-go/internal/app/steeringauthority"
@@ -40,6 +42,8 @@ import (
 	jobs "analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/ports"
 	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
+	processport "analytix.local/runtime-go/internal/ports/processdisplay"
+	snapshotport "analytix.local/runtime-go/internal/ports/toolresultsnapshot"
 	provider "analytix.local/runtime-go/internal/provider"
 	research "analytix.local/runtime-go/internal/research"
 )
@@ -47,68 +51,74 @@ import (
 const DefaultRuntimeToken = httpapi.DefaultRuntimeToken
 
 type runtimeServerHandler struct {
-	documentCodec      codecport.Codec
-	officePackageHost  *packagehostapp.Service
-	runtimeToken       string
-	insecure           bool
-	startedAt          string
-	host               string
-	port               int
-	dataDir            string
-	infoDataDir        string
-	mutationAuthority  filestore.ConditionalMutationAuthority
-	store              *DurableEventSessionStore
-	attachments        *filestore.PersistentAttachmentStore
-	attachmentAccess   *attachmentauthorityapp.Service
-	attachmentUses     *attachmentuseapp.Service
-	memories           *filestore.PersistentMemoryStore
-	caseFinalizer      evidenceapp.CasePublicationFinalizer
-	asyncTurnObserver  func(AsyncTurnObservationV1)
-	caseThreads        casethreadapp.Authority
-	turnSecurity       turnsecurityapp.WorkspaceSecurityAuthority
-	continuations      *continuationapp.Service
-	pendingWork        *pendingworkapp.Service
-	checkpoints        checkpointapp.SnapshotAuthority
-	workspaceMutations *workspacemutationapp.Coordinator
-	managedEditing     *managededitingapp.Registry
-	objectEditing      *objecteditingapp.Service
-	publicProjector    threadapp.PublicProjector
-	control            *controlapp.Controller
-	sessions           *sessionapp.Service
-	threads            *threadapp.Service
-	threadSummaries    *threadsummaryapp.Service
-	provider           ports.ProviderClient
-	providerConfig     provider.RuntimeProviderConfigSet
-	providerExecution  ProviderExecutionResolver
-	providerRegistry   httpapi.ProviderRegistryService
-	mediaExecution     *mediaexecutionapp.Executor
-	modelProxyURL      string
-	approvalPolicy     string
-	sandboxMode        string
-	gate               *controlapp.ApprovalUserInputManager
-	gates              *controlapp.GateRegistry[runtimePendingToolCall]
-	mcp                MCPManager
-	mcpSearch          runtimeMCPSearchSettings
-	commandProbe       ports.CommandProbe
-	commandHomeDir     string
-	workspaceProbe     ports.WorkspaceStatusProbe
-	shellRunner        ports.ShellRunner
-	gitStatusProbe     ports.GitStatusProbe
-	worktreeManager    ports.WorktreeManager
-	allowWriteRoots    []string
-	protectedReadDirs  []string
-	jobs               *jobs.Manager
-	childCompletions   subagentapp.ChildCompletionIssuer
-	foregroundHandoffs *subagentapp.ForegroundHandoffAuthority
-	g6Readiness        runtimeReadinessStatus
-	autoResearch       research.AutoResearchProjectStore
-	skills             runtimeSkillCatalog
-	subagents          runtimeSubagentConfig
-	subagentState      *subagentapp.RuntimeState
-	nativeAuthority    *nativecomponentapp.RuntimeAuthority
-	caseEntities       *caseentityapp.Service
-	resolveCaseIngress caseentityapp.ResolveAccountIngressCandidatesV1
-	caseAnswerSlots    func(
+	userInputConfig             toolcatalogapp.UserInputConfig
+	processDisplay              *processapp.ServiceV1
+	processHistory              processport.SettledHistoryStoreV1
+	toolSnapshots               snapshotport.Store
+	toolSnapshotHistoryValidate func(context.Context, map[string]any, domainsecurity.TurnSecurityContext) error
+	documentCodec               codecport.Codec
+	officePackageHost           *packagehostapp.Service
+	runtimeToken                string
+	insecure                    bool
+	startedAt                   string
+	host                        string
+	port                        int
+	dataDir                     string
+	infoDataDir                 string
+	mutationAuthority           filestore.ConditionalMutationAuthority
+	store                       *DurableEventSessionStore
+	attachments                 *filestore.PersistentAttachmentStore
+	attachmentAccess            *attachmentauthorityapp.Service
+	attachmentUses              *attachmentuseapp.Service
+	memories                    *filestore.PersistentMemoryStore
+	caseFinalizer               evidenceapp.CasePublicationFinalizer
+	asyncTurnObserver           func(AsyncTurnObservationV1)
+	caseThreads                 casethreadapp.Authority
+	turnSecurity                turnsecurityapp.WorkspaceSecurityAuthority
+	continuations               *continuationapp.Service
+	pendingWork                 *pendingworkapp.Service
+	checkpoints                 checkpointapp.SnapshotAuthority
+	workspaceMutations          *workspacemutationapp.Coordinator
+	managedEditing              *managededitingapp.Registry
+	objectEditing               *objecteditingapp.Service
+	publicProjector             threadapp.PublicProjector
+	control                     *controlapp.Controller
+	goalDriver                  *appgoal.RoundDriverV1
+	sessions                    *sessionapp.Service
+	threads                     *threadapp.Service
+	threadSummaries             *threadsummaryapp.Service
+	provider                    ports.ProviderClient
+	providerConfig              provider.RuntimeProviderConfigSet
+	providerExecution           ProviderExecutionResolver
+	providerRegistry            httpapi.ProviderRegistryService
+	mediaExecution              *mediaexecutionapp.Executor
+	modelProxyURL               string
+	approvalPolicy              string
+	sandboxMode                 string
+	gate                        *controlapp.ApprovalUserInputManager
+	gates                       *controlapp.GateRegistry[runtimePendingToolCall]
+	mcp                         MCPManager
+	mcpSearch                   runtimeMCPSearchSettings
+	commandProbe                ports.CommandProbe
+	commandHomeDir              string
+	workspaceProbe              ports.WorkspaceStatusProbe
+	shellRunner                 ports.ShellRunner
+	gitStatusProbe              ports.GitStatusProbe
+	worktreeManager             ports.WorktreeManager
+	allowWriteRoots             []string
+	protectedReadDirs           []string
+	jobs                        *jobs.Manager
+	childCompletions            subagentapp.ChildCompletionIssuer
+	foregroundHandoffs          *subagentapp.ForegroundHandoffAuthority
+	g6Readiness                 runtimeReadinessStatus
+	autoResearch                research.AutoResearchProjectStore
+	skills                      runtimeSkillCatalog
+	subagents                   runtimeSubagentConfig
+	subagentState               *subagentapp.RuntimeState
+	nativeAuthority             *nativecomponentapp.RuntimeAuthority
+	caseEntities                *caseentityapp.Service
+	resolveCaseIngress          caseentityapp.ResolveAccountIngressCandidatesV1
+	caseAnswerSlots             func(
 		context.Context,
 		domainsecurity.TurnSecurityContext,
 		[]domainnative.AccountFlowProviderModelOutputV1,
@@ -139,6 +149,7 @@ type runtimeServerHandler struct {
 	turnSeq                      int
 	readRegistry                 *filetoolsapp.ReadRegistry
 	cachePrefixShapes            map[string]appusage.PrefixBaseline
+	providerUsage                ProviderUsageObserverV1
 }
 
 func (h *runtimeServerHandler) resolveRuntimeTurnExecution(

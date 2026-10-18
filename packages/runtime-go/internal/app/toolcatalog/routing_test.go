@@ -242,7 +242,7 @@ func TestUserInputQuestionsNormalizesStructuredAndFallbackQuestions(t *testing.T
 		t.Fatalf("structured questions mismatch: %#v", questions)
 	}
 	options := questions[0]["options"].([]map[string]string)
-	if len(options) != 2 || options[0]["label"] != "A" || options[1]["description"] != "Bee" {
+	if len(options) != 2 || options[0]["label"] != "A" || options[1]["description"] != "Bee" || options[0]["id"] != "input_1_1_option_1" || options[1]["id"] != "input_1_1_option_2" || questions[0]["multiSelect"] != false {
 		t.Fatalf("question options mismatch: %#v", options)
 	}
 	fallback := UserInputQuestions(map[string]any{
@@ -263,5 +263,37 @@ func TestUserInputQuestionsIgnoreModelOriginatedAuthorityIDs(t *testing.T) {
 	}, "input_host", "fallback")
 	if len(questions) != 1 || questions[0]["id"] != "input_host_1" {
 		t.Fatalf("model-originated question ID became authority: %#v", questions)
+	}
+}
+
+func TestUserInputQuestionsMintOptionIDsAndExplicitSelectionMode(t *testing.T) {
+	questions := UserInputQuestions(map[string]any{"questions": []any{
+		map[string]any{"question": "Choose", "multi_select": true, "options": []any{map[string]any{"id": "forged", "label": "Other"}, "Other"}},
+		map[string]any{"question": "Free text"},
+	}}, "input_123456789012", "fallback")
+	options := questions[0]["options"].([]map[string]string)
+	if questions[0]["multiSelect"] != true || questions[1]["multiSelect"] != false || options[0]["id"] != "input_123456789012_1_option_1" || options[1]["id"] != "input_123456789012_1_option_2" {
+		t.Fatalf("Core identity or mode lost: %#v", questions)
+	}
+	fallback := UserInputQuestions(map[string]any{"multi_select": true, "options": []any{"One", "Two"}}, "input_fallback", "Choose")
+	if fallback[0]["multiSelect"] != true || fallback[0]["options"].([]map[string]string)[1]["id"] != "input_fallback_1_option_2" {
+		t.Fatalf("fallback identity or mode lost: %#v", fallback)
+	}
+}
+
+func TestUserInputQuestionsUseEffectiveCoreOrdinalsAfterBlankQuestions(t *testing.T) {
+	for name, raw := range map[string][]any{
+		"blank before":  {map[string]any{"question": " "}, map[string]any{"question": "First", "options": []any{" ", "A"}}, map[string]any{"question": "Second"}},
+		"blank between": {map[string]any{"question": "First", "options": []any{" ", "A"}}, map[string]any{"question": "\n"}, map[string]any{"question": "Second"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			questions := UserInputQuestions(map[string]any{"questions": raw}, "input_host", "Fallback")
+			if len(questions) != 2 || questions[0]["id"] != "input_host_1" || questions[1]["id"] != "input_host_2" || questions[0]["header"] != "Question 1" || questions[1]["header"] != "Question 2" {
+				t.Fatalf("blank source question shifted public Core identities: %#v", questions)
+			}
+			if questions[0]["options"].([]map[string]string)[0]["id"] != "input_host_1_option_1" || questions[1]["multiSelect"] != false {
+				t.Fatalf("effective batch identity or mode lost: %#v", questions)
+			}
+		})
 	}
 }

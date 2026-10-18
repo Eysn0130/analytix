@@ -392,7 +392,7 @@ export function FloatingComposerModelPicker({
                       setMenuOpen(false)
                       onConfigureProviders()
                     }}
-                    className="mt-2 flex w-full items-center justify-center rounded-lg border border-ds-border bg-ds-surface-subtle px-3 py-2 text-[12.5px] font-semibold text-ds-ink transition hover:bg-ds-hover"
+                    className="mt-2 flex w-full items-center justify-center rounded-lg border border-ds-border bg-ds-subtle px-3 py-2 text-[12.5px] font-semibold text-ds-ink transition hover:bg-ds-hover"
                   >
                     {t('composerConfigureProviders')}
                   </button>
@@ -1106,7 +1106,7 @@ function ModelCapabilityBadge({
 }): ReactElement {
   const tone = kind === 'multimodal'
     ? 'border-accent/25 bg-accent/5 text-accent'
-    : 'border-ds-border bg-ds-surface-subtle text-ds-muted'
+    : 'border-ds-border bg-ds-subtle text-ds-muted'
   return (
     <span
       className={`inline-flex h-5 shrink-0 items-center rounded-full border px-1.5 text-[10.5px] font-semibold leading-none ${tone}`}

@@ -1,53 +1,17 @@
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
-import { useMemo, useState } from 'react'
+import subagentCss from './presentation/chat/toolviews/subagent-row.module.css'
+import type { FormEvent, ReactElement } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ChildInputSubmitRequestV1 } from '@shared/child-input-contract'
 import { useTranslation } from 'react-i18next'
-import { Ban, Bot, Check, ChevronDown, ChevronRight, Diff, ExternalLink, ListTodo, Loader2, Pause, Play, RotateCcw, SendHorizontal, StopIcon as Square, SquareTerminal, Trash2 } from '../../design/AnalytixUiIcons'
-import type { ChatBlock, RuntimeChildMetadata, RuntimeJobDiagnosticsMetadata, ToolBlock } from '../../agent/types'
-import { rendererRuntimeClient } from '../../agent/runtime-client'
+import { Ban, Check, Diff, ExternalLink, ListTodo, Loader2, Pause, Play, RotateCcw, SendHorizontal, StopIcon as Square, Trash2 } from '../../design/AnalytixUiIcons'
+import type { ChatBlock, RuntimeChildMetadata, RuntimeJobDiagnosticsMetadata } from '../../agent/types'
+import { ChildInputRejectedError, rendererRuntimeClient } from '../../agent/runtime-client'
 import { useChatStore } from '../../store/chat-store'
 import { formatDuration, formatJobHeartbeatStatus } from './message-timeline-tools'
+import { nativeSubagentCardModel, subagentPublicSummary } from './presentation/chat/models/subagent-card-model'
+import { ToolDetails } from './presentation/chat/toolviews/ToolDetails'
 
 type CardStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'closed'
-
-type DelegateDetail = {
-  childId?: string
-  childThreadId?: string
-  input?: string
-  profile?: string
-  toolPolicy?: string
-  toolInvocations?: number
-  durationMs?: number
-  queuedMs?: number
-  totalTokens?: number
-}
-
-function parseDelegateDetail(detail: string | undefined): DelegateDetail {
-  if (!detail || !detail.trim()) return {}
-  let raw: unknown
-  try {
-    raw = JSON.parse(detail)
-  } catch {
-    return {}
-  }
-  if (!raw || typeof raw !== 'object') return {}
-  const obj = raw as Record<string, unknown>
-  const usage = obj.usage && typeof obj.usage === 'object' ? obj.usage as Record<string, unknown> : undefined
-  const str = (value: unknown): string | undefined =>
-    typeof value === 'string' && value.trim() ? value.trim() : undefined
-  const num = (value: unknown): number | undefined =>
-    typeof value === 'number' && Number.isFinite(value) ? value : undefined
-  return {
-    childId: str(obj.childId),
-    childThreadId: str(obj.childThreadId),
-    input: str(obj.input) || str(obj.prompt) || str(obj.instructions),
-    profile: str(obj.profile),
-    toolPolicy: str(obj.toolPolicy),
-    toolInvocations: num(obj.toolInvocations),
-    durationMs: num(obj.durationMs),
-    queuedMs: num(obj.queuedMs),
-    totalTokens: usage ? num(usage.totalTokens) : undefined
-  }
-}
 
 function blockMeta(block: ChatBlock): Record<string, unknown> | undefined {
   return block.kind === 'tool' || block.kind === 'approval' || block.kind === 'user' || block.kind === 'system'
@@ -183,15 +147,6 @@ function statusLabel(status: CardStatus, t: Translator): string {
   }
 }
 
-function splitTaskLine(block: ToolBlock): string | undefined {
-  const raw = block.summary?.trim()
-  if (!raw) return undefined
-  const stripped = raw.replace(/^(delegate_task|task|parallel_tasks)\s*:\s*/i, '').trim()
-  if (!stripped || stripped.length > 160) return undefined
-  if (/^(delegate_task|task|parallel_tasks)$/i.test(stripped)) return undefined
-  return stripped
-}
-
 type Translator = (key: string, opts?: Record<string, unknown>) => string
 type SteerSubmitStatus = 'idle' | 'sending' | 'queued' | 'admitted' | 'rejected' | 'error'
 type PauseControlStatus = 'idle' | 'sending' | 'requested' | 'resumed' | 'killed' | 'rejected' | 'error'
@@ -203,69 +158,18 @@ type ChildTodoProjectionStatus = 'idle' | 'sending' | 'accepted' | 'rejected' | 
 
 const MAX_STEER_MESSAGE_CHARS = 4000
 
-function compactText(value: string | undefined, maxLength = 220): string {
-  const text = value?.replace(/\s+/g, ' ').trim() ?? ''
-  if (!text) return ''
-  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text
-}
-
 function compactNumber(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
   return String(value)
 }
 
-function isGenericAgentName(value: string): boolean {
-  return /^(task|delegate_task|parallel_tasks|subagent|child-run|child run)$/i.test(value.trim())
-}
-
-function normalizeAgentName(value: string | undefined): string | undefined {
-  const label = compactText(value, 72)
-  if (!label || isGenericAgentName(label)) return undefined
-  if (label.length > 64) return undefined
-  return label
-}
-
-function childDisplayName(
-  child: RuntimeChildMetadata | null,
-  detail: DelegateDetail,
-  taskText: string | undefined,
-  fallback: string
-): string {
-  return (
-    normalizeAgentName(child?.childLabel) ||
-    normalizeAgentName(child?.childName) ||
-    normalizeAgentName(detail.profile) ||
-    normalizeAgentName(child?.childProfile) ||
-    normalizeAgentName(child?.childRunId) ||
-    normalizeAgentName(detail.childId) ||
-    normalizeAgentName(child?.childId) ||
-    normalizeAgentName(taskText) ||
-    fallback
-  )
-}
-
-function childDisplayLabel(child: RuntimeChildMetadata | null, detail: DelegateDetail, name: string): string {
-  const profile = normalizeAgentName(child?.childProfile) || normalizeAgentName(detail.profile)
-  if (!profile || profile === name) return name
-  return `${name} (${profile})`
-}
-
-function childInstruction(block: ChatBlock, detail: DelegateDetail): string {
-  const taskText = block.kind === 'tool' ? splitTaskLine(block) : undefined
-  return compactText(detail.input || taskText, 420)
-}
-
-function childErrorText(_block: ChatBlock, _detail: DelegateDetail, status: CardStatus): string {
-  return status === 'failed' ? '子任务执行失败' : ''
-}
-
-function childLineMeta(child: RuntimeChildMetadata | null, detail: DelegateDetail, t: Translator): string {
-  const toolPolicy = child?.childToolPolicy || detail.toolPolicy
-  const toolInvocations = child?.toolInvocations ?? detail.toolInvocations
-  const durationMs = child?.durationMs ?? detail.durationMs
-  const queuedMs = child?.queuedMs ?? detail.queuedMs
-  const tokens = child?.totalTokens ?? detail.totalTokens
+function childLineMeta(child: RuntimeChildMetadata | null, t: Translator): string {
+  const toolPolicy = child?.childToolPolicy
+  const toolInvocations = child?.toolInvocations
+  const durationMs = child?.durationMs
+  const queuedMs = child?.queuedMs
+  const tokens = child?.totalTokens
   const evidence = child?.evidenceBundleStatus
     ? `evidence ${child.evidenceBundleStatus}${child.evidenceCount !== undefined ? ` (${child.evidenceCount})` : ''}`
     : ''
@@ -422,16 +326,9 @@ function childIsolationMeta(child: RuntimeChildMetadata | null, t: Translator): 
   ].filter(Boolean).join(' · ')
 }
 
-function childCanAcceptSteer(child: RuntimeChildMetadata | null, status: CardStatus): boolean {
+function childCanInspectInput(child: RuntimeChildMetadata | null): boolean {
   const jobId = child?.jobId || child?.childRunId || child?.childId
-  return Boolean(
-    child?.background &&
-    child.canAcceptSteer === true &&
-    child.parentThreadId &&
-    jobId &&
-    !childHasUnsafeRuntimeLease(child) &&
-    (status === 'running' || status === 'queued')
-  )
+  return Boolean(child?.parentThreadId && child.childThreadId && jobId)
 }
 
 function childCanPause(child: RuntimeChildMetadata | null, status: CardStatus): boolean {
@@ -490,10 +387,6 @@ function childCanUseRecoveryControls(child: RuntimeChildMetadata | null, status:
         (health === 'stale' || health === 'lease_expired' || health === 'orphaned'))
     )
   )
-}
-
-function childHasWorktreeIsolation(child: RuntimeChildMetadata | null): boolean {
-  return child?.isolationMode === 'worktree'
 }
 
 // This is deliberately not a user setting. Worktree mutation controls remain
@@ -722,7 +615,6 @@ function actionReasonText(code: SubagentActionReasonCode | undefined, t: Transla
   }
 }
 
-const parseSteerResponse = projectSubagentActionResponse
 const parseJobControlResponse = projectSubagentActionResponse
 const parseIsolationReviewResponse = projectSubagentActionResponse
 const parseIsolationDecisionResponse = projectSubagentActionResponse
@@ -963,98 +855,112 @@ function SubagentRecoveryControls({
   )
 }
 
-function SubagentSteerForm({
-  child,
-  status
-}: {
-  child: RuntimeChildMetadata | null
-  status: CardStatus
-}): ReactElement | null {
+function SubagentSteerForm({ child }: { child: RuntimeChildMetadata }): ReactElement {
   const { t } = useTranslation('common')
   const [message, setMessage] = useState('')
   const [submitStatus, setSubmitStatus] = useState<SteerSubmitStatus>('idle')
   const [responseText, setResponseText] = useState('')
-  if (!childCanAcceptSteer(child, status)) return null
-  const jobId = child?.jobId || child?.childRunId || child?.childId
-  if (!child || !jobId) return null
+  const jobId = child.jobId || child.childRunId || child.childId!
+  const scope = JSON.stringify([child.parentThreadId, jobId, child.childThreadId])
+  const activeThreadId = useChatStore(state => state.activeThreadId)
+  const viewScope = JSON.stringify([scope, activeThreadId])
+  const currentView = useRef({ scope: viewScope, epoch: 0 })
+  if (currentView.current.scope !== viewScope) currentView.current = { scope: viewScope, epoch: currentView.current.epoch + 1 }
+  const epoch = currentView.current.epoch
+  const draft = useRef(message)
+  draft.current = message
+  const mounted = useRef(false)
+  const sending = useRef(false)
+  // An unknown result retains the entire envelope, including the inspected anchors.
+  const attempts = useRef(new Map<string, { request: ChildInputSubmitRequestV1; uncertain: boolean }>())
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  useEffect(() => { setSubmitStatus('idle'); setResponseText('') }, [viewScope])
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
     event.stopPropagation()
     const text = message.trim()
-    if (!text || submitStatus === 'sending') return
+    if ((!text && !attempts.current.has(scope)) || sending.current) return
+    const isCurrent = (): boolean => mounted.current && currentView.current.epoch === epoch
+    const submittedDraft = message
+    sending.current = true
     setSubmitStatus('sending')
     setResponseText('')
     try {
-      const response = await rendererRuntimeClient.steerTaskJob({
-        threadId: child.parentThreadId,
-        jobId,
-        message: text,
-        clientMessageId: nextClientMessageId(),
-        ...(child.parentTurnId ? { sourceTurnId: child.parentTurnId } : {}),
-        ...(child.parentToolCallId ? { sourceToolCallId: child.parentToolCallId } : {})
-      })
-      const parsed = parseSteerResponse(response.body)
-      if (!response.ok) {
-        setSubmitStatus('rejected')
-        setResponseText(actionReasonText(parsed.reasonCode, t, 'subagentSteerRejected', 'Steer was rejected'))
-        return
+      let attempt = attempts.current.get(scope)
+      if (!attempt) {
+        const caps = await rendererRuntimeClient.inspectChildInput(child.parentThreadId!, jobId, child.childThreadId)
+        if (!isCurrent()) return
+        if (caps.send === 'disabled' || !caps.runId || !caps.childTurnId) {
+          setSubmitStatus('rejected')
+          setResponseText(t('subagentMessageUnavailable', { defaultValue: 'Child cannot accept a message right now' }))
+          return
+        }
+        attempt = { uncertain: false, request: {
+          mode: 'start_or_steer', threadId: child.parentThreadId!, jobId,
+          expectedRunId: caps.runId, expectedChildTurnId: caps.childTurnId,
+          message: text, clientMessageId: globalThis.crypto.randomUUID()
+        } }
+        attempts.current.set(scope, attempt)
       }
-      const nextStatus = parsed.status === 'admitted' || parsed.status === 'rejected' || parsed.status === 'queued'
-        ? parsed.status
-        : 'queued'
-      setSubmitStatus(nextStatus)
-      setResponseText(
-        nextStatus === 'queued'
+      const receipt = await rendererRuntimeClient.submitChildInput(attempt.request, child.childThreadId!)
+      if (!isCurrent()) { attempt.uncertain = true; return }
+      attempts.current.delete(scope)
+      setSubmitStatus(receipt.admission)
+      setResponseText(receipt.action === 'start'
+        ? t('subagentChildTurnStarted', { defaultValue: 'Started a new turn in this child session' })
+        : receipt.admission === 'queued'
           ? t('subagentSteerQueued', { defaultValue: 'Queued for the next safe child turn boundary' })
-          : nextStatus === 'admitted'
-            ? t('subagentSteerAdmittedNotice', { defaultValue: 'Admitted into the child run' })
-            : actionReasonText(parsed.reasonCode, t, 'subagentSteerRejected', 'Steer was rejected')
-      )
-      if (nextStatus !== 'rejected') {
-        setMessage('')
-      }
-    } catch {
-      setSubmitStatus('error')
-      setResponseText(t('subagentSteerFailed', { defaultValue: 'Failed to send steer message' }))
+          : t('subagentSteerAdmittedNotice', { defaultValue: 'Admitted into the child run' }))
+      if (draft.current === submittedDraft && submittedDraft.trim() === attempt.request.message) setMessage('')
+    } catch (error) {
+      const attempt = attempts.current.get(scope)
+      if (attempt && !(error instanceof ChildInputRejectedError)) attempt.uncertain = true
+      if (!isCurrent()) return
+      // A later authority failure cannot disprove a previously unknown admission.
+      const rejected = error instanceof ChildInputRejectedError && (!attempt?.uncertain || error.code === 'input_cancelled')
+      if (rejected) attempts.current.delete(scope)
+      setSubmitStatus(rejected ? 'rejected' : 'error')
+      setResponseText(attempts.current.has(scope)
+        ? t('subagentMessageUnconfirmed', { defaultValue: 'Message unconfirmed; retry the same message to check admission' })
+        : error instanceof ChildInputRejectedError
+          ? t('subagentSteerRejected', { defaultValue: 'Child message was rejected' })
+          : t('subagentSteerFailed', { defaultValue: 'Failed to send child message' }))
+    } finally {
+      sending.current = false
+      if (isCurrent()) setSubmitStatus(current => current === 'sending' ? 'idle' : current)
     }
   }
-  const statusText = responseText || (
-    child.steerStatus
-      ? `steer ${child.steerStatus}`
-      : t('subagentSteerHint', { defaultValue: 'Delivered at the next safe child boundary' })
-  )
+  const pending = attempts.current.get(scope)
+  const statusText = responseText || (pending
+    ? t('subagentMessageUnconfirmed', { defaultValue: 'Message unconfirmed; retry the same message to check admission' })
+    : t('subagentMessageHint', { defaultValue: 'Message this child session' }))
   return (
-    <form className="flex min-w-0 items-center gap-1.5" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+    <form className="flex min-w-0 items-center gap-1.5" onSubmit={submit} onClick={event => event.stopPropagation()}>
       <input
-        className="min-w-0 flex-1 rounded-md border border-ds-border/70 bg-ds-card-muted/50 px-2 py-1 text-[12.5px] leading-5 text-ds-muted outline-none transition placeholder:text-ds-faint focus:border-ds-muted/50"
+        className="min-w-0 flex-1 rounded-md border border-ds-border/70 bg-ds-subtle/50 px-2 py-1 text-[12.5px] leading-5 text-ds-muted outline-none transition placeholder:text-ds-faint focus:border-ds-muted/50"
         value={message}
-        onChange={(event) => {
-          setMessage(event.target.value.slice(0, MAX_STEER_MESSAGE_CHARS))
-          if (submitStatus !== 'sending') {
-            setSubmitStatus('idle')
-            setResponseText('')
-          }
+        onChange={event => {
+          setMessage([...event.target.value].slice(0, MAX_STEER_MESSAGE_CHARS).join(''))
+          if (submitStatus !== 'sending') { setSubmitStatus('idle'); setResponseText('') }
         }}
-        maxLength={MAX_STEER_MESSAGE_CHARS}
+        maxLength={MAX_STEER_MESSAGE_CHARS * 2}
         aria-label={t('subagentSteerInputLabel', { defaultValue: 'Message child agent' })}
-        placeholder={t('subagentSteerPlaceholder', { defaultValue: 'Message child at next safe point' })}
+        placeholder={t('subagentMessagePlaceholder', { defaultValue: 'Message child agent' })}
       />
       <button
         type="submit"
-        disabled={!message.trim() || submitStatus === 'sending'}
+        disabled={(!message.trim() && !pending) || submitStatus === 'sending'}
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ds-faint transition hover:bg-ds-hover/70 hover:text-ds-muted disabled:cursor-not-allowed disabled:opacity-40"
-        aria-label={t('subagentSteerSend', { defaultValue: 'Send steer message' })}
-        title={t('subagentSteerSend', { defaultValue: 'Send steer message' })}
+        aria-label={pending ? t('subagentMessageRetry', { defaultValue: 'Retry unconfirmed child message' }) : t('subagentSteerSend', { defaultValue: 'Send child message' })}
+        title={pending ? t('subagentMessageRetry', { defaultValue: 'Retry unconfirmed child message' }) : t('subagentSteerSend', { defaultValue: 'Send child message' })}
       >
-        {submitStatus === 'sending' ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.9} />
-        ) : (
-          <SendHorizontal className="h-3.5 w-3.5" strokeWidth={1.9} />
-        )}
+        {submitStatus === 'sending' ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.9} />
+          : <SendHorizontal className="h-3.5 w-3.5" strokeWidth={1.9} />}
       </button>
-      <span className="max-w-[16rem] truncate text-[12px] leading-5 text-ds-faint" title={statusText}>
-        {statusText}
-      </span>
+      <span role="status" className="max-w-[16rem] truncate text-[12px] leading-5 text-ds-faint" title={statusText}>{statusText}</span>
     </form>
   )
 }
@@ -1404,7 +1310,7 @@ function SubagentIsolationRepairControls({
       {canCheck ? (
         <div className="flex min-w-0 items-start gap-1.5">
           <textarea
-            className="min-h-14 min-w-0 flex-1 resize-y rounded-md border border-ds-border/70 bg-ds-card-muted/50 px-2 py-1 text-[12px] leading-5 text-ds-muted outline-none transition placeholder:text-ds-faint focus:border-ds-muted/50"
+            className="min-h-14 min-w-0 flex-1 resize-y rounded-md border border-ds-border/70 bg-ds-subtle/50 px-2 py-1 text-[12px] leading-5 text-ds-muted outline-none transition placeholder:text-ds-faint focus:border-ds-muted/50"
             value={repairPatch}
             onChange={(event) => {
               setRepairPatch(event.target.value)
@@ -1562,320 +1468,10 @@ function SubagentChildTodoProjectionControls({
   )
 }
 
-function groupStatus(blocks: ChatBlock[]): CardStatus {
-  const statuses = blocks.map((block) => resolveStatus(block, childMetaFromBlock(block)))
-  if (statuses.length > 0 && statuses.every((status) => status === 'failed')) return 'failed'
-  if (statuses.length > 0 && statuses.every((status) => status === 'closed')) return 'closed'
-  if (statuses.some((status) => status === 'running')) return 'running'
-  if (statuses.some((status) => status === 'paused')) return 'paused'
-  if (statuses.some((status) => status === 'queued')) return 'queued'
-  return 'done'
-}
-
-function parseJsonObject(value: string | undefined): Record<string, unknown> | null {
-  if (!value?.trim()) return null
-  try {
-    const parsed = JSON.parse(value)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null
-  } catch {
-    return null
-  }
-}
-
-function positiveInteger(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  const count = Math.trunc(value)
-  return count > 0 ? count : null
-}
-
-function parallelTaskEntriesFromPayload(payload: Record<string, unknown> | null): Record<string, unknown>[] {
-  if (!payload) return []
-  for (const key of ['tasks', 'results', 'jobs', 'children'] as const) {
-    const entries = payload[key]
-    if (!Array.isArray(entries)) continue
-    const objects = entries.filter((entry): entry is Record<string, unknown> =>
-      Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
-    )
-    if (objects.length > 0) return objects
-  }
-  return []
-}
-
-function parallelTasksCountFromPayload(payload: Record<string, unknown> | null): number | null {
-  if (!payload) return null
-  const explicit =
-    positiveInteger(payload.taskCount) ??
-    positiveInteger(payload.task_count) ??
-    positiveInteger(payload.count)
-  if (explicit) return explicit
-  const entries = parallelTaskEntriesFromPayload(payload)
-  return entries.length > 0 ? entries.length : null
-}
-
-function blockSubagentCount(block: ChatBlock): number {
-  if (childMetaFromBlock(block)) return 1
-  if (toolNameFromBlock(block) !== 'parallel_tasks') return 1
-  return parallelTasksCountFromPayload(parseJsonObject(block.kind === 'tool' ? block.detail : undefined)) ?? 1
-}
-
-function groupCount(blocks: ChatBlock[]): number {
-  return blocks.reduce((count, block) => count + blockSubagentCount(block), 0)
-}
-
-function payloadString(payload: Record<string, unknown>, ...keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = payload[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
-  }
-  return undefined
-}
-
-function payloadNumber(payload: Record<string, unknown>, ...keys: string[]): number | undefined {
-  for (const key of keys) {
-    const value = payload[key]
-    if (typeof value === 'number' && Number.isFinite(value)) return value
-  }
-  return undefined
-}
-
-function payloadBoolean(payload: Record<string, unknown>, ...keys: string[]): boolean | undefined {
-  for (const key of keys) {
-    const value = payload[key]
-    if (typeof value === 'boolean') return value
-  }
-  return undefined
-}
-
-function payloadUsage(payload: Record<string, unknown>): Record<string, unknown> | undefined {
-  const usage = payload.usage
-  return usage && typeof usage === 'object' && !Array.isArray(usage)
-    ? usage as Record<string, unknown>
-    : undefined
-}
-
-function normalizedChildStatus(value: string | undefined, fallback: CardStatus): RuntimeChildMetadata['childStatus'] {
-  switch (value?.trim()) {
-    case 'queued':
-    case 'running':
-    case 'paused':
-    case 'pause_requested':
-    case 'resume_requested':
-    case 'resuming':
-    case 'completed':
-    case 'failed':
-    case 'aborted':
-    case 'interrupted':
-    case 'killed':
-      return value.trim() as RuntimeChildMetadata['childStatus']
-    case 'success':
-    case 'done':
-      return 'completed'
-    case 'error':
-      return 'failed'
-    case 'closed':
-      return 'killed'
-    default:
-      if (fallback === 'queued') return 'queued'
-      if (fallback === 'running') return 'running'
-      if (fallback === 'paused') return 'paused'
-      if (fallback === 'failed') return 'failed'
-      if (fallback === 'closed') return 'killed'
-      return 'completed'
-  }
-}
-
-function blockStatusFromChildStatus(status: RuntimeChildMetadata['childStatus']): ToolBlock['status'] {
-  if (status === 'queued' || status === 'running' || status === 'paused' || status === 'pause_requested' || status === 'resume_requested' || status === 'resuming') return 'running'
-  if (status === 'failed' || status === 'aborted' || status === 'interrupted' || status === 'killed') return 'error'
-  return 'success'
-}
-
-function parentChildBase(block: ToolBlock): Pick<RuntimeChildMetadata, 'parentThreadId' | 'parentTurnId' | 'parentToolCallId'> {
-  const parent = childMetaFromBlock(block)
-  return {
-    parentThreadId: parent?.parentThreadId ?? payloadString(block.meta ?? {}, 'parentThreadId', 'threadId') ?? '',
-    parentTurnId: parent?.parentTurnId ?? payloadString(block.meta ?? {}, 'parentTurnId', 'turnId') ?? '',
-    ...(parent?.parentToolCallId || payloadString(block.meta ?? {}, 'parentToolCallId', 'callId')
-      ? { parentToolCallId: parent?.parentToolCallId ?? payloadString(block.meta ?? {}, 'parentToolCallId', 'callId') }
-      : {})
-  }
-}
-
-function aggregatedParallelSubagentBlocks(block: ChatBlock): ToolBlock[] {
-  if (block.kind !== 'tool' || toolNameFromBlock(block) !== 'parallel_tasks' || childMetaFromBlock(block)) return []
-  const payload = parseJsonObject(block.detail)
-  const count = parallelTasksCountFromPayload(payload) ?? 1
-  if (count < 2) return []
-  const entries = parallelTaskEntriesFromPayload(payload)
-  const rowPayloads = entries.length > 0
-    ? entries
-    : Array.from({ length: count }, () => ({}))
-  const fallbackStatus = groupStatus([block])
-  const base = parentChildBase(block)
-  return rowPayloads.slice(0, count).map((entry, index): ToolBlock => {
-    const childStatus = normalizedChildStatus(
-      payloadString(entry, 'childStatus', 'status', 'rawStatus'),
-      fallbackStatus
-    )
-    const childThreadId = payloadString(entry, 'childThreadId', 'threadId')
-    const childRunId = payloadString(entry, 'childRunId', 'jobId', 'childId', 'id')
-    const childId = childRunId ?? `parallel-task-${index + 1}`
-    const childLabel = payloadString(entry, 'childLabel', 'label', 'displayName', 'agentNickname', 'name')
-    const childProfile = payloadString(entry, 'childProfile', 'profile', 'profileName')
-    const usage = payloadUsage(entry)
-    const prompt = payloadString(entry, 'input', 'prompt', 'instructions', 'task', 'description')
-    const detail = {
-      ...(childId ? { childId } : {}),
-      ...(childThreadId ? { childThreadId } : {}),
-      ...(prompt ? { input: prompt } : {}),
-      ...(childProfile ? { profile: childProfile } : {}),
-      ...(payloadString(entry, 'toolPolicy') ? { toolPolicy: payloadString(entry, 'toolPolicy') } : {}),
-      ...(payloadNumber(entry, 'toolInvocations') !== undefined ? { toolInvocations: payloadNumber(entry, 'toolInvocations') } : {}),
-      ...(payloadNumber(entry, 'durationMs') !== undefined ? { durationMs: payloadNumber(entry, 'durationMs') } : {}),
-      ...(payloadNumber(entry, 'queuedMs') !== undefined ? { queuedMs: payloadNumber(entry, 'queuedMs') } : {}),
-      ...(usage && payloadNumber(usage, 'totalTokens', 'total_tokens') !== undefined
-        ? { usage: { totalTokens: payloadNumber(usage, 'totalTokens', 'total_tokens') } }
-        : {})
-    }
-    const child: RuntimeChildMetadata = {
-      ...base,
-      childId,
-      childStatus,
-      ...(childRunId ? { childRunId } : {}),
-      ...(childThreadId ? { childThreadId } : {}),
-      ...(payloadString(entry, 'childTurnId') ? { childTurnId: payloadString(entry, 'childTurnId') } : {}),
-      ...(childLabel ? { childLabel } : {}),
-      ...(payloadString(entry, 'name', 'childName') ? { childName: payloadString(entry, 'name', 'childName') } : {}),
-      ...(childProfile ? { childProfile } : {}),
-      ...(payloadString(entry, 'toolPolicy', 'childToolPolicy') ? { childToolPolicy: payloadString(entry, 'toolPolicy', 'childToolPolicy') } : {}),
-      ...(childRunId ? { jobId: childRunId } : {}),
-      ...(payloadString(entry, 'parallelGroupId') ? { parallelGroupId: payloadString(entry, 'parallelGroupId') } : {}),
-      parallelIndex: payloadNumber(entry, 'parallelIndex') ?? index + 1,
-      childSeq: payloadNumber(entry, 'childSeq') ?? index + 1,
-      ...(payloadNumber(entry, 'toolInvocations') !== undefined ? { toolInvocations: payloadNumber(entry, 'toolInvocations') } : {}),
-      ...(payloadNumber(entry, 'durationMs') !== undefined ? { durationMs: payloadNumber(entry, 'durationMs') } : {}),
-      ...(payloadNumber(entry, 'queuedMs') !== undefined ? { queuedMs: payloadNumber(entry, 'queuedMs') } : {}),
-      ...(usage && payloadNumber(usage, 'totalTokens', 'total_tokens') !== undefined
-        ? { totalTokens: payloadNumber(usage, 'totalTokens', 'total_tokens') }
-        : {}),
-      ...(payloadBoolean(entry, 'background') !== undefined ? { background: payloadBoolean(entry, 'background') } : {})
-    }
-    return {
-      kind: 'tool',
-      id: `${block.id}:parallel:${index + 1}`,
-      createdAt: block.createdAt,
-      summary: prompt ? `task: ${prompt}` : `task ${index + 1}`,
-      status: blockStatusFromChildStatus(childStatus),
-      toolKind: 'subagent',
-      detail: JSON.stringify(detail),
-      meta: {
-        ...(block.meta ?? {}),
-        toolName: 'task',
-        child
-      }
-    }
-  })
-}
-
-function groupTitle(blocks: ChatBlock[], t: Translator): string {
-  const status = groupStatus(blocks)
-  const count = groupCount(blocks)
-  if (status === 'failed') {
-    return t('subagentCreateFailedTitle', { count, defaultValue: 'Failed to create {{count}} agents' })
-  }
-  if (status === 'closed') {
-    return t('subagentClosedTitle', { count, defaultValue: 'Closed {{count}} agents' })
-  }
-  if (status === 'paused') {
-    return t('subagentPausedTitle', { count, defaultValue: 'Paused {{count}} agents' })
-  }
-  if (status === 'running') {
-    return t('subagentRunningTitle', { count, defaultValue: 'Running {{count}} agents' })
-  }
-  if (status === 'queued') {
-    return t('subagentCreatingTitle', { count, defaultValue: 'Queued {{count}} agents' })
-  }
-  return t('subagentCreatedTitle', { count, defaultValue: 'Created {{count}} agents' })
-}
-
-function groupGlyphClass(status: CardStatus): string {
-  if (status === 'running' || status === 'paused') return 'text-ds-muted'
-  if (status === 'failed') return 'text-ds-muted'
-  return 'text-ds-faint'
-}
-
-function SubagentHeader({
-  title,
-  status,
-  expanded,
-  onToggle
-}: {
-  title: string
-  status: CardStatus
-  expanded: boolean
-  onToggle: () => void
-}): ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={expanded}
-      className="group flex w-fit max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-[14px] font-medium text-ds-muted transition hover:opacity-85"
-    >
-      <span className={`flex h-4 w-4 shrink-0 items-center justify-center ${groupGlyphClass(status)}`}>
-        {status === 'running' || status === 'queued' ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.9} />
-        ) : status === 'paused' ? (
-          <Pause className="h-3.5 w-3.5" strokeWidth={1.9} />
-        ) : (
-          <Bot className="h-3.5 w-3.5" strokeWidth={1.85} />
-        )}
-      </span>
-      <span className="min-w-0 truncate">{title}</span>
-      {expanded ? (
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-45" strokeWidth={1.8} />
-      ) : (
-        <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-45" strokeWidth={1.8} />
-      )}
-    </button>
-  )
-}
-
-function subagentLineText(block: ChatBlock, t: Translator): { text: string; title: string } {
+export function subagentLineText(block: ChatBlock, t: Translator): { text: string; title: string } {
   const child = childMetaFromBlock(block)
-  const detail = parseDelegateDetail(block.kind === 'tool' ? block.detail : undefined)
-  const status = resolveStatus(block, child)
-  const taskText = block.kind === 'tool' ? splitTaskLine(block) : undefined
-  const name = childDisplayName(child, detail, taskText, t('subagentDefaultName', { defaultValue: 'Child agent' }))
-  const label = childDisplayLabel(child, detail, name)
-  const instruction = childInstruction(block, detail)
-  const meta = childLineMeta(child, detail, t)
-  let text = ''
-  if (status === 'failed') {
-    text = instruction
-      ? t('subagentFailedLineWithInput', { name: label, input: instruction, defaultValue: 'Failed to create {{name}}: {{input}}' })
-      : t('subagentFailedLine', { name: label, defaultValue: 'Failed to create {{name}}' })
-  } else if (status === 'closed') {
-    text = t('subagentClosedLine', { name: label, defaultValue: 'Closed {{name}}' })
-  } else if (status === 'running') {
-    text = instruction
-      ? t('subagentRunningLineWithInput', { name: label, input: instruction, defaultValue: 'Running {{name}} with: {{input}}' })
-      : t('subagentRunningLine', { name: label, defaultValue: 'Running {{name}}' })
-  } else if (status === 'paused') {
-    text = instruction
-      ? t('subagentPausedLineWithInput', { name: label, input: instruction, defaultValue: 'Paused {{name}} with: {{input}}' })
-      : t('subagentPausedLine', { name: label, defaultValue: 'Paused {{name}}' })
-  } else if (status === 'queued') {
-    text = instruction
-      ? t('subagentQueuedLineWithInput', { name: label, input: instruction, defaultValue: 'Queued {{name}} with: {{input}}' })
-      : t('subagentQueuedLine', { name: label, defaultValue: 'Queued {{name}}' })
-  } else {
-    text = instruction
-      ? t('subagentCreatedLineWithInput', { name: label, input: instruction, defaultValue: 'Created {{name}} with: {{input}}' })
-      : t('subagentCreatedLine', { name: label, defaultValue: 'Created {{name}}' })
-  }
+  const text = subagentPublicSummary(block, child, t)
+  const meta = childLineMeta(child, t)
   return { text, title: [text, meta].filter(Boolean).join(' · ') }
 }
 
@@ -1890,7 +1486,7 @@ function ChildThreadButton({ childThreadId }: { childThreadId?: string }): React
         event.stopPropagation()
         void selectThread(childThreadId).catch(() => undefined)
       }}
-      className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ds-faint opacity-0 transition hover:bg-ds-hover/70 hover:text-ds-muted group-hover:opacity-100"
+      className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ds-faint transition hover:bg-ds-hover/70 hover:text-ds-muted"
       aria-label={t('subagentOpenSession', { defaultValue: 'Open child session' })}
       title={t('subagentOpenSession', { defaultValue: 'Open child session' })}
     >
@@ -1899,296 +1495,48 @@ function ChildThreadButton({ childThreadId }: { childThreadId?: string }): React
   )
 }
 
-function SubagentCompactRow({ block }: { block: ChatBlock }): ReactElement {
+/** Native control state is independent of the protected start-receipt lease. */
+export function SubagentNativeControls({ block }: { block: ChatBlock }): ReactElement | null {
   const { t } = useTranslation('common')
   const child = childMetaFromBlock(block)
-  const detail = useMemo(
-    () => parseDelegateDetail(block.kind === 'tool' ? block.detail : undefined),
-    [block]
-  )
-  const line = subagentLineText(block, t)
-  const childThreadId = child?.childThreadId || detail.childThreadId
-
-  return (
-    <div className="group flex min-w-0 items-center py-[1px] text-[13.5px] leading-6 text-ds-faint">
-      <span className="min-w-0 flex-1 truncate" title={line.title}>
-        {line.text}
-      </span>
-      <ChildThreadButton childThreadId={childThreadId} />
-    </div>
-  )
-}
-
-function SubagentSingleDetail({
-  block,
-  defaultExpanded
-}: {
-  block: ChatBlock
-  defaultExpanded: boolean
-}): ReactElement | null {
-  const { t } = useTranslation('common')
-  const [expanded, setExpanded] = useState(defaultExpanded)
-  const child = childMetaFromBlock(block)
-  const detail = useMemo(
-    () => parseDelegateDetail(block.kind === 'tool' ? block.detail : undefined),
-    [block]
-  )
-  const diagnostics = diagnosticsFromBlock(block)
   const status = resolveStatus(block, child)
-  const taskText = block.kind === 'tool' ? splitTaskLine(block) : undefined
-  const name = childDisplayName(child, detail, taskText, t('subagentDefaultName', { defaultValue: 'Child agent' }))
-  const label = childDisplayLabel(child, detail, name)
-  const input = childInstruction(block, detail)
-  const error = childErrorText(block, detail, status)
-  const summary = ''
-  const meta = childLineMeta(child, detail, t)
-  const jobMeta = jobDiagnosticsMeta(child, diagnostics, t)
-  const isolationMeta = childIsolationMeta(child, t)
-  const todoMeta = childTodoMeta(child, t)
-  const childThreadId = child?.childThreadId || detail.childThreadId
-  const title = groupTitle([block], t)
-  const canSteer = childCanAcceptSteer(child, status)
+  const canSteer = childCanInspectInput(child)
   const canPauseOrResume = childCanPause(child, status) || childCanResume(child, status)
   const canUseRecoveryControls = childCanUseRecoveryControls(child, status)
   const canReviewIsolation = childCanReviewIsolation(child)
   const canDecideIsolation = childCanAcceptIsolation(child, status) || childCanRejectIsolation(child, status) || childCanCleanupIsolation(child, status)
   const canRepairIsolation = childCanReportConflict(child, status) || childCanCheckRepair(child, status, child?.conflictReportId) || childCanAcceptRepair(child, status, child?.repairReviewId, child?.repairDryRunStatus)
   const canActOnChildTodoProjection = childCanRejectTodoProjection(child, status) || childCanAcceptTodoProjection(child, status)
-  const hasBody = Boolean(input || error || summary || meta || jobMeta || isolationMeta || todoMeta || childThreadId || canSteer || canPauseOrResume || canUseRecoveryControls || canReviewIsolation || canDecideIsolation || canRepairIsolation || canActOnChildTodoProjection)
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (!hasBody) return
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    setExpanded((value) => !value)
-  }
 
-  return (
-    <section className="ds-subagent-mount min-w-0 text-ds-faint" aria-label={`${label} · ${statusLabel(status, t)}`}>
-      <SubagentHeader title={title} status={status} expanded={expanded} onToggle={() => setExpanded((value) => !value)} />
-      <div
-        role={hasBody ? 'button' : undefined}
-        tabIndex={hasBody ? 0 : undefined}
-        aria-expanded={hasBody ? expanded : undefined}
-        onClick={() => {
-          if (hasBody) setExpanded((value) => !value)
-        }}
-        onKeyDown={onKeyDown}
-        className={`group mt-1 min-w-0 rounded-md px-0 py-0.5 text-left text-[13.5px] leading-6 ${
-          hasBody ? 'cursor-pointer transition hover:bg-ds-hover/25' : ''
-        }`}
-      >
-        <span className="flex min-w-0 items-center">
-          <span className="min-w-0 flex-1 truncate font-medium text-ds-muted" title={subagentLineText(block, t).title}>
-            {status === 'failed'
-              ? t('subagentCreateFailedShort', { defaultValue: 'Creation failed' })
-              : subagentLineText(block, t).text}
-          </span>
-          <ChildThreadButton childThreadId={childThreadId} />
-        </span>
-      </div>
-      {expanded ? (
-        <div className="space-y-1 text-[13.5px] leading-6 text-ds-faint">
-          {input ? (
-            <p className="whitespace-pre-wrap break-words">
-              <span className="font-medium text-ds-muted">{t('subagentInputLabel', { defaultValue: 'Input' })}: </span>
-              {input}
-            </p>
-          ) : null}
-          {summary ? (
-            <p className="whitespace-pre-wrap break-words">
-              <span className="font-medium text-ds-muted">{t('subagentResultLabel', { defaultValue: 'Result' })}: </span>
-              {summary}
-            </p>
-          ) : null}
-          {error && error !== input ? (
-            <p className="whitespace-pre-wrap break-words">
-              <span className="font-medium text-ds-muted">{t('subagentErrorLabel', { defaultValue: 'Error' })}: </span>
-              {error}
-            </p>
-          ) : null}
-          {meta ? (
-            <p className="truncate text-ds-faint" title={meta}>{meta}</p>
-          ) : null}
-          {jobMeta ? (
-            <p className="whitespace-pre-wrap break-words text-ds-faint" title={jobMeta}>{jobMeta}</p>
-          ) : null}
-          {isolationMeta ? (
-            <p className="truncate text-ds-faint" title={isolationMeta}>{isolationMeta}</p>
-          ) : null}
-          {todoMeta ? (
-            <p className="truncate text-ds-faint" title={todoMeta}>{todoMeta}</p>
-          ) : null}
-          {canReviewIsolation ? <SubagentIsolationReviewControl child={child} /> : null}
-          {canDecideIsolation ? <SubagentIsolationDecisionControls child={child} status={status} /> : null}
-          {canRepairIsolation ? <SubagentIsolationRepairControls child={child} status={status} /> : null}
-          {canActOnChildTodoProjection ? <SubagentChildTodoProjectionControls child={child} status={status} /> : null}
-          {canUseRecoveryControls ? <SubagentRecoveryControls child={child} status={status} /> : null}
-          {canPauseOrResume ? <SubagentPauseControls child={child} status={status} /> : null}
-          {canSteer ? <SubagentSteerForm child={child} status={status} /> : null}
-        </div>
-      ) : null}
-    </section>
-  )
-}
-
-export function SubagentCallCard({ block }: { block: ChatBlock }): ReactElement | null {
-  const aggregated = aggregatedParallelSubagentBlocks(block)
-  if (aggregated.length >= 2) return <AggregatedParallelSubagentGroup sourceBlock={block} blocks={aggregated} />
-  const child = childMetaFromBlock(block)
-  const status = resolveStatus(block, child)
-  return <SubagentSingleDetail block={block} defaultExpanded={status === 'failed' || childCanAcceptSteer(child, status) || childCanPause(child, status) || childCanResume(child, status) || childCanUseRecoveryControls(child, status) || childHasWorktreeIsolation(child) || Boolean(child?.childTodoProjectionId)} />
-}
-
-function AggregatedParallelSubagentGroup({
-  sourceBlock,
-  blocks
-}: {
-  sourceBlock: ChatBlock
-  blocks: ToolBlock[]
-}): ReactElement | null {
-  const { t } = useTranslation('common')
-  const [collapsed, setCollapsed] = useState(false)
-  if (blocks.length < 2) return null
-  const status = groupStatus(blocks)
-  const title = groupTitle(blocks.length > 0 ? blocks : [sourceBlock], t)
-  return (
-    <section className="ds-subagent-mount min-w-0 text-ds-faint" aria-label={`${title} · ${statusLabel(status, t)}`}>
-      <SubagentHeader
-        title={title}
-        status={status}
-        expanded={!collapsed}
-        onToggle={() => setCollapsed((value) => !value)}
-      />
-      {!collapsed ? (
-        <div className="mt-0.5 min-w-0">
-          {blocks.map((block) => (
-            <SubagentCompactRow key={block.id} block={block} />
-          ))}
-        </div>
-      ) : null}
-    </section>
-  )
-}
-
-export function SubagentGroup({ blocks }: { blocks: ChatBlock[] }): ReactElement | null {
-  const { t } = useTranslation('common')
-  const [collapsed, setCollapsed] = useState(false)
-  if (blocks.length === 0) return null
-  if (blocks.length === 1) {
-    const block = blocks[0]
-    const aggregated = aggregatedParallelSubagentBlocks(block)
-    if (aggregated.length >= 2) return <AggregatedParallelSubagentGroup sourceBlock={block} blocks={aggregated} />
-    const child = childMetaFromBlock(block)
-    const status = resolveStatus(block, child)
-    return <SubagentSingleDetail block={block} defaultExpanded={status === 'failed' || childCanAcceptSteer(child, status) || childCanPause(child, status) || childCanResume(child, status) || childCanUseRecoveryControls(child, status) || childHasWorktreeIsolation(child) || Boolean(child?.childTodoProjectionId)} />
-  }
-
-  const sorted = [...blocks].sort((a, b) => {
-    const left = childMetaFromBlock(a)?.childSeq ?? 0
-    const right = childMetaFromBlock(b)?.childSeq ?? 0
-    return left - right
-  })
-  const status = groupStatus(sorted)
-  const title = groupTitle(sorted, t)
-
-  return (
-    <section className="ds-subagent-mount min-w-0 text-ds-faint" aria-label={`${title} · ${statusLabel(status, t)}`}>
-      <SubagentHeader
-        title={title}
-        status={status}
-        expanded={!collapsed}
-        onToggle={() => setCollapsed((value) => !value)}
-      />
-      {!collapsed ? (
-        <div className="mt-0.5 min-w-0">
-          {sorted.map((block) => (
-            <SubagentCompactRow key={block.id} block={block} />
-          ))}
-        </div>
-      ) : null}
-    </section>
-  )
-}
-
-export function BackgroundShellCard({ block }: { block: ChatBlock }): ReactElement | null {
-  const { t } = useTranslation('common')
-  const child = childMetaFromBlock(block)
-  const diagnostics = diagnosticsFromBlock(block)
-  const status = resolveStatus(block, child)
-  const [expanded, setExpanded] = useState(false)
-  const label = child?.childLabel || (block.kind === 'tool' ? block.summary : '') || t('backgroundShellLabel', { defaultValue: 'Background shell' })
-  const jobId = child?.jobId || child?.childRunId || child?.childId
-  const heartbeatAgeMs = diagnostics?.heartbeatAgeMs
-  const heartbeatStatus = formatJobHeartbeatStatus(diagnostics?.heartbeatStatus || child?.heartbeatStatus, t)
-  const detail = [
-    jobId ? `job ${jobId}` : '',
-    heartbeatStatus ? `${t('toolJobHeartbeatStatus', { defaultValue: 'status' })} ${heartbeatStatus}` : '',
-    child?.childProfile ? `profile ${child.childProfile}` : '',
-    child?.childToolPolicy ? `policy ${child.childToolPolicy}` : '',
-    diagnostics?.status,
-    diagnostics?.stalled ? t('toolJobStalled') : '',
-    heartbeatAgeMs !== undefined ? `heartbeat ${formatDuration(heartbeatAgeMs)}` : '',
-    diagnostics?.warningCode
-  ].filter(Boolean).join(' · ')
-  const canExpand = Boolean(detail || (block.kind === 'tool' && block.detail?.trim()))
-
-  return (
-    <section className="ds-subagent-mount min-w-0 text-ds-faint">
-      <div
-        role={canExpand ? 'button' : undefined}
-        tabIndex={canExpand ? 0 : undefined}
-        aria-expanded={canExpand ? expanded : undefined}
-        onClick={() => {
-          if (canExpand) setExpanded((value) => !value)
-        }}
-        onKeyDown={(event) => {
-          if (!canExpand) return
-          if (event.key !== 'Enter' && event.key !== ' ') return
-          event.preventDefault()
-          setExpanded((value) => !value)
-        }}
-        className={`group flex min-w-0 items-center gap-1.5 rounded-md py-0.5 text-left text-[13.5px] leading-6 ${
-          canExpand ? 'cursor-pointer transition hover:bg-ds-hover/25' : ''
-        }`}
-      >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ds-faint">
-          <SquareTerminal className="h-3.5 w-3.5" strokeWidth={1.8} />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-ds-faint">
-          {label}
-          {detail ? <span className="text-ds-faint"> · {detail}</span> : null}
-        </span>
-        {status === 'running' ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-ds-faint" strokeWidth={2} /> : null}
-        {canExpand ? (
-          expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ds-faint opacity-45" strokeWidth={1.8} />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ds-faint opacity-45" strokeWidth={1.8} />
-          )
-        ) : null}
-      </div>
-      {expanded ? (
-        <div className="mt-1">
-          {block.kind === 'tool' && block.detail?.trim() ? (
-            <pre className="whitespace-pre-wrap break-words rounded-md bg-ds-card-muted/60 px-2.5 py-2 font-mono text-[12px] leading-5 text-ds-muted">
-              {block.detail}
-            </pre>
-          ) : (
-            <p className="whitespace-pre-wrap text-[13px] leading-5 text-ds-muted">{detail}</p>
-          )}
-        </div>
-      ) : null}
-    </section>
-  )
-}
-
-export function BackgroundShellGroup({ blocks }: { blocks: ChatBlock[] }): ReactElement | null {
-  if (blocks.length === 0) return null
-  return (
-    <div className="flex flex-col gap-1">
-      {blocks.map((block) => (
-        <BackgroundShellCard key={block.id} block={block} />
-      ))}
+  if (!child) return null
+  return <div data-subagent-native-controls aria-label={statusLabel(status, t)}>
+    <div className={subagentCss.nativeActions}><ChildThreadButton childThreadId={child.childThreadId} /></div>
+    <div className={subagentCss.nativeControls}>
+      {canReviewIsolation ? <SubagentIsolationReviewControl child={child} /> : null}
+      {canDecideIsolation ? <SubagentIsolationDecisionControls child={child} status={status} /> : null}
+      {canRepairIsolation ? <SubagentIsolationRepairControls child={child} status={status} /> : null}
+      {canActOnChildTodoProjection ? <SubagentChildTodoProjectionControls child={child} status={status} /> : null}
+      {canUseRecoveryControls ? <SubagentRecoveryControls child={child} status={status} /> : null}
+      {canPauseOrResume ? <SubagentPauseControls child={child} status={status} /> : null}
+      {canSteer ? <SubagentSteerForm child={child} /> : null}
     </div>
-  )
+  </div>
+}
+
+/** Recorded lifecycle and existing diagnostics use the compact DSH field layout. */
+export function SubagentDetailBody({ block, showControls = true }: { block: ChatBlock; showControls?: boolean }): ReactElement | null {
+  const { t } = useTranslation('common')
+  const child = childMetaFromBlock(block)
+  const model = nativeSubagentCardModel(child, t)
+  const observations = [
+    { label: t('toolChildAgent'), value: childLineMeta(child, t) },
+    { label: t('toolJobHeartbeat', { defaultValue: 'Heartbeat' }), value: jobDiagnosticsMeta(child, diagnosticsFromBlock(block), t) },
+    { label: t('subagentWorktreeIsolated', { defaultValue: 'Isolated worktree' }), value: childIsolationMeta(child, t) },
+    { label: t('subagentChildTodoCountChip', { count: child?.childTodoCount ?? 0, defaultValue: '{{count}} child todos' }), value: childTodoMeta(child, t) }
+  ].filter(field => field.value !== '')
+  const items = model.items.map(item => ({ ...item, fields: [...item.fields, ...observations] }))
+  return <section data-dsh-subagent-details className={subagentCss.nativeDetails}>
+    <ToolDetails model={{ ...model, items }} />
+    {showControls ? <SubagentNativeControls block={block} /> : null}
+  </section>
 }

@@ -1,3 +1,5 @@
+import { useDocxEditorStore,isDocxPath } from '../office/docx-editor-store'
+import { useChatStore } from '../store/chat-store'
 import { useNativeOfficeStore } from '../office/native-office-store'
 import i18n from '../i18n'
 import { openTextObject } from './object-editing-client'
@@ -219,6 +221,11 @@ export function createWriteFileActions({
       const saved = await get().flushSave(get().workspaceRoot || workspaceRoot)
       if (!saved || revision !== navigation.revision) return
       if (!(await get().closeImageRegion()) || revision !== navigation.revision) return
+      if (isDocxPath(path)) {
+        const threadId=useChatStore.getState().activeThreadId
+        await useDocxEditorStore.getState().select(workspaceRoot,path,threadId ?? undefined,()=>revision===navigation.revision)
+        return
+      }
       if (isNativeOfficeFilePath(path)) {
         await useNativeOfficeStore.getState().select(workspaceRoot, path)
         return
@@ -367,7 +374,7 @@ export function createWriteFileActions({
       }
     },
 
-    createFile: async (workspaceRoot, path, content = '') => {
+    createFile: async (workspaceRoot, path, content = '', options = {}) => {
       let result: Awaited<ReturnType<typeof window.analytix.files.createFile>>
       try {
         result = await window.analytix.files.createFile({ workspaceRoot, path, content })
@@ -379,8 +386,11 @@ export function createWriteFileActions({
         set({ fileError: result.message })
         return null
       }
-      await get().refreshWorkspace(workspaceRoot)
-      await get().openFile(workspaceRoot, result.path)
+      if (options.openAfterCreate === false) await get().loadDirectory(workspaceRoot,writeDirnameFromPath(result.path))
+      else {
+        await get().refreshWorkspace(workspaceRoot)
+        await get().openFile(workspaceRoot,result.path)
+      }
       return result.path
     },
 

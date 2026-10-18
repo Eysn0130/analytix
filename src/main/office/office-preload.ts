@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { OFFICE_BIND_IPC, isOfficeEvent, isOfficeEngineFailure, isOfficeReady, isOfficeRequest, isOfficeResult, officeRecord, officeToken, type OfficeBinding, type OfficeEngineFailure, type OfficeEvent, type OfficeReady, type OfficeRequest, type OfficeResult } from './office-protocol'
+import { OFFICE_BIND_IPC, isOfficePointerMessage, type OfficePointerGuest, type OfficePointerHost, isOfficeEvent, isOfficeEngineFailure, isOfficeReady, isOfficeRequest, isOfficeResult, officeRecord, officeToken, type OfficeBinding, type OfficeEngineFailure, type OfficeEvent, type OfficeReady, type OfficeRequest, type OfficeResult } from './office-protocol'
 
-type SurfaceMessage = OfficeEngineFailure | OfficeReady | OfficeResult | OfficeEvent
-type SurfaceListener = (message: OfficeBinding | OfficeRequest) => void
+type SurfaceMessage = OfficeEngineFailure | OfficeReady | OfficeResult | OfficeEvent | OfficePointerGuest
+type SurfaceListener = (message: OfficeBinding | OfficeRequest | OfficePointerHost) => void
 let bound = false, listener: SurfaceListener | undefined, port: MessagePort | undefined, channel: string | undefined
 let connected = false
 function deliverBinding(): void {
@@ -12,7 +12,7 @@ ipcRenderer.on(OFFICE_BIND_IPC, (event, value: unknown) => {
   if (bound || !officeRecord(value) || Object.keys(value).sort().join(',') !== 'channel,entryURL' || !officeToken(value.channel) || value.entryURL !== location.href || location.protocol !== 'http:' || location.hostname !== '127.0.0.1' || event.ports.length !== 1) return
   bound = true; channel = value.channel; port = event.ports[0]
   port.onmessage = ({ data }) => {
-    if (!isOfficeRequest(data) || data.channel !== channel || !connected) return
+    if (!(isOfficeRequest(data) || isOfficePointerMessage(data,'host')) || data.channel !== channel || !connected) return
     listener?.(data)
   }
   port.start()
@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('analytixOfficeSurface', Object.freeze({
     listener = handler; deliverBinding()
   },
   send(message: SurfaceMessage): void {
-    if (!port || !connected || message?.channel !== channel || !(isOfficeEngineFailure(message) || isOfficeReady(message) || isOfficeResult(message) || isOfficeEvent(message))) throw Error('office-invalid-message')
+    if (!port || !connected || message?.channel !== channel || !(isOfficeEngineFailure(message) || isOfficeReady(message) || isOfficeResult(message) || isOfficeEvent(message) || isOfficePointerMessage(message,'guest'))) throw Error('office-invalid-message')
     port.postMessage(message)
   }
 }))

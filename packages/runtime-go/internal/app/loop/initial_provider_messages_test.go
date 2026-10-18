@@ -219,3 +219,44 @@ func TestBindInitialProviderIngressAliasesTargetsCurrentExactUserMessage(t *test
 		t.Fatal("missing current provider ingress target was accepted")
 	}
 }
+
+func TestPrepareInitialProviderMessagesOmitsOnlyHostWakeEmptyPrompt(t *testing.T) {
+	for _, test := range []struct {
+		name, prompt, attachment string
+		omit                     bool
+		wantCurrent              bool
+	}{
+		{name: "ordinary prompt", prompt: "actual synthetic ordinary input", wantCurrent: true},
+		{name: "ordinary empty prompt stays compatible", wantCurrent: true},
+		{name: "verified Host empty wake", omit: true},
+		{name: "nonempty prompt cannot be suppressed", prompt: "actual synthetic ordinary input", omit: true, wantCurrent: true},
+		{name: "prompt whitespace is preserved", prompt: "  ", omit: true, wantCurrent: true},
+		{name: "attachment message cannot be suppressed", attachment: strings.Repeat("a", 64), omit: true, wantCurrent: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			prepared := PrepareInitialProviderMessagesV1(InitialProviderMessagesInputV1{
+				SystemPrompt: "system", History: []domainmodel.Message{{Role: "assistant", Content: "prior ordinary result"}},
+				UserPrompt: test.prompt, OmitCurrentUserPrompt: test.omit, AttachmentPlanDigest: test.attachment,
+			})
+			want := 2
+			if test.wantCurrent {
+				want++
+			}
+			if len(prepared.Messages) != want || prepared.Messages[1].Role != "assistant" || prepared.Messages[1].Content != "prior ordinary result" {
+				t.Fatal("Host wake changed ordinary history or message count")
+			}
+			if test.wantCurrent {
+				current := prepared.Messages[len(prepared.Messages)-1]
+				if current.Role != "user" || current.Content != test.prompt || current.PrivateAttachmentPlanDigest != test.attachment {
+					t.Fatal("ordinary current input or attachment changed")
+				}
+			} else {
+				for _, message := range prepared.Messages {
+					if message.Role == "user" {
+						t.Fatal("Host wake invented a current human message")
+					}
+				}
+			}
+		})
+	}
+}

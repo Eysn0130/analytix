@@ -1,10 +1,13 @@
 package subagent
 
 import (
+	"context"
+	"reflect"
 	"strings"
 	"time"
 
 	domainjob "analytix.local/runtime-go/internal/domain/job"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 const (
@@ -26,6 +29,39 @@ type TaskJobServiceResult struct {
 	IsError   bool
 	ErrorCode string
 	Err       error
+	// Receipt describes this operation, independently of Record.Status. It is
+	// private display evidence and never enters Response's public allowlist.
+	Receipt *domaintoolresult.ProtectedJobReceiptV1
+	// OutputCapture is a protected producer observation, never a public result
+	// or a replacement for the output-free durable Job record.
+	OutputCapture *domaintoolresult.ProtectedJobOutputV1 `json:"-"`
+}
+
+// Only the protected tool execution path asks for producer bytes. Ordinary
+// HTTP/model callers retain the existing fixed withheld result.
+func (s *Service) OutputTaskJobProtectedV1(ctx context.Context, parentThreadID string, request TaskJobOutputRequest) TaskJobServiceResult {
+	result := s.OutputTaskJob(parentThreadID, request, true)
+	if result.IsError || result.Record.SecurityBinding == nil || s.resolveProtectedOutput == nil || s.state == nil || ctx == nil {
+		return result
+	}
+	binding := result.Record.SecurityBinding
+	release, err := s.state.AcquireSecurityScopeRead(ctx, parentThreadID, binding.ParentWorkspaceRealPath, binding.TenantID, binding.UserID)
+	if err != nil || release == nil {
+		return result
+	}
+	defer release()
+	if !s.RecordAuthorized(parentThreadID, result.Record) {
+		return TaskJobServiceResult{Response: ForbiddenTaskJobResponse(), IsError: true, ErrorCode: TaskJobErrorForbidden}
+	}
+	output, ok := s.resolveProtectedOutput(ctx, result.Record)
+	current, found, forbidden, loadErr := s.taskJobRecord(request.JobID, parentThreadID)
+	if ctx.Err() != nil || forbidden {
+		return TaskJobServiceResult{Response: ForbiddenTaskJobResponse(), IsError: true, ErrorCode: TaskJobErrorForbidden}
+	}
+	if ok && found && loadErr == nil && reflect.DeepEqual(current, result.Record) {
+		result.OutputCapture = &output
+	}
+	return result
 }
 
 func (s *Service) WaitTaskJobs(parentThreadID string, request TaskJobWaitRequest, emptyIsNotFound bool) TaskJobServiceResult {
@@ -49,14 +85,19 @@ func (s *Service) WaitTaskJobs(parentThreadID string, request TaskJobWaitRequest
 			return TaskJobServiceResult{Response: ForbiddenTaskJobResponse(), IsError: true, ErrorCode: TaskJobErrorForbidden}
 		}
 	}
-	if request.TimeoutMS > 0 && TaskJobsTerminal(records) && s.state != nil {
+	// The durable terminal status can precede the worker's final unregister.
+	// Keep the actual wait exit independent of that status for the receipt.
+	waitCompleted := TaskJobsTerminal(records)
+	if request.TimeoutMS > 0 && waitCompleted && s.state != nil {
 		for _, record := range records {
 			remaining := time.Until(deadline)
 			if remaining <= 0 {
+				waitCompleted = false
 				break
 			}
 			settled, _ := s.state.WaitBackgroundJobSettled(record.ID, remaining)
 			if !settled {
+				waitCompleted = false
 				break
 			}
 		}
@@ -64,10 +105,11 @@ func (s *Service) WaitTaskJobs(parentThreadID string, request TaskJobWaitRequest
 		if forbidden {
 			return TaskJobServiceResult{Response: ForbiddenTaskJobResponse(), IsError: true, ErrorCode: TaskJobErrorForbidden}
 		}
+		waitCompleted = waitCompleted && TaskJobsTerminal(records)
 	}
 	if emptyIsNotFound {
 		response, isError := TaskJobWaitResult(records, request.JobIDs, time.Now().UTC(), DefaultTaskJobStalledAfter)
-		result := TaskJobServiceResult{Response: response, Records: records, IsError: isError}
+		result := TaskJobServiceResult{Response: response, Records: records, IsError: isError, Receipt: taskJobWaitReceiptV1(records, waitCompleted)}
 		if isError {
 			result.ErrorCode = TaskJobErrorNotFound
 		}
@@ -76,6 +118,7 @@ func (s *Service) WaitTaskJobs(parentThreadID string, request TaskJobWaitRequest
 	return TaskJobServiceResult{
 		Response: map[string]any{"jobs": TaskJobRecordsAny(records, time.Now().UTC(), DefaultTaskJobStalledAfter)},
 		Records:  records,
+		Receipt:  taskJobWaitReceiptV1(records, waitCompleted),
 	}
 }
 
@@ -152,17 +195,20 @@ func (s *Service) killTaskJobWithWait(parentThreadID string, request TaskJobKill
 		return TaskJobServiceResult{Response: TaskJobNotFoundResponse(request.JobID), IsError: true, ErrorCode: TaskJobErrorNotFound, Err: err}
 	}
 	if TaskJobTerminal(record) {
-		return TaskJobServiceResult{Response: TaskJobKillResult(record, time.Now().UTC(), DefaultTaskJobStalledAfter), Record: record}
+		return TaskJobServiceResult{Response: TaskJobKillResult(record, time.Now().UTC(), DefaultTaskJobStalledAfter), Record: record, Receipt: &domaintoolresult.ProtectedJobReceiptV1{Operation: "cancel", Status: "already-finished"}}
 	}
+	var receipt *domaintoolresult.ProtectedJobReceiptV1
 	if s.state != nil {
 		found, stopped, cancelErr := s.state.CancelBackgroundJobAndWait(request.JobID, cancelWait)
 		if found {
+			receipt = &domaintoolresult.ProtectedJobReceiptV1{Operation: "cancel", Status: "cancellation-requested"}
 			if cancelErr != nil || !stopped {
 				if cancelErr == nil {
 					cancelErr = ErrBackgroundJobStopTimeout
 				}
 				return TaskJobServiceResult{
 					Response: ValidationErrorResponse(cancelErr.Error()), Record: record,
+					Receipt: receipt,
 					IsError: true, ErrorCode: TaskJobErrorConflict, Err: cancelErr,
 				}
 			}
@@ -170,7 +216,7 @@ func (s *Service) killTaskJobWithWait(parentThreadID string, request TaskJobKill
 				if refreshed, loadErr := s.jobs.LoadChildRun(request.JobID); loadErr == nil {
 					record = refreshed
 				} else {
-					return TaskJobServiceResult{Response: ValidationErrorResponse(loadErr.Error()), Record: record, IsError: true, ErrorCode: TaskJobErrorValidation, Err: loadErr}
+					return TaskJobServiceResult{Response: ValidationErrorResponse(loadErr.Error()), Record: record, IsError: true, ErrorCode: TaskJobErrorValidation, Err: loadErr, Receipt: receipt}
 				}
 			}
 		}
@@ -181,11 +227,22 @@ func (s *Service) killTaskJobWithWait(parentThreadID string, request TaskJobKill
 			FailureCode: domainjob.FailureChildKilled,
 		})
 		if updateErr != nil {
-			return TaskJobServiceResult{Response: ValidationErrorResponse(updateErr.Error()), Record: record, IsError: true, ErrorCode: TaskJobErrorValidation, Err: updateErr}
+			return TaskJobServiceResult{Response: ValidationErrorResponse(updateErr.Error()), Record: record, IsError: true, ErrorCode: TaskJobErrorValidation, Err: updateErr, Receipt: receipt}
 		}
 		record = updated
 	}
-	return TaskJobServiceResult{Response: TaskJobKillResult(record, time.Now().UTC(), DefaultTaskJobStalledAfter), Record: record}
+	return TaskJobServiceResult{Response: TaskJobKillResult(record, time.Now().UTC(), DefaultTaskJobStalledAfter), Record: record, Receipt: receipt}
+}
+
+func taskJobWaitReceiptV1(records []domainjob.Record, completed bool) *domaintoolresult.ProtectedJobReceiptV1 {
+	if len(records) == 0 {
+		return nil
+	}
+	status := "timeout"
+	if completed {
+		status = "completed"
+	}
+	return &domaintoolresult.ProtectedJobReceiptV1{Operation: "wait", Status: status}
 }
 
 func (s *Service) PauseTaskJob(parentThreadID string, request TaskJobPauseRequest) TaskJobServiceResult {
@@ -199,6 +256,9 @@ func (s *Service) PauseTaskJob(parentThreadID string, request TaskJobPauseReques
 	}
 	if !s.RecordAuthorized(parentThreadID, record) {
 		return TaskJobServiceResult{Response: TaskJobNotFoundResponse(request.JobID), IsError: true, ErrorCode: TaskJobErrorNotFound}
+	}
+	if record.HostChildInput != nil {
+		return TaskJobServiceResult{Response: ValidationErrorResponse("Host child input supports send and stop"), Record: record, IsError: true, ErrorCode: TaskJobErrorConflict}
 	}
 	now := time.Now().UTC()
 	validation := ValidateTaskJobPause(record, parentThreadID, request, now)
@@ -230,6 +290,9 @@ func (s *Service) ResumeTaskJob(parentThreadID string, request TaskJobResumeRequ
 	}
 	if !s.RecordAuthorized(parentThreadID, record) {
 		return TaskJobServiceResult{Response: TaskJobNotFoundResponse(request.JobID), IsError: true, ErrorCode: TaskJobErrorNotFound}
+	}
+	if record.HostChildInput != nil {
+		return TaskJobServiceResult{Response: ValidationErrorResponse("Host child input supports send and stop"), Record: record, IsError: true, ErrorCode: TaskJobErrorConflict}
 	}
 	now := time.Now().UTC()
 	validation := ValidateTaskJobResume(record, parentThreadID, request, now)

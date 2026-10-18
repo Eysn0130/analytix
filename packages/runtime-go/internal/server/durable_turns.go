@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
 	executiongrantapp "analytix.local/runtime-go/internal/app/executiongrant"
@@ -18,6 +21,8 @@ import (
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
+	admission "analytix.local/runtime-go/internal/domain/scheduleadmission"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	subagentstartupport "analytix.local/runtime-go/internal/ports/subagentstartup"
@@ -77,6 +82,13 @@ func (s *DurableEventSessionStore) AppendTurnToThreadIfBaseline(threadID string,
 }
 
 func (s *DurableEventSessionStore) appendTurnToThread(threadID string, turn map[string]any, providerID string, threadPatch map[string]any, expectedWorkspace, expectedDigest string) error {
+	return s.appendScheduleTurnV1(nil, threadID, turn, providerID, threadPatch, expectedWorkspace, expectedDigest)
+}
+func (s *DurableEventSessionStore) appendScheduleTurnV1(carrier *scheduleAdmissionCarrierV1, threadID string, turn map[string]any, providerID string, threadPatch map[string]any, expectedWorkspace, expectedDigest string) error {
+	return s.appendHostChildInputTurnV1(nil, carrier, threadID, turn, providerID, threadPatch, expectedWorkspace, expectedDigest)
+}
+
+func (s *DurableEventSessionStore) appendHostChildInputTurnV1(child *hostChildInputCarrierV1, carrier *scheduleAdmissionCarrierV1, threadID string, turn map[string]any, providerID string, threadPatch map[string]any, expectedWorkspace, expectedDigest string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if expectedDigest != "" {
@@ -84,7 +96,20 @@ func (s *DurableEventSessionStore) appendTurnToThread(threadID string, turn map[
 			return err
 		}
 	}
-	thread, err := s.readThreadNoLock(threadID)
+	var thread map[string]any
+	var err error
+	if carrier != nil {
+		var receipt *admission.ReceiptV1
+		thread, receipt, err = s.readScheduleAdmissionNoLockV1(context.Background(), carrier.request)
+		if err == nil && receipt != nil {
+			return admission.ErrExistingV1
+		}
+		if err == nil && (!scheduleIdleV1(thread) || expectedDigest != carrier.baselineDigest || threadID != carrier.request.Origin.ThreadID) {
+			return turnstartapp.ErrBaselineConflict
+		}
+	} else {
+		thread, err = s.readThreadNoLock(threadID)
+	}
 	if err == nil && thread == nil {
 		err = os.ErrNotExist
 	}
@@ -94,7 +119,24 @@ func (s *DurableEventSessionStore) appendTurnToThread(threadID string, turn map[
 			ExpectedWorkspace: expectedWorkspace, ExpectedDigest: expectedDigest, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		})
 	}
-	if err == nil {
+	if err == nil && carrier != nil {
+		if _, err = s.scheduleReceiptFromPrimaryV1(thread, carrier.request); err != nil {
+			return err
+		}
+		carrier.writeAttempted = true
+	}
+	if err == nil && child != nil {
+		if carrier != nil || child.foreground == nil || child.current.ChildThreadID != threadID {
+			return errHostChildInputConflictV1
+		}
+		if receipt, _, markerErr := s.hostChildInputReceiptFromPrimaryV1(thread, child.request); markerErr != nil || receipt == nil || receipt.ChildTurnID != stringField(turn, "id") {
+			return errHostChildInputConflictV1
+		}
+		child.writeAttempted = true
+		err = s.upsertThreadNoLockWithAtomicWriteAuthority(thread, false, func(write func() error) error {
+			return child.foreground.WithCurrentV1(context.Background(), threadID, write)
+		})
+	} else if err == nil {
 		err = s.upsertThreadNoLock(thread, false)
 	}
 	return err
@@ -590,6 +632,122 @@ func (s *DurableEventSessionStore) EnsurePrivateToolResultItemExact(threadID, tu
 	return err
 }
 
+// EnsureProtectedToolResultSettlementExact retains its mandatory private
+// snapshot gate. Ordinary results cannot enter through this protected owner.
+func (s *DurableEventSessionStore) EnsureProtectedToolResultSettlementExact(ctx context.Context, threadID, turnID, callItemID string, item map[string]any) error {
+	if item[domaintoolresult.ProtectedSnapshotBindingFieldV1] == nil {
+		return errors.New("protected tool settlement is not closed")
+	}
+	return s.ensureClosedToolResultSettlementExact(ctx, threadID, turnID, callItemID, item, nil)
+}
+
+// EnsureOrdinaryToolResultSettlementExact commits one closed ordinary result
+// together with its exact call lifecycle. A snapshot binding, including null,
+// is refused here and must use the explicitly protected entry point.
+func (s *DurableEventSessionStore) EnsureOrdinaryToolResultSettlementExact(ctx context.Context, threadID, turnID, callItemID string, item map[string]any) error {
+	if _, present := item[domaintoolresult.ProtectedSnapshotBindingFieldV1]; present {
+		return errors.New("ordinary tool settlement is not closed")
+	}
+	return s.ensureClosedToolResultSettlementExact(ctx, threadID, turnID, callItemID, item, nil)
+}
+
+// The complete original record must already equal its canonical closed shape.
+// Unknown/raw fields and JSON encoding failures are rejected, never stripped.
+// Freeze once before the transaction: primary readback and exact replay reuse
+// these same result/timestamp bytes and never reconstruct or repeat an effect.
+// authorizeWrite is the existing atomic-write seam; production callers pass nil.
+func (s *DurableEventSessionStore) ensureClosedToolResultSettlementExact(ctx context.Context, threadID, turnID, callItemID string, item map[string]any, authorizeWrite func(func() error) error) error {
+	if ctx == nil || ctx.Err() != nil {
+		return errors.New("closed tool settlement context is unavailable")
+	}
+	projected, closed := domaintoolresult.PrivateDurableToolResultItemRecordV1(item)
+	if !closed || len(item) != len(projected) {
+		return errors.New("tool settlement is not canonically closed")
+	}
+	for key := range item {
+		if _, present := projected[key]; !present {
+			return errors.New("tool settlement is not canonically closed")
+		}
+	}
+	originalBytes, originalErr := json.Marshal(item)
+	canonicalBytes, canonicalErr := json.Marshal(projected)
+	// Check encoding errors first: Marshal has already rejected cycles and
+	// unsupported values before the known JSON graph is walked below.
+	if originalErr != nil || canonicalErr != nil {
+		return errors.New("tool settlement is not canonically closed")
+	}
+	if !closedToolResultOriginalUTF8V1(item) || !bytes.Equal(originalBytes, canonicalBytes) {
+		return errors.New("tool settlement is not canonically closed")
+	}
+	frozen := contracts.CloneMap(projected)
+	frozenBytes, freezeErr := json.Marshal(frozen)
+	if freezeErr != nil || !bytes.Equal(originalBytes, frozenBytes) {
+		return errors.New("tool settlement is not canonically closed")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot, err := s.ReadPrimaryThreadSnapshotV1(ctx, threadID)
+	if err != nil {
+		return err
+	}
+	mutation := turnapp.OrdinaryToolSettlementInput{Thread: snapshot.Thread, ThreadID: threadID, TurnID: turnID, ToolCallItemID: callItemID, CallID: stringField(frozen, "callId"), ToolName: stringField(frozen, "toolName"), Status: stringField(frozen, "status"), Timestamp: stringField(frozen, "finishedAt"), ResultItem: frozen}
+	next, changed, err := turnapp.EnsureOrdinaryToolSettlementExact(mutation)
+	if err != nil || !changed {
+		return err
+	}
+	if err := turnapp.ValidateSecurityBoundAppend(snapshot.Thread, turnID, frozen); err != nil {
+		return err
+	}
+	writeErr := s.upsertThreadNoLockWithAtomicWriteAuthority(next, false, authorizeWrite)
+	persisted, readErr := s.ReadPrimaryThreadSnapshotV1(ctx, threadID)
+	if readErr != nil {
+		return errors.Join(writeErr, readErr)
+	}
+	mutation.Thread = persisted.Thread
+	_, stillChanged, exactErr := turnapp.EnsureOrdinaryToolSettlementExact(mutation)
+	if exactErr == nil && !stillChanged {
+		return nil
+	}
+	return errors.Join(writeErr, exactErr, errors.New("closed tool settlement primary exact readback unavailable"))
+}
+
+// This owner accepts only the known JSON record graph. Do not let Marshal's
+// invalid-UTF8 replacement turn different original string bytes into a closed
+// record. Encoding errors, including cycles, are checked before this walk.
+func closedToolResultOriginalUTF8V1(value any) bool {
+	switch typed := value.(type) {
+	case nil, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr, float32, float64, json.Number:
+		return true
+	case string:
+		return utf8.ValidString(typed)
+	case map[string]any:
+		for key, nested := range typed {
+			if !utf8.ValidString(key) || !closedToolResultOriginalUTF8V1(nested) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		for _, nested := range typed {
+			if !closedToolResultOriginalUTF8V1(nested) {
+				return false
+			}
+		}
+		return true
+	case []string:
+		for _, text := range typed {
+			if !utf8.ValidString(text) {
+				return false
+			}
+		}
+		return true
+	default:
+		// The live record owner materializes typed metadata as JSON maps;
+		// other original aliases/composites are not this closed input shape.
+		return false
+	}
+}
+
 func (s *DurableEventSessionStore) PatchTurnItemStatus(threadID, turnID, itemID, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -674,23 +832,64 @@ func (s *DurableEventSessionStore) commitTerminalUpdateWithAuthority(
 	if thread == nil {
 		return false, "", os.ErrNotExist
 	}
-	prepared, err := turnapp.PrepareTerminalCASMutation(turnapp.PrepareTerminalCASInput{
-		Thread: thread, ThreadID: threadID, TurnID: turnID, Status: status,
-		AppendItems: appendItems, Fields: fields, PrivateFinal: privateFinal, FactAuthority: factAuthority,
-		CaseThread: s.caseThreads != nil && s.caseThreads.IsCaseThread(threadID), Now: time.Now().UTC(),
-		LoadGeneralTerminalEvents: func() ([]map[string]any, error) {
-			loaded, err := s.loadEventsSinceFileNoLock(threadID, 0)
-			if err != nil || len(loaded.Diagnostics) != 0 {
-				return nil, errors.Join(err, errors.New("general terminal CAS cannot validate the existing event inventory"))
-			}
-			return loaded.Events, nil
-		},
-	})
+	if stringField(thread, "status") == "deleted" {
+		return false, "", errors.New("terminal primary thread is deleted")
+	}
+	preparedAt := time.Now().UTC()
+	prepare := func(node map[string]any) (turnapp.PreparedTerminalCAS, error) {
+		return turnapp.PrepareTerminalCASMutation(turnapp.PrepareTerminalCASInput{
+			Thread: node, ThreadID: threadID, TurnID: turnID, Status: status,
+			AppendItems: appendItems, Fields: fields, PrivateFinal: privateFinal, FactAuthority: factAuthority,
+			CaseThread: s.caseThreads != nil && s.caseThreads.IsCaseThread(threadID), Now: preparedAt,
+			LoadGeneralTerminalEvents: func() ([]map[string]any, error) {
+				loaded, err := s.loadEventsSinceFileNoLock(threadID, 0)
+				if err != nil || len(loaded.Diagnostics) != 0 {
+					return nil, errors.Join(err, errors.New("general terminal CAS cannot validate the existing event inventory"))
+				}
+				return loaded.Events, nil
+			},
+		})
+	}
+	prepared, err := prepare(thread)
 	if errors.Is(err, turnapp.ErrTerminalCASTurnNotFound) {
 		return false, "", os.ErrNotExist
 	}
 	if err != nil || !prepared.Applied {
 		return false, prepared.CurrentStatus, err
+	}
+	if seal := s.settledProcessHistory; seal != nil {
+		// Never reverse the existing process-reader -> Primary lock order.
+		// Seal a detached candidate outside s.mu, then re-run the original
+		// terminal CAS. A racing winner never receives a later history patch.
+		candidate := cloneMap(prepared.Thread)
+		var anchor *domainprocess.SettledHistoryAnchorV1
+		s.mu.Unlock()
+		func() {
+			defer s.mu.Lock()
+			anchor = seal(candidate, turnID)
+		}()
+		thread, err = s.readThreadNoLock(threadID)
+		if err != nil || thread == nil {
+			return false, "", errors.Join(err, os.ErrNotExist)
+		}
+		if stringField(thread, "status") == "deleted" {
+			return false, "", errors.New("terminal primary thread is deleted")
+		}
+		prepared, err = prepare(thread)
+		if err != nil || !prepared.Applied {
+			return false, prepared.CurrentStatus, err
+		}
+		if anchor != nil {
+			terminal, original, witness, witnessErr := processHistoryTerminalV1(prepared.Thread, turnID)
+			if witnessErr == nil && domainprocess.ValidateSettledHistoryAnchorV1(*anchor) == nil && anchor.ThreadID == threadID && anchor.TurnID == turnID && anchor.ContextDigest == original.ContextDigest && anchor.Terminal == witness {
+				// Private attachment after exact accepted-final plan validation;
+				// signed fields/authority input remain byte-for-byte unchanged.
+				ref, refErr := domainprocess.SettledHistoryAnchorMapV1(*anchor)
+				if refErr == nil {
+					terminal[domainprocess.SettledHistoryFieldV1] = ref
+				}
+			}
+		}
 	}
 	if s.beforeTerminalWrite != nil {
 		if err := s.beforeTerminalWrite(); err != nil {

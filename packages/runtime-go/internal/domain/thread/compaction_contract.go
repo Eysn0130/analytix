@@ -8,7 +8,166 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"time"
+	"unicode/utf8"
 )
+
+// CompactionSummaryFactsV1 describes one complete, projected ordinary summary.
+// The hashes bind content and selection, never evidence or execution authority.
+type CompactionSummaryFactsV1 struct {
+	CompactionID      string   `json:"compactionId"`
+	Summary           string   `json:"summary"`
+	SummaryDigest     string   `json:"summaryDigest"`
+	SourceDigest      string   `json:"sourceDigest"`
+	CheckpointDigest  string   `json:"checkpointDigest"`
+	SourceItemIDs     []string `json:"sourceItemIds"`
+	ShadowedItemCount int      `json:"shadowedItemCount"`
+	ReplacedTokens    int      `json:"replacedTokens"`
+	FinishedAt        string   `json:"finishedAt"`
+}
+
+func SealCompactionSummaryFactsV1(facts CompactionSummaryFactsV1) (CompactionSummaryFactsV1, error) {
+	summaryHash := sha256.Sum256([]byte(facts.Summary))
+	facts.SummaryDigest = hex.EncodeToString(summaryHash[:])
+	facts.CheckpointDigest = ""
+	body, err := json.Marshal(facts)
+	if err != nil {
+		return CompactionSummaryFactsV1{}, err
+	}
+	hash := sha256.Sum256(body)
+	facts.CheckpointDigest = hex.EncodeToString(hash[:])
+	if !validCompactionSummaryFactsShapeV1(facts) {
+		return CompactionSummaryFactsV1{}, errors.New("ordinary compaction summary facts are invalid")
+	}
+	return facts, nil
+}
+
+func ValidateCompactionSummaryFactsV1(facts CompactionSummaryFactsV1) error {
+	sealed, err := SealCompactionSummaryFactsV1(facts)
+	if err != nil || sealed.SummaryDigest != facts.SummaryDigest || sealed.CheckpointDigest != facts.CheckpointDigest {
+		return errors.New("ordinary compaction summary facts are invalid")
+	}
+	return nil
+}
+
+func validCompactionSummaryFactsShapeV1(facts CompactionSummaryFactsV1) bool {
+	if !IsCanonicalRecordID(facts.CompactionID) || !utf8.ValidString(facts.Summary) || strings.TrimSpace(facts.Summary) == "" || len(facts.Summary) > 16*1024 ||
+		len(facts.SourceItemIDs) == 0 || facts.ShadowedItemCount < len(facts.SourceItemIDs) || facts.ShadowedItemCount <= 0 || facts.ReplacedTokens <= 0 ||
+		len(facts.SourceDigest) != 64 || len(facts.SummaryDigest) != 64 || len(facts.CheckpointDigest) != 64 {
+		return false
+	}
+	if _, err := hex.DecodeString(facts.SourceDigest); err != nil || facts.SourceDigest != strings.ToLower(facts.SourceDigest) {
+		return false
+	}
+	if _, err := time.Parse(time.RFC3339Nano, facts.FinishedAt); err != nil {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, id := range facts.SourceItemIDs {
+		if !IsCanonicalRecordID(id) || seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
+}
+
+// CompactionHistoryDerivationV1 binds an explicitly exported summary to its
+// derived data owner. It stores only provenance commitments, never a parent
+// security context, execution grant, epoch witness or publication authority.
+const CompactionHistoryDerivationFieldV1 = "compactionHistoryDerivation"
+
+type CompactionHistoryDerivationV1 struct {
+	Version                string `json:"version"`
+	Derivation             string `json:"derivation"`
+	SourceThreadID         string `json:"sourceThreadId"`
+	SourceTurnID           string `json:"sourceTurnId"`
+	SourceItemID           string `json:"sourceItemId"`
+	SourceScopeDigest      string `json:"sourceScopeDigest"`
+	SourceItemDigest       string `json:"sourceItemDigest"`
+	SourceSummaryDigest    string `json:"sourceSummaryDigest"`
+	SourceCheckpointDigest string `json:"sourceCheckpointDigest"`
+	ThreadID               string `json:"threadId"`
+	TurnID                 string `json:"turnId"`
+	ItemID                 string `json:"itemId"`
+	ScopeDigest            string `json:"scopeDigest"`
+	ItemDigest             string `json:"itemDigest"`
+	Digest                 string `json:"digest"`
+}
+
+func CompactionHistoryItemDigestV1(item map[string]any) string {
+	body, err := json.Marshal(item)
+	if err != nil || item == nil {
+		return ""
+	}
+	hash := sha256.Sum256(append([]byte("analytix.compaction-history-data.v1\x00"), body...))
+	return hex.EncodeToString(hash[:])
+}
+
+func SealCompactionHistoryDerivationV1(value CompactionHistoryDerivationV1) (CompactionHistoryDerivationV1, error) {
+	if value.Version != "" && value.Version != "compaction-history-derivation.v1" ||
+		!IsCanonicalRecordID(value.SourceThreadID) || !IsCanonicalRecordID(value.ThreadID) ||
+		!IsCanonicalRecordID(value.SourceTurnID) || value.SourceTurnID != value.TurnID ||
+		!IsCanonicalRecordID(value.SourceItemID) || value.SourceItemID != value.ItemID ||
+		!isContinuationSHA256V1(value.SourceScopeDigest) || !isContinuationSHA256V1(value.ScopeDigest) ||
+		!isContinuationSHA256V1(value.SourceItemDigest) || !isContinuationSHA256V1(value.ItemDigest) ||
+		!isContinuationSHA256V1(value.SourceSummaryDigest) || !isContinuationSHA256V1(value.SourceCheckpointDigest) {
+		return CompactionHistoryDerivationV1{}, errors.New("compaction history derivation is invalid")
+	}
+	switch value.Derivation {
+	case "fork", "resume":
+		if value.SourceThreadID == value.ThreadID {
+			return CompactionHistoryDerivationV1{}, errors.New("compaction history derivation must change its data owner")
+		}
+	case "fork-prefix":
+		if value.SourceThreadID != value.ThreadID || value.SourceScopeDigest != value.ScopeDigest || value.SourceItemDigest != value.ItemDigest {
+			return CompactionHistoryDerivationV1{}, errors.New("compaction prefix must preserve exact source data")
+		}
+	default:
+		return CompactionHistoryDerivationV1{}, errors.New("compaction history derivation is invalid")
+	}
+	value.Version, value.Digest = "compaction-history-derivation.v1", ""
+	body, err := json.Marshal(value)
+	if err != nil {
+		return CompactionHistoryDerivationV1{}, err
+	}
+	hash := sha256.Sum256(body)
+	value.Digest = hex.EncodeToString(hash[:])
+	return value, nil
+}
+
+func CompactionHistoryDerivationMapV1(value CompactionHistoryDerivationV1) map[string]any {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if json.Unmarshal(body, &out) != nil {
+		return nil
+	}
+	return out
+}
+
+func ParseCompactionHistoryDerivationV1(raw any) (CompactionHistoryDerivationV1, error) {
+	body, err := json.Marshal(raw)
+	if err != nil || len(body) > 8192 {
+		return CompactionHistoryDerivationV1{}, errors.New("compaction history derivation is invalid")
+	}
+	var value CompactionHistoryDerivationV1
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil {
+		return CompactionHistoryDerivationV1{}, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return CompactionHistoryDerivationV1{}, errors.New("compaction history derivation has trailing data")
+	}
+	sealed, err := SealCompactionHistoryDerivationV1(value)
+	if err != nil || value.Version != "compaction-history-derivation.v1" || !isContinuationSHA256V1(value.Digest) || sealed.Digest != value.Digest {
+		return CompactionHistoryDerivationV1{}, errors.New("compaction history derivation commitment is invalid")
+	}
+	return value, nil
+}
 
 const (
 	TaskContinuationSchemaVersionV1 = 1

@@ -5,6 +5,7 @@ import {
   modelProviderTokenPlanProfile,
   normalizeAppSettings,
   type AppSettingsV1,
+  type AppSettingsPatch,
   type ModelProviderProfileV1
 } from '@shared/app-settings'
 import type { ProviderRegistryRequest, ProviderRegistryResult } from '@shared/analytix-api'
@@ -487,7 +488,7 @@ describe('credential persistence', () => {
     const drafts = initialSetupDrafts(settings())
     drafts.deepseek = { ...drafts.deepseek, apiKey: canary }
     const registry = registryHarness()
-    const saveSettings = vi.fn(async (next: AppSettingsV1) => next)
+    const saveSettings = vi.fn(async (next: AppSettingsPatch) => normalizeAppSettings(next as AppSettingsV1))
 
     const saved = await persistInitialSetup({
       settings: settings(),
@@ -516,9 +517,9 @@ describe('credential persistence', () => {
       events.push(`registry:${request.operation}`)
       return registry.request(request)
     })
-    const saveSettings = vi.fn(async (next: AppSettingsV1) => {
+    const saveSettings = vi.fn(async (next: AppSettingsPatch) => {
       events.push('settings:save')
-      return next
+      return normalizeAppSettings(next as AppSettingsV1)
     })
 
     await persistInitialSetup({
@@ -553,7 +554,7 @@ describe('credential persistence', () => {
       }
       return result
     })
-    const saveSettings = vi.fn(async (next: AppSettingsV1) => next)
+    const saveSettings = vi.fn(async (next: AppSettingsPatch) => normalizeAppSettings(next as AppSettingsV1))
 
     await expect(persistInitialSetup({
       settings: settings(),
@@ -627,7 +628,7 @@ describe('credential persistence', () => {
       const drafts = initialSetupDrafts(settings())
       drafts.deepseek = { ...drafts.deepseek, apiKey: draftValue ?? '' }
       const registry = registryHarness([publicProvider()], 'deepseek')
-      const saveSettings = vi.fn(async (next: AppSettingsV1) => next)
+      const saveSettings = vi.fn(async (next: AppSettingsPatch) => normalizeAppSettings(next as AppSettingsV1))
 
       await persistInitialSetup({
         settings: settings(),
@@ -878,7 +879,7 @@ describe('credential persistence', () => {
   it('fails closed when preserve is requested without a committed Registry credential', async () => {
     const drafts = initialSetupDrafts(settings())
     const registry = registryHarness()
-    const saveSettings = vi.fn(async (next: AppSettingsV1) => next)
+    const saveSettings = vi.fn(async (next: AppSettingsPatch) => normalizeAppSettings(next as AppSettingsV1))
 
     await expect(persistInitialSetup({
       settings: settings(),
@@ -909,7 +910,7 @@ describe('initialization completion and recovery boundaries', () => {
     const registry = registryHarness()
     const drafts = initialSetupDrafts(settings())
     drafts.deepseek.apiKey = 'synthetic-rejected-key'
-    const saveSettings = vi.fn(async (next: AppSettingsV1) => next)
+    const saveSettings = vi.fn(async (next: AppSettingsPatch) => normalizeAppSettings(next as AppSettingsV1))
     const request = vi.fn(async (input: ProviderRegistryRequest): Promise<ProviderRegistryResult> => {
       const result = await registry.request(input)
       return input.operation === 'probe' && 'status' in result
@@ -937,11 +938,22 @@ describe('initialization completion and recovery boundaries', () => {
     const count = registry.request.mock.calls.length
     const saved = await persistInitialSetup({ settings: settings(), drafts: initialSetupDrafts(settings()),
       selection: { presetId: 'deepseek', mode: 'api', model: 'deepseek-flash' },
-      requestProviderRegistry: registry.request, saveSettings: async next => next
+      requestProviderRegistry: registry.request, saveSettings: async next => normalizeAppSettings(next as AppSettingsV1)
     })
     expect(saved.runtime.model).toBe('deepseek-flash')
     expect(registry.snapshot().selectedProviderId).toBe('deepseek')
     expect(registry.request.mock.calls.slice(count).some(([r]) =>
       r.operation === 'connect' || r.operation === 'credential-replace')).toBe(false)
   })
+})
+
+
+it('saves setup settings without echoing the task catalog into the ordinary write', async () => {
+  const baseline = settings({ schedule: { tasks: [{ id: 'host-task', title: 'Existing task' }] } })
+  const registry = registryHarness([publicProvider()], 'deepseek')
+  const saveSettings = vi.fn(async (next: AppSettingsPatch) => normalizeAppSettings({ ...baseline, ...next } as AppSettingsV1))
+  await persistInitialSetup({ settings: baseline, drafts: initialSetupDrafts(baseline), selection: { presetId: 'deepseek', mode: 'api' },
+    requestProviderRegistry: registry.request, saveSettings })
+  expect(saveSettings).toHaveBeenCalledTimes(1)
+  expect(saveSettings.mock.calls[0][0].schedule).not.toHaveProperty('tasks')
 })

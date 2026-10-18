@@ -18,13 +18,25 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   await i18n.changeLanguage('en')
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
-  useChatStore.setState({ workspaceRoot: '/synthetic/workspace' })
+  useChatStore.setState({ workspaceRoot: '/synthetic/workspace', topNotice: null })
   clearFileReferenceValidationCache()
   Object.assign(window, { analytix: { app: { openExternal: vi.fn().mockResolvedValue(true) }, files: { resolve: vi.fn().mockResolvedValue({ ok: false }) } } })
 })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); useChatStore.setState(initial); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const render = async (text: string, streaming = false) => act(async () => root.render(createElement(DshAssistant, { text, streaming })))
 const textOf = (tokens: readonly (readonly { text: string }[])[] | undefined) => tokens?.map(line => line.map(span => span.text).join('')).join('\n')
+const tokenColors = (element: Element) => [...element.querySelectorAll<HTMLElement>('.line > span')].map(token => [token.textContent, token.style.color])
+const expectHighlightedSource = (code: string) => {
+  const actual = host.querySelector('pre code')!
+  expect(actual.textContent).toBe(code)
+  const html = highlightToHtml(code, 'typescript')
+  expect(html).toBeDefined()
+  const expected = document.createElement('div')
+  expected.innerHTML = html!
+  const tokens = tokenColors(actual)
+  expect(new Set(tokens.map(([, color]) => color).filter(Boolean)).size).toBeGreaterThan(1)
+  expect(tokens).toEqual(tokenColors(expected))
+}
 
 it('renders actual GFM, CJK strong and bounded math while raw HTML and unsafe URLs stay inert', async () => {
   await render('中文**重点**说明\n\n| 项目 | 值 |\n| --- | --- |\n| 安全 | 1 |\n\n$x^2$\n\n<script>sentinel</script>\n\n[bad](javascript:alert%281%29)\n\n$\\href{javascript:alert(1)}{unsafe}$')
@@ -90,6 +102,65 @@ it('links each independent collapse control to retained code and keeps keyboard 
   await act(async () => buttons[0].click())
   expect(buttons[0].getAttribute('aria-expanded')).toBe('false')
 })
+it.each([false, true])('renders ordinary assistant fences beyond twelve lines in full, streaming=%s', async streaming => {
+  const code = Array.from({ length: 16 }, (_, i) => `const value${i} = ${i}`).join('\n')
+  await render('```typescript\n' + code + '\n```', streaming)
+  expect(host.querySelector('pre code')?.textContent).toBe(code)
+  expect(host.querySelector('[data-code-collapsed]')).toBeNull()
+  expect(host.querySelector('button[aria-label="Expand code"]')).toBeNull()
+  expectHighlightedSource(code)
+})
+it.each([
+  ['24,000 characters', Array.from({ length: 200 }, (_, i) => `const value${i} = "${'x'.repeat(120)}"`).join('\n')],
+  ['700 lines', Array.from({ length: 701 }, (_, i) => `const v${i} = 1`).join('\n')],
+])('highlights expanded source beyond %s with actual Shiki token colors', async (limit, code) => {
+  expect(code.length > 24000).toBe(limit === '24,000 characters')
+  expect(code.split('\n').length > 700).toBe(limit === '700 lines')
+  await act(async () => root.render(createElement(CodeBlock, { code: code + '\n', lang: 'typescript', copyLabel: 'Copy code', copiedLabel: 'Copied', toolbarLabels: labels })))
+  const expand = host.querySelector<HTMLButtonElement>('button[aria-label="Expand code"]')!
+  expect(expand.getAttribute('aria-expanded')).toBe('false')
+  await act(async () => expand.click())
+  expect(expand.getAttribute('aria-expanded')).toBe('true')
+  expectHighlightedSource(code)
+})
+it('retains completed assistant code lines and tokens across streaming groups and settle', async () => {
+  const prefix = Array.from({ length: 40 }, (_, i) => `const value${i} = ${i}`).join('\n') + '\n'
+  await render('```typescript\n' + prefix + 'const tail = "', true)
+  const codeElement = host.querySelector('pre code')!
+  const completed = [...codeElement.querySelectorAll('.line')].slice(0, 40)
+  expect(completed).toHaveLength(40)
+  const completedTokens = completed.map(line => [...line.children])
+  const code = prefix + 'const tail = "done";\n' + Array.from({ length: 40 }, (_, i) => `const next${i} = ${i}`).join('\n')
+  await render('```typescript\n' + code, true)
+  expect(host.querySelector('pre code')).toBe(codeElement)
+  const appended = [...codeElement.querySelectorAll('.line')]
+  completed.forEach((line, index) => {
+    expect(appended[index]).toBe(line)
+    completedTokens[index].forEach((token, tokenIndex) => expect(appended[index].children[tokenIndex]).toBe(token))
+  })
+  expectHighlightedSource(code)
+  const appendedTokens = appended.map(line => [...line.children])
+  await render('```typescript\n' + code + '\n```')
+  expect(host.querySelector('pre code')).toBe(codeElement)
+  const settled = [...codeElement.querySelectorAll('.line')]
+  expect(settled).toHaveLength(appended.length)
+  appended.forEach((line, index) => {
+    expect(settled[index]).toBe(line)
+    appendedTokens[index].forEach((token, tokenIndex) => expect(settled[index].children[tokenIndex]).toBe(token))
+  })
+  expectHighlightedSource(code)
+})
+it('keeps unknown assistant fence languages as literal plain text while streaming and settled', async () => {
+  const code = 'const value = "<span>literal</span>";\n'.repeat(16).trimEnd()
+  expect(highlightToHtml(code, 'unknown-language')).toBeUndefined()
+  for (const streaming of [true, false]) {
+    await render('```unknown-language\n' + code + '\n```', streaming)
+    const source = host.querySelector('pre code')!
+    expect(source.textContent).toBe(code)
+    expect(source.children).toHaveLength(0)
+    expect(host.querySelector('[data-code-collapsed]')).toBeNull()
+  }
+})
 it('retains checked body and inline file links with line/column, and withholds unvalidated replacement targets', async () => {
   const resolve = vi.fn().mockResolvedValue({ ok: true, path: '/synthetic/workspace/one.ts' })
   Object.assign(window.analytix.files, { resolve })
@@ -105,7 +176,24 @@ it('uses the real external navigation bridge for HTTP and mailto', async () => {
   await act(async () => host.querySelectorAll<HTMLAnchorElement>('a').forEach(a => a.click()))
   expect(window.analytix.app.openExternal).toHaveBeenCalledWith('https://example.com')
   expect(window.analytix.app.openExternal).toHaveBeenCalledWith('mailto:synthetic@example.invalid')
+  expect(useChatStore.getState().topNotice).toBeNull()
 })
+it.each(['bridge absent', 'app absent', 'method absent', 'promise rejected', 'synchronous throw'] as const)(
+  'reports a safe external-link error when %s', async failure => {
+    const openExternal = vi.fn<(href: string) => Promise<void>>().mockResolvedValue(undefined)
+    if (failure === 'promise rejected') openExternal.mockRejectedValue(new Error('RAW_EXTERNAL_OPEN_ERROR'))
+    if (failure === 'synchronous throw') openExternal.mockImplementation(() => { throw new Error('RAW_EXTERNAL_OPEN_ERROR') })
+    const bridge = failure === 'bridge absent' ? undefined : failure === 'app absent' ? {}
+      : { app: failure === 'method absent' ? {} : { openExternal } }
+    Object.assign(window, { analytix: bridge })
+    await render('[site](https://example.invalid/external-target)')
+    const event = new MouseEvent('click', { button: 0, bubbles: true, cancelable: true })
+    await act(async () => { host.querySelector<HTMLAnchorElement>('a')!.dispatchEvent(event) })
+    expect(event.defaultPrevented).toBe(true)
+    expect(useChatStore.getState().topNotice).toMatchObject({ tone: 'error', message: 'Cannot open this link.' })
+    expect(openExternal).toHaveBeenCalledTimes(failure === 'promise rejected' || failure === 'synchronous throw' ? 1 : 0)
+  }
+)
 it('uses actual Shiki 3.23 for multiline streaming and lazy Python without changing source', async () => {
   const session = new StreamingHighlightSession()
   session.update('/* comment\n', 'typescript')

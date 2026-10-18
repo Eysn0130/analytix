@@ -20,6 +20,10 @@ import (
 	testsecurity "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
 
+// This credential-shaped fixture is built only from a public hexadecimal alphabet.
+// Local synthetic test fixture; never sourced from an account.
+const syntheticAcceptedFinalTestCredentialV1 = "sk-0123456789abcdef0123456789abcdef"
+
 func collisionAcceptedFinalCASInputV1(t *testing.T) PrepareTerminalCASInput {
 	t.Helper()
 	seed := sha256.Sum256([]byte("analytix/pr46/synthetic-authority/212301"))
@@ -179,7 +183,10 @@ func TestAcceptedFinalOriginalBinaryAndSchemaCannotMasquerade(t *testing.T) {
 func TestAcceptedFinalQualificationDoesNotEchoUntrustedKeys(t *testing.T) {
 	input := collisionAcceptedFinalCASInputV1(t)
 	raw := shallowAcceptedFinalMapV1(input.Fields["acceptedFinal"].(map[string]any))
-	const unsafeKey = "sk-synthetic-private-unknown-key-123456"
+	const unsafeKey = syntheticAcceptedFinalTestCredentialV1
+	if !domainsecret.ContainsCredentialV1(unsafeKey) {
+		t.Fatal("synthetic credential fixture must exercise credential projection")
+	}
 	raw[unsafeKey] = "safe"
 	_, err := parseAcceptedFinalForPublicValidationV1(raw)
 	if err == nil || strings.Contains(err.Error(), unsafeKey) {
@@ -610,4 +617,88 @@ func turnSecurityContextRecord(context domainsecurity.TurnSecurityContext) map[s
 	record := map[string]any{}
 	_ = json.Unmarshal(body, &record)
 	return record
+}
+
+func acceptedFinalHistoryQuestionItemV1(t *testing.T, leafBytes int) map[string]any {
+	t.Helper()
+	questions, answers := []any{}, []any{}
+	for index := 0; index < 3; index++ {
+		questions = append(questions, map[string]any{"question": "Synthetic optional detail?", "header": "Detail", "options": []any{}, "multiSelect": false})
+		answers = append(answers, map[string]any{"selected": []any{}, "custom": strings.Repeat(string(rune('a'+index)), leafBytes)})
+	}
+	encoded, err := json.Marshal(map[string]any{"kind": "question_reply_content", "questions": questions, "answers": answers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{"id": "synthetic-question-message", "kind": "user_message", "delivery": "steer", "text": string(encoded)}
+}
+
+func TestAcceptedFinalHistoryQuestionResourceLimitsPreserveOriginalV1(t *testing.T) {
+	item := acceptedFinalHistoryQuestionItemV1(t, 400000)
+	turn := map[string]any{"id": "synthetic-turn", "items": []any{item}}
+	before, _ := json.Marshal(turn)
+	view, err := AcceptedFinalHistoryValidationViewV1("synthetic-thread", turn)
+	if err != nil {
+		t.Fatalf("complete legal Question history: %v", err)
+	}
+	after, _ := json.Marshal(turn)
+	if !bytes.Equal(before, after) {
+		t.Fatal("resource validation changed original payload")
+	}
+	view["syntheticReturnIdentity"] = true
+	if turn["syntheticReturnIdentity"] != true {
+		t.Fatal("ordinary history did not return original turn")
+	}
+	delete(turn, "syntheticReturnIdentity")
+	for name, items := range map[string][]any{
+		"ordinary scalar":      {map[string]any{"kind": "user_message", "text": strings.Repeat("x", (1<<20)+1)}},
+		"actual Question leaf": {acceptedFinalHistoryQuestionItemV1(t, (1<<20)+1)},
+		"repeated body total":  {item, item, item, item, item, item, item},
+	} {
+		t.Run(name, func(t *testing.T) {
+			original := map[string]any{"id": "synthetic-turn", "items": items}
+			before, _ := json.Marshal(original)
+			if _, err := AcceptedFinalHistoryValidationViewV1("synthetic-thread", original); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+				t.Fatalf("existing resource limit was weakened: %v", err)
+			}
+			after, _ := json.Marshal(original)
+			if !bytes.Equal(before, after) {
+				t.Fatal("rejected history changed original payload")
+			}
+		})
+	}
+}
+
+func TestAcceptedFinalHistoryLargeQuestionKeepsSignedAuthorityV1(t *testing.T) {
+	input := collisionAcceptedFinalCASInputV1(t)
+	prepared, err := PrepareTerminalCASMutation(input)
+	if err != nil || !prepared.Applied {
+		t.Fatalf("existing exact signed fixture: %v", err)
+	}
+	turn, found := securityTurnByID(prepared.Thread, input.TurnID)
+	if !found {
+		t.Fatal("signed durable winner missing")
+	}
+	turn["items"] = append(turn["items"].([]any), acceptedFinalHistoryQuestionItemV1(t, 400000))
+	before, _ := json.Marshal(turn)
+	view, err := AcceptedFinalHistoryValidationViewV1(input.ThreadID, turn)
+	if err != nil {
+		t.Fatalf("legal signed winner with complete Question: %v", err)
+	}
+	if err := domainevent.ValidatePublicRecord(view); err != nil {
+		t.Fatalf("signed scan view with complete Question: %v", err)
+	}
+	after, _ := json.Marshal(turn)
+	if !bytes.Equal(before, after) {
+		t.Fatal("history validation changed signed original payload")
+	}
+	turn["acceptedFinal"].(map[string]any)["authoritySignature"] = base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+	tamperedBefore, _ := json.Marshal(turn)
+	if _, err := AcceptedFinalHistoryValidationViewV1(input.ThreadID, turn); err == nil {
+		t.Fatal("large Question bypassed tampered original signature")
+	}
+	tamperedAfter, _ := json.Marshal(turn)
+	if !bytes.Equal(tamperedBefore, tamperedAfter) {
+		t.Fatal("rejection repaired tampered original authority")
+	}
 }

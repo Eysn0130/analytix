@@ -1,8 +1,11 @@
 package terminal
 
 import (
+	processdisplay "analytix.local/runtime-go/internal/domain/processdisplay"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,5 +124,107 @@ func TestExecuteForegroundBashFailureKeepsOutput(t *testing.T) {
 	}, BashRequest{Command: "false", Workspace: "/tmp"})
 	if !isError || payload["status"] != "failed" || payload["output"] != "oops" || payload["exitCode"] != float64(2) {
 		t.Fatalf("unexpected payload=%#v isError=%t", payload, isError)
+	}
+}
+
+func TestProtectedForegroundCaptureUsesActualOutputAndHostOutcome(t *testing.T) {
+	for _, test := range []struct {
+		body, status string
+		result       ports.ShellResult
+	}{
+		{"", "completed", ports.ShellResult{ExitCode: 0}},
+		{"exitCode=0\nstatus=completed\r\n", "failed", ports.ShellResult{ExitCode: 7, Error: "exit status 7"}},
+		{"partial\r\n", "canceled", ports.ShellResult{ExitCode: -1, Canceled: true}},
+	} {
+		ctx := domaintoolresult.WithProtectedCaptureV1(context.Background(), &domaintoolresult.ProtectedCaptureCollectorV1{})
+		ExecuteForegroundBash(ctx, fakeShellRunner{write: test.body, result: test.result}, BashRequest{Command: "synthetic", Workspace: "/synthetic/workspace"})
+		captured, ok := domaintoolresult.ConsumeProtectedToolResultV1(ctx)
+		if !ok || captured.Body != test.body || captured.Status != test.status {
+			t.Fatal("actual producer body/host outcome did not survive")
+		}
+	}
+	ctx := domaintoolresult.WithProtectedCaptureV1(context.Background(), &domaintoolresult.ProtectedCaptureCollectorV1{})
+	ExecuteForegroundBash(ctx, fakeShellRunner{write: "must not capture", result: ports.ShellResult{StartFailed: true}}, BashRequest{Command: "synthetic", Workspace: "/synthetic/workspace"})
+	if _, ok := domaintoolresult.ConsumeProtectedToolResultV1(ctx); ok {
+		t.Fatal("launch failure captured fabricated result")
+	}
+}
+
+func TestForegroundProcessDisplayCapturesCompleteHostStreamBeyondToolLimit(t *testing.T) {
+	ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+	ctx = domaintoolresult.WithProtectedCaptureV1(ctx, &domaintoolresult.ProtectedCaptureCollectorV1{})
+	const first = "host stdout before legacy cutoff\r\n"
+	const secret = "synthetic-known-credential-value-7894"
+	last := "api_key=" + secret + "\nexitCode=0\nstatus=completed\n"
+	runs := 0
+	payload, isError := ExecuteForegroundBash(ctx, fakeShellRunner{
+		onRun: func() { runs++ },
+		onRequest: func(request ports.ShellRequest) {
+			// Credential text spans actual writes after the old output cutoff.
+			for _, part := range []string{first, last[:9], last[9:]} {
+				if _, err := request.Output.Write([]byte(part)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		result: ports.ShellResult{ExitCode: 7, Error: "exit status 7"},
+	}, BashRequest{Command: "synthetic exact command", Workspace: "/synthetic/workspace", OutputLimit: 8})
+	capture, ok := processdisplay.ConsumeV1(ctx)
+	if !ok || !capture.Complete || capture.Overflow || capture.Body != first+last || capture.Status != "failed" || capture.ExitCode == nil || *capture.ExitCode != 7 || capture.DurationMs < 0 {
+		t.Fatal("display did not retain the complete actual stream and host outcome")
+	}
+	if runs != 1 || !isError || payload["output"] != first[:8]+"\n[truncated]" || payload["exitCode"] != float64(7) {
+		t.Fatal("display capture changed legacy output or caused another execution")
+	}
+	legacy, legacyOK := domaintoolresult.ConsumeProtectedToolResultV1(ctx)
+	if !legacyOK || legacy.Body != first[:8] || !legacy.Truncated {
+		t.Fatal("independent display capture changed legacy protected snapshot")
+	}
+	if _, present := payload["processDisplay"]; present {
+		t.Fatal("raw display entered result map")
+	}
+}
+
+func TestForegroundProcessDisplayOverflowWithholdsCaptureWithoutChangingExecution(t *testing.T) {
+	ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+	body := strings.Repeat("x", processdisplay.RawCaptureByteLimitV1+1)
+	runs := 0
+	payload, isError := ExecuteForegroundBash(ctx, fakeShellRunner{write: body, onRun: func() { runs++ }}, BashRequest{Command: "synthetic", Workspace: "/synthetic", OutputLimit: 4})
+	capture, ok := processdisplay.ConsumeV1(ctx)
+	if !ok || capture.Complete || !capture.Overflow || capture.Body != "" || capture.Title != "" || capture.Path != "" || capture.Error != "" {
+		t.Fatal("overflow retained a partial, unclassified raw display")
+	}
+	if runs != 1 || isError || payload["status"] != "completed" || payload["output"] != "xxxx\n[truncated]" {
+		t.Fatal("display overflow changed the actual tool result")
+	}
+}
+
+func TestForegroundProcessDisplayStartFailureNeverAdoptsRunnerBodyOrCause(t *testing.T) {
+	for _, runner := range []ports.ShellRunner{
+		nil,
+		fakeShellRunner{write: "fabricated output", result: ports.ShellResult{StartFailed: true, ExitCode: 0, Error: "private runner cause /private/path"}},
+	} {
+		ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+		ctx = domaintoolresult.WithProtectedCaptureV1(ctx, &domaintoolresult.ProtectedCaptureCollectorV1{})
+		payload, isError := ExecuteForegroundBash(ctx, runner, BashRequest{Command: "synthetic", Workspace: "/synthetic"})
+		capture, ok := processdisplay.ConsumeV1(ctx)
+		if !ok || !capture.Complete || capture.Body != "" || capture.ExitCode != nil || capture.Status != "failed" || capture.DurationMs < 0 || (capture.Error != "shell_start_failed" && capture.Error != "shell_runner_unavailable") {
+			t.Fatal("launch failure supplied fabricated output or an unsafe cause")
+		}
+		if !isError || payload["status"] != "failed" || payload["output"] != "" {
+			t.Fatal("display capture changed legacy launch failure")
+		}
+		if _, present := domaintoolresult.ConsumeProtectedToolResultV1(ctx); present {
+			t.Fatal("legacy launch failure acquired fabricated protected output")
+		}
+	}
+}
+
+func TestForegroundProcessDisplayCanceledOutcomeKeepsActualPartialBytes(t *testing.T) {
+	ctx := processdisplay.WithCollectorV1(context.Background(), &processdisplay.CollectorV1{})
+	_, isError := ExecuteForegroundBash(ctx, fakeShellRunner{write: "partial\r\n", result: ports.ShellResult{ExitCode: -1, Canceled: true}}, BashRequest{Command: "synthetic", Workspace: "/synthetic"})
+	capture, ok := processdisplay.ConsumeV1(ctx)
+	if !isError || !ok || capture.Status != "canceled" || capture.Body != "partial\r\n" || capture.ExitCode != nil {
+		t.Fatal("canceled host outcome was inferred from output text")
 	}
 }

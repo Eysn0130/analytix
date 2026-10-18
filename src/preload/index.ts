@@ -1,7 +1,28 @@
+import { docxEditorRequestSchema, docxEditorResponseSchema,docxEditorCaptureRequestSchema,docxEditorCaptureSchema } from '../shared/docx-editor'
+import { writePrototypeAuthorizePayloadSchema, writePrototypeAuthorizeResultSchema } from '../shared/write-prototype'
+import {
+  processPaneAuthorizeRequestSchemaV1,
+  processPaneAuthorizeEnvelopeSchemaV2,
+  processPaneControlSchemaV2,
+  processPaneInvalidationRequestSchemaV2,
+  processPaneReadRequestSchemaV1,
+  processPaneReadResultSchemaV1,
+  processPaneExpansionRequestSchemaV1,
+  processPaneViewerRequestSchemaV1,
+  processPaneTargetRequestSchemaV1,
+  processPaneWebLinkRequestSchemaV1,
+  processPaneActionResultSchemaV1,
+  processPaneTargetResultSchemaV1,
+  hasProcessDisplayPayloadV2
+} from '../../packages/runtime/src/contracts/protected-process-local-display'
+import { userInputLocalEffectRequestSchemaV1, userInputLocalEffectResultSchemaV1 } from '../shared/analytix-api'
+import { userInputLocalSelectorSchemaV1, userInputLocalViewRequestSchemaV1, userInputLocalViewResultSchemaV1, userInputLocalDiscardLateReplyRequestSchemaV1, userInputLocalDiscardLateReplyResponseSchemaV1, userInputLocalSaveDraftRequestSchemaV1 } from '../../packages/runtime/src/contracts/user-input-local-display'
+import { toolResultLocalPresentHistoryViewRequestSchemaV1, toolResultLocalPresentHistoryViewResultSchemaV1, toolResultLocalViewRequestSchemaV1, toolResultLocalEffectRequestSchemaV1, toolResultLocalSaveRequestSchemaV1, toolResultLocalViewResultSchemaV1, toolResultLocalEffectResultSchemaV1, toolResultLocalNavigateResultSchemaV1, toolResultLocalWebLinkRequestSchemaV1, toolResultLocalCopyRequestSchemaV1, toolResultLocalPresentFileRequestSchemaV1, toolResultLocalPresentOpenRequestSchemaV1, toolResultLocalPresentApplicationsResultSchemaV1, toolResultLocalPresentAssociationRequestSchemaV1, toolResultLocalPresentAssociationResultSchemaV1 } from '../../packages/runtime/src/contracts/tool-result-local-display'
 import { WRITE_SHUTDOWN_REQUEST, WRITE_SHUTDOWN_ACK, writeShutdownRequestSchema, writeShutdownResultSchema, type WriteShutdownHandler } from '../shared/write-shutdown'
 import { canvasHostRequestSchema, canvasHostResponseSchema } from '../../packages/runtime/src/contracts/canvas-host'
 import { nativeOfficeActionChoiceSchema, nativeOfficeMenuTargetSchema, nativeOfficePickerResponseSchema, nativeOfficeResponseSchema, nativeOfficeViewSchema, nativeWorkspaceCommandSchema, nativeOfficeInputFreezeSchema } from '../shared/native-office'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { userInputWaitOwnerStateSchemaV1, userInputWaitOwnerEventSchemaV1, userInputDraftSaveResultSchemaV1 } from '../shared/analytix-api'
 import type { AnalytixApi, AnalytixFlatApi } from '../shared/analytix-api'
 import { WINDOW_STARTUP_SURFACE_READY_CHANNEL } from '../shared/window-startup'
 import {
@@ -10,6 +31,114 @@ import {
   isStrictPublicRuntimeSseIpcPayload
 } from '../shared/public-runtime-sse'
 import { parseRuntimeStatusPublicV1 } from '../shared/analytix-runtime-status'
+
+// Each mounted native leaf owns an independent irreversible lease. These maps
+// retain identity/control only, never display snapshots or private bodies.
+type ProcessControl = { schemaVersion: 2; documentEpoch: string; authorityEpoch: string }
+type ProcessPaneOwner = { paneId: string; viewerId: string | null; epoch: object;
+  expandedBlockIds: Set<string>; root: Element | null; control: ProcessControl | null;
+  scope: import('../../packages/runtime/src/contracts/protected-process-local-display').ProcessDisplayScopeV1 | null; revision: string }
+const processPaneOwners = new Map<string, ProcessPaneOwner>()
+const processPaneViewers = new Map<string, ProcessPaneOwner>()
+const processPaneInvalidationListeners = new Set<{ handler: () => void; paneId: string | null }>()
+let processDocumentControl: ProcessControl | null = null
+const processPaneDocument = typeof document === 'undefined' ? undefined : document
+const hasProcessPaneDocument = (): boolean =>
+  typeof document === 'undefined' ? processPaneDocument === undefined :
+    document === processPaneDocument && document.visibilityState !== 'hidden'
+const processRoots = (paneId: string): Element[] => processPaneDocument
+  ? [...processPaneDocument.querySelectorAll('[data-process-pane-id]')].filter(root => root.getAttribute('data-process-pane-id') === paneId) : []
+const processRootVisible = (root: Element): boolean => {
+  if (!root.isConnected || root.ownerDocument !== processPaneDocument) return false
+  for (let node: Element | null = root; node; node = node.parentElement) {
+    if (node.hasAttribute('hidden') || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true') return false
+    const style = processPaneDocument?.defaultView?.getComputedStyle(node)
+    if (!style || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+  }
+  return true
+}
+const isCurrentProcessPane = (owner: ProcessPaneOwner, epoch = owner.epoch): boolean => {
+  if (!hasProcessPaneDocument() || processPaneOwners.get(owner.paneId) !== owner || owner.epoch !== epoch) return false
+  if (!processPaneDocument) return true
+  const roots = processRoots(owner.paneId)
+  return roots.length === 1 && roots[0] === owner.root && processRootVisible(roots[0])
+}
+const notifyProcessPane = (paneId: string | null): void => {
+  for (const { handler, paneId: selected } of [...processPaneInvalidationListeners]) {
+    if (paneId !== null && selected !== null && paneId !== selected) continue
+    try { handler() } catch { /* Continue clearing other protected leaves. */ }
+  }
+}
+const closeRetiredProcessPane = (viewerId: string): void => {
+  if (!hasProcessPaneDocument() || processPaneViewers.has(viewerId)) return
+  try { void ipcRenderer.invoke('process-local:close', { viewerId }).catch(() => undefined) }
+  catch { /* A retired handle cannot regain local authority. */ }
+}
+const retireProcessOwner = (owner: ProcessPaneOwner, notify = true): void => {
+  owner.epoch = {}; owner.expandedBlockIds.clear()
+  if (processPaneOwners.get(owner.paneId) === owner) processPaneOwners.delete(owner.paneId)
+  if (owner.viewerId && processPaneViewers.get(owner.viewerId) === owner) processPaneViewers.delete(owner.viewerId)
+  if (notify) notifyProcessPane(owner.paneId)
+  if (owner.viewerId) closeRetiredProcessPane(owner.viewerId)
+}
+const retireProcessOwnerAndNotify = (): void => {
+  const owners = [...processPaneOwners.values()]
+  for (const owner of owners) {
+    owner.epoch = {}; owner.expandedBlockIds.clear()
+    if (processPaneOwners.get(owner.paneId) === owner) processPaneOwners.delete(owner.paneId)
+    if (owner.viewerId && processPaneViewers.get(owner.viewerId) === owner) processPaneViewers.delete(owner.viewerId)
+  }
+  notifyProcessPane(null)
+  for (const owner of owners) if (owner.viewerId) closeRetiredProcessPane(owner.viewerId)
+}
+// Both a fresh authorization envelope and a control notification advance the
+// same fence. Equal-stamp notifications still clear any older sibling owners.
+const adoptProcessControl = (control: ProcessControl, fromCurrentAuthorization = false): boolean => {
+  if (processDocumentControl && (BigInt(control.documentEpoch) < BigInt(processDocumentControl.documentEpoch) ||
+      control.documentEpoch !== processDocumentControl.documentEpoch && !fromCurrentAuthorization ||
+      BigInt(control.authorityEpoch) < BigInt(processDocumentControl.authorityEpoch))) return false
+  const advanced = processDocumentControl !== null &&
+    (BigInt(control.documentEpoch) > BigInt(processDocumentControl.documentEpoch) || BigInt(control.authorityEpoch) > BigInt(processDocumentControl.authorityEpoch))
+  processDocumentControl = control
+  const retiredPaneIds = new Set<string>()
+  for (const owner of [...processPaneOwners.values()]) {
+    if ((!owner.control && (advanced || BigInt(control.authorityEpoch) > 0n)) || (owner.control &&
+        (BigInt(owner.control.documentEpoch) < BigInt(control.documentEpoch) ||
+          owner.control.documentEpoch === control.documentEpoch && BigInt(owner.control.authorityEpoch) < BigInt(control.authorityEpoch)))) {
+      retiredPaneIds.add(owner.paneId); retireProcessOwner(owner)
+    }
+  }
+  // A failed reservation leaves no owner, but its mounted subscriber may be
+  // waiting to retry. Real control advance cancels that intent as well; fresh
+  // owners at this fence and already-notified panes remain independent.
+  if (advanced) for (const { handler, paneId } of [...processPaneInvalidationListeners]) {
+    if (paneId === null ? retiredPaneIds.size > 0 : retiredPaneIds.has(paneId) || processPaneOwners.has(paneId)) continue
+    try { handler() } catch { /* Continue fencing other unleased recoveries. */ }
+  }
+  return true
+}
+const ensureProcessPaneCurrent = (owner: ProcessPaneOwner, epoch = owner.epoch): boolean => {
+  if (isCurrentProcessPane(owner, epoch)) return true
+  if (processPaneOwners.get(owner.paneId) === owner && owner.epoch === epoch) retireProcessOwner(owner)
+  return false
+}
+const processReplyCurrent = (owner: ProcessPaneOwner, result: { scope: NonNullable<ProcessPaneOwner['scope']>; revision: string }): boolean =>
+  owner.scope !== null && result.scope.threadId === owner.scope.threadId && result.scope.turnId === owner.scope.turnId &&
+  result.scope.contextDigest === owner.scope.contextDigest && result.scope.contextEpoch === owner.scope.contextEpoch &&
+  result.scope.processIncarnation === owner.scope.processIncarnation && BigInt(result.revision) >= BigInt(owner.revision)
+
+ipcRenderer.on('process-local:invalidated', (_event, value: unknown) => {
+  const parsed = processPaneControlSchemaV2.safeParse(value)
+  if (!parsed.success) return
+  adoptProcessControl(parsed.data)
+})
+ipcRenderer.on('runtime:status', (_event, value: unknown) => {
+  const status = parseRuntimeStatusPublicV1(value)
+  if (status && status.state !== 'running') retireProcessOwnerAndNotify()
+})
+processPaneDocument?.addEventListener?.('visibilitychange', () => {
+  if (processPaneDocument?.visibilityState === 'hidden') retireProcessOwnerAndNotify()
+})
 
 let officeAnnotationInputFrozen = false
 const officeAnnotationFreezeListeners = new Set<(frozen: boolean) => void>()
@@ -49,10 +178,14 @@ const flatApi = {
   platform: process.platform,
   startupSurfaceReady: () => ipcRenderer.send(WINDOW_STARTUP_SURFACE_READY_CHANNEL),
   getSettings: () => ipcRenderer.invoke('settings:get'),
-  setSettings: (partial) =>
-    ipcRenderer.invoke('settings:set', partial),
-  saveSettingsSilent: (partial) =>
-    ipcRenderer.invoke('settings:save-silent', partial),
+  setSettings: (partial) => {
+    retireProcessOwnerAndNotify()
+    return ipcRenderer.invoke('settings:set', partial)
+  },
+  saveSettingsSilent: (partial) => {
+    retireProcessOwnerAndNotify()
+    return ipcRenderer.invoke('settings:save-silent', partial)
+  },
   getHubAccountSnapshot: () =>
     ipcRenderer.invoke('hub-account:snapshot'),
   refreshHubAccount: () =>
@@ -135,6 +268,291 @@ const flatApi = {
     ipcRenderer.invoke('runtime:direct-source-preview', request),
   acceptedSlotDisplay: (request) =>
     ipcRenderer.invoke('runtime:accepted-slot-display', request),
+  authorizeProcessPane: async (request) => {
+    let owner: ProcessPaneOwner | undefined
+    try {
+      const parsed = processPaneAuthorizeRequestSchemaV1.safeParse(request)
+      if (!parsed.success || !hasProcessPaneDocument()) return { status: 'unavailable' as const }
+      const roots = processRoots(parsed.data.paneId)
+      if (processPaneDocument && (roots.length !== 1 || !processRootVisible(roots[0]))) return { status: 'unavailable' as const }
+      const previous = processPaneOwners.get(parsed.data.paneId)
+      if (previous) retireProcessOwner(previous, previous.viewerId !== null || !isCurrentProcessPane(previous))
+      if (processPaneOwners.size >= 8) return { status: 'unavailable' as const }
+      owner = { paneId: parsed.data.paneId, viewerId: null, epoch: {}, expandedBlockIds: new Set(),
+        root: roots[0] ?? null, control: processDocumentControl, scope: null, revision: '0' }
+      processPaneOwners.set(owner.paneId, owner)
+      const envelope = processPaneAuthorizeEnvelopeSchemaV2.safeParse(await ipcRenderer.invoke('process-local:authorize', parsed.data))
+      if (!envelope.success) { if (processPaneOwners.get(owner.paneId) === owner) retireProcessOwner(owner); return { status: 'unavailable' as const } }
+      const { control, result } = envelope.data
+      if (!isCurrentProcessPane(owner) || processDocumentControl &&
+          (BigInt(control.documentEpoch) < BigInt(processDocumentControl.documentEpoch) || BigInt(control.authorityEpoch) < BigInt(processDocumentControl.authorityEpoch))) {
+        if (result.status === 'authorized') closeRetiredProcessPane(result.viewerId)
+        if (processPaneOwners.get(owner.paneId) === owner) retireProcessOwner(owner)
+        return { status: 'unavailable' as const }
+      }
+      if (result.status !== 'authorized') {
+        const currentControl = owner.control ?? processDocumentControl
+        if (currentControl && (control.documentEpoch !== currentControl.documentEpoch || control.authorityEpoch !== currentControl.authorityEpoch)) {
+          if (control.documentEpoch === currentControl.documentEpoch) adoptProcessControl(control)
+          if (processPaneOwners.get(owner.paneId) === owner) retireProcessOwner(owner)
+          return { status: 'unavailable' as const }
+        }
+        // An ordinary producer-not-ready reply ends only this unleased
+        // reservation. Keep the control baseline so later real loss can fence
+        // a renderer that is waiting for its bounded retry.
+        retireProcessOwner(owner, result.status === 'revoked')
+        if (result.status !== 'revoked') adoptProcessControl(control)
+        return result
+      }
+      if (result.scope.threadId !== parsed.data.threadId || result.scope.turnId !== parsed.data.turnId || processPaneViewers.has(result.viewerId)) {
+        closeRetiredProcessPane(result.viewerId); retireProcessOwner(owner); return { status: 'unavailable' as const }
+      }
+      owner.control = control; owner.scope = result.scope; owner.revision = result.revision; owner.viewerId = result.viewerId
+      processPaneViewers.set(result.viewerId, owner)
+      if (!adoptProcessControl(control, true) || !ensureProcessPaneCurrent(owner)) return { status: 'unavailable' as const }
+      return result
+    } catch {
+      if (owner && processPaneOwners.get(owner.paneId) === owner) retireProcessOwner(owner)
+      return { status: 'unavailable' as const }
+    }
+  },
+  onProcessPaneInvalidated: (requestOrHandler: { paneId: string } | (() => void), suppliedHandler?: () => void) => {
+    const handler = typeof requestOrHandler === 'function' ? requestOrHandler : suppliedHandler
+    const selected = typeof requestOrHandler === 'function' ? null : processPaneInvalidationRequestSchemaV2.safeParse(requestOrHandler)
+    if (typeof handler !== 'function' || selected !== null && !selected.success || processPaneInvalidationListeners.size >= 128) return () => undefined
+    const subscription = { handler, paneId: selected === null ? null : selected.data.paneId }
+    processPaneInvalidationListeners.add(subscription)
+    return () => { processPaneInvalidationListeners.delete(subscription) }
+  },
+  readProcessPane: async (request) => {
+    const parsed = processPaneReadRequestSchemaV1.safeParse(request)
+    const owner = parsed.success ? processPaneViewers.get(parsed.data.viewerId) : undefined
+    if (!parsed.success || !owner) return { status: 'unavailable' as const }
+    if (!isCurrentProcessPane(owner)) { retireProcessOwner(owner); return { status: 'unavailable' as const } }
+    const epoch = owner.epoch
+    try {
+      const reply: unknown = await ipcRenderer.invoke('process-local:read', parsed.data)
+      if (!ensureProcessPaneCurrent(owner, epoch)) return { status: 'unavailable' as const }
+      const result = processPaneReadResultSchemaV1.safeParse(reply)
+      if (!result.success || (result.data.status === 'snapshot' || result.data.status === 'unchanged') &&
+          (!processReplyCurrent(owner, result.data) || result.data.status === 'snapshot' && result.data.blocks.some(block =>
+            hasProcessDisplayPayloadV2(block) && !owner.expandedBlockIds.has(block.blockId) ||
+            parsed.data.draftsOnly && block.source.kind !== 'assistant_draft'))) {
+        retireProcessOwner(owner); return { status: 'unavailable' as const }
+      }
+      if (result.data.status === 'revoked' || result.data.status === 'unavailable') retireProcessOwner(owner)
+      if (result.data.status === 'snapshot' || result.data.status === 'unchanged') owner.revision = result.data.revision
+      return result.data
+    } catch { if (processPaneOwners.get(owner.paneId) === owner && owner.epoch === epoch) retireProcessOwner(owner); return { status: 'unavailable' as const } }
+  },
+  setProcessPaneExpanded: async (request) => {
+    const parsed = processPaneExpansionRequestSchemaV1.safeParse(request)
+    const owner = parsed.success ? processPaneViewers.get(parsed.data.viewerId) : undefined
+    if (!parsed.success || !owner) return { status: 'unavailable' as const }
+    if (!isCurrentProcessPane(owner)) { retireProcessOwner(owner); return { status: 'unavailable' as const } }
+    const epoch = owner.epoch = {}
+    owner.expandedBlockIds = new Set(parsed.data.expandedBlockIds)
+    try {
+      const result = processPaneActionResultSchemaV1.safeParse(await ipcRenderer.invoke('process-local:expand', parsed.data))
+      if (!ensureProcessPaneCurrent(owner, epoch)) return { status: 'unavailable' as const }
+      if (!result.success) { retireProcessOwner(owner); return { status: 'unavailable' as const } }
+      if (result.data.status === 'revoked' || result.data.status === 'unavailable') retireProcessOwner(owner)
+      return result.data
+    } catch { if (processPaneOwners.get(owner.paneId) === owner && owner.epoch === epoch) retireProcessOwner(owner); return { status: 'unavailable' as const } }
+  },
+  closeProcessPane: async (request) => {
+    const parsed = processPaneViewerRequestSchemaV1.safeParse(request)
+    const owner = parsed.success ? processPaneViewers.get(parsed.data.viewerId) : undefined
+    if (!parsed.success || !owner) return { status: 'unavailable' as const }
+    // Synchronous local retirement precedes the close acknowledgement.
+    owner.epoch = {}; owner.expandedBlockIds.clear()
+    if (processPaneOwners.get(owner.paneId) === owner) processPaneOwners.delete(owner.paneId)
+    processPaneViewers.delete(parsed.data.viewerId); notifyProcessPane(owner.paneId)
+    try {
+      const result = processPaneActionResultSchemaV1.safeParse(await ipcRenderer.invoke('process-local:close', parsed.data))
+      return result.success ? result.data : { status: 'unavailable' as const }
+    } catch { return { status: 'unavailable' as const } }
+  },
+  openProcessCapture: async (request) => {
+    const parsed = processPaneTargetRequestSchemaV1.safeParse(request)
+    const owner = parsed.success ? processPaneViewers.get(parsed.data.viewerId) : undefined
+    if (!parsed.success || !owner) return { status: 'unavailable' as const }
+    if (!isCurrentProcessPane(owner)) { retireProcessOwner(owner); return { status: 'unavailable' as const } }
+    if (!owner.expandedBlockIds.has(parsed.data.blockId)) return { status: 'unavailable' as const }
+    const epoch = owner.epoch
+    try {
+      const reply: unknown = await ipcRenderer.invoke('process-local:target', parsed.data)
+      if (!ensureProcessPaneCurrent(owner, epoch)) return { status: 'unavailable' as const }
+      const result = processPaneTargetResultSchemaV1.safeParse(reply)
+      if (!result.success || result.data.status === 'capture' && (!processReplyCurrent(owner, result.data) ||
+          result.data.block.blockId !== parsed.data.blockId || result.data.block.captureDigest !== parsed.data.captureDigest ||
+          result.data.block.body === undefined || !owner.expandedBlockIds.has(result.data.block.blockId))) {
+        retireProcessOwner(owner); return { status: 'unavailable' as const }
+      }
+      if (result.data.status === 'revoked' || result.data.status === 'unavailable') retireProcessOwner(owner)
+      if (result.data.status === 'capture') owner.revision = result.data.revision
+      return result.data
+    } catch { if (processPaneOwners.get(owner.paneId) === owner && owner.epoch === epoch) retireProcessOwner(owner); return { status: 'unavailable' as const } }
+  },
+  openProcessWebLink: async (request) => {
+    const parsed = processPaneWebLinkRequestSchemaV1.safeParse(request)
+    const owner = parsed.success ? processPaneViewers.get(parsed.data.viewerId) : undefined
+    if (!parsed.success || !owner) return { status: 'unavailable' as const }
+    if (!isCurrentProcessPane(owner)) { retireProcessOwner(owner); return { status: 'unavailable' as const } }
+    const epoch = owner.epoch
+    try {
+      const result = processPaneActionResultSchemaV1.safeParse(await ipcRenderer.invoke('process-local:web-link', parsed.data))
+      if (!ensureProcessPaneCurrent(owner, epoch)) return { status: 'unavailable' as const }
+      if (!result.success) { retireProcessOwner(owner); return { status: 'unavailable' as const } }
+      if (result.data.status === 'revoked' || result.data.status === 'unavailable') retireProcessOwner(owner)
+      return result.data
+    } catch { if (processPaneOwners.get(owner.paneId) === owner && owner.epoch === epoch) retireProcessOwner(owner); return { status: 'unavailable' as const } }
+  },
+  openUserInputWait: async selector => {
+    const parsed = userInputLocalSelectorSchemaV1.safeParse(selector)
+    if (!parsed.success) return { state: 'unavailable' as const }
+    try {
+      const result = userInputWaitOwnerStateSchemaV1.safeParse(await ipcRenderer.invoke('user-input-wait:open', parsed.data))
+      return result.success ? result.data : { state: 'unavailable' as const }
+    } catch { return { state: 'unavailable' as const } }
+  },
+  closeUserInputWait: async selector => {
+    const parsed = userInputLocalSelectorSchemaV1.safeParse(selector)
+    if (parsed.success) await ipcRenderer.invoke('user-input-wait:close', parsed.data)
+  },
+  onUserInputWaitChanged: handler => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      const parsed = userInputWaitOwnerEventSchemaV1.safeParse(value)
+      if (parsed.success) handler(parsed.data)
+    }
+    ipcRenderer.on('user-input-wait:changed', wrapped)
+    return () => ipcRenderer.removeListener('user-input-wait:changed', wrapped)
+  },
+  openUserInputLocalDisplay: async (request) => {
+    const parsed = userInputLocalViewRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    try {
+      const result = userInputLocalViewResultSchemaV1.safeParse(await ipcRenderer.invoke('user-input-local:open', parsed.data))
+      if (!result.success || result.data.ok && ['threadId', 'turnId', 'itemId', 'requestId'].some(key =>
+        result.data.ok && result.data.display[key as 'threadId' | 'turnId' | 'itemId' | 'requestId'] !== parsed.data[key as 'threadId' | 'turnId' | 'itemId' | 'requestId'])) return { ok: false, code: 'unavailable' as const }
+      return result.data
+    } catch { return { ok: false, code: 'unavailable' as const } }
+  },
+  discardUserInputLateReply: async request => {
+    const parsed = userInputLocalDiscardLateReplyRequestSchemaV1.safeParse(request)
+    if (!parsed.success) throw new Error('Question discard unavailable.')
+    try {
+      const result = userInputLocalDiscardLateReplyResponseSchemaV1.safeParse(await ipcRenderer.invoke('user-input-local:discard-late-reply', parsed.data))
+      if (!result.success || ['threadId', 'turnId', 'itemId', 'requestId'].some(key => result.data[key as 'threadId' | 'turnId' | 'itemId' | 'requestId'] !== parsed.data[key as 'threadId' | 'turnId' | 'itemId' | 'requestId']) ||
+          result.data.lateReply.clientUserMessageId !== parsed.data.clientUserMessageId || result.data.lateReply.turnId !== parsed.data.expectedTurnId) throw new Error('Question discard unavailable.')
+      return result.data
+    } catch { throw new Error('Question discard unavailable.') }
+  },
+  saveUserInputDraft: async request => {
+    const parsed = userInputLocalSaveDraftRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'invalid' as const }
+    try {
+      const result = userInputDraftSaveResultSchemaV1.safeParse(await ipcRenderer.invoke('user-input-local:save-draft', parsed.data))
+      if (!result.success) return { ok: false, code: 'unavailable' as const }
+      if (!result.data.ok) return result.data
+      const receipt = result.data.receipt
+      if (['threadId', 'turnId', 'itemId', 'requestId'].some(key => receipt[key as 'threadId' | 'turnId' | 'itemId' | 'requestId'] !== parsed.data[key as 'threadId' | 'turnId' | 'itemId' | 'requestId']) ||
+          receipt.draftRevision !== parsed.data.revision || JSON.stringify(receipt.draft) !== JSON.stringify(parsed.data.draft)) return { ok: false, code: 'unavailable' as const }
+      return result.data
+    } catch { return { ok: false, code: 'unavailable' as const } }
+  },
+  performUserInputLocalEffect: async request => {
+    const parsed = userInputLocalEffectRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    try {
+      const result = userInputLocalEffectResultSchemaV1.safeParse(await ipcRenderer.invoke('user-input-local:effect', parsed.data))
+      return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+    } catch { return { ok: false, code: 'unavailable' as const } }
+  },
+  closeUserInputLocalDisplay: async viewId => { await ipcRenderer.invoke('user-input-local:close', viewId) },
+  invalidateUserInputLocalDisplay: async () => { await ipcRenderer.invoke('user-input-local:invalidate') },
+  onUserInputLocalDisplayInvalidated: handler => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: unknown, reason: unknown) => {
+      if (value === null || typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)) handler(value, reason === 'background' ? 'background' : 'authority')
+    }
+    ipcRenderer.on('user-input-local:invalidated', wrapped)
+    return () => ipcRenderer.removeListener('user-input-local:invalidated', wrapped)
+  },
+  openToolResultLocalDisplay: async (request) => {
+    const parsed = toolResultLocalViewRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    const result = toolResultLocalViewResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:open', parsed.data))
+    return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+  },
+  closeToolResultLocalDisplay: async (viewId) => { await ipcRenderer.invoke('tool-result-local:close', viewId) },
+  copyToolResultLocalDisplay: async (request) => {
+    const parsed = toolResultLocalCopyRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    const result = toolResultLocalEffectResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:copy', parsed.data))
+    return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+  },
+  saveToolResultLocalDisplay: async (request) => {
+    const parsed = toolResultLocalSaveRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    try {
+      const result = toolResultLocalEffectResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:save', parsed.data))
+      return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+    } catch { return { ok: false, code: 'unavailable' as const } }
+  },
+  openToolResultLocalWebLink: async (request) => {
+    const parsed = toolResultLocalWebLinkRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    try {
+      const result = toolResultLocalEffectResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:web-link', parsed.data))
+      return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+    } catch { return { ok: false, code: 'unavailable' as const } }
+  },
+  navigateToolResultLocalDisplay: async (request) => {
+    const parsed = toolResultLocalEffectRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' }
+    const result = toolResultLocalNavigateResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:navigate', parsed.data))
+    return result.success ? result.data : { ok: false, code: 'unavailable' }
+  },
+  openToolResultLocalPresentHistory: async request => {
+    const parsed = toolResultLocalPresentHistoryViewRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' }
+    try {
+      const result = toolResultLocalPresentHistoryViewResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:present-history', parsed.data))
+      return result.success ? result.data : { ok: false, code: 'unavailable' }
+    } catch { return { ok: false, code: 'unavailable' } }
+  },
+  associateToolResultLocalPresentFile: async request => {
+    const parsed = toolResultLocalPresentAssociationRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' }
+    try {
+      const result = toolResultLocalPresentAssociationResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:present-associations', parsed.data))
+      return result.success ? result.data : { ok: false, code: 'unavailable' }
+    } catch { return { ok: false, code: 'unavailable' } }
+  },
+  listToolResultLocalPresentApplications: async request => {
+    const parsed = toolResultLocalPresentFileRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    try {
+      const result = toolResultLocalPresentApplicationsResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:present-applications', parsed.data))
+      return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+    } catch { return { ok: false, code: 'unavailable' as const } }
+  },
+  openToolResultLocalPresentFile: async request => {
+    const parsed = toolResultLocalPresentOpenRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false, code: 'unavailable' as const }
+    try {
+      const result = toolResultLocalEffectResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:present-open', parsed.data))
+      return result.success ? result.data : { ok: false, code: 'unavailable' as const }
+    } catch { return { ok: false, code: 'unavailable' as const } }
+  },
+  invalidateToolResultLocalDisplay: async () => { await ipcRenderer.invoke('tool-result-local:invalidate') },
+  onToolResultLocalDisplayInvalidated: (handler) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (value === null || typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)) handler(value)
+    }
+    ipcRenderer.on('tool-result-local:invalidated', wrapped)
+    return () => ipcRenderer.removeListener('tool-result-local:invalidated', wrapped)
+  },
   stageFundsCSVSnapshot: () =>
     ipcRenderer.invoke('runtime:stage-funds-csv-snapshot'),
   confirmFundsCSVSnapshot: (selector) =>
@@ -147,12 +565,20 @@ const flatApi = {
     ipcRenderer.invoke('runtime:run-deterministic-funds-cleaning'),
   revokeCleaningDiffPreview: (selector) =>
     ipcRenderer.invoke('runtime:revoke-cleaning-diff-preview', selector),
-  restartRuntime: () => ipcRenderer.invoke('runtime:restart'),
+  restartRuntime: () => {
+    retireProcessOwnerAndNotify()
+    return ipcRenderer.invoke('runtime:restart')
+  },
   fetchUpstreamModels: () => ipcRenderer.invoke('upstream:models'),
   probeModelCapabilities: (payload) => ipcRenderer.invoke('provider:capability-probe', payload),
   getClawStatus: () => ipcRenderer.invoke('claw:status'),
   runClawTask: (taskId) =>
     ipcRenderer.invoke('claw:task:run', taskId),
+  listScheduleTasks: () => ipcRenderer.invoke('schedule:tasks:list'),
+  readScheduleTaskHistory: (request) => ipcRenderer.invoke('schedule:task:history', request),
+  createScheduleTask: (input) => ipcRenderer.invoke('schedule:task:create', input),
+  updateScheduleTask: (request) => ipcRenderer.invoke('schedule:task:update', request),
+  deleteScheduleTask: (request) => ipcRenderer.invoke('schedule:task:delete', request),
   getScheduleStatus: () => ipcRenderer.invoke('schedule:status'),
   runScheduleTask: (taskId) =>
     ipcRenderer.invoke('schedule:task:run', taskId),
@@ -273,12 +699,46 @@ const flatApi = {
     ipcRenderer.invoke('file:list-workspace-directory', options),
   resolveWorkspaceFile: (options) =>
     ipcRenderer.invoke('file:resolve-workspace', options),
-  readWorkspaceFile: (options) =>
-    ipcRenderer.invoke('file:read-workspace', options),
-  readWorkspaceImage: (options) =>
-    ipcRenderer.invoke('file:read-workspace-image', options),
-  readWorkspacePdf: (options) =>
-    ipcRenderer.invoke('file:read-workspace-pdf', options),
+  readWorkspaceFile: (options) => {
+    if (options.protectedPresent !== undefined) {
+      const request = toolResultLocalPresentFileRequestSchemaV1.safeParse(options.protectedPresent)
+      if (!request.success || options.protectedRead !== undefined) return Promise.resolve({ ok: false, message: 'Protected current file preview unavailable.' })
+      return ipcRenderer.invoke('file:read-workspace', { protectedPresent: request.data })
+    }
+    if (options.preview === 'source' || options.protectedRead !== undefined) {
+      const request = toolResultLocalEffectRequestSchemaV1.safeParse(options.protectedRead)
+      if (!request.success) return Promise.resolve({ ok: false, message: 'Protected file preview unavailable.' })
+      return ipcRenderer.invoke('file:read-workspace', { protectedRead: request.data })
+    }
+    return ipcRenderer.invoke('file:read-workspace', options)
+  },
+  readWorkspaceImage: (options) => {
+    if (options.protectedPresent !== undefined) {
+      const request = toolResultLocalPresentFileRequestSchemaV1.safeParse(options.protectedPresent)
+      if (!request.success || options.protectedRead !== undefined) return Promise.resolve({ ok: false, message: 'Protected current image preview unavailable.' })
+      return ipcRenderer.invoke('file:read-workspace-image', { protectedPresent: request.data })
+    }
+    if (options.preview === 'source' || options.protectedRead !== undefined) return Promise.resolve({ ok: false, message: 'Protected image preview unavailable.' })
+    return ipcRenderer.invoke('file:read-workspace-image', options)
+  },
+  readWorkspacePdf: (options) => {
+    if (options.protectedPresent !== undefined) {
+      const request = toolResultLocalPresentFileRequestSchemaV1.safeParse(options.protectedPresent)
+      if (!request.success || options.protectedRead !== undefined) return Promise.resolve({ ok: false, message: 'Protected current PDF preview unavailable.' })
+      return ipcRenderer.invoke('file:read-workspace-pdf', { protectedPresent: request.data })
+    }
+    if (options.preview === 'source' || options.protectedRead !== undefined) return Promise.resolve({ ok: false, message: 'Protected PDF preview unavailable.' })
+    return ipcRenderer.invoke('file:read-workspace-pdf', options)
+  },
+  readWorkspaceExcel: (options) => {
+    if (options.protectedPresent !== undefined) {
+      const request = toolResultLocalPresentFileRequestSchemaV1.safeParse(options.protectedPresent)
+      if (!request.success || options.protectedRead !== undefined) return Promise.resolve({ ok: false, message: 'Protected current spreadsheet preview unavailable.' })
+      return ipcRenderer.invoke('file:read-workspace-excel', { protectedPresent: request.data })
+    }
+    if (options.preview === 'source' || options.protectedRead !== undefined) return Promise.resolve({ ok: false, message: 'Protected spreadsheet preview unavailable.' })
+    return ipcRenderer.invoke('file:read-workspace-excel', options)
+  },
   readLocalPdfText: (options) =>
     ipcRenderer.invoke('file:read-local-pdf-text', options),
   saveWorkspaceFileAs: (payload) =>
@@ -323,8 +783,14 @@ const flatApi = {
     ipcRenderer.invoke('write:retrieve-context', payload),
   generateWriteInfographic: (payload) =>
     ipcRenderer.invoke('write:generate-infographic', payload),
-  authorizeWritePrototype: (payload) =>
-    ipcRenderer.invoke('write:authorize-prototype', payload),
+  authorizeWritePrototype: async (payload) => {
+    const denied = { ok: false as const, message: 'HTML preview is unavailable.' }
+    const request = writePrototypeAuthorizePayloadSchema.safeParse(payload)
+    if (!request.success) return denied
+    const result = writePrototypeAuthorizeResultSchema.safeParse(await ipcRenderer.invoke('write:authorize-prototype', request.data))
+    return result.success ? result.data : denied
+  },
+  revokeWritePrototype: (payload) => ipcRenderer.invoke('write:revoke-prototype', payload),
   openWritePrototype: (payload) =>
     ipcRenderer.invoke('write:open-prototype', payload),
   transcribeSpeech: (payload) =>
@@ -333,8 +799,8 @@ const flatApi = {
     ipcRenderer.invoke('write:inline-completion-debug:list'),
   clearWriteInlineCompletionDebugEntries: () =>
     ipcRenderer.invoke('write:inline-completion-debug:clear'),
-  startSse: (threadId, sinceSeq, streamId) =>
-    ipcRenderer.invoke('runtime:sse:start', { threadId, sinceSeq, streamId }),
+  startSse: (threadId, sinceSeq, streamId, replay) =>
+    ipcRenderer.invoke('runtime:sse:start', { threadId, sinceSeq, streamId, ...(replay ? { replayThroughSeq: replay.replayThroughSeq } : {}) }),
   ackSseEvent: (streamId, seq, acceptedFinal) =>
     ipcRenderer.invoke('runtime:sse:ack', acceptedFinal
       ? { streamId, seq, ...acceptedFinal }
@@ -543,6 +1009,35 @@ const api = {
     cleaningDiffPreview: flatApi.cleaningDiffPreview,
     directSourcePreview: flatApi.directSourcePreview,
     acceptedSlotDisplay: flatApi.acceptedSlotDisplay,
+    authorizeProcessPane: flatApi.authorizeProcessPane,
+    onProcessPaneInvalidated: flatApi.onProcessPaneInvalidated,
+    readProcessPane: flatApi.readProcessPane,
+    setProcessPaneExpanded: flatApi.setProcessPaneExpanded,
+    closeProcessPane: flatApi.closeProcessPane,
+    openProcessCapture: flatApi.openProcessCapture,
+    openProcessWebLink: flatApi.openProcessWebLink,
+    openUserInputWait: flatApi.openUserInputWait,
+    closeUserInputWait: flatApi.closeUserInputWait,
+    onUserInputWaitChanged: flatApi.onUserInputWaitChanged,
+    discardUserInputLateReply: flatApi.discardUserInputLateReply,
+    saveUserInputDraft: flatApi.saveUserInputDraft,
+    performUserInputLocalEffect: flatApi.performUserInputLocalEffect,
+    openUserInputLocalDisplay: flatApi.openUserInputLocalDisplay,
+    closeUserInputLocalDisplay: flatApi.closeUserInputLocalDisplay,
+    invalidateUserInputLocalDisplay: flatApi.invalidateUserInputLocalDisplay,
+    onUserInputLocalDisplayInvalidated: flatApi.onUserInputLocalDisplayInvalidated,
+    openToolResultLocalDisplay: flatApi.openToolResultLocalDisplay,
+    closeToolResultLocalDisplay: flatApi.closeToolResultLocalDisplay,
+    copyToolResultLocalDisplay: flatApi.copyToolResultLocalDisplay,
+    saveToolResultLocalDisplay: flatApi.saveToolResultLocalDisplay,
+    navigateToolResultLocalDisplay: flatApi.navigateToolResultLocalDisplay,
+    openToolResultLocalPresentHistory: flatApi.openToolResultLocalPresentHistory,
+    associateToolResultLocalPresentFile: flatApi.associateToolResultLocalPresentFile,
+    listToolResultLocalPresentApplications: flatApi.listToolResultLocalPresentApplications,
+    openToolResultLocalPresentFile: flatApi.openToolResultLocalPresentFile,
+    openToolResultLocalWebLink: flatApi.openToolResultLocalWebLink,
+    invalidateToolResultLocalDisplay: flatApi.invalidateToolResultLocalDisplay,
+    onToolResultLocalDisplayInvalidated: flatApi.onToolResultLocalDisplayInvalidated,
     stageFundsCSVSnapshot: flatApi.stageFundsCSVSnapshot,
     confirmFundsCSVSnapshot: flatApi.confirmFundsCSVSnapshot,
     cancelFundsCSVImport: flatApi.cancelFundsCSVImport,
@@ -576,6 +1071,11 @@ const api = {
     createTaskFromText: flatApi.createClawTaskFromText
   },
   schedule: {
+    listTasks: flatApi.listScheduleTasks,
+    readHistory: flatApi.readScheduleTaskHistory,
+    createTask: flatApi.createScheduleTask,
+    updateTask: flatApi.updateScheduleTask,
+    deleteTask: flatApi.deleteScheduleTask,
     getStatus: flatApi.getScheduleStatus,
     runTask: flatApi.runScheduleTask,
     createTaskFromText: flatApi.createScheduleTaskFromText
@@ -610,6 +1110,20 @@ const api = {
     onThreadHandoffEvent: flatApi.onThreadHandoffEvent,
     listEditors: flatApi.listEditors,
     openEditorPath: flatApi.openEditorPath
+  },
+  docxEditor: {
+    onCapture: handler=>{
+      const listener=(_event:unknown,raw:unknown)=>{
+        const request=docxEditorCaptureRequestSchema.safeParse(raw)
+        if (!request.success) return
+        let result:ReturnType<typeof handler>
+        try {result=handler(request.data)} catch {return}
+        if (result) {const parsed=docxEditorCaptureSchema.safeParse(result);if(parsed.success)void ipcRenderer.invoke('docx-editor:capture-result',parsed.data).catch(()=>undefined)}
+      }
+      ipcRenderer.on('docx-editor:capture',listener)
+      return ()=>ipcRenderer.removeListener('docx-editor:capture',listener)
+    },
+    request: async (request) => docxEditorResponseSchema.parse(await ipcRenderer.invoke('docx-editor:request',docxEditorRequestSchema.parse(request)))
   },
   office: {
     onAnnotationInputFreeze: (handler) => {
@@ -689,6 +1203,7 @@ const api = {
     read: flatApi.readWorkspaceFile,
     readImage: flatApi.readWorkspaceImage,
     readPdf: flatApi.readWorkspacePdf,
+    readExcel: flatApi.readWorkspaceExcel,
     readLocalPdfText: flatApi.readLocalPdfText,
     saveAs: flatApi.saveWorkspaceFileAs,
     write: flatApi.writeWorkspaceFile,
@@ -715,6 +1230,7 @@ const api = {
     retrieveWriteContext: flatApi.retrieveWriteContext,
     generateWriteInfographic: flatApi.generateWriteInfographic,
     authorizeWritePrototype: flatApi.authorizeWritePrototype,
+    revokeWritePrototype: flatApi.revokeWritePrototype,
     openWritePrototype: flatApi.openWritePrototype,
     listWriteInlineCompletionDebugEntries: flatApi.listWriteInlineCompletionDebugEntries,
     clearWriteInlineCompletionDebugEntries: flatApi.clearWriteInlineCompletionDebugEntries,
@@ -795,8 +1311,10 @@ const api = {
   },
   dataAnalysis: {
     ensureBackend: () => ipcRenderer.invoke('data-analysis:ensure-backend'),
-    ensureWorkspaceCase: (payload) =>
-      ipcRenderer.invoke('data-analysis:ensure-workspace-case', payload),
+    ensureWorkspaceCase: (payload) => {
+      retireProcessOwnerAndNotify()
+      return ipcRenderer.invoke('data-analysis:ensure-workspace-case', payload)
+    },
     getRuntimeInfo: () => ipcRenderer.invoke('data-analysis:runtime-info'),
     onBackendRuntimeState: (handler) => {
       const wrapped = (

@@ -1,3 +1,22 @@
+import type { WritePrototypeAuthorizePayload, WritePrototypeAuthorizeResult } from './write-prototype'
+import type { ScheduleTaskCreateInput, ScheduleTaskUpdateRequest, ScheduleTaskDeleteRequest, ScheduleTaskListResult, ScheduleTaskWriteResult, ScheduleTaskDeleteResult, ScheduleTaskHistoryRequest, ScheduleTaskHistoryResult } from './schedule-task-mutation'
+import type {
+  ProcessPaneAuthorizeRequestV1,
+  ProcessPaneAuthorizeResultV1,
+  ProcessPaneReadRequestV1,
+  ProcessPaneReadResultV1,
+  ProcessPaneExpansionRequestV1,
+  ProcessPaneViewerRequestV1,
+  ProcessPaneTargetRequestV1,
+  ProcessPaneWebLinkRequestV1,
+  ProcessPaneActionResultV1,
+  ProcessPaneTargetResultV1
+} from '../../packages/runtime/src/contracts/protected-process-local-display'
+import type { ToolResultLocalPresentHistoryViewRequestV1, ToolResultLocalPresentHistoryViewResultV1, ToolResultLocalViewRequestV1, ToolResultLocalViewResultV1, ToolResultLocalEffectRequestV1, ToolResultLocalSaveRequestV1, ToolResultLocalEffectResultV1, ToolResultLocalNavigateResultV1, ToolResultLocalWebLinkRequestV1, ToolResultLocalCopyRequestV1, ToolResultLocalPresentFileRequestV1, ToolResultLocalPresentOpenRequestV1, ToolResultLocalPresentApplicationsResultV1, ToolResultLocalPresentAssociationRequestV1, ToolResultLocalPresentAssociationResultV1 } from '../../packages/runtime/src/contracts/tool-result-local-display'
+import { z } from 'zod'
+import { userInputLocalSelectorSchemaV1, type UserInputLocalSelectorV1 } from '../../packages/runtime/src/contracts/user-input-local-display'
+import { UserInputWaitSnapshotSchemaV1 } from '../../packages/runtime/src/contracts/approvals'
+import { userInputLocalSaveDraftResponseSchemaV1, type UserInputLocalSaveDraftRequestV1, type UserInputLocalDisplayApiV1, type UserInputLocalDiscardLateReplyRequestV1, type UserInputLocalDiscardLateReplyResponseV1 } from '../../packages/runtime/src/contracts/user-input-local-display'
 import type { WriteShutdownHandler } from './write-shutdown'
 import type { ProviderEndpointKind } from './provider-display'
 import type {
@@ -49,6 +68,7 @@ import type {
   WorkspaceFileSaveAsResult,
   WorkspaceImageReadResult,
   WorkspacePdfReadResult,
+  WorkspaceExcelReadResult,
   WorkspaceDirectoryCreatePayload,
   WorkspaceDirectoryCreateResult,
   WorkspaceDirectoryListResult,
@@ -538,6 +558,9 @@ export type SseErrorPayload = {
   reasonCode?: PublicRuntimeSseRejectionReasonCode
 }
 /** Exact renderer receipt binding required for an accepted-final terminal ACK. */
+/** Omitted for live subscriptions. Replay is ordinary public UI history only. */
+export type RuntimeSseReplayOptionsV1 = Readonly<{ replayThroughSeq: number }>
+
 export type AcceptedFinalSseAckBindingV1 = Readonly<{
   batchId: string
   threadId: string
@@ -687,7 +710,66 @@ export type ProviderCredentialRecoveryResult =
     }
 
 /** Internal preload IPC map. Renderer code must use AnalytixDomainFacade domains instead. */
-export type AnalytixFlatApi = {
+// Identity and wait metadata only; this channel cannot carry raw questions or answers.
+export const userInputWaitOwnerStateSchemaV1 = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('connecting') }).strict(),
+  z.object({ state: z.literal('waiting'), snapshot: UserInputWaitSnapshotSchemaV1, observedAt: z.number().int().nonnegative() }).strict(),
+  z.object({ state: z.enum(['ended', 'unavailable']) }).strict()
+])
+export const userInputWaitOwnerEventSchemaV1 = z.object({ selector: userInputLocalSelectorSchemaV1, wait: userInputWaitOwnerStateSchemaV1 }).strict()
+export type UserInputWaitOwnerStateV1 = z.infer<typeof userInputWaitOwnerStateSchemaV1>
+export type UserInputWaitOwnerEventV1 = z.infer<typeof userInputWaitOwnerEventSchemaV1>
+export type UserInputWaitApiV1 = {
+  openUserInputWait: (selector: UserInputLocalSelectorV1) => Promise<UserInputWaitOwnerStateV1>
+  closeUserInputWait: (selector: UserInputLocalSelectorV1) => Promise<void>
+  onUserInputWaitChanged: (handler: (event: UserInputWaitOwnerEventV1) => void) => () => void
+}
+
+// Current private view + source node identity only. Native derives all copied
+// text and external destinations from fresh Host data, never caller strings.
+export const userInputLocalEffectRequestSchemaV1 = z.object({
+  selector: userInputLocalSelectorSchemaV1,
+  viewId: z.string().uuid(),
+  effect: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('copyReply'), locale: z.enum(['en', 'zh']), clientUserMessageId: z.string().uuid(), expectedTurnId: z.string().min(1).max(255) }).strict(),
+    z.object({ kind: z.enum(['copyCode', 'openDetailLink']), questionId: z.string().regex(/^input_[a-f0-9]{64}_[1-3]$/), start: z.number().int().min(0).max(4 << 20), end: z.number().int().min(1).max(4 << 20) }).strict()
+  ])
+}).strict().refine(value => value.effect.kind === 'copyReply' || value.effect.end > value.effect.start)
+export const userInputLocalEffectResultSchemaV1 = z.union([
+  z.object({ ok: z.literal(true) }).strict(),
+  z.object({ ok: z.literal(false), code: z.literal('unavailable') }).strict()
+])
+export type UserInputLocalEffectRequestV1 = z.infer<typeof userInputLocalEffectRequestSchemaV1>
+export type UserInputLocalEffectResultV1 = z.infer<typeof userInputLocalEffectResultSchemaV1>
+export type UserInputLocalEffectV1 = UserInputLocalEffectRequestV1['effect']
+export type UserInputLocalEffectsApiV1 = {
+  performUserInputLocalEffect: (request: UserInputLocalEffectRequestV1) => Promise<UserInputLocalEffectResultV1>
+}
+
+export type UserInputLateDiscardApiV1 = {
+  discardUserInputLateReply: (request: UserInputLocalDiscardLateReplyRequestV1) => Promise<UserInputLocalDiscardLateReplyResponseV1>
+}
+
+// A private save result carries only a verified receipt or a fixed condition.
+// It cannot claim submission, steering admission or a public runtime outcome.
+export const userInputDraftSaveResultSchemaV1 = z.union([
+  z.object({ ok: z.literal(true), receipt: userInputLocalSaveDraftResponseSchemaV1 }).strict(),
+  z.object({ ok: z.literal(false), code: z.enum(['invalid', 'retired', 'conflict', 'capacity', 'unavailable']) }).strict()
+])
+export type UserInputDraftSaveResultV1 = z.infer<typeof userInputDraftSaveResultSchemaV1>
+export type UserInputDraftSaveApiV1 = {
+  saveUserInputDraft: (request: UserInputLocalSaveDraftRequestV1) => Promise<UserInputDraftSaveResultV1>
+}
+
+// Native visibility retirement is not an authority revocation. Older Core
+// consumers retain their one-argument listener; this optional desktop reason
+// lets a normal foreground return request a fresh lease without reviving one.
+export type UserInputLocalInvalidationReasonV1 = 'background' | 'authority'
+export type UserInputDesktopLocalDisplayApiV1 = Omit<UserInputLocalDisplayApiV1, 'onUserInputLocalDisplayInvalidated'> & {
+  onUserInputLocalDisplayInvalidated: (handler: (viewId: string | null, reason?: UserInputLocalInvalidationReasonV1) => void) => () => void
+}
+
+export type AnalytixFlatApi = UserInputDesktopLocalDisplayApiV1 & UserInputLocalEffectsApiV1 & UserInputWaitApiV1 & UserInputLateDiscardApiV1 & UserInputDraftSaveApiV1 & {
   platform: string
   startupSurfaceReady: () => void
   getSettings: () => Promise<AppSettingsV1>
@@ -765,6 +847,25 @@ export type AnalytixFlatApi = {
   cleaningDiffPreview: (request: CleaningDiffPreviewRequest) => Promise<LocalDisplayResult>
   directSourcePreview: (request: DirectSourcePreviewRequest) => Promise<LocalDisplayResult>
   acceptedSlotDisplay: (request: AcceptedSlotDisplayRequest) => Promise<LocalDisplayResult>
+  authorizeProcessPane: (request: ProcessPaneAuthorizeRequestV1) => Promise<ProcessPaneAuthorizeResultV1>
+  onProcessPaneInvalidated: import('../../packages/runtime/src/contracts/protected-process-local-display').ProcessPaneInvalidationSubscriptionV2
+  readProcessPane: (request: ProcessPaneReadRequestV1) => Promise<ProcessPaneReadResultV1>
+  setProcessPaneExpanded: (request: ProcessPaneExpansionRequestV1) => Promise<ProcessPaneActionResultV1>
+  closeProcessPane: (request: ProcessPaneViewerRequestV1) => Promise<ProcessPaneActionResultV1>
+  openProcessWebLink: (request: ProcessPaneWebLinkRequestV1) => Promise<ProcessPaneActionResultV1>
+  openProcessCapture: (request: ProcessPaneTargetRequestV1) => Promise<ProcessPaneTargetResultV1>
+  openToolResultLocalDisplay: (request: ToolResultLocalViewRequestV1) => Promise<ToolResultLocalViewResultV1>
+  closeToolResultLocalDisplay: (viewId: string) => Promise<void>
+  copyToolResultLocalDisplay: (request: ToolResultLocalCopyRequestV1) => Promise<ToolResultLocalEffectResultV1>
+  saveToolResultLocalDisplay: (request: ToolResultLocalSaveRequestV1) => Promise<ToolResultLocalEffectResultV1>
+  openToolResultLocalWebLink: (request: ToolResultLocalWebLinkRequestV1) => Promise<ToolResultLocalEffectResultV1>
+  navigateToolResultLocalDisplay: (request: ToolResultLocalEffectRequestV1) => Promise<ToolResultLocalNavigateResultV1>
+  openToolResultLocalPresentHistory: (request: ToolResultLocalPresentHistoryViewRequestV1) => Promise<ToolResultLocalPresentHistoryViewResultV1>
+  associateToolResultLocalPresentFile: (request: ToolResultLocalPresentAssociationRequestV1) => Promise<ToolResultLocalPresentAssociationResultV1>
+  listToolResultLocalPresentApplications: (request: ToolResultLocalPresentFileRequestV1) => Promise<ToolResultLocalPresentApplicationsResultV1>
+  openToolResultLocalPresentFile: (request: ToolResultLocalPresentOpenRequestV1) => Promise<ToolResultLocalEffectResultV1>
+  invalidateToolResultLocalDisplay: () => Promise<void>
+  onToolResultLocalDisplayInvalidated: (handler: (viewId: string | null) => void) => () => void
   stageFundsCSVSnapshot: () => Promise<FundsCSVSnapshotStageResult>
   confirmFundsCSVSnapshot: (selector: string) => Promise<FundsCSVSnapshotConfirmResult>
   cancelFundsCSVImport: (selector: string) => Promise<FundsImportCancelResult>
@@ -776,6 +877,11 @@ export type AnalytixFlatApi = {
   probeModelCapabilities: (payload: ModelCapabilityProbeRequest) => Promise<ModelCapabilityProbeResult>
   getClawStatus: () => Promise<ClawRuntimeStatus>
   runClawTask: (taskId: string) => Promise<ClawRunResult>
+  listScheduleTasks: () => Promise<ScheduleTaskListResult>
+  readScheduleTaskHistory: (request: ScheduleTaskHistoryRequest) => Promise<ScheduleTaskHistoryResult>
+  createScheduleTask: (input: ScheduleTaskCreateInput) => Promise<ScheduleTaskWriteResult>
+  updateScheduleTask: (request: ScheduleTaskUpdateRequest) => Promise<ScheduleTaskWriteResult>
+  deleteScheduleTask: (request: ScheduleTaskDeleteRequest) => Promise<ScheduleTaskDeleteResult>
   getScheduleStatus: () => Promise<ScheduleRuntimeStatus>
   runScheduleTask: (taskId: string) => Promise<ScheduleRunResult>
   startClawImInstallQr: (
@@ -878,6 +984,7 @@ export type AnalytixFlatApi = {
   readWorkspaceFile: (options: WorkspaceFileTarget) => Promise<WorkspaceFileReadResult>
   readWorkspaceImage: (options: WorkspaceFileTarget) => Promise<WorkspaceImageReadResult>
   readWorkspacePdf: (options: WorkspaceFileTarget) => Promise<WorkspacePdfReadResult>
+  readWorkspaceExcel: (options: WorkspaceFileTarget) => Promise<WorkspaceExcelReadResult>
   readLocalPdfText: (options: LocalPdfTextTarget) => Promise<LocalPdfTextReadResult>
   saveWorkspaceFileAs: (payload: WorkspaceFileSaveAsPayload) => Promise<WorkspaceFileSaveAsResult>
   writeWorkspaceFile: (payload: WorkspaceFileWritePayload) => Promise<WorkspaceFileWriteResult>
@@ -909,12 +1016,8 @@ export type AnalytixFlatApi = {
   generateWriteInfographic: (
     payload: WriteInfographicRequest
   ) => Promise<WriteInfographicResult>
-  authorizeWritePrototype: (payload: {
-    path: string
-    workspaceRoot: string
-  }) => Promise<
-    { ok: true; absolutePath: string; fileUrl: string } | { ok: false; message: string }
-  >
+  authorizeWritePrototype: (payload: WritePrototypeAuthorizePayload) => Promise<WritePrototypeAuthorizeResult>
+  revokeWritePrototype?: (payload: { grantId: string }) => Promise<{ ok: boolean }>
   openWritePrototype: (payload: {
     path: string
     workspaceRoot: string
@@ -928,7 +1031,7 @@ export type AnalytixFlatApi = {
   copyWriteDocumentAsRichText: (
     payload: WriteRichClipboardPayload
   ) => Promise<WriteRichClipboardResult>
-  startSse: (threadId: string, sinceSeq: number, streamId?: string) => Promise<{ streamId: string }>
+  startSse: (threadId: string, sinceSeq: number, streamId?: string, replay?: RuntimeSseReplayOptionsV1) => Promise<{ streamId: string }>
   ackSseEvent: (
     streamId: string,
     seq: number,
@@ -1046,6 +1149,35 @@ export type AnalytixRuntimeApi = Pick<
   | 'cleaningDiffPreview'
   | 'directSourcePreview'
   | 'acceptedSlotDisplay'
+  | 'authorizeProcessPane'
+  | 'onProcessPaneInvalidated'
+  | 'readProcessPane'
+  | 'setProcessPaneExpanded'
+  | 'closeProcessPane'
+  | 'openProcessWebLink'
+  | 'openProcessCapture'
+  | 'openUserInputWait'
+  | 'closeUserInputWait'
+  | 'onUserInputWaitChanged'
+  | 'discardUserInputLateReply'
+  | 'saveUserInputDraft'
+  | 'performUserInputLocalEffect'
+  | 'openUserInputLocalDisplay'
+  | 'closeUserInputLocalDisplay'
+  | 'invalidateUserInputLocalDisplay'
+  | 'onUserInputLocalDisplayInvalidated'
+  | 'openToolResultLocalDisplay'
+  | 'closeToolResultLocalDisplay'
+  | 'copyToolResultLocalDisplay'
+  | 'saveToolResultLocalDisplay'
+  | 'openToolResultLocalWebLink'
+  | 'navigateToolResultLocalDisplay'
+  | 'openToolResultLocalPresentHistory'
+  | 'associateToolResultLocalPresentFile'
+  | 'listToolResultLocalPresentApplications'
+  | 'openToolResultLocalPresentFile'
+  | 'invalidateToolResultLocalDisplay'
+  | 'onToolResultLocalDisplayInvalidated'
   | 'stageFundsCSVSnapshot'
   | 'confirmFundsCSVSnapshot'
   | 'cancelFundsCSVImport'
@@ -1105,6 +1237,11 @@ export type AnalytixConnectPhoneApi = {
 }
 
 export type AnalytixScheduleApi = {
+  listTasks: AnalytixFlatApi['listScheduleTasks']
+  readHistory: AnalytixFlatApi['readScheduleTaskHistory']
+  createTask: AnalytixFlatApi['createScheduleTask']
+  updateTask: AnalytixFlatApi['updateScheduleTask']
+  deleteTask: AnalytixFlatApi['deleteScheduleTask']
   getStatus: AnalytixFlatApi['getScheduleStatus']
   runTask: AnalytixFlatApi['runScheduleTask']
   createTaskFromText: AnalytixFlatApi['createScheduleTaskFromText']
@@ -1148,6 +1285,7 @@ export type AnalytixFilesApi = {
   read: AnalytixFlatApi['readWorkspaceFile']
   readImage: AnalytixFlatApi['readWorkspaceImage']
   readPdf: AnalytixFlatApi['readWorkspacePdf']
+  readExcel: AnalytixFlatApi['readWorkspaceExcel']
   readLocalPdfText: AnalytixFlatApi['readLocalPdfText']
   saveAs: AnalytixFlatApi['saveWorkspaceFileAs']
   write: AnalytixFlatApi['writeWorkspaceFile']
@@ -1171,6 +1309,7 @@ export type AnalytixWriteApi = Pick<
   | 'retrieveWriteContext'
   | 'generateWriteInfographic'
   | 'authorizeWritePrototype'
+  | 'revokeWritePrototype'
   | 'openWritePrototype'
   | 'listWriteInlineCompletionDebugEntries'
   | 'clearWriteInlineCompletionDebugEntries'
@@ -1258,6 +1397,10 @@ export type AnalytixDiagnosticsApi = {
 }
 
 export type AnalytixDomainFacade = {
+  docxEditor: {
+    onCapture:(handler:(request:import('./docx-editor').DocxEditorCaptureRequest)=>import('./docx-editor').DocxEditorCapture|null)=>()=>void
+    request: (request: import('./docx-editor').DocxEditorRequest) => Promise<import('./docx-editor').DocxEditorResponse>
+  }
   canvas: {
     request: (request: import('../../packages/runtime/src/contracts/canvas-host').CanvasHostRequest) => Promise<import('../../packages/runtime/src/contracts/canvas-host').CanvasHostResponse>
     pickFile: (request: { workspace: string }) => Promise<{ ok: true; path: string | null } | { ok: false }>
@@ -1265,7 +1408,7 @@ export type AnalytixDomainFacade = {
   office: {
     onAnnotationInputFreeze: (handler: (frozen: boolean) => void) => () => void
     onMenuRequested: (handler: (target: import('./native-office').NativeOfficeMenuTarget) => void) => () => void
-    showActionMenu: (request: import('./native-office').NativeOfficeActionMenu) => Promise<{actionId:string | null}>
+    showActionMenu: (request: import('./native-office').NativeOfficeActionMenu) => Promise<import('./native-office').NativeOfficeActionChoice>
     onWorkspaceCommand: (handler: (command: import('./native-office').NativeWorkspaceCommand) => void) => () => void
     pickFile: (request: import('zod').infer<typeof import('./native-office').nativeOfficePickerRequestSchema>) => Promise<import('zod').infer<typeof import('./native-office').nativeOfficePickerResponseSchema>>
     request: (request: import('./native-office').NativeOfficeRequest) => Promise<import('./native-office').NativeOfficeResponse>

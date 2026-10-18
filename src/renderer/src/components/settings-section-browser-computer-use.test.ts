@@ -1,6 +1,9 @@
-import { createElement } from 'react'
+// @vitest-environment jsdom
+import { act, createElement, type ReactElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ComputerUsePermissions, ModelCapabilityProbeResult } from '@shared/analytix-api'
 import {
   defaultAnalytixRuntimeSettings,
   defaultModelProviderSettings
@@ -212,6 +215,41 @@ function baseCtx(): Record<string, unknown> {
   }
 }
 
+afterEach(() => vi.unstubAllGlobals())
+
+async function withSettings(element: ReactElement, run: (host: HTMLDivElement) => Promise<void>): Promise<void> {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const host = document.createElement('div')
+  document.body.append(host)
+  const root = createRoot(host)
+  try {
+    await act(async () => root.render(element))
+    await run(host)
+  } finally {
+    await act(async () => root.unmount())
+    host.remove()
+  }
+}
+
+async function changeSelect(host: HTMLDivElement, label: string, value: string): Promise<void> {
+  const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)
+  expect(select).not.toBeNull()
+  await act(async () => {
+    select!.value = value
+    select!.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+
+async function clickButton(host: HTMLDivElement, label: string, toggle = false): Promise<void> {
+  const button = toggle
+    ? host.querySelector<HTMLButtonElement>(`button[role="switch"][aria-label="${label}"]`)
+    : Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim() === label)
+  expect(button).toBeDefined()
+  expect(button).not.toBeNull()
+  expect(button!.disabled).toBe(false)
+  await act(async () => button!.click())
+}
+
 describe('BrowserSettingsSection and ComputerUseSettingsSection', () => {
   it('renders the Codex-style browser settings and high permission defaults', () => {
     const html = renderToStaticMarkup(createElement(BrowserSettingsSection, { ctx: baseCtx() }))
@@ -221,6 +259,27 @@ describe('BrowserSettingsSection and ComputerUseSettingsSection', () => {
     expect(html).toContain('Always allow')
     expect(html).toContain('Enable full CDP access')
     expect(html).toContain('No site-specific permissions yet')
+    expect(html).not.toContain('Clear all browsing data')
+    expect(html).not.toContain('Clear history and cache')
+    expect(html).not.toMatch(/>Add<\/button>/)
+    expect(html).not.toContain('Learn more')
+    expect(html).toContain('Computer control settings')
+  })
+
+  it('preserves saved browser permissions after removing unavailable controls', () => {
+    const ctx = baseCtx()
+    const runtime = defaultAnalytixRuntimeSettings()
+    runtime.browserUse.sitePermissions = [{ origin: 'https://allowed.invalid', approvalMode: 'neverAsk',
+      downloadApprovalMode: 'alwaysAsk', uploadApprovalMode: 'alwaysAsk', fullCdpAccess: false }]
+    ctx.analytix = runtime
+    const before = JSON.stringify(runtime.browserUse)
+    const html = renderToStaticMarkup(createElement(BrowserSettingsSection, { ctx }))
+
+    expect(html).toContain('https://allowed.invalid')
+    expect(html).toContain('Global allow')
+    expect(html).toContain('Always allow')
+    expect(html).not.toContain('No site-specific permissions yet')
+    expect(JSON.stringify(runtime.browserUse)).toBe(before)
   })
 
   it('renders the Codex-style computer control page with analytix-computer-use', () => {
@@ -231,7 +290,8 @@ describe('BrowserSettingsSection and ComputerUseSettingsSection', () => {
     expect(html).toContain('analytix-computer-use')
     expect(html).toContain('Google Chrome')
     expect(html).not.toContain('Lock screen operation')
-    expect(html).toContain('Always-allowed apps')
+    expect(html).not.toContain('Always-allowed apps')
+    expect(html).not.toMatch(/>Add<\/button>/)
     expect(html).toContain('Vision model and routing')
     expect(html).toContain('Capability probe')
   })
@@ -255,13 +315,129 @@ describe('BrowserSettingsSection and ComputerUseSettingsSection', () => {
     expect(html).toContain('Connection diagnostics')
     expect(html).toContain('Chrome Browser Use diagnostics API missing')
     expect(html).toContain('Permissions')
-    expect(html).toContain('History')
-    expect(html).toContain('Downloads')
-    expect(html).toContain('Uploads')
+    expect(html).not.toContain('History')
+    expect(html).not.toContain('Downloads')
+    expect(html).not.toContain('Uploads')
+    expect(html).not.toContain('Learn more')
+    expect(html).not.toMatch(/>Add<\/button>/)
     expect(html).toContain('Always ask')
     expect(html).toContain('Enable full CDP access')
     expect(html).toContain('No site-specific permissions yet')
-    expect(html).toContain('disabled=""')
+    expect(html).not.toContain('disabled=""')
+  })
+
+  it('keeps Browser setting actions and navigation without replacing saved permissions', async () => {
+    const ctx = baseCtx()
+    const runtime = defaultAnalytixRuntimeSettings()
+    const saved = { ...runtime.browserUse, approvalMode: 'alwaysAsk' as const, fullCdpAccess: false,
+      chromeControlEnabled: false, sitePermissions: [{ origin: 'https://allowed.invalid', approvalMode: 'neverAsk' as const,
+        downloadApprovalMode: 'alwaysAsk' as const, uploadApprovalMode: 'alwaysAsk' as const, fullCdpAccess: false }] }
+    const before = JSON.stringify(saved)
+    const update = vi.fn(), navigate = vi.fn(), notice = vi.fn()
+    ctx.analytix = { ...runtime, browserUse: saved }
+    ctx.updateAnalytix = update
+    ctx.openSettingsSection = navigate
+    ctx.showTopNotice = notice
+    await withSettings(createElement(BrowserSettingsSection, { ctx }), async (host) => {
+      await changeSelect(host, 'Local URL open target', 'system')
+      await changeSelect(host, 'Annotation screenshots', 'off')
+      await changeSelect(host, 'Approval', 'neverAsk')
+      await clickButton(host, 'Enable full CDP access', true)
+      await clickButton(host, 'Browser', true)
+      await clickButton(host, 'Computer control settings')
+      expect(update.mock.calls.map(([patch]) => patch)).toEqual([
+        { browserUse: { ...saved, localUrlOpenTarget: 'system' } },
+        { browserUse: { ...saved, annotationScreenshotsMode: 'off' } },
+        { browserUse: { ...saved, approvalMode: 'neverAsk' } },
+        { browserUse: { ...saved, fullCdpAccess: true } },
+        { browserUse: { ...saved, enabled: false } }
+      ])
+      expect(navigate).toHaveBeenCalledExactlyOnceWith('computerUse')
+      expect(notice).not.toHaveBeenCalled()
+      expect(JSON.stringify(saved)).toBe(before)
+      expect(host.textContent).toContain('https://allowed.invalid')
+    })
+  })
+
+  it('keeps Chrome approval, CDP, extension and Back actions with saved configuration', async () => {
+    const ctx = baseCtx()
+    const runtime = defaultAnalytixRuntimeSettings()
+    const saved = { ...runtime.browserUse, approvalMode: 'alwaysAsk' as const, fullCdpAccess: false,
+      sitePermissions: [{ origin: 'https://allowed.invalid', approvalMode: 'neverAsk' as const,
+        downloadApprovalMode: 'alwaysAsk' as const, uploadApprovalMode: 'alwaysAsk' as const, fullCdpAccess: false }] }
+    const before = JSON.stringify(saved)
+    const change = vi.fn(), back = vi.fn(), notice = vi.fn()
+    const openExtension = vi.fn().mockResolvedValue({ ok: true })
+    ctx.showTopNotice = notice
+    vi.stubGlobal('analytix', { app: { openChromeBrowserUseExtensionPage: openExtension } })
+    await withSettings(createElement(ComputerUseChromeSettingsDetail, {
+      ctx, browserUse: saved, chromeStatus: null, onBack: back, onBrowserUseChange: change
+    }), async (host) => {
+      await changeSelect(host, 'Approval', 'neverAsk')
+      await clickButton(host, 'Enable full CDP access', true)
+      await clickButton(host, 'Reinstall extension')
+      await clickButton(host, 'Open extension settings')
+      await clickButton(host, 'Back')
+      expect(change.mock.calls.map(([patch]) => patch)).toEqual([{ approvalMode: 'neverAsk' }, { fullCdpAccess: true }])
+      expect(openExtension.mock.calls).toEqual([['webstore'], ['settings']])
+      expect(back).toHaveBeenCalledOnce()
+      expect(notice).not.toHaveBeenCalled()
+      expect(JSON.stringify(saved)).toBe(before)
+      expect(host.textContent).toContain('https://allowed.invalid')
+    })
+  })
+
+  it('keeps Computer Use enable, Chrome management and the explicit capability probe', async () => {
+    const ctx = baseCtx()
+    const runtime = defaultAnalytixRuntimeSettings()
+    const provider = defaultModelProviderSettings()
+    const profile = { ...provider.providers[0], baseUrl: 'https://provider.invalid/v1' }
+    provider.providers = [profile]
+    provider.activeProviderId = profile.id
+    const saved = { ...runtime, providerId: profile.id, model: 'fixture-model',
+      computerUse: { ...runtime.computerUse, enabled: false, mode: 'off' as const, maxActionsPerTurn: 7 },
+      browserUse: { ...runtime.browserUse, chromeControlEnabled: false },
+      visionBridge: { ...runtime.visionBridge, enabled: false } }
+    const before = JSON.stringify(saved)
+    const update = vi.fn(), notice = vi.fn()
+    ctx.analytix = saved
+    ctx.form = { provider }
+    ctx.updateAnalytix = update
+    ctx.showTopNotice = notice
+    let permissions: ComputerUsePermissions = { platform: 'darwin', supported: true, needsPermission: true,
+      accessibility: 'denied', screenRecording: 'denied', accessibilityNeedsRestart: false }
+    const request = vi.fn(async (kind: 'accessibility' | 'screenRecording') => {
+      permissions = { ...permissions, [kind]: 'granted' }
+      return { ...permissions }
+    })
+    const result: ModelCapabilityProbeResult = { ok: true, key: 'fixture', providerId: profile.id, model: saved.model,
+      endpointFormat: profile.endpointFormat, sanitizedBaseUrl: profile.baseUrl,
+      probedAt: '2026-10-10T00:00:00.000Z', staleAfter: '2026-10-11T00:00:00.000Z',
+      status: 'supported', imageInput: 'supported', toolCalling: 'supported', toolResultImage: 'supported' }
+    const probe = vi.fn().mockResolvedValue(result)
+    vi.stubGlobal('analytix', { app: { getComputerUsePermissions: async () => ({ ...permissions }),
+      requestComputerUsePermission: request }, runtime: { probeModelCapabilities: probe } })
+    await withSettings(createElement(ComputerUseSettingsSection, { ctx }), async (host) => {
+      expect(request).not.toHaveBeenCalled()
+      expect(probe).not.toHaveBeenCalled()
+      await clickButton(host, 'Any app', true)
+      await clickButton(host, 'Google Chrome', true)
+      expect(update.mock.calls.map(([patch]) => patch)).toEqual([
+        { computerUse: { ...saved.computerUse, enabled: true, mode: 'always' } },
+        { browserUse: { ...saved.browserUse, chromeControlEnabled: true } }
+      ])
+      expect(request.mock.calls).toEqual([['accessibility'], ['screenRecording']])
+      await clickButton(host, 'Run probe')
+      expect(probe).toHaveBeenCalledExactlyOnceWith({ providerId: profile.id, model: saved.model,
+        baseUrl: profile.baseUrl, endpointFormat: profile.endpointFormat })
+      await clickButton(host, 'Manage')
+      expect(host.textContent).toContain('Connection diagnostics')
+      await clickButton(host, 'Back')
+      expect(host.textContent).toContain('Vision model and routing')
+      expect(request).toHaveBeenCalledTimes(2)
+      expect(notice).not.toHaveBeenCalled()
+      expect(JSON.stringify(saved)).toBe(before)
+    })
   })
 
   it('renders concrete Chrome Browser Use diagnostics without marking pending setup connected', () => {

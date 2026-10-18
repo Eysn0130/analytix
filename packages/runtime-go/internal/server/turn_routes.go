@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
+	"time"
 
 	httpapi "analytix.local/runtime-go/internal/adapters/inbound/httpapi"
 	controlapp "analytix.local/runtime-go/internal/app/control"
@@ -13,6 +15,7 @@ import (
 	privacyprojectionapp "analytix.local/runtime-go/internal/app/privacyprojection"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 )
@@ -22,6 +25,37 @@ func (h *runtimeServerHandler) handleThreadTurnAction(w http.ResponseWriter, r *
 }
 
 func (h *runtimeServerHandler) steerRuntimeTurn(ctx context.Context, request controlapp.SteerTurnRequest) (controlapp.ActionResult, error) {
+	scheduleCarrier, carrierErr := scheduleCarrierV1(ctx, h)
+	if carrierErr != nil {
+		return controlapp.ActionResult{}, carrierErr
+	}
+	if scheduleCarrier != nil && !reflect.DeepEqual(request, scheduleCarrier.steerRequestV1()) {
+		return controlapp.ActionResult{}, errors.New("invalid Host Schedule steering provenance")
+	}
+	var lateCarrier *lateUserInputSteeringV1
+	var supplied any
+	if ctx != nil {
+		supplied = ctx.Value(lateUserInputSteeringContextKeyV1{})
+	}
+	if supplied != nil || request.UserInputReplyIdentity != nil || request.UserInputID != "" || request.UserInputCaptureReceiptID != "" || !request.UserInputCapturedAt.IsZero() {
+		carrier, ok := supplied.(*lateUserInputSteeringV1)
+		valid := ok && carrier != nil && carrier.host == h && reflect.DeepEqual(request, carrier.requestV1())
+		if valid {
+			fresh, err := h.verifiedLateUserInputSteeringV1(ctx, carrier.binding, carrier.attemptID, carrier.captureReceiptID, carrier.turnID)
+			valid = err == nil && reflect.DeepEqual(fresh, carrier)
+		}
+		if !valid {
+			return controlapp.ActionResult{StatusCode: http.StatusConflict, Body: map[string]any{"code": "late_reply_unavailable", "message": "late Question steering provenance is unavailable"}}, nil
+		}
+		lateCarrier = carrier
+	}
+	childCarrier, childCarrierErr := hostChildInputCarrierFromContextV1(ctx, h)
+	if childCarrierErr != nil {
+		return controlapp.ActionResult{}, childCarrierErr
+	}
+	if childCarrier != nil && (lateCarrier != nil || scheduleCarrier != nil || request.ThreadID != childCarrier.current.ChildThreadID || request.TurnID != childCarrier.current.ChildTurnID || request.ExpectedTurnID != childCarrier.current.ChildTurnID || request.Text != childCarrier.request.Message || request.ClientUserMessageID != childCarrier.request.ClientMessageID) {
+		return controlapp.ActionResult{}, errors.New("Host child steering provenance is invalid")
+	}
 	threadID := request.ThreadID
 	turnID := request.TurnID
 	if _, err := h.store.GetThread(threadID); errors.Is(err, os.ErrNotExist) {
@@ -39,13 +73,20 @@ func (h *runtimeServerHandler) steerRuntimeTurn(ctx context.Context, request con
 			"code": "security_context_invalid", "message": "turn is missing valid frozen security authority",
 		}}, nil
 	}
+	content := request.Text + "\n" + request.DisplayText
+	if lateCarrier != nil {
+		if securityContext.ContextDigest != lateCarrier.contextDigest {
+			return controlapp.ActionResult{StatusCode: http.StatusConflict, Body: map[string]any{"code": "late_reply_unavailable", "message": "late Question current authority changed"}}, nil
+		}
+		content = lateCarrier.content
+	}
 	admissionInput := controlapp.SteerSecurityAdmissionInput{
 		Context: securityContext, RiskIntent: request.RiskIntent,
-		LexicalCaseRisk:   apploop.PromptRequiresCaseRiskAdmission(request.Text + "\n" + request.DisplayText),
-		ProtectedCaseData: domainsecurity.ContainsProtectedCaseData(request.Text + "\n" + request.DisplayText),
+		LexicalCaseRisk:   apploop.PromptRequiresCaseRiskAdmission(content),
+		ProtectedCaseData: domainsecurity.ContainsProtectedCaseData(content),
 		AttachmentCount:   len(request.AttachmentIDs), FileRefCount: len(request.FileReferences),
 	}
-	effectBinding := steeringLogicalEffectBinding(request.Text+"\n"+request.DisplayText, admissionInput)
+	effectBinding := steeringLogicalEffectBinding(content, admissionInput)
 	preAdmission, admissionErr := controlapp.EvaluateSteerSecurityAdmission(admissionInput)
 	if admissionErr != nil {
 		h.runtimeControl().CancelRegisteredTurn(threadID, turnID)
@@ -112,14 +153,42 @@ func (h *runtimeServerHandler) steerRuntimeTurn(ctx context.Context, request con
 		}}, nil
 	}
 	defer releaseSteerAdmission()
-	request.Text, request.DisplayText, request.FileReferences = privacyprojectionapp.ProjectSteeringContent(request.Text, request.DisplayText, request.FileReferences)
+	if lateCarrier != nil {
+		request.Text = lateCarrier.projectedText
+		payload, payloadErr := domainsteering.ParseUserInputReplyContentV1(request.Text, *lateCarrier.identity)
+		if payloadErr != nil {
+			return controlapp.ActionResult{StatusCode: http.StatusConflict, Body: map[string]any{"code": "late_reply_unavailable", "message": "late Question content is unavailable"}}, nil
+		}
+		if _, envelopeErr := domainsteering.UserInputReplyEnvelopeV1(*lateCarrier.identity, payload); envelopeErr != nil {
+			return controlapp.ActionResult{StatusCode: http.StatusConflict, Body: map[string]any{"code": "late_reply_too_large", "message": "The late answer exceeds the current steering message limit. Original answers remain saved privately; edit and submit a new attempt.", "inputId": request.UserInputID}}, nil
+		}
+	} else {
+		request.Text, request.DisplayText, request.FileReferences = privacyprojectionapp.ProjectSteeringContent(request.Text, request.DisplayText, request.FileReferences)
+	}
+	var steeringStore controlapp.SteeringStore = h.store
+	var admissionAt time.Time
+	if scheduleCarrier != nil {
+		steeringStore = scheduleSteeringStoreV1{h.store, scheduleCarrier}
+		admissionAt = scheduleCarrier.at
+	}
+	if childCarrier != nil {
+		steeringStore = hostChildInputSteeringStoreV1{h.store, childCarrier}
+		admissionAt = childCarrier.at
+	}
 	response, err := controlapp.AdmitSteeringTurn(controlapp.AdmitSteeringInput{
-		Store:                 h.store,
+		Store:                 steeringStore,
+		Now:                   admissionAt,
 		Request:               request,
 		ExpectedContextDigest: securityContext.ContextDigest,
 		EffectBinding:         effectBinding,
 	})
 	if err != nil {
+		if lateCarrier != nil && errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+			return controlapp.ActionResult{StatusCode: http.StatusConflict, Body: map[string]any{"code": "late_reply_too_large", "message": "The complete Question reply exceeds the current turn resource capacity. Original answers remain saved privately; edit and submit a new attempt.", "inputId": request.UserInputID}}, nil
+		}
+		if lateCarrier != nil && errors.Is(err, errDurableSteeringProjectionInvalid) && len(request.Text) > domainsteering.MaxUserInputReplyEnvelopeBytesV1 {
+			return controlapp.ActionResult{StatusCode: http.StatusConflict, Body: map[string]any{"code": "late_reply_too_large", "message": "The late answer exceeds the current steering message limit. Original answers remain saved privately; edit and submit a new attempt.", "inputId": request.UserInputID}}, nil
+		}
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, errDurableTurnNotFound) {
 			return controlapp.ActionResult{StatusCode: http.StatusNotFound, Body: map[string]any{"code": "not_found", "message": "turn not found"}}, nil
 		}

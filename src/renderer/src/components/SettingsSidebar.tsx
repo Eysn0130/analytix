@@ -1,10 +1,8 @@
 import { useMemo, useState, type Dispatch, type ReactElement, type SetStateAction } from 'react'
 import {
   Archive,
-  AudioLines,
   Bot,
   BrainCircuit,
-  Bug,
   ChevronLeft,
   Code2,
   Globe,
@@ -19,7 +17,6 @@ import {
   Settings,
   ShieldCheck,
   Smartphone,
-  UserCircle,
   X
 } from '../design/AnalytixUiIcons'
 
@@ -29,7 +26,6 @@ type SettingsCategory =
   | 'providers'
   | 'write'
   | 'imageGeneration'
-  | 'mediaGeneration'
   | 'speechToText'
   | 'agents'
   | 'archives'
@@ -42,9 +38,8 @@ type SettingsCategory =
 
   | 'claw'
   | 'updates'
-  | 'debug'
 
-type SidebarIcon = typeof UserCircle
+type SidebarIcon = typeof Settings
 
 type NavItem = {
   category: SettingsCategory
@@ -62,12 +57,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     headingKey: 'settingsNavPersonal',
     items: [
-      { category: 'account', labelKey: 'deprecatedHubCompatibility', icon: UserCircle, keywords: ['deprecated', 'compatibility', 'account', 'login', 'hub'] },
-      { category: 'general', labelKey: 'general', icon: Globe, keywords: ['theme', 'ui plugin', 'locale', 'workspace', 'startup'] },
+      { category: 'general', labelKey: 'general', icon: Globe, keywords: ['theme', 'ui plugin', 'locale', 'workspace', 'startup', 'logs', 'diagnostics', 'debug', 'troubleshooting'] },
       { category: 'write', labelKey: 'write', icon: PencilLine, keywords: ['editor', 'completion', 'typing'] },
       { category: 'imageGeneration', labelKey: 'imageGen', icon: ImageIcon, keywords: ['image', 'generation'] },
-      { category: 'mediaGeneration', labelKey: 'mediaGeneration', icon: AudioLines, keywords: ['media', 'video', 'audio'] },
       { category: 'speechToText', labelKey: 'speechToText', icon: Mic, keywords: ['speech', 'transcription', 'voice'] },
+      { category: 'shortcuts', labelKey: 'keyboardShortcuts', icon: Keyboard, keywords: ['keyboard', 'hotkey', 'shortcut'] },
       { category: 'updates', labelKey: 'updates', icon: RefreshCw, keywords: ['version', 'release', 'update'] }
     ]
   },
@@ -86,21 +80,19 @@ const NAV_GROUPS: NavGroup[] = [
       { category: 'agents', labelKey: 'agents', icon: Bot, keywords: ['assistant', 'skill', 'mcp', 'runtime'] },
       { category: 'permissions', labelKey: 'permissions', icon: ShieldCheck, keywords: ['approval', 'sandbox', 'access'] },
       { category: 'worktree', labelKey: 'worktree', icon: Code2, keywords: ['git', 'branch', 'worktree'] },
-      { category: 'memory', labelKey: 'memory', icon: BrainCircuit, keywords: ['memory', 'remember', 'context'] },
-      { category: 'shortcuts', labelKey: 'keyboardShortcuts', icon: Keyboard, keywords: ['keyboard', 'hotkey', 'shortcut'] },
-      { category: 'debug', labelKey: 'debug', icon: Bug, keywords: ['logs', 'diagnostics', 'troubleshooting'] }
-    ]
-  },
-  {
-    headingKey: 'settingsNavArchived',
-    items: [
-      { category: 'archives', labelKey: 'archives', icon: Archive, keywords: ['archive', 'history', 'threads'] }
+      { category: 'memory', labelKey: 'memory', icon: BrainCircuit, keywords: ['memory', 'remember', 'context'] }
     ]
   }
 ]
 
+const ARCHIVES_ITEM: NavItem = {
+  category: 'archives', labelKey: 'archives', icon: Archive, keywords: ['archive', 'history', 'threads']
+}
+const NAV_ITEMS = [...NAV_GROUPS.flatMap(group => group.items), ARCHIVES_ITEM]
+
 export function settingsCategoryLabelKey(category: SettingsCategory): string {
-  return NAV_GROUPS.flatMap(group => group.items).find(item => item.category === category)?.labelKey ?? 'title'
+  if (category === 'account') return 'deprecatedHubCompatibility'
+  return NAV_ITEMS.find(item => item.category === category)?.labelKey ?? 'title'
 }
 
 export function SettingsSidebar({
@@ -124,12 +116,15 @@ export function SettingsSidebar({
         const heading = t(group.headingKey).toLowerCase()
         const items = group.items.filter((item) => {
           const label = t(item.labelKey).toLowerCase()
-          return [heading, label, ...item.keywords].some((entry) => entry.toLowerCase().includes(normalizedQuery))
+          const aliases = item.category === 'general' ? [t('logTitle'), t('debug')] : []
+          return [heading, label, ...aliases, ...item.keywords].some((entry) => entry.toLowerCase().includes(normalizedQuery))
         })
         return { ...group, items }
       })
       .filter((group) => group.items.length > 0)
   }, [normalizedQuery, t])
+  const archivesVisible = !normalizedQuery || [t(ARCHIVES_ITEM.labelKey), t('settingsNavArchived'), ...ARCHIVES_ITEM.keywords]
+    .some(entry => entry.toLowerCase().includes(normalizedQuery))
 
   const catCls = (c: SettingsCategory): string =>
     `flex h-[35px] w-full items-center gap-2 rounded-lg px-2.5 text-left text-[14px] font-normal transition ${
@@ -192,18 +187,19 @@ export function SettingsSidebar({
         </div>
       </div>
       <nav className="ds-no-drag min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {visibleGroups.length === 0 ? (
+        {visibleGroups.length === 0 && !archivesVisible ? (
           <div className="rounded-lg border border-ds-border-muted bg-ds-main/40 px-3 py-3 text-[12.5px] leading-5 text-ds-muted">
             {t('settingsSearchEmpty')}
           </div>
         ) : normalizedQuery ? (
           <div className="flex flex-col gap-1">
             {visibleGroups.flatMap((group) => group.items.map((item) => renderNavButton(item, group.headingKey)))}
+            {archivesVisible ? renderNavButton(ARCHIVES_ITEM) : null}
           </div>
         ) : (
           <div className="flex flex-col gap-4">
             {visibleGroups.map((group) => (
-              <section key={group.headingKey} className="space-y-1">
+              <section key={group.headingKey} aria-label={t(group.headingKey)} className="space-y-1">
                 <div className="px-2 text-[11px] font-semibold uppercase tracking-normal text-ds-faint">
                   {t(group.headingKey)}
                 </div>
@@ -216,6 +212,7 @@ export function SettingsSidebar({
         )}
       </nav>
       <div className="ds-no-drag mt-auto border-t border-ds-border p-3">
+        {!normalizedQuery ? renderNavButton(ARCHIVES_ITEM) : null}
         <div className="flex items-center gap-2 rounded-lg px-2 py-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-ds-subtle text-ds-muted">
             <Settings className="h-4 w-4" strokeWidth={1.75} />

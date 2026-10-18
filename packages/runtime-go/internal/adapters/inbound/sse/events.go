@@ -23,6 +23,7 @@ type ThreadEventStore struct {
 	LoadEventsSinceContext        func(context.Context, string, int) ([]map[string]any, error)
 	LoadPublicEventsSinceContext  func(context.Context, string, int) ([]map[string]any, error)
 	SubscribeEvents               func(threadID string) (<-chan map[string]any, func())
+	InitialGoalActivation         func(threadID string) map[string]any
 	SealAcceptedFinalDelivery     func([]map[string]any) (domainevent.AcceptedFinalDeliverySealV1, error)
 	ValidateAcceptedFinalDelivery func(domainevent.AcceptedFinalDeliveryBatchV2) error
 	PreflightPublic               func(threadID string) string
@@ -216,6 +217,26 @@ func (h ThreadEventsHandler) serveLive(w http.ResponseWriter, r *http.Request, t
 		}
 	}
 	flusher.Flush()
+	if h.Store.InitialGoalActivation != nil {
+		// SubscribeEvents is already live. A change before this read is in
+		// its current snapshot; a change after it remains in the live queue.
+		// This metadata has no replay cursor or durable delivery identity.
+		if event := h.Store.InitialGoalActivation(threadID); event != nil {
+			public, visible, code := h.publicEvent(threadID, event)
+			if code != "" {
+				h.writeProjectionRevokedEvent(w, threadID, code)
+				flusher.Flush()
+				return
+			}
+			if visible {
+				body, err := json.Marshal(public)
+				if err == nil {
+					_, _ = w.Write([]byte("event: goal_activation_changed\ndata: " + string(body) + "\n\n"))
+					flusher.Flush()
+				}
+			}
+		}
+	}
 
 	heartbeatInterval := h.HeartbeatInterval
 	if heartbeatInterval <= 0 {
@@ -233,6 +254,27 @@ func (h ThreadEventsHandler) serveLive(w http.ResponseWriter, r *http.Request, t
 					flusher.Flush()
 				}
 				return
+			}
+			if contracts.StringField(event, "kind") == "goal_activation_changed" {
+				// Process-local control never participates in replay cursors or
+				// interrupts a committed terminal delivery bundle.
+				if len(pendingGeneralTerminal) != 0 {
+					continue
+				}
+				public, visible, revocation := h.publicEvent(threadID, event)
+				if revocation != "" {
+					h.writeProjectionRevokedEvent(w, threadID, revocation)
+					flusher.Flush()
+					return
+				}
+				if visible {
+					body, err := json.Marshal(public)
+					if err == nil {
+						_, _ = w.Write([]byte("event: goal_activation_changed\ndata: " + string(body) + "\n\n"))
+						flusher.Flush()
+					}
+				}
+				continue
 			}
 			seq, _ := NumericSeq(event["seq"])
 			if seq <= lastSeq {
@@ -665,6 +707,18 @@ func (h ThreadEventsHandler) withSSETrace(event map[string]any) map[string]any {
 	switch strings.TrimSpace(contracts.StringField(event, "kind")) {
 	case domainevent.AcceptedFinalDeliveryBatchKind, domainevent.GeneralTerminalDeliveryBatchKind:
 		return event
+	case "compaction_started", "compaction_completed", "compaction_failed":
+		// Every supported compaction wire version is closed and trace-free.
+		// Preserve legacy replay too; this does not upgrade its summary facts.
+		return event
+	case "pipeline_stage":
+		// Logical-step metadata is deliberately closed and trace-free in both
+		// live delivery and replay. A trace field would reject this event before
+		// downstream consumers can receive the later terminal batch.
+		switch contracts.StringField(event, "stage") {
+		case "logical_step_started", "logical_step_assembled", "logical_step_closed":
+			return event
+		}
 	}
 	out := make(map[string]any, len(event))
 	for key, value := range event {

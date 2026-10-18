@@ -4849,6 +4849,8 @@ describe('AgentLoop', () => {
       threadId: h.threadId,
       request: { reason: 'manual test' }
     })
+    expect(compacted.replacedTokens).toBeGreaterThan(0)
+    if (!('summary' in compacted)) throw new Error('Expected a completed compaction response with summary.')
     expect(compacted.summary).toContain('original requirement alpha')
 
     const next = await h.turns.startTurn({

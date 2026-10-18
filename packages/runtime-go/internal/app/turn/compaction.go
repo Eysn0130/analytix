@@ -23,6 +23,7 @@ const CaseCompactionSummaryTextV1 = "Case-bound history compacted. No case facts
 const GeneralCompactionSummaryTextV3 = domainevent.GeneralCompactionSummaryTextV3
 
 type CompactionInput struct {
+	SummaryFacts               *threaddomain.CompactionSummaryFactsV1
 	ThreadID                   string
 	Model                      string
 	Turns                      []any
@@ -60,7 +61,11 @@ func BuildThreadCompaction(thread map[string]any, threadID, reason string, stamp
 }
 
 func BuildThreadCompactionWithMode(thread map[string]any, threadID, reason string, stamp int64, now string, auto bool) CompactionPlan {
-	return buildThreadCompactionWithModeAndCaseAuthority(thread, threadID, reason, stamp, now, auto, nil, nil, nil)
+	return buildThreadCompactionWithModeAndCaseAuthority(thread, threadID, reason, stamp, now, auto, nil, nil, nil, nil)
+}
+
+func BuildThreadCompactionWithSummary(thread map[string]any, threadID, reason string, stamp int64, now string, auto bool, facts threaddomain.CompactionSummaryFactsV1) CompactionPlan {
+	return buildThreadCompactionWithModeAndCaseAuthority(thread, threadID, reason, stamp, now, auto, nil, nil, nil, &facts)
 }
 
 func BuildThreadCompactionWithCaseAuthority(
@@ -81,7 +86,7 @@ func BuildThreadCompactionWithCaseAuthority(
 		inherited = activeInherited[0]
 	}
 	return buildThreadCompactionWithModeAndCaseAuthority(
-		thread, threadID, reason, stamp, now, auto, &continuation, authorityTurnIDs, inherited,
+		thread, threadID, reason, stamp, now, auto, &continuation, authorityTurnIDs, inherited, nil,
 	)
 }
 
@@ -94,6 +99,7 @@ func buildThreadCompactionWithModeAndCaseAuthority(
 	continuation *threaddomain.TaskContinuationSnapshotV1,
 	authorityTurnIDs []string,
 	activeInherited []domainsecurity.ActiveInheritedTurnV1,
+	facts *threaddomain.CompactionSummaryFactsV1,
 ) CompactionPlan {
 	turns, _ := thread["turns"].([]any)
 	authorities, err := domainturnterminal.GeneralTerminalProjectionAuthoritiesV1(thread)
@@ -101,7 +107,8 @@ func buildThreadCompactionWithModeAndCaseAuthority(
 		return CompactionPlan{Result: threaddomain.CompactionResult{ThreadID: strings.TrimSpace(threadID), RemainingTurns: len(turns)}, Error: err}
 	}
 	return BuildCompaction(CompactionInput{
-		ThreadID: threadID, Model: stringField(thread, "model"), Turns: turns, SecurityContext: thread["securityState"],
+		SummaryFacts: facts,
+		ThreadID:     threadID, Model: stringField(thread, "model"), Turns: turns, SecurityContext: thread["securityState"],
 		CaseMarker: hasCompactionCaseMarker(thread), Auto: auto, ContinuationThread: thread, Reason: reason, Stamp: stamp, Now: now,
 		GeneralTerminalAuthorities: authorities, CaseContinuation: continuation,
 		CaseAuthorityTurnIDs: append([]string(nil), authorityTurnIDs...),
@@ -115,6 +122,9 @@ func BuildCompaction(input CompactionInput) CompactionPlan {
 	caseBound, err := compactionCaseBound(input.SecurityContext, turns, threadID, input.CaseMarker)
 	if err != nil {
 		return CompactionPlan{Result: threaddomain.CompactionResult{ThreadID: threadID, RemainingTurns: len(turns)}, Error: err}
+	}
+	if input.SummaryFacts != nil && caseBound {
+		return CompactionPlan{Error: errors.New("ordinary summary cannot compact case history")}
 	}
 	authorizedCase := caseBound && validCaseCompactionContinuation(input.SecurityContext, input.CaseContinuation) &&
 		validCaseCompactionAuthorityTurnIDs(turns, input.CaseAuthorityTurnIDs, threadID)
@@ -218,6 +228,15 @@ func BuildCompaction(input CompactionInput) CompactionPlan {
 	if caseBound {
 		replacedTokens = estimateCompactedTokensFromTurns(compactedTurns)
 	}
+	finishedAt := now
+	if facts := input.SummaryFacts; facts != nil {
+		if threaddomain.ValidateCompactionSummaryFactsV1(*facts) != nil || facts.CompactionID != itemID ||
+			facts.SourceDigest != sourceDigest || !equalCompactionIDs(facts.SourceItemIDs, sourceItemIDs) ||
+			facts.ShadowedItemCount != compactionInventoryCount(compactedTurns) {
+			return CompactionPlan{Error: errors.New("ordinary summary does not match the selected history")}
+		}
+		summary, replacedTokens, finishedAt = facts.Summary, facts.ReplacedTokens, facts.FinishedAt
+	}
 	pinnedConstraints := []string{"user: preserve recent turns"}
 	summaryItem := map[string]any{
 		"id":                itemID,
@@ -226,7 +245,7 @@ func BuildCompaction(input CompactionInput) CompactionPlan {
 		"role":              "system",
 		"status":            "completed",
 		"createdAt":         now,
-		"finishedAt":        now,
+		"finishedAt":        finishedAt,
 		"kind":              "compaction",
 		"summary":           summary,
 		"replacedTokens":    float64(replacedTokens),
@@ -264,6 +283,18 @@ func BuildCompaction(input CompactionInput) CompactionPlan {
 			summaryItem["providerHistoryProjectionVersion"] = float64(2)
 			summaryItem["taskContinuation"] = threaddomain.TaskContinuationSnapshotMapV1(continuation)
 		}
+		if facts := input.SummaryFacts; facts != nil {
+			delete(summaryItem, "assistantProseExcluded")
+			summaryItem["schemaVersion"] = float64(5)
+			summaryItem["providerHistoryProjectionVersion"] = float64(3)
+			summaryItem["summaryKind"] = "conversation"
+			summaryItem["compactionId"] = itemID
+			summaryItem["summaryDigest"] = facts.SummaryDigest
+			summaryItem["checkpointDigest"] = facts.CheckpointDigest
+			summaryItem["shadowedItemCount"] = float64(facts.ShadowedItemCount)
+			summaryItem["tokenCountKind"] = "estimated"
+			summaryItem["tokenEstimatorVersion"] = float64(1)
+		}
 	}
 	summaryItem["reasoningExclusionProof"] = domainevent.ReasoningExclusionProof(summaryItem)
 	compactTurn := map[string]any{
@@ -274,7 +305,7 @@ func BuildCompaction(input CompactionInput) CompactionPlan {
 		"model":      strings.TrimSpace(input.Model),
 		"createdAt":  now,
 		"startedAt":  now,
-		"finishedAt": now,
+		"finishedAt": finishedAt,
 		"items":      []any{summaryItem},
 	}
 	nextTurns := make([]any, 0, len(tailTurns))
@@ -298,6 +329,7 @@ func BuildCompaction(input CompactionInput) CompactionPlan {
 	}
 	return CompactionPlan{
 		Result: threaddomain.CompactionResult{
+			SummaryFacts:            input.SummaryFacts,
 			ThreadID:                threadID,
 			TurnID:                  turnID,
 			ItemID:                  itemID,
@@ -314,6 +346,29 @@ func BuildCompaction(input CompactionInput) CompactionPlan {
 		NextTurns: nextTurns,
 		Changed:   true,
 	}
+}
+
+func compactionInventoryCount(turns []any) int {
+	count := 0
+	for _, raw := range turns {
+		turn, _ := raw.(map[string]any)
+		if items, ok := turn["items"].([]any); ok {
+			count += len(items)
+		}
+	}
+	return count
+}
+
+func equalCompactionIDs(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func compactionContainsAcceptedFinal(turns []any) bool {
@@ -953,65 +1008,6 @@ func compactionSourceItemIDs(items []map[string]any) []string {
 		}
 	}
 	return ids
-}
-
-func compactionSummary(items []map[string]any, reason string) string {
-	lines := []string{"Compacted conversation history."}
-	if reason != "" {
-		lines = append(lines, "Reason: "+reason+".")
-	}
-	for _, item := range items {
-		text := compactionItemSummaryText(item)
-		if text == "" {
-			continue
-		}
-		lines = append(lines, "- "+text)
-		if len(lines) >= 8 {
-			break
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func compactionItemSummaryText(item map[string]any) string {
-	kind := stringField(item, "kind")
-	switch kind {
-	case "user_message", "assistant_text":
-		if text := truncateCompactionText(stringField(item, "text"), 220); text != "" {
-			return kind + ": " + text
-		}
-	case "tool_call":
-		return "tool_call: " + firstNonEmptyCompactionString(stringField(item, "toolName"), "unknown_tool")
-	case "tool_result":
-		return "tool_result: " + firstNonEmptyCompactionString(stringField(item, "toolName"), "unknown_tool")
-	case "compaction":
-		if summary := truncateCompactionText(stringField(item, "summary"), 220); summary != "" {
-			return "compaction: " + summary
-		}
-	}
-	return ""
-}
-
-func truncateCompactionText(text string, limit int) string {
-	trimmed := strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-	if trimmed == "" {
-		return ""
-	}
-	runes := []rune(trimmed)
-	if len(runes) <= limit {
-		return trimmed
-	}
-	if limit <= 3 {
-		return string(runes[:limit])
-	}
-	return strings.TrimSpace(string(runes[:limit-3])) + "..."
-}
-
-func firstNonEmptyCompactionString(value string, fallback string) string {
-	if strings.TrimSpace(value) != "" {
-		return strings.TrimSpace(value)
-	}
-	return fallback
 }
 
 func estimateCompactedTokens(items []map[string]any) int {

@@ -9,6 +9,8 @@ const (
 	LocalDisplayImportMappingPathV1      = "/v1/local-display/import-mapping-preview"
 	LocalDisplayCleaningDiffPathV1       = "/v1/local-display/cleaning-diff-preview"
 	LocalDisplayDirectPreviewPathV1      = "/v1/local-display/direct-source-preview"
+	UserInputLocalDisplayPathV1          = "/v1/local-display/user-input"
+	ToolResultLocalDisplayPathV1         = "/v1/local-display/tool-result-snapshot"
 	LocalDisplayAcceptedSlotsPathV1      = "/v1/local-display/accepted-slot-display"
 	HostFundsImportStagePathV1           = "/v1/local-display/funds-import/stage"
 	HostFundsImportConfirmPathV1         = "/v1/local-display/funds-import/confirm"
@@ -92,7 +94,7 @@ func MatchRuntimeRoute(path string) RuntimeRouteMatch {
 		return RuntimeRouteMatch{Route: RouteProviderRegistry}
 	case path == MediaExecutionPathV1:
 		return RuntimeRouteMatch{Route: RouteMediaExecution}
-	case path == LocalDisplayImportMappingPathV1 || path == LocalDisplayCleaningDiffPathV1 ||
+	case path == ScheduleAdmissionPathV1 || path == UserInputLocalDisplayPathV1 || path == ProcessLocalDisplayReadPathV1 || path == ProcessLocalDisplayTargetPathV1 || path == ToolResultLocalDisplayPathV1 || path == LocalDisplayImportMappingPathV1 || path == LocalDisplayCleaningDiffPathV1 ||
 		path == LocalDisplayDirectPreviewPathV1 || path == LocalDisplayAcceptedSlotsPathV1 ||
 		path == HostFundsImportStagePathV1 || path == HostFundsImportConfirmPathV1 ||
 		path == HostFundsImportCancelPathV1 || path == HostFundsImportStatusPathV1 ||

@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import { URL } from 'node:url'
 import type { AppSettingsV1 } from '../shared/app-settings'
 import { analytixThreadEventsPath } from '../shared/analytix-endpoints'
-import { GeneralTerminalDeliveryBatchV1Schema } from '../../packages/runtime/src/contracts/events'
 import {
   containsPrivateAcceptedFinalAuthority,
   PublicRuntimeEventFilter
@@ -11,7 +10,8 @@ import {
 import {
   isPublicRuntimeSseRejectionReasonCode,
   projectPublicRuntimeSseBlock,
-  takePublicRuntimeSseBlock
+  takePublicRuntimeSseBlock,
+  type PublicRuntimeSseDecodeDiagnostic
 } from '../shared/public-runtime-sse'
 import { sseAckPayloadSchema, sseStartPayloadSchema, streamIdSchema } from './ipc/app-ipc-schemas'
 import type { JsonSettingsStore } from './settings-store'
@@ -55,6 +55,9 @@ const SSE_START_TIMEOUT_MS = 15_000
 const SSE_ENSURE_RETRY_WINDOW_MS = 45_000
 const SSE_PENDING_EVENT_BATCH_MS = 16
 const SSE_ACK_GRACE_MS = 500
+const SSE_REPLAY_TIMEOUT_MS = 45_000
+// An ordinary terminal carrier can contain 8 MiB of text before JSON escaping.
+const SSE_REPLAY_MAX_FRAME_CHARS = 64 * 1024 * 1024
 
 const sseControllers = new Map<string, SseControllerState>()
 const sseOwnerDestroyedHandlers = new WeakMap<WebContents, () => void>()
@@ -276,6 +279,8 @@ export function registerRuntimeSseIpc(options: {
   }
   ipcMain.handle('runtime:sse:start', async (event, args: unknown) => {
     const request = sseStartPayloadSchema.parse(args)
+    const replayThroughSeq = request.replayThroughSeq
+    const replay = replayThroughSeq !== undefined
     const loadedSettings = await store.load()
     const ownerId = webContentsOwnerId(event.sender)
     const requestedId = request.streamId?.trim() ?? ''
@@ -303,6 +308,14 @@ export function registerRuntimeSseIpc(options: {
     }
     sseControllers.set(id, state)
     ensureSseOwnerDestroyedObserver(event.sender)
+    const replayTimeout = replay ? setTimeout(() => {
+      if (sseControllers.get(id) !== state || ac.signal.aborted) return
+      sendSseMessage(event.sender, 'runtime:sse-error', {
+        streamId: id, ...publicSseError('', 'sse_stream_error')
+      })
+      stopSseController(state)
+      deleteControllerIfCurrent(id, state)
+    }, SSE_REPLAY_TIMEOUT_MS) : undefined
 
     ;(async () => {
       const wc = event.sender
@@ -392,7 +405,7 @@ export function registerRuntimeSseIpc(options: {
           })
           const url = new URL(`${base}${analytixThreadEventsPath(request.threadId)}`)
           url.searchParams.set('since_seq', String(state.ackedSinceSeq))
-          url.searchParams.set('live', '1')
+          if (!replay) url.searchParams.set('live', '1')
           const requestHeaders = { ...headers }
           if (state.ackedSinceSeq > 0) {
             requestHeaders['Last-Event-ID'] = String(state.ackedSinceSeq)
@@ -401,8 +414,12 @@ export function registerRuntimeSseIpc(options: {
           }
           try {
             const res = await fetchSseWithStartTimeout(url, requestHeaders, ac.signal, SSE_START_TIMEOUT_MS)
+            if (state.stoppedByClient || ac.signal.aborted) {
+              void res.body?.cancel().catch(() => undefined)
+              return
+            }
             if (!res.ok || !res.body) {
-              if (isFatalSseStatus(res.status)) {
+              if (replay || isFatalSseStatus(res.status)) {
                 if (!sendSseMessage(wc, 'runtime:sse-error', { streamId: id, status: res.status })) {
                   stopSseController(state)
                 }
@@ -427,7 +444,14 @@ export function registerRuntimeSseIpc(options: {
             let terminalRuntimeEventSeen = false
             let terminalAckRequired = false
             let protocolViolationReason = ''
+            let protocolViolationDiagnostic: PublicRuntimeSseDecodeDiagnostic | undefined
+            const recordDecoderDiagnostic = (diagnostic: PublicRuntimeSseDecodeDiagnostic): void => {
+              protocolViolationDiagnostic ??= diagnostic
+            }
             let refreshConnectionAuthority = false
+            let replayBoundaryReached = false
+            const replayAuthorityIsCurrent = (): boolean => !replay || !connectionAuthorityPin ||
+              authorityPinIsCurrent(connectionAuthorityPin)
 
             const flushEvents = (): boolean => {
               if (throttleTimer) {
@@ -439,13 +463,18 @@ export function registerRuntimeSseIpc(options: {
                 return false
               }
               if (pendingEvents.length === 0) return true
+              if (!replayAuthorityIsCurrent()) {
+                protocolViolationReason = 'invalid_public_projection'
+                pendingEvents = []
+                return false
+              }
 
               let batchMaxSeq = state.deliveredSinceSeq
               for (const event of pendingEvents) {
                 if (typeof event.seq === 'number') {
                   batchMaxSeq = Math.max(batchMaxSeq, event.seq)
                 }
-                if (isTerminalRuntimeSseEvent(event)) {
+                if (isTerminalRuntimeSseEvent(event) && (!replay || event.kind !== 'general_terminal_batch')) {
                   terminalRuntimeEventSeen = true
                   if (event.kind === 'accepted_final_batch') terminalAckRequired = true
                 }
@@ -469,7 +498,12 @@ export function registerRuntimeSseIpc(options: {
             }
 
             const admitEvent = (event: Record<string, unknown>): boolean => {
+              if (replay && event.kind === 'error' && (event.terminal === true || event.fatal === true || event.code === 'sse_setup_error')) {
+                protocolViolationReason = 'invalid_public_projection'
+                return false
+              }
               if (event.kind === 'accepted_final_batch') {
+                if (replay) { protocolViolationReason = 'invalid_public_projection'; return false }
                 const verificationStartedAt = performance.now()
                 if (!connectionAuthorityPin) {
                   protocolViolationReason = connectionAuthorityPinUnavailableReason
@@ -520,7 +554,7 @@ export function registerRuntimeSseIpc(options: {
                 pendingEvents.push(verified.batch)
                 terminalAckRequired = true
                 flushEvents()
-                return false
+                return replay
               }
               if (!acceptedFinalAuthorityIsValid(event)) {
                 protocolViolationReason = 'accepted_final_authority_invalid'
@@ -533,6 +567,7 @@ export function registerRuntimeSseIpc(options: {
             try {
               while (true) {
                 const { done, value } = await reader.read()
+                if (state.stoppedByClient || ac.signal.aborted) break
                 if (done) break
                 buffer += dec.decode(value, { stream: true })
                 let next: { block: string; rest: string } | null
@@ -540,7 +575,13 @@ export function registerRuntimeSseIpc(options: {
                 while ((next = takePublicRuntimeSseBlock(buffer)) !== null) {
                   const block = next.block
                   buffer = next.rest
-                  const decision = projectPublicRuntimeSseBlock(block, state.threadId, state.publicEventFilter)
+                  if (replay && block.length > SSE_REPLAY_MAX_FRAME_CHARS) {
+                    protocolViolationReason = 'malformed_frame'
+                    break
+                  }
+                  const decision = projectPublicRuntimeSseBlock(
+                    block, state.threadId, state.publicEventFilter, recordDecoderDiagnostic
+                  )
                   if (decision === null) continue
                   if (decision.status === 'revoke') {
                     // Revocation is a terminal, non-durable control. Never
@@ -551,42 +592,52 @@ export function registerRuntimeSseIpc(options: {
                     break
                   }
                   if (decision.status !== 'emit') {
-                    if (process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1') {
-                      const kind = /^event: ([A-Za-z_]+)$/m.exec(block)?.[1] ?? ''
-                      const diagnostic: Record<string, unknown> = { kind, reason: decision.reason }
-                      if (kind === 'general_terminal_batch') {
-                        try {
-                          const dataLine = block.split(/\r?\n/).find((line) => line.startsWith('data: ')) ?? ''
-                          const batch = JSON.parse(dataLine.slice(6)) as Record<string, unknown>
-                          const schema = GeneralTerminalDeliveryBatchV1Schema.safeParse(batch)
-                          const nested = Array.isArray(batch.events) ? batch.events : []
-                          diagnostic.schemaValid = schema.success
-                          diagnostic.issuePaths = schema.success ? [] : schema.error.issues.slice(0, 12)
-                            .map((issue) => `${issue.path.join('.')}:${issue.code}`)
-                          diagnostic.issueKeys = schema.success ? [] : schema.error.issues.slice(0, 12)
-                            .filter((issue) => issue.code === 'unrecognized_keys')
-                            .flatMap((issue) => issue.keys)
-                          diagnostic.verificationReason = generalTerminalDeliveryBatchVerificationV1(batch).reason
-                          diagnostic.nestedKinds = nested.map((event) => event && typeof event === 'object'
-                            ? String((event as Record<string, unknown>).kind ?? '') : '')
-                        } catch {
-                          diagnostic.parseFailed = true
-                        }
-                      }
-                      console.error('[packaged-sse-schema] ' + JSON.stringify(diagnostic))
-                    }
                     protocolViolationReason = decision.reason
                     break
                   }
+                  if (replay) {
+                    // Setup errors use the requested cursor (including zero),
+                    // so they must fail before normal replay deduplication.
+                    if (decision.event.kind === 'error' && (decision.event.terminal === true ||
+                        decision.event.fatal === true || decision.event.code === 'sse_setup_error')) {
+                      protocolViolationReason = 'invalid_public_projection'
+                      break
+                    }
+                    if (decision.seq > replayThroughSeq!) {
+                      if (typeof decision.event.firstSeq === 'number' && decision.event.firstSeq <= replayThroughSeq!) {
+                        protocolViolationReason = 'invalid_public_projection'
+                      } else {
+                        replayBoundaryReached = true
+                      }
+                      break
+                    }
+                    if (decision.seq <= state.ackedSinceSeq) continue
+                    if (typeof decision.event.firstSeq === 'number' && decision.event.firstSeq <= state.ackedSinceSeq) {
+                      protocolViolationReason = 'invalid_public_projection'
+                      break
+                    }
+                  }
                   if (!admitEvent(decision.event)) break
-                  if (!firstEventFlushed) {
+                  if (replay) {
+                    if (!flushEvents()) break
+                    await waitForSseAck(state, state.deliveredSinceSeq, ac.signal, null)
+                    if (state.stoppedByClient || ac.signal.aborted) break
+                    if (!replayAuthorityIsCurrent()) {
+                      protocolViolationReason = 'invalid_public_projection'
+                      break
+                    }
+                  } else if (!firstEventFlushed) {
                     firstEventFlushed = true
                     if (!flushEvents()) break
                   } else {
                     hasNewEvents = true
                   }
                 }
-                if (terminalRuntimeEventSeen || protocolViolationReason || refreshConnectionAuthority) break
+                if (state.stoppedByClient || ac.signal.aborted || terminalRuntimeEventSeen || protocolViolationReason || refreshConnectionAuthority || replayBoundaryReached) break
+                if (replay && buffer.length > SSE_REPLAY_MAX_FRAME_CHARS) {
+                  protocolViolationReason = 'malformed_frame'
+                  break
+                }
                 if (hasNewEvents && !throttleTimer) {
                   throttleTimer = setTimeout(() => {
                     throttleTimer = undefined
@@ -595,12 +646,29 @@ export function registerRuntimeSseIpc(options: {
                 }
               }
               buffer += dec.decode()
+              if (replay && !replayBoundaryReached && !state.stoppedByClient && !ac.signal.aborted &&
+                  buffer.length > SSE_REPLAY_MAX_FRAME_CHARS) protocolViolationReason = 'malformed_frame'
               // A delivered terminal ends this connection. Coalesced later history
               // belongs to a subsequent replay, not to an incomplete final frame.
-              if (!terminalRuntimeEventSeen && buffer.trim() && !protocolViolationReason && !refreshConnectionAuthority) {
-                const decision = projectPublicRuntimeSseBlock(buffer, state.threadId, state.publicEventFilter)
+              if (!state.stoppedByClient && !ac.signal.aborted && !terminalRuntimeEventSeen && !replayBoundaryReached &&
+                  buffer.trim() && !protocolViolationReason && !refreshConnectionAuthority) {
+                const decision = projectPublicRuntimeSseBlock(
+                  buffer, state.threadId, state.publicEventFilter, recordDecoderDiagnostic
+                )
                 if (decision?.status === 'emit') {
-                  admitEvent(decision.event)
+                  if (replay && decision.event.kind === 'error' && (decision.event.terminal === true ||
+                      decision.event.fatal === true || decision.event.code === 'sse_setup_error')) {
+                    protocolViolationReason = 'invalid_public_projection'
+                  } else if (replay && decision.seq > replayThroughSeq!) {
+                    if (typeof decision.event.firstSeq === 'number' && decision.event.firstSeq <= replayThroughSeq!) {
+                      protocolViolationReason = 'invalid_public_projection'
+                    }
+                  } else if (replay && decision.seq > state.ackedSinceSeq &&
+                      typeof decision.event.firstSeq === 'number' && decision.event.firstSeq <= state.ackedSinceSeq) {
+                    protocolViolationReason = 'invalid_public_projection'
+                  } else if (!replay || decision.seq > state.ackedSinceSeq) {
+                    admitEvent(decision.event)
+                  }
                 } else if (decision?.status === 'revoke') {
                   pendingEvents = [decision.event]
                   terminalRuntimeEventSeen = true
@@ -631,6 +699,7 @@ export function registerRuntimeSseIpc(options: {
               }
             }
             if (refreshConnectionAuthority) {
+              if (replay) throw new Error('replay authority changed')
               continue
             }
             if (protocolViolationReason) {
@@ -650,8 +719,12 @@ export function registerRuntimeSseIpc(options: {
               })
               logError('sse', 'SSE event rejected', {
                 code: publicError.code,
-                reasonCode
+                reasonCode,
+                ...(protocolViolationDiagnostic ? { diagnostic: protocolViolationDiagnostic } : {})
               })
+              if (protocolViolationDiagnostic && process.env.ANALYTIX_RUNTIME_GO_ACTUAL_PACKAGED_SOAK === '1') {
+                console.error('[packaged-sse-schema] ' + JSON.stringify({ reasonCode, diagnostic: protocolViolationDiagnostic }))
+              }
               return
             }
             if (terminalRuntimeEventSeen && terminalAckRequired) {
@@ -660,11 +733,17 @@ export function registerRuntimeSseIpc(options: {
             if (terminalRuntimeEventSeen) {
               return
             }
-            await waitForSseAck(state, state.deliveredSinceSeq, ac.signal)
+            await waitForSseAck(state, state.deliveredSinceSeq, ac.signal, replay ? null : SSE_ACK_GRACE_MS)
+            if (replay) {
+              if (!state.stoppedByClient && !ac.signal.aborted && !replayAuthorityIsCurrent()) {
+                throw new Error('replay authority changed')
+              }
+              return
+            }
           } catch (e) {
             if (state.stoppedByClient || ac.signal.aborted) return
             const rawMsg = e instanceof Error ? e.message : String(e)
-            if (/sse start timeout/i.test(rawMsg) || /fetch failed/i.test(rawMsg) || /network/i.test(rawMsg)) {
+            if (!replay && (/sse start timeout/i.test(rawMsg) || /fetch failed/i.test(rawMsg) || /network/i.test(rawMsg))) {
               await sleepWithAbort(reconnectDelayMs, ac.signal)
               reconnectDelayMs = Math.min(reconnectDelayMs * 2, SSE_RECONNECT_MAX_MS)
               continue
@@ -684,10 +763,16 @@ export function registerRuntimeSseIpc(options: {
         deleteControllerIfCurrent(id, state)
       }
     })().catch(() => {
+      if (replay && !state.stoppedByClient && !ac.signal.aborted) {
+        sendSseMessage(event.sender, 'runtime:sse-error', { streamId: id, ...publicSseError('', 'sse_stream_error') })
+        stopSseController(state)
+      }
       deleteControllerIfCurrent(id, state)
       logError('sse', 'SSE worker crashed', {
         code: 'sse_worker_error'
       })
+    }).finally(() => {
+      if (replayTimeout !== undefined) clearTimeout(replayTimeout)
     })
 
     return { streamId: id }
@@ -703,11 +788,23 @@ export function registerRuntimeSseIpc(options: {
   })
 
   ipcMain.handle('runtime:sse:ack', async (event, args: unknown) => {
-    const ack = sseAckPayloadSchema.parse(args)
-    const state = sseControllers.get(ack.streamId)
-    if (!state || state.owner !== event.sender || state.ownerId !== webContentsOwnerId(event.sender) ||
-        (ack.seq !== state.ackedSinceSeq && !state.deliveredAckSeqs.has(ack.seq))) {
+    const rejectAck = (reasonCode: 'invalid_ack_request' | 'stream_unavailable' | 'owner_mismatch' |
+      'undelivered_sequence' | 'accepted_final_receipt_mismatch' | 'accepted_final_sequence_invalid' |
+      'unexpected_accepted_final_receipt'): false => {
+      try { logError('sse', 'SSE acknowledgement rejected', { code: 'sse_ack_rejected', reasonCode }) }
+      catch { /* Diagnostics must not change the ACK contract. */ }
       return false
+    }
+    let ack: ReturnType<typeof sseAckPayloadSchema.parse>
+    try { ack = sseAckPayloadSchema.parse(args) }
+    catch (error) { rejectAck('invalid_ack_request'); throw error }
+    const state = sseControllers.get(ack.streamId)
+    if (!state) return rejectAck('stream_unavailable')
+    if (state.owner !== event.sender || state.ownerId !== webContentsOwnerId(event.sender)) {
+      return rejectAck('owner_mismatch')
+    }
+    if (ack.seq !== state.ackedSinceSeq && !state.deliveredAckSeqs.has(ack.seq)) {
+      return rejectAck('undelivered_sequence')
     }
     const acceptedFinalAck = 'batchId' in ack ? ack : null
     const required = state.requiredAcceptedFinalAck
@@ -716,13 +813,13 @@ export function registerRuntimeSseIpc(options: {
         if (!acceptedFinalAck || acceptedFinalAck.batchId !== required.batchId ||
             acceptedFinalAck.threadId !== required.threadId || acceptedFinalAck.turnId !== required.turnId ||
             acceptedFinalAck.publicationCommitId !== required.publicationCommitId) {
-          return false
+          return rejectAck('accepted_final_receipt_mismatch')
         }
       } else if (acceptedFinalAck || ack.seq > required.seq) {
-        return false
+        return rejectAck('accepted_final_sequence_invalid')
       }
     } else if (acceptedFinalAck) {
-      return false
+      return rejectAck('unexpected_accepted_final_receipt')
     }
     state.ackedSinceSeq = Math.max(state.ackedSinceSeq, ack.seq)
     if (required && ack.seq === required.seq) state.requiredAcceptedFinalAck = undefined

@@ -119,3 +119,16 @@ func TestBuildLoopGuardEvent(t *testing.T) {
 		t.Fatalf("unexpected loop guard event: %#v", guard)
 	}
 }
+
+func TestProviderRetryLifecycleBuilderPreservesOwnerTimestampAndLegacyRecovery(t *testing.T) {
+	retry := map[string]any{"schemaVersion": float64(1), "source": "provider_retry", "phase": "started", "logicalSequence": float64(7), "outerAttempt": float64(2)}
+	event := BuildProviderRetryingEvent(ProviderRetryingEventInput{ThreadID: "thread", TurnID: "turn", Attempt: 2, MaxAttempts: 3, Retry: retry, Timestamp: "2026-10-07T01:02:03.000004Z"})
+	if event["timestamp"] != "2026-10-07T01:02:03.000004Z" || event["attempt"] != float64(2) || event["maxAttempt"] != float64(3) || event["details"].(map[string]any)["retry"] == nil {
+		t.Fatalf("retry owner lost: %#v", event)
+	}
+	for _, legacy := range []map[string]any{BuildProviderRetryingEvent(ProviderRetryingEventInput{Attempt: 2, MaxAttempts: 3}), BuildStreamInterruptedRecoveryEvent(StreamInterruptedRecoveryEventInput{Attempt: 1, MaxAttempts: 2})} {
+		if legacy["details"].(map[string]any)["retry"] != nil {
+			t.Fatal("legacy replay/visible recovery invented phase")
+		}
+	}
+}

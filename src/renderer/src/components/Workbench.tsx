@@ -1,18 +1,24 @@
+import { extractRequestedSkillIds } from '../lib/composer-mentions'
+import { useDocxEditorStore,isDocxPath,ensureLocalDocumentThread } from '../office/docx-editor-store'
 import { validateBrowserReferences } from '../write/browser-references'
 import { validateCanvasReferences } from '../canvas/canvas-references'
 import { validateImageReferences } from '../write/image-references'
 import { canvasPreviewSessions } from '../canvas/canvas-preview-owner'
 import { openCanvasWorkspaceObject } from '../canvas/canvas-workspace-open'
 import { nativeWorkspaceCommandFromInput, type NativeWorkspaceCommand } from '@shared/native-office'
-import { useNativeReferenceStore, nativeReferencesPrompt, nativeActionReferencesCurrent, type NativeReference } from '../office/native-reference-store'
+import { useNativeReferenceStore, nativeReferencesPrompt, nativeActionReferencesCurrent, nativeOfficeDraftReferencesCurrent, validateOfficeReferences, docxReferenceCurrent, type NativeReference } from '../office/native-reference-store'
 import { workbenchReferencesCurrent } from '../write/workbench-reference-snapshot'
 import { useThreadComposerDraft } from './chat/use-thread-composer-draft'
-import { isNativeOfficeFilePath, isWriteWorkspaceFilePath } from '@shared/write-text-file'
+import { isNativeOfficeFilePath } from '@shared/write-text-file'
 import type { CSSProperties, ReactElement } from 'react'
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowDown } from '../design/AnalytixUiIcons'
+import { ArrowDown, FileText, Globe, ImageIcon, Info, Shapes } from '../design/AnalytixUiIcons'
+import { createPortal } from 'react-dom'
+import { ComposerReferenceChip } from './chat/ComposerReferenceChip'
+import { useAnchoredPanel } from './chat/presentation/useAnchoredPanel'
+import panelCss from './chat/presentation/AnchoredPanel.module.css'
 import {
   modelSupportsImageInput,
   type ApprovalPolicy,
@@ -40,11 +46,18 @@ import type {
   CoreThreadSummarySubagentJson
 } from '../agent/analytix-contract'
 import { getProvider } from '../agent/registry'
+import { isOrdinaryDisplayHistoryBlock } from '../agent/analytix-mapper'
 import { rendererRuntimeClient } from '../agent/runtime-client'
+import { isPublicProjectionRevoked } from '../lib/public-projection-revocation'
+import { invalidateSharedThreadSummary, querySharedThreadSummary } from './summary/thread-summary-resource'
+import { ThreadSummarySurface, THREAD_SUMMARY_TITLE_ID, THREAD_SUMMARY_TRIGGER_ID } from './summary/ThreadSummarySurface'
+import { SkillChildInspectionContext, skillChildRelationMatches, type SkillChildInspectionRequest } from './chat/presentation/chat/toolviews/skill-child-inspection'
 import { useChatStore } from '../store/chat-store'
 import { isClawThread, providerIdForComposerModel } from '../store/chat-store-helpers'
 import { threadHasPendingRuntimeWork } from '../store/chat-store-runtime-helpers'
-import type { AppRoute, PluginHostRoute, SideConversation } from '../store/chat-store-types'
+import type { AppRoute, PluginHostRoute, SideConversation, ThreadSelectionReceipt } from '../store/chat-store-types'
+import { composerDraftKey, type ComposerAttachmentUpload } from '../store/composer-drafts'
+import { resolveComposerContextWindow } from '../lib/context-capacity'
 import {
   extractLatestTurnAutoOpenDevPreviewUrls,
   extractLatestTurnDevPreviewUrls
@@ -52,13 +65,13 @@ import {
 import { Sidebar } from './chat/Sidebar'
 import { WorkbenchTopBar, type RightPanelMode } from './chat/WorkbenchTopBar'
 import { useWorkspaceTabsStore, workspaceObjectTabId, type WorkspaceTab } from '../store/workspace-tabs-store'
-import { useNativeOfficeStore } from '../office/native-office-store'
+import { queuedMessagesForThread } from '../store/chat-store-queue'
+import { useNativeOfficeStore, nativeOfficeTargetMatches, nativeOfficeCreateErrorKey, readNativeOfficeCreateReadiness, type NativeOfficeCreateReadiness } from '../office/native-office-store'
 import { WorkspaceTabs, WorkspaceToolSelector, workspacePanelDomId, workspaceTabDomId } from './workbench/WorkspaceTabs'
+import { openTaskDetail } from './workbench-schedule-controller'
 import { preloadAssistantMarkdownRenderer } from './chat/AssistantMarkdown'
-import type {
-  ComposerExecutionSettings,
-  ComposerFileReference
-} from './chat/FloatingComposer'
+import type { ComposerExecutionSettings } from './chat/FloatingComposerExecutionPicker'
+import type { ComposerFileReference } from '../lib/composer-file-references'
 import { ChatFileTreePanel, type ChatFileTreeReference } from './chat/ChatFileTreePanel'
 import {
   composerModelIdLooksMultimodal,
@@ -66,11 +79,14 @@ import {
   type ComposerReasoningEffort
 } from './chat/FloatingComposerModelPicker'
 import { SideConversationPanel } from './chat/SideConversationPanel'
+import { ConversationWidthControls, conversationPresentationPhase } from './chat/ConversationWidthControls'
+import { isImageThreadNavigationFrozen, subscribeImageThreadNavigation } from '../write/image-thread-navigation'
+import { requestUserInputLocalReopen } from './chat/presentation/chat/useUserInputLocalDisplay'
 import { SessionHeader } from './SessionHeader'
 import { ShellNavigationControls } from './shell/ShellNavigationControls'
 import { prepareWorkbenchDocumentMessage, workbenchEmptyMessageKeys } from '../write/workbench-document-message'
 import { resolveWriteAgentPreset } from '../write/agent-presets'
-import { useWriteWorkspaceStore } from '../write/write-workspace-store'
+import { useWriteWorkspaceStore, writeWorkspaceHasUnsettledDraft } from '../write/write-workspace-store'
 import { buildSddDraftId, createSddDraft, forgetRememberedSddDraft, useSddDraftStore } from '../sdd/sdd-draft-store'
 import type { SddDraft, SddDraftSaveStatus } from '../sdd/sdd-draft-store'
 import { listSddDraftHistory, titleFromSddDraftContent } from '../sdd/sdd-draft-history'
@@ -104,17 +120,16 @@ import { prepareImageAttachmentUpload } from '../lib/image-attachment-upload'
 import { canUploadImageAttachment, isChatAttachmentUploadEnabled } from '../lib/attachment-upload-availability'
 import { normalizeWorkspaceRoot, workspaceRootIdentityKey } from '../lib/workspace-path'
 import {
-  preloadCaseOverviewForWorkspace
+  preloadCaseOverviewForWorkspace,
+  sharedActiveCaseContextTransitionPending
 } from '../data-analysis/services/analysis/stats-case-overview-resource'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { useKeyboardShortcutSettings } from '../lib/keyboard-shortcut-settings'
 import { useUiPluginStore } from '../store/ui-plugin-store'
-import { readFocusModePreference, writeFocusModePreference } from '../lib/focus-mode'
 import {
   listenRuntimeDiagnosticsFocus,
   type RuntimeDiagnosticsFocus
 } from '../lib/runtime-diagnostics-focus'
-import { createComposerController, createComposerViewState } from '../composer/composer-controller'
 import {
   buildComposerFileContextPrompt,
   composerFileReferenceFromPath,
@@ -125,11 +140,13 @@ import {
 import { filesUnderDirectory, loadWorkspaceFileIndex } from '../lib/workspace-file-index'
 import { AnalytixLoadingPage } from './brand/AnalytixLoadingPage'
 import { ChatTimelineIsland, useDevPreviewUrls } from './workbench/ChatTimelineIsland'
-import { FloatingComposerIsland } from './workbench/FloatingComposerIsland'
+import { InputBar } from './chat/InputBar'
 import {
   ChangeInspectorIsland,
   DevBrowserPanelIsland,
   PlanPanel,
+  QuestionPlanPreview,
+  ScheduleTaskDetail,
   SddAssistantPanelIsland,
   SubagentInspectorPanelIsland,
   ThreadSummaryPanelIsland,
@@ -233,6 +250,7 @@ type SubagentInspectorState = {
   parentThreadId: string
   selectedKey: string | null
   subagents: CoreThreadSummarySubagentJson[]
+  skillInspection?: { request: SkillChildInspectionRequest; signal: AbortSignal }
 }
 
 const SIDE_CONVERSATION_INSPECTOR_KEY_PREFIX = 'side-conversation:'
@@ -514,7 +532,7 @@ function mergeSkillCommands(
 function sddAssistantContextFromBlocks(blocks: ChatBlock[], maxMessages = 10): string {
   const messages: string[] = []
   for (const block of blocks) {
-    if (block.kind !== 'user' && block.kind !== 'assistant') continue
+    if (isOrdinaryDisplayHistoryBlock(block) || block.kind !== 'user' && block.kind !== 'assistant') continue
     if (block.kind === 'user' && block.meta?.displayText) continue
     const text = block.text.trim()
     if (!text) continue
@@ -538,6 +556,57 @@ function base64ToFile(dataBase64: string, name: string, mimeType: string): File 
     bytes[index] = binary.charCodeAt(index)
   }
   return new File([bytes], name || 'image', { type: mimeType })
+}
+
+/** Protected reference display stays local; the shared chip receives no source payload. */
+function NativeReferenceChip({ reference }: { reference: NativeReference }): ReactElement {
+  const { t } = useTranslation('common')
+  const panel = useAnchoredPanel<HTMLSpanElement>({ enabled: true,
+    ownerKey: JSON.stringify([reference.threadId, reference.id, reference.revision, reference.scopeId, reference.editable]) })
+  const office = reference.kind === undefined || reference.kind === 'office'
+  const status = [
+    reference.editable === false ? t('nativeReferenceDiscussionOnly') : '',
+    !reference.scopeId || reference.kind === 'canvas' && reference.editable === false ? t('nativeReferenceRecapture') : '',
+    office && reference.selection.capture?.truncated ? t('nativeReferencePartial') : ''
+  ].filter(Boolean).join(' · ')
+  const label = [reference.label, status].filter(Boolean).join(' · ')
+  const SourceIcon = reference.kind === 'browser-selection' ? Globe : reference.kind === 'image-region' ? ImageIcon : reference.kind === 'canvas' ? Shapes : FileText
+  const openSource = reference.kind === 'canvas'
+    ? () => openCanvasWorkspaceObject(reference.workspace, reference.path)
+    : office || reference.kind==='docx' ? () => useWorkspaceTabsStore.getState().openTab({
+      id: workspaceObjectTabId(reference.workspace, reference.path), kind: 'document', mode: 'documents',
+      title: reference.path.split(/[\\/]/).at(-1) ?? reference.path,
+      path: reference.path, workspaceRoot: reference.workspace
+    }) : undefined
+  return <span ref={panel.rootRef} className="inline-flex min-w-0 max-w-full">
+    <ComposerReferenceChip title={label} remove={{ label: t('nativeReferenceRemove', { name: reference.label }),
+      onClick: () => useNativeReferenceStore.getState().remove(reference.id) }}>
+      <SourceIcon className="h-3.5 w-3.5 shrink-0 text-ds-faint" aria-hidden />
+      {openSource ? <button type="button" className="min-w-0 max-w-52 truncate" onClick={openSource}>
+        {label}
+      </button> : <span className="min-w-0 max-w-52 truncate">{label}</span>}
+      <button ref={panel.triggerRef} type="button" className="shrink-0 rounded-full p-0.5 text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
+        aria-label={t('nativeReferenceDetails', { name: reference.label })} title={t('nativeReferenceDetails', { name: reference.label })}
+        aria-haspopup="dialog" aria-expanded={panel.open} aria-controls={panel.open ? panel.id : undefined}
+        onClick={() => panel.setOpen(!panel.open)}>
+        <Info className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </ComposerReferenceChip>
+    {panel.open ? createPortal(<div id={panel.id} ref={panel.panelRef} className={panelCss.panel}
+      style={panel.style} role="dialog" aria-label={t('nativeReferenceDetails', { name: reference.label })}>
+      <div className="mb-2 break-words font-medium text-ds-ink">{reference.label}</div>
+      {status ? <p className="mb-2 break-words">{status}</p> : null}
+      {reference.kind === 'canvas' ? <p>{t('nativeReferenceCanvasSelection', { count: reference.selectedIds.length })}</p>
+        : reference.kind === 'image-region' ? <>
+          <p>{t('nativeReferenceImageSize', { width: reference.width, height: reference.height })}</p>
+          <p>{t('nativeReferenceImageRegion', reference.region)}</p>
+          <p className="mt-2">{t('imageRegionDiscussionOnly')}</p>
+        </> : reference.kind === 'browser-selection' ? <p>{t('nativeReferenceBrowserDiscussion')}</p>
+          : <>
+            {reference.editable ? <p className="mb-2">{t('nativeReferenceCanPropose')}</p> : null}
+          </>}
+    </div>, document.body) : null}
+  </span>
 }
 
 export function Workbench(): ReactElement {
@@ -564,7 +633,6 @@ export function Workbench(): ReactElement {
     runtimeConnection,
     setRoute,
     openCode,
-    openWrite,
     openSettings,
     openPlugins,
     openClaw,
@@ -627,7 +695,6 @@ export function Workbench(): ReactElement {
       runtimeConnection: s.runtimeConnection,
       setRoute: s.setRoute,
       openCode: s.openCode,
-      openWrite: s.openWrite,
       openSettings: s.openSettings,
       openPlugins: s.openPlugins,
       openClaw: s.openClaw,
@@ -642,7 +709,7 @@ export function Workbench(): ReactElement {
       setError: s.setError,
       sendMessage: s.sendMessage,
       reviewActiveThread: s.reviewActiveThread,
-      queuedMessages: s.queuedMessages,
+      queuedMessages: queuedMessagesForThread(s),
       removeQueuedMessage: s.removeQueuedMessage,
       startThreadHandoff: s.startThreadHandoff,
       hydrateThreadHandoffOperations: s.hydrateThreadHandoffOperations,
@@ -672,7 +739,7 @@ export function Workbench(): ReactElement {
   const {
     draft: composerDraft, setInput, setAttachments: setComposerAttachments,
     setFileReferences: setComposerFileReferences, clearSubmitted: clearSubmittedComposer,
-    beginAttachmentUpload, setAttachmentUploadError
+    setAttachmentUploadError, removeAttachmentUpload
   } = useThreadComposerDraft(
     threads.find((thread) => thread.id === activeThreadId)?.workspace || workspaceRoot || '',
     activeThreadId
@@ -688,12 +755,12 @@ export function Workbench(): ReactElement {
   const [composerExecutionSettings, setComposerExecutionSettings] =
     useState<ComposerExecutionSettings | null>(null)
   const [composerExecutionApplying, setComposerExecutionApplying] = useState(false)
-  const attachmentUploadBusy = (composerDraft.pendingAttachmentUploads ?? 0) > 0
+  const attachmentUploads = composerDraft.attachmentUploads ?? []
+  const attachmentUploadBusy = (composerDraft.pendingAttachmentUploads ?? 0) > 0 || attachmentUploads.some(item => item.status === 'uploading')
   const attachmentUploadError = composerDraft.attachmentUploadError ?? null
   const [connectPhoneSidebarOpen, setConnectPhoneSidebarOpen] = useState(false)
   const [activeDataAnalysis, setActiveDataAnalysis] = useState<ActiveDataAnalysis | null>(null)
   const initUiPlugins = useUiPluginStore((s) => s.initUiPlugins)
-  const [focusModeEnabled, setFocusModeEnabled] = useState(readFocusModePreference)
   const [runtimeLogPath, setRuntimeLogPath] = useState('')
   const [planPanelOverlayPreferred, setPlanPanelOverlayPreferred] = useState(false)
   const [timelineReturnToBottomState, setTimelineReturnToBottomState] =
@@ -774,6 +841,22 @@ export function Workbench(): ReactElement {
     () => threads.find((thread) => thread.id === activeThreadId) ?? null,
     [activeThreadId, threads]
   )
+  const [conversationBody, setConversationBody] = useState<HTMLDivElement | null>(null)
+  const [summaryOpenIntent, setSummaryOpenIntent] = useState(false)
+  const [summaryPinPreference, setSummaryPinPreference] = useState(true)
+  const [summaryReservedInlineEnd, setSummaryReservedInlineEnd] = useState(0)
+  const closeThreadSummary = useCallback((restoreFocus: boolean): void => {
+    setSummaryOpenIntent(false)
+    if (restoreFocus) document.getElementById(THREAD_SUMMARY_TRIGGER_ID)?.focus({ preventScroll: true })
+  }, [])
+  const conversationHasContent = useChatStore(s => Boolean(s.blocks.length || s.liveAssistant.trim() || s.currentTurnId))
+  const conversationHistoryLoading = useSyncExternalStore(subscribeImageThreadNavigation, isImageThreadNavigationFrozen, () => false)
+  const conversationPhase = conversationPresentationPhase({
+    threadId: activeThreadId,
+    hasContent: conversationHasContent,
+    historyLoading: conversationHistoryLoading,
+    summaryBlank: activeThread?.messageCount === 0
+  })
   const currentSideConversations = useMemo(
     () =>
       Object.values(sideConversations)
@@ -786,10 +869,20 @@ export function Workbench(): ReactElement {
     [currentSideConversations]
   )
   const [subagentInspector, setSubagentInspector] = useState<SubagentInspectorState | null>(null)
+  const skillInspectionGeneration = useRef(0)
+  useLayoutEffect(() => {
+    skillInspectionGeneration.current += 1
+    return () => { skillInspectionGeneration.current += 1 }
+  }, [activeThreadId])
   const [hiddenSubagentInspectorKeysByParent, setHiddenSubagentInspectorKeysByParent] =
     useState<Record<string, string[]>>({})
   const activeSubagentInspector = useMemo<SubagentInspectorState | null>(() => {
     if (subagentInspector?.parentThreadId !== activeThreadId) return null
+    const origin = subagentInspector.skillInspection
+    const selectedAgents = subagentInspector.subagents.filter(agent => agent.key === subagentInspector.selectedKey)
+    if (origin && (origin.signal.aborted || isPublicProjectionRevoked(origin.request.parentThreadId) ||
+      isPublicProjectionRevoked(origin.request.child.childThreadId) ||
+      selectedAgents.length !== 1 || !skillChildRelationMatches(selectedAgents[0], origin.request))) return null
     const hiddenKeys = new Set(activeThreadId ? hiddenSubagentInspectorKeysByParent[activeThreadId] ?? [] : [])
     const visibleSubagents = subagentInspector.subagents.filter((agent) => !hiddenKeys.has(agent.key))
     const merged = mergeSubagentInspectorItems(visibleSubagents, currentSideConversationSubagents)
@@ -869,9 +962,14 @@ export function Workbench(): ReactElement {
     leftSidebarCollapsed,
     leftResizing,
     leftSidebarWidth,
+    leftResizeMin,
+    leftResizeMax,
     openDevPreview,
     rightPanelMode,
     rightPanelVisible,
+    rightPanelAutoOverlay,
+    rightResizeMin,
+    rightResizeMax,
     rightPaneContentRef,
     rightPaneRef,
     rightResizing,
@@ -894,6 +992,7 @@ export function Workbench(): ReactElement {
     terminalPaneRef,
     terminalStageRef,
     terminalComposerRef,
+    composerHeight,
     terminalResizing,
     toggleLeftSidebar,
     toggleTerminal,
@@ -917,8 +1016,11 @@ export function Workbench(): ReactElement {
   const workspaceActiveTab = workspaceTabs.find((tab) => tab.id === workspaceActiveTabId) ?? null
   const nativeDocumentTarget = useNativeOfficeStore((state) => state.target)
   const nativeDocumentViews = useNativeOfficeStore((state) => state.views)
+  const wordCreationAttempt = useNativeOfficeStore(state => state.creationAttempt)
+  const wordCreateInFlight = useRef(false)
   const textDocumentPath = useWriteWorkspaceStore((state) => state.activeFilePath)
   const textDocumentRoot = useWriteWorkspaceStore((state) => state.workspaceRoot)
+  const textDocumentUnsettled = useWriteWorkspaceStore(writeWorkspaceHasUnsettledDraft)
   const textDocumentSaveStatus = useWriteWorkspaceStore((state) => state.saveStatus)
   const textDocumentLoading = useWriteWorkspaceStore((state) => state.fileLoading)
   const textDocumentError = useWriteWorkspaceStore((state) => state.fileError)
@@ -932,17 +1034,25 @@ export function Workbench(): ReactElement {
     setDocumentsMounted(true)
   }, [])
   useEffect(() => {
-    if (nativeDocumentTarget) registerDocumentTab(nativeDocumentTarget.workspace, nativeDocumentTarget.path)
+    if (!nativeDocumentTarget || nativeDocumentTarget.protectedPresent) return
+    const attempt = useNativeOfficeStore.getState().creationAttempt, receipt = attempt?.creation
+    if (attempt?.phase === 'created' && receipt && nativeDocumentTarget.path === receipt.path &&
+      normalizeWorkspaceRoot(nativeDocumentTarget.workspace) === normalizeWorkspaceRoot(receipt.workspace)) {
+      const chat = useChatStore.getState()
+      const currentWorkspace = chat.threads.find(thread => thread.id === chat.activeThreadId)?.workspace || chat.workspaceRoot
+      // The creation handler owns its first registration. A delayed target
+      // observer cannot revive that receipt in another thread or workspace.
+      if (!attempt.presented || chat.activeThreadId !== attempt.input.threadId ||
+        normalizeWorkspaceRoot(currentWorkspace) !== normalizeWorkspaceRoot(receipt.workspace)) return
+    }
+    registerDocumentTab(nativeDocumentTarget.workspace, nativeDocumentTarget.path)
   }, [nativeDocumentTarget, registerDocumentTab])
-  useEffect(() => {
-    if (textDocumentPath && !useNativeOfficeStore.getState().target) registerDocumentTab(textDocumentRoot, textDocumentPath)
-  }, [textDocumentPath, textDocumentRoot, registerDocumentTab])
   useEffect(() => {
     if (!textDocumentPath || !textDocumentRoot) return
     useWorkspaceTabsStore.getState().patchTab(workspaceObjectTabId(textDocumentRoot, textDocumentPath), {
-      dirty: textDocumentSaveStatus !== 'saved', loading: textDocumentLoading, error: Boolean(textDocumentError)
+      dirty: textDocumentUnsettled || textDocumentSaveStatus !== 'saved', loading: textDocumentLoading, error: Boolean(textDocumentError)
     })
-  }, [textDocumentPath, textDocumentRoot, textDocumentSaveStatus, textDocumentLoading, textDocumentError])
+  }, [textDocumentPath, textDocumentRoot, textDocumentSaveStatus, textDocumentLoading, textDocumentError, textDocumentUnsettled])
   useEffect(() => {
     const state = useWorkspaceTabsStore.getState()
     for (const tab of state.tabs) {
@@ -954,40 +1064,37 @@ export function Workbench(): ReactElement {
   const nativeReferences = useNativeReferenceStore(state => state.references)
   const documentQuotes = useWriteWorkspaceStore((state) => state.quotedSelections)
   useEffect(() => {
-    if (route !== 'write' && rightPanelMode !== 'documents') return
-    let cancelled = false
-    const root = useNativeOfficeStore.getState().target?.workspace || useWriteWorkspaceStore.getState().workspaceRoot || activeThread?.workspace || workspaceRoot
-    void (async () => {
-      if (root) await useWriteWorkspaceStore.getState().initializeWorkspace(root)
-      if (cancelled) return
-      setDocumentsMounted(true)
-      setRightPanelMode('documents')
-      setRightSidebarWidth((width) => Math.max(width, 640))
-      if (route === 'write') useChatStore.getState().setRoute('chat')
-    })()
-    return () => { cancelled = true }
-  }, [activeThread?.workspace, route, rightPanelMode, workspaceRoot, setRightPanelMode, setRightSidebarWidth])
+    if (route === 'write') {
+      // The retired no-path writing route returns to the explicit selector.
+      useChatStore.getState().setRoute('chat')
+      useWorkspaceTabsStore.getState().showSelector()
+      return
+    }
+    if (rightPanelMode !== 'documents') return
+    if (!workspaceActiveTab?.path) { useWorkspaceTabsStore.getState().showSelector(); return }
+    setDocumentsMounted(true)
+    setRightSidebarWidth(width => Math.max(width, 640))
+  }, [route,rightPanelMode,workspaceActiveTab?.id,workspaceActiveTab?.path,setRightSidebarWidth])
 
   useEffect(() => {
-    if (rightPanelMode !== 'file' || !filePreviewTarget || !isWriteWorkspaceFilePath(filePreviewTarget.path)) return
-    let cancelled = false
-    const target = filePreviewTarget
-    const root = target.workspaceRoot || workspaceRoot
+    if (rightPanelMode !== 'file' || !filePreviewTarget || filePreviewTarget.preview === 'source' ||
+      filePreviewTarget.protectedRead !== undefined || filePreviewTarget.protectedPresent !== undefined ||
+      !isNativeOfficeFilePath(filePreviewTarget.path)) return
+    const target = filePreviewTarget, root = target.workspaceRoot || workspaceRoot
+    // The document surface owns loading, typed failure and retry. A failed open
+    // must never route an ordinary DOCX back into the text-only preview.
+    if (isDocxPath(target.path)) {
+      registerDocumentTab(root,target.path);setRightPanelMode('documents');return
+    }
+    let current = true
     void (async () => {
-      await useWriteWorkspaceStore.getState().initializeWorkspace(root)
-      if (cancelled || useWriteWorkspaceStore.getState().workspaceRoot !== root) return
-      await useWriteWorkspaceStore.getState().openFile(root, target.path)
-      if (cancelled) return
-      const nativeTarget = useNativeOfficeStore.getState().target
-      const opened = isNativeOfficeFilePath(target.path)
-        ? nativeTarget?.workspace === root && nativeTarget.path === target.path
-        : useWriteWorkspaceStore.getState().activeFilePath === target.path
-      if (!opened) return
-      registerDocumentTab(root, target.path)
+      const selected = await useNativeOfficeStore.getState().select(root,target.path,() => current)
+      if (!selected || !current) return
+      registerDocumentTab(root,target.path)
       setRightPanelMode('documents')
     })()
-    return () => { cancelled = true }
-  }, [filePreviewTarget, rightPanelMode, workspaceRoot, setRightPanelMode, registerDocumentTab])
+    return () => { current = false }
+  }, [filePreviewTarget,rightPanelMode,workspaceRoot,activeThreadId,setRightPanelMode,registerDocumentTab])
 
   useEffect(() => {
     useWriteWorkspaceStore.getState().clearQuotedSelections()
@@ -1041,10 +1148,11 @@ export function Workbench(): ReactElement {
   useEffect(() => listenRuntimeDiagnosticsFocus((focus) => {
     setRuntimeDiagnosticsFocus(focus)
     preloadRightPanelIsland('summary')
-    setRightPanelMode('summary')
-  }), [setRightPanelMode])
+    setSummaryOpenIntent(true)
+  }), [])
 
-  const inspectChildAgent = useCallback((subagents: CoreThreadSummarySubagentJson[], selectedKey: string): void => {
+  const inspectChildAgent = useCallback((subagents: CoreThreadSummarySubagentJson[], selectedKey: string,
+    skillInspection?: SubagentInspectorState['skillInspection']): void => {
     if (!activeThreadId) return
     setHiddenSubagentInspectorKeysByParent((current) => {
       const hidden = current[activeThreadId]
@@ -1060,11 +1168,40 @@ export function Workbench(): ReactElement {
     setSubagentInspector({
       parentThreadId: activeThreadId,
       selectedKey,
-      subagents
+      subagents,
+      ...(skillInspection ? { skillInspection } : {})
     })
     setRightSidebarWidth((width) => Math.max(width, SUBAGENT_PANEL_PREFERRED_WIDTH))
     useWorkspaceTabsStore.getState().openTab({ id: `agent:${activeThreadId}:${selectedKey}`, kind: 'tool', mode: 'child-agent', instanceId: selectedKey, title: t('workspaceSubagent', { defaultValue: '子代理' }) })
   }, [activeThreadId, setRightSidebarWidth, t])
+
+  const inspectSkillChild = useCallback(async (request: SkillChildInspectionRequest, signal: AbortSignal): Promise<boolean> => {
+    const generation = ++skillInspectionGeneration.current
+    const ownsRequest = () => !signal.aborted && !document.hidden && submissionOwnerMounted.current &&
+      !sharedActiveCaseContextTransitionPending() &&
+      skillInspectionGeneration.current === generation && useChatStore.getState().activeThreadId === request.parentThreadId &&
+      activeThreadId === request.parentThreadId && !isPublicProjectionRevoked(request.parentThreadId) &&
+      !isPublicProjectionRevoked(request.child.childThreadId) && !useChatStore.getState().threads.some(thread =>
+        (thread.id === request.parentThreadId || thread.id === request.child.childThreadId) && thread.historyAuthority === 'case_boundary_only_v1')
+    if (!request.child.childThreadId || !ownsRequest()) return false
+    setSubagentInspector(current => current?.skillInspection ? null : current)
+    invalidateSharedThreadSummary(request.parentThreadId)
+    const summary = await querySharedThreadSummary(request.parentThreadId, { force: true })
+    if (!ownsRequest() || summary.threadId !== request.parentThreadId) return false
+    const matches = summary.subagents.filter(agent => skillChildRelationMatches(agent, request))
+    if (matches.length !== 1 || summary.subagents.filter(agent => agent.key === matches[0].key).length !== 1) return false
+    inspectChildAgent([matches[0]], matches[0].key, { request, signal })
+    return true
+  }, [activeThreadId, inspectChildAgent])
+
+  useLayoutEffect(() => {
+    const origin = subagentInspector?.skillInspection
+    if (!origin) return
+    const clear = () => setSubagentInspector(current => current?.skillInspection === origin ? null : current)
+    if (origin.signal.aborted) { clear(); return }
+    origin.signal.addEventListener('abort', clear, { once: true })
+    return () => origin.signal.removeEventListener('abort', clear)
+  }, [subagentInspector?.skillInspection])
 
   const selectSubagentInspector = useCallback((selectedKey: string): void => {
     const sideThreadId = sideConversationThreadIdFromInspectorKey(selectedKey)
@@ -1072,7 +1209,8 @@ export function Workbench(): ReactElement {
       selectSideConversation(sideThreadId)
       setSidePanelOpen(false)
     }
-    setSubagentInspector((current) => current ? { ...current, selectedKey } : current)
+    setSubagentInspector((current) => current ? { ...current, selectedKey,
+      skillInspection: current.selectedKey === selectedKey ? current.skillInspection : undefined } : current)
   }, [selectSideConversation, setSidePanelOpen])
 
   const closeSubagentInspectorTab = useCallback((key: string): void => {
@@ -1100,14 +1238,17 @@ export function Workbench(): ReactElement {
   ): void => {
     setSubagentInspector((current) => {
       if (!current || current.parentThreadId !== parentThreadId) return current
-      if (sameSubagentInspectorItems(current.subagents, subagents)) return current
+      const admitted = current.skillInspection ? subagents.filter(agent => skillChildRelationMatches(agent, current.skillInspection!.request)) : subagents
+      if (current.skillInspection && (admitted.length !== 1 || admitted[0].key !== current.selectedKey ||
+        subagents.filter(agent => agent.key === current.selectedKey).length !== 1)) return null
+      if (sameSubagentInspectorItems(current.subagents, admitted)) return current
       const selectedKey = current.selectedKey && (
-        subagents.some((agent) => agent.key === current.selectedKey) ||
+        admitted.some((agent) => agent.key === current.selectedKey) ||
         Boolean(sideConversationThreadIdFromInspectorKey(current.selectedKey))
       )
         ? current.selectedKey
-        : subagents[0]?.key ?? current.selectedKey
-      return { ...current, selectedKey, subagents }
+        : admitted[0]?.key ?? current.selectedKey
+      return { ...current, selectedKey, subagents: admitted }
     })
   }, [])
 
@@ -1158,7 +1299,8 @@ export function Workbench(): ReactElement {
       }),
     [terminalPanelMotion.animatedSize, terminalPanelMotion.isMounted]
   )
-  const chatStageStyle = workbenchScrollReserve.timelineReserveStyle
+  const chatStageStyle = { ...workbenchScrollReserve.timelineReserveStyle,
+    '--ax-conversation-composer-height': `${composerHeight}px` } as CSSProperties
   const titleForSddDraft = useCallback((draft: SddDraft): string => {
     const snapshot = useSddDraftStore.getState()
     const markdown = snapshot.activeDraft?.id === draft.id ? snapshot.content : ''
@@ -1250,7 +1392,7 @@ export function Workbench(): ReactElement {
     const onKeyDown = (event: KeyboardEvent): void => {
       // These chat menus and modal dialogs own Tab navigation, including Shift+Tab.
       if (event.key === 'Tab' && event.target instanceof Element &&
-        event.target.closest('[data-composer-menu],[data-composer-execution-menu],[data-session-actions-menu],[data-markdown-table-menu],[role="dialog"][aria-modal="true"]')) return
+        event.target.closest('[data-composer-menu],[data-composer-execution-menu],[data-session-actions-menu],[data-markdown-table-menu],[data-thread-summary-surface],[role="dialog"][aria-modal="true"]')) return
       if (event.defaultPrevented || event.repeat || event.isComposing) return
       const workspaceCommand = nativeWorkspaceCommandFromInput({key:event.key,control:event.ctrlKey,meta:event.metaKey,shift:event.shiftKey,alt:event.altKey,isComposing:event.isComposing})
       // Tab buttons own close-and-focus restoration; skip the desktop fallback.
@@ -1303,6 +1445,7 @@ export function Workbench(): ReactElement {
     keyboardShortcutBindings,
     mode,
     openSettings,
+    rightTabsPaneRef,
     setMode
   ])
   const showDevPreviewCard =
@@ -1324,19 +1467,9 @@ export function Workbench(): ReactElement {
   }, [])
 
   useEffect(() => {
-    // 形象工坊:读取偏好、应用 DOM 属性/token,并在插件模式下加载图集
+    // Initialize the saved UI theme and its tokens.
     void initUiPlugins()
   }, [initUiPlugins])
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    document.documentElement.setAttribute('data-focus-mode', focusModeEnabled ? 'on' : 'off')
-  }, [focusModeEnabled])
-
-  const updateFocusMode = (enabled: boolean): void => {
-    writeFocusModePreference(enabled)
-    setFocusModeEnabled(enabled)
-  }
 
   useEffect(() => {
     const previousThreadId = prevThreadId.current
@@ -1384,11 +1517,12 @@ export function Workbench(): ReactElement {
   const openSideChat = useCallback((): void => {
     const latestSide = currentSideConversations.at(-1)
     if (latestSide) {
-      openSideChatInspector(latestSide.threadId)
+      selectSideConversation(latestSide.threadId)
+      setSidePanelOpen(true)
       return
     }
-    void createSideChatInInspector()
-  }, [createSideChatInInspector, currentSideConversations, openSideChatInspector])
+    useChatStore.getState().openSideConversationDraft()
+  }, [currentSideConversations, selectSideConversation, setSidePanelOpen])
 
   useEffect(() => {
     let cancelled = false
@@ -1469,10 +1603,10 @@ export function Workbench(): ReactElement {
   }, [input])
 
   useEffect(() => {
-    if (rightPanelMode === 'plan' && !activeGuiPlan) {
+    if (rightPanelMode === 'plan' && !activeGuiPlan && !workspaceActiveTab?.questionPlan) {
       setRightPanelMode(null)
     }
-  }, [activeGuiPlan, rightPanelMode, setRightPanelMode])
+  }, [activeGuiPlan, rightPanelMode, setRightPanelMode, workspaceActiveTab?.questionPlan])
 
   useEffect(() => {
     if (
@@ -1676,30 +1810,84 @@ export function Workbench(): ReactElement {
 
   const handlePickAttachments = async (
     files: File[],
-    options: { localFilePaths?: string[] } = {}
+    options: { localFilePaths?: string[]; retry?: ComposerAttachmentUpload } = {}
   ): Promise<void> => {
     if (!files.length || !attachmentUploadEnabled) return
-    const provider = getProvider()
-    if (typeof provider.uploadAttachment !== 'function') {
-      setAttachmentUploadError(t('composerAttachmentUnavailable'))
-      return
+    const entry = useChatStore.getState()
+    if (entry.activeThreadId !== activeThreadId || !submissionOwnerMounted.current) return
+    const workspace = activeComposerWorkspace()
+    if (!workspace) { setAttachmentUploadError(t('composerAttachmentUnavailable')); return }
+    const sourceKey = composerDraftKey(entry.threads.find(thread => thread.id === entry.activeThreadId)?.workspace || entry.workspaceRoot || '', entry.activeThreadId)
+    const currentDraft = entry.composerDrafts[sourceKey]
+    if ((currentDraft?.pendingAttachmentUploads ?? 0) > 0 || currentDraft?.attachmentUploads?.some(item => item.status === 'uploading')) return
+    let targetKey = sourceKey
+    let targetThreadId = entry.activeThreadId
+    const jobs: ComposerAttachmentUpload[] = files.map((file, index) => ({
+      id: options.retry?.id ?? crypto.randomUUID(), attemptId: crypto.randomUUID(), file,
+      localFilePath: options.retry?.localFilePath ?? options.localFilePaths?.[index], status: 'uploading'
+    }))
+    const update = entry.updateComposerDraft
+    update(sourceKey, current => ({ ...current, attachmentUploadError: null,
+      attachmentUploads: [...(current.attachmentUploads ?? []).filter(item => !jobs.some(job => job.id === item.id)), ...jobs]
+    }))
+    const settle = (job: ComposerAttachmentUpload, attachment?: AttachmentReference, error?: string) => {
+      update(targetKey, current => {
+        if (!current.attachmentUploads?.some(item => item.id === job.id && item.attemptId === job.attemptId)) return current
+        const uploads = current.attachmentUploads.flatMap(item => item.id !== job.id ? [item]
+          : attachment ? [] : [{ ...item, status: 'failed' as const, error }])
+        return { ...current, attachmentUploads: uploads,
+          attachments: attachment ? [...current.attachments.filter(item => item.id !== attachment.id), attachment] : current.attachments,
+          attachmentUploadError: uploads.find(item => item.status === 'failed')?.error ?? null }
+      })
     }
-    const finishUpload = beginAttachmentUpload()
-    setAttachmentUploadError(null)
     try {
-      const workspace = activeComposerWorkspace()
-      if (!activeThreadId || !workspace) {
-        throw new Error(t('composerAttachmentUnavailable'))
+      if (!targetThreadId) {
+        if (entry.route !== 'chat') throw new Error(t('composerAttachmentUnavailable'))
+        let revoked = false
+        const unsubscribe = useChatStore.subscribe((next, previous) => {
+          if (next.activeThreadId !== previous.activeThreadId || next.workspaceRoot !== previous.workspaceRoot || next.route !== previous.route || next.runtimeConnection !== previous.runtimeConnection) revoked = true
+        })
+        const selected: { receipt?: ThreadSelectionReceipt } = {}
+        try {
+          await entry.createThread({ workspaceRoot: workspace, materialize: true, forceNew: true,
+            isCurrent: () => !revoked && submissionOwnerMounted.current,
+            beforeSelect: target => {
+              if (revoked || !submissionOwnerMounted.current || normalizeWorkspaceRoot(target.workspace) !== normalizeWorkspaceRoot(workspace)) return false
+              const destination = composerDraftKey(target.workspace, target.threadId)
+              let moved = false
+              useChatStore.setState(state => {
+                const source = state.composerDrafts[sourceKey]
+                const existing = state.composerDrafts[destination]
+                if (!source || !jobs.some(job => source.attachmentUploads?.some(item => item.id === job.id && item.attemptId === job.attemptId)) ||
+                  existing && (existing.input || existing.attachments.length || existing.fileReferences.length || existing.attachmentUploads?.length)) return {}
+                const drafts = { ...state.composerDrafts }
+                delete drafts[sourceKey]
+                drafts[destination] = source
+                moved = true
+                return { composerDrafts: drafts }
+              })
+              if (!moved) return false
+              targetKey = destination
+              targetThreadId = target.threadId
+              unsubscribe()
+              return true
+            },
+            onSelected: receipt => { selected.receipt = receipt }
+          })
+        } finally { unsubscribe() }
+        if (!selected.receipt?.isCurrent() || selected.receipt.threadId !== targetThreadId) throw new Error(t('composerAttachmentUnavailable'))
       }
+      const provider = getProvider()
+      if (typeof provider.uploadAttachment !== 'function') throw new Error(t('composerAttachmentUnavailable'))
+      const uploadAttachment = provider.uploadAttachment.bind(provider)
       const attachmentCapabilities = runtimeInfo?.capabilities.attachments
-      if (!attachmentCapabilities) {
-        setAttachmentUploadError(t('composerAttachmentUnavailable'))
-        return
-      }
-      const uploaded: AttachmentReference[] = []
-      for (const [index, file] of files.entries()) {
+      if (!attachmentCapabilities) throw new Error(t('composerAttachmentUnavailable'))
+      const uploadThreadId = targetThreadId
+      if (!uploadThreadId) throw new Error(t('composerAttachmentUnavailable'))
+      const uploadFile = async (job: ComposerAttachmentUpload): Promise<AttachmentReference> => {
+        const file = job.file
         const localFilePath =
-          options.localFilePaths?.[index] ||
+          job.localFilePath ||
           (typeof window.analytix?.files?.getPathForFile === 'function' ? window.analytix.files.getPathForFile(file) : '')
         if (isPdfAttachmentFile(file)) {
           if (!localFilePath || typeof window.analytix?.files?.readLocalPdfText !== 'function') {
@@ -1709,16 +1897,16 @@ export function Workbench(): ReactElement {
           if (!result.ok) throw new Error(result.message)
           const documentText = result.text.trim()
           if (!documentText) throw new Error(t('composerPdfAttachmentNoText'))
-          const attachment = await provider.uploadAttachment({
+          const attachment = await uploadAttachment({
             name: file.name || fileNameFromPath(result.path),
             mimeType: 'application/pdf',
             dataBase64: arrayBufferToBase64(await file.arrayBuffer()),
             documentText,
             pageCount: result.pageCount,
-            threadId: activeThreadId,
+            threadId: uploadThreadId,
             workspace
           })
-          uploaded.push({
+          return {
             id: attachment.id,
             kind: 'document',
             name: attachment.name,
@@ -1730,8 +1918,7 @@ export function Workbench(): ReactElement {
             documentText,
             localFilePath,
             FilePath: localFilePath
-          })
-          continue
+          }
         }
         if (!isImageAttachmentFile(file)) {
           throw new Error(t('composerAttachmentUnsupportedType'))
@@ -1740,15 +1927,15 @@ export function Workbench(): ReactElement {
           throw new Error(t('composerAttachmentModelUnsupported'))
         }
         const prepared = await prepareImageAttachmentUpload(file, attachmentCapabilities)
-        const attachment = await provider.uploadAttachment({
+        const attachment = await uploadAttachment({
           name: file.name || 'image',
           mimeType: prepared.mimeType,
           dataBase64: prepared.dataBase64,
           textFallback: prepared.textFallback,
-          threadId: activeThreadId,
+          threadId: uploadThreadId,
           workspace
         })
-        uploaded.push({
+        return {
           id: attachment.id,
           kind: 'image',
           name: attachment.name,
@@ -1758,22 +1945,22 @@ export function Workbench(): ReactElement {
           ...(localFilePath ? { localFilePath } : {}),
           ...(localFilePath ? { FilePath: localFilePath } : {}),
           previewUrl: `data:${prepared.mimeType};base64,${prepared.dataBase64}`
-        })
+        }
       }
-      if (uploaded.length > 0) {
-        setComposerAttachments((current) => {
-          const byId = new Map(current.map((attachment) => [attachment.id, attachment]))
-          for (const attachment of uploaded) {
-            byId.set(attachment.id, attachment)
-          }
-          return [...byId.values()]
-        })
+      for (const job of jobs) {
+        const current = useChatStore.getState().composerDrafts[targetKey]
+        if (!current?.attachmentUploads?.some(item => item.id === job.id && item.attemptId === job.attemptId)) continue
+        try { settle(job, await uploadFile(job)) }
+        catch (error) { settle(job, undefined, error instanceof Error ? error.message : String(error)) }
       }
     } catch (error) {
-      setAttachmentUploadError(error instanceof Error ? error.message : String(error))
-    } finally {
-      finishUpload()
+      for (const job of jobs) settle(job, undefined, error instanceof Error ? error.message : String(error))
     }
+  }
+
+  const retryAttachmentUpload = (id: string): void => {
+    const upload = attachmentUploads.find(item => item.id === id && item.status === 'failed')
+    if (upload) void handlePickAttachments([upload.file], { retry: upload })
   }
 
   const removeComposerAttachment = (id: string): void => {
@@ -1793,6 +1980,32 @@ export function Workbench(): ReactElement {
       return
     }
     await handlePickAttachments([clipboardImageToFile(image)], { localFilePaths: [image.localFilePath] })
+  }
+
+  const prepareNativeDraft = (value: string, references: NativeReference[]): boolean => {
+    const chat = useChatStore.getState(), native = useNativeOfficeStore.getState()
+    if (references.length && references.every(reference=>reference.kind==='docx')) {
+      const workspace=chat.threads.find(thread=>thread.id===chat.activeThreadId)?.workspace || chat.workspaceRoot
+      const tabs=useWorkspaceTabsStore.getState(), tab=tabs.tabs.find(item=>item.id===tabs.activeTabId)
+      if (!submissionOwnerMounted.current || chat.route!=='chat' || chat.activeThreadId!==activeThreadId ||
+        !references.every(reference=>reference.kind==='docx' && docxReferenceCurrent(reference) && reference.threadId===activeThreadId &&
+          normalizeWorkspaceRoot(reference.workspace)===normalizeWorkspaceRoot(workspace) && tab?.path===reference.path && tab.workspaceRoot===reference.workspace)) return false
+      for (const reference of references) useNativeReferenceStore.getState().add(reference)
+      setInput(current=>current.trim()?current:value)
+      return true
+    }
+    if (!native.target || native.target.protectedPresent || !native.view || !nativeOfficeTargetMatches(native.target,native.view)) return false
+    const workspace = chat.threads.find(thread => thread.id === chat.activeThreadId)?.workspace || chat.workspaceRoot
+    const tabs = useWorkspaceTabsStore.getState(), activeTab = tabs.tabs.find(tab => tab.id === tabs.activeTabId)
+    if (activeTab && (!native.target || activeTab.mode !== 'documents' || !activeTab.path || !activeTab.workspaceRoot ||
+      workspaceObjectTabId(activeTab.workspaceRoot,activeTab.path) !== workspaceObjectTabId(native.target.workspace,native.target.path))) return false
+    if (!submissionOwnerMounted.current || chat.route !== 'chat' || !activeThreadId || chat.activeThreadId !== activeThreadId ||
+      !references.every(reference => (!reference.kind || reference.kind === 'office') &&
+        reference.threadId === activeThreadId && normalizeWorkspaceRoot(reference.workspace) === normalizeWorkspaceRoot(workspace)) ||
+      !nativeOfficeDraftReferencesCurrent(references,[native.view])) return false
+    for (const reference of references) useNativeReferenceStore.getState().add(reference)
+    setInput(current => current.trim() ? current : value)
+    return true
   }
 
   const sendWritePrompt = (value: string, references?: NativeReference[]): void => {
@@ -1932,42 +2145,43 @@ export function Workbench(): ReactElement {
     if (options.closeAssistant && rightPanelMode === 'sdd-ai') setRightPanelMode(null)
   }, [rightPanelMode, setRightPanelMode])
 
-  const prepareThreadContextAction = useCallback(async (threadId: string): Promise<boolean> => {
+  const threadContextActionGeneration = useRef(0)
+  useEffect(() => () => { threadContextActionGeneration.current += 1 }, [])
+  const prepareThreadContextAction = useCallback(async (threadId: string): Promise<import('../store/chat-store-types').ThreadSelectionReceipt | null> => {
+    const requestGeneration = ++threadContextActionGeneration.current
     const targetThreadId = threadId.trim()
-    if (!targetThreadId || runtimeConnection !== 'ready') return false
+    if (!targetThreadId || runtimeConnection !== 'ready') return null
     setConnectPhoneSidebarOpen(false)
     if (useSddDraftStore.getState().activeDraft) dismissActiveSddDraft({ closeAssistant: true })
     setRoute('chat')
-    if (useChatStore.getState().activeThreadId !== targetThreadId) {
-      await selectThread(targetThreadId)
-    }
-    return true
+    const selected: { receipt: import('../store/chat-store-types').ThreadSelectionReceipt | null } = { receipt: null }
+    await selectThread(targetThreadId, { onSelected: receipt => { selected.receipt = receipt } })
+    const receipt = selected.receipt
+    const current = useChatStore.getState()
+    return requestGeneration === threadContextActionGeneration.current && receipt?.threadId === targetThreadId &&
+      receipt.isCurrent() && current.activeThreadId === targetThreadId && current.route === 'chat' &&
+      current.runtimeConnection === 'ready' ? receipt : null
   }, [dismissActiveSddDraft, runtimeConnection, selectThread, setRoute])
 
   const openSideChatForThread = useCallback(async (threadId: string): Promise<void> => {
-    if (!(await prepareThreadContextAction(threadId))) return
+    const receipt = await prepareThreadContextAction(threadId)
+    if (!receipt?.isCurrent()) return
     const state = useChatStore.getState()
-    const targetThreadId = threadId.trim()
+    const targetThreadId = receipt.threadId
     const latestSide = Object.values(state.sideConversations)
       .filter((side) => side.parentThreadId === targetThreadId)
       .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
       .at(-1)
     if (latestSide) {
       state.selectSideConversation(latestSide.threadId)
-    }
-    state.setSidePanelOpen(false)
-    setSubagentInspector((current) => ({
-      parentThreadId: targetThreadId,
-      selectedKey: latestSide ? sideConversationInspectorKey(latestSide.threadId) : null,
-      subagents: current?.parentThreadId === targetThreadId ? current.subagents : []
-    }))
-    setRightSidebarWidth((width) => Math.max(width, SUBAGENT_PANEL_PREFERRED_WIDTH))
-    setRightPanelMode('child-agent')
-  }, [prepareThreadContextAction, setRightPanelMode, setRightSidebarWidth])
+      if (receipt.isCurrent()) state.setSidePanelOpen(true)
+    } else if (receipt.isCurrent()) state.openSideConversationDraft()
+  }, [prepareThreadContextAction])
 
   const forkThreadFromSidebar = useCallback(async (threadId: string): Promise<void> => {
-    if (!(await prepareThreadContextAction(threadId))) return
-    await forkActiveThread()
+    const receipt = await prepareThreadContextAction(threadId)
+    if (!receipt?.isCurrent()) return
+    await forkActiveThread(receipt)
   }, [forkActiveThread, prepareThreadContextAction])
 
   const openSddAssistantPanel = async (): Promise<void> => {
@@ -2398,7 +2612,27 @@ export function Workbench(): ReactElement {
     const planRelativePath = sddDraftPlanRelativePath(draft)
     const planId = buildGuiPlanId(draft.workspaceRoot, planRelativePath)
     const sourceRequest = sddDraftSourceRequest(latestDraftContent, draft.relativePath)
-    const assistantContext = sddAssistantContextFromBlocks(useChatStore.getState().blocks)
+    // Display history can include compressed turns. Only the current primary
+    // may supply additional context to a new model turn.
+    const provider = getProvider()
+    const contextBlocks = useChatStore.getState().blocks
+    let assistantContext: string
+    try {
+      const primary = await provider.getThreadDetail(threadId)
+      const current = useChatStore.getState()
+      if (getProvider() !== provider || current.activeThreadId !== threadId ||
+          current.blocks !== contextBlocks ||
+          useSddDraftStore.getState().activeDraft?.id !== draft.id || current.busy ||
+          (primary.thread && primary.thread.id !== threadId) || primary.latestSeq < current.lastSeq) {
+        throw new Error(t('runtimeFinalSnapshotUnavailable'))
+      }
+      assistantContext = sddAssistantContextFromBlocks(primary.blocks)
+    } catch (error) {
+      sddUpgradeInFlightRef.current = false
+      useSddDraftStore.getState().setOperationStatus('error',
+        error instanceof Error ? error.message : String(error))
+      return
+    }
     const prompt = buildSddDraftToPlanPrompt({
       draftMarkdown: latestDraftContent,
       draftRelativePath: draft.relativePath,
@@ -2519,21 +2753,21 @@ export function Workbench(): ReactElement {
     return entries
   }
 
-  const handleSend = (): void => {
-    void handleSendAsync()
+  const handleSend = (intent?: 'queue' | 'steer'): void => {
+    void handleSendAsync(undefined, undefined, intent)
   }
 
-  const handleSendAsync = async (overrideInput?: string, actionReferences?: NativeReference[]): Promise<void> => {
+  const handleSendAsync = async (overrideInput?: string, actionReferences?: NativeReference[], intent?: 'queue' | 'steer'): Promise<void> => {
     const chat = useChatStore.getState()
     if (chat.runtimeConnection !== 'ready') return
     if (chat.activeThreadId !== activeThreadId || !submissionOwnerMounted.current) return
     const threadWorkspace = chat.threads.find(thread => thread.id === chat.activeThreadId)?.workspace || chat.workspaceRoot
     const key = JSON.stringify([threadWorkspace, chat.activeThreadId])
-    if ((chat.composerDrafts[key]?.pendingAttachmentUploads ?? 0) > 0) return
+    if ((chat.composerDrafts[key]?.pendingAttachmentUploads ?? 0) > 0 || chat.composerDrafts[key]?.attachmentUploads?.length) return
     if (submissionsInFlight.current.has(key)) return
     submissionsInFlight.current.add(key)
     try {
-      await submitWorkbenchTurn(overrideInput, actionReferences)
+      await submitWorkbenchTurn(overrideInput, actionReferences, intent)
     } catch (error) {
       const current = useChatStore.getState()
       const currentWorkspace = current.threads.find(thread => thread.id === current.activeThreadId)?.workspace || current.workspaceRoot
@@ -2545,12 +2779,13 @@ export function Workbench(): ReactElement {
     }
   }
 
-  const submitWorkbenchTurn = async (overrideInput?: string, actionReferences?: NativeReference[]): Promise<void> => {
+  const submitWorkbenchTurn = async (overrideInput?: string, actionReferences?: NativeReference[], intent?: 'queue' | 'steer'): Promise<void> => {
     const v = (overrideInput ?? input).trim()
     const nativeAction = actionReferences !== undefined
     const documentState = useWriteWorkspaceStore.getState()
     const frozenQuotes = nativeAction ? [] : [...documentState.quotedSelections]
     const frozenNativeReferences = structuredClone(actionReferences ?? useNativeReferenceStore.getState().references.filter(r => r.threadId === activeThreadId))
+    const officeReferences = frozenNativeReferences.filter(reference => !reference.kind || reference.kind === 'office' || reference.kind === 'docx')
     const editorRequest = overrideInput !== undefined && !nativeAction
     const documentContext = frozenQuotes.length > 0 || editorRequest
     const currentReferenceSnapshot = () => {
@@ -2573,8 +2808,11 @@ export function Workbench(): ReactElement {
       const current = currentReferenceSnapshot()
       const native = useNativeOfficeStore.getState()
       return submissionOwnerMounted.current && workbenchReferencesCurrent(frozenReference, current) &&
-        (!nativeAction || route === 'chat' && !!current.threadId) &&
+        (!nativeAction || useChatStore.getState().route === 'chat' && !!current.threadId) &&
         (!nativeAction || nativeActionReferencesCurrent(frozenNativeReferences, [...(native.view ? [native.view] : []), ...Object.values(native.views)])) &&
+        (!officeReferences.length || useChatStore.getState().route === 'chat' && nativeOfficeDraftReferencesCurrent(officeReferences,[...(native.view ? [native.view] : []),...Object.values(native.views)])) &&
+        (nativeAction || frozenNativeReferences.every(reference => useNativeReferenceStore.getState().references.some(current =>
+          current.id === reference.id && current.scopeId === reference.scopeId))) &&
         frozenNativeReferences.every(reference => reference.threadId === current.threadId &&
           normalizeWorkspaceRoot(reference.workspace) === normalizeWorkspaceRoot(current.threadWorkspace))
     }
@@ -2594,13 +2832,14 @@ export function Workbench(): ReactElement {
       const valid = await validateCanvasReferences(frozenNativeReferences,
         request => window.analytix.canvas.request(request), referenceCurrent) &&
         await validateImageReferences(frozenNativeReferences, request => window.analytix.objects.request(request), referenceCurrent) &&
-        await validateBrowserReferences(frozenNativeReferences, request => window.analytix.browserSelection.request(request), referenceCurrent)
+        await validateBrowserReferences(frozenNativeReferences, request => window.analytix.browserSelection.request(request), referenceCurrent) &&
+        await validateOfficeReferences(frozenNativeReferences, request => window.analytix.office.request(request), referenceCurrent)
       if (!valid) reportSubmissionError(t('workbenchReferenceChanged'))
       return valid
     }
-    // A Canvas handle cannot survive deferred queueing. The existing send owner
-    // rechecks this one-shot Core fence after all its settings/checkpoint I/O.
-    const submissionGuard = frozenNativeReferences.some(reference => reference.kind === 'canvas' || reference.kind === 'image-region' || reference.kind === 'browser-selection')
+    // Native scopes cannot survive deferred queueing. The send owner rechecks
+    // this Core fence after all its settings/checkpoint I/O.
+    const submissionGuard = frozenNativeReferences.length > 0
       ? { isCurrent: referenceCurrent, validateBeforeSend: validateSubmission }
       : undefined
     const runtimeFileReferences = runtimeFileReferencesFromComposer(fileReferences)
@@ -2618,6 +2857,7 @@ export function Workbench(): ReactElement {
       fileReferences.length + documentAttachments.length, frozenQuotes.length + frozenNativeReferences.length, imageAttachments.length
     )
     const emptyDisplayText = v ? undefined : t(emptyMessage.display, { count: emptyMessage.count })
+    const requestedSkillIds = extractRequestedSkillIds(v)
     const rawMessageText = v || t(emptyMessage.prompt)
     const editorPreset = !editorRequest ? undefined : documentState.agentPresets.find(
       (preset) => preset.id === documentState.assistantAgentPresetId
@@ -2651,8 +2891,7 @@ export function Workbench(): ReactElement {
           return null
         }
       }
-      // Validate the prepared reference snapshot here, and for Canvas again in
-      // the actual send owner after its final asynchronous preparation.
+      // Recheck native scopes here and in the send owner after its final I/O.
       if (!(await validateSubmission())) return null
       const messageText = frozenNativeReferences.length ? `${documentMessage}\n\n${nativeReferencesPrompt(frozenNativeReferences)}` : documentMessage
       const displayText = fileContext === null && !submissionGuard ? emptyDisplayText : v || emptyDisplayText
@@ -2680,6 +2919,7 @@ export function Workbench(): ReactElement {
       const model = composerModel.trim()
       const providerId = composerProviderId.trim()
       const sent = await sendPlanTurn(prepared.text, {
+        requestedSkillIds,
         ...(submissionGuard ? { submissionGuard } : {}),
         ...(prepared.displayText ? { displayText: prepared.displayText } : {}),
         ...(model ? { model } : {}),
@@ -2788,6 +3028,8 @@ export function Workbench(): ReactElement {
     if (!prepared) return
     if (!referenceCurrent()) { reportSubmissionError(t('workbenchReferenceChanged')); return }
     const sent = await sendMessage(prepared.text, mode === 'plan' ? 'plan' : 'agent', {
+      requestedSkillIds,
+      ...(intent ? { deliveryIntent: intent } : {}),
       ...(submissionGuard ? { submissionGuard } : {}),
       ...(prepared.displayText ? { displayText: prepared.displayText } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
@@ -2804,55 +3046,18 @@ export function Workbench(): ReactElement {
     route === 'claw'
       ? clawChannels.find((channel) => channel.id === activeClawChannelId)?.model ?? 'auto'
       : composerModel
-  const composerViewState = useMemo(
-    () =>
-      createComposerViewState({
-        input,
-        mode,
-        busy,
-        runtimeReady: runtimeConnection === 'ready',
-        hasActiveThread: Boolean(activeThreadId),
-        contextWindowTokens: runtimeInfo?.capabilities.model.contextWindowTokens,
-        runtimeToolCount:
-          runtimeInfo
-            ? runtimeInfo.capabilities.mcp.search?.active
-              ? runtimeInfo.capabilities.mcp.search.advertisedToolCount
-              : runtimeInfo.capabilities.mcp.toolCount
-            : undefined,
-        runtimeSkillCount: runtimeInfo?.capabilities.skills.discoveredSkills,
-        composerModel: mainComposerModel,
-        composerProviderId: route === 'chat' ? composerProviderId : undefined,
-        composerReasoningEffort:
-          route === 'chat' || route === 'claw' ? composerReasoningEffort : undefined
-      }),
-    [
-      activeThreadId,
-      busy,
-      composerProviderId,
-      composerReasoningEffort,
-      input,
-      mainComposerModel,
-      mode,
-      route,
-      runtimeConnection,
-      runtimeInfo
-    ]
-  )
-  const composerController = createComposerController({
-    setInput,
-    setMode,
-    send: handleSend,
-    interrupt: (options) => void interrupt(options),
-    setModel: (modelId, providerId) => {
-      if (route === 'claw' && activeClawChannelId) {
-        void setClawChannelModel(activeClawChannelId, modelId)
-        return
-      }
-      setComposerModel(modelId, providerId)
-    },
-    setReasoningEffort:
-      route === 'chat' || route === 'claw' ? setComposerReasoningEffort : undefined
+  const composerContextWindow = resolveComposerContextWindow({
+    model: mainComposerModel, providerId: composerProviderId, groups: composerModelGroups,
+    runtimeModel: runtimeInfo ? { ...runtimeInfo.capabilities.model,
+      providerId: runtimeInfo.capabilities.model.providerId || runtimeInfo.provider?.id } : undefined
   })
+  const handleComposerModelChange = (modelId: string, providerId?: string): void => {
+    if (route === 'claw' && activeClawChannelId) {
+      void setClawChannelModel(activeClawChannelId, modelId)
+      return
+    }
+    setComposerModel(modelId, providerId)
+  }
 
   const openThread = async (id: string): Promise<void> => {
     setConnectPhoneSidebarOpen(false)
@@ -2914,13 +3119,6 @@ export function Workbench(): ReactElement {
     setConnectPhoneSidebarOpen(false)
     setActiveDataAnalysis(null)
     void openCode()
-  }
-
-  const openWriteMode = (): void => {
-    setConnectPhoneSidebarOpen(false)
-    void (async () => {
-      await openWrite()
-    })()
   }
 
   const openPluginsView = (): void => {
@@ -2987,10 +3185,8 @@ export function Workbench(): ReactElement {
     setConnectPhoneSidebarOpen(entry.connectPhoneSidebarOpen)
 
     if (entry.route === 'write') {
-      void (async () => {
-        await useWriteWorkspaceStore.getState().openWorkspaceHome()
-        await openWrite()
-      })()
+      useChatStore.getState().setRoute('chat')
+      useWorkspaceTabsStore.getState().showSelector()
       return
     }
 
@@ -3015,7 +3211,7 @@ export function Workbench(): ReactElement {
     }
 
     void openCode()
-  }, [activeSddDraft, dismissActiveSddDraft, openClaw, openCode, openPlugins, openSchedule, openSettings, openWrite])
+  }, [activeSddDraft, dismissActiveSddDraft, openClaw, openCode, openPlugins, openSchedule, openSettings])
 
   const navigateShellHistoryBack = useCallback((): void => {
     const target = shellHistory.back[shellHistory.back.length - 1]
@@ -3085,6 +3281,19 @@ export function Workbench(): ReactElement {
   )
 
   const rightPanelDockedVisible = rightPanelVisible && !planPanelInOverlay
+  const rightWorkspaceAutoOverlay = rightPanelDockedVisible && rightPanelAutoOverlay
+  const rightWorkspaceOverlay = rightPanelDockedVisible && (documentFocused || rightWorkspaceAutoOverlay)
+  const rightWorkspaceContentWidth = rightWorkspaceOverlay
+    ? (shellRef.current?.clientWidth || window.innerWidth) - (rightWorkspaceAutoOverlay || leftSidebarCollapsed ? 0 : leftSidebarWidth) - (rightWorkspaceAutoOverlay ? 0 : 16)
+    : rightSidebarWidth
+  const lastWorkbenchFocus = useRef<Element | null>(null)
+  useLayoutEffect(() => {
+    if (!rightWorkspaceAutoOverlay || !document.hasFocus()) return
+    const active = document.activeElement === document.body ? lastWorkbenchFocus.current : document.activeElement
+    if (active instanceof Element && (active.closest('[data-workbench-underlay], .ds-window-chrome-session') || leftPaneRef.current?.contains(active))) {
+      document.getElementById('workbench-workspace-collapse')?.focus({ preventScroll: true })
+    }
+  }, [leftPaneRef, rightWorkspaceAutoOverlay])
   const [rightPanelRetained, setRightPanelRetained] = useState(rightPanelDockedVisible)
   useEffect(() => {
     // Collapsing must not discard a child-agent draft or mounted tool state.
@@ -3121,11 +3330,10 @@ export function Workbench(): ReactElement {
     }
   }, [activeCaseProjectWorkspaceRoot, activeDataAnalysis, route])
 
-  useEffect(() => {
-    if (rightPanelMode === 'summary') preloadRightPanelIsland('summary')
-  }, [rightPanelMode])
-
-  const renderPlanPanel = (className: string): ReactElement => (
+  const renderPlanPanel = (className: string, presented: boolean): ReactElement => workspaceActiveTab?.questionPlan ? (
+    <QuestionPlanPreview owner={workspaceActiveTab.questionPlan} className={className}
+      presented={presented && route === 'chat' && !activeSddDraft && !activeDataAnalysis && workspaceActiveTab.mode === 'plan' && workspaceActiveTab.questionPlan.selector.threadId === activeThreadId} />
+  ) : (
     <PlanPanel
       workspaceRoot={workspaceRoot}
       activeThreadId={activeThreadId}
@@ -3139,20 +3347,65 @@ export function Workbench(): ReactElement {
     />
   )
 
-  const renderSummaryPanel = (): ReactElement | null => !rightPanelDockedVisible ? null : (
-    <ThreadSummaryPanelIsland activeThreadId={activeThreadId} className="h-full w-full"
-      visible={rightPanelDockedVisible && !workspaceSelectorOpen}
-      diagnosticsFocus={runtimeDiagnosticsFocus} onDiagnosticsFocusHandled={() => setRuntimeDiagnosticsFocus(null)}
-      onCollapse={closeRightPanel} onInspectChildAgent={inspectChildAgent}
-      onSubagentsChange={syncSubagentInspector} onOpenChanges={() => setRightPanelMode('changes')} />
-  )
-
-  const activateWorkspaceTab = (id: string): void => {
+  const activateWorkspaceTab = (id: string, explicit = true): void => {
     const tab = useWorkspaceTabsStore.getState().tabs.find((item) => item.id === id)
     if (!tab) return
-    if (tab.mode === 'file' && tab.path) setFilePreviewTarget({ path: tab.path, workspaceRoot: tab.workspaceRoot })
+    if (tab.mode === 'file' && (tab.id.startsWith('protected-read:') || tab.preview === 'source' || tab.protectedRead !== undefined || tab.protectedPresent !== undefined)) {
+      setFilePreviewTarget({ path: tab.title, preview: 'source', protectedRead: tab.protectedRead, protectedPresent: tab.protectedPresent, line: tab.sourceLine })
+    } else if (tab.mode === 'file' && tab.path) setFilePreviewTarget({ path: tab.path, workspaceRoot: tab.workspaceRoot })
     if (tab.mode === 'child-agent' && tab.instanceId) selectSubagentInspector(tab.instanceId)
-    useWorkspaceTabsStore.getState().activateTab(id)
+    if (tab.questionPlan && explicit) {
+      useWorkspaceTabsStore.getState().openQuestionPlanReview(tab.questionPlan, tab.title)
+      requestUserInputLocalReopen(tab.questionPlan.selector)
+    } else useWorkspaceTabsStore.getState().activateTab(id)
+  }
+
+  const createWordDocument = async (fileName: string, resumeOperationId?: string): Promise<void | NativeOfficeCreateReadiness> => {
+    const chat = useChatStore.getState(), tabs = useWorkspaceTabsStore.getState()
+    let ownerThread = chat.activeThreadId
+    const ownerWorkspace = chat.threads.find(thread => thread.id === ownerThread)?.workspace || chat.workspaceRoot
+    if (!submissionOwnerMounted.current || chat.route !== 'chat' ||
+      !ownerWorkspace || !tabs.open || !tabs.selectorOpen || wordCreateInFlight.current) return
+    const retained = useNativeOfficeStore.getState().creationAttempt
+    if (resumeOperationId && (retained?.phase !== 'created' || retained.presented || !retained.creation ||
+      retained.input.operationId !== resumeOperationId || retained.input.threadId !== ownerThread ||
+      normalizeWorkspaceRoot(retained.creation.workspace) !== normalizeWorkspaceRoot(ownerWorkspace))) return
+    const ownerTabId = tabs.activeTabId
+    const isCurrent = () => {
+      const next = useChatStore.getState(), nextTabs = useWorkspaceTabsStore.getState()
+      const nextWorkspace = next.threads.find(thread => thread.id === next.activeThreadId)?.workspace || next.workspaceRoot
+      return submissionOwnerMounted.current && next.route === 'chat' && next.activeThreadId === ownerThread &&
+        normalizeWorkspaceRoot(nextWorkspace) === normalizeWorkspaceRoot(ownerWorkspace) &&
+        nextTabs.open && nextTabs.selectorOpen && nextTabs.activeTabId === ownerTabId
+    }
+    const rect = rightPaneContentRef.current?.getBoundingClientRect()
+    const bounds = {x:Math.max(0,Math.min(16384,Math.round(rect?.x ?? 0))),y:Math.max(0,Math.min(16384,Math.round(rect?.y ?? 0))),
+      width:Math.max(1,Math.min(16384,Math.round(rect?.width ?? 1))),height:Math.max(1,Math.min(16384,Math.round(rect?.height ?? 1)))}
+    wordCreateInFlight.current = true
+    try {
+      // Readiness can block a fresh create, never an existing receipt or unknown replay.
+      if (!resumeOperationId && retained?.phase !== 'unknown') {
+        const readiness = await readNativeOfficeCreateReadiness()
+        if (!isCurrent()) return
+        if (readiness !== 'ready') return readiness
+      }
+      if (!ownerThread) {
+        const receipt=await ensureLocalDocumentThread(ownerWorkspace,isCurrent,threadId=>{ownerThread=threadId})
+        if (!receipt || !receipt.isCurrent() || !isCurrent()) return
+      }
+      if (!ownerThread) return
+      const result = resumeOperationId ? {creation:retained!.creation} : await useNativeOfficeStore.getState().createDocument({threadId:ownerThread,fileName,bounds,
+        appearance:{theme:document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',reducedMotion:document.documentElement.dataset.motionReduced === 'true'}})
+      if (!result?.creation) return
+      const creation = result.creation
+      // Keep a late receipt solely in its original attempt. It cannot write
+      // the current tabs; returning to its owner exposes an explicit open.
+      if (!isCurrent() || normalizeWorkspaceRoot(creation.workspace) !== normalizeWorkspaceRoot(ownerWorkspace)) return
+      registerDocumentTab(creation.workspace,creation.path)
+      useNativeOfficeStore.setState(state => state.creationAttempt?.input.operationId === creation.operationId
+        ? {creationAttempt:{...state.creationAttempt,presented:true}} : {})
+      setRightPanelMode('documents')
+    } finally { wordCreateInFlight.current = false }
   }
 
   const closeWorkspaceTab = async (id: string): Promise<void> => {
@@ -3165,19 +3418,25 @@ export function Workbench(): ReactElement {
         return
       }
     }
-    if (tab.kind === 'document' && tab.path && tab.workspaceRoot) {
-      if (isNativeOfficeFilePath(tab.path)) {
+    if (tab.kind === 'document' && tab.path && tab.workspaceRoot && tab.preview !== 'source' && tab.protectedRead === undefined && tab.protectedPresent === undefined) {
+      if (isDocxPath(tab.path)) {
+        if (!(await useDocxEditorStore.getState().close(tab.workspaceRoot,tab.path))) {activateWorkspaceTab(id);return}
+      } else if (isNativeOfficeFilePath(tab.path)) {
         if (!(await useNativeOfficeStore.getState().close(tab.workspaceRoot, tab.path))) {
           activateWorkspaceTab(id)
           return
         }
-      } else if (useWriteWorkspaceStore.getState().activeFilePath === tab.path) {
-        if (!(await useWriteWorkspaceStore.getState().openWorkspaceHome(tab.workspaceRoot))) return
+      } else {
+        const owner = useWriteWorkspaceStore.getState()
+        if (owner.activeFilePath === tab.path && normalizeWorkspaceRoot(owner.workspaceRoot) === normalizeWorkspaceRoot(tab.workspaceRoot)) {
+          if (writeWorkspaceHasUnsettledDraft(owner)) { activateWorkspaceTab(id); return }
+          if (!(await owner.openWorkspaceHome(tab.workspaceRoot))) return
+        }
       }
     }
     useWorkspaceTabsStore.getState().closeTab(id)
     const next = useWorkspaceTabsStore.getState().activeTabId
-    if (next && useWorkspaceTabsStore.getState().open && !useWorkspaceTabsStore.getState().selectorOpen) activateWorkspaceTab(next)
+    if (next && useWorkspaceTabsStore.getState().open && !useWorkspaceTabsStore.getState().selectorOpen) activateWorkspaceTab(next, false)
   }
 
   const workspaceCommandHandler = useRef<(command: NativeWorkspaceCommand['command']) => void>(() => {})
@@ -3211,19 +3470,22 @@ export function Workbench(): ReactElement {
         className="ds-right-sidebar-pane ds-no-drag h-full min-h-0 shrink-0"
         data-open={rightPanelDockedVisible ? 'true' : 'false'}
         data-resizing={rightResizing ? 'true' : 'false'}
+        data-auto-overlay={rightWorkspaceAutoOverlay || undefined}
+        data-compact={rightWorkspaceContentWidth <= 520 || undefined}
+        data-narrow={rightWorkspaceContentWidth <= 360 || undefined}
         aria-hidden={!rightPanelDockedVisible}
         style={{
           opacity: rightPanelMotion.opacity,
-          width: documentFocused ? 'auto' : rightPanelMotion.animatedSize,
-          ...(documentFocused ? { position: 'absolute', inset: `8px 8px ${terminalVisible ? terminalHeight + 24 : 8}px 8px`, height: 'auto', zIndex: 60 } as const : {})
+          width: rightWorkspaceOverlay ? 'auto' : rightPanelMotion.animatedSize,
+          ...(rightWorkspaceOverlay ? { position: 'absolute', inset: rightWorkspaceAutoOverlay ? '0' : `8px 8px ${terminalVisible ? terminalHeight + 24 : 8}px 8px`, height: 'auto', zIndex: 60 } as const : {})
         }}
       >
-        {rightPanelDockedVisible ? (
+        {rightPanelDockedVisible && !rightWorkspaceOverlay ? (
           <WorkbenchResizeHandle
             edge="left"
             isResizing={rightResizing}
             onPointerDown={beginRightResize}
-            ariaLabel={t('resizeWorkspace')} value={rightSidebarWidth} min={180} max={760} onResizeDelta={resizeRightSidebarBy}
+            ariaLabel={t('resizeWorkspace')} value={rightSidebarWidth} min={rightResizeMin} max={rightResizeMax} onResizeDelta={resizeRightSidebarBy}
             onReset={resetRightSidebarWidth}
           />
         ) : null}
@@ -3233,19 +3495,35 @@ export function Workbench(): ReactElement {
             ref={rightPaneContentRef}
             className="ds-right-sidebar-pane-content flex min-h-0 flex-col"
             style={{
-              minWidth: documentFocused ? 0 : rightSidebarWidth,
-              width: documentFocused ? '100%' : rightSidebarWidth,
+              minWidth: rightWorkspaceOverlay ? 0 : rightSidebarWidth,
+              width: rightWorkspaceOverlay ? '100%' : rightSidebarWidth,
               // Document selection menus use viewport coordinates. Layout/paint
               // containment would rebase their fixed position onto this pane.
               contain: panelMode === 'documents' ? 'none' : undefined
             }}
           >
             {workspaceSelectorOpen ? <WorkspaceToolSelector filesEnabled={Boolean(fileTreeWorkspaceRoot)}
-              sideChatEnabled={runtimeConnection === 'ready' && Boolean(activeThreadId)} planEnabled={Boolean(activeGuiPlan)}
-              focused={documentFocused} onToggleFocus={() => setDocumentFocused(value => !value)}
+              terminalAvailable={route !== 'schedule'}
+              onCreateWord={fileName => createWordDocument(fileName)}
+              onOpenWordPlugins={openPluginsView}
+              onOpenCreatedWord={route === 'chat' && wordCreationAttempt?.phase === 'created' &&
+                !wordCreationAttempt.presented && wordCreationAttempt.creation && wordCreationAttempt.input.threadId === activeThreadId &&
+                normalizeWorkspaceRoot(wordCreationAttempt.creation.workspace) === normalizeWorkspaceRoot(activeThread?.workspace || workspaceRoot)
+                ? () => void createWordDocument(wordCreationAttempt.input.fileName,wordCreationAttempt.input.operationId) : undefined}
+              wordEnabled={route === 'chat' && !!fileTreeWorkspaceRoot &&
+                !(wordCreationAttempt?.phase === 'pending' || wordCreationAttempt?.phase === 'unknown' && wordCreationAttempt.input.threadId !== activeThreadId)}
+              wordCreation={wordCreationAttempt && wordCreationAttempt.input.threadId === activeThreadId && wordCreationAttempt.phase !== 'created'
+                ? {phase:wordCreationAttempt.phase,fileName:wordCreationAttempt.input.fileName,message:t(wordCreationAttempt.phase === 'pending' ? 'workspaceWordCreating'
+                  : wordCreationAttempt.phase === 'unknown' ? 'workspaceWordUnknown'
+                  : nativeOfficeCreateErrorKey(wordCreationAttempt.error))} : undefined}
+              sideChatEnabled={runtimeConnection === 'ready' && Boolean(activeThreadId)} planEnabled={Boolean(activeGuiPlan || workspaceTabs.some(tab => tab.questionPlan?.selector.threadId === activeThreadId))}
               onOpen={(action) => {
                 if (action === 'terminal') { if (!terminalOpen) toggleTerminal(); return }
                 if (action === 'sidechat') { openSideChat(); return }
+                if (action === 'plan' && !activeGuiPlan) {
+                  const questionTab = workspaceTabs.find(tab => tab.mode === 'plan' && tab.questionPlan?.selector.threadId === activeThreadId)
+                  if (questionTab) { activateWorkspaceTab(questionTab.id); return }
+                }
                 setRightPanelMode(action)
               }} /> : null}
             {workspaceTabs.filter(tab => tab.id !== workspaceActiveTabId).map(tab => <div key={tab.id} hidden role="tabpanel" id={workspacePanelDomId(tab.id)} aria-labelledby={workspaceTabDomId(tab.id)} />)}
@@ -3255,12 +3533,11 @@ export function Workbench(): ReactElement {
             <Suspense fallback={<WorkbenchLoadingFallback surface="sidebar" />}>
               {documentsMounted ? (
                 <div className="h-full min-h-0" hidden={panelMode !== 'documents'}>
-                  <DocumentWorkspacePanel threadId={activeThreadId} activeTab={workspaceActiveTab} visible={panelMode === 'documents' && rightPanelVisible && !workspaceSelectorOpen} input={input} setInput={setInput} onSubmitPrompt={sendWritePrompt}
-                    fileBrowser={renderFileTreeSidePanel(workspaceActiveTab?.workspaceRoot || textDocumentRoot || fileTreeWorkspaceRoot, false)}
-                    focused={documentFocused} onToggleFocus={() => setDocumentFocused((value) => !value)}
-                    onCollapse={closeRightPanel} onOpenSettings={() => openSettings('write')}
+                  <DocumentWorkspacePanel threadId={activeThreadId} activeTab={workspaceActiveTab} visible={route !== 'plugins' && route !== 'settings' && panelMode === 'documents' && rightPanelVisible && !workspaceSelectorOpen} onSubmitPrompt={sendWritePrompt} onPrepareDraft={prepareNativeDraft}
+                    fileBrowser={renderFileTreeSidePanel(workspaceActiveTab?.workspaceRoot || textDocumentRoot || fileTreeWorkspaceRoot)}
                     onFocusConversation={() => {
                       setDocumentFocused(false)
+                      if (rightWorkspaceAutoOverlay) closeRightPanel()
                       requestAnimationFrame(() => document.querySelector<HTMLElement>('.ds-chat-stage .composer-prompt-editor [contenteditable="true"]')?.focus())
                     }} />
                 </div>
@@ -3270,9 +3547,10 @@ export function Workbench(): ReactElement {
                   <DevBrowserPanelIsland onSubmitPrompt={sendWritePrompt} preferredUrl={latestDevPreviewUrl} className="h-full max-h-full w-full flex-col" onCollapse={closeRightPanel} />
                 </div>
               ) : null}
-              {panelMode === 'files' ? renderFileTreeSidePanel() : panelMode === 'summary' ? (
-                renderSummaryPanel()
-              ) : panelMode === 'child-agent' && activeSubagentInspector ? (
+              {panelMode === 'schedule-task' && workspaceActiveTab?.scheduleTaskId ? (
+                <ScheduleTaskDetail key={workspaceActiveTab.scheduleTaskId} taskId={workspaceActiveTab.scheduleTaskId}
+                  onClose={() => void closeWorkspaceTab(workspaceActiveTab.id)} onOpenThread={openThread} />
+              ) : panelMode === 'files' ? renderFileTreeSidePanel() : panelMode === 'child-agent' && activeSubagentInspector ? (
                 <SubagentInspectorPanelIsland tabbedWorkspace
                   visible={rightPanelDockedVisible && !workspaceSelectorOpen}
                   subagents={activeSubagentInspector.subagents}
@@ -3319,6 +3597,9 @@ export function Workbench(): ReactElement {
                   attachmentUploadEnabled={attachmentUploadEnabled}
                   attachmentUploadBusy={attachmentUploadBusy}
                   attachmentUploadError={attachmentUploadError}
+                            attachmentUploads={attachmentUploads}
+                            onRetryAttachmentUpload={retryAttachmentUpload}
+                            onRemoveAttachmentUpload={removeAttachmentUpload}
                   onPickAttachments={(files) => void handlePickAttachments(files)}
                   onPasteClipboardImage={(options) => void handlePasteClipboardImage(options)}
                   onRemoveAttachment={removeComposerAttachment}
@@ -3350,7 +3631,7 @@ export function Workbench(): ReactElement {
                   onOpenPlan={openGuiPlanPanel}
                 />
               ) : panelMode === 'plan' ? (
-                renderPlanPanel('h-full max-h-full w-full')
+                renderPlanPanel('h-full max-h-full w-full', rightPanelDockedVisible && !workspaceSelectorOpen && rightPanelMode === 'plan')
               ) : panelMode === 'file' ? (
                 <WorkspaceFilePreviewPanel
                   target={filePreviewTarget}
@@ -3370,10 +3651,10 @@ export function Workbench(): ReactElement {
     )
   }
 
-  const renderFileTreeSidePanel = (browserRoot = fileTreeWorkspaceRoot, collapsible = true): ReactElement => browserRoot ? (
+  const renderFileTreeSidePanel = (browserRoot = fileTreeWorkspaceRoot): ReactElement => browserRoot ? (
     <ChatFileTreePanel workspaceRoot={browserRoot} selectedPath={workspaceActiveTab?.path || filePreviewTarget?.path}
       onPreviewFile={previewWorkspaceFileFromSidebar} onAddReference={addWorkspaceReferenceFromSidebar}
-      onCollapse={collapsible ? closeRightPanel : undefined} t={t} fill />
+      fill />
   ) : <div className="p-5 text-sm text-ds-muted">{t('workspaceRequiredToCreateThread')}</div>
 
   const renderPlanPanelOverlay = (): ReactElement | null => {
@@ -3393,7 +3674,7 @@ export function Workbench(): ReactElement {
         />
         <div className="ds-plan-panel-overlay-card">
           <Suspense fallback={<WorkbenchLoadingFallback surface="sidebar" />}>
-            {renderPlanPanel('h-full max-h-full w-full')}
+            {renderPlanPanel('h-full max-h-full w-full', planPanelInOverlay && !workspaceSelectorOpen)}
           </Suspense>
         </div>
       </div>
@@ -3401,9 +3682,11 @@ export function Workbench(): ReactElement {
   }
 
   return (
-    <div className="ds-product-shell flex h-full min-h-0 min-w-0 flex-col">
+    <SkillChildInspectionContext.Provider value={inspectSkillChild}>
+    <div className="ds-product-shell flex h-full min-h-0 min-w-0 flex-col"
+      onFocusCapture={event => { if (event.target instanceof Element) lastWorkbenchFocus.current = event.target }}>
       <header ref={windowChromeRef} className="ds-window-chrome" data-resizing={leftResizing} style={{
-        '--ds-window-chrome-sidebar-width': `${leftSidebarCollapsed ? 0 : leftSidebarWidth}px`
+        '--ds-window-chrome-sidebar-width': `${leftSidebarCollapsed || rightWorkspaceAutoOverlay ? 0 : leftSidebarWidth}px`
       } as CSSProperties}>
         <div className="ds-window-chrome-navigation">
           <ShellNavigationControls
@@ -3421,28 +3704,35 @@ export function Workbench(): ReactElement {
             onNewChat={startNewChat}
           />
         </div>
-        <div className="ds-window-chrome-session ds-no-drag">
+        <div className="ds-window-chrome-session ds-no-drag" inert={rightWorkspaceAutoOverlay}
+          aria-hidden={rightWorkspaceAutoOverlay} style={{ display: rightWorkspaceAutoOverlay ? 'none' : undefined }}>
           {route === 'chat' && !activeSddDraft && !activeDataAnalysis ? (
             <>
               <SessionHeader compact className="min-w-0 flex-1" onOpenSideChat={openSideChat} />
-              {busy ? <span className="ds-window-chrome-running">{t('running')}</span> : null}
             </>
           ) : null}
-          {route === 'chat' ? <WorkbenchTopBar workspaceOpen={rightPanelVisible}
+          {route === 'chat' || route === 'schedule' ? <WorkbenchTopBar workspaceOpen={rightPanelVisible}
             onToggleWorkspace={toggleRightPanel}
+            summaryAvailable={route === 'chat' && !activeSddDraft && !activeDataAnalysis}
+            summaryOpen={summaryOpenIntent}
+            onToggleSummary={() => { preloadRightPanelIsland('summary'); setSummaryOpenIntent(open => !open) }}
             terminalOpen={terminalOpen} terminalConstrained={terminalOpen && !terminalVisible}
+            terminalAvailable={route === 'chat'}
             onToggleTerminal={toggleTerminal} /> : null}
         </div>
-        {route !== 'plugins' && route !== 'schedule' && (rightPanelDockedVisible || rightPanelRetained || rightPanelMotion.isMounted || documentsMounted) ? (
+        {route !== 'plugins' && (rightPanelDockedVisible || rightPanelRetained || rightPanelMotion.isMounted || documentsMounted) ? (
           <div ref={rightTabsPaneRef} className="ds-window-chrome-workspace ds-no-drag"
             inert={!rightPanelDockedVisible} aria-hidden={!rightPanelDockedVisible}
             data-open={rightPanelDockedVisible ? 'true' : 'false'}
-            style={{ width: rightPanelMotion.animatedSize, opacity: rightPanelMotion.opacity }}>
-            <div ref={rightTabsContentRef} style={{ width: rightSidebarWidth, minWidth: rightSidebarWidth }}>
+            style={{ width: rightWorkspaceAutoOverlay ? 'auto' : rightPanelMotion.animatedSize, flex: rightWorkspaceAutoOverlay ? '1 1 0' : undefined, opacity: rightPanelMotion.opacity }}>
+            <div ref={rightTabsContentRef} style={{ width: rightWorkspaceAutoOverlay ? '100%' : rightSidebarWidth, minWidth: rightWorkspaceAutoOverlay ? 0 : rightSidebarWidth }}>
             <WorkspaceTabs tabs={workspaceTabs} activeTabId={workspaceActiveTabId} selectorOpen={workspaceSelectorOpen}
-              focused={documentFocused} onSelect={activateWorkspaceTab} onClose={closeWorkspaceTab}
+              focused={documentFocused || rightWorkspaceAutoOverlay} onSelect={activateWorkspaceTab} onClose={closeWorkspaceTab}
               onReorder={useWorkspaceTabsStore.getState().reorderTab} onAdd={useWorkspaceTabsStore.getState().showSelector}
-              onToggleFocus={() => setDocumentFocused((value) => !value)} onCollapse={closeRightPanel} />
+              onToggleFocus={() => {
+                if (rightWorkspaceAutoOverlay) closeRightPanel()
+                else setDocumentFocused((value) => !value)
+              }} onCollapse={closeRightPanel} />
             </div>
           </div>
         ) : null}
@@ -3461,12 +3751,12 @@ export function Workbench(): ReactElement {
       <div
         ref={leftPaneRef}
         id="workbench-project-sidebar"
-        inert={leftSidebarCollapsed}
+        inert={leftSidebarCollapsed || rightWorkspaceAutoOverlay}
         className="ds-left-sidebar-pane min-h-0 shrink-0"
-        data-collapsed={leftSidebarCollapsed ? 'true' : 'false'}
+        data-collapsed={leftSidebarCollapsed || rightWorkspaceAutoOverlay ? 'true' : 'false'}
         data-resizing={leftResizing ? 'true' : 'false'}
-        aria-hidden={leftSidebarCollapsed}
-        style={{ width: leftSidebarCollapsed ? 0 : leftSidebarWidth }}
+        aria-hidden={leftSidebarCollapsed || rightWorkspaceAutoOverlay}
+        style={{ width: leftSidebarCollapsed || rightWorkspaceAutoOverlay ? 0 : leftSidebarWidth }}
       >
         <div className="ds-left-sidebar-pane-clip">
           <div
@@ -3486,7 +3776,6 @@ export function Workbench(): ReactElement {
 	                  activeThreadId={activeThreadId}
                   activeView={sidebarView}
                   connectPhoneSidebarOpen={connectPhoneSidebarOpen}
-                  pluginsActive={route === 'plugins'}
                   runtimeReady={runtimeConnection === 'ready'}
                   threadSearch={threadSearch}
                   showArchivedThreads={showArchivedThreads}
@@ -3506,44 +3795,42 @@ export function Workbench(): ReactElement {
                   activeDataAnalysis={activeDataAnalysis}
                   onOpenDataAnalysis={openDataAnalysis}
                   onOpenSettings={(section) => openSettings(section)}
-                  onOpenPlugins={openPluginsView}
-                  focusModeEnabled={focusModeEnabled}
-                  onFocusModeChange={updateFocusMode}
                   onToggleConnectPhone={toggleConnectPhone}
-                  onCodeOpen={openCodeMode}
-                  onWriteOpen={openWriteMode}
                   onScheduleOpen={openScheduleView}
                 />
             ) : null}
           </div>
         </div>
-        {!leftSidebarCollapsed ? (
+        {!leftSidebarCollapsed && !rightWorkspaceAutoOverlay ? (
           <WorkbenchResizeHandle
             edge="right"
             isResizing={leftResizing}
             onPointerDown={beginLeftResize}
-            ariaLabel={t('resizeProjectSidebar')} value={leftSidebarWidth} min={180} max={520} onResizeDelta={resizeLeftSidebarBy}
+            ariaLabel={t('resizeProjectSidebar')} value={leftSidebarWidth} min={leftResizeMin} max={leftResizeMax} onResizeDelta={resizeLeftSidebarBy}
             onReset={resetLeftSidebarWidth}
           />
         ) : null}
       </div>
 
       <WorkbenchStage className={route === 'plugins' ? 'px-0' : ''}>
-        {route === 'plugins' ? (
-          <Suspense fallback={<WorkbenchLoadingFallback />}>
-            <PluginMarketplaceView leftSidebarCollapsed={leftSidebarCollapsed} />
-          </Suspense>
-        ) : route === 'schedule' ? (
-          <Suspense fallback={<WorkbenchLoadingFallback />}>
-            <ScheduleTasksView
-              leftSidebarCollapsed={leftSidebarCollapsed}
-              onOpenThread={openThread}
-            />
-          </Suspense>
-        ) : (
-          <>
-            <div className="flex min-h-0 flex-1">
-              <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1">
+          {route === 'plugins' ? (
+            <Suspense fallback={<WorkbenchLoadingFallback />}>
+              <PluginMarketplaceView leftSidebarCollapsed={leftSidebarCollapsed} />
+            </Suspense>
+          ) : route === 'schedule' ? (
+            <div className="min-h-0 min-w-0 flex-1" data-workbench-underlay inert={rightWorkspaceAutoOverlay}
+              aria-hidden={rightWorkspaceAutoOverlay} style={{ visibility: rightWorkspaceAutoOverlay ? 'hidden' : undefined }}>
+              <Suspense fallback={<WorkbenchLoadingFallback />}>
+                <ScheduleTasksView leftSidebarCollapsed={leftSidebarCollapsed} onOpenThread={openThread}
+                  onOpenTaskDetail={openTaskDetail} />
+              </Suspense>
+            </div>
+          ) : (
+            <>
+
+              <div className="flex min-h-0 min-w-0 flex-1" data-workbench-underlay inert={rightWorkspaceAutoOverlay}
+                aria-hidden={rightWorkspaceAutoOverlay} style={{ visibility: rightWorkspaceAutoOverlay ? 'hidden' : undefined }}>
                 {activeSddDraft ? (
                   <Suspense fallback={<WorkbenchLoadingFallback className="min-w-0 flex-1" />}>
                     <SddDraftEditorView
@@ -3576,8 +3863,10 @@ export function Workbench(): ReactElement {
                     data-bottom-panel-open={workbenchScrollReserve.bottomPanelOpen ? 'true' : 'false'}
                     style={chatStageStyle}
                   >
-                    <div className={`${stageInsetClass} flex min-h-0 min-w-0 flex-1 flex-col`}>
-                      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                    <div ref={setConversationBody} data-analytix-conversation-body data-phase={conversationPhase} data-conversation-route={route === 'claw' ? 'claw' : 'chat'}
+                      style={{ paddingInlineEnd: summaryReservedInlineEnd, '--ax-thread-summary-reserve': `${summaryReservedInlineEnd}px` } as CSSProperties}
+                      className={`${stageInsetClass} relative flex min-h-0 min-w-0 flex-1 flex-col`}>
+                      <div data-analytix-conversation-view className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                         {ownedRequestNavigation?.threadId === activeThreadId && ownedRequestNavigation.returnThreadId && ownedRequestNavigation.returnThreadId !== activeThreadId ? (
                           <div className="ds-no-drag flex shrink-0 items-center justify-between gap-3 border-b border-ds-border-muted px-5 py-2 text-xs text-ds-muted">
                             <span>{t('pendingRequestNotResolved')}</span>
@@ -3588,6 +3877,7 @@ export function Workbench(): ReactElement {
                           </div>
                         ) : null}
                         <ChatTimelineIsland
+                          conversationPhase={route === 'chat' ? conversationPhase : undefined}
                           focusRequestId={ownedRequestNavigation?.threadId === activeThreadId ? ownedRequestNavigation.requestId : null}
                           onRequestFocused={() => setOwnedRequestNavigation(current => current ? { ...current, requestId: null } : null)}
                           activeThreadId={activeThreadId}
@@ -3597,10 +3887,6 @@ export function Workbench(): ReactElement {
                           onRetryConnection={() => void probeRuntime('user', { restart: true })}
                           onOpenSettings={() => openSettings('agents')}
                           onSelectSuggestion={(text) => setInput(text)}
-                          focusModeEnabled={focusModeEnabled}
-                          planActionsBusy={busy}
-                          onBuildPlan={() => void buildGuiPlan()}
-                          onOpenPlan={openGuiPlanPanel}
                           devPreviewCard={
                             showDevPreviewCard ? (
                               <DevPreviewLaunchCard
@@ -3619,59 +3905,59 @@ export function Workbench(): ReactElement {
                           <div data-analytix-return-to-bottom-anchor className="relative h-0">
                             <ComposerReturnToBottomButton state={timelineReturnToBottomState} />
                           </div>
-                          {nativeReferences.some(r => r.threadId === activeThreadId) ? <div className="mb-2 flex flex-wrap gap-2" aria-label="原生文档引用">
-                            {nativeReferences.filter(r => r.threadId === activeThreadId).map(reference => <div key={reference.id} className="flex items-center gap-2 rounded-lg border border-ds-border px-2 py-1 text-xs">
-                              {reference.kind === 'canvas' ? <button type="button" title={reference.label}
-                                onClick={() => openCanvasWorkspaceObject(reference.workspace, reference.path)}>
-                                {reference.label}{reference.editable === false ? ` · ${t('canvas:canvasRecaptureRequired')}` : ''}
-                              </button> : reference.kind === 'browser-selection' ? <span>{reference.label} · {t('imageRegionDiscussionOnly')}</span> : reference.kind === 'image-region' ? <span title={reference.label}>{reference.label} · {t('imageRegionDiscussionOnly')}{!reference.scopeId ? ` · ${t('imageRegionRecapture')}` : ''}</span>
-                                : <button type="button" title={[reference.note, reference.text].filter(Boolean).join('\n\n')} onClick={() => useWorkspaceTabsStore.getState().openTab({id:workspaceObjectTabId(reference.workspace, reference.path), kind:'document', mode:'documents', title:reference.path.split(/[\\/]/).at(-1) ?? reference.path, path:reference.path, workspaceRoot:reference.workspace})}>{reference.label}{reference.selection.capture?.truncated ? ' · 部分引用' : ''}{reference.editable === false ? ' · 仅讨论' : ''}{reference.note ? <span className="ml-1 text-ds-muted">· {reference.note.slice(0, 48)}{reference.note.length > 48 ? '…' : ''}</span> : null}</button>}
-                              <button type="button" aria-label={`移除 ${reference.label}`} onClick={() => useNativeReferenceStore.getState().remove(reference.id)}>×</button>
-                            </div>)}
+                          {nativeReferences.some(r => r.threadId === activeThreadId) ? <div className="mb-2 flex flex-wrap gap-2" aria-label={t('nativeReferences')}>
+                            {nativeReferences.filter(r => r.threadId === activeThreadId).map(reference => (
+                              <NativeReferenceChip key={reference.id} reference={reference} />
+                            ))}
                           </div> : null}
                           {documentQuotes.length ? (
                             <div className="mb-2 flex flex-wrap gap-2" aria-label={t('workbenchReferences')}>
                               {documentQuotes.map((quote) => (
-                                <div key={quote.id} className="flex items-center gap-2 rounded-lg border border-ds-border px-2 py-1 text-xs">
-                                  <button type="button" onClick={() => setRightPanelMode('documents')} title={quote.text}>
+                                <ComposerReferenceChip key={quote.id} title={quote.text}
+                                  remove={{ label: t('writeRemoveQuote'), onClick: () => useWriteWorkspaceStore.getState().removeQuotedSelection(quote.id) }}>
+                                  <FileText className="h-3.5 w-3.5 shrink-0 text-ds-faint" />
+                                  <button type="button" className="min-w-0 max-w-52 truncate" onClick={() => setRightPanelMode('documents')} title={quote.text}>
                                     {quote.sourceTitle} · {quote.lineStart ?? quote.pageStart ?? ''}–{quote.lineEnd ?? quote.pageEnd ?? ''}
                                   </button>
-                                  <button type="button" aria-label={t('writeRemoveQuote')} onClick={() => useWriteWorkspaceStore.getState().removeQuotedSelection(quote.id)}>×</button>
-                                </div>
+                                </ComposerReferenceChip>
                               ))}
                             </div>
                           ) : null}
                           {skillDiscoveryIncomplete ? (
                             <p role="status" className="mb-2 text-xs text-ds-muted">{t('skillDiscoveryIncomplete')}</p>
                           ) : null}
-                          <FloatingComposerIsland
+                          <InputBar
+                            presentationPhase={route === 'chat' ? conversationPhase : undefined}
                             activeSkillWorkspace={activeSkillWorkspace}
                             className="max-w-none"
-                            input={composerViewState.input}
-                            setInput={composerController.setInput}
-                            mode={composerViewState.mode}
-                            setMode={composerController.setMode}
-                            busy={composerViewState.busy}
-                            runtimeReady={composerViewState.runtimeReady}
-                            hasActiveThread={composerViewState.hasActiveThread}
-                            contextWindowTokens={composerViewState.contextWindowTokens}
-                            runtimeToolCount={composerViewState.runtimeToolCount}
-                            runtimeSkillCount={composerViewState.runtimeSkillCount}
-                            composerModel={composerViewState.composerModel}
-                            composerProviderId={composerViewState.composerProviderId}
+                            input={input}
+                            setInput={setInput}
+                            mode={mode}
+                            setMode={setMode}
+                            busy={busy}
+                            runtimeReady={runtimeConnection === 'ready'}
+                            hasActiveThread={Boolean(activeThreadId)}
+                            contextWindowTokens={composerContextWindow}
+                            runtimeToolCount={runtimeInfo ? runtimeInfo.capabilities.mcp.search?.active ? runtimeInfo.capabilities.mcp.search.advertisedToolCount : runtimeInfo.capabilities.mcp.toolCount : undefined}
+                            runtimeSkillCount={runtimeInfo?.capabilities.skills.discoveredSkills}
+                            composerModel={mainComposerModel}
+                            composerProviderId={route === 'chat' ? composerProviderId : undefined}
                             composerPickList={composerPickList}
                             composerModelGroups={composerModelGroups}
-                            composerReasoningEffort={composerViewState.composerReasoningEffort}
-                            onComposerModelChange={composerController.setModel}
-                            onComposerReasoningEffortChange={composerController.setReasoningEffort}
+                            composerReasoningEffort={route === 'chat' || route === 'claw' ? composerReasoningEffort : undefined}
+                            onComposerModelChange={handleComposerModelChange}
+                            onComposerReasoningEffortChange={route === 'chat' || route === 'claw' ? setComposerReasoningEffort : undefined}
                             onConfigureProviders={() => openSettings('providers')}
                             onOpenPermissionSettings={() => openSettings('permissions')}
-                            onSend={composerController.send}
+                            onSend={handleSend}
                             documentReferenceCount={documentQuotes.length + nativeReferences.filter(reference => reference.threadId === activeThreadId).length}
                             attachments={composerAttachments}
                             attachmentUploadEnabled={attachmentUploadEnabled}
                             attachmentUploadBusy={attachmentUploadBusy}
                             attachmentUploadError={attachmentUploadError}
+                            attachmentUploads={attachmentUploads}
+                            onRetryAttachmentUpload={retryAttachmentUpload}
+                            onRemoveAttachmentUpload={removeAttachmentUpload}
                             fileReferenceEnabled={route === 'chat' && !activeSddDraft && !activeDataAnalysis}
                             fileReferences={composerFileReferences}
                             webAccessAvailable={webAccessAvailable}
@@ -3688,7 +3974,7 @@ export function Workbench(): ReactElement {
                             onRemoveFileReference={removeComposerFileReference}
                             queuedMessages={queuedMessages}
                             onRemoveQueuedMessage={removeQueuedMessage}
-                            onInterrupt={composerController.interrupt}
+                            onInterrupt={(options) => void interrupt(options)}
                             onPlanCommand={() => void handleGuiPlanCommand()}
                             useWorktreePool={useWorktreePool || Boolean(activeThreadWorktreeRecord)}
                             onToggleWorktreeMode={handleToggleWorktreeMode}
@@ -3716,6 +4002,19 @@ export function Workbench(): ReactElement {
                           />
                         </div>
                       </div>
+                      {route === 'chat' ? <>
+                        <ConversationWidthControls container={conversationBody} phase={conversationPhase} label={t('resizeWorkspace')} reservedInlineEnd={summaryReservedInlineEnd} />
+                        <ThreadSummarySurface container={conversationBody} openIntent={summaryOpenIntent} pinPreference={summaryPinPreference}
+                          onReserveChange={setSummaryReservedInlineEnd} onDismiss={closeThreadSummary}>
+                          <Suspense fallback={<WorkbenchLoadingFallback surface="sidebar" />}>
+                            <ThreadSummaryPanelIsland activeThreadId={activeThreadId} className="w-full" visible={summaryOpenIntent}
+                              titleId={THREAD_SUMMARY_TITLE_ID} pinPreference={summaryPinPreference} onTogglePin={() => setSummaryPinPreference(pinned => !pinned)}
+                              diagnosticsFocus={runtimeDiagnosticsFocus} onDiagnosticsFocusHandled={() => setRuntimeDiagnosticsFocus(null)}
+                              onCollapse={() => closeThreadSummary(true)} onInspectChildAgent={inspectChildAgent}
+                              onSubagentsChange={syncSubagentInspector} onOpenChanges={() => setRightPanelMode('changes')} />
+                          </Suspense>
+                        </ThreadSummarySurface>
+                      </> : null}
                     </div>
                     {terminalOpen || terminalPanelMotion.isMounted ? (
                       <div
@@ -3764,20 +4063,28 @@ export function Workbench(): ReactElement {
               </div>
 
               {route === 'chat' && !activeSddDraft && !activeDataAnalysis ? (
+                <div style={{ display: 'contents', visibility: rightWorkspaceAutoOverlay ? 'hidden' : undefined }}
+                  data-workbench-underlay inert={rightWorkspaceAutoOverlay} aria-hidden={rightWorkspaceAutoOverlay}>
                 <SideConversationPanel
+                  onRetryConnection={() => void probeRuntime('user', { restart: true })}
+                  onOpenSettings={() => openSettings('agents')}
                   onOpenThreadRequest={openOwnedThreadRequest}
                   rightOffset={(rightPanelDockedVisible ? rightSidebarWidth + 24 : 24) + fileTreeSidePanelOffset}
                 />
+                </div>
               ) : null}
 
-              {renderRightPanel()}
-            </div>
-          </>
-        )}
+            </>
+          )}
+          <div className={route === 'plugins' ? 'hidden' : 'flex min-h-0'} hidden={route === 'plugins'} inert={route === 'plugins'}>
+            {renderRightPanel()}
+          </div>
+        </div>
         {renderPlanPanelOverlay()}
       </WorkbenchStage>
     </WorkbenchShell>
     </div>
     </div>
+    </SkillChildInspectionContext.Provider>
   )
 }

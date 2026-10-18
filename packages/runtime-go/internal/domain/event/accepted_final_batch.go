@@ -736,6 +736,9 @@ func validAcceptedFinalUsageEffortV1(event map[string]any) bool {
 
 func validateAcceptedFinalDeliveryTerminalSemanticsV2(batch AcceptedFinalDeliveryBatchV2) error {
 	terminalEvent := batch.Events[len(batch.Events)-1]
+	if !domainterminal.ValidEndReasonRecord(terminalEvent) {
+		return errors.New("accepted final end reason is invalid")
+	}
 	terminalReason := strings.TrimSpace(contracts.StringField(terminalEvent, "terminalReason"))
 	expectedStatus, ok := domainterminal.StatusForReasonV1(terminalReason)
 	requiresErrorItem, profileOK := domainterminal.AcceptedFinalDeliveryRequiresErrorItemV1(terminalReason)

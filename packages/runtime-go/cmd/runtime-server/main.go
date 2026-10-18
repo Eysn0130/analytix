@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,11 +19,15 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	backendgenerationfs "analytix.local/runtime-go/internal/adapters/outbound/backendgenerationfs"
 	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
 	backendgenerationapp "analytix.local/runtime-go/internal/app/backendgeneration"
+	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainregistry "analytix.local/runtime-go/internal/domain/providerregistry"
 	"analytix.local/runtime-go/internal/runtimeapp"
 )
 
@@ -140,6 +145,7 @@ func runRuntimeServerWithDependencies(args []string, dependencies runtimeServerD
 		if errors.Is(err, context.Canceled) && runtimeCtx.Err() != nil {
 			return nil
 		}
+		emitStartupPrepareFailureV1(os.Stderr, started, err)
 		return err
 	}
 	emitStartupOwnerPhaseV1(os.Stderr, started, startupGoSemanticPreparedV1)
@@ -510,7 +516,7 @@ func runtimeConfigFromCLI(cli runtimeServerCLIConfig, runtimeToken string, port 
 		APIKey:                                  "",
 		Model:                                   "",
 		EndpointFormat:                          "",
-		ModelProvidersJSON:                      "",
+		ModelProvidersJSON:                      cli.ModelProvidersJSON,
 		ModelProxyURL:                           "",
 		ProviderAuditSocketPath:                 formalProviderAuditSocketPathV1(),
 		MCPProxyURL:                             cli.MCPProxyURL,
@@ -689,7 +695,8 @@ func parseRuntimeServerCLI(args []string) (runtimeServerCLIConfig, error) {
 	if fs.NArg() != 0 {
 		return runtimeServerCLIConfig{}, errors.New("runtime-server does not accept positional arguments")
 	}
-	if err := validateKeyFreeModelProvidersJSON(*modelProvidersJSON); err != nil {
+	projectedModelPreferences, err := projectRuntimeModelPreferencesJSONV1(*modelProvidersJSON)
+	if err != nil {
 		return runtimeServerCLIConfig{}, err
 	}
 	if !exactAbsoluteCLIPath(*dataDir) {
@@ -722,7 +729,7 @@ func parseRuntimeServerCLI(args []string) (runtimeServerCLIConfig, error) {
 		BaseURL:               *baseURL,
 		Model:                 *model,
 		EndpointFormat:        *endpointFormat,
-		ModelProvidersJSON:    *modelProvidersJSON,
+		ModelProvidersJSON:    projectedModelPreferences,
 		MCPConfigPath:         *mcpConfigPath,
 		MCPConfigJSON:         *mcpConfigJSON,
 		ModelProxyURL:         *modelProxyURL,
@@ -734,24 +741,236 @@ func parseRuntimeServerCLI(args []string) (runtimeServerCLIConfig, error) {
 	}, nil
 }
 
-func validateKeyFreeModelProvidersJSON(raw string) error {
+// Runtime model preferences carry no Provider selection, route, catalog or
+// credential authority. The Registry remains the only execution authority.
+type runtimeModelPreferencesProviderV1 struct {
+	ID             string                                      `json:"id"`
+	BaseURL        string                                      `json:"baseUrl"`
+	EndpointFormat string                                      `json:"endpointFormat"`
+	ModelProfiles  map[string]runtimeModelPreferencesProfileV1 `json:"modelProfiles"`
+}
+
+type runtimeModelPreferencesProfileV1 struct {
+	Aliases   []string                            `json:"aliases,omitempty"`
+	Reasoning *domainmodel.ModelProviderReasoning `json:"reasoning,omitempty"`
+}
+
+func projectRuntimeModelPreferencesJSONV1(raw string) (string, error) {
+	if len(raw) > 1<<20 {
+		return "", errors.New("runtime model provider metadata is invalid")
+	}
 	if strings.TrimSpace(raw) == "" {
-		return nil
+		return "", nil
 	}
-	var document struct {
-		Providers []struct {
-			APIKey *json.RawMessage `json:"apiKey"`
-		} `json:"providers"`
+	invalid := errors.New("runtime model provider metadata is invalid")
+	document, err := domainjsonstrict.DecodeObject([]byte(raw), domainjsonstrict.Options{
+		MaxBytes: 1 << 20, MaxDepth: 16, MaxTokens: 1 << 20, MaxStringBytes: 3 * 2048,
+	})
+	if err != nil {
+		return "", invalid
 	}
-	if err := json.Unmarshal([]byte(raw), &document); err != nil {
-		return errors.New("runtime model provider metadata is invalid")
+	providersValue, present := document["providers"]
+	if !present {
+		return "", nil // Legacy route-only configuration cannot supply metadata.
 	}
-	for _, provider := range document.Providers {
-		if provider.APIKey != nil {
-			return errors.New("runtime model provider metadata must be key-free")
+	providers, valid := providersValue.([]any)
+	if !valid || len(providers) > 128 {
+		return "", invalid
+	}
+	seenIDs := make(map[string]struct{}, len(providers))
+	hasProfiles := false
+	for _, value := range providers {
+		provider, valid := value.(map[string]any)
+		if !valid {
+			return "", invalid
+		}
+		if _, present := provider["apiKey"]; present {
+			return "", errors.New("runtime model provider metadata must be key-free")
+		}
+		if idValue, present := provider["id"]; present {
+			id, valid := idValue.(string)
+			if !valid || !domainregistry.ValidProviderID(id) {
+				return "", invalid
+			}
+			if _, duplicate := seenIDs[id]; duplicate {
+				return "", invalid
+			}
+			seenIDs[id] = struct{}{}
+		}
+		if _, present := provider["modelProfiles"]; present {
+			hasProfiles = true
 		}
 	}
-	return nil
+	if !hasProfiles {
+		return "", nil // Preserve legacy authority rejection without enabling a route.
+	}
+	if !runtimeModelPreferencesFieldsV1(document, "providers") {
+		return "", invalid
+	}
+	projected := struct {
+		Providers []runtimeModelPreferencesProviderV1 `json:"providers"`
+	}{Providers: make([]runtimeModelPreferencesProviderV1, 0, len(providers))}
+	for _, value := range providers {
+		provider := value.(map[string]any)
+		if !runtimeModelPreferencesFieldsV1(provider, "id", "baseUrl", "endpointFormat", "modelProfiles") {
+			return "", invalid
+		}
+		id, idValid := provider["id"].(string)
+		endpoint, endpointValid := provider["baseUrl"].(string)
+		format, formatValid := provider["endpointFormat"].(string)
+		if !idValid || !domainregistry.ValidProviderID(id) || !endpointValid ||
+			!runtimeModelPreferencesEndpointV1(endpoint) || !formatValid {
+			return "", invalid
+		}
+		switch format {
+		case "chat_completions", "messages", "responses", "custom_endpoint":
+		default:
+			return "", invalid
+		}
+		profilesValue, present := provider["modelProfiles"]
+		if !present {
+			continue // A closed route-only record still cannot supply a profile.
+		}
+		profiles, valid := profilesValue.(map[string]any)
+		if !valid || len(profiles) > 200 {
+			return "", invalid
+		}
+		entry := runtimeModelPreferencesProviderV1{
+			ID: id, BaseURL: endpoint, EndpointFormat: format,
+			ModelProfiles: make(map[string]runtimeModelPreferencesProfileV1),
+		}
+		seenModelKeys := make(map[string]struct{}, len(profiles))
+		for model, value := range profiles {
+			if !runtimeModelPreferencesStringV1(model, 128) {
+				return "", invalid
+			}
+			modelKey := strings.ToLower(model)
+			if _, duplicate := seenModelKeys[modelKey]; duplicate {
+				return "", invalid
+			}
+			seenModelKeys[modelKey] = struct{}{}
+			profile, valid := value.(map[string]any)
+			if !valid || !runtimeModelPreferencesFieldsV1(profile, "aliases", "reasoning") {
+				return "", invalid
+			}
+			projectedProfile := runtimeModelPreferencesProfileV1{}
+			if aliasesValue, present := profile["aliases"]; present {
+				aliases, valid := aliasesValue.([]any)
+				if !valid || len(aliases) > 50 {
+					return "", invalid
+				}
+				seenAliases := make(map[string]struct{}, len(aliases))
+				for _, aliasValue := range aliases {
+					alias, valid := aliasValue.(string)
+					if !valid || !runtimeModelPreferencesStringV1(alias, 128) {
+						return "", invalid
+					}
+					if _, duplicate := seenAliases[alias]; duplicate {
+						return "", invalid
+					}
+					seenAliases[alias] = struct{}{}
+					projectedProfile.Aliases = append(projectedProfile.Aliases, alias)
+				}
+			}
+			if reasoningValue, present := profile["reasoning"]; present {
+				// Main projects explicit persisted null to the existing non-nil
+				// none protocol. Null here would reactivate official defaults.
+				reasoning, valid := reasoningValue.(map[string]any)
+				if !valid || !runtimeModelPreferencesFieldsV1(reasoning, "supportedEfforts", "defaultEffort", "requestProtocol") {
+					return "", invalid
+				}
+				efforts, valid := reasoning["supportedEfforts"].([]any)
+				defaultEffort, defaultValid := reasoning["defaultEffort"].(string)
+				protocol, protocolValid := reasoning["requestProtocol"].(string)
+				if !valid || len(efforts) == 0 || len(efforts) > 6 || !defaultValid || !protocolValid {
+					return "", invalid
+				}
+				switch protocol {
+				case "none", "deepseek-chat-completions", "deepseek-messages", "glm-chat-completions", "mimo-chat-completions", "openai-responses", "anthropic-thinking":
+				default:
+					return "", invalid
+				}
+				projectedReasoning := &domainmodel.ModelProviderReasoning{
+					DefaultEffort: defaultEffort, RequestProtocol: protocol,
+				}
+				seenEfforts := make(map[string]struct{}, len(efforts))
+				for _, effortValue := range efforts {
+					effort, valid := effortValue.(string)
+					if !valid || effort == "" || domainmodel.ValidateReasoningEffortV1(effort) != nil {
+						return "", invalid
+					}
+					if _, duplicate := seenEfforts[effort]; duplicate {
+						return "", invalid
+					}
+					seenEfforts[effort] = struct{}{}
+					projectedReasoning.SupportedEfforts = append(projectedReasoning.SupportedEfforts, effort)
+				}
+				if _, supported := seenEfforts[defaultEffort]; !supported {
+					return "", invalid
+				}
+				projectedProfile.Reasoning = projectedReasoning
+			}
+			if len(projectedProfile.Aliases) != 0 || projectedProfile.Reasoning != nil {
+				entry.ModelProfiles[model] = projectedProfile
+			}
+		}
+		if len(entry.ModelProfiles) != 0 {
+			projected.Providers = append(projected.Providers, entry)
+		}
+	}
+	if len(projected.Providers) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil || len(encoded) > 1<<20 {
+		return "", invalid
+	}
+	return string(encoded), nil
+}
+
+func runtimeModelPreferencesFieldsV1(record map[string]any, allowed ...string) bool {
+	for key := range record {
+		found := false
+		for _, candidate := range allowed {
+			found = found || key == candidate
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeModelPreferencesStringV1(value string, maximum int) bool {
+	if value == "" || value != strings.TrimSpace(value) || strings.HasPrefix(value, "\ufeff") || strings.HasSuffix(value, "\ufeff") {
+		return false
+	}
+	units := 0
+	for _, current := range value {
+		if current < 0x20 || current == 0x7f {
+			return false
+		}
+		units++
+		if current > 0xffff {
+			units++ // Match the persisted JavaScript string-length boundary.
+		}
+	}
+	return units <= maximum
+}
+
+func runtimeModelPreferencesEndpointV1(value string) bool {
+	if !runtimeModelPreferencesStringV1(value, 2048) || strings.ContainsAny(value, "?#\\") {
+		return false
+	}
+	for _, current := range value {
+		if unicode.IsSpace(current) {
+			return false
+		}
+	}
+	parsed, err := url.Parse(value)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+		parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" &&
+		!parsed.ForceQuery && parsed.Fragment == "" && parsed.RawFragment == ""
 }
 
 func cloneRuntimeMCPServerSpecV1(spec *domainmcp.ServerSpec) *domainmcp.ServerSpec {

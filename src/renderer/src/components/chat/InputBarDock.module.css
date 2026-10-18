@@ -1,0 +1,97 @@
+/* Composer-only status dock. Hints retain their separate existing owner.
+ * Selected ContextMeter bar geometry adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md. */
+.dock {
+  display: flex;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.dock:empty {
+  display: none;
+}
+
+.capacityTrigger {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  font-variant-numeric: tabular-nums;
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.capacityTrigger:hover,
+.capacityTrigger[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.capacityTrigger:focus-visible {
+  outline: 2px solid var(--dsw-focus-ring-color);
+  outline-offset: 2px;
+}
+
+.capacityRing {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  transform: rotate(-90deg);
+}
+
+/* Context breakdown has its own geometry; session and turn statistics keep theirs. */
+.capacityPanel[role='dialog'] {
+  width: min(264px, calc(100vw - 24px));
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  padding: 12px;
+  line-height: 20px;
+}
+
+.capacityHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.capacityBarWrap {
+  position: relative;
+  margin: 10px 0 12px;
+}
+
+.capacityBar {
+  display: flex;
+  gap: 1px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.capacityBar > span {
+  flex-shrink: 0;
+}
+
+.capacityRow {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto 46px;
+  align-items: center;
+  column-gap: 8px;
+  padding-block: 3px;
+}

@@ -9,7 +9,22 @@ import (
 	"testing"
 
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
+
+func TestReadFailureCapturesActualProducerErrorOnceWithoutSuccessBody(t *testing.T) {
+	workspace := t.TempDir()
+	for _, path := range []string{"missing.txt", "."} {
+		var messages []string
+		captures := 0
+		output, raw, failed := ExecuteReadTextTool(ReadTextToolInput{Workspace: workspace, Args: map[string]any{"path": path}, Mode: filetoolsapp.ReadModeWindow,
+			CaptureError: func(message string) { messages = append(messages, message) }, Capture: func(domaintoolresult.ProtectedCaptureV1) { captures++ }})
+		if !failed || raw != "" || captures != 0 || len(messages) != 1 || messages[0] != output["error"] {
+			t.Fatal("failed Read lost its source error or captured a success body")
+		}
+	}
+}
 
 func TestWorkspaceFileToolRunnerReadListAndGrep(t *testing.T) {
 	workspace := t.TempDir()
@@ -377,5 +392,32 @@ func TestProviderFileToolsCannotReadListOrSearchWorkspaceHostMetadata(t *testing
 				t.Fatalf("root search should prune metadata rather than fail: %s", body)
 			}
 		})
+	}
+}
+
+func TestReadCaptureNavigationUsesActualHostPathBytesAndWindow(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	path := filepath.Join(outside, "source.go")
+	original := []byte("first\r\nsecond\r\nthird\r\n")
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var capture domaintoolresult.ProtectedCaptureV1
+	output, _, failed := ExecuteReadTextTool(ReadTextToolInput{Workspace: workspace,
+		ReadRoots: []string{outside}, SandboxMode: "workspace-write", Mode: filetoolsapp.ReadModeWindow,
+		Args:    map[string]any{"path": "@" + ExternalReadRootAlias(outside) + "/source.go", "offset": 2, "limit": 1},
+		Capture: func(value domaintoolresult.ProtectedCaptureV1) { capture = value }})
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed || capture.ReadTarget == nil || capture.ReadTarget.Path != real || capture.ReadTarget.StartLine != capture.StartLine ||
+		capture.ReadTarget.ContentDigest != domainsecurity.SHA256Hex(original) || capture.Label == real || capture.Body != "second\r\n" {
+		t.Fatalf("actual host target/window/digest not captured: failed=%v", failed)
+	}
+	encoded, _ := json.Marshal(output)
+	if strings.Contains(string(encoded), "contentDigest") || strings.Contains(string(encoded), "readTarget") || strings.Contains(string(encoded), real) {
+		t.Fatal("private navigation target entered tool output")
 	}
 }

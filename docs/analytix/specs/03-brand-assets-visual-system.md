@@ -14,7 +14,7 @@ asset is current or correctly wired.
 
 本 spec 定义 Analytix 第一阶段品牌资产、app icon、tray/dock/installer icon、启动图、空状态、SVG 图标结构、阴影、边框、动效的升级边界。
 
-目标是保留原 Kun 功能和主要信息架构，但把产品身份、图标资产、视觉细节升级为 Analytix，同时参考 CodexDesktop-Rebuild 的成熟视觉结构。
+目标是在当前产品范围内维护 Analytix 的品牌与视觉一致性；上游参考和历史迁移不构成恢复旧功能入口的要求。
 
 ## 2. 冻结决策
 
@@ -28,7 +28,6 @@ asset is current or correctly wired.
 - 不保留 Kun app icon。
 - 不直接使用 Codex 主 logo。
 - CodexDesktop-Rebuild 仅可用于行为、结构、布局和视觉节奏观察；未建立材料级授权前，不复制其代码、二进制提取物、图标、品牌或其他资产。
-- 原 Kun 吉祥物/插画/iKun 模式保留功能，第一阶段源码命名改为 `mascot` / `cameo`，后期再替换视觉。
 
 ## 3. analytix-logo 历史来源
 
@@ -84,8 +83,7 @@ build/
 
 是否保留 `src/asset/img/`：
 
-- 若引用量可控，推荐迁移品牌资产到 `src/asset/brand/`。
-- 若短期引用太多，可保留 `src/asset/img/`，但文件名必须是 `analytix*` / `mascot*` / `cameo*`，不能保留 `kun*` / `ikun*` 新身份命名。
+- 当前资产以 tracked manifest 和实际生产引用为准；历史路径不构成新增或保留资产的要求。
 
 ## 5. CodexDesktop-Rebuild 参考边界
 
@@ -136,14 +134,14 @@ src/asset/img/ikun-ui-plugin.gif
 src/asset/img/ikun-ui-plugin.mp4
 ```
 
-第一阶段处理：
+第一阶段历史处理：
 
 - app icon/tray/dock/installer/icon source 替换为 Analytix 品牌资产。
 - `kun_*` mascot 素材改名为 `mascot_*` 或 `cameo_*`。
 - `ikun_*` 功能/模式源码改名为 `mascot` / `cameo`。
 - 原素材只有在 Kun 许可、required notice 与适用授权范围允许时才可
-  保留；文件名和代码语义不能继续表达 Kun 产品身份。当前实际文件以
-  tracked `src/asset/img/mascot*` / `cameo*` 为准。
+  保留；文件名和代码语义不能继续表达 Kun 产品身份。该历史清单不证明
+  当前文件仍存在，也不要求恢复 mascot/cameo 模式。
 
 ## 7. UI 视觉系统升级方向
 
@@ -229,28 +227,15 @@ Codex-like 体感更像“轻、短、稳定”，不是动画更多。
 目标：
 
 - Chat empty hero 使用 Analytix logo/symbol。
-- Write empty state 使用 Analytix + 当前功能语义。
+- Word/共享文档空状态使用 Analytix 品牌与当前功能语义。
 - Connect Phone 空状态可保留原模式，但用户可见品牌为 Analytix / Connect Phone。
 - 启动图使用 Analytix symbol + 简短 loading state。
 
 ## 8. 需要保留的 UI/功能
 
-不得删除：
-
-- Chat empty suggestions。
-- Workspace picker。
-- Work logo / mascot mode。
-- Write workspace。
-- SDD / plan cards。
-- Generated files panel。
-- Review plan / summary cards。
-- Process/tool sections。
-- Connect Phone UI。
-- Schedule UI。
-- Settings sections。
-- UI plugin views。
-
-视觉升级必须保持现有功能入口和操作路径。
+现行功能覆盖见[桌面 QA 合同](07-desktop-qa-release-readiness.md#2-final-acceptance-scope)与
+[产品矩阵](../product-completion.md)。视觉调整须保留适用范围内的操作与无障碍，
+不要求恢复独立 Write 或 mascot/cameo 入口。共享 Plan/SDD/Markdown 能力继续保留。
 
 ## 9. 验收标准
 
@@ -264,7 +249,6 @@ rg -n "kun.png|kun_mac|kun_tray|ikun|iKun|Kun" src/asset src/renderer src/main s
 
 - app icon/tray/dock/installer 不再引用 Kun。
 - 用户可见文案不再出现 Kun。
-- `mascot` / `cameo` 替代源码中的 `ikun` 模式命名。
 - legacy migration 以外不再使用 Kun 作为当前产品身份。
 
 视觉检查：
@@ -278,6 +262,5 @@ rg -n "kun.png|kun_mac|kun_tray|ikun|iKun|Kun" src/asset src/renderer src/main s
 
 ## 10. 后续可选
 
-- 第二阶段生成新的 mascot/cameo 资产。
 - 第二阶段统一 design token 到 `src/renderer/src/styles/tokens.css`。
 - 第二阶段建立视觉回归截图。

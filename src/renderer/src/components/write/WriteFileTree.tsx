@@ -235,7 +235,7 @@ export function WriteFileTree({
     <div className="flex h-full min-h-0 w-full flex-col">
       {showHeader ? (
         <SidebarSectionHeader
-          label={t('writeWorkspaceFiles')}
+          label={t('writeSpaces')}
           actions={
             <>
               <TreeActionButton

@@ -6,6 +6,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"path/filepath"
+
+	docport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	"errors"
 	"os"
 	"strings"
@@ -570,4 +574,191 @@ func TestNativeRecoveryRetirementRejectsUnsafeOrChangedBlob(t *testing.T) {
 			officeEditingAssertBytes(t, path, before)
 		})
 	}
+}
+
+func TestNativeManualKeepsFrozenV1RecordBytes(t *testing.T) {
+	body := []byte(`{"version":1,"objectIdentity":"1111111111111111111111111111111111111111111111111111111111111111","pathBinding":"2222222222222222222222222222222222222222222222222222222222222222","kind":"docx","draft":{"ChangeID":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ThreadID":"thread_main","ProposalID":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","BaseRevision":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","BeforeText":"before","AfterText":"after"},"undoStarted":false,"createdAt":"2026-10-15T00:00:00Z"}`)
+	var record nativeRecoveryRecord
+	if err := nativeDecode(body, &record, nativeChangeMetadataBytes); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil || !bytes.Equal(encoded, body) || digestAtomicText(encoded) != "7ba74d2c97db3d2e7fc8fc1598fbbaef288018b3aa8d6e07ef72bc8ac10cf176" {
+		t.Fatal("v1 canonical record changed", err)
+	}
+	if !nativeDraftValid(record.Draft) || record.Manual != nil {
+		t.Fatal("v1 acquired manual authority")
+	}
+}
+
+func TestNativeManualContinuousSaveUndoAndLostACK(t *testing.T) {
+	for _, lostACK := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ack", true: "lost-ack"}[lostACK], func(t *testing.T) {
+			ctx := context.Background()
+			original := officeEditingNativeBytes(t, "docx", "original")
+			first := officeEditingNativeBytes(t, "docx", "first manual edit")
+			second := officeEditingNativeBytes(t, "docx", "second manual edit")
+			store, workspace, path := officeEditingNativeFixture(t, "docx", original)
+			commit := objectEditingInput(t, store, workspace, path, base64.StdEncoding.EncodeToString(first))
+			draft := editing.NativeManualDraft{ChangeID: strings.Repeat("1", 64), ThreadID: "thread_main", BaseRevision: commit.BaseRevision, BeginOperationID: "manual_begin_001"}
+			begin := editing.NativeManualInput{Workspace: workspace, Path: path, ObjectIdentity: commit.ObjectIdentity, Draft: draft}
+			prepared, err := store.PrepareNativeManual(ctx, begin)
+			if err != nil || prepared.Version != 2 || prepared.Origin != "manual" || prepared.Status != "prepared" {
+				t.Fatal("begin", prepared, err)
+			}
+			if again, err := store.PrepareNativeManual(ctx, begin); err != nil || again.ChangeID != prepared.ChangeID {
+				t.Fatal("begin replay", again, err)
+			}
+			other := begin
+			other.Draft.ChangeID = strings.Repeat("3", 64)
+			other.Draft.BeginOperationID = "manual_begin_003"
+			if _, err := store.PrepareNativeManual(ctx, other); !errors.Is(err, editing.ErrConflict) {
+				t.Fatal("overlapping begin admitted", err)
+			}
+			commit.OperationID = prepared.SaveOperationID
+			firstCommit := editing.NativeCommitInput{CommitInput: commit, ThreadID: draft.ThreadID, ChangeID: draft.ChangeID}
+			if receipt, err := store.CommitNativeChange(ctx, firstCommit); err != nil || receipt.Status != editing.StatusCommitted {
+				t.Fatal("first save", receipt, err)
+			}
+			begin.Draft = editing.NativeManualDraft{ChangeID: strings.Repeat("2", 64), ThreadID: draft.ThreadID, BaseRevision: digestAtomicText(first), BeginOperationID: "manual_begin_002"}
+			prepared, err = store.PrepareNativeManual(ctx, begin)
+			if err != nil {
+				t.Fatal("next begin", err)
+			}
+			before, err := os.ReadFile(store.nativePath(commit.ObjectIdentity, begin.Draft.ChangeID, ".before"))
+			if err != nil || !bytes.Equal(before, first) {
+				t.Fatal("second original is not acknowledged first save", err)
+			}
+			commit.OperationID, commit.BaseRevision, commit.Content = prepared.SaveOperationID, begin.Draft.BaseRevision, base64.StdEncoding.EncodeToString(second)
+			secondCommit := editing.NativeCommitInput{CommitInput: commit, ThreadID: draft.ThreadID, ChangeID: begin.Draft.ChangeID}
+			if lostACK {
+				store.replaceJournal = func(request atomicTextReplaceRequest) error {
+					if request.Path == store.recordPath(commit.ObjectIdentity, commit.OperationID) && bytes.Contains(request.Content, []byte(`"status":"committed"`)) {
+						return errors.New("synthetic lost manual receipt")
+					}
+					return atomicReplaceText(request)
+				}
+			}
+			receipt, err := store.CommitNativeChange(ctx, secondCommit)
+			if lostACK && !errors.Is(err, editing.ErrPersistence) || !lostACK && (err != nil || receipt.Status != editing.StatusCommitted) {
+				t.Fatal("second save", receipt, err)
+			}
+			officeEditingAssertBytes(t, path, second)
+			restarted, err := NewOfficeObjectEditingFiles(store.receiptRoot, nil, "docx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cancel := editing.NativeUndoInput{Workspace: workspace, Path: path, ObjectIdentity: commit.ObjectIdentity, ThreadID: draft.ThreadID, ChangeID: begin.Draft.ChangeID, BaseRevision: digestAtomicText(second)}
+			if _, err := restarted.CancelNativeChange(ctx, cancel); err == nil {
+				t.Fatal("committed or ACK-lost save was discarded")
+			}
+			officeEditingAssertBytes(t, path, second)
+			state, err := restarted.NativeRecovery(ctx, commit.ObjectIdentity, workspace, path, draft.ThreadID)
+			if err != nil || state.Pending != nil || state.Current == nil || state.Current.Version != 2 || state.Current.ChangeID != begin.Draft.ChangeID || state.Current.Revision != digestAtomicText(second) || !state.Current.CanUndo {
+				t.Fatal("recovery", state, err)
+			}
+			for _, replay := range []editing.NativeCommitInput{firstCommit, secondCommit} {
+				if receipt, err := restarted.CommitNativeChange(ctx, replay); err != nil || receipt.Status != editing.StatusCommitted {
+					t.Fatal("save replay", receipt, err)
+				}
+				officeEditingAssertBytes(t, path, second)
+			}
+			if _, err := restarted.UndoNativeChange(ctx, cancel); err != nil {
+				t.Fatal("undo latest", err)
+			}
+			officeEditingAssertBytes(t, path, first)
+		})
+	}
+}
+
+func TestNativeManualExternalCASAndUncertainBegin(t *testing.T) {
+	ctx := context.Background()
+	before, after := officeEditingNativeBytes(t, "docx", "before"), officeEditingNativeBytes(t, "docx", "after")
+	store, workspace, path := officeEditingNativeFixture(t, "docx", before)
+	commit := objectEditingInput(t, store, workspace, path, base64.StdEncoding.EncodeToString(after))
+	draft := editing.NativeManualDraft{ChangeID: strings.Repeat("4", 64), ThreadID: "thread_main", BaseRevision: commit.BaseRevision, BeginOperationID: "manual_begin_004"}
+	begin := editing.NativeManualInput{Workspace: workspace, Path: path, ObjectIdentity: commit.ObjectIdentity, Draft: draft}
+	prepared, err := store.PrepareNativeManual(ctx, begin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.replaceDocument = func(atomicTextReplaceRequest) error { return errors.New("synthetic uncertain write") }
+	commit.OperationID = prepared.SaveOperationID
+	if _, err := store.CommitNativeChange(ctx, editing.NativeCommitInput{CommitInput: commit, ThreadID: draft.ThreadID, ChangeID: draft.ChangeID}); err == nil {
+		t.Fatal("uncertainty not observed")
+	}
+	begin.Draft.ChangeID, begin.Draft.BeginOperationID = strings.Repeat("5", 64), "manual_begin_005"
+	if _, err := store.PrepareNativeManual(ctx, begin); !errors.Is(err, editing.ErrConflict) {
+		t.Fatal("new begin replaced uncertain candidate", err)
+	}
+	store.replaceDocument = nil
+	external := officeEditingNativeBytes(t, "docx", "external writer")
+	if err := os.WriteFile(path, external, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := store.CommitNativeChange(ctx, editing.NativeCommitInput{CommitInput: commit, ThreadID: draft.ThreadID, ChangeID: draft.ChangeID}); err == nil && receipt.Status == editing.StatusCommitted {
+		t.Fatal("external change overwritten")
+	}
+	officeEditingAssertBytes(t, path, external)
+}
+
+func TestUserDOCXCreationAbsentOnlyAndOperationBinding(t *testing.T) {
+	ctx := context.Background()
+	blank := officeEditingNativeBytes(t, "docx", "")
+	store, workspace, _ := officeEditingNativeFixture(t, "docx", blank)
+	input := docport.UserCreateInput{Workspace: workspace, FileName: "new.docx", SubjectIdentity: strings.Repeat("9", 64), OperationID: "user_create_001", RequestHash: strings.Repeat("8", 64), Content: blank, CheckCurrent: func() error { return nil }}
+	first, err := store.CreateUserDocument(ctx, input)
+	if err != nil || first.Revision != digestAtomicText(blank) || first.ByteSize != len(blank) {
+		t.Fatal("create", first, err)
+	}
+	store.replaceDocument = func(atomicTextReplaceRequest) error { t.Fatal("creation replay rewrote file"); return nil }
+	input.Content = nil
+	input.Encode = func(context.Context) ([]byte, error) {
+		t.Fatal("committed creation replay invoked codec")
+		return nil, errors.New("codec unavailable")
+	}
+	again, err := store.CreateUserDocument(ctx, input)
+	if err != nil || first != again {
+		t.Fatal("creation receipt replay", again, err)
+	}
+	other := input
+	other.FileName = "other.docx"
+	if _, err := store.CreateUserDocument(ctx, other); !errors.Is(err, editing.ErrOperationMismatch) {
+		t.Fatal("same op changed target", err)
+	}
+	other = input
+	other.OperationID = "user_create_002"
+	other.Content, other.Encode = blank, nil
+	if _, err := store.CreateUserDocument(ctx, other); !errors.Is(err, editing.ErrConflict) {
+		t.Fatal("existing DOCX overwritten", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "other.docx")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("mismatched target was created", err)
+	}
+	officeEditingAssertBytes(t, first.Path, blank)
+}
+
+func TestUserDOCXCreationLostReceiptNeverClaimsIdenticalExternalFile(t *testing.T) {
+	ctx := context.Background()
+	blank := officeEditingNativeBytes(t, "docx", "")
+	store, workspace, _ := officeEditingNativeFixture(t, "docx", blank)
+	input := docport.UserCreateInput{Workspace: workspace, FileName: "uncertain.docx", SubjectIdentity: strings.Repeat("7", 64), OperationID: "user_create_003", RequestHash: strings.Repeat("6", 64), Content: blank, CheckCurrent: func() error { return nil }}
+	store.replaceDocument = func(request atomicTextReplaceRequest) error {
+		if err := os.WriteFile(request.Path, blank, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return errors.New("external identical file; installation result unknown")
+	}
+	if _, err := store.CreateUserDocument(ctx, input); !errors.Is(err, editing.ErrPersistence) {
+		t.Fatal("uncertain create", err)
+	}
+	restarted, err := NewOfficeObjectEditingFiles(store.receiptRoot, nil, "docx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.replaceDocument = func(atomicTextReplaceRequest) error { t.Fatal("uncertain create retried"); return nil }
+	if _, err := restarted.CreateUserDocument(ctx, input); !errors.Is(err, editing.ErrPersistence) {
+		t.Fatal("hash-only evidence falsely completed create", err)
+	}
+	officeEditingAssertBytes(t, filepath.Join(workspace, input.FileName), blank)
 }

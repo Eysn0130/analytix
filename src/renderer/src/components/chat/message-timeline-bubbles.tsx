@@ -1,56 +1,56 @@
+import { PresentedFiles } from './presentation/chat/PresentedFiles'
+import type { PresentCall } from './presentation/chat/presented-files'
 import { useInputComposition } from './use-composer-draft'
+import { ToolCallTree } from './presentation/chat/ToolCallTree'
+import { Tooltip } from './presentation/Tooltip'
+import { DshBrowseOutlineRegular, DshCopyOutlineRegular, DshCheckOutlineRegular, DshEditOutlineRegular } from './presentation/DshToolIcons'
+import { messageClock, useCalendarDay } from './presentation/chat/message-chrome'
+import actionStyles from './presentation/chat/turn-state/TurnState.module.css'
+import userStyles from './UserMessage.module.css'
+import { TurnStatusView } from './presentation/chat/TurnStatusView'
+import { ProtectedToolResultScope } from './presentation/ProtectedToolResult'
+import { ApprovalPanel } from './presentation/chat/ApprovalPanel'
+import { QuestionReplyView } from './presentation/chat/QuestionReplyView'
+import { QuestionComposer } from './presentation/chat/QuestionComposer'
 import type { ReactElement, ReactNode } from 'react'
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { useTranslation } from 'react-i18next'
-import { Check, ChevronDown, ChevronRight, Copy, Download, File, FileEdit, GitFork, ImageIcon, Loader2, MessageSquareQuote, PencilLine, Plug, RotateCcw, Sparkles, Terminal, Video, Wrench } from '../../design/AnalytixUiIcons'
-import type { HubAgentPluginListItem } from '@shared/analytix-api'
+import { Check, Copy, Download, File, ImageIcon, Loader2, MessageSquareQuote, Plug, Sparkles, Video } from '../../design/AnalytixUiIcons'
+import type { HubAgentPluginListItem, SkillListItem } from '@shared/analytix-api'
 import { generatedArtifactMetadataSchema } from '../../../../../packages/runtime/src/contracts/generated-artifact'
-import { GeneratedOfficeArtifact } from './GeneratedOfficeArtifact'
-import type { AttachmentReference, ChatBlock, GeneratedFileReference, RuntimeDisclosureMetadata, ToolBlock, UserInputAnswer, UserInputQuestion } from '../../agent/types'
-import { extractUnifiedDiffText } from '../../lib/diff-stats'
+import { GoalRoundSourceSchemaV1 } from '../../../../../packages/runtime/src/contracts/goal'
+import { GeneratedOfficeDeliverables } from './GeneratedOfficeArtifact'
+import type { AttachmentReference, ChatBlock, GeneratedFileReference, RuntimeDisclosureMetadata, ToolBlock } from '../../agent/types'
 import {
-  getComposerMentionDisplayPlan,
+  getUserMessageDisplayParts,
   type ComposerPluginMentionToken,
   type ComposerSkillMentionToken
 } from '../../lib/composer-mentions'
 import { useChatStore } from '../../store/chat-store'
+import { isPendingActiveStreamTurnId } from '../../thread/streaming/active-stream-store'
 import { getProvider } from '../../agent/registry'
 import { parseWritePromptForDisplay } from '../../write/quoted-selection'
 import { parseClawUserPromptForDisplay, type ClawUserPromptDisplay } from '@shared/app-settings'
 import { projectOrdinaryPublicText } from '@shared/ordinary-log-pii-projection'
 import { openWorkspacePathInEditor } from '../../lib/open-workspace-path'
 import { normalizeWorkspaceRoot } from '../../lib/workspace-path'
-import { DiffView } from '../DiffView'
+import { useValidatedFileReference } from '../../lib/file-reference-validation'
+import { previewWorkspaceFile } from '../../lib/workspace-file-preview'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { observeTerminalDOMCommit } from '../../thread/tracing/thread-performance-trace'
 import { AcceptedSlotDisplay, acceptedFinalHasLocalDisplaySlots } from './AcceptedSlotDisplay'
 import { ImagePreviewLightbox } from './ImagePreviewLightbox'
-import { ModelMetaTag, WritePromptMetaDisclosure } from './message-timeline-cards'
+import { WritePromptMetaDisclosure } from './message-timeline-cards'
 import { InjectedMemoryMetaChip } from './injected-memory-meta-chip'
 import {
-  readNumber,
   formatChildAgentChip,
-  formatDuration,
   formatJobDiagnosticsChip,
-  formatProviderDiagnosticsChip,
-  formatToolTitle
+  formatProviderDiagnosticsChip
 } from './message-timeline-tools'
 
 const COPY_FEEDBACK_RESET_MS = 1600
 
 const EMPTY_INLINE_MENTION_PLUGINS: HubAgentPluginListItem[] = []
-
-type RollbackAction = {
-  busy: boolean
-  onRollback: () => void
-}
-
-type ForkAction = {
-  busy: boolean
-  onFork: () => void
-}
 
 let inlineMentionPluginCache: HubAgentPluginListItem[] | null = null
 let inlineMentionPluginPromise: Promise<HubAgentPluginListItem[]> | null = null
@@ -147,39 +147,92 @@ function useInlineMentionPlugins(enabled: boolean): HubAgentPluginListItem[] {
   return plugins
 }
 
-function UserMessageInlineText({ text }: { text: string }): ReactElement {
-  const displayPlan = useMemo(() => getComposerMentionDisplayPlan(text), [text])
-  const plugins = useInlineMentionPlugins(
-    displayPlan.parts.some((part) => part.kind === 'plugin')
-  )
+function userReferenceOwner(state: ReturnType<typeof useChatStore.getState>, threadId: string | null): { workspace: string; key: string } {
+  const thread = state.threads.find(item => item.id === threadId)
+  const workspace = normalizeWorkspaceRoot(thread?.workspace) ||
+    (threadId && threadId === state.activeThreadId ? normalizeWorkspaceRoot(state.workspaceRoot) : '')
+  return { workspace, key: JSON.stringify([threadId, workspace]) }
+}
 
-  if (!displayPlan.hasMentions) return <>{text}</>
+function useInlineMentionSkills(enabled: boolean, ownerKey: string, workspaceRoot: string): SkillListItem[] {
+  const [entry, setEntry] = useState<{ owner: string; skills: SkillListItem[] } | null>(null)
+  useEffect(() => {
+    if (!enabled || typeof window.analytix?.app?.listSkills !== 'function') return
+    let cancelled = false
+    void window.analytix.app.listSkills(workspaceRoot || undefined).then(result => {
+      if (!cancelled) setEntry({ owner: ownerKey, skills: result.ok ? result.skills : [] })
+    }).catch(() => {
+      if (!cancelled) setEntry({ owner: ownerKey, skills: [] })
+    })
+    return () => { cancelled = true }
+  }, [enabled, ownerKey, workspaceRoot])
+  return entry?.owner === ownerKey ? entry.skills : []
+}
 
-  const nodes: ReactNode[] = []
-  for (const part of displayPlan.parts) {
-    if (part.kind === 'text') {
-      nodes.push(part.text)
-      continue
-    }
-    if (part.kind === 'plugin') {
-      nodes.push(
-        <UserMessageInlinePluginMention
-          key={part.key}
-          mention={part.mention}
-          plugin={findInlineMentionPlugin(plugins, part.mention.pluginId)}
-        />
-      )
-      continue
-    }
-    nodes.push(
-      <UserMessageInlineSkillMention
-        key={part.key}
-        mention={part.mention}
-      />
-    )
+function UserMessageInlineText({ text, meta, threadId }: { text: string; meta?: RuntimeDisclosureMetadata; threadId: string | null }): ReactElement {
+  const loadedSkillIds = useMemo(() => metaStringArray(meta, 'activeSkillIds'), [meta])
+  const parts = useMemo(() => getUserMessageDisplayParts(text, loadedSkillIds), [text, loadedSkillIds])
+  const plugins = useInlineMentionPlugins(parts.some(part => part.kind === 'plugin'))
+  const ownerKey = useChatStore(state => userReferenceOwner(state, threadId).key)
+  const workspaceRoot = useChatStore(state => userReferenceOwner(state, threadId).workspace)
+  const activeOwner = useChatStore(state => threadId !== null && state.activeThreadId === threadId)
+  const skills = useInlineMentionSkills(activeOwner && parts.some(part => part.kind === 'loaded-skill' ||
+    part.kind === 'skill' && loadedSkillIds.includes(part.mention.skillId)), ownerKey, workspaceRoot)
+  const skillPath = (id: string): string | undefined => {
+    if (!activeOwner || !loadedSkillIds.includes(id)) return undefined
+    const matching = skills.filter(skill => skill.id === id)
+    return matching.length === 1 ? matching[0]!.entryPath : undefined
   }
-  if (displayPlan.editableValue) nodes.push(displayPlan.editableValue)
-  return <>{nodes}</>
+
+  return <>{parts.map(part => {
+    if (part.kind === 'text') return part.text
+    if (part.kind === 'plugin') return <UserMessageInlinePluginMention key={part.key} mention={part.mention}
+      plugin={findInlineMentionPlugin(plugins, part.mention.pluginId)} />
+    if (part.kind === 'skill') return <UserMessageInlineSkillMention key={part.key} mention={part.mention}
+      path={skillPath(part.mention.skillId)} ownerKey={ownerKey} workspaceRoot={workspaceRoot} threadId={threadId} />
+    if (part.kind === 'loaded-skill') return <UserMessageInlineReference key={part.key} kind="skill"
+      title={`/${part.skillId}`} display={`/${part.skillId}`} path={skillPath(part.skillId)}
+      ownerKey={ownerKey} workspaceRoot={workspaceRoot} threadId={threadId} slash />
+    return <UserMessageInlineReference key={part.key} kind={part.directory ? 'folder' : 'file'}
+      title={part.label} display={part.display} path={part.directory || !activeOwner ? undefined : part.path}
+      ownerKey={ownerKey} workspaceRoot={workspaceRoot} threadId={threadId} />
+  })}</>
+}
+
+/** Reference geometry/selection guard adapted from DSH user-text.tsx at 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md. */
+function UserMessageInlineReference({ kind, title, display, path, ownerKey, workspaceRoot, threadId, slash, icon }: {
+  kind: 'file' | 'folder' | 'skill'; title: string; display: string; path?: string
+  ownerKey: string; workspaceRoot: string; threadId: string | null; slash?: boolean; icon?: ReactNode
+}): ReactElement {
+  const target = useMemo(() => path && !Array.from(path).some(character => {
+    const code = character.charCodeAt(0)
+    return code <= 0x1f || code === 0x7f
+  }) &&
+    !/^[\\/]{2}/u.test(path) && (!/^[a-z][a-z\d+.-]*:/iu.test(path) || /^[a-z]:[\\/]/iu.test(path)) ? { path } : null, [path])
+  const validation = useValidatedFileReference(target, workspaceRoot)
+  const contents = <>{icon ?? (kind === 'file' ? <DshBrowseOutlineRegular className={userStyles.referenceIcon} />
+    : kind === 'folder' ? <UserMessageFolderIcon /> : null)}{display}</>
+  const className = `${userStyles.referenceChip}${slash ? ` ${userStyles.slashChip}` : ''}`
+  if (validation.status !== 'valid') return <span className={className} title={title}
+    data-ref-chip={kind} data-user-message-inline-mention={kind}>{contents}</span>
+  return <button type="button" className={`${className} ${userStyles.referenceAction}`} title={title}
+    data-ref-chip={kind} data-user-message-inline-mention={kind} onClick={event => {
+      if (event.detail > 1 || (event.detail !== 0 && event.currentTarget.ownerDocument.getSelection()?.isCollapsed === false)) return
+      const state = useChatStore.getState()
+      if (!threadId || state.activeThreadId !== threadId || userReferenceOwner(state, threadId).key !== ownerKey) return
+      previewWorkspaceFile({ path: validation.path, workspaceRoot })
+    }}>{contents}</button>
+}
+
+/* DSH FolderCloseArtwork at 5badb15009ae1756c3afe0ae0cef1faafc290ccc; scoped to this user leaf.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md. */
+function UserMessageFolderIcon(): ReactElement {
+  return <svg width={16} height={16} className={userStyles.referenceIcon} viewBox="0 0 16 16" fill="none"
+    xmlns="http://www.w3.org/2000/svg" aria-hidden="true" strokeWidth={1}>
+    <path d="M1.50439 3.11059C1.50439 2.55831 1.95211 2.1106 2.50439 2.1106H5.43389C5.67773 2.1106 5.91318 2.19969 6.09593 2.36113L7.71649 3.79265C7.89924 3.95409 8.1347 4.04319 8.3785 4.04319H13.4958C14.0481 4.04319 14.4958 4.4909 14.4958 5.04319V12.8894C14.4958 13.4417 14.0481 13.8894 13.4958 13.8894H2.50439C1.95211 13.8894 1.50439 13.4417 1.50439 12.8894V4.04319V3.11059Z" stroke="currentColor" />
+    <path d="M3.63501 7.66614H12.3647" stroke="currentColor" />
+  </svg>
 }
 
 function UserMessageInlinePluginMention({
@@ -195,12 +248,12 @@ function UserMessageInlinePluginMention({
   return (
     <span
       data-user-message-inline-mention="plugin"
-      className="mx-0.5 inline-flex items-baseline gap-1 align-baseline whitespace-nowrap font-semibold leading-[inherit] text-accent"
+      className={userStyles.referenceChip}
       title={title}
       style={brandColor ? { color: brandColor } : undefined}
     >
       {iconUrl ? (
-        <span className="inline-flex h-[1em] w-[1em] shrink-0 translate-y-[0.12em] items-center justify-center overflow-hidden rounded-[4px]">
+        <span className={userStyles.referenceImage}>
           <img
             src={iconUrl}
             alt=""
@@ -211,29 +264,20 @@ function UserMessageInlinePluginMention({
           />
         </span>
       ) : (
-        <Plug className="h-[1em] w-[1em] shrink-0 translate-y-[0.12em]" strokeWidth={1.9} />
+        <Plug className={userStyles.referenceIcon} strokeWidth={1.9} />
       )}
       <span className="leading-[inherit]">{title}</span>
     </span>
   )
 }
 
-function UserMessageInlineSkillMention({
-  mention
-}: {
-  mention: ComposerSkillMentionToken
+function UserMessageInlineSkillMention({ mention, path, ownerKey, workspaceRoot, threadId }: {
+  mention: ComposerSkillMentionToken; path?: string; ownerKey: string; workspaceRoot: string; threadId: string | null
 }): ReactElement {
   const title = mention.label.trim() || mention.skillId
-  return (
-    <span
-      data-user-message-inline-mention="skill"
-      className="mx-0.5 inline-flex items-baseline gap-1 align-baseline whitespace-nowrap font-semibold leading-[inherit] text-accent"
-      title={title}
-    >
-      <Sparkles className="h-[1em] w-[1em] shrink-0 translate-y-[0.12em]" strokeWidth={1.8} />
-      <span className="leading-[inherit]">{title}</span>
-    </span>
-  )
+  return <UserMessageInlineReference kind="skill" title={title} display={title} path={path}
+    ownerKey={ownerKey} workspaceRoot={workspaceRoot} threadId={threadId}
+    icon={<Sparkles className={userStyles.referenceIcon} strokeWidth={1.8} />} />
 }
 
 /**
@@ -242,10 +286,30 @@ function UserMessageInlineSkillMention({
  * version of the message — locally truncating subsequent turns and starting
  * a fresh turn on the same thread (see chat-store `rewindAndResend`).
  */
+function GoalRoundSourceView({ block }: { block: Extract<ChatBlock, { kind: 'user' }> }): ReactElement {
+  const { t, i18n } = useTranslation('common')
+  const source = GoalRoundSourceSchemaV1.safeParse(block.source)
+  const timestamp = block.createdAt && Number.isFinite(Date.parse(block.createdAt)) ? block.createdAt : undefined
+  return <div data-goal-round-source className="flex min-w-0 flex-col gap-1 py-1 text-[13px] text-ds-muted">
+    <div className="flex items-center gap-1.5"><Sparkles size={14} aria-hidden="true" />
+      <span>{source.success ? t('goalRoundSourceTriggered', { round: source.data.round }) : t('goalRoundSourceUnavailable')}</span>
+      {timestamp ? <time dateTime={timestamp} className="text-ds-faint">{formatMessageDateTime(timestamp, i18n.language)}</time> : null}
+    </div>
+    {source.success ? <details><summary>{t('goalRoundSourceDetails')}</summary><dl>
+      <dt>{t('goalRoundSourceGoal')}</dt><dd>{source.data.goalId}</dd>
+      <dt>{t('goalRoundSourceRevision')}</dt><dd>{source.data.revision}</dd>
+    </dl></details> : null}
+  </div>
+}
+
 function UserMessageBubble({
-  block
+  block,
+  threadId,
+  actionsReveal = 'always'
 }: {
   block: Extract<ChatBlock, { kind: 'user' }>
+  threadId: string | null
+  actionsReveal?: 'always' | 'hover'
 }): ReactElement {
   const { t } = useTranslation('common')
   const composition = useInputComposition()
@@ -275,6 +339,8 @@ function UserMessageBubble({
   const displayText = projectOrdinaryPublicText(
     metaDisplayText ?? parsedWritePrompt?.userInput ?? parsedClawPrompt?.text ?? publicBlockText
   )
+  const day = useCalendarDay(Boolean(block.createdAt && Number.isFinite(Date.parse(block.createdAt))))
+  const clock = messageClock(block.createdAt, day, t)
   const canEdit = !metaDisplayText
   const showClawInboundCard = route === 'claw' && parsedClawPrompt?.inbound === true
 
@@ -329,105 +395,102 @@ function UserMessageBubble({
 
   if (editing) {
     return (
-      <div className="ds-user-message">
-        <UserAttachmentPreviews meta={block.meta} />
-        <div data-user-message-bubble className="ds-user-message-bubble min-w-0 border border-accent/35 ring-1 ring-accent/15">
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value)
-              const el = e.currentTarget
-              el.style.height = 'auto'
-              el.style.height = `${Math.min(el.scrollHeight, 360)}px`
-            }}
-            onCompositionStart={composition.onCompositionStart}
-            onCompositionEnd={composition.onCompositionEnd}
-            onKeyDown={(e) => {
-              if (composition.isComposingEvent(e) || e.repeat) return
-              if (e.key === 'Escape') {
-                e.preventDefault()
-                cancelEdit()
-              } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                void submit()
-              }
-            }}
-            rows={2}
-            className="block w-full min-w-0 resize-none break-words bg-transparent text-[15px] font-medium leading-[1.58] text-ds-ink outline-none [overflow-wrap:anywhere]"
-          />
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <span className="text-[12px] text-ds-faint">{t('rewindHint')}</span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={cancelEdit}
-                className="rounded-md px-3 py-1 text-[13px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
-              >
-                {t('rewindCancel')}
-              </button>
-              <button
-                type="button"
-                onClick={() => void submit()}
-                disabled={!draft.trim() || busy}
-                className="rounded-md bg-accent px-3 py-1 text-[13px] font-medium text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {t('rewindResend')}
-              </button>
+      <div className={userStyles.row}>
+        <div className={userStyles.stack}>
+          <UserAttachmentPreviews meta={block.meta} />
+          <div data-user-message-bubble className={`${userStyles.bubble} border border-accent/35 ring-1 ring-accent/15`}>
+            <textarea
+              data-user-message-editor
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value)
+                const el = e.currentTarget
+                el.style.height = 'auto'
+                el.style.height = `${Math.min(el.scrollHeight, 360)}px`
+              }}
+              onCompositionStart={composition.onCompositionStart}
+              onCompositionEnd={composition.onCompositionEnd}
+              onKeyDown={(e) => {
+                if (composition.isComposingEvent(e) || e.repeat) return
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  cancelEdit()
+                } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  void submit()
+                }
+              }}
+              rows={2}
+              className={userStyles.editor}
+            />
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <span className="text-[12px] text-ds-faint">{t('rewindHint')}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  className="rounded-md px-3 py-1 text-[13px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
+                >
+                  {t('rewindCancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submit()}
+                  disabled={!draft.trim() || busy}
+                  className="rounded-md bg-accent px-3 py-1 text-[13px] font-medium text-[var(--ds-composer-primary-action-fg)] shadow-sm transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t('rewindResend')}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="mt-2 flex min-w-0 items-center justify-between gap-3">
           {block.meta?.workspaceCheckpointId ? (
-            <span className="min-w-0 flex-1 text-left text-[12px] font-medium leading-5 text-ds-faint">
+            <div className="mt-2 min-w-0 text-left text-[12px] font-medium leading-5 text-ds-faint">
               {t('rewindFileRollbackNotice')}
-            </span>
-          ) : (
-            <span className="min-w-0 flex-1" />
-          )}
-          <ModelMetaTag label={block.modelLabel} />
+            </div>
+          ) : null}
         </div>
       </div>
     )
   }
 
   return (
-    <div className="ds-user-message group relative">
-      <UserAttachmentPreviews meta={block.meta} />
-      {showClawInboundCard && parsedClawPrompt ? (
-        <ClawInboundMessageCard display={parsedClawPrompt} text={displayText} />
-      ) : (
-        <div data-user-message-bubble className="ds-user-message-bubble min-w-0">
-          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-left">
-            <UserMessageInlineText text={displayText} />
+    <div className={userStyles.row} data-actions-reveal={actionsReveal}>
+      <div className={userStyles.stack}>
+        <UserAttachmentPreviews meta={block.meta} />
+        {showClawInboundCard && parsedClawPrompt ? (
+          <ClawInboundMessageCard display={parsedClawPrompt} text={displayText} />
+        ) : (
+          <div data-user-message-bubble className={userStyles.bubble}>
+            <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-left">
+              <UserMessageInlineText text={displayText} meta={block.meta} threadId={threadId} />
+            </div>
+            {parsedWritePrompt ? (
+              <WritePromptMetaDisclosure
+                display={parsedWritePrompt}
+                expanded={writeMetaOpen}
+                onToggle={() => setWriteMetaOpen((value) => !value)}
+              />
+            ) : null}
+            <RuntimeMetaChips meta={block.meta} align="right" hideAttachments />
           </div>
-          {parsedWritePrompt ? (
-            <WritePromptMetaDisclosure
-              display={parsedWritePrompt}
-              expanded={writeMetaOpen}
-              onToggle={() => setWriteMetaOpen((value) => !value)}
-            />
-          ) : null}
-          <RuntimeMetaChips meta={block.meta} align="right" hideAttachments />
-        </div>
-      )}
-      <div className="mt-2 flex min-w-0 items-center justify-between gap-3 text-ds-faint opacity-90 transition group-hover:opacity-100">
-        <ModelMetaTag label={block.modelLabel} className="flex-1 justify-start text-left" />
-        <div className="flex items-center justify-end gap-3">
-          <CopyFeedbackButton text={displayText} iconOnly />
-          {canEdit ? (
-            <button
-              type="button"
-              onClick={startEdit}
-              disabled={busy}
-              title={t('rewindEditMessage')}
-              aria-label={t('rewindEditMessage')}
-              className="rounded-md p-1 transition hover:bg-ds-hover hover:text-ds-muted disabled:cursor-not-allowed disabled:hover:text-ds-faint"
-            >
-              <PencilLine className="h-4 w-4" strokeWidth={1.8} />
-            </button>
-          ) : null}
-        </div>
+        )}
+      </div>
+      <div className={`${actionStyles.actions} ${userStyles.actions}`} data-clock="start">
+        {clock ? <time dateTime={block.createdAt} className={actionStyles.timeStart}>{clock}</time> : null}
+        <CopyFeedbackButton text={displayText} iconOnly chrome="turn" className={actionStyles.action} />
+        {canEdit ? (
+          <Tooltip label={t('rewindEditMessage')} side="bottom"><button
+            type="button"
+            onClick={startEdit}
+            disabled={busy}
+            aria-label={t('rewindEditMessage')}
+            className={`${actionStyles.action} ${userStyles.editAction}`}
+          >
+            <DshEditOutlineRegular />
+          </button></Tooltip>
+        ) : null}
       </div>
     </div>
   )
@@ -473,18 +536,12 @@ function ClawInboundMessageCard({
   )
 }
 
-const USER_INPUT_OTHER_LABEL = 'Other'
 const USER_INPUT_FREEFORM_LABEL = 'Answer'
 
 function metaStringArray(meta: Record<string, unknown> | undefined, key: string): string[] {
   const value = meta?.[key]
   if (!Array.isArray(value)) return []
   return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-}
-
-function metaString(meta: Record<string, unknown> | undefined, key: string): string | undefined {
-  const value = meta?.[key]
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
 function metaAttachmentReferences(meta: RuntimeDisclosureMetadata | undefined): AttachmentReference[] {
@@ -958,7 +1015,7 @@ function MediaAttachmentGallery({
       ? `grid w-full max-w-2xl grid-cols-1 gap-2 ${media.length > 1 ? 'sm:grid-cols-2' : ''}`
       : variant === 'tool'
         ? 'flex min-w-0 flex-wrap gap-2 border-t border-ds-border-muted/60 px-4 py-3'
-        : 'flex max-w-[80%] flex-wrap justify-end gap-2'
+        : 'flex max-w-full flex-wrap justify-end gap-2'
 
   return (
     <div className={wrapperClass}>
@@ -977,7 +1034,7 @@ function MediaAttachmentGallery({
   )
 }
 
-export function GeneratedFilesPanel({ blocks }: { blocks: ToolBlock[] }): ReactElement | null {
+export function GeneratedFilesPanel({ blocks, present }: { blocks: ToolBlock[]; present?: { threadId: string | null; calls: PresentCall[] } }): ReactElement | null {
   const { t } = useTranslation('common')
   const artifacts = useMemo(() => {
     const seen = new Set<string>()
@@ -999,12 +1056,12 @@ export function GeneratedFilesPanel({ blocks }: { blocks: ToolBlock[] }): ReactE
     [blocks]
   )
 
-  if (media.length === 0 && artifacts.length === 0) return null
+  if (media.length === 0 && artifacts.length === 0 && !present?.calls.length) return null
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div className="text-[12px] font-semibold text-ds-faint">{t('generatedFilesTitle')}</div>
-      {artifacts.map(artifact => <GeneratedOfficeArtifact key={artifact.artifactId} artifact={artifact} />)}
+      {present ? <PresentedFiles threadId={present.threadId} calls={present.calls} artifacts={artifacts} /> : <GeneratedOfficeDeliverables artifacts={artifacts} />}
+      {media.length > 0 ? <div className="text-[12px] font-semibold text-ds-faint">{t('generatedFilesTitle')}</div> : null}
       <MediaAttachmentGallery media={media} variant="conversation" />
     </div>
   )
@@ -1030,13 +1087,13 @@ function UserAttachmentPreviews({
   if (attachments.length === 0) return null
 
   return (
-    <div className="mb-2 flex min-w-0 justify-end">
+    <div className={userStyles.attachments} data-message-attachments>
       <MediaAttachmentGallery media={attachments} variant="user" />
     </div>
   )
 }
 
-function ToolAttachmentPreviews({
+export function ToolAttachmentPreviews({
   meta
 }: {
   meta?: Record<string, unknown>
@@ -1154,41 +1211,68 @@ function RuntimeMetaChips({
   )
 }
 
-function CopyFeedbackButton({
+/* Turn chrome and clipboard fallback adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+export function CopyFeedbackButton({
   text,
-  iconOnly = false
+  iconOnly = false,
+  chrome = 'standard',
+  className
 }: {
   text: string
   iconOnly?: boolean
+  chrome?: 'standard' | 'turn'
+  className?: string
 }): ReactElement {
   const { t } = useTranslation('common')
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const resetRef = useRef<number | null>(null)
-
-  useEffect(
-    () => () => {
+  const copyPending = useRef(false), copyEpoch = useRef(0)
+  useEffect(() => {
+    copyEpoch.current += 1
+    copyPending.current = false
+    setStatus('idle')
+    if (resetRef.current !== null) { window.clearTimeout(resetRef.current); resetRef.current = null }
+    return () => {
+      copyEpoch.current += 1
+      copyPending.current = false
       if (resetRef.current !== null) window.clearTimeout(resetRef.current)
-    },
-    []
-  )
+    }
+  }, [text])
 
   const scheduleReset = (): void => {
     if (resetRef.current !== null) window.clearTimeout(resetRef.current)
     resetRef.current = window.setTimeout(() => {
       setStatus('idle')
       resetRef.current = null
-    }, COPY_FEEDBACK_RESET_MS)
+    }, chrome === 'turn' ? 1000 : COPY_FEEDBACK_RESET_MS)
   }
 
   const handleCopy = async (): Promise<void> => {
+    if (copyPending.current || status === 'success') return
+    const epoch = copyEpoch.current
+    copyPending.current = true
+    let copied = false
     try {
-      if (!navigator?.clipboard?.writeText) throw new Error('Clipboard unavailable')
-      await navigator.clipboard.writeText(text)
+      if (navigator?.clipboard?.writeText) await navigator.clipboard.writeText(text)
+      else if (chrome === 'turn' && typeof document.execCommand === 'function') {
+        // Pinned DSH clipboard fallback; a rejected async write does not retry.
+        const exec = document.execCommand.bind(document), area = document.createElement('textarea')
+        area.value = text; area.setAttribute('readonly', '')
+        area.style.position = 'fixed'; area.style.left = '-9999px'
+        document.body.appendChild(area)
+        try { area.select(); if (!exec('copy')) throw new Error('Clipboard unavailable') }
+        finally { area.remove() }
+      } else throw new Error('Clipboard unavailable')
+      if (epoch !== copyEpoch.current) return
+      copied = true
       setStatus('success')
     } catch {
-      setStatus('error')
+      if (epoch !== copyEpoch.current) return
+      setStatus(chrome === 'turn' ? 'idle' : 'error')
     }
-    scheduleReset()
+    copyPending.current = false
+    if (copied || chrome === 'standard') scheduleReset()
   }
 
   const success = status === 'success'
@@ -1196,13 +1280,13 @@ function CopyFeedbackButton({
   const label = success ? t('copySuccess') : error ? t('copyFailed') : t('copyMessage')
   const iconClassName = iconOnly ? 'h-4 w-4' : 'h-3.5 w-3.5'
 
-  return (
+  const button = (
     <button
       type="button"
       onClick={() => void handleCopy()}
-      title={label}
+      title={chrome === 'turn' ? undefined : label}
       aria-label={label}
-      className={`flex shrink-0 items-center rounded-md transition ${
+      className={className ?? `flex shrink-0 items-center rounded-md transition ${
         iconOnly
           ? 'gap-0 p-1 hover:bg-ds-hover'
           : 'gap-1 px-1.5 py-0.5 hover:bg-ds-hover'
@@ -1214,7 +1298,7 @@ function CopyFeedbackButton({
             : 'text-ds-faint hover:text-ds-muted'
       }`}
     >
-      {success ? (
+      {chrome === 'turn' ? (success ? <DshCheckOutlineRegular /> : <DshCopyOutlineRegular />) : success ? (
         <Check className={iconClassName} strokeWidth={2} />
       ) : (
         <Copy className={iconClassName} strokeWidth={1.8} />
@@ -1222,6 +1306,7 @@ function CopyFeedbackButton({
       {!iconOnly ? <span>{label}</span> : null}
     </button>
   )
+  return chrome === 'turn' ? <Tooltip label={label} side="bottom">{button}</Tooltip> : button
 }
 
 /** A secondary timeline can display a gate, but only its owning main-thread
@@ -1230,380 +1315,19 @@ export const GateResponseContext = createContext<{
   onOpenOwnerThread?: (requestId: string) => void
 } | null>(null)
 
-function OpenGateOwnerButton({ requestId }: { requestId: string }): ReactElement | null {
-  const context = useContext(GateResponseContext)
-  const { t } = useTranslation('common')
-  if (!context) return null
-  return <div className="mt-3 text-[13px] text-ds-muted">
-    <p>{t('pendingRequestNotResolved')}</p>
-    {context.onOpenOwnerThread ? <button type="button" className="mt-2 rounded-lg bg-ds-ink px-3 py-2 font-medium text-ds-main"
-      onClick={() => context.onOpenOwnerThread?.(requestId)}>{t('respondInOwnedThread')}</button>
-      : <p className="mt-1">{t('ownedThreadUnavailable')}</p>}
-  </div>
-}
+// A turn can contain later user steering as well as its opening input. Keep
+// recency available to those nested leaves without changing tool ownership.
+export const UserMessageActionsRevealContext = createContext<{
+  latestUserId?: string
+  reveal: 'always' | 'hover'
+} | null>(null)
 
-function UserInputBubble({
-  block,
-  nested = false
-}: {
-  block: Extract<ChatBlock, { kind: 'user_input' }>
-  nested?: boolean
-}): ReactElement {
-  const { t } = useTranslation('common')
-  const resolveUserInput = useChatStore((s) => s.resolveUserInput)
-  const responseContext = useContext(GateResponseContext)
-  const composition = useInputComposition()
-  const resolving = useChatStore(state => state.pendingGateResolutionIds?.[`user_input:${block.requestId}`] === true)
-  const [answers, setAnswers] = useState<Record<string, UserInputAnswer>>(() =>
-    answersByQuestionId(block.answers)
-  )
-  const pending = block.status === 'pending' && !responseContext
-  const done = !pending
-
-  useEffect(() => {
-    setAnswers(answersByQuestionId(block.answers))
-  }, [block.id, block.answers])
-
-  const chooseOption = (question: UserInputQuestion, label: string, value = label): void => {
-    if (!pending || useChatStore.getState().pendingGateResolutionIds?.[`user_input:${block.requestId}`]) return
-    setAnswers((prev) => ({
-      ...prev,
-      [question.id]: { id: question.id, label, value }
-    }))
-  }
-
-  const canSubmit = block.questions.every((question) => {
-    const answer = answers[question.id]
-    if (!answer) return false
-    if (question.options.length === 0 || answer.label === USER_INPUT_OTHER_LABEL) {
-      return answer.value.trim().length > 0
-    }
-    return true
-  })
-
-  const submit = (): void => {
-    if (!canSubmit || !pending || resolving) return
-    const ordered = block.questions.map((question) => answers[question.id]).filter(Boolean)
-    void resolveUserInput(block.id, { kind: 'submit', answers: ordered })
-  }
-
-  const cancel = (): void => {
-    if (!pending || resolving) return
-    void resolveUserInput(block.id, { kind: 'cancel' })
-  }
-
-  const statusLabel = resolving ? t('requestResolving') :
-    block.status === 'submitted'
-      ? t('userInputSubmitted')
-      : block.status === 'cancelled'
-        ? t('userInputCancelled')
-        : block.status === 'error'
-          ? t('userInputFailed')
-          : t('userInputPending')
-  const tone =
-    block.status === 'error'
-      ? 'error'
-      : block.status === 'submitted'
-        ? 'success'
-        : block.status === 'cancelled'
-          ? 'muted'
-          : 'active'
-  const questionCount = block.questions.length
-  const containerClass = nested
-    ? `overflow-hidden rounded-[14px] border px-3.5 py-3 text-[13px] leading-5 shadow-[0_8px_22px_rgba(20,47,95,0.035)] ${
-        tone === 'error'
-          ? 'border-red-300/65 bg-ds-card/88 dark:border-red-800/55 dark:bg-red-950/20'
-          : tone === 'success'
-            ? 'border-emerald-500/22 bg-ds-card/88 dark:border-emerald-600/30 dark:bg-ds-card/82'
-            : tone === 'muted'
-              ? 'border-ds-border-muted bg-ds-card/78'
-              : 'border-accent/22 bg-ds-card/90'
-      }`
-    : `overflow-hidden rounded-[16px] border px-4 py-4 text-[13px] leading-6 shadow-[0_14px_36px_rgba(20,47,95,0.055)] ${
-        tone === 'error'
-          ? 'border-red-300/70 bg-ds-card/90 dark:border-red-800/60 dark:bg-red-950/20'
-          : tone === 'success'
-            ? 'border-emerald-500/24 bg-ds-card/90 dark:border-emerald-600/32 dark:bg-ds-card/84'
-            : tone === 'muted'
-              ? 'border-ds-border bg-ds-card/82'
-              : 'border-accent/24 bg-ds-card/95 text-ds-ink'
-      }`
-  const iconFrameClass =
-    tone === 'error'
-      ? 'border-red-300/60 bg-red-500/10 text-red-700 dark:border-red-800/45 dark:text-red-300'
-      : tone === 'success'
-        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-        : tone === 'active'
-          ? 'border-accent/20 bg-accent/10 text-accent'
-          : 'border-ds-border-muted bg-ds-subtle text-ds-muted'
-  const statusClass =
-    tone === 'error'
-      ? 'text-red-700 dark:text-red-300'
-      : tone === 'success'
-        ? 'text-emerald-700 dark:text-emerald-300'
-        : tone === 'active'
-          ? 'text-accent'
-          : 'text-ds-muted'
-  const statusIcon =
-    tone === 'active' ? (
-      <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
-    ) : tone === 'success' ? (
-      <Check className="h-3.5 w-3.5" strokeWidth={2} />
-    ) : tone === 'error' ? (
-      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-current text-[10px] font-bold leading-none">
-        !
-      </span>
-    ) : (
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-    )
-
-  return (
-    <div className={containerClass} data-gate-request-id={block.requestId} tabIndex={-1} aria-busy={resolving}>
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border ${iconFrameClass}`}
-          >
-            {statusIcon}
-          </span>
-          <div className="min-w-0 pt-0.5">
-            <div className="font-semibold text-ds-ink">{t('userInputTitle')}</div>
-            <div className={`mt-0.5 text-[12px] font-medium ${statusClass}`}>{statusLabel}</div>
-          </div>
-        </div>
-        {questionCount > 1 ? (
-          <span className="shrink-0 rounded-full border border-ds-border-muted bg-ds-subtle px-2 py-0.5 text-[11.5px] font-medium text-ds-muted">
-            {questionCount}
-          </span>
-        ) : null}
-      </div>
-
-      <div className={nested ? 'mt-3 flex flex-col gap-2.5' : 'mt-3.5 flex flex-col gap-3'}>
-        {block.questions.map((question, index) => {
-          const answer = answers[question.id]
-          const hasOptions = question.options.length > 0
-          const otherSelected = answer?.label === USER_INPUT_OTHER_LABEL
-          const committedAnswer = block.answers?.find(candidate => candidate.id === question.id)
-          const submittedAnswer = block.status === 'submitted' ? (committedAnswer?.value || committedAnswer?.label || '') : ''
-          const showProgress = questionCount > 1
-          const showHeader =
-            typeof question.header === 'string' &&
-            question.header.trim().length > 0 &&
-            !(questionCount === 1 && question.header.trim().toLowerCase() === 'input')
-          return (
-            <div
-              key={question.id}
-              role="group"
-              aria-label={question.question}
-              className={`min-w-0 rounded-[12px] border px-3 py-3 ${
-                submittedAnswer
-                  ? 'border-ds-border-muted bg-ds-main/35'
-                  : 'border-ds-border-muted bg-ds-main/45'
-              }`}
-            >
-              {showHeader || showProgress ? (
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    {showHeader ? (
-                      <div className="min-w-0 text-[12px] font-semibold text-ds-muted">
-                        {question.header}
-                      </div>
-                    ) : null}
-                  </div>
-                  {showProgress ? (
-                    <div className="rounded-full bg-ds-card/70 px-2 py-0.5 text-[11.5px] font-medium text-ds-faint">
-                      {t('userInputQuestionProgress', {
-                        current: index + 1,
-                        total: block.questions.length
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              <p
-                className={`whitespace-pre-wrap break-words text-[14px] font-semibold leading-6 text-ds-ink [overflow-wrap:anywhere] ${
-                  showHeader || showProgress ? 'mt-2' : ''
-                }`}
-              >
-                {question.question}
-              </p>
-
-              {submittedAnswer ? (
-                <div className="mt-3 flex min-w-0 items-start gap-2 rounded-[10px] border border-emerald-500/14 bg-ds-card/78 px-3 py-2.5">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/12 text-emerald-700 dark:text-emerald-300">
-                    <Check className="h-3.5 w-3.5" strokeWidth={2.1} />
-                  </span>
-                  <span className="min-w-0 flex-1 break-words text-[13.5px] font-medium leading-5 text-ds-ink [overflow-wrap:anywhere]">
-                    {submittedAnswer}
-                  </span>
-                </div>
-              ) : done ? (
-                <div className="mt-3 rounded-[10px] border border-ds-border-muted bg-ds-card/70 px-3 py-2 text-[12.5px] font-medium text-ds-muted">
-                  {statusLabel}
-                </div>
-              ) : hasOptions ? (
-                <div className="mt-3 grid gap-2">
-                  {question.options.map((option) => {
-                    const selected = answer?.label === option.label && answer.value === option.label
-                    return (
-                      <button
-                        key={option.label}
-                        type="button"
-                        disabled={done || resolving}
-                        aria-pressed={selected}
-                        onClick={() => chooseOption(question, option.label)}
-                        className={`group flex min-w-0 gap-2.5 rounded-[10px] border px-3 py-2.5 text-left transition disabled:cursor-default ${
-                          selected
-                            ? 'border-accent/35 bg-accent/10 text-ds-ink ring-1 ring-accent/10'
-                            : 'border-ds-border-muted bg-ds-card/78 text-ds-muted hover:border-ds-border hover:bg-ds-card hover:text-ds-ink'
-                        }`}
-                      >
-                        <span
-                          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition ${
-                            selected
-                              ? 'border-accent bg-accent/10'
-                              : 'border-ds-border bg-transparent group-hover:border-ds-muted'
-                          }`}
-                        >
-                          {selected ? <span className="h-2 w-2 rounded-full bg-accent" /> : null}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block break-words text-[13px] font-semibold [overflow-wrap:anywhere]">
-                            {option.label}
-                          </span>
-                          {option.description ? (
-                            <span className="mt-0.5 block break-words text-[12px] leading-5 text-ds-faint [overflow-wrap:anywhere]">
-                              {option.description}
-                            </span>
-                          ) : null}
-                        </span>
-                      </button>
-                    )
-                  })}
-                  <button
-                    type="button"
-                    disabled={done || resolving}
-                    aria-pressed={otherSelected}
-                    onClick={() =>
-                      chooseOption(
-                        question,
-                        USER_INPUT_OTHER_LABEL,
-                        answer?.label === USER_INPUT_OTHER_LABEL ? answer.value : ''
-                      )
-                    }
-                    className={`group flex min-w-0 gap-2.5 rounded-[10px] border px-3 py-2.5 text-left transition disabled:cursor-default ${
-                      otherSelected
-                        ? 'border-accent/35 bg-accent/10 text-ds-ink ring-1 ring-accent/10'
-                        : 'border-ds-border-muted bg-ds-card/78 text-ds-muted hover:border-ds-border hover:bg-ds-card hover:text-ds-ink'
-                    }`}
-                  >
-                    <span
-                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition ${
-                        otherSelected
-                          ? 'border-accent bg-accent/10'
-                          : 'border-ds-border bg-transparent group-hover:border-ds-muted'
-                      }`}
-                    >
-                      {otherSelected ? <span className="h-2 w-2 rounded-full bg-accent" /> : null}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[13px] font-semibold">{t('userInputOther')}</span>
-                      <span className="mt-0.5 block text-[12px] leading-5 text-ds-faint">
-                        {t('userInputOtherDescription')}
-                      </span>
-                    </span>
-                  </button>
-                  {otherSelected ? (
-                    <textarea
-                      rows={2}
-                      disabled={done || resolving}
-                      value={answer?.value ?? ''}
-                      onChange={(e) =>
-                        chooseOption(question, USER_INPUT_OTHER_LABEL, e.target.value)
-                      }
-                      aria-label={question.question}
-                      onCompositionStart={composition.onCompositionStart}
-                      onCompositionEnd={composition.onCompositionEnd}
-                      onKeyDown={(e) => {
-                        if (composition.isComposingEvent(e) || e.repeat) return
-                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault()
-                          submit()
-                        }
-                      }}
-                      placeholder={t('userInputCustomPlaceholder')}
-                      className="min-h-20 resize-y rounded-[10px] border border-ds-border-muted bg-ds-card/90 px-3 py-2 text-[13px] leading-5 text-ds-ink outline-none transition placeholder:text-ds-faint focus:border-accent/45 focus:ring-2 focus:ring-accent/10 disabled:cursor-default disabled:opacity-80"
-                    />
-                  ) : null}
-                </div>
-              ) : (
-                <div className="mt-3">
-                  <textarea
-                    rows={3}
-                    disabled={done || resolving}
-                    value={answer?.value ?? ''}
-                    onChange={(e) =>
-                      chooseOption(question, USER_INPUT_FREEFORM_LABEL, e.target.value)
-                    }
-                    aria-label={question.question}
-                    onCompositionStart={composition.onCompositionStart}
-                    onCompositionEnd={composition.onCompositionEnd}
-                    onKeyDown={(e) => {
-                      if (composition.isComposingEvent(e) || e.repeat) return
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault()
-                        submit()
-                      }
-                      }}
-                      placeholder={t('userInputCustomPlaceholder')}
-                    className="min-h-24 w-full resize-y rounded-[10px] border border-ds-border-muted bg-ds-card/90 px-3 py-2.5 text-[13px] leading-5 text-ds-ink outline-none transition placeholder:text-ds-faint focus:border-accent/45 focus:ring-2 focus:ring-accent/10 disabled:cursor-default disabled:opacity-80"
-                  />
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {block.errorMessage ? (
-        <p className="mt-3 text-[12px] text-red-700 dark:text-red-300">{block.errorMessage}</p>
-      ) : null}
-
-      {block.status === 'pending' && responseContext ? <OpenGateOwnerButton requestId={block.requestId} /> : null}
-      {pending ? (
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-ds-border-muted pt-3">
-          <button
-            type="button"
-            disabled={!canSubmit || resolving}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-[9px] bg-ds-ink px-3 py-1.5 text-[13px] font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45 dark:text-black"
-            onClick={submit}
-          >
-            <Check className="h-3.5 w-3.5" strokeWidth={2} />
-            {t('userInputSubmit')}
-          </button>
-          <button
-            type="button"
-            className="min-h-8 rounded-[9px] border border-ds-border-muted bg-ds-card/80 px-3 py-1.5 text-[13px] font-medium text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
-            disabled={resolving}
-            onClick={cancel}
-          >
-            {t('userInputCancel')}
-          </button>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function answersByQuestionId(
-  answers: UserInputAnswer[] | undefined
-): Record<string, UserInputAnswer> {
-  const out: Record<string, UserInputAnswer> = {}
-  for (const answer of answers ?? []) {
-    out[answer.id] = answer
-  }
-  return out
-}
+/**
+ * Memoized so settled bubbles skip re-render while streaming deltas
+ * re-render only the live bubble; block references stay stable in the
+ * store for unchanged blocks.
+ */
+export const MessageBubble = memo(MessageBubbleImpl)
 
 function formatMessageDateTime(input: string, locale: string): string {
   const date = new Date(input)
@@ -1624,26 +1348,35 @@ function formatMessageDateTime(input: string, locale: string): string {
  * re-render only the live bubble; block references stay stable in the
  * store for unchanged blocks.
  */
-export const MessageBubble = memo(MessageBubbleImpl)
 
 function MessageBubbleImpl({
   block,
   nested = false,
-  forkAction,
-  rollbackAction,
-  onAssistantFinalized
+  onAssistantFinalized,
+  threadId,
+  showActions = true,
+  presented = true
 }: {
   block: ChatBlock
   nested?: boolean
-  forkAction?: ForkAction
-  rollbackAction?: RollbackAction
+  threadId?: string | null
+  showActions?: boolean
+  presented?: boolean
   onAssistantFinalized?: () => void
 }): ReactElement {
   const { t, i18n } = useTranslation('common')
   const resolveApproval = useChatStore((s) => s.resolveApproval)
+  const resolveUserInput = useChatStore((s) => s.resolveUserInput)
+  const selectUserInputPanel = useChatStore(s => s.selectUserInputPanel)
+  const lateReplyTargetTurnId = useChatStore(s => s.busy && !isPendingActiveStreamTurnId(s.currentTurnId) && s.activeThreadId === (threadId ?? s.activeThreadId) ? s.currentTurnId : null)
   const responseContext = useContext(GateResponseContext)
-  const resolving = useChatStore(state => block.kind === 'approval' && state.pendingGateResolutionIds?.[`approval:${block.approvalId}`] === true)
-  const traceThreadId = useChatStore((s) => s.activeThreadId)
+  const referenceScopeThreadId = useContext(ProtectedToolResultScope)
+  const userActions = useContext(UserMessageActionsRevealContext)
+  const resolving = useChatStore(state => block.kind === 'approval' ? state.pendingGateResolutionIds?.[`approval:${block.approvalId}`] === true : block.kind === 'user_input' && block.status === 'pending' && state.pendingGateResolutionIds?.[`user_input:${block.requestId}`] === true)
+  const activeTraceThreadId = useChatStore((s) => s.activeThreadId)
+  const replyBlocks = useChatStore(s => s.blocks)
+  const replyRequests = replyBlocks.filter((candidate): candidate is Extract<ChatBlock, { kind: 'user_input' }> => candidate.kind === 'user_input' && candidate.status === 'continued')
+  const traceThreadId = threadId === undefined ? activeTraceThreadId : threadId
   const answerRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     answerRef.current?.removeAttribute('data-terminal-trace-seq')
@@ -1651,7 +1384,13 @@ function MessageBubbleImpl({
     if (traceThreadId) observeTerminalDOMCommit(traceThreadId, block.id, answerRef.current)
   }, [block, traceThreadId])
   if (block.kind === 'user') {
-    return <UserMessageBubble block={block} />
+    if (block.source !== undefined) return <GoalRoundSourceView block={block} />
+    const actionsReveal = userActions && block.id !== userActions.latestUserId ? 'hover' : userActions?.reveal
+    const referenceThreadId = threadId === undefined ? referenceScopeThreadId : threadId
+    const fallback = <UserMessageBubble block={block} threadId={referenceThreadId} actionsReveal={actionsReveal} />
+    const message = block.meta?.steeringStatus === 'accepted' && block.meta.clientUserMessageId && traceThreadId && traceThreadId === activeTraceThreadId
+      ? <QuestionReplyView key={traceThreadId + ':' + block.id} block={block} requests={replyRequests} threadId={traceThreadId} fallback={fallback} /> : fallback
+    return nested ? <div data-content-search-unit-key={`${block.id}:user`}>{message}</div> : message
   }
   if (block.kind === 'assistant') {
     const streaming = block.id === 'live-assistant'
@@ -1675,36 +1414,10 @@ function MessageBubbleImpl({
           acceptedFinalHasLocalDisplaySlots(block.acceptedFinalView) ? (
           <AcceptedSlotDisplay receipt={block.acceptedFinalProjectionReceipt} />
         ) : null}
-        {!streaming ? (
+        {!streaming && showActions ? (
           <div className="mt-1 flex min-h-5 min-w-0 items-center justify-between gap-3 text-[11.5px] text-ds-faint opacity-0 transition duration-150 group-hover/message:opacity-100">
             <span className="min-w-0 truncate">{createdAtLabel ?? ''}</span>
             <div className="flex shrink-0 items-center gap-1.5">
-              {rollbackAction ? (
-                <button
-                  type="button"
-                  onClick={() => rollbackAction.onRollback()}
-                  disabled={rollbackAction.busy}
-                  className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 transition hover:bg-ds-hover hover:text-ds-muted disabled:cursor-not-allowed disabled:opacity-60"
-                  title={t('rollbackWorkspaceFromAssistantResponse')}
-                  aria-label={t('rollbackWorkspaceFromAssistantResponse')}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.8} />
-                  <span>{rollbackAction.busy ? t('rollingBackWorkspace') : t('rollbackWorkspace')}</span>
-                </button>
-              ) : null}
-              {forkAction ? (
-                <button
-                  type="button"
-                  onClick={() => forkAction.onFork()}
-                  disabled={forkAction.busy}
-                  className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 transition hover:bg-ds-hover hover:text-ds-muted disabled:cursor-not-allowed disabled:opacity-60"
-                  title={t('forkFromAssistantResponse')}
-                  aria-label={t('forkFromAssistantResponse')}
-                >
-                  <GitFork className="h-3.5 w-3.5" strokeWidth={1.8} />
-                  <span>{forkAction.busy ? t('forkingThread') : t('forkResponse')}</span>
-                </button>
-              ) : null}
               <CopyFeedbackButton text={block.text} />
             </div>
           </div>
@@ -1713,72 +1426,35 @@ function MessageBubbleImpl({
     )
   }
   if (block.kind === 'tool') {
-    return <ToolEntry block={block} nested={nested} />
+    return <ProtectedToolResultScope.Provider value={threadId ?? traceThreadId}>
+      <ToolCallTree blocks={[block]} processing={block.status === 'running'} />
+    </ProtectedToolResultScope.Provider>
   }
   if (block.kind === 'user_input') {
-    return <UserInputBubble block={block} nested={nested} />
+    return <QuestionComposer key={`${traceThreadId}:${block.requestId}`} block={block} resolving={resolving} presented={presented}
+      selector={traceThreadId && typeof block.meta?.turnId === 'string' ? {
+        threadId: traceThreadId, turnId: block.meta.turnId, itemId: block.id, requestId: block.requestId
+      } : null}
+      readOnly={Boolean(responseContext) || !['pending', 'continued'].includes(block.status)} onOpenOwnerThread={responseContext?.onOpenOwnerThread}
+      lateReplyTargetTurnId={lateReplyTargetTurnId}
+      getLateReplyExpectedTurnId={traceThreadId && !responseContext ? async () => {
+        const owns = () => useChatStore.getState().activeThreadId === traceThreadId && useChatStore.getState().route === 'chat'
+        if (!owns()) return null
+        const detail = await getProvider().getThreadDetail(traceThreadId)
+        const turnId = detail.latestTurnId
+        return owns() && turnId && !isPendingActiveStreamTurnId(turnId) ? turnId : null
+      } : undefined}
+      onHide={traceThreadId === activeTraceThreadId && !responseContext ? () => selectUserInputPanel(null) : undefined}
+      onLateSubmit={(answers, clientUserMessageId, expectedTurnId) => resolveUserInput({ itemId: block.id, requestId: block.requestId, threadId: traceThreadId, turnId: typeof block.meta?.turnId === 'string' ? block.meta.turnId : null }, { kind: 'late', answers, clientUserMessageId, expectedTurnId })}
+      onSubmit={answers => resolveUserInput({ itemId: block.id, requestId: block.requestId, threadId: traceThreadId, turnId: typeof block.meta?.turnId === 'string' ? block.meta.turnId : null }, { kind: 'submit', answers })}
+      onCancel={() => resolveUserInput({ itemId: block.id, requestId: block.requestId, threadId: traceThreadId, turnId: typeof block.meta?.turnId === 'string' ? block.meta.turnId : null }, { kind: 'cancel' })} />
   }
   if (block.kind === 'approval') {
-    const done = block.status !== 'pending' || Boolean(responseContext)
-    const statusLabel = resolving ? t('requestResolving') :
-      block.status === 'allowed'
-        ? t('approvalAllowed')
-        : block.status === 'denied'
-          ? t('approvalDenied')
-          : block.status === 'error'
-            ? t('approvalFailed')
-            : t('approvalPending')
-    return (
-      <div data-gate-request-id={block.approvalId} tabIndex={-1} aria-busy={resolving}
-        className={`rounded-[22px] border px-4 py-4 text-[13px] leading-6 shadow-[0_12px_30px_rgba(86,103,136,0.04)] ${
-          block.status === 'error'
-            ? 'border-red-300/80 bg-red-500/10 dark:border-red-800/60 dark:bg-red-950/35'
-            : 'border-ds-border bg-ds-card text-ds-ink'
-        }`}
-      >
-        <div className="font-semibold text-accent">{t('approvalTitle')}</div>
-        {block.toolName ? (
-          <div className="mt-1 text-[12px] text-ds-muted">
-            {t('approvalTool', { name: block.toolName })}
-          </div>
-        ) : null}
-        <p className="mt-2 whitespace-pre-wrap text-[14px] text-ds-ink">{block.summary}</p>
-        {block.errorMessage ? (
-          <p className="mt-2 text-[12px] text-red-700 dark:text-red-300">{block.errorMessage}</p>
-        ) : null}
-        {block.status === 'pending' && responseContext ? <OpenGateOwnerButton requestId={block.approvalId} /> : null}
-        {!done ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-emerald-700"
-              disabled={resolving}
-              onClick={() => void resolveApproval(block.id, 'allow')}
-            >
-              {t('approvalAllow')}
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-ds-border bg-ds-card px-3 py-1.5 text-[13px] font-medium text-ds-ink hover:bg-ds-hover"
-              disabled={resolving}
-              onClick={() => void resolveApproval(block.id, 'deny')}
-            >
-              {t('approvalDeny')}
-            </button>
-          </div>
-        ) : (
-          <p className="mt-2 text-[12px] font-medium text-ds-muted">{statusLabel}</p>
-        )}
-      </div>
-    )
+    return <ApprovalPanel key={`${traceThreadId}:${block.approvalId}`} block={block} resolving={resolving}
+      readOnly={Boolean(responseContext)} onOpenOwnerThread={responseContext?.onOpenOwnerThread}
+      onResolve={decision => resolveApproval(block.id, decision)} />
   }
-  if (block.kind === 'compaction') {
-    return (
-      <div className="ds-card-soft rounded-[18px] px-3 py-2 text-[13.5px] text-ds-muted">
-        {block.detail || block.summary}
-      </div>
-    )
-  }
+  if (block.kind === 'compaction') return <TurnStatusView block={block} />
   if (block.kind === 'review') {
     return (
       <div className="ds-card-soft rounded-[18px] px-3 py-2 text-[13.5px] text-ds-muted">
@@ -1786,139 +1462,6 @@ function MessageBubbleImpl({
       </div>
     )
   }
-  if (block.kind === 'system') {
-    const errorTone = block.severity === 'error'
-    const warningTone = block.severity === 'warning'
-    return (
-      <div
-        className={`rounded-[18px] border px-3 py-2 text-[13.5px] leading-6 ${
-          errorTone
-            ? 'border-red-300/80 bg-red-500/10 text-red-800 dark:border-red-800/60 dark:bg-red-950/35 dark:text-red-200'
-            : warningTone
-              ? 'border-amber-300/80 bg-amber-500/10 text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/35 dark:text-amber-100'
-              : 'border-ds-border bg-ds-subtle text-ds-muted'
-        }`}
-      >
-        <p className="whitespace-pre-wrap break-words">{block.text}</p>
-        {block.code ? (
-          <p className="mt-1 font-mono text-[11px] opacity-70">{block.code}</p>
-        ) : null}
-        <RuntimeMetaChips meta={block.meta} />
-      </div>
-    )
-  }
+  if (block.kind === 'system') return <TurnStatusView block={block} />
   return <></>
-}
-
-function ToolEntry({ block, nested = false }: { block: ToolBlock; nested?: boolean }): ReactElement {
-  const { t } = useTranslation('common')
-  const [open, setOpen] = useState(() => block.status === 'running')
-
-  useEffect(() => {
-    if (block.status === 'running') {
-      setOpen(true)
-    }
-  }, [block.status, block.id])
-
-  const effectiveOpen = block.status === 'running' ? true : open
-
-  const tone =
-    block.status === 'error'
-      ? 'border-orange-300/80 bg-orange-500/10 text-orange-950 dark:border-orange-800/60 dark:bg-orange-950/35 dark:text-orange-100'
-      : block.status === 'running'
-        ? 'border-amber-300/80 bg-amber-500/10 text-amber-950 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-100'
-        : 'border-ds-border bg-ds-subtle text-ds-ink'
-
-  const Icon = block.toolKind === 'file_change' ? FileEdit : block.toolKind === 'command_execution' ? Terminal : Wrench
-  const kindLabel =
-    block.toolKind === 'file_change'
-      ? t('toolKindFile')
-      : block.toolKind === 'command_execution'
-        ? t('toolKindCommand')
-        : t('toolKindTool')
-
-  const exitCode = readNumber(block.meta, 'exit_code')
-  const durationMs = readNumber(block.meta, 'duration_ms')
-  const sessionId = metaString(block.meta, 'session_id')
-  const sessionStatus = metaString(block.meta, 'status')
-
-  const hasDetail = !!(block.detail && block.detail.trim().length > 0)
-  const patchText = block.toolKind === 'file_change' ? extractUnifiedDiffText(block.detail) : undefined
-  const canExpand = hasDetail || block.status === 'running'
-
-  return (
-    <div className={`rounded-[22px] border shadow-[0_12px_30px_rgba(86,103,136,0.04)] ${tone}`}>
-      <button
-        type="button"
-        onClick={() => {
-          if (!canExpand || block.status === 'running') return
-          setOpen((v) => !v)
-        }}
-        className={`flex w-full items-start gap-2 px-4 py-3 text-left text-[13.5px] leading-6 ${
-          canExpand && block.status !== 'running' ? 'cursor-pointer' : 'cursor-default'
-        }`}
-      >
-        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold uppercase tracking-[0.12em] text-[11px] opacity-75">
-              {kindLabel}
-            </span>
-            {block.status === 'running' ? (
-              <span className="rounded-full bg-amber-200/40 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:bg-amber-700/30 dark:text-amber-100">
-                {t('inspectorStatusRunning')}
-              </span>
-            ) : null}
-            {typeof exitCode === 'number' ? (
-              <span
-                className={`rounded-full px-2 py-0.5 text-[11px] font-mono ${
-                  exitCode === 0
-                    ? 'bg-ds-success-soft text-ds-success'
-                    : 'bg-ds-danger-soft text-ds-danger'
-                }`}
-              >
-                exit {exitCode}
-              </span>
-            ) : null}
-            {sessionId ? (
-              <span className="rounded-full bg-ds-card px-2 py-0.5 text-[11px] font-mono text-ds-muted" title={sessionId}>
-                {sessionStatus === 'running' ? t('inspectorStatusRunning') : sessionStatus || 'session'} {sessionId.slice(0, 12)}
-              </span>
-            ) : null}
-            {typeof durationMs === 'number' ? (
-              <span className="rounded-full bg-ds-card px-2 py-0.5 text-[11px] font-mono text-ds-muted">
-                {formatDuration(durationMs)}
-              </span>
-            ) : null}
-          </div>
-          <div className="mt-0.5 break-words">
-            {block.filePath ? (
-              <span className="font-mono text-[12px] opacity-90">{block.filePath} — </span>
-            ) : null}
-            <span>{block.summary}</span>
-          </div>
-          <RuntimeMetaChips meta={block.meta} />
-        </div>
-        {canExpand ? (
-          effectiveOpen ? (
-            <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-70" strokeWidth={1.75} />
-          ) : (
-            <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-70" strokeWidth={1.75} />
-          )
-        ) : null}
-      </button>
-      <ToolAttachmentPreviews meta={block.meta} />
-      {effectiveOpen && hasDetail ? (
-        <div className="ds-panel-strip min-w-0 border-t border-ds-border-muted/60 px-4 py-3">
-          {patchText !== undefined ? (
-            <DiffView patch={patchText} filePath={block.filePath} />
-          ) : (
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-6 text-ds-ink">
-              {block.detail}
-            </pre>
-          )}
-        </div>
-      ) : null}
-    </div>
-  )
 }

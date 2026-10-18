@@ -7,9 +7,13 @@ import (
 	"time"
 
 	casethreadapp "analytix.local/runtime-go/internal/app/casethread"
+	controlapp "analytix.local/runtime-go/internal/app/control"
 	gateprojection "analytix.local/runtime-go/internal/app/gateprojection"
+	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	contracts "analytix.local/runtime-go/internal/contracts"
+	domaingoal "analytix.local/runtime-go/internal/domain/goal"
+	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
@@ -36,6 +40,12 @@ type Repository interface {
 	RecordEvent(map[string]any) (map[string]any, []string, error)
 }
 
+// The durable owner keeps projection, prefix replay, identity and creation seed
+// under its existing mutation mutex. Other repositories retain the legacy seam.
+type ForkProjectionRepositoryV1 interface {
+	ForkThreadWithProjectionV1(string, map[string]any, PublicProjector) (map[string]any, error)
+}
+
 type LimitedRepository interface {
 	ListThreadsLimited(archivedOnly bool, includeArchived bool, includeSide bool, search string, limit int) ([]map[string]any, error)
 }
@@ -44,8 +54,13 @@ type UsageSnapshotFunc func(threadID string) (map[string]any, error)
 type PendingGateSnapshotFunc func(threadID string) ([]string, []string, error)
 type QuiesceThreadTurnsFunc func(context.Context, string) error
 type BeginMetadataReadFunc func(context.Context, string, string, string, string) (func(), error)
+type ObservePromotionChildrenFunc func(context.Context) (pendingworkapp.TrustedInventoryV1, []domainjob.Record, bool, error)
 
 type Service struct {
+	goalMutation             func(string, map[string]any, func() (map[string]any, error)) (map[string]any, error)
+	goalActivation           func(string, map[string]any) *domaingoal.ActivationV1
+	summarizeCompaction      SummarizeCompactionFunc
+	projectCompactionHistory ProjectCompactionHistoryFunc
 	repository               Repository
 	dataDir                  string
 	defaultApprovalPolicy    string
@@ -61,11 +76,17 @@ type Service struct {
 	beginScopeTransition     BeginScopeTransitionFunc
 	beginWorkspaceTransition BeginWorkspaceScopeTransitionFunc
 	beginMetadataRead        BeginMetadataReadFunc
+	beginArchiveRead         BeginMetadataReadFunc
+	observePromotionChildren ObservePromotionChildrenFunc
 	quiesceThreadTurns       QuiesceThreadTurnsFunc
 	transitionTimeout        time.Duration
 }
 
 type Dependencies struct {
+	GoalMutation             func(string, map[string]any, func() (map[string]any, error)) (map[string]any, error)
+	GoalActivation           func(string, map[string]any) *domaingoal.ActivationV1
+	SummarizeCompaction      SummarizeCompactionFunc
+	ProjectCompactionHistory ProjectCompactionHistoryFunc
 	Repository               Repository
 	DataDir                  string
 	DefaultApprovalPolicy    string
@@ -80,6 +101,8 @@ type Dependencies struct {
 	BeginScopeTransition     BeginScopeTransitionFunc
 	BeginWorkspaceTransition BeginWorkspaceScopeTransitionFunc
 	BeginMetadataRead        BeginMetadataReadFunc
+	BeginArchiveRead         BeginMetadataReadFunc
+	ObservePromotionChildren ObservePromotionChildrenFunc
 	QuiesceThreadTurns       QuiesceThreadTurnsFunc
 	TransitionTimeout        time.Duration
 }
@@ -102,6 +125,9 @@ func NewService(deps Dependencies) *Service {
 		caseCompactionAuthority = authority
 	}
 	return &Service{
+		goalMutation: deps.GoalMutation, goalActivation: deps.GoalActivation,
+		summarizeCompaction:      deps.SummarizeCompaction,
+		projectCompactionHistory: deps.ProjectCompactionHistory,
 		repository:               deps.Repository,
 		dataDir:                  deps.DataDir,
 		defaultApprovalPolicy:    NormalizeApprovalPolicy(deps.DefaultApprovalPolicy),
@@ -117,6 +143,8 @@ func NewService(deps Dependencies) *Service {
 		beginScopeTransition:     deps.BeginScopeTransition,
 		beginWorkspaceTransition: deps.BeginWorkspaceTransition,
 		beginMetadataRead:        deps.BeginMetadataRead,
+		beginArchiveRead:         deps.BeginArchiveRead,
+		observePromotionChildren: deps.ObservePromotionChildren,
 		quiesceThreadTurns:       deps.QuiesceThreadTurns,
 		transitionTimeout:        deps.TransitionTimeout,
 	}
@@ -212,6 +240,9 @@ func (s *Service) Get(threadID string) (map[string]any, error) {
 
 func (s *Service) Patch(ctx context.Context, threadID string, patch map[string]any) (map[string]any, error) {
 	if err := s.requireRestartWritableV1(threadID); err != nil {
+		if patch["promoteSide"] == true {
+			return nil, ErrSidePromotionUnavailable
+		}
 		return nil, err
 	}
 	if err := ValidatePublicPatch(patch); err != nil {
@@ -222,6 +253,9 @@ func (s *Service) Patch(ctx context.Context, threadID string, patch map[string]a
 	}
 	initial, _, err := s.repository.ReadThreadMutationBaseline(threadID)
 	if err != nil {
+		if patch["promoteSide"] == true {
+			return nil, ErrSidePromotionUnavailable
+		}
 		return nil, err
 	}
 	if initial == nil {
@@ -231,7 +265,9 @@ func (s *Service) Patch(ctx context.Context, threadID string, patch map[string]a
 	requestedWorkspace := strings.TrimSpace(stringField(map[string]any{"workspace": patch["workspace"]}, "workspace"))
 	changesWorkspace := workspacePresent && requestedWorkspace != strings.TrimSpace(stringField(initial, "workspace"))
 	var thread map[string]any
-	if changesWorkspace {
+	if patch["promoteSide"] == true {
+		thread, err = s.promoteSideUnderWriter(ctx, threadID, initial)
+	} else if changesWorkspace {
 		thread, err = s.patchWorkspace(ctx, threadID, requestedWorkspace, patch, initial)
 	} else {
 		thread, err = s.patchUnderWriter(ctx, threadID, patch, initial)
@@ -244,7 +280,11 @@ func (s *Service) Patch(ctx context.Context, threadID string, patch map[string]a
 		"threadId": threadID,
 		"status":   stringField(thread, "status"),
 	})
-	return s.projectThread(thread)
+	projected, err := s.projectThread(thread)
+	if err != nil && patch["promoteSide"] == true {
+		return nil, ErrSidePromotionUnavailable
+	}
+	return projected, err
 }
 
 func (s *Service) Delete(ctx context.Context, threadID string) (bool, error) {
@@ -282,15 +322,25 @@ func (s *Service) Fork(threadID string, request map[string]any) (map[string]any,
 	if err := s.requireRestartWritableV1(threadID); err != nil {
 		return nil, err
 	}
-	thread, err := s.repository.ForkThread(threadID, contracts.CloneMap(request))
+	if _, err := ParseForkBoundaryV1(request); err != nil {
+		return nil, err
+	}
+	var thread map[string]any
+	var err error
+	if owner, ok := s.repository.(ForkProjectionRepositoryV1); ok {
+		thread, err = owner.ForkThreadWithProjectionV1(threadID, contracts.CloneMap(request), s.publicProjector)
+	} else {
+		if stringField(request, "turnId") != "" {
+			return nil, ErrForkBoundaryUnavailable
+		}
+		thread, err = s.repository.ForkThread(threadID, contracts.CloneMap(request))
+		if err == nil {
+			_, _, err = s.repository.RecordEvent(map[string]any{"kind": "thread_created", "threadId": stringField(thread, "id"), "status": stringField(thread, "status")})
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	_, _, _ = s.repository.RecordEvent(map[string]any{
-		"kind":     "thread_created",
-		"threadId": stringField(thread, "id"),
-		"status":   stringField(thread, "status"),
-	})
 	return s.projectThread(thread)
 }
 
@@ -375,7 +425,14 @@ func (s *Service) SetGoal(threadID string, patch map[string]any) (map[string]any
 		}
 		return nil, ErrCaseControlProjectionRestricted
 	}
-	goal, err := s.repository.SetGoal(threadID, contracts.CloneMap(patch))
+	commit := func() (map[string]any, error) { return s.repository.SetGoal(threadID, contracts.CloneMap(patch)) }
+	var goal map[string]any
+	var err error
+	if s.goalMutation != nil {
+		goal, err = s.goalMutation(threadID, patch, commit)
+	} else {
+		goal, err = commit()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +442,23 @@ func (s *Service) SetGoal(threadID string, patch map[string]any) (map[string]any
 		"goal":     goal,
 	})
 	return contracts.CloneMap(goal), nil
+}
+
+func (s *Service) GetGoalStateV1(threadID string) (map[string]any, error) {
+	thread, _, err := s.readPublicThreadSnapshotV1(threadID)
+	if err != nil {
+		return nil, err
+	}
+	goal, _ := thread["goal"].(map[string]any)
+	history, _ := thread["goalHistory"].([]any)
+	if history == nil {
+		history = []any{}
+	}
+	var activation *domaingoal.ActivationV1
+	if s.goalActivation != nil {
+		activation = s.goalActivation(threadID, goal)
+	}
+	return map[string]any{"goal": goal, "activation": activation, "history": history}, nil
 }
 
 func (s *Service) ClearGoal(threadID string) (bool, error) {
@@ -546,7 +620,7 @@ func (s *Service) Compact(ctx context.Context, threadID string, reason string) (
 	return s.compact(ctx, threadID, reason, false)
 }
 
-func (s *Service) compact(ctx context.Context, threadID string, reason string, auto bool) (map[string]any, error) {
+func (s *Service) compact(ctx context.Context, threadID string, reason string, auto bool, reservations ...*controlapp.ForegroundReservation) (map[string]any, error) {
 	if err := s.requireRestartWritableV1(threadID); err != nil {
 		return nil, err
 	}
@@ -563,6 +637,20 @@ func (s *Service) compact(ctx context.Context, threadID string, reason string, a
 	}
 	if thread == nil {
 		return nil, ErrThreadNotFound
+	}
+	caseSensitive, classificationErr := domainsecurity.ClassifyCaseSensitiveThread(thread)
+	if classificationErr != nil {
+		return nil, classificationErr
+	}
+	if !caseSensitive && !caseThreadKnown(s.caseThreads, threadID) {
+		if len(reservations) > 1 {
+			return nil, errors.New("compaction reservation is ambiguous")
+		}
+		var reservation *controlapp.ForegroundReservation
+		if len(reservations) == 1 {
+			reservation = reservations[0]
+		}
+		return s.compactOrdinarySummary(ctx, thread, threadID, reason, auto, reservation)
 	}
 	prepared, caseAuthorization, err := s.prepareCompactionForCurrentThread(
 		ctx, thread, threadID, reason, time.Now().UTC(), auto, nil,
@@ -653,7 +741,7 @@ func (s *Service) compact(ctx context.Context, threadID string, reason string, a
 	}); err != nil {
 		return nil, err
 	}
-	completed, _, err := s.repository.RecordEvent(map[string]any{
+	completedEvent := map[string]any{
 		"kind":                    "compaction_completed",
 		"threadId":                threadID,
 		"turnId":                  result.TurnID,
@@ -669,7 +757,27 @@ func (s *Service) compact(ctx context.Context, threadID string, reason string, a
 		"schemaVersion":           float64(2),
 		"reasoningExcluded":       true,
 		"reasoningExclusionProof": result.ReasoningExclusionProof,
-	})
+	}
+	if !prepared.CaseBound {
+		// The existing completion producer records the committed compaction
+		// turn, including its closed item proof and original timestamps.
+		for _, raw := range listAny(prepared.Thread["turns"]) {
+			turn, _ := raw.(map[string]any)
+			if stringField(turn, "id") != result.TurnID {
+				continue
+			}
+			public, projectionErr := ProjectPublicThread(map[string]any{"id": threadID, "status": "idle", "turns": []any{turn}})
+			if projectionErr != nil {
+				return nil, projectionErr
+			}
+			completedEvent["turn"] = contracts.CloneValue(public["turns"].([]any)[0])
+		}
+
+		if completedEvent["turn"] == nil {
+			return nil, ErrForkBoundaryUnavailable
+		}
+	}
+	completed, _, err := s.repository.RecordEvent(completedEvent)
 	if err != nil {
 		return nil, err
 	}

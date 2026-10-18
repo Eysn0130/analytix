@@ -143,9 +143,11 @@ func GateContinuationPayload(kind string, gateID string, itemID string, pending 
 	}
 	payload := domaincontinuation.Payload{
 		Version: domaincontinuation.ContractVersion, Kind: strings.TrimSpace(kind), GateID: strings.TrimSpace(gateID),
-		ThreadID: pending.ThreadID, TurnID: pending.TurnID, ItemID: strings.TrimSpace(itemID), CallID: pending.Call.ID,
+		UserInputTimedWait: domaincontinuation.CloneUserInputTimedWaitV1(pending.UserInputTimedWait),
+		ThreadID:           pending.ThreadID, TurnID: pending.TurnID, ItemID: strings.TrimSpace(itemID), CallID: pending.Call.ID,
 		ToolName: pending.Call.Name, ToolCallItemID: pending.ToolCallItemID, Arguments: append(json.RawMessage(nil), arguments...),
-		ProviderID: pending.ProviderID, Model: pending.Model,
+		ModelVisibleToolDefinition: domainmodel.CloneToolDefinitionSnapshotV1(pending.ModelVisibleToolDefinition),
+		ProviderID:                 pending.ProviderID, Model: pending.Model,
 		ProviderRouteHash: appmodel.ProviderContinuationRouteHash(pending.ProviderConfig), WorkspaceCheckpointID: pending.WorkspaceCheckpointID,
 		ApprovalPolicy: pending.ApprovalPolicy, SandboxMode: pending.SandboxMode, SubagentDepth: pending.SubagentDepth,
 		ReasoningEffort: pending.Effort, Mode: pending.Mode, GUIPlan: guiPlan, DisableUserInput: pending.DisableUserInput,
@@ -156,7 +158,8 @@ func GateContinuationPayload(kind string, gateID string, itemID string, pending 
 		PrivateProtocolObserved:  pending.PrivateProtocolObserved,
 		ProviderStepPromptSHA256: domaincontinuation.CanonicalProviderStepPromptSHA256(pending.Prompt),
 		ProviderNamespace:        domaincontinuation.CloneProviderContinuationNamespaceV1(pending.ProviderNamespace), TerminalRecoveryKind: pending.TerminalRecoveryKind,
-		SecurityContext: pending.SecurityContext, ExecutionGrant: pending.ExecutionGrant,
+		OutputCapLogicalSequence: pending.OutputCapLogicalSequence,
+		SecurityContext:          pending.SecurityContext, ExecutionGrant: pending.ExecutionGrant,
 		IssuedAt: issuedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if err := domaincontinuation.ValidatePayloadForExecution(payload); err != nil {

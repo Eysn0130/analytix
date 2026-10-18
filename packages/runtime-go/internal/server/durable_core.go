@@ -21,6 +21,7 @@ import (
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	turnapp "analytix.local/runtime-go/internal/app/turn"
 	domainpendingwork "analytix.local/runtime-go/internal/domain/pendingwork"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 	threaddomain "analytix.local/runtime-go/internal/domain/thread"
 	acceptedfinaleventport "analytix.local/runtime-go/internal/ports/acceptedfinalevent"
@@ -87,7 +88,10 @@ type DurableEventSessionStore struct {
 	beforeUsageIndexThreadHook   func(string)
 	caseCompactionCommitHook     func(string, string)
 	generalTerminalAtomicAppend  func(string, []map[string]any) error
+	forkCreationAtomicAppend     func(string, []map[string]any, eventlog.EventLogFrontierV1) error
 	beforeTerminalWrite          func() error
+	settledProcessHistory        func(map[string]any, string) *domainprocess.SettledHistoryAnchorV1
+	retireProcessThread          func(string)
 	beforeMaintenanceReadHook    func()
 	acceptedFinalEvents          *acceptedfinaleventadapter.Store
 	childThreadCounterFloor      int

@@ -58,7 +58,8 @@ func publicHTTPCode(status int, requested string) string {
 		"gate_continuation_terminal_turn", "task_job_output_schema_invalid", "worktree_isolation_authority_required",
 		"attachment_authority_unavailable", "attachment_upload_unavailable",
 		"turn_execution_conflict", CodeNewTurnRequired, "runtime_shutting_down",
-		"accepted_final_hydration_unavailable", "public_projection_pending", "privacy_unavailable":
+		"accepted_final_hydration_unavailable", "public_projection_pending", "privacy_unavailable",
+		"timed_wait_unavailable", "late_reply_too_large", "late_reply_unavailable", "fork_boundary_unavailable":
 		if publicHTTPSpecialCodeMatchesStatus(requested, status) {
 			return requested
 		}
@@ -94,7 +95,7 @@ func publicHTTPSpecialCodeMatchesStatus(code string, status int) bool {
 		return status == 403
 	case "case_compaction_archive_required", "thread_running", "gate_continuation_unavailable", "gate_continuation_terminal_turn", "worktree_isolation_authority_required":
 		return status == 409
-	case "turn_execution_conflict", CodeNewTurnRequired:
+	case "turn_execution_conflict", CodeNewTurnRequired, "timed_wait_unavailable", "late_reply_too_large", "late_reply_unavailable", "fork_boundary_unavailable":
 		return status == 409
 	case "task_job_output_schema_invalid":
 		return status >= 500
@@ -108,6 +109,14 @@ func publicHTTPSpecialCodeMatchesStatus(code string, status int) bool {
 
 func publicHTTPMessage(status int, code string) string {
 	switch code {
+	case "fork_boundary_unavailable":
+		return "The requested Fork event-prefix history is unavailable under current host authority."
+	case "timed_wait_unavailable":
+		return "The timed Question foreground wait is unavailable."
+	case "late_reply_too_large":
+		return "The complete Question reply exceeds the current turn resource capacity. Original answers remain saved privately; edit and submit a new attempt."
+	case "late_reply_unavailable":
+		return "The late Question reply is unavailable under current host authority."
 	case "privacy_unavailable":
 		return "Media content cannot be safely projected; this operation is unavailable."
 	case "validation_error", "invalid_checkpoint_scope":

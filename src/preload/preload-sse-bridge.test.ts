@@ -199,6 +199,15 @@ describe('preload SSE bridge', () => {
     electronMock.getPathForFile.mockReset()
   })
 
+  it('passes an explicit finite replay boundary through the existing SSE IPC route', async () => {
+    electronMock.invoke.mockResolvedValueOnce({ streamId: 'finite' })
+    const api = await loadPreloadApi()
+    await api.runtime.startSse('thread', 0, 'finite', { replayThroughSeq: 12 })
+    expect(electronMock.invoke).toHaveBeenCalledWith('runtime:sse:start', {
+      threadId: 'thread', sinceSeq: 0, streamId: 'finite', replayThroughSeq: 12
+    })
+  })
+
   it('passes SSE start and stop requests through the analytix runtime facade unchanged', async () => {
     electronMock.invoke
       .mockResolvedValueOnce({ streamId: 'stream-provided' })

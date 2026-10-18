@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
+import { isValidScheduleTimeZone, isValidScheduleTimeOfDay, validateScheduleCalendarRule } from '../../../../../packages/runtime/src/contracts/schedule-rule'
 import { useModalFocus } from '../../hooks/use-modal-focus'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Brain,
@@ -41,6 +42,8 @@ import {
   type ScheduleTaskMessageKey,
   type ScheduledTaskV1
 } from '@shared/app-settings'
+import { buildScheduleTaskUpdate, scheduleTaskEditable, type ScheduleTaskEditPatch } from '@shared/schedule-task-mutation'
+import { scheduleTaskCatalog } from './schedule-task-catalog'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
 import { confirmDialog } from '../../lib/confirm-dialog'
 import { desktopQueryCache } from '../../lib/desktop-query-cache'
@@ -51,6 +54,7 @@ import { ScheduleDefaultsDialog } from './ScheduleDefaultsDialog'
 type Props = {
   leftSidebarCollapsed: boolean
   onOpenThread?: (threadId: string) => void
+  onOpenTaskDetail?: (taskId: string, title: string) => void
 }
 
 type TaskFilter = 'all' | 'enabled' | 'running' | 'done'
@@ -63,14 +67,13 @@ type ScheduleModelProviderOption = {
 }
 type TaskDialogState =
   | { mode: 'create'; draft: ScheduledTaskV1 }
-  | { mode: 'edit'; taskId: string; draft: ScheduledTaskV1 }
+  | { mode: 'edit'; taskId: string; baseline: ScheduledTaskV1; draft: ScheduledTaskV1 }
 
 const SCHEDULE_FILTERS: TaskFilter[] = ['all', 'enabled', 'running', 'done']
 const SCHEDULE_FILTER_STORAGE_KEY = 'analytix.schedule.filter.v1'
 const SCHEDULE_STATUS_STALE_MS = 4_000
-const SCHEDULE_KIND_OPTIONS: ScheduleKind[] = ['daily', 'at', 'interval', 'manual']
+const SCHEDULE_KIND_OPTIONS: ScheduleKind[] = ['daily', 'weekly', 'cron', 'at', 'interval', 'manual']
 const SCHEDULE_REASONING_OPTIONS: ScheduleReasoningEffort[] = [...SCHEDULE_REASONING_EFFORT_IDS]
-const EMPTY_SCHEDULE_TASKS: ScheduledTaskV1[] = []
 const TIME_HOURS = Array.from({ length: 24 }, (_item, index) => String(index).padStart(2, '0'))
 const TIME_MINUTES = Array.from({ length: 60 }, (_item, index) => String(index).padStart(2, '0'))
 function modelIdsEqual(left: string, right: string): boolean {
@@ -182,8 +185,31 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+export function scheduleDefaultTimeZone(): string {
+  const zone = new Intl.DateTimeFormat().resolvedOptions().timeZone
+  return isValidScheduleTimeZone(zone) ? zone : 'UTC'
+}
+
+/** Called only by real timing controls; opening/saving ordinary edits never migrates a rule. */
+export function editScheduleTiming(schedule: ScheduledTaskV1['schedule'], patch: Partial<ScheduledTaskV1['schedule']>): ScheduledTaskV1['schedule'] {
+  if (Object.entries(patch).every(([key, value]) => JSON.stringify(schedule[key as keyof typeof schedule]) === JSON.stringify(value))) return schedule
+  const next = { ...schedule, ...patch }
+  if (next.kind === 'daily' || next.kind === 'weekly' || next.kind === 'cron') {
+    if (!Object.prototype.hasOwnProperty.call(next, 'timeZone')) next.timeZone = scheduleDefaultTimeZone()
+    if (next.kind === 'weekly') next.weekdays ??= [1, 2, 3, 4, 5]
+    else delete next.weekdays
+    if (next.kind === 'cron') next.expression ??= '0 9 * * *'
+    else delete next.expression
+  } else {
+    delete next.timeZone; delete next.weekdays; delete next.expression
+  }
+  return next
+}
+
 export function newScheduledTask(workspaceRoot: string, defaults?: Partial<ScheduledTaskV1>): ScheduledTaskV1 {
   const now = nowIso()
+  const schedule: ScheduledTaskV1['schedule'] = { kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '', ...defaults?.schedule }
+  if ((schedule.kind === 'daily' || schedule.kind === 'weekly' || schedule.kind === 'cron') && !Object.prototype.hasOwnProperty.call(schedule, 'timeZone')) schedule.timeZone = scheduleDefaultTimeZone()
   return {
     id: globalThis.crypto?.randomUUID?.() ?? `schedule-${Date.now()}`,
     title: '',
@@ -194,12 +220,7 @@ export function newScheduledTask(workspaceRoot: string, defaults?: Partial<Sched
     providerId: '',
     model: DEFAULT_SCHEDULE_MODEL,
     reasoningEffort: DEFAULT_SCHEDULE_REASONING_EFFORT,
-    schedule: {
-      kind: 'daily',
-      everyMinutes: 60,
-      timeOfDay: '09:00',
-      atTime: ''
-    },
+
     createdAt: now,
     updatedAt: now,
     lastRunAt: '',
@@ -208,6 +229,7 @@ export function newScheduledTask(workspaceRoot: string, defaults?: Partial<Sched
     lastMessage: 'schedule_task_idle',
     lastThreadId: '',
     ...defaults,
+    schedule,
     mode: 'agent'
   }
 }
@@ -236,7 +258,7 @@ export function isoFromDateTimeLocalValue(value: string): string {
 }
 
 export function scheduleTaskSummary(
-  task: ScheduledTaskV1,
+  task: Pick<ScheduledTaskV1, 'schedule'>,
   t: (key: string, values?: Record<string, unknown>) => string
 ): string {
   if (task.schedule.kind === 'at') {
@@ -248,8 +270,10 @@ export function scheduleTaskSummary(
     return t('scheduleEvery', { minutes: task.schedule.everyMinutes })
   }
   if (task.schedule.kind === 'daily') {
-    return t('scheduleDailyAt', { time: task.schedule.timeOfDay })
+    return t('scheduleDailyAt', { time: task.schedule.timeOfDay }) + (task.schedule.timeZone ? ` · ${task.schedule.timeZone}` : '')
   }
+  if (task.schedule.kind === 'weekly') return t('scheduleWeeklyAt', { days: task.schedule.weekdays?.map(day => t(`scheduleWeekday_${day}`)).join(', '), time: task.schedule.timeOfDay, zone: task.schedule.timeZone })
+  if (task.schedule.kind === 'cron') return t('scheduleCronAt', { expression: task.schedule.expression, zone: task.schedule.timeZone })
   return t('scheduleManual')
 }
 
@@ -320,8 +344,13 @@ export function validateScheduledTaskDraft(
   if (task.schedule.kind === 'interval' && (!Number.isFinite(task.schedule.everyMinutes) || task.schedule.everyMinutes < 1)) {
     return t('scheduleIntervalInvalid')
   }
-  if (task.schedule.kind === 'daily' && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(task.schedule.timeOfDay)) {
+  if ((task.schedule.kind === 'daily' || task.schedule.kind === 'weekly') && !isValidScheduleTimeOfDay(task.schedule.timeOfDay)) {
     return t('scheduleDailyTimeInvalid')
+  }
+  try { validateScheduleCalendarRule(task.schedule, true) }
+  catch {
+    if ((task.schedule.kind === 'daily' || task.schedule.kind === 'weekly' || task.schedule.kind === 'cron') && !isValidScheduleTimeZone(task.schedule.timeZone)) return t('scheduleTimeZoneInvalid')
+    return t(task.schedule.kind === 'weekly' ? 'scheduleWeekdaysInvalid' : 'scheduleCronInvalid')
   }
   if (task.schedule.kind === 'at') {
     const runAt = Date.parse(task.schedule.atTime)
@@ -357,6 +386,8 @@ type ScheduleTaskMessageTranslationKey =
   | 'scheduleStatus_running'
   | 'scheduleStatus_success'
   | 'scheduleStatus_error'
+  | 'scheduleDeliveryAccepted'
+  | 'scheduleDeliveryPending'
 
 const SCHEDULE_TASK_MESSAGE_TRANSLATIONS: Readonly<
   Partial<Record<ScheduleTaskMessageKey, ScheduleTaskMessageTranslationKey>>
@@ -365,13 +396,18 @@ const SCHEDULE_TASK_MESSAGE_TRANSLATIONS: Readonly<
   schedule_task_running: 'scheduleStatus_running',
   schedule_task_started: 'scheduleStatus_running',
   schedule_task_completed: 'scheduleStatus_success',
+  schedule_task_accepted: 'scheduleDeliveryAccepted',
   schedule_task_failed: 'scheduleStatus_error',
   schedule_task_interrupted: 'scheduleStatus_error'
 }
 
 export function scheduledTaskMessageTranslationKey(
-  task: Pick<ScheduledTaskV1, 'lastMessage' | 'lastStatus'>
+  task: Pick<ScheduledTaskV1, 'lastMessage' | 'lastStatus' | 'deliveryKind'>
 ): ScheduleTaskMessageTranslationKey {
+  if (task.deliveryKind === 'origin-delivery') {
+    if (task.lastStatus === 'success') return 'scheduleDeliveryAccepted'
+    if (task.lastStatus === 'running') return 'scheduleDeliveryPending'
+  }
   const key = task.lastMessage
   if (key) {
     const translation = SCHEDULE_TASK_MESSAGE_TRANSLATIONS[key]
@@ -399,9 +435,11 @@ function statusTone(status: ScheduledTaskV1['lastStatus']): string {
 
 export function ScheduleTasksView({
   leftSidebarCollapsed,
-  onOpenThread
+  onOpenThread,
+  onOpenTaskDetail
 }: Props): ReactElement {
   const { t } = useTranslation('common')
+  const catalog = useSyncExternalStore(scheduleTaskCatalog.subscribe, scheduleTaskCatalog.getSnapshot)
   const [settings, setSettings] = useState<AppSettingsV1 | null>(null)
   const [status, setStatus] = useState<ScheduleRuntimeStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -411,6 +449,11 @@ export function ScheduleTasksView({
     'all',
     SCHEDULE_FILTERS
   )
+  const dialogGeneration = useRef(0)
+  const saveRequest = useRef(0)
+  const pendingSaveGeneration = useRef<number | null>(null)
+  const [dialogSaving, setDialogSaving] = useState(false)
+  const pickerRequest = useRef(0)
   const [dialog, setDialog] = useState<TaskDialogState | null>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
@@ -440,12 +483,13 @@ export function ScheduleTasksView({
 
   useEffect(() => {
     void load()
-    const id = window.setInterval(() => void load(), 5_000)
+    const id = window.setInterval(() => { void load(); void scheduleTaskCatalog.refresh() }, 5_000)
     return () => window.clearInterval(id)
   }, [load])
 
+  const catalogError = catalog.phase === 'error' || catalog.phase === 'unavailable'
   const schedule = settings ? normalizeScheduleSettings(settings.schedule) : null
-  const tasks = schedule?.tasks ?? EMPTY_SCHEDULE_TASKS
+  const tasks = catalog.tasks
   const clawChannels = settings?.claw.channels ?? []
   const modelProviders = useMemo(
     () => settings ? scheduleModelProviderOptions(settings) : [],
@@ -455,21 +499,13 @@ export function ScheduleTasksView({
   const visibleTasks = useMemo(() => filterScheduledTasks(tasks, filter), [filter, tasks])
 
   const persistSchedule = async (patch: Parameters<typeof mergeScheduleSettings>[1]): Promise<void> => {
-    if (!settings) return
-    const nextSchedule = mergeScheduleSettings(settings.schedule, patch)
-    setSettings({ ...settings, schedule: nextSchedule })
-    const saved = await rendererRuntimeClient.setSettings({ schedule: nextSchedule })
+    if (!settings || !patch) return
+    const { tasks: _tasks, ...defaults } = patch
+    void _tasks
+    const saved = await rendererRuntimeClient.setSettings({ schedule: defaults })
     setSettings(saved)
-    const getScheduleStatus = window.analytix?.schedule?.getStatus
-    if (typeof getScheduleStatus === 'function') {
-      desktopQueryCache.invalidateQueries({ queryKey: ['schedule'], broadcast: true })
-      setStatus(await desktopQueryCache.fetchQuery({
-        queryKey: ['schedule', 'status'],
-        staleTimeMs: SCHEDULE_STATUS_STALE_MS,
-        forceRefresh: true,
-        fetcher: () => getScheduleStatus()
-      }))
-    }
+    desktopQueryCache.invalidateQueries({ queryKey: ['schedule'], broadcast: true })
+    await load()
   }
 
   const resolveDialogWorkspaceRoot = useCallback((workspaceRoot?: string): string => {
@@ -478,7 +514,13 @@ export function ScheduleTasksView({
     return schedule?.defaultWorkspaceRoot.trim() || settings?.workspaceRoot.trim() || ''
   }, [schedule?.defaultWorkspaceRoot, settings?.workspaceRoot])
 
+  const closeDialog = (): void => { dialogGeneration.current += 1; setDialog(null); setDialogError(null); setDialogSaving(false) }
+
+  useEffect(() => () => { dialogGeneration.current += 1 }, [])
+
   const openCreateDialog = (): void => {
+    dialogGeneration.current += 1
+    setDialogSaving(false)
     const workspaceRoot = resolveDialogWorkspaceRoot()
     const selection = settings
       ? resolveScheduleModelSelection(
@@ -498,18 +540,15 @@ export function ScheduleTasksView({
   }
 
   const openEditDialog = (task: ScheduledTaskV1): void => {
-    const selection = resolveScheduleModelSelection(modelProviders, task.providerId, task.model)
-    const selectedProvider = modelProviders.find((provider) => provider.providerId === selection.providerId) ?? null
-    const selectedProfile = scheduleModelProfileForSelection(selectedProvider, selection.model)
+    if (onOpenTaskDetail) { onOpenTaskDetail(task.id, task.title); return }
+    dialogGeneration.current += 1
+    setDialogSaving(false)
     setDialog({
       mode: 'edit',
       taskId: task.id,
+      baseline: task,
       draft: {
         ...task,
-        providerId: selection.providerId,
-        model: selection.model,
-        reasoningEffort: resolveScheduleReasoningSelection(task.reasoningEffort, selectedProfile),
-        workspaceRoot: resolveDialogWorkspaceRoot(task.workspaceRoot),
         schedule: { ...task.schedule }
       }
     })
@@ -518,16 +557,19 @@ export function ScheduleTasksView({
 
   const pickDialogWorkspace = async (): Promise<void> => {
     if (!dialog) return
+    const generation = dialogGeneration.current
+    const request = ++pickerRequest.current
+    const current = (): boolean => generation === dialogGeneration.current && request === pickerRequest.current
     try {
       if (typeof window.analytix?.workspace?.pickDirectory !== 'function') {
         throw new Error(t('workspacePickerUnavailable'))
       }
       const picked = await window.analytix.workspace.pickDirectory(resolveDialogWorkspaceRoot(dialog.draft.workspaceRoot) || undefined)
-      if (picked.canceled || !picked.path) return
+      if (!current() || picked.canceled || !picked.path) return
       onDraftChangeInDialog({ workspaceRoot: picked.path })
       setDialogError(null)
     } catch (error) {
-      setDialogError(formatWorkspacePickerError(error))
+      if (current()) setDialogError(formatWorkspacePickerError(error))
     }
   }
 
@@ -536,76 +578,63 @@ export function ScheduleTasksView({
   }
 
   const saveDialog = async (): Promise<void> => {
-    if (!dialog || !schedule || !settings) return
+    if (!dialog || !schedule || !settings || pendingSaveGeneration.current === dialogGeneration.current) return
     const validation = validateScheduledTaskDraft(dialog.draft, t)
     if (validation) {
       setDialogError(validation)
       return
     }
-    const now = nowIso()
-    const workspaceRoot = resolveDialogWorkspaceRoot(dialog.draft.workspaceRoot)
-    const draftClawChannelId = dialog.draft.clawChannelId.trim()
-    const selection = resolveScheduleModelSelection(
-      modelProviders,
-      dialog.draft.providerId,
-      dialog.draft.model
-    )
-    const selectedProvider =
-      modelProviders.find((provider) => provider.providerId === selection.providerId) ?? null
-    const selectedProfile = scheduleModelProfileForSelection(selectedProvider, selection.model)
-    const configuredClawChannelId = configuredScheduleImChannels(clawChannels)
-      .some((channel) => channel.id === draftClawChannelId)
-      ? draftClawChannelId
-      : ''
     const task = {
       ...dialog.draft,
       title: dialog.draft.title.trim(),
-      prompt: dialog.draft.prompt,
-      workspaceRoot,
-      clawChannelId: configuredClawChannelId,
-      providerId: selection.providerId,
-      model: selection.model,
-      reasoningEffort: resolveScheduleReasoningSelection(dialog.draft.reasoningEffort, selectedProfile),
-      mode: 'agent' as const,
-      updatedAt: now,
-      nextRunAt: ''
+      workspaceRoot: dialog.mode === 'create'
+        ? resolveDialogWorkspaceRoot(dialog.draft.workspaceRoot) : dialog.draft.workspaceRoot
     }
-    if (dialog.mode === 'create') {
-      await persistSchedule({
-        enabled: true,
-        tasks: [...schedule.tasks, { ...task, createdAt: now }]
-      })
-    } else {
-      await persistSchedule({
-        tasks: schedule.tasks.map((item) => item.id === dialog.taskId ? task : item)
-      })
+    const generation = dialogGeneration.current
+    pendingSaveGeneration.current = generation
+    setDialogSaving(true)
+    const request = ++saveRequest.current
+    const current = (): boolean => generation === dialogGeneration.current && request === saveRequest.current
+    try {
+      const api = window.analytix?.schedule
+      const result = dialog.mode === 'create'
+        ? await api.createTask(scheduleTaskEditable(task))
+        : await api.updateTask(buildScheduleTaskUpdate(dialog.baseline, scheduleTaskEditable(task)))
+      scheduleTaskCatalog.invalidate()
+      if (!current()) return
+      if (result.kind !== 'success') {
+        setDialogError(result.message)
+        return
+      }
+      closeDialog()
+      setDialogError(null)
+    } catch {
+      if (current()) setDialogError(t('scheduleStatus_error'))
+    } finally {
+      if (pendingSaveGeneration.current === generation) pendingSaveGeneration.current = null
+      if (current()) setDialogSaving(false)
     }
-    setDialog(null)
-    setDialogError(null)
   }
 
-  const updateTask = async (taskId: string, patch: Partial<ScheduledTaskV1>): Promise<void> => {
-    if (!schedule) return
-    const now = nowIso()
-    await persistSchedule({
-      tasks: schedule.tasks.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
-              ...patch,
-              ...(patch.schedule ? { schedule: { ...task.schedule, ...patch.schedule } } : {}),
-              nextRunAt: patch.enabled !== undefined || patch.schedule ? '' : task.nextRunAt,
-              updatedAt: now
-            }
-          : task
-      )
-    })
+  const updateTask = async (taskId: string, patch: ScheduleTaskEditPatch): Promise<void> => {
+    const task = tasks.find((item) => item.id === taskId)
+    if (!task) return
+    try {
+      const draft = { ...scheduleTaskEditable(task), ...patch, schedule: { ...task.schedule, ...patch.schedule } }
+      const result = await window.analytix.schedule.updateTask(buildScheduleTaskUpdate(task, draft))
+      if (result.kind !== 'success') setError(result.message)
+      scheduleTaskCatalog.invalidate()
+    } catch { setError(t('scheduleStatus_error')) }
   }
 
   const deleteTask = async (taskId: string): Promise<void> => {
-    if (!schedule) return
-    if (!(await confirmDialog(t('scheduleDeleteConfirm')))) return
-    await persistSchedule({ tasks: schedule.tasks.filter((task) => task.id !== taskId) })
+    const task = tasks.find((item) => item.id === taskId)
+    if (!task || !(await confirmDialog(t('scheduleDeleteConfirm')))) return
+    try {
+      const result = await window.analytix.schedule.deleteTask({ taskId, expected: scheduleTaskEditable(task) })
+      if (result.kind !== 'success') setError(result.message)
+      scheduleTaskCatalog.invalidate()
+    } catch { setError(t('scheduleStatus_error')) }
   }
 
   const runTask = async (taskId: string): Promise<void> => {
@@ -615,6 +644,7 @@ export function ScheduleTasksView({
       setError(t('scheduleStatus_error'))
       return
     }
+    scheduleTaskCatalog.invalidate()
     await load()
   }
 
@@ -697,11 +727,18 @@ export function ScheduleTasksView({
             </label>
           </div>
 
-          {loading ? (
+          {(error || catalogError) && tasks.length > 0 ? (
+            <div role="alert" className="mb-3 text-[13px] text-red-700 dark:text-red-200">
+              {error || t('scheduleStatus_error')}
+              <button type="button" className="ml-3 underline" onClick={() => { setError(null); void scheduleTaskCatalog.refresh() }}>{t('retryConnection')}</button>
+            </div>
+          ) : null}
+          {loading || (tasks.length === 0 && (catalog.phase === 'idle' || catalog.phase === 'loading')) ? (
             <div className="py-20 text-center text-[14px] text-ds-faint">{t('loading')}</div>
-          ) : error ? (
+          ) : tasks.length === 0 && (error || catalogError) ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-              {error}
+              {error || t('scheduleStatus_error')}
+              <button type="button" className="ml-3 underline" onClick={() => { setError(null); void scheduleTaskCatalog.refresh() }}>{t('retryConnection')}</button>
             </div>
           ) : visibleTasks.length === 0 ? (
             <div className="flex min-h-[340px] items-center justify-center text-[13px] text-ds-faint">
@@ -726,10 +763,13 @@ export function ScheduleTasksView({
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
                           <h2 className="truncate text-[15px] font-semibold text-ds-ink">
-                            {task.title || t('scheduleUntitled')}
+                            {onOpenTaskDetail ? <button type="button" className="truncate text-left hover:underline"
+                              aria-label={t('dshSchedule.openTask', { title: task.title, defaultValue: 'Open {{title}}' })}
+                              onClick={() => onOpenTaskDetail(task.id, task.title)}>{task.title || t('scheduleUntitled')}</button>
+                              : task.title || t('scheduleUntitled')}
                           </h2>
                           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${statusTone(task.lastStatus)}`}>
-                            {running ? t('scheduleStatus_running') : t(`scheduleStatus_${task.lastStatus}`)}
+                            {task.deliveryKind === 'origin-delivery' ? t(scheduledTaskMessageTranslationKey(task)) : running ? t('scheduleStatus_running') : t(`scheduleStatus_${task.lastStatus}`)}
                           </span>
                         </div>
                         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-ds-faint">
@@ -820,8 +860,9 @@ export function ScheduleTasksView({
       {dialog ? (
         <ScheduleTaskDialog
           dialog={dialog}
+          saving={dialogSaving}
           error={dialogError}
-          onClose={() => setDialog(null)}
+          onClose={closeDialog}
           onDraftChange={(draft) => setDialog((current) => current ? { ...current, draft } : current)}
           onPickWorkspace={() => void pickDialogWorkspace()}
           onSubmit={() => void saveDialog()}
@@ -851,6 +892,7 @@ export function ScheduleTasksView({
 
 function ScheduleTaskDialog({
   dialog,
+  saving,
   error,
   onClose,
   onDraftChange,
@@ -863,6 +905,7 @@ function ScheduleTaskDialog({
   t
 }: {
   dialog: TaskDialogState
+  saving: boolean
   error: string | null
   onClose: () => void
   onDraftChange: (draft: ScheduledTaskV1) => void
@@ -880,7 +923,7 @@ function ScheduleTaskDialog({
     onDraftChange({ ...draft, ...patch })
   }
   const updateSchedule = (patch: Partial<ScheduledTaskV1['schedule']>): void => {
-    onDraftChange({ ...draft, schedule: { ...draft.schedule, ...patch } })
+    onDraftChange({ ...draft, schedule: editScheduleTiming(draft.schedule, patch) })
   }
   const imChannels = configuredScheduleImChannels(clawChannels)
   const preferredImChannel = preferredScheduleImChannel(clawChannels)
@@ -1151,7 +1194,7 @@ function ScheduleTaskDialog({
                   </div>
                 </div>
 
-                {draft.schedule.kind === 'daily' ? (
+                {draft.schedule.kind === 'daily' || draft.schedule.kind === 'weekly' ? (
                   <div className="grid gap-2">
                     <FieldLabel>{t('scheduleDailyTime')}</FieldLabel>
                     <ScheduleTimePicker
@@ -1160,6 +1203,10 @@ function ScheduleTaskDialog({
                       t={t}
                     />
                   </div>
+                ) : draft.schedule.kind === 'cron' ? (
+                  <label className="grid gap-2"><FieldLabel>{t('scheduleCronExpression')}</FieldLabel>
+                    <input value={draft.schedule.expression ?? ''} onChange={event => updateSchedule({ expression: event.target.value })} aria-label={t('scheduleCronExpression')} className="h-10 w-full rounded-xl border border-ds-border bg-ds-main/55 px-3 text-[14px] text-ds-ink" />
+                  </label>
                 ) : draft.schedule.kind === 'at' ? (
                   <label className="grid gap-2">
                     <FieldLabel>{t('scheduleAtTime')}</FieldLabel>
@@ -1188,6 +1235,12 @@ function ScheduleTaskDialog({
                   </div>
                 )}
               </div>
+              {draft.schedule.kind === 'weekly' ? <fieldset className="mt-3 flex flex-wrap gap-3"><legend>{t('scheduleWeekdays')}</legend>
+                {[1, 2, 3, 4, 5, 6, 7].map(day => <label key={day}><input type="checkbox" checked={draft.schedule.weekdays?.includes(day) ?? false} onChange={event => updateSchedule({ weekdays: event.target.checked ? [...(draft.schedule.weekdays ?? []), day].sort((a, b) => a - b) : draft.schedule.weekdays?.filter(value => value !== day) ?? [] })} /> {t(`scheduleWeekday_${day}`)}</label>)}
+              </fieldset> : null}
+              {['daily', 'weekly', 'cron'].includes(draft.schedule.kind) ? <label className="mt-3 grid gap-2"><FieldLabel>{t('scheduleTimeZone')}</FieldLabel>
+                <input value={draft.schedule.timeZone ?? ''} placeholder={t('scheduleLegacyLocal')} onChange={event => updateSchedule({ timeZone: event.target.value })} aria-label={t('scheduleTimeZone')} className="h-10 w-full rounded-xl border border-ds-border bg-ds-main/55 px-3 text-[14px] text-ds-ink" />
+              </label> : null}
             </ScheduleDialogSection>
 
             <ScheduleDialogSection
@@ -1262,6 +1315,7 @@ function ScheduleTaskDialog({
             </button>
             <button
               type="submit"
+              disabled={saving}
               className="h-8 rounded-xl bg-ds-userbubble px-5 text-[13px] font-semibold text-ds-userbubbleFg transition hover:opacity-90"
             >
               {t('confirm')}

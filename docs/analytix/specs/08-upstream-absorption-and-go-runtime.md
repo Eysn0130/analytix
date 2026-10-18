@@ -46,9 +46,9 @@ historical stage records unless a newer current-state note repeats them.
 Current authority note (2026-08-26):
 [`11-agent-platform-brand-and-architecture.md`](11-agent-platform-brand-and-architecture.md)
 and the accepted `agent-platform-foundation` scoped requirements govern current
-brand, one-Harness, Plugin and Privacy Layer terminology. `重构升级方案.md`,
-the stage plans and the chronological sections below remain historical decision
-and gate ledgers. They do not authorize a second runtime, an everything-is-a-
+brand, one-Harness, Plugin and Privacy Layer terminology. Historical stage plans
+and the chronological sections below remain decision and gate ledgers.
+They do not authorize a second runtime, an everything-is-a-
 plugin security kernel, a default Codex Goal, or the old TypeScript-oracle/Go-
 shadow construction order. Current construction routing starts from applicable
 `AGENTS.md`, current Git/code, accepted specs, the active authorized OpenSpec
@@ -61,7 +61,6 @@ Authority and historical entry documents (repo-relative paths):
 ```text
 AGENTS.md
 docs/analytix/README.md
-重构升级方案.md
 docs/analytix/specs/01-identity-runtime-schema-reset.md
 docs/analytix/specs/02-release-packaging-channels.md
 docs/analytix/specs/03-brand-assets-visual-system.md

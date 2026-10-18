@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { scheduleNativeOriginSchemaV1 } from "./schedule-runtime-helpers";
+import { isValidScheduleTimeZone, isValidScheduleTimeOfDay, validateScheduleCalendarRule } from "../../packages/runtime/src/contracts/schedule-rule";
 
 export type McpLaunchOptions = {
   baseUrl: string;
@@ -33,6 +35,10 @@ async function postJson(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
+  if (Object.hasOwn(body, "origin")) {
+    if (!options.secret) throw new Error("Authenticated native Schedule helper is required.");
+    headers["X-Analytix-Schedule-Origin"] = "typed-v1";
+  }
   if (options.secret) {
     headers.Authorization = `Bearer ${options.secret}`;
   }
@@ -88,10 +94,16 @@ const scheduledTaskOutputSchema = z.strictObject({
   reasoningEffort: z.enum(["auto", "off", "low", "medium", "high", "max"]),
   mode: z.enum(["agent", "plan"]),
   schedule: z.strictObject({
-    kind: z.enum(["manual", "at", "daily", "interval"]),
+    kind: z.enum(["manual", "at", "daily", "interval", "weekly", "cron"]),
     everyMinutes: z.number(),
     timeOfDay: z.string(),
     atTime: z.string(),
+    timeZone: z.string().max(255).optional(),
+    weekdays: z.array(z.number().int().min(1).max(7)).max(7).optional(),
+    expression: z.string().max(512).optional(),
+  }).superRefine((value, ctx) => {
+    try { validateScheduleCalendarRule(value, true); }
+    catch { ctx.addIssue({ code: "custom", message: "Invalid committed calendar rule." }); }
   }),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -111,7 +123,20 @@ const atScheduleInputSchema = z.strictObject({
 
 const dailyScheduleInputSchema = z.strictObject({
   kind: z.literal("daily"),
-  timeOfDay: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  timeOfDay: z.string().refine(isValidScheduleTimeOfDay),
+  timeZone: z.string().max(255).refine(isValidScheduleTimeZone),
+});
+const weeklyScheduleInputSchema = dailyScheduleInputSchema.extend({
+  kind: z.literal("weekly"),
+  weekdays: z.array(z.number().int().min(1).max(7)).min(1).max(7).refine(days => new Set(days).size === days.length),
+});
+const cronScheduleInputSchema = z.strictObject({
+  kind: z.literal("cron"),
+  expression: z.string().max(512),
+  timeZone: z.string().max(255).refine(isValidScheduleTimeZone),
+}).superRefine((value, ctx) => {
+  try { validateScheduleCalendarRule(value); }
+  catch { ctx.addIssue({ code: "custom", message: "Invalid numeric five-field cron." }); }
 });
 
 const intervalScheduleInputSchema = z.strictObject({
@@ -122,6 +147,8 @@ const intervalScheduleInputSchema = z.strictObject({
 const createScheduleInputSchema = z.discriminatedUnion("kind", [
   atScheduleInputSchema,
   dailyScheduleInputSchema,
+  weeklyScheduleInputSchema,
+  cronScheduleInputSchema,
   intervalScheduleInputSchema,
 ]);
 
@@ -129,6 +156,8 @@ const updateScheduleInputSchema = z.union([
   z.strictObject({ kind: z.literal("manual") }),
   atScheduleInputSchema,
   dailyScheduleInputSchema,
+  weeklyScheduleInputSchema,
+  cronScheduleInputSchema,
   intervalScheduleInputSchema,
 ]);
 
@@ -222,8 +251,8 @@ export function createClawScheduleMcpServer(
       name,
       {
         description: name.startsWith("claw_")
-          ? "Legacy alias. Create a scheduled task in Analytix. Supports one-time (`at`), daily, or interval schedules."
-          : "Create a scheduled task in Analytix. Supports one-time (`at`), daily, or interval schedules. When creating from an existing conversation, pass that conversation's provider_id, model, and reasoning_effort so the scheduled task keeps the same execution settings.",
+          ? "Legacy alias. Create a scheduled task in Analytix. Supports one-time (`at`), daily, weekly, cron, interval, or manual schedules."
+          : "Create a scheduled task in Analytix. Supports one-time (`at`), daily, weekly, cron, interval, or manual schedules. When creating from an existing conversation, pass that conversation's provider_id, model, and reasoning_effort so the scheduled task keeps the same execution settings.",
         inputSchema: z.strictObject({
           title: z
             .string()
@@ -278,10 +307,20 @@ export function createClawScheduleMcpServer(
           openWorldHint: false,
         },
       },
-      async (args) => {
+      async (args, extra) => {
         try {
+          const metadata = extra._meta;
+          if (name === "gui_schedule_create" && (!metadata || !Object.hasOwn(metadata, "analytixScheduleOriginV1"))) throw new Error("Native Schedule origin is required.");
+          let origin: ReturnType<typeof scheduleNativeOriginSchemaV1.parse> | undefined;
+          if (metadata && Object.hasOwn(metadata, "analytixScheduleOriginV1")) {
+            const native = z.object({ version: z.literal(1), ...scheduleNativeOriginSchemaV1.shape }).strict().parse(metadata.analytixScheduleOriginV1);
+            if (!options.secret) throw new Error("Authenticated native Schedule helper is required.");
+            const { version: _version, ...source } = native; void _version;
+            origin = source;
+          }
           const result = taskBackendResponseSchema.parse(
             await postJson(options, "/schedule/internal/create", {
+              ...(origin === undefined ? {} : { origin }),
               input: {
                 title: args.title,
                 prompt: args.prompt,

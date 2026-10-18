@@ -48,6 +48,8 @@ type UseTimelineScrollOptions = {
   autoCollapseThreshold: number
   totalTurns: number
   busy: boolean
+  /** Another conversation view owns this scroller; do not sample or follow its viewport. */
+  suspended?: boolean
   /** Triggers stick-to-bottom snap scroll. */
   scrollDeps: { contentKey: string; streaming: boolean; userTurnKey: string; phase?: TimelineStreamingPhase }
   onAnchorCorrected?: (data: TimelineAnchorCorrectionTrace) => void
@@ -68,7 +70,9 @@ export type UseTimelineScrollResult = {
   hiddenTurnCount: number
   isAtBottom: boolean
   bottomDistance: number
-  loadEarlierTurns: (options?: { userInitiated?: boolean }) => void
+  loadEarlierTurns: (options?: { userInitiated?: boolean; preserveScroll?: boolean }) => void
+  pauseFollowForNavigation: () => void
+  pauseForViewChange: () => void
   collapseEarlierTurns: () => void
   preserveBottomOnResize: () => void
   scrollToBottom: (options?: { behavior?: ScrollBehavior }) => void
@@ -153,6 +157,7 @@ export function useTimelineScroll({
   autoCollapseThreshold,
   totalTurns,
   busy,
+  suspended = false,
   scrollDeps,
   onAnchorCorrected
 }: UseTimelineScrollOptions): UseTimelineScrollResult {
@@ -173,6 +178,11 @@ export function useTimelineScroll({
   const [bottomDistance, setBottomDistance] = useState(0)
   const hiddenTurnCount = Math.max(0, totalTurns - visibleTurnCount)
 
+  const suspendedRef = useRef(suspended)
+  suspendedRef.current = suspended
+  const renderedThreadIdRef = useRef(activeThreadId)
+  renderedThreadIdRef.current = activeThreadId
+  const scrollEpochRef = useRef(0)
   const stickToBottomRef = useRef(true)
   const followModeRef = useRef<TimelineFollowMode>('user_follow')
   const streamingPhaseRef = useRef<TimelineStreamingPhase>(streamingPhase)
@@ -182,10 +192,12 @@ export function useTimelineScroll({
   const visibleTurnCountRef = useRef(visibleTurnCount)
   const activeThreadIdRef = useRef(activeThreadId)
   const restoreConfigRef = useRef({ pageSize, totalTurns, shouldCollapseHistory })
+  restoreConfigRef.current = { pageSize, totalTurns, shouldCollapseHistory }
   const lastUserTurnKeyRef = useRef(userTurnKey)
   const historyExpansionRequestedRef = useRef(false)
   const pendingPrependRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const prependInFlightRef = useRef(false)
+  const prependFrameRef = useRef<number | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
   const lastObservedScrollTopRef = useRef<number | null>(null)
   const userScrolledAwayFromBottomRef = useRef(false)
@@ -202,9 +214,15 @@ export function useTimelineScroll({
     followDistanceRef.current = followDistancePx
   }, [followDistancePx])
 
-  useEffect(() => {
-    restoreConfigRef.current = { pageSize, totalTurns, shouldCollapseHistory }
-  }, [pageSize, shouldCollapseHistory, totalTurns])
+  // Retire pending work before the alternate view can reuse this DOM node.
+  // Saving belongs to the explicit pre-switch callback, while the old rows exist.
+  useLayoutEffect(() => {
+    scrollEpochRef.current += 1
+    pendingPrependRef.current = null
+    prependInFlightRef.current = false
+    if (prependFrameRef.current !== null) { window.cancelAnimationFrame(prependFrameRef.current); prependFrameRef.current = null }
+    if (scrollFrameRef.current !== null) { window.cancelAnimationFrame(scrollFrameRef.current); scrollFrameRef.current = null }
+  }, [activeThreadId, suspended])
 
   const recordAnchorCorrection = useCallback(
     ({
@@ -244,30 +262,48 @@ export function useTimelineScroll({
   )
 
   const loadEarlierTurns = useCallback(
-    (options?: { userInitiated?: boolean }): void => {
-      if (hiddenTurnCount === 0 || prependInFlightRef.current) return
+    (options?: { userInitiated?: boolean; preserveScroll?: boolean }): void => {
+      if (suspendedRef.current || hiddenTurnCount === 0 || prependInFlightRef.current) return
       if (options?.userInitiated) {
         historyExpansionRequestedRef.current = true
       }
       const el = containerRef.current
-      if (el) {
+      if (el && options?.preserveScroll !== false) {
         pendingPrependRef.current = {
           scrollHeight: el.scrollHeight,
           scrollTop: el.scrollTop
         }
       }
-      prependInFlightRef.current = true
+      prependInFlightRef.current = options?.preserveScroll !== false
       setVisibleTurnCount((count) => Math.min(totalTurns, count + pageSize))
     },
     [containerRef, hiddenTurnCount, pageSize, totalTurns]
   )
 
+  // Exact record navigation owns its scroll, independently of live following.
+  const pauseFollowForNavigation = useCallback(() => {
+    if (suspendedRef.current) return
+    scrollEpochRef.current += 1
+    followModeRef.current = 'static'
+    stickToBottomRef.current = false
+    userScrolledAwayFromBottomRef.current = true
+    pendingPrependRef.current = null
+    prependInFlightRef.current = false
+    if (prependFrameRef.current !== null) { window.cancelAnimationFrame(prependFrameRef.current); prependFrameRef.current = null }
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
+      scrollFrameRef.current = null
+    }
+  }, [])
+
   const collapseEarlierTurns = useCallback((): void => {
+    if (suspendedRef.current) return
     historyExpansionRequestedRef.current = false
     setVisibleTurnCount(pageSize)
   }, [pageSize])
 
   const saveScrollPosition = useCallback((threadId: string | null): void => {
+    if (suspendedRef.current) return
     const normalizedThreadId = threadId?.trim()
     const el = containerRef.current
     if (!normalizedThreadId || !el) return
@@ -291,7 +327,14 @@ export function useTimelineScroll({
     })
   }, [containerRef])
 
+  const pauseForViewChange = useCallback(() => {
+    if (suspendedRef.current) return
+    pauseFollowForNavigation()
+    saveScrollPosition(activeThreadIdRef.current)
+  }, [pauseFollowForNavigation, saveScrollPosition])
+
   const scrollToBottom = useCallback((options?: { behavior?: ScrollBehavior }): void => {
+    if (suspendedRef.current) return
     const el = containerRef.current
     if (!el) return
     userScrolledAwayFromBottomRef.current = false
@@ -333,12 +376,14 @@ export function useTimelineScroll({
   }, [containerRef, recordAnchorCorrection, streamingPhase])
 
   const snapToBottomIfFollowing = useCallback((): void => {
+    if (suspendedRef.current) return
     if (userScrolledAwayFromBottomRef.current) return
     if (!timelineFollowModeShouldAutoScroll(followModeRef.current)) return
     scrollToBottom({ behavior: 'auto' })
   }, [scrollToBottom])
 
   const snapToBottomIfNearLive = useCallback((): void => {
+    if (suspendedRef.current) return
     if (userScrolledAwayFromBottomRef.current) return
     const el = containerRef.current
     const currentBottomDistance = el
@@ -358,6 +403,7 @@ export function useTimelineScroll({
   }, [containerRef, scrollToBottom])
 
   const preserveBottomOnResize = useCallback((): void => {
+    if (suspendedRef.current) return
     if (userScrolledAwayFromBottomRef.current) return
     if (!timelineFollowModeShouldAutoScroll(followModeRef.current)) return
     const el = containerRef.current
@@ -403,6 +449,7 @@ export function useTimelineScroll({
   // A freshly submitted user turn should become visible even if the user was
   // reading older history before pressing Enter.
   useLayoutEffect(() => {
+    if (suspended) { lastUserTurnKeyRef.current = userTurnKey; return }
     if (!userTurnKey || lastUserTurnKeyRef.current === userTurnKey) return
     lastUserTurnKeyRef.current = userTurnKey
     userScrolledAwayFromBottomRef.current = false
@@ -439,13 +486,14 @@ export function useTimelineScroll({
       prepend: false,
       reset: false
     })
-  }, [containerRef, recordAnchorCorrection, streamingPhase, userTurnKey])
+  }, [containerRef, recordAnchorCorrection, streamingPhase, userTurnKey, suspended])
 
   // Scroll listener: tracks stick-to-bottom + triggers lazy load.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const onScroll = (): void => {
+      if (suspendedRef.current) return
       const layoutState = scrollLayoutRef.current?.capture({
         totalHeight: el.scrollHeight,
         scrollTop: el.scrollTop,
@@ -490,6 +538,7 @@ export function useTimelineScroll({
   // Snap to bottom when content changes, but only if the user was
   // already at the bottom.
   useLayoutEffect(() => {
+    if (suspended) return
     if (userScrolledAwayFromBottomRef.current) return
     if (!timelineFollowModeShouldAutoScroll(followModeRef.current)) return
     const el = containerRef.current
@@ -524,15 +573,20 @@ export function useTimelineScroll({
       setBottomDistance(bottomDistanceRef.current)
       setIsAtBottom(isNearBottom(bottomDistanceRef.current, TIMELINE_AT_BOTTOM_PX))
     }
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
+    const epoch = scrollEpochRef.current
+    const frame = window.requestAnimationFrame(() => {
+      if (scrollFrameRef.current !== frame || suspendedRef.current || scrollEpochRef.current !== epoch || renderedThreadIdRef.current !== activeThreadId) return
       scrollFrameRef.current = null
       applyScroll()
     })
-  }, [containerRef, contentKey, recordAnchorCorrection, streaming])
+    scrollFrameRef.current = frame
+    return () => { window.cancelAnimationFrame(frame); if (scrollFrameRef.current === frame) scrollFrameRef.current = null }
+  }, [activeThreadId, containerRef, contentKey, recordAnchorCorrection, streaming, suspended])
 
   // Restore the thread's own viewport on thread switch. Returning to a thread
   // should not yank the reader to the bottom unless no position is known.
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (suspended) { activeThreadIdRef.current = activeThreadId; return }
     const previousThreadId = activeThreadIdRef.current
     if (previousThreadId && previousThreadId !== activeThreadId) {
       saveScrollPosition(previousThreadId)
@@ -611,13 +665,16 @@ export function useTimelineScroll({
     activeThreadId,
     containerRef,
     recordAnchorCorrection,
-    saveScrollPosition
+    saveScrollPosition,
+    suspended
   ])
 
   // Cleanup any pending rAF on unmount.
   useEffect(
     () => () => {
       saveScrollPosition(activeThreadIdRef.current)
+      scrollEpochRef.current += 1
+      if (prependFrameRef.current !== null) { window.cancelAnimationFrame(prependFrameRef.current); prependFrameRef.current = null }
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current)
       }
@@ -628,6 +685,7 @@ export function useTimelineScroll({
   // Re-derive visible count when the thread / collapse flag / total
   // turns change.
   useEffect(() => {
+    if (suspended) return
     setVisibleTurnCount((count) =>
       deriveTimelineVisibleTurnCount({
         currentVisibleTurnCount: count,
@@ -637,14 +695,14 @@ export function useTimelineScroll({
         historyExpansionRequested: historyExpansionRequestedRef.current
       })
     )
-  }, [activeThreadId, pageSize, shouldCollapseHistory, totalTurns])
+  }, [activeThreadId, pageSize, shouldCollapseHistory, totalTurns, suspended])
 
   // While a turn is running, keep the latest page visible without
   // mounting every historical turn. Expanding all history during SSE
   // streaming can repaint long conversations and make the viewport look
   // like it scrolled through the whole thread.
   useEffect(() => {
-    if (!busy) return
+    if (suspended || !busy) return
     setVisibleTurnCount((count) =>
       deriveTimelineVisibleTurnCount({
         currentVisibleTurnCount: count,
@@ -654,11 +712,12 @@ export function useTimelineScroll({
         historyExpansionRequested: historyExpansionRequestedRef.current
       })
     )
-  }, [busy, pageSize, shouldCollapseHistory, totalTurns])
+  }, [busy, pageSize, shouldCollapseHistory, totalTurns, suspended])
 
   // After a prepend, restore scroll position so the user's viewport
   // doesn't jump.
   useEffect(() => {
+    if (suspended) return
     const snapshot = pendingPrependRef.current
     const el = containerRef.current
     if (!snapshot || !el) return
@@ -666,7 +725,12 @@ export function useTimelineScroll({
     pendingPrependRef.current = null
     prependInFlightRef.current = false
 
-    requestAnimationFrame(() => {
+    let cancelled = false
+    const epoch = scrollEpochRef.current
+    const frame = requestAnimationFrame(() => {
+      if (prependFrameRef.current !== frame) return
+      prependFrameRef.current = null
+      if (cancelled || document.hidden || suspendedRef.current || scrollEpochRef.current !== epoch || renderedThreadIdRef.current !== activeThreadId) return
       const previousTop = el.scrollTop
       const nextTop = scrollLayoutRef.current?.nextScrollTopAfterPrepend(
         snapshot.scrollTop,
@@ -700,18 +764,20 @@ export function useTimelineScroll({
         reset: false
       })
     })
-  }, [containerRef, recordAnchorCorrection, visibleTurnCount])
+    prependFrameRef.current = frame
+    return () => { cancelled = true; cancelAnimationFrame(frame); if (prependFrameRef.current === frame) prependFrameRef.current = null }
+  }, [activeThreadId, containerRef, recordAnchorCorrection, visibleTurnCount, suspended])
 
   // If the user explicitly asked to expand history and the container
   // still has room, keep loading earlier turns until it overflows.
   useEffect(() => {
     const el = containerRef.current
-    if (!el || hiddenTurnCount === 0 || prependInFlightRef.current) return
+    if (suspended || !el || hiddenTurnCount === 0 || prependInFlightRef.current) return
     if (!historyExpansionRequestedRef.current) return
     if (el.scrollHeight <= el.clientHeight + TOP_LOAD_TRIGGER_PX) {
       loadEarlierTurns()
     }
-  }, [containerRef, hiddenTurnCount, loadEarlierTurns, visibleTurnCount])
+  }, [containerRef, hiddenTurnCount, loadEarlierTurns, visibleTurnCount, suspended])
 
   return {
     visibleTurnCount,
@@ -719,6 +785,8 @@ export function useTimelineScroll({
     isAtBottom,
     bottomDistance,
     loadEarlierTurns,
+    pauseFollowForNavigation,
+    pauseForViewChange,
     collapseEarlierTurns,
     preserveBottomOnResize,
     scrollToBottom,

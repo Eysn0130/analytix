@@ -21,6 +21,12 @@ const loadWorkspaceFilePreviewPanel = () =>
     default: module.WorkspaceObjectPreviewPanel
   }))
 
+const loadQuestionPlanPreview = () => import('./QuestionPlanPreview').then(module => ({ default: module.QuestionPlanPreview }))
+export const QuestionPlanPreview = lazy(loadQuestionPlanPreview)
+
+const loadScheduleTaskDetail = () => import('../schedule/ScheduleTaskDetail').then(module => ({ default: module.ScheduleTaskDetail }))
+export const ScheduleTaskDetail = lazy(loadScheduleTaskDetail)
+
 const loadPlanPanel = () =>
   import('../plan/PlanPanel').then((module) => ({ default: module.PlanPanel }))
 
@@ -53,11 +59,15 @@ export type RightPanelIslandPreloadTarget =
   | 'summary'
   | 'sdd-ai'
   | 'child-agent'
+  | 'schedule-task'
 
 export function preloadRightPanelIsland(
   target: RightPanelIslandPreloadTarget | null | undefined
 ): void {
   switch (target) {
+    case 'schedule-task':
+      void loadScheduleTaskDetail()
+      break
     case 'documents':
       void loadDocumentWorkspacePanel()
       break
@@ -75,6 +85,7 @@ export function preloadRightPanelIsland(
       break
     case 'plan':
       void loadPlanPanel()
+      void loadQuestionPlanPreview()
       break
     case 'summary':
       void loadThreadSummaryPanel()

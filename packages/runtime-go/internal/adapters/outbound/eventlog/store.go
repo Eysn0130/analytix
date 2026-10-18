@@ -20,6 +20,7 @@ import (
 	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainrestrictedevidence "analytix.local/runtime-go/internal/domain/restrictedevidence"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 )
 
 type JSONLDiagnostic struct {
@@ -126,9 +127,15 @@ func (err *AtomicAppendError) Unwrap() error {
 	return err.Cause
 }
 
+// AtomicAppendCommittedV1 exposes confirmed persistence without requiring
+// application owners to depend on this storage adapter's concrete error.
+func (err *AtomicAppendError) AtomicAppendCommittedV1() bool {
+	return err != nil && err.Committed
+}
+
 func AtomicAppendCommitted(err error) bool {
 	var appendErr *AtomicAppendError
-	return errors.As(err, &appendErr) && appendErr.Committed
+	return errors.As(err, &appendErr) && appendErr.AtomicAppendCommittedV1()
 }
 
 func (s *Store) HighestSeqAfterCommittedTail(threadID string, expected []map[string]any) (int, error) {
@@ -228,6 +235,9 @@ func (s *Store) appendEventsAtomic(
 		}
 		bundleSequences[index] = sequence
 		if err := domainevent.ValidatePublicRecord(event); err != nil {
+			return err
+		}
+		if _, err := EncodeEventJSONLFrameV1(event); err != nil {
 			return err
 		}
 		if err := domaineventlifecycle.ValidateNewEventLifecycleV1(event); err != nil {
@@ -365,9 +375,12 @@ func (s *Store) appendEventsAtomic(
 			return err
 		}
 	}
-	encoder := json.NewEncoder(candidateWriter)
 	for _, event := range events {
-		if err := encoder.Encode(event); err != nil {
+		frame, err := EncodeEventJSONLFrameV1(event)
+		if err != nil {
+			return err
+		}
+		if _, err := candidateWriter.Write(frame); err != nil {
 			return err
 		}
 	}
@@ -943,4 +956,18 @@ func valueContainsSearch(value any, needle string) bool {
 		}
 	}
 	return false
+}
+
+// The same exact encoding is used by CAS preflight and the actual bundle
+// writer. Replay admits at most 4MiB including the JSON newline; no estimate of
+// escaping, timestamp, sequence or metadata stands in for this frame.
+func EncodeEventJSONLFrameV1(event map[string]any) ([]byte, error) {
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded)+1 > maxEventJSONLLineBytesV1 {
+		return nil, domainsecret.ErrProjectionLimitV1
+	}
+	return append(encoded, '\n'), nil
 }

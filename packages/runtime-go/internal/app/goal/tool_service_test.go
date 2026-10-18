@@ -3,6 +3,7 @@ package goal
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,22 @@ import (
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	toolidentitytest "analytix.local/runtime-go/internal/testsupport/toolidentity"
 )
+
+func TestTodoFailureRetainsPrivateSourceWithoutChangingOriginalEgress(t *testing.T) {
+	store := newFakeGoalStore()
+	result := (ToolService{Store: store}).TodoWrite("thread-1", map[string]any{"todos": "invalid"})
+	if !result.IsError || result.ProtectedError == nil || result.ProtectedError.Availability != "available" || len(result.ProtectedError.Entries) != 1 {
+		t.Fatal("actual Todo error was not captured")
+	}
+	output := result.Output.(map[string]any)
+	if result.ProtectedError.Entries[0].Message != output["error"] {
+		t.Fatal("private error was synthesized from projected output")
+	}
+	body, err := json.Marshal(result)
+	if err != nil || strings.Contains(string(body), "ProtectedError") || strings.Contains(string(body), "outputError") {
+		t.Fatal("private producer error changed public serialization")
+	}
+}
 
 func TestToolServiceCompleteStepVerifiesHostEvidenceAndAdvancesTodo(t *testing.T) {
 	store := newFakeGoalStore()
@@ -507,5 +524,35 @@ func cloneValueForTest(value any) any {
 		return cloneSliceForTest(typed)
 	default:
 		return typed
+	}
+}
+
+func TestCompleteStepPreservesParallelActiveTodosAndGoalIncompleteGate(t *testing.T) {
+	store := newFakeGoalStore()
+	store.goal = map[string]any{"id": "goal_1", "threadId": "thread-1", "status": "active", "evidenceLedger": []any{}}
+	store.todos = map[string]any{"threadId": "thread-1", "items": []any{
+		map[string]any{"id": "first", "content": "First", "status": "in_progress"},
+		map[string]any{"id": "selected", "content": "Selected", "status": "in_progress"},
+		map[string]any{"id": "third", "content": "Third", "status": "in_progress"},
+		map[string]any{"id": "queued", "content": "Queued", "status": "pending"},
+	}}
+	service := ToolService{Store: store}
+	pending := PendingToolContext{ThreadID: "thread-1", TurnID: "turn-1", ToolCallID: "call-1"}
+	result := service.CompleteStep(pending, map[string]any{"step_index": float64(2), "evidence": []any{"checked"}})
+	if result.IsError {
+		t.Fatalf("complete_step failed: %#v", result.Output)
+	}
+	items := listAny(store.todos["items"])
+	for index, status := range []string{"in_progress", "completed", "in_progress", "pending"} {
+		if stringField(items[index].(map[string]any), "status") != status {
+			t.Fatalf("unselected parallel state changed: %#v", items)
+		}
+	}
+	if len(listAny(store.goal["evidenceLedger"])) != 1 {
+		t.Fatal("step evidence was not committed once")
+	}
+	closed := service.UpdateGoal(pending, map[string]any{"status": "complete"})
+	if !closed.IsError || stringField(closed.Output.(map[string]any), "code") != "goal_todos_incomplete" {
+		t.Fatal("parallel work allowed premature goal closure")
 	}
 }

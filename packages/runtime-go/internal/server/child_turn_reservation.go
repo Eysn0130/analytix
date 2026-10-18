@@ -94,3 +94,18 @@ func (h *runtimeServerHandler) nextRuntimeTurnIdentityNoLock() (string, int, err
 	h.turnSeq++
 	return fmt.Sprintf("turn_%d", h.turnSeq), h.turnSeq, nil
 }
+
+// A direct Host input consumes the same identity allocation, while its fresh
+// principal/security transition and primary CAS own admission separately.
+func (h *runtimeServerHandler) consumeHostChildInputTurnV1(ctx context.Context, carrier *hostChildInputCarrierV1) (string, int, error) {
+	if h == nil || ctx == nil || ctx.Err() != nil || carrier == nil || carrier.host != h || carrier.turn == nil {
+		return "", 0, errors.New("Host child allocation unavailable")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.validateRuntimeChildTurnNoLock(carrier.turn); err != nil {
+		return "", 0, err
+	}
+	carrier.turn.claim.consumed = true
+	return carrier.turn.turnID, carrier.turn.sequence, nil
+}

@@ -6,9 +6,12 @@ import { describe, expect, it } from 'vitest'
 import { atomicWriteFile } from '../../packages/runtime/src/adapters/file/atomic-write'
 import {
   DEFAULT_APPROVAL_POLICY,
+  analytixRuntimeSettingsEqual,
   defaultAnalytixRuntimeSettings,
   defaultModelProviderSettings,
-  type AppSettingsV1
+  type AppSettingsV1,
+  normalizeAppSettings,
+  type ScheduledTaskV1
 } from '../shared/app-settings'
 import { DEFAULT_GUI_UPDATE_CHANNEL } from '../shared/gui-update'
 import {
@@ -209,6 +212,45 @@ describe('JsonSettingsStore', () => {
     expect(serialized).toBe(before)
     expect(serialized).not.toMatch(/"(?:botToken|sessionKey|appSecret|credentialRef)"\s*:/)
     expect(publicText).not.toMatch(/"(?:botToken|sessionKey|appSecret|credentialRef)"\s*:/)
+  })
+
+  it.each([
+    { name: 'NUL in channel identity', id: 'channel\u0000id', botToken: 'synthetic-token' },
+    { name: 'CR in channel identity', id: 'channel\rid', botToken: 'synthetic-token' },
+    { name: 'LF in channel identity', id: 'channel\nid', botToken: 'synthetic-token' },
+    { name: 'NUL in credential', id: 'channel-id', botToken: 'synthetic\u0000token' },
+    { name: 'CR in credential', id: 'channel-id', botToken: 'synthetic\rtoken' },
+    { name: 'LF in credential', id: 'channel-id', botToken: 'synthetic\ntoken' },
+    { name: 'empty trimmed identity', id: ' \r\n ', botToken: 'synthetic-token' },
+    { name: 'empty trimmed credential', id: 'channel-id', botToken: ' \r\n ' },
+    { name: 'identity above UTF-8 byte limit', id: '雪'.repeat(171), botToken: 'synthetic-token' },
+    { name: 'credential above byte limit', id: 'channel-id', botToken: 's'.repeat((16 << 10) + 1) }
+  ])('rejects legacy IM string boundary: $name without source mutation', async ({ id, botToken }) => {
+    const userDataDir = await mkdtemp(join(tmpdir(), 'analytix-settings-legacy-im-string-'))
+    const settingsPath = join(userDataDir, 'analytix-settings.json')
+    const raw = JSON.stringify({ claw: { channels: [{ id, provider: 'telegram', platformCredential: { kind: 'telegram', botToken } }] } })
+    await writeFile(settingsPath, raw, { mode: 0o600 })
+    await expect(new JsonSettingsStore(userDataDir).inspectLegacyImAccountCredentials())
+      .rejects.toThrow('Legacy IM plaintext persistence is not permitted.')
+    expect(await readFile(settingsPath, 'utf8')).toBe(raw)
+  })
+
+  it('preserves trimmed legacy IM strings at byte limits and accepts other characters', async () => {
+    const userDataDir = await mkdtemp(join(tmpdir(), 'analytix-settings-legacy-im-string-valid-'))
+    const settingsPath = join(userDataDir, 'analytix-settings.json')
+    const id = `${'雪'.repeat(170)}ab`
+    const prefix = 'synthetic\\u0000\t'
+    const botToken = prefix + 's'.repeat((16 << 10) - Buffer.byteLength(prefix, 'utf8'))
+    const raw = JSON.stringify({ claw: { channels: [{ id: ` \r\n${id}\r\n `, provider: 'telegram', platformCredential: { kind: 'telegram', botToken: ` \r\n${botToken}\r\n ` } }] } })
+    await writeFile(settingsPath, raw, { mode: 0o600 })
+    const inspection = await new JsonSettingsStore(userDataDir).inspectLegacyImAccountCredentials()
+    expect(inspection?.candidates).toHaveLength(1)
+    expect(inspection?.candidates[0].channelId).toBe(id)
+    const credential = inspection?.candidates[0].credential
+    expect(credential?.kind).toBe('telegram')
+    if (credential?.kind !== 'telegram') throw new Error('Expected synthetic Telegram credential.')
+    expect(credential.botToken).toBe(botToken)
+    expect(await readFile(settingsPath, 'utf8')).toBe(raw)
   })
 
   it('does not expose an ordinary plaintext restore producer', async () => {
@@ -1765,10 +1807,11 @@ describe('JsonSettingsStore', () => {
         baseUrl: 'https://stale-save-resurrection.invalid/v1'
       }
     }, 'analytix-settings-cleanup-stale-save-')
-    const migrationStore = new JsonSettingsStore(source.userDataDir)
-    const staleStore = new JsonSettingsStore(source.userDataDir)
+    const options = { homeRoot: source.userDataDir }
+    const migrationStore = new JsonSettingsStore(source.userDataDir, options)
+    const staleStore = new JsonSettingsStore(source.userDataDir, options)
     const staleDataDir = await mkdtemp(join(tmpdir(), 'analytix-settings-cleanup-stale-data-'))
-    const stale = await new JsonSettingsStore(staleDataDir).load()
+    const stale = await new JsonSettingsStore(staleDataDir, { homeRoot: staleDataDir }).load()
     ;(stale.provider as unknown as Record<string, unknown>).apiKey = 'synthetic-stale-save-resurrection'
     stale.provider.baseUrl = 'https://stale-save-resurrection.invalid/v1'
     await migrationStore.cleanupLegacyProviderCredentialSource(cleanupRequestFor(source.inspection))
@@ -1796,11 +1839,12 @@ describe('JsonSettingsStore', () => {
       }
     }), 'utf8')
     await writeFile(compatibilityPath, compatibilityRaw)
-    const inspection = await new JsonSettingsStore(userDataDir).inspectLegacyProviderCredentialSources()
+    const options = { homeRoot: userDataDir }
+    const inspection = await new JsonSettingsStore(userDataDir, options).inspectLegacyProviderCredentialSources()
     expect(inspection.sourceLocator).toBe('compatibility:01:kun-settings.json')
 
     const staleDataDir = await mkdtemp(join(tmpdir(), 'analytix-settings-compatibility-stale-data-'))
-    const stale = await new JsonSettingsStore(staleDataDir).load()
+    const stale = await new JsonSettingsStore(staleDataDir, { homeRoot: staleDataDir }).load()
     ;(stale.provider as unknown as Record<string, unknown>).apiKey = 'synthetic-compatibility-save-lock'
     stale.provider.baseUrl = 'https://compatibility-save-lock.invalid/v1'
 
@@ -1809,6 +1853,7 @@ describe('JsonSettingsStore', () => {
     let releaseCleanup!: () => void
     const cleanupRelease = new Promise<void>((resolve) => { releaseCleanup = resolve })
     const migrationStore = new JsonSettingsStore(userDataDir, {
+      ...options,
       legacyProviderCleanupAtomicWriteFile: async (path, contents, options) => {
         enteredCleanup()
         await cleanupRelease
@@ -1818,20 +1863,29 @@ describe('JsonSettingsStore', () => {
     const cleanupPromise = migrationStore.cleanupLegacyProviderCredentialSource(
       cleanupRequestFor(inspection)
     )
-    await cleanupEntered
-    const savePromise = new JsonSettingsStore(userDataDir).save(stale)
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    const currentCreatedBeforeCleanup = await readFile(currentPath).then(() => true, () => false)
-    releaseCleanup()
-    const [cleanupResult, saveResult] = await Promise.allSettled([cleanupPromise, savePromise])
+    let savePromise: ReturnType<JsonSettingsStore['save']> | undefined
+    try {
+      await Promise.race([cleanupEntered, cleanupPromise.then(() => {
+        throw new Error('Fixture cleanup completed before the write gate.')
+      })])
+      savePromise = new JsonSettingsStore(userDataDir, options).save(stale)
+      const settlement = Promise.allSettled([cleanupPromise, savePromise])
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const currentCreatedBeforeCleanup = await readFile(currentPath).then(() => true, () => false)
+      releaseCleanup()
+      const [cleanupResult, saveResult] = await settlement
 
-    expect(currentCreatedBeforeCleanup).toBe(false)
-    expect(cleanupResult.status).toBe('fulfilled')
-    expect(saveResult.status).toBe('rejected')
-    expect(await readFile(currentPath).then(() => true, () => false)).toBe(false)
-    const compatibilityAfter = await readFile(compatibilityPath)
-    expect(compatibilityAfter.includes(Buffer.from('synthetic-compatibility-save-lock'))).toBe(false)
-    clearInspectionCredentials(inspection)
+      expect(currentCreatedBeforeCleanup).toBe(false)
+      expect(cleanupResult.status).toBe('fulfilled')
+      expect(saveResult.status).toBe('rejected')
+      expect(await readFile(currentPath).then(() => true, () => false)).toBe(false)
+      const compatibilityAfter = await readFile(compatibilityPath)
+      expect(compatibilityAfter.includes(Buffer.from('synthetic-compatibility-save-lock'))).toBe(false)
+    } finally {
+      releaseCleanup()
+      await Promise.allSettled(savePromise ? [cleanupPromise, savePromise] : [cleanupPromise])
+      clearInspectionCredentials(inspection)
+    }
   })
 
   it('rejects ordinary load and save through symlink or hardlink settings peers', async () => {
@@ -2525,6 +2579,51 @@ describe('JsonSettingsStore', () => {
     expect((await readFile(currentSettingsPath, 'utf8')).includes('sk-legacy-provider')).toBe(false)
   })
 
+  it('creates a visible workspace for a fresh isolated profile', async () => {
+    const homeRoot = await mkdtemp(join(tmpdir(), 'analytix-visible-workspace-'))
+    const userDataDir = join(homeRoot, 'profile')
+    const options = { homeRoot }
+    const loaded = await new JsonSettingsStore(userDataDir, options).load()
+
+    expect(loaded.workspaceRoot).toBe(join(homeRoot, 'Analytix'))
+    expect((await stat(loaded.workspaceRoot)).isDirectory()).toBe(true)
+    expect((await new JsonSettingsStore(userDataDir, options).load()).workspaceRoot).toBe(loaded.workspaceRoot)
+    expect(JSON.parse(await readFile(join(userDataDir, 'analytix-settings.json'), 'utf8')).workspaceRoot).toBe(loaded.workspaceRoot)
+    await expect(stat(join(homeRoot, '.analytix', 'default_workspace'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each(['legacy-default', 'custom'])('preserves a nonempty %s workspace and its files', async kind => {
+    const homeRoot = await mkdtemp(join(tmpdir(), 'analytix-existing-workspace-'))
+    const userDataDir = join(homeRoot, 'profile')
+    const workspaceRoot = kind === 'legacy-default'
+      ? join(homeRoot, '.analytix', 'default_workspace')
+      : join(homeRoot, 'existing-project')
+    const sourcePath = join(workspaceRoot, 'original.txt')
+    await mkdir(userDataDir, { recursive: true })
+    await mkdir(workspaceRoot, { recursive: true })
+    await writeFile(sourcePath, 'synthetic original content')
+    await writeFile(join(userDataDir, 'analytix-settings.json'), JSON.stringify({ version: 1, workspaceRoot }))
+    const options = { homeRoot }
+    const store = new JsonSettingsStore(userDataDir, options)
+
+    expect((await store.load()).workspaceRoot).toBe(workspaceRoot)
+    expect((await store.patch({ locale: 'en' })).workspaceRoot).toBe(workspaceRoot)
+    expect((await new JsonSettingsStore(userDataDir, options).load()).workspaceRoot).toBe(workspaceRoot)
+    expect(await readFile(sourcePath, 'utf8')).toBe('synthetic original content')
+    await expect(stat(join(homeRoot, 'Analytix'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each(['', '   ', null, 123])('uses the visible default for an empty or invalid workspace (%j)', async workspaceRoot => {
+    const homeRoot = await mkdtemp(join(tmpdir(), 'analytix-workspace-fallback-'))
+    const userDataDir = join(homeRoot, 'profile')
+    await mkdir(userDataDir, { recursive: true })
+    await writeFile(join(userDataDir, 'analytix-settings.json'), JSON.stringify({ version: 1, workspaceRoot }))
+
+    const loaded = await new JsonSettingsStore(userDataDir, { homeRoot }).load()
+    expect(loaded.workspaceRoot).toBe(join(homeRoot, 'Analytix'))
+    expect((await stat(loaded.workspaceRoot)).isDirectory()).toBe(true)
+  })
+
   it('creates the configured code workspace on load', async () => {
     const userDataDir = await mkdtemp(join(tmpdir(), 'analytix-settings-'))
     const workspaceRoot = join(userDataDir, 'missing-workspace')
@@ -2980,4 +3079,256 @@ describe('JsonSettingsStore', () => {
       await rm(userDataDir, { recursive: true, force: true })
     }
   })
+})
+
+it('persists closed model preferences through normal patch/load and fresh-store reopen', async () => {
+  const isolatedRoot = await mkdtemp(join(tmpdir(), 'analytix-model-preferences-store-'))
+  const profile = { id: 'provider-alpha', baseUrl: 'https://provider.invalid/v1', endpointFormat: 'chat_completions' as const,
+    modelProfiles: { 'model-alpha': { aliases: ['alpha'], reasoning: {
+      supportedEfforts: ['off', 'high'] as const, defaultEffort: 'high' as const, requestProtocol: 'deepseek-chat-completions' as const
+    } } }
+  }
+  try {
+    const store = new JsonSettingsStore(join(isolatedRoot, 'profile'), { homeRoot: isolatedRoot })
+    const before = await store.load()
+    const choice = { ...profile, modelProfiles: { 'model-alpha': { ...profile.modelProfiles['model-alpha'], reasoning: {
+      ...profile.modelProfiles['model-alpha'].reasoning, supportedEfforts: ['off', 'high'] as ('off' | 'high')[]
+    } } } }
+    const saved = await store.patch({ provider: { modelPreferences: [choice] } })
+    expect(saved.provider.modelPreferences).toEqual([choice])
+    expect(saved.provider.providers).toEqual(before.provider.providers)
+    expect(saved.runtime).toEqual(before.runtime)
+    const reopened = await new JsonSettingsStore(join(isolatedRoot, 'profile'), { homeRoot: isolatedRoot }).load()
+    expect(reopened.provider.modelPreferences).toEqual([choice])
+    const off = { ...choice, modelProfiles: { 'model-alpha': { reasoning: null } } }
+    await store.patch({ provider: { modelPreferences: [off] } })
+    expect((await new JsonSettingsStore(join(isolatedRoot, 'profile'), { homeRoot: isolatedRoot }).load()).provider.modelPreferences).toEqual([off])
+    expect(await readFile(join(isolatedRoot, 'profile', 'analytix-settings.json'), 'utf8')).not.toMatch(/apiKey|credentialRef/)
+  } finally {
+    await rm(isolatedRoot, { recursive: true, force: true })
+  }
+})
+
+
+describe('isolated performance and usage settings persistence', () => {
+  it('saves and reopens Compact/Detailed in the existing native settings store', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-settings-performance-usage-'))
+    try {
+      const userDataDir = join(fixture, 'profile')
+      const options = { homeRoot: fixture }
+      const store = new JsonSettingsStore(userDataDir, options)
+      expect((await store.load()).performanceUsageMode).toBe('detailed')
+      await store.patch({ performanceUsageMode: 'compact' })
+      expect((await new JsonSettingsStore(userDataDir, options).load()).performanceUsageMode).toBe('compact')
+      await store.patch({ performanceUsageMode: 'detailed' })
+      expect((await new JsonSettingsStore(userDataDir, options).load()).performanceUsageMode).toBe('detailed')
+      const persisted = JSON.parse(await readFile(join(userDataDir, 'analytix-settings.json'), 'utf8')) as AppSettingsV1
+      expect(persisted.performanceUsageMode).toBe('detailed')
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+})
+
+
+describe('latest-under-lock task and ordinary settings transactions', () => {
+  it('merges concurrent task mutations and ordinary defaults through real disk storage', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-schedule-transaction-'))
+    try {
+      const userData = join(fixture, 'profile'); const options = { homeRoot: fixture }
+      const store = new JsonSettingsStore(userData, options)
+      await store.load()
+      const tasks = normalizeAppSettings({ schedule: { tasks: [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }] } } as AppSettingsV1).schedule.tasks
+      await store.mutateScheduleTasks(() => ({ tasks, value: undefined }))
+      const second = new JsonSettingsStore(userData, options)
+      await second.load()
+      await Promise.all([
+        store.mutateScheduleTasks(latest => ({ tasks: latest.schedule.tasks.map(task => task.id === 'a' ? { ...task, title: 'A latest' } : task), value: undefined })),
+        second.patch({ theme: 'dark', schedule: { keepAwake: true } }),
+        second.mutateScheduleTasks(latest => ({ tasks: latest.schedule.tasks.map(task => task.id === 'b' ? { ...task, lastThreadId: 'actual-thread-b', nextRunAt: '2099-01-01T00:00:00.000Z' } : task), value: undefined }))
+      ])
+      const persisted = await new JsonSettingsStore(userData, options).load()
+      expect(persisted).toMatchObject({ theme: 'dark', schedule: { keepAwake: true, tasks: [
+        { id: 'a', title: 'A latest' }, { id: 'b', lastThreadId: 'actual-thread-b', nextRunAt: '2099-01-01T00:00:00.000Z' }
+      ] } })
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+
+  it('releases a failed transaction without poisoning the next write or cache', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-schedule-failed-transaction-'))
+    try {
+      const store = new JsonSettingsStore(join(fixture, 'profile'), { homeRoot: fixture })
+      await store.load()
+      await expect(store.mutateScheduleTasks(() => { throw new Error('Synthetic failed transform') })).rejects.toThrow()
+      const saved = await store.patch({ schedule: { keepAwake: true } })
+      expect(saved.schedule.keepAwake).toBe(true)
+      expect((await store.loadFresh()).schedule.keepAwake).toBe(true)
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+
+  it('does not revive a deleted task through an old background snapshot', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-schedule-delete-transaction-'))
+    try {
+      const store = new JsonSettingsStore(join(fixture, 'profile'), { homeRoot: fixture })
+      await store.load()
+      const task: ScheduledTaskV1 = normalizeAppSettings({ schedule: { tasks: [{ id: 'deleted' }] } } as AppSettingsV1).schedule.tasks[0]
+      await store.mutateScheduleTasks(() => ({ tasks: [task], value: undefined }))
+      await store.mutateScheduleTasks(latest => ({ tasks: latest.schedule.tasks.filter(item => item.id !== task.id), value: undefined }))
+      await store.mutateScheduleTasks(latest => ({ tasks: latest.schedule.tasks.map(item => item.id === task.id ? { ...item, lastStatus: 'success' } : item), value: undefined }))
+      expect((await new JsonSettingsStore(join(fixture, 'profile'), { homeRoot: fixture }).load()).schedule.tasks).toEqual([])
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+})
+
+describe('Main-private Schedule delivery state', () => {
+  it('preserves origin and actual ACK fields through normalization, ordinary writes and real disk reload without exposing them in a settings read', async () => {
+    const { scheduleSettingsReadView } = await import('./schedule-runtime-helpers')
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-schedule-native-state-'))
+    try {
+      const userData = join(fixture, 'profile'), options = { homeRoot: fixture }, store = new JsonSettingsStore(userData, options)
+      await store.load()
+      const task = normalizeAppSettings({ schedule: { tasks: [{ id: 'native-task', title: 'Original' }] } } as AppSettingsV1).schedule.tasks[0]
+      const hostDelivery = { schemaVersion: 1 as const, origin: { threadId: 'original-thread', turnId: 'original-turn', toolCallId: 'call_host_' + 'a'.repeat(64), grantId: 'historical-grant' },
+        records: [{ attemptId: 'accepted-attempt', scheduledAt: '2026-10-11T10:00:00.000Z', deliveredAt: '2026-10-11T10:00:01.123456789Z', messageId: 'actual-message', prompt: 'ACK_SAVED_PROMPT' }],
+        pending: { schemaVersion: 1 as const, kind: 'submit' as const, taskId: task.id,
+          origin: { threadId: 'original-thread', turnId: 'original-turn', toolCallId: 'call_host_' + 'a'.repeat(64), grantId: 'historical-grant' },
+          attemptId: '00000000-0000-4000-8000-000000000001', scheduledAt: '2026-10-12T10:00:00Z', prompt: 'FROZEN_PENDING_PROMPT', execution: {} } }
+      await store.mutateScheduleTasks(() => ({ tasks: [{ ...task, hostDelivery }], value: undefined }))
+      await store.patch({ theme: 'dark', schedule: { keepAwake: true } })
+      await store.mutateScheduleTasks(latest => ({ tasks: latest.schedule.tasks.map(item => ({ ...item, title: 'Renamed', prompt: 'CURRENT_PROMPT' })), value: undefined }))
+      const reloaded = await new JsonSettingsStore(userData, options).load()
+      expect((reloaded.schedule.tasks[0] as typeof task & { hostDelivery: typeof hostDelivery }).hostDelivery).toEqual(hostDelivery)
+      const projected = scheduleSettingsReadView(reloaded)
+      expect(JSON.stringify(projected)).not.toContain('historical-grant')
+      expect(JSON.stringify(projected)).not.toContain('ACK_SAVED_PROMPT')
+      expect(JSON.stringify(projected)).not.toContain('FROZEN_PENDING_PROMPT')
+      expect(projected.schedule.tasks[0].title).toBe('Renamed')
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+})
+
+
+describe('Main existing Schedule helper authentication bootstrap', () => {
+  it('initializes the existing internal secret atomically, preserves it across restart and binds the same six startup arguments', async () => {
+    const { buildRuntimeHostScheduleMcpBindingV1 } = await import('./claw-schedule-mcp-config')
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-schedule-existing-auth-'))
+    try {
+      const userData = join(fixture, 'profile'), options = { homeRoot: fixture }, store = new JsonSettingsStore(userData, options)
+      const initial = await store.ensureScheduleInternalAuthentication()
+      expect(initial.schedule.internal.secret).toMatch(/^[0-9a-f-]{36}$/)
+      const repeated = await new JsonSettingsStore(userData, options).ensureScheduleInternalAuthentication()
+      expect(repeated.schedule.internal.secret).toBe(initial.schedule.internal.secret)
+      const binding = buildRuntimeHostScheduleMcpBindingV1(repeated, { appPath: '/tmp/app', execPath: '/tmp/electron', isPackaged: false })
+      expect(binding.args.length).toBe(6)
+      expect(binding.args.slice(-2)).toEqual(['--secret', initial.schedule.internal.secret])
+      await store.patch({ schedule: { internal: { secret: 'preconfigured-fixture' } } })
+      expect((await store.ensureScheduleInternalAuthentication()).schedule.internal.secret).toBe('preconfigured-fixture')
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+})
+
+
+async function prepareGuiProjectionFixture(store: JsonSettingsStore, autoStart?: boolean): Promise<AppSettingsV1> {
+  await store.load()
+  const provider: AppSettingsV1['provider']['providers'][number] = {
+    id: 'gui-transaction-fixture', name: 'Synthetic GUI transaction',
+    baseUrl: 'https://provider.invalid/v1', endpointFormat: 'chat_completions',
+    models: ['old-model', 'next-model', 'failed-model', 'retry-model', 'later-model', 'same-model'],
+    modelProfiles: {}
+  }
+  const defaults = defaultModelProviderSettings()
+  return store.patch({
+    provider: { ...defaults, activeProviderId: provider.id, providers: [...defaults.providers, provider] },
+    runtime: { providerId: provider.id, model: 'old-model', ...(autoStart === undefined ? {} : { autoStart }) }
+  })
+}
+
+describe('GUI configuration projection in the existing settings transaction', () => {
+  it('projects current→next before saving even while automatic runtime startup is off', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-gui-projection-'))
+    try {
+      const userData = join(fixture, 'profile')
+      const store = new JsonSettingsStore(userData, { homeRoot: fixture })
+      await prepareGuiProjectionFixture(store, false)
+      let projections = 0
+      await store.patch({ runtime: { model: 'next-model' } }, async (current, next) => {
+        projections += 1
+        expect(current.runtime.model).toBe('old-model')
+        expect(next.runtime).toMatchObject({ autoStart: false, model: 'next-model' })
+        const disk = JSON.parse(await readFile(join(userData, 'analytix-settings.json'), 'utf8'))
+        expect(disk.runtime.model).toBe('old-model')
+      })
+      expect(projections).toBe(1)
+      expect((await store.loadFresh()).runtime.model).toBe('next-model')
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+
+  it('does not save a failed projection and releases the lock for a later retry', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-gui-projection-fail-'))
+    try {
+      const store = new JsonSettingsStore(join(fixture, 'profile'), { homeRoot: fixture })
+      const previous = await prepareGuiProjectionFixture(store)
+      await expect(store.patch({ runtime: { model: 'failed-model' } }, async () => {
+        throw new Error('Synthetic derived configuration failure')
+      })).rejects.toThrow()
+      expect((await store.loadFresh()).runtime.model).toBe(previous.runtime.model)
+      await store.patch({ runtime: { model: 'retry-model' } }, async () => undefined)
+      expect((await store.loadFresh()).runtime.model).toBe('retry-model')
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+
+  it('evaluates rollback admission against the latest accepted runtime under the same lock', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'analytix-gui-rollback-generation-'))
+    try {
+      const userData = join(fixture, 'profile'), options = { homeRoot: fixture }
+      const store = new JsonSettingsStore(userData, options)
+      const previous = await prepareGuiProjectionFixture(store)
+      const failed = await store.patch({ runtime: { model: 'failed-model' } })
+      const concurrent = new JsonSettingsStore(userData, options)
+      await concurrent.load()
+      let release!: () => void, entered!: () => void
+      const gate = new Promise<void>(resolve => { release = resolve })
+      const entry = new Promise<void>(resolve => { entered = resolve })
+      const laterWrite = concurrent.patch({ runtime: { model: 'later-model' } }, async () => {
+        entered(); await gate
+      })
+      await entry
+      let rollbackProjected = false
+      const rollback = store.patch(current => analytixRuntimeSettingsEqual(current, failed)
+        ? { runtime: previous.runtime, provider: previous.provider } : null,
+      async () => { rollbackProjected = true })
+      release(); await laterWrite; const retained = await rollback
+      expect(retained.runtime.model).toBe('later-model')
+      expect(rollbackProjected).toBe(false)
+      expect((await new JsonSettingsStore(userData, options).load()).runtime.model).toBe('later-model')
+    } finally { await rm(fixture, { recursive: true, force: true }) }
+  })
+})
+
+
+it('keeps the derived-config lease until the accepted write and fences an A→B→A old rollback by commit generation', async () => {
+  const fixture = await mkdtemp(join(tmpdir(), 'analytix-gui-commit-generation-'))
+  try {
+    const store = new JsonSettingsStore(join(fixture, 'profile'), { homeRoot: fixture })
+    const previous = await prepareGuiProjectionFixture(store)
+    let generation = 0, released = false
+    const noteCommit = (current: AppSettingsV1, next: AppSettingsV1): void => {
+      expect(released).toBe(false)
+      if (!analytixRuntimeSettingsEqual(current, next)) generation += 1
+    }
+    const lease = async (): Promise<() => void> => {
+      released = false
+      return () => { released = true }
+    }
+    const failed = await store.patch({ runtime: { model: 'same-model' } }, lease, noteCommit)
+    const failedGeneration = generation
+    expect(released).toBe(true)
+    await store.patch({ runtime: { model: 'later-model' } }, lease, noteCommit)
+    await store.patch({ runtime: { model: 'same-model' } }, lease, noteCommit)
+    expect(analytixRuntimeSettingsEqual(await store.loadFresh(), failed)).toBe(true)
+    let rollbackProjected = false
+    const retained = await store.patch(current => generation === failedGeneration && analytixRuntimeSettingsEqual(current, failed)
+      ? { runtime: previous.runtime, provider: previous.provider } : null,
+    async () => { rollbackProjected = true })
+    expect(rollbackProjected).toBe(false)
+    expect(retained.runtime.model).toBe('same-model')
+  } finally { await rm(fixture, { recursive: true, force: true }) }
 })

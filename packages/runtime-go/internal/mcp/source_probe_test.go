@@ -65,7 +65,7 @@ func TestLegacyReadyProbeCannotAdvertiseExecuteOrMintGrant(t *testing.T) {
 			"ready": true, "readOnly": true, "blocker": "", "checkedAt": now.Format(time.RFC3339Nano),
 		},
 	}
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{spec}
 	manager.clients[spec.ID] = client
 	manager.connectionEpochs[spec.ID] = 11
@@ -603,7 +603,7 @@ func newCurrentProbeValidationFixture(t *testing.T) *currentProbeValidationFixtu
 		},
 	}
 	const connectionEpoch = uint64(23)
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{spec}
 	manager.clients[spec.ID] = client
 	manager.connectionEpochs[spec.ID] = connectionEpoch
@@ -731,7 +731,7 @@ func TestProductionManagerRejectsPluginSelectedDatasetSnapshot(t *testing.T) {
 			"blocker": "", "checkedAt": now.Format(time.RFC3339Nano),
 		},
 	}
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{spec}
 	manager.clients[spec.ID] = client
 	manager.connectionEpochs[spec.ID] = 5
@@ -849,7 +849,7 @@ func TestProductionManagerRejectsCachedOrSpoofedSourceProbe(t *testing.T) {
 		ServerID: spec.ID, WorkspaceRealPath: "/workspace", ThreadID: "thread_1", TurnID: "turn_1", CaseID: "case_1234", CaseBindingHash: bindingHash,
 		DatasetSnapshotID: snapshotID, ContextEpoch: 2, ContextDigest: domainsecurity.SHA256Hex([]byte("context")),
 	}
-	manager := NewProductionManager(nil)
+	manager := newAdmissionTestManager(nil)
 	manager.specs = []ServerSpec{spec}
 	manager.cachedSchemas[spec.ID] = true
 	manager.specFingerprints[spec.ID] = SpecFingerprint(spec)

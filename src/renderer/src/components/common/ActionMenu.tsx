@@ -15,6 +15,8 @@ export function ActionMenuItem({
   hasSubmenu = false,
   expanded,
   controls,
+  role = 'menuitem',
+  checked,
   tabIndex,
   ref,
   title,
@@ -30,6 +32,8 @@ export function ActionMenuItem({
   hasSubmenu?: boolean
   expanded?: boolean
   controls?: string
+  role?: 'menuitem' | 'menuitemradio'
+  checked?: boolean
   tabIndex?: number
   ref?: Ref<HTMLButtonElement>
   title?: string
@@ -39,7 +43,8 @@ export function ActionMenuItem({
   return (
     <button
       type="button"
-      role="menuitem"
+      role={role}
+      aria-checked={role === 'menuitemradio' ? checked : undefined}
       ref={ref}
       tabIndex={tabIndex}
       aria-haspopup={hasSubmenu ? 'menu' : undefined}

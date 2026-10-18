@@ -154,16 +154,16 @@ describe('write workspace file actions', () => {
     const h = createHarness()
     const flush = vi.fn(async () => true)
     h.set({ flushSave: flush })
-    await h.actions.openFile('/workspace', '/workspace/report.docx')
+    await h.actions.openFile('/workspace', '/workspace/report.xlsx')
     expect(flush).toHaveBeenCalledOnce()
-    expect(useNativeOfficeStore.getState().target).toEqual({ workspace: '/workspace', path: '/workspace/report.docx' })
+    expect(useNativeOfficeStore.getState().target).toEqual({ workspace: '/workspace', path: '/workspace/report.xlsx' })
     expect(h.get().activeFilePath).toBeNull()
   })
 
   it('clears a failed native target when returning to a text file', async () => {
     const h = createHarness()
     installDsGui({ readWorkspaceFile: async () => ({ ok: true, path: '/workspace/report.md', content: 'saved text', size: 10, truncated: false }) })
-    useNativeOfficeStore.setState({ target: { workspace: '/workspace', path: '/workspace/missing.docx' }, view: null, error: 'save_failed' })
+    useNativeOfficeStore.setState({ target: { workspace: '/workspace', path: '/workspace/missing.xlsx' }, view: null, error: 'save_failed' })
     await h.actions.openFile('/workspace', '/workspace/report.md')
     expect(useNativeOfficeStore.getState()).toMatchObject({ target: null, view: null, error: null })
     expect(h.get().fileContent).toBe('saved text')
@@ -339,4 +339,16 @@ describe('write workspace file actions', () => {
     expect(get().fileContent).toBe('')
     expect(get().imageDataUrl).toBe('')
   })
+})
+
+
+it('creates a generic Markdown file without opening the retired adapter or replacing a retained draft',async()=>{
+  const harness=createHarness(),openFile=vi.fn(),flushSave=vi.fn(),loadDirectory=vi.fn(async()=>'/synthetic')
+  harness.set({workspaceRoot:'/original',activeFilePath:'/original/retained.md',activeFileKind:'text',fileContent:'original draft',saveStatus:'dirty',openFile,flushSave,loadDirectory})
+  const createFile=vi.fn(async()=>({ok:true,path:'/synthetic/untitled.md'}))
+  vi.stubGlobal('window',{analytix:{files:{createFile}}})
+  expect(await harness.actions.createFile('/synthetic','/synthetic/untitled.md','',{openAfterCreate:false})).toBe('/synthetic/untitled.md')
+  expect(createFile).toHaveBeenCalledExactlyOnceWith({workspaceRoot:'/synthetic',path:'/synthetic/untitled.md',content:''})
+  expect(openFile).not.toHaveBeenCalled();expect(flushSave).not.toHaveBeenCalled()
+  expect(harness.get()).toMatchObject({workspaceRoot:'/original',activeFilePath:'/original/retained.md',fileContent:'original draft',saveStatus:'dirty'})
 })

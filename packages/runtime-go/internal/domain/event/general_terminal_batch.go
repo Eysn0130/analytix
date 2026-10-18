@@ -492,7 +492,7 @@ func generalTerminalDeliveryProjectedEventShapeV1(slot string, event map[string]
 		return generalTerminalDeliveryAllowedKeysV1(event, []string{
 			"kind", "seq", "timestamp", "threadId", "turnId", "status", "terminalReason",
 		}, []string{
-			"itemId", "message", "error", "code", "details", "severity", "discard", "cancelled", "cancelledPendingGates",
+			"itemId", "message", "error", "code", "details", "severity", "discard", "cancelled", "cancelledPendingGates", "endReason",
 		}) && generalTerminalDeliveryLifecycleFieldsV1(event)
 	default:
 		return false
@@ -565,7 +565,7 @@ func generalTerminalDeliveryProfileValidV1(events []map[string]any) bool {
 	reason := contracts.StringField(terminal, "terminalReason")
 	expectedStatus, ok := domainterminal.StatusForReasonV1(reason)
 	status := contracts.StringField(terminal, "status")
-	if !ok || status != expectedStatus || contracts.StringField(terminal, "kind") != "turn_"+expectedStatus {
+	if !ok || status != expectedStatus || contracts.StringField(terminal, "kind") != "turn_"+expectedStatus || !domainterminal.ValidEndReasonRecord(terminal) {
 		return false
 	}
 	if domainterminal.CandidateAllowedV1(reason) {

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -441,6 +441,60 @@ try {
   assert.equal(classifyPinnedLicenseBytes(dshLicenseBytes).detectedClass, "permissive-with-notice");
   assert.notEqual(classifyPinnedLicenseBytes(Buffer.concat([dshLicenseBytes, Buffer.from("changed")])).status, "recognized");
 
+  // Only the exact admitted Apps SDK notice is recognized, not arbitrary MIT text.
+  const appsLicenseSha256 = "f26a46776c890b0d7b45d042cb8a78fdca9c4742a5c7fd97f0f53767411b1cc6";
+  const appsLicenseBytes = readFileSync(new URL(
+    "../src/renderer/src/design/openai-icons/LICENSE", import.meta.url,
+  ));
+  assert.equal(appsLicenseBytes.length, 1054);
+  assert.deepEqual(classifyPinnedLicenseBytes(appsLicenseBytes), {
+    status: "recognized",
+    licenseId: "MIT",
+    detectedClass: "permissive-with-notice",
+    contentSha256: appsLicenseSha256,
+  });
+  expectProblem(licenseClassConsistencyProblems(
+    "permissive-with-notice",
+    classifyPinnedLicenseBytes(Buffer.concat([appsLicenseBytes, Buffer.from("changed")])),
+  ), "not recognized by the closed classifier");
+
+  const currentManifest = JSON.parse(readFileSync(new URL(
+    "../docs/analytix/upstreams/upstream-sources.json", import.meta.url,
+  ), "utf8"));
+  const appsRegistrations = currentManifest.sources.filter((source) =>
+    source.id === "openai/apps-sdk-ui"
+  );
+  assert.equal(appsRegistrations.length, 1);
+  const appsRegistration = appsRegistrations[0];
+  assert.equal(appsRegistration.commit, "0f00143c7a639906f1621fe58e1b6be7b5bea46d");
+  assert.equal(appsRegistration.license.path, "LICENSE");
+  assert.equal(appsRegistration.license.blob, "b8ac8dc0f960bbe0b0cc90cd06d58b672151773f");
+  assert.equal(appsRegistration.license.class, "permissive-with-notice");
+  const appsLedgerPath = join(process.cwd(), appsRegistration.ledger);
+  const appsReviewProblems = [];
+  const appsReview = validateLedgerReview(
+    appsRegistration, appsLedgerPath, appsReviewProblems,
+    process.cwd(), currentManifest.analytixCommit,
+  );
+  assert.deepEqual(appsReviewProblems, []);
+  assert.deepEqual(appsReview, {
+    schemaVersion: 1,
+    sourceId: appsRegistration.id,
+    reviewedCommit: appsRegistration.commit,
+    parity: "not-proven",
+    capabilityBenchmarkV1: null,
+  });
+  for (const [override, expectedProblem] of [
+    [{ sourceId: "openai/other-sdk-ui" }, "sourceId mismatch"],
+    [{ reviewedCommit: "c".repeat(40) }, "reviewedCommit mismatch"],
+  ]) {
+    const problems = [];
+    validateLedgerReview(appsRegistration, appsLedgerPath, problems,
+      process.cwd(), currentManifest.analytixCommit,
+      { ledgerText: marker({ ...appsReview, ...override }) });
+    expectProblem(problems, expectedProblem);
+  }
+
   const knownLicenses = [
     {
       repo: "/Users/sun/Projects/_upstreams/DeepSeek-Reasonix",
@@ -580,6 +634,38 @@ try {
     entry.disposition === "blocked" &&
     entry.status === "blocked"
   ));
+  const appsAuditedSources = currentReport.sources.filter((source) =>
+    source.id === appsRegistration.id
+  );
+  assert.equal(appsAuditedSources.length, 1);
+  const appsAudited = appsAuditedSources[0];
+  assert.deepEqual(appsAudited.ledgerReview, appsReview);
+  assert.equal(appsAudited.evidenceBindings.licenseObject.commit, appsRegistration.commit);
+  assert.equal(appsAudited.evidenceBindings.licenseObject.blob, appsRegistration.license.blob);
+  assert.equal(appsAudited.evidenceBindings.licenseObject.sha256, appsLicenseSha256);
+  assert.equal(appsAudited.evidenceBindings.licenseObject.readbackMatched, true);
+  assert.equal(appsAudited.evidenceBindings.licenseObject.classification.status, "recognized");
+  const appsEntries = currentReport.artifactAdmission.entries.filter((entry) =>
+    entry.sourceId === appsRegistration.id
+  );
+  assert.equal(appsEntries.length, 1);
+  assert.equal(appsEntries[0].disposition, "approved");
+  // A newly written ledger must not bypass the tracked HEAD provenance binding.
+  if (appsAudited.evidenceBindings.ledger.gitBlob) {
+    assert.equal(appsEntries[0].status, "passed");
+    assert.deepEqual(appsEntries[0].problems, []);
+  } else {
+    assert.equal(appsEntries[0].status, "blocked");
+    expectProblem(appsEntries[0].problems, "tracked Git blob identity is missing or invalid");
+  }
+  if (appsAudited.branch === "") {
+    expectProblem(appsAudited.freshnessProblems, "tracking HEAD mismatch");
+  }
+  if (currentReport.discovered.length === 1 &&
+      currentReport.discovered[0] === appsRegistration.directory) {
+    assert.equal(currentReport.researchFreshness.status, "unverified");
+  }
+
   const exactCurrentItems = currentReport.artifactAdmission.entries.map((entry) => entry.item);
   for (const item of [
     "Reasonix-derived `packages/runtime-go/internal/netclient/netclient.go`",

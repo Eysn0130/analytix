@@ -7,6 +7,7 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sort"
 	"sync"
 	"testing"
@@ -617,6 +618,7 @@ func providerTelemetryWitnessedBoundaryContextV1(t *testing.T) domainsecurity.Tu
 
 func completeProviderUsageV1() domaincachetelemetry.ProviderUsageV1 {
 	return domaincachetelemetry.ProviderUsageV1{
+		NativeCounterPresence: true, OutputTokensFinality: domaincachetelemetry.ProviderOutputTokensFinalV1,
 		InputTokens:     domaincachetelemetry.TokenCountV1{Known: true, Value: 100},
 		OutputTokens:    domaincachetelemetry.TokenCountV1{Known: true, Value: 20},
 		CacheHitTokens:  domaincachetelemetry.TokenCountV1{Known: true, Value: 90},
@@ -1022,5 +1024,208 @@ func assertProviderTelemetrySecretsAbsentV1(t *testing.T, body []byte) {
 		if bytes.Contains(body, forbidden) {
 			t.Fatalf("provider telemetry authority leaked %q in %s", forbidden, body)
 		}
+	}
+}
+
+func TestBillingObserverIncludesPendingAttemptsAndPreservesReportedSubtotalsAcrossRestart(t *testing.T) {
+	fixture := newDurableServiceFixtureV1(t)
+	service, err := NewDurableService(fixture.authority, fixture.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	first, err := service.BeginAttempt(ctx, fixture.registration(t, 1, 1, domaincachetelemetry.ProviderChannelPrimary, "2026-07-14T00:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := completeProviderUsageV1()
+	usage.InputTokens = domaincachetelemetry.TokenCountV1{Known: true, Value: 100}
+	usage.OutputTokens = domaincachetelemetry.TokenCountV1{Known: true, Value: 10}
+	usage.CacheHitTokens = domaincachetelemetry.TokenCountV1{Known: true, Value: 80}
+	usage.CacheMissTokens = domaincachetelemetry.TokenCountV1{Known: true, Value: 20}
+	usage.ReasoningTokens = domaincachetelemetry.TokenCountV1{Known: true, Value: 0}
+	usage.MessagesInput = domaincachetelemetry.MessagesInputV1{SchemaVersion: "messages-input.v1", Uncached: domaincachetelemetry.TokenCountV1{Known: true, Value: 15}, Read: domaincachetelemetry.TokenCountV1{Known: true, Value: 80}, Created: domaincachetelemetry.TokenCountV1{Known: true, Value: 5}}
+	settlement := cachetelemetryport.AttemptSettlementInputV1{Handle: first, DispatchState: domaincachetelemetry.ProviderDispatchStateSent, Status: domaincachetelemetry.ProviderCallStatusFailed, Usage: usage, SafeReasonCode: "provider_failed", SettledAt: durableServiceTimeV1(t, "2026-07-14T00:00:01Z")}
+	if err := service.SettleAttempt(ctx, settlement); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SettleAttempt(ctx, settlement); err != nil {
+		t.Fatalf("exact settlement replay: %v", err)
+	}
+	second, err := service.BeginAttempt(ctx, fixture.registration(t, 1, 2, domaincachetelemetry.ProviderChannelPrimary, "2026-07-14T00:00:02Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	observe := func(owner *DurableService) ProviderBillingV1 {
+		t.Helper()
+		inventory, err := owner.ObserveTurnInventoryV1(ctx, fixture.securityContext)
+		if err != nil {
+			t.Fatal(err)
+		}
+		billing, err := inventory.BillingV1()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return billing
+	}
+	before := observe(service)
+	if !before.InventoryComplete || before.Closed || before.AttemptCount != 2 || before.SettledAttemptCount != 1 || before.TotalTokens.ReportedValue != 110 || before.TotalTokens.KnownAttemptCount != 1 || before.TotalTokens.Complete || before.CacheWriteTokens.ReportedValue != 5 || before.UncachedInputTokens.ReportedValue != 15 || before.ReasoningTokens.KnownAttemptCount != 1 {
+		t.Fatalf("open billing coverage is not intent-bound: %#v", before)
+	}
+	reopened, err := NewDurableService(fixture.authority, fixture.reopenStore(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after := observe(reopened); !reflect.DeepEqual(after, before) {
+		t.Fatalf("restart lost numeric ledger projection: before=%#v after=%#v", before, after)
+	}
+	// A settled cancelled retry with no usage remains unknown. Its predecessor
+	// subtotal still contributes to composer accounting, never an exact footer.
+	if err := reopened.SettleAttempt(ctx, cachetelemetryport.AttemptSettlementInputV1{Handle: second, DispatchState: domaincachetelemetry.ProviderDispatchStateSent, Status: domaincachetelemetry.ProviderCallStatusCancelled, SafeReasonCode: "provider_cancelled", SettledAt: durableServiceTimeV1(t, "2026-07-14T00:00:03Z")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.CloseTurn(ctx, fixture.securityContext, domaincachetelemetry.ProviderTurnTerminalCancelV1, durableServiceTimeV1(t, "2026-07-14T00:00:04Z")); err != nil {
+		t.Fatal(err)
+	}
+	closed := observe(reopened)
+	if !closed.Closed || closed.SettledAttemptCount != 2 || closed.TotalTokens.Complete || closed.TotalTokens.ReportedValue != 110 || closed.ReasoningTokens.Complete {
+		t.Fatalf("cancelled unknown retry fabricated complete billing: %#v", closed)
+	}
+	body, err := json.Marshal(closed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertProviderTelemetrySecretsAbsentV1(t, body)
+}
+
+func TestBillingObserverDistinguishesVerifiedEmptyClosureFromUnavailableInventory(t *testing.T) {
+	if _, err := (TurnInventoryV1{}).BillingV1(); err == nil {
+		t.Fatal("zero-value inventory became explicit zero")
+	}
+	fixture := newDurableServiceFixtureV1(t)
+	service, err := NewDurableService(fixture.authority, fixture.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	inventory, err := service.ObserveTurnInventoryV1(ctx, fixture.securityContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open, err := inventory.BillingV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open.TotalTokens.Complete || open.Closed {
+		t.Fatalf("open empty turn became complete: %#v", open)
+	}
+	if _, err := service.CloseTurn(ctx, fixture.securityContext, domaincachetelemetry.ProviderTurnTerminalCancelV1, durableServiceTimeV1(t, "2026-07-14T00:00:00Z")); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err = service.ObserveTurnInventoryV1(ctx, fixture.securityContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := inventory.BillingV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !closed.TotalTokens.Complete || !closed.Closed || closed.TotalTokens.ReportedValue != 0 || closed.AttemptCount != 0 {
+		t.Fatalf("verified empty closure lost explicit zero: %#v", closed)
+	}
+}
+
+func TestBillingObserverKeepsDifferentAttemptPresenceAndNamespacesSeparate(t *testing.T) {
+	fixture := newDurableServiceFixtureV1(t)
+	service, err := NewDurableService(fixture.authority, fixture.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for index, usage := range []domaincachetelemetry.ProviderUsageV1{
+		{InputTokens: domaincachetelemetry.TokenCountV1{Known: true, Value: 100}},
+		{OutputTokens: domaincachetelemetry.TokenCountV1{Known: true, Value: 20}, ReasoningTokens: domaincachetelemetry.TokenCountV1{Known: true, Value: 0}},
+	} {
+		input := fixture.registration(t, uint64(index+1), 1, domaincachetelemetry.ProviderChannelPrimary, "2026-07-14T00:00:00Z")
+		if index == 1 {
+			input.Model = []byte("another-approved-model")
+		}
+		handle, err := service.BeginAttempt(ctx, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := service.SettleAttempt(ctx, cachetelemetryport.AttemptSettlementInputV1{Handle: handle, DispatchState: domaincachetelemetry.ProviderDispatchStateSent, Status: domaincachetelemetry.ProviderCallStatusSucceeded, Usage: usage, SafeReasonCode: "provider_succeeded", SettledAt: durableServiceTimeV1(t, "2026-07-14T00:00:01Z")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := service.CloseTurn(ctx, fixture.securityContext, domaincachetelemetry.ProviderTurnTerminalSuccessV1, durableServiceTimeV1(t, "2026-07-14T00:00:02Z")); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := service.ObserveTurnInventoryV1(ctx, fixture.securityContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	billing, err := inventory.BillingV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if billing.InputTokens.ReportedValue != 100 || billing.OutputTokens.ReportedValue != 20 || billing.InputTokens.Complete || billing.OutputTokens.Complete || billing.TotalTokens.ReportedValue != 0 || billing.TotalTokens.KnownAttemptCount != 0 || billing.TotalTokens.Complete {
+		t.Fatalf("independent attempt counters were paired across namespaces: %#v", billing)
+	}
+	if billing.CacheWriteTokens.KnownAttemptCount != 0 || billing.UncachedInputTokens.KnownAttemptCount != 0 || billing.ReasoningTokens.KnownAttemptCount != 1 || billing.ReasoningTokens.ReportedValue != 0 {
+		t.Fatalf("legacy buckets or explicit zero were inferred incorrectly: %#v", billing)
+	}
+	// The observer must read storage again even after live writes populated the
+	// commit cache. A divergent persisted observation cannot become a DTO.
+	fixture.store.mu.Lock()
+	for id, settlement := range fixture.store.settlements {
+		settlement.Observation.Usage.OutputTokens.Value++
+		fixture.store.settlements[id] = settlement
+		break
+	}
+	fixture.store.mu.Unlock()
+	if _, err := service.ObserveTurnInventoryV1(ctx, fixture.securityContext); err == nil {
+		t.Fatal("observer trusted a stale commit cache over changed signed storage")
+	}
+}
+
+func TestBillingQualifierPreservesProvisionalAndLegacyReportedSubtotalsAcrossReopen(t *testing.T) {
+	for _, qualification := range []domaincachetelemetry.ProviderOutputTokensFinalityV1{"", domaincachetelemetry.ProviderOutputTokensProvisionalV1, domaincachetelemetry.ProviderOutputTokensFinalV1} {
+		t.Run(string(qualification), func(t *testing.T) {
+			f := newDurableServiceFixtureV1(t)
+			s, err := NewDurableService(f.authority, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			h, err := s.BeginAttempt(ctx, f.registration(t, 1, 1, domaincachetelemetry.ProviderChannelPrimary, "2026-07-14T00:00:00Z"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			u := completeProviderUsageV1()
+			u.OutputTokensFinality = qualification
+			if err := s.SettleAttempt(ctx, cachetelemetryport.AttemptSettlementInputV1{Handle: h, Status: domaincachetelemetry.ProviderCallStatusCancelled, DispatchState: domaincachetelemetry.ProviderDispatchStateSent, Usage: u, SettledAt: durableServiceTimeV1(t, "2026-07-14T00:00:01Z"), SafeReasonCode: "provider_cancelled"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.CloseTurn(ctx, f.securityContext, domaincachetelemetry.ProviderTurnTerminalCancelV1, durableServiceTimeV1(t, "2026-07-14T00:00:02Z")); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := NewDurableService(f.authority, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inventory, err := reopened.ObserveTurnInventoryV1(ctx, f.securityContext)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := inventory.BillingV1()
+			if err != nil {
+				t.Fatal(err)
+			}
+			final := qualification == domaincachetelemetry.ProviderOutputTokensFinalV1
+			if b.OutputTokens.ReportedValue != 20 || b.OutputTokens.KnownAttemptCount != 1 || b.OutputTokens.Complete != final || b.TotalTokens.ReportedValue != 120 || b.TotalTokens.Complete != final || !b.Closed {
+				t.Fatalf("reopen changed subtotal/qualification: %#v", b)
+			}
+		})
 	}
 }

@@ -1,3 +1,4 @@
+import { preserveScheduleTaskHostDelivery } from './schedule-runtime-helpers'
 import { Buffer } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
@@ -52,7 +53,8 @@ import {
   type AppSettingsPatch,
   type AppSettingsV1,
   type ClawImChannelV1,
-  type ClawImConversationV1
+  type ClawImConversationV1,
+  type ScheduledTaskV1
 } from '../shared/app-settings'
 import { publicConsoleWarn } from './logger'
 
@@ -367,7 +369,7 @@ export function expandHomePath(
 }
 
 function defaultWorkspaceRoot(homeRoot: string): string {
-  return join(homeRoot, '.analytix', 'default_workspace')
+  return join(homeRoot, 'Analytix')
 }
 
 function defaultClawChannelsRoot(homeRoot: string): string {
@@ -461,6 +463,7 @@ function normalizeStoredSettings(
   homeRoot: string = homedir()
 ): AppSettingsV1 {
   const normalized = normalizeAppSettings(settings)
+  normalized.schedule.tasks = preserveScheduleTaskHostDelivery(normalized.schedule.tasks, settings.schedule?.tasks)
   const writeDefaultRoot = normalizeWriteWorkspaceRoot(
     normalized.write.defaultWorkspaceRoot,
     homeRoot
@@ -621,7 +624,10 @@ function buildMergedSettings(
     keyboardShortcuts: normalizeKeyboardShortcuts(migrated.keyboardShortcuts),
     write: mergeWriteSettings(defaults.write, migrated.write),
     claw: mergeClawSettings(defaults.claw, migrated.claw),
-    schedule: mergeScheduleSettings(defaults.schedule, migrated.schedule),
+    schedule: {
+      ...mergeScheduleSettings(defaults.schedule, migrated.schedule),
+      tasks: preserveScheduleTaskHostDelivery(mergeScheduleSettings(defaults.schedule, migrated.schedule).tasks, parsed.schedule?.tasks)
+    },
     guiUpdate: { ...defaults.guiUpdate, ...migrated.guiUpdate },
     motionPreference: migrated.motionPreference ?? defaults.motionPreference,
     codePromptPrefix: typeof migrated.codePromptPrefix === 'string' ? migrated.codePromptPrefix : '',
@@ -1616,7 +1622,8 @@ export type LegacyImAccountCredentialInspectionV1 = {
 
 function legacyImString(record: Record<string, unknown>, key: string, maximum = 16 << 10): string {
   const value = typeof record[key] === 'string' ? record[key].trim() : ''
-  if (!value || Buffer.byteLength(value, 'utf8') > maximum || /[\u0000\r\n]/.test(value)) {
+  if (!value || Buffer.byteLength(value, 'utf8') > maximum ||
+    value.includes('\u0000') || value.includes('\r') || value.includes('\n')) {
     throw new Error(LEGACY_IM_PLAINTEXT_PERSISTENCE_FAILURE)
   }
   return value
@@ -2314,23 +2321,24 @@ export class JsonSettingsStore {
     data: AppSettingsV1,
     allowInvalidCurrentReplacement: boolean
   ): Promise<void> {
-    if (containsLegacyImPlaintext(data as unknown as ParsedSettingsRecord)) {
+    await this.commitSettings(data, allowInvalidCurrentReplacement)
+  }
+
+  private async commitSettings(
+    data: AppSettingsV1 | ((current: AppSettingsV1) => AppSettingsV1),
+    allowInvalidCurrentReplacement = false,
+    beforeCommit?: (current: AppSettingsV1, next: AppSettingsV1) => Promise<void | (() => void)>,
+    afterCommit?: (current: AppSettingsV1, next: AppSettingsV1) => void
+  ): Promise<AppSettingsV1> {
+    const updateLatest = typeof data === 'function'
+    let writeRequested = true
+    if (!updateLatest && containsLegacyImPlaintext(data as unknown as ParsedSettingsRecord)) {
       throw new Error(LEGACY_IM_PLAINTEXT_PERSISTENCE_FAILURE)
     }
-    const normalized = normalizeStoredSettings(data, this.homeRoot)
-    await ensureIsolatedRuntimeDataDirExists(normalized, this.homeRoot)
-    await ensureWorkspaceRootExists(normalized.workspaceRoot, this.homeRoot)
-    await ensureWriteWorkspaceRootsExist(normalized)
-    await ensureClawChannelWorkspaceRootsExist(normalized, this.homeRoot)
+    let normalized = updateLatest ? null : normalizeStoredSettings(data as AppSettingsV1, this.homeRoot)
     await mkdir(dirname(this.path), { recursive: true })
-    const serialized = serializeSettingsForDisk(normalized, this.homeRoot)
-    const serializedRecord = JSON.parse(serialized) as unknown
-    if (!isRecord(serializedRecord)) throw new Error(LEGACY_PROVIDER_PLAINTEXT_PERSISTENCE_FAILURE)
-    const desiredContainsPlaintext = containsLegacyProviderPlaintext(
-      serializedRecord,
-      'current:analytix-settings.json'
-    )
     let selected: ProtectedSettingsBytesSource | null = null
+    const derivedConfigLease: { release: void | (() => void) } = { release: undefined }
     try {
       try {
         selected = await readProtectedSettingsBytesWithCompatibility(this.path)
@@ -2345,9 +2353,12 @@ export class JsonSettingsStore {
         async () => {
           const current = await readProtectedSettingsBytesWithCompatibility(this.path)
           try {
-            if ((selected === null && current !== null) ||
-              (selected !== null && (current === null || !sameProtectedSettingsSource(selected, current) ||
-                current.sourcePath !== selected.sourcePath || !current.raw.equals(selected.raw)))) {
+            if (updateLatest
+              ? (current !== null && (current.physicalPath !== physicalWritePath ||
+                  (selected !== null && current.sourcePath !== selected.sourcePath))) || (selected !== null && current === null)
+              : (selected === null && current !== null) ||
+                (selected !== null && (current === null || !sameProtectedSettingsSource(selected, current) ||
+                  current.sourcePath !== selected.sourcePath || !current.raw.equals(selected.raw)))) {
               throw new Error(LEGACY_PROVIDER_PLAINTEXT_PERSISTENCE_FAILURE)
             }
             let currentRecord: ParsedSettingsRecord | null = null
@@ -2358,6 +2369,29 @@ export class JsonSettingsStore {
                 if (!allowInvalidCurrentReplacement) throw error
               }
             }
+            let latestForCommit: AppSettingsV1 | null = null
+            if (typeof data === 'function') {
+              const parsed = currentRecord && basename(current!.sourcePath) === LEGACY_KUN_SETTINGS_FILE_NAME
+                ? migrateLegacyKunSettingsFile(currentRecord) : currentRecord
+              const latest = normalizeStoredSettings(buildMergedSettings(parsed ?? {}, this.homeRoot), this.homeRoot)
+              latestForCommit = latest
+              const proposed = data(latest)
+              writeRequested = proposed !== latest
+              normalized = normalizeStoredSettings({ ...proposed, schedule: { ...proposed.schedule,
+                tasks: preserveScheduleTaskHostDelivery(proposed.schedule.tasks, latest.schedule.tasks)
+              } }, this.homeRoot)
+            }
+            if (!normalized || containsLegacyImPlaintext(normalized as unknown as ParsedSettingsRecord)) {
+              throw new Error(LEGACY_IM_PLAINTEXT_PERSISTENCE_FAILURE)
+            }
+            if (typeof data !== 'function' && currentRecord) {
+              normalized.schedule.tasks = preserveScheduleTaskHostDelivery(normalized.schedule.tasks,
+                (currentRecord.schedule as { tasks?: unknown } | undefined)?.tasks, true)
+            }
+            const serialized = serializeSettingsForDisk(normalized, this.homeRoot)
+            const serializedRecord = JSON.parse(serialized) as unknown
+            if (!isRecord(serializedRecord)) throw new Error(LEGACY_PROVIDER_PLAINTEXT_PERSISTENCE_FAILURE)
+            const desiredContainsPlaintext = containsLegacyProviderPlaintext(serializedRecord, 'current:analytix-settings.json')
             const currentContainsPlaintext = currentRecord !== null &&
               containsLegacyProviderPlaintext(currentRecord, current!.sourceLocator)
             const currentContainsLegacyImPlaintext = currentRecord !== null && containsLegacyImPlaintext(currentRecord)
@@ -2366,46 +2400,121 @@ export class JsonSettingsStore {
               currentContainsLegacyImPlaintext) {
               throw new Error(LEGACY_PROVIDER_PLAINTEXT_PERSISTENCE_FAILURE)
             }
-            await atomicWriteFile(this.path, serialized, { mode: 0o600 })
+            await ensureIsolatedRuntimeDataDirExists(normalized, this.homeRoot)
+            await ensureWorkspaceRootExists(normalized.workspaceRoot, this.homeRoot)
+            await ensureWriteWorkspaceRootsExist(normalized)
+            await ensureClawChannelWorkspaceRootsExist(normalized, this.homeRoot)
+            // GUI configuration is derived from the same serialized current→next
+            // transition. A failed projection must not commit its settings intent.
+            if (writeRequested && latestForCommit && beforeCommit) {
+              derivedConfigLease.release = await beforeCommit(latestForCommit, normalized)
+            }
+            const verified = await readProtectedSettingsBytesWithCompatibility(this.path)
+            try {
+              if ((current === null && verified !== null) || (current !== null &&
+                (verified === null || !sameProtectedSettingsSource(current, verified) ||
+                  current.sourcePath !== verified.sourcePath || !current.raw.equals(verified.raw)))) {
+                throw new Error(LEGACY_PROVIDER_PLAINTEXT_PERSISTENCE_FAILURE)
+              }
+              if (writeRequested) {
+                await atomicWriteFile(this.path, serialized, { mode: 0o600 })
+                if (latestForCommit) afterCommit?.(latestForCommit, normalized)
+              }
+              this.cache = normalized
+            } finally {
+              verified?.raw.fill(0)
+            }
           } finally {
             current?.raw.fill(0)
           }
         })
-      this.cache = normalized
+      return normalized!
     } catch (error) {
       this.cache = null
-      if (error instanceof Error && error.message === LEGACY_PROVIDER_PLAINTEXT_PERSISTENCE_FAILURE) {
+      if (error instanceof Error && (error.message === LEGACY_PROVIDER_PLAINTEXT_PERSISTENCE_FAILURE ||
+        error.message === LEGACY_IM_PLAINTEXT_PERSISTENCE_FAILURE)) {
         throw error
       }
       throw new Error(LEGACY_PROVIDER_PLAINTEXT_PERSISTENCE_FAILURE, { cause: error })
     } finally {
+      if (typeof derivedConfigLease.release === 'function') derivedConfigLease.release()
       selected?.raw.fill(0)
     }
   }
 
-  async patch(partial: AppSettingsPatch): Promise<AppSettingsV1> {
-    const cur = await this.load()
-    const { runtime: runtimePatch, provider: providerPatch, ...restPatch } = partial
-    const next = normalizeStoredSettings({
-      ...applyAnalytixRuntimePatch(cur, runtimePatch),
-      ...restPatch,
-      provider: mergeModelProviderSettings(cur.provider, providerPatch),
-      log: { ...cur.log, ...(partial.log ?? {}) },
-      notifications: { ...cur.notifications, ...(partial.notifications ?? {}) },
-      appBehavior: mergeAppBehaviorSettings(cur.appBehavior, partial.appBehavior),
-      keyboardShortcuts: normalizeKeyboardShortcuts({
-        bindings: {
-          ...cur.keyboardShortcuts.bindings,
-          ...(partial.keyboardShortcuts?.bindings ?? {})
-        }
-      }),
-      write: mergeWriteSettings(cur.write, partial.write),
-      claw: mergeClawSettings(cur.claw, partial.claw),
-      schedule: mergeScheduleSettings(cur.schedule, partial.schedule),
-      guiUpdate: { ...cur.guiUpdate, ...(partial.guiUpdate ?? {}) }
-    }, this.homeRoot)
-    await this.save(next)
-    return next
+  async patch(
+    patch: AppSettingsPatch | ((current: AppSettingsV1) => AppSettingsPatch | null),
+    beforeCommit?: (current: AppSettingsV1, next: AppSettingsV1) => Promise<void | (() => void)>,
+    afterCommit?: (current: AppSettingsV1, next: AppSettingsV1) => void
+  ): Promise<AppSettingsV1> {
+    return this.commitSettings((cur) => {
+      const partial = typeof patch === 'function' ? patch(cur) : patch
+      if (partial === null) return cur
+      const { runtime: runtimePatch, provider: providerPatch, ...restPatch } = partial
+      const next = normalizeStoredSettings({
+        ...applyAnalytixRuntimePatch(cur, runtimePatch),
+        ...restPatch,
+        provider: mergeModelProviderSettings(cur.provider, providerPatch),
+        log: { ...cur.log, ...(partial.log ?? {}) },
+        notifications: { ...cur.notifications, ...(partial.notifications ?? {}) },
+        appBehavior: mergeAppBehaviorSettings(cur.appBehavior, partial.appBehavior),
+        keyboardShortcuts: normalizeKeyboardShortcuts({
+          bindings: {
+            ...cur.keyboardShortcuts.bindings,
+            ...(partial.keyboardShortcuts?.bindings ?? {})
+          }
+        }),
+        write: mergeWriteSettings(cur.write, partial.write),
+        claw: mergeClawSettings(cur.claw, partial.claw),
+        schedule: mergeScheduleSettings(cur.schedule, partial.schedule),
+        guiUpdate: { ...cur.guiUpdate, ...(partial.guiUpdate ?? {}) }
+      }, this.homeRoot)
+      return next
+    }, false, beforeCommit, afterCommit)
+  }
+
+  async loadFresh(): Promise<AppSettingsV1> {
+    const current = await readProtectedSettingsBytesWithCompatibility(this.path)
+    if (!current) return this.load()
+    try {
+      const record = parseCleanupSource(current.raw)
+      const parsed = basename(current.sourcePath) === LEGACY_KUN_SETTINGS_FILE_NAME
+        ? migrateLegacyKunSettingsFile(record) : record
+      return normalizeStoredSettings(buildMergedSettings(parsed, this.homeRoot), this.homeRoot)
+    } finally { current.raw.fill(0) }
+  }
+
+  /** A synchronous task transform, serialized with ordinary settings patches. */
+  /** Initialize the existing helper Bearer before the immutable runtime binding. */
+  async ensureScheduleInternalAuthentication(): Promise<AppSettingsV1> {
+    await this.load()
+    return this.commitSettings(latest => {
+      if (latest.schedule.internal.secret.trim()) return latest
+      return { ...latest, schedule: { ...latest.schedule,
+        internal: { ...latest.schedule.internal, secret: randomUUID() } } }
+    })
+  }
+
+  async mutateScheduleTasks<T>(mutator: (latest: AppSettingsV1) => {
+    tasks: ScheduledTaskV1[]
+    enabled?: boolean
+    value: T
+  }): Promise<{ settings: AppSettingsV1; value: T; changed: boolean }> {
+    let value!: T
+    let changed = false
+    const settings = await this.commitSettings((latest) => {
+      const result = mutator(latest)
+      value = result.value
+      changed = result.tasks !== latest.schedule.tasks ||
+        (result.enabled !== undefined && result.enabled !== latest.schedule.enabled)
+      if (!changed) return latest
+      return { ...latest, schedule: {
+        ...latest.schedule,
+        tasks: result.tasks,
+        ...(result.enabled === undefined ? {} : { enabled: result.enabled })
+      } }
+    })
+    return { settings, value, changed }
   }
 }
 

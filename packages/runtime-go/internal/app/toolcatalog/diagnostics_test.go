@@ -509,7 +509,7 @@ func toolCatalogCaseContextV2(t *testing.T, input domainsecurity.TurnSecurityCon
 func TestPersistableToolOutputRedactsUserInputAnswers(t *testing.T) {
 	output := map[string]any{
 		"status":  "submitted",
-		"answers": []map[string]string{{"id": "a", "value": "secret"}, {"id": "b", "value": "private"}},
+		"answers": []map[string]string{{"id": "a", "kind": "answer", "selectedOptions": `["Alpha","Beta"]`, "customText": "secret", "value": "secret"}, {"id": "b", "kind": "skip", "value": "[skipped]"}},
 	}
 	persisted, ok := PersistableToolOutput("request_user_input", output).(map[string]any)
 	if !ok {

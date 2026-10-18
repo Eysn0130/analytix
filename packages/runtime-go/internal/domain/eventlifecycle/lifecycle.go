@@ -6,9 +6,14 @@ package eventlifecycle
 
 import (
 	"errors"
+	"regexp"
 	"strings"
+	"time"
+
+	"analytix.local/runtime-go/internal/contracts"
 
 	domainjob "analytix.local/runtime-go/internal/domain/job"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 )
 
 var ErrInvalidEventLifecycleV1 = errors.New("new event lifecycle is outside the closed V1 allowlist")
@@ -26,6 +31,11 @@ func ValidateNewEventLifecycleV1(event map[string]any) error {
 	}
 
 	switch kind {
+	case domainthread.MessageFeedbackPutKindV1, domainthread.MessageFeedbackDeleteKindV1:
+		if err := forbidStatusV1(event); err != nil {
+			return err
+		}
+		return domainthread.ValidateMessageFeedbackEventV1(event)
 	case "thread_created":
 		return requireStatusV1(event, "idle")
 	case "thread_updated":
@@ -47,7 +57,7 @@ func ValidateNewEventLifecycleV1(event map[string]any) error {
 	case "approval_resolved":
 		return requireStatusV1(event, "allowed", "denied", "expired")
 	case "user_input_resolved":
-		return requireStatusV1(event, "submitted", "cancelled")
+		return requireStatusV1(event, "submitted", "cancelled", "continued")
 	case "child_steer_queued":
 		return requireStatusV1(event, string(domainjob.StatusQueued))
 	case "child_steer_admitted":
@@ -72,13 +82,17 @@ func ValidateNewEventLifecycleV1(event map[string]any) error {
 		if !stagePresent || !stageExact || !validPipelineStageV1(stage) {
 			return invalidV1("pipeline stage is missing or invalid")
 		}
+		if stage == "logical_step_assembled" {
+			return validateLogicalStepAssembledV1(event)
+		}
 		return nil
-	case "thread_rewound",
+	case "thread_fork_seed", "thread_fork_seed_completed",
+		"thread_rewound",
 		"turn_steered",
 		"item_created", "item_updated", "item_completed",
 		"tool_call_started", "tool_call_finished", "tool_call_ready",
 		"tool_storm_suppressed", "tool_catalog_changed",
-		"compaction_started", "compaction_completed",
+		"compaction_started", "compaction_completed", "compaction_failed",
 		"goal_updated", "goal_cleared", "goal_evidence_audit",
 		"todos_updated", "todos_cleared", "autoresearch_state_audit",
 		"checkpoint_captured", "checkpoint_rewind_rescue_created", "checkpoint_rewind_applied",
@@ -128,7 +142,7 @@ func validPipelineStageV1(stage string) bool {
 	switch stage {
 	case "setup", "pre_start", "post_start", "input_received", "input_cached", "input_routed",
 		"input_compressed", "input_remembered", "pre_send", "post_send", "response_received",
-		"provider_admission_rejected",
+		"provider_admission_rejected", "logical_step_started", "logical_step_assembled", "logical_step_closed",
 		"provider_retrying", "step_limit_finalizing", "provider_error", "empty_final_recovered", "loop_guard":
 		return true
 	}
@@ -142,6 +156,39 @@ func validPipelineStageV1(stage string) bool {
 		return true
 	}
 	return exactDynamicSuffixV1(stage, "background_job_", domainjob.TerminalStatusV1)
+}
+
+// Keep this new durable variant closed independently of the caller's
+// projection. The public ID grammar matches the desktop metadata boundary.
+var (
+	logicalStepPublicIDV1        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$`)
+	logicalStepPublicTimestampV1 = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$`)
+)
+
+func validateLogicalStepAssembledV1(event map[string]any) error {
+	seq, seqOK := contracts.NumericSeq(event["seq"])
+	threadID, threadOK := event["threadId"].(string)
+	turnID, turnOK := event["turnId"].(string)
+	timestamp, timestampOK := event["timestamp"].(string)
+	if len(event) != 8 || event["label"] != "Logical step assembled" ||
+		!seqOK || seq < 1 || uint64(seq) > 9007199254740991 ||
+		!threadOK || !logicalStepPublicIDV1.MatchString(threadID) ||
+		!turnOK || !logicalStepPublicIDV1.MatchString(turnID) ||
+		!timestampOK || len(timestamp) > 64 || !logicalStepPublicTimestampV1.MatchString(timestamp) {
+		return invalidV1("logical step assembly envelope is not closed")
+	}
+	at, err := time.Parse(time.RFC3339Nano, timestamp)
+	if err != nil || at.IsZero() {
+		return invalidV1("logical step assembly timestamp is invalid")
+	}
+	details, detailsOK := event["details"].(map[string]any)
+	version, versionOK := contracts.NumericSeq(details["schemaVersion"])
+	id, idOK := details["logicalStepId"].(string)
+	if !detailsOK || len(details) != 2 || !versionOK || version != 1 ||
+		!idOK || id != strings.TrimSpace(id) || !contracts.IsCanonicalOpaqueUUIDV4(id) {
+		return invalidV1("logical step assembly details are not closed")
+	}
+	return nil
 }
 
 func exactDynamicSuffixV1(stage, prefix string, valid func(string) bool) bool {

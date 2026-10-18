@@ -11,6 +11,10 @@ import (
 var ErrExecutionPolicyVersionRuntimeOwned = errors.New("executionPolicyVersion is runtime-owned")
 var ErrContextEpochStateRuntimeOwned = errors.New("contextEpochState is runtime-owned")
 var ErrThreadStatusRuntimeOwned = errors.New("thread status is runtime-owned")
+var ErrInvalidThreadArchiveIntent = errors.New("archived must be the sole boolean thread patch field")
+var ErrInvalidSidePromotionIntent = errors.New("promoteSide must be the sole true thread patch field")
+var ErrThreadRelationRuntimeOwned = errors.New("thread relation and parent are runtime-owned; use a supported thread intent")
+var ErrSidePromotionUnavailable = errors.New("own Side promotion authority is unavailable")
 var ErrCaseWorkspaceMutationRestricted = errors.New("case workspace changes require a host context epoch transition")
 
 const (
@@ -100,6 +104,17 @@ func ApplyPatch(thread map[string]any, patch map[string]any, now string) map[str
 }
 
 func ValidatePublicPatch(patch map[string]any) error {
+	if _, exists := patch["relation"]; exists {
+		return ErrThreadRelationRuntimeOwned
+	}
+	if _, exists := patch["parentThreadId"]; exists {
+		return ErrThreadRelationRuntimeOwned
+	}
+	if value, exists := patch["promoteSide"]; exists {
+		if enabled, valid := value.(bool); !valid || !enabled || len(patch) != 1 {
+			return ErrInvalidSidePromotionIntent
+		}
+	}
 	if _, exists := patch["status"]; exists {
 		return ErrThreadStatusRuntimeOwned
 	}
@@ -108,6 +123,11 @@ func ValidatePublicPatch(patch map[string]any) error {
 	}
 	if _, exists := patch["contextEpochState"]; exists {
 		return ErrContextEpochStateRuntimeOwned
+	}
+	if value, exists := patch["archived"]; exists {
+		if _, valid := value.(bool); !valid || len(patch) != 1 {
+			return ErrInvalidThreadArchiveIntent
+		}
 	}
 	return nil
 }

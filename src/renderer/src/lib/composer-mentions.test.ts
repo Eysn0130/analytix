@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  extractRequestedSkillIds,
   extractComposerPluginMentions,
   extractComposerSkillMentions,
   formatComposerPluginMentionToken,
   formatComposerSkillMentionToken,
   getComposerAtMentionAtCursor,
   getComposerMentionDisplayPlan,
+  getUserMessageDisplayParts,
   removeComposerMentionToken,
   removeComposerMentionTokens,
   replaceComposerAtMentionInInput
@@ -95,3 +97,54 @@ describe('composer mention helpers', () => {
     })
   })
 })
+
+
+describe('sent user text reference projection', () => {
+  it('decorates only message-loaded slash skills with whitespace boundaries', () => {
+    const input = '/audit /other /audit.md /audit/path /audit。 mail@example.test\n/audit end'
+    const parts = getUserMessageDisplayParts(input, ['audit'])
+    expect(parts.filter(part => part.kind === 'loaded-skill').map(part => input.slice(part.start, part.end))).toEqual(['/audit', '/audit'])
+    expect(parts.map(part => input.slice(part.start, part.end)).join('')).toBe(input)
+    expect(getUserMessageDisplayParts('/audit', []).every(part => part.kind === 'text')).toBe(true)
+    expect(parts.filter(part => part.kind === 'file')).toEqual([])
+    expect(getComposerMentionDisplayPlan('@src/file.ts /audit')).toMatchObject({ hasMentions: false, editableValue: '@src/file.ts /audit' })
+  })
+
+  it('keeps wire plugin/skill precedence and labels while projecting adjacent files', () => {
+    const plugin = formatComposerPluginMentionToken('Tool @nested', 'plugin')
+    const skill = formatComposerSkillMentionToken('Skill @nested', 'audit')
+    const parts = getUserMessageDisplayParts(`${plugin} ${skill} @src/index.ts,`, ['audit'])
+    expect(parts.filter(part => part.kind !== 'text').map(part => part.kind)).toEqual(['plugin', 'skill', 'file'])
+    expect(parts.find(part => part.kind === 'file')).toMatchObject({ path: 'src/index.ts', display: 'index.ts' })
+    expect(parts.at(-1)).toMatchObject({ kind: 'text', text: ',' })
+  })
+
+  it('supports composer-escaped quoted files, directory decoration and long wrapping labels', () => {
+    const long = 'long'.repeat(100)
+    const input = String.raw`@"docs/my \"quoted\" file.txt" @src/ ` + `@${long}.txt！`
+    const parts = getUserMessageDisplayParts(input)
+    expect(parts.filter(part => part.kind === 'file')).toMatchObject([
+      { path: 'docs/my "quoted" file.txt', display: 'my "quoted" file.txt', directory: false },
+      { path: 'src/', display: 'src', directory: true },
+      { path: `${long}.txt`, display: `${long}.txt`, directory: false }
+    ])
+    expect(parts.map(part => input.slice(part.start, part.end)).join('')).toBe(input)
+    expect(getUserMessageDisplayParts('@"unfinished name').every(part => part.kind === 'text')).toBe(true)
+  })
+})
+
+describe('explicit initial skill requests', () => {
+  it('extracts existing selections and whitespace-bound slash names without rewriting input', () => {
+    const text = '/review use $[Report](skill://report) /skill:audit /review';
+    expect(extractRequestedSkillIds(text)).toEqual(['review', 'report', 'audit']);
+    expect(text).toBe('/review use $[Report](skill://report) /skill:audit /review');
+    expect(extractRequestedSkillIds('docs/review https://host/review (/review) /review, /Review /a_b')).toEqual([]);
+    expect(extractRequestedSkillIds('$[ignored /fake](skill://report)')).toEqual(['report']);
+    expect(extractRequestedSkillIds('@[Plugin /review label](plugin://plug)')).toEqual([]);
+    expect(extractRequestedSkillIds('$[bad](skill://..%2Fsecret)')).toEqual([]);
+  });
+  it('decorates legacy slash selections only after successful item loading', () => {
+    expect(getUserMessageDisplayParts('/skill:review', []).some(part => part.kind === 'loaded-skill')).toBe(false);
+    expect(getUserMessageDisplayParts('/skill:review', ['review'])).toMatchObject([{kind:'loaded-skill',skillId:'review'}]);
+  });
+});

@@ -1,28 +1,41 @@
 import {
   containsPrivateAcceptedFinalAuthority,
+  isClosedPipelineDetails,
+  isClosedLogicalStepEvent,
+  isPublicHostErrorCode,
+  isPublicProviderDispatchState,
+  isPublicProviderEndpointFormat,
+  isPublicProviderFailureStage,
   isPublicSseIpcPayload,
   PublicRuntimeEventFilter
 } from './public-runtime-content'
 import {
   AcceptedFinalDeliveryBatchV2Schema,
   ApprovalEvent,
+  CompactionEvent,
   GeneralTerminalDeliveryBatchV1Schema,
+  GoalActivationChangedEventV1,
   PublicProjectionRevokedEvent as PublicProjectionRevokedEventSchema,
   UserInputEvent
 } from '../../packages/runtime/src/contracts/events.js'
 import type { PublicProjectionRevokedEvent } from '../../packages/runtime/src/contracts/events.js'
+import { GoalRoundSourceSchemaV1 } from '../../packages/runtime/src/contracts/goal.js'
 import {
   ApprovalTurnItem,
+  CompactionTurnItem,
   TaskContinuationSnapshotV1Schema,
   ToolCallTurnItem,
   ToolProgressTurnItem,
   ToolResultTurnItem,
-  UserInputTurnItem
+  UserInputTurnItem,
+  UserFileReferenceSchema
 } from '../../packages/runtime/src/contracts/items.js'
 import {
   containsInternalCaseEntityReference,
   containsUnboundCaseRiskV1
 } from './ordinary-log-pii-projection'
+
+export { isClosedProviderRetryLifecycle, isClosedProviderOutputCapObservation } from './public-runtime-content'
 
 export type { PublicProjectionRevokedEvent } from '../../packages/runtime/src/contracts/events.js'
 
@@ -82,6 +95,122 @@ export type PublicRuntimeSseDecision =
         | 'invalid_public_projection'
     }
 
+// Diagnostic paths are schema names, never keys taken from an event. Unknown
+// segments stop at the nearest listed container; array indexes are normalized.
+const DIAGNOSTIC_FIELD_PATHS = [
+  '$', 'kind', 'seq', 'timestamp', 'threadId', 'turnId', 'itemId', 'trace',
+  'stage', 'callId', 'message', 'child', 'details',
+  'item', 'item.id', 'item.threadId', 'item.turnId', 'item.role', 'item.status',
+  'item.createdAt', 'item.finishedAt', 'item.kind', 'item.toolName', 'item.callId',
+  'item.toolKind', 'item.isError', 'item.arguments', 'item.arguments.schemaVersion',
+  'item.arguments.projectionKind', 'item.arguments.disclosure', 'item.arguments.messageKey',
+  'item.arguments.privatePayloadWithheld', 'item.arguments.factAnswerAllowed',
+  'item.arguments.evidenceAuthority', 'item.arguments.runtimeStatus', 'item.arguments.stage',
+  'item.arguments.status', 'item.arguments.diagnostics', 'item.output',
+  'item.output.schemaVersion', 'item.output.projectionKind', 'item.output.disclosure',
+  'item.output.status', 'item.output.code', 'item.output.messageKey',
+  'item.output.privatePayloadWithheld', 'item.output.factAnswerAllowed',
+  'item.output.evidenceAuthority', 'item.output.taskJob', 'item.output.taskJob.operation',
+  'item.output.taskJob.result', 'item.approvalId', 'item.inputId', 'item.summary',
+  'item.prompt', 'item.questions', 'item.questions.[]', 'item.questions.[].id',
+  'item.questions.[].header', 'item.questions.[].question', 'item.questions.[].options',
+  'item.timedWait', 'item.text', 'item.displayText', 'item.delivery', 'item.clientUserMessageId',
+  'item.workspaceCheckpointId', 'item.attachmentIds', 'item.activeSkillIds', 'item.taskContinuation', 'item.taskContinuation.schemaVersion',
+  'item.taskContinuation.goal', 'item.taskContinuation.todos', 'item.taskContinuation.todos.[]',
+  'item.taskContinuation.todos.[].todoId', 'item.taskContinuation.evidenceReferences',
+  'item.taskContinuation.evidenceReferences.[]',
+  'item.taskContinuation.evidenceReferences.[].referenceDigest',
+  'approvalId', 'toolName', 'inputId', 'status', 'prompt', 'questions', 'questions.[]',
+  'questions.[].id', 'questions.[].header', 'questions.[].question', 'questions.[].options',
+  'timedWait', 'schemaVersion', 'purpose', 'batchId', 'firstSeq', 'lastSeq',
+  'publicationCommitId', 'eventManifestDigest', 'publicationAuthority', 'batchDigest',
+  'generalTerminalCommitId', 'generalTerminalAuthorityKind', 'generalTerminalAuthorityDigest',
+  'projectedEventsDigest', 'transportAuthority', 'evidenceAuthority', 'citationAuthority',
+  'factAnswerAllowed', 'events', 'events.[]', 'events.[].kind', 'events.[].seq',
+  'events.[].timestamp', 'events.[].threadId', 'events.[].turnId', 'events.[].itemId',
+  'events.[].item', 'events.[].item.kind', 'events.[].item.status',
+  'events.[].item.ordinaryResult', 'eventManifest', 'eventManifest.[]'
+] as const
+
+type DiagnosticFieldPath = typeof DIAGNOSTIC_FIELD_PATHS[number]
+type DiagnosticStage = 'frame' | 'transport_binding' | 'event_contract' | 'event_schema' |
+  'item_contract' | 'item_binding' | 'item_schema' | 'public_content' |
+  'projection_filter' | 'projected_binding'
+type DiagnosticReason = 'malformed_frame' | 'missing_transport_binding' | 'binding_mismatch' |
+  'unsupported_event_kind' | 'unsupported_item_kind' | 'detached_terminal_item' |
+  'unknown_fields' | 'invalid_field' | 'schema_invalid_type' | 'schema_invalid_value' |
+  'schema_invalid_format' | 'schema_constraint' | 'schema_refinement' | 'schema_union' |
+  'schema_other' | 'restricted_content' | 'public_content_rejected' | 'projection_rejected'
+
+export type PublicRuntimeSseDecodeDiagnostic = Readonly<{
+  validation: 'input' | 'projected'
+  stage: DiagnosticStage
+  reason: DiagnosticReason
+  fieldPaths: readonly DiagnosticFieldPath[]
+}>
+
+type DiagnosticRecorder = (
+  stage: DiagnosticStage,
+  reason: DiagnosticReason,
+  fieldPaths: readonly DiagnosticFieldPath[]
+) => void
+
+const DIAGNOSTIC_FIELD_PATH_SET = new Set<string>(DIAGNOSTIC_FIELD_PATHS)
+
+function diagnosticFieldPath(prefix: DiagnosticFieldPath, path: readonly PropertyKey[]): DiagnosticFieldPath {
+  let known = prefix
+  for (const segment of path) {
+    const name = typeof segment === 'number' ? '[]' : typeof segment === 'string' ? segment : ''
+    // Dots cannot turn one unknown key into a sequence of known schema names.
+    if (!name || name.includes('.')) break
+    const candidate = known === '$' ? name : `${known}.${name}`
+    if (!DIAGNOSTIC_FIELD_PATH_SET.has(candidate)) break
+    known = candidate as DiagnosticFieldPath
+  }
+  return known
+}
+
+function invalidValidation(
+  diagnostic: DiagnosticRecorder | undefined,
+  stage: DiagnosticStage,
+  reason: DiagnosticReason,
+  fieldPaths: readonly DiagnosticFieldPath[]
+): false {
+  diagnostic?.(stage, reason, fieldPaths)
+  return false
+}
+
+function schemaDiagnosticReason(code: string): DiagnosticReason {
+  switch (code) {
+    case 'unrecognized_keys': return 'unknown_fields'
+    case 'invalid_type': return 'schema_invalid_type'
+    case 'invalid_value': return 'schema_invalid_value'
+    case 'invalid_format': return 'schema_invalid_format'
+    case 'too_small':
+    case 'too_big': return 'schema_constraint'
+    case 'custom': return 'schema_refinement'
+    case 'invalid_union': return 'schema_union'
+    default: return 'schema_other'
+  }
+}
+
+function schemaIsValid(
+  result: { success: true } | { success: false; error: { issues: readonly {
+    code: string; path: readonly PropertyKey[]
+  }[] } },
+  diagnostic: DiagnosticRecorder | undefined,
+  stage: DiagnosticStage,
+  prefix: DiagnosticFieldPath
+): boolean {
+  if (result.success || !diagnostic) return result.success
+  const issues = result.error.issues.slice(0, 12)
+  // In particular, unrecognized_keys.keys and union messages/errors contain
+  // untrusted names or values. Only the first parse's code and path are read.
+  const paths = [...new Set(issues.map((issue) => diagnosticFieldPath(prefix, issue.path)))]
+  return invalidValidation(diagnostic, stage,
+    schemaDiagnosticReason(issues[0]?.code ?? ''), paths.length ? paths : [prefix])
+}
+
 const BASE_EVENT_KEYS = [
   'kind',
   'seq',
@@ -94,12 +223,12 @@ const BASE_EVENT_KEYS = [
 
 type PublicEventContract = Readonly<{
   keys: readonly string[]
-  validate: (event: Record<string, unknown>) => boolean
+  validate: (event: Record<string, unknown>, diagnostic?: DiagnosticRecorder) => boolean
 }>
 
 function eventContract(
   keys: readonly string[],
-  validate: (event: Record<string, unknown>) => boolean
+  validate: PublicEventContract['validate']
 ): PublicEventContract {
   return { keys, validate }
 }
@@ -133,7 +262,7 @@ const PUBLIC_EVENT_CONTRACTS: Readonly<Record<string, PublicEventContract>> = {
     'maxModelSteps', 'workspaceCheckpointId'
   ], validateTurnLifecycleEvent),
   turn_completed: eventContract([
-    'status', 'clientUserMessageId', 'admittedSeq', 'terminalReason', 'discard', 'cancelled',
+    'endReason', 'status', 'clientUserMessageId', 'admittedSeq', 'terminalReason', 'discard', 'cancelled',
     'model', 'providerId', 'approvalPolicy', 'sandboxMode', 'mode', 'disableUserInput',
     'maxModelSteps', 'workspaceCheckpointId'
   ], validateTurnLifecycleEvent),
@@ -209,13 +338,15 @@ const PUBLIC_EVENT_CONTRACTS: Readonly<Record<string, PublicEventContract>> = {
   approval_resolved: eventContract([
     'approvalId', 'toolName', 'status', 'approvalPolicy', 'sandboxMode', 'summary'
   ], validateApprovalEvent),
-  user_input_requested: eventContract(['inputId', 'status', 'prompt', 'questions'], validateUserInputEvent),
-  user_input_resolved: eventContract(['inputId', 'status', 'prompt', 'questions'], validateUserInputEvent),
-  compaction_started: eventContract(['auto'], validateCompactionEvent),
+  user_input_requested: eventContract(['inputId', 'status', 'prompt', 'questions', 'timedWait'], validateUserInputEvent),
+  user_input_resolved: eventContract(['inputId', 'status', 'prompt', 'questions', 'timedWait'], validateUserInputEvent),
+  compaction_started: eventContract(['auto', 'compactionId', 'schemaVersion', 'startedAt'], validateCompactionEvent),
   compaction_completed: eventContract([
     'summary', 'replacedTokens', 'auto', 'pinnedConstraints', 'sourceDigest', 'digestMarker', 'sourceItemIds',
-    'schemaVersion', 'reasoningExcluded', 'reasoningExclusionProof'
+    'schemaVersion', 'reasoningExcluded', 'reasoningExclusionProof', 'compactionId', 'summaryKind', 'summaryDigest',
+    'checkpointDigest', 'shadowedItemCount', 'tokenCountKind', 'tokenEstimatorVersion', 'createdAt', 'finishedAt', 'turn'
   ], validateCompactionEvent),
+  compaction_failed: eventContract(['auto', 'compactionId', 'schemaVersion', 'reasonCode', 'finishedAt'], validateCompactionEvent),
   goal_updated: eventContract(['goal', 'cleared'], validateGoalEvent),
   goal_cleared: eventContract(['goal', 'cleared'], validateGoalEvent),
   goal_evidence_audit: eventContract([
@@ -294,13 +425,6 @@ const SHA256_MARKER = /^sha256:[a-f0-9]{12,64}$/
 
 const APPROVAL_POLICIES = new Set(['always', 'on-request', 'untrusted', 'never', 'auto', 'suggest'])
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'danger-full-access', 'external-sandbox'])
-const ENDPOINT_FORMATS = new Set(['chat_completions', 'responses', 'messages', 'custom_endpoint'])
-const PROVIDER_FAILURE_STAGES = new Set([
-  'request_validation', 'request_build', 'pre_send_body_audit', 'telemetry_begin',
-  'transport_before_observed_send', 'transport_after_observed_send', 'local_admission_config',
-  'callback_projection', 'unclassified'
-])
-const PROVIDER_DISPATCH_STATES = new Set(['not_sent', 'sent', 'indeterminate'])
 const TERMINAL_REASONS = new Set([
   'success', 'source_unavailable', 'semantic_failure', 'provider_failure', 'cancel', 'timeout',
   'stream_abort', 'recovery', 'approval', 'user_input', 'resume', 'restart', 'report_fallback',
@@ -312,29 +436,14 @@ const JOB_STATUSES = new Set([
 ])
 const DELIVERY_STATUSES = new Set(['pending', 'retry', 'delivered', 'skipped', 'dead_letter', 'unknown'])
 const AUTO_CONTINUE_STATUSES = new Set(['starting', 'started', 'skipped', 'failed', 'unknown'])
-const HOST_ERROR_CODES = new Set([
-  'turn_failed', 'turn_cancelled', 'provider_error', 'provider_authentication_failed',
-  'provider_rate_limited', 'provider_insufficient_balance', 'provider_endpoint_not_found',
-  'provider_request_rejected', 'provider_request_failed', 'provider_request_error',
-  'provider_unavailable', 'provider_network_unavailable', 'provider_timeout',
-  'provider_stream_interrupted', 'provider_model_invalid', 'provider_not_configured',
-  'provider_tool_arguments_invalid', 'provider_reasoning_markup_invalid', 'provider_empty_final',
-  'attachment_text_fallback_too_large', 'publication_receipt_required', 'validation_error',
-  'runtime_restarted', 'turn_recovery_boundary', 'approval_denied', 'input_cancelled',
-  'turn_step_limit_exceeded', 'turn_security_authority_unavailable', 'turn_security_context_invalid',
-  'turn_security_workspace_mismatch', 'turn_security_case_binding_mismatch',
-  'turn_security_dataset_snapshot_mismatch', 'turn_security_risk_policy_mismatch',
-  'tool_call_identity_invalid', 'tool_not_advertised', 'tool_schema_missing',
-  'tool_schema_invalid', 'tool_private_arguments', 'tool_source_unavailable',
-  'tool_invalid_arguments_storm', 'tool_failure_storm', 'execution_grant_rejected',
-  'source_probe_unavailable', 'tool_pending_continuation_invalid', 'provider_stream_failed',
-  'context_window_hard_limit', 'sse_setup_error'
-])
 
 const PIPELINE_LABEL_BY_STAGE: Readonly<Record<string, string>> = {
   setup: 'Setup',
   pre_start: 'Pre-Start',
   post_start: 'Post-Start',
+  logical_step_started: 'Logical step started',
+  logical_step_assembled: 'Logical step assembled',
+  logical_step_closed: 'Logical step closed',
   input_received: 'Input Received',
   input_cached: 'Input Cached',
   input_routed: 'Input Routed',
@@ -388,6 +497,19 @@ function isOptionalEnum(value: unknown, allowed: ReadonlySet<string>): boolean {
 
 function isOptionalSafeIdentifier(value: unknown): boolean {
   return value === undefined || isSafePublicId(value)
+}
+
+const INITIAL_USER_SKILL_ID_PATTERN = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/
+
+function isInitialUserSkillIdList(value: unknown): boolean {
+  // Go omits the field when no skill was loaded; exposed selections are nonempty.
+  if (!Array.isArray(value) || value.length === 0 || value.length > 16) return false
+  const seen = new Set<string>()
+  for (const id of value) {
+    if (typeof id !== 'string' || INITIAL_USER_SKILL_ID_PATTERN.exec(id)?.[0] !== id || seen.has(id)) return false
+    seen.add(id)
+  }
+  return true
 }
 
 function isSafeIdList(value: unknown): boolean {
@@ -453,51 +575,104 @@ const ITEM_BASE_KEYS = [
   'id', 'turnId', 'threadId', 'role', 'status', 'createdAt', 'finishedAt', 'kind'
 ] as const
 
-function isClosedItemBase(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
-  return isSafePublicId(event.turnId) && isSafePublicId(event.itemId) &&
-    item.threadId === event.threadId && item.turnId === event.turnId && item.id === event.itemId &&
-    isCanonicalTimestamp(item.createdAt) &&
-    (item.finishedAt === undefined || isCanonicalTimestamp(item.finishedAt))
+function isClosedItemBase(
+  event: Record<string, unknown>, item: Record<string, unknown>, diagnostic?: DiagnosticRecorder
+): boolean {
+  if (!isSafePublicId(event.turnId)) return invalidValidation(diagnostic, 'item_binding', 'invalid_field', ['turnId'])
+  if (!isSafePublicId(event.itemId)) return invalidValidation(diagnostic, 'item_binding', 'invalid_field', ['itemId'])
+  if (item.threadId !== event.threadId) return invalidValidation(diagnostic, 'item_binding', 'binding_mismatch', ['item.threadId'])
+  if (item.turnId !== event.turnId) return invalidValidation(diagnostic, 'item_binding', 'binding_mismatch', ['item.turnId'])
+  if (item.id !== event.itemId) return invalidValidation(diagnostic, 'item_binding', 'binding_mismatch', ['item.id'])
+  if (!isCanonicalTimestamp(item.createdAt)) return invalidValidation(diagnostic, 'item_binding', 'invalid_field', ['item.createdAt'])
+  if (item.finishedAt !== undefined && !isCanonicalTimestamp(item.finishedAt)) {
+    return invalidValidation(diagnostic, 'item_binding', 'invalid_field', ['item.finishedAt'])
+  }
+  return true
 }
 
-function isClosedUserMessageItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
+const CLOSED_USER_FILE_REFERENCES_SCHEMA = UserFileReferenceSchema.strict().array().max(4096)
+
+function isClosedUserMessageItem(
+  event: Record<string, unknown>, item: Record<string, unknown>, diagnostic?: DiagnosticRecorder
+): boolean {
   const allowed = [
     ...ITEM_BASE_KEYS, 'text', 'displayText', 'delivery', 'clientUserMessageId', 'attachmentIds',
-    'workspaceCheckpointId'
+    'workspaceCheckpointId', 'source', 'fileReferences', 'activeSkillIds'
   ]
-  return hasOnlyKeys(item, allowed) && isClosedItemBase(event, item) && item.role === 'user' &&
-    item.status === 'completed' && typeof item.text === 'string' && item.text.length <= 1_000_000 &&
-    (item.displayText === undefined || typeof item.displayText === 'string') &&
-    (item.delivery === undefined || item.delivery === 'steer') &&
-    isOptionalSafePublicId(item.clientUserMessageId) && isOptionalSafePublicId(item.workspaceCheckpointId) &&
-    (item.attachmentIds === undefined || isSafeIdList(item.attachmentIds))
+  if (!hasOnlyKeys(item, allowed)) return invalidValidation(diagnostic, 'item_contract', 'unknown_fields', ['item'])
+  if (item.source !== undefined && !GoalRoundSourceSchemaV1.safeParse(item.source).success) return false
+  if (!isClosedItemBase(event, item, diagnostic)) return false
+  if (item.role !== 'user') return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.role'])
+  if (item.status !== 'completed') return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.status'])
+  if (typeof item.text !== 'string' || item.text.length > 1_000_000) {
+    return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.text'])
+  }
+  if (item.displayText !== undefined && typeof item.displayText !== 'string') {
+    return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.displayText'])
+  }
+  if (item.fileReferences !== undefined && !schemaIsValid(
+    CLOSED_USER_FILE_REFERENCES_SCHEMA.safeParse(item.fileReferences), diagnostic, 'item_schema', 'item'
+  )) return false
+  if (item.delivery !== undefined && item.delivery !== 'steer') {
+    return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.delivery'])
+  }
+  if ('activeSkillIds' in item && (item.delivery === 'steer' || !isInitialUserSkillIdList(item.activeSkillIds))) {
+    return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.activeSkillIds'])
+  }
+  if (!isOptionalSafePublicId(item.clientUserMessageId)) {
+    return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.clientUserMessageId'])
+  }
+  if (!isOptionalSafePublicId(item.workspaceCheckpointId)) {
+    return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.workspaceCheckpointId'])
+  }
+  return item.attachmentIds === undefined || isSafeIdList(item.attachmentIds) ||
+    invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.attachmentIds'])
 }
 
-function isClosedErrorItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
+function isClosedErrorItem(
+  event: Record<string, unknown>, item: Record<string, unknown>, diagnostic?: DiagnosticRecorder
+): boolean {
   const allowed = [...ITEM_BASE_KEYS, 'message', 'code', 'severity']
-  return hasOnlyKeys(item, allowed) && isClosedItemBase(event, item) && item.role === 'system' &&
+  return (hasOnlyKeys(item, allowed) || invalidValidation(diagnostic, 'item_contract', 'unknown_fields', ['item'])) &&
+    isClosedItemBase(event, item, diagnostic) && item.role === 'system' &&
     new Set(['completed', 'failed', 'aborted']).has(String(item.status)) &&
     isClosedHostError(item.code, item.message) && isOptionalEnum(item.severity, new Set(['info', 'warning', 'error']))
 }
 
-function isClosedToolProgressItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
-  return isClosedItemBase(event, item) && ToolProgressTurnItem.safeParse(item).success
+function isClosedToolProgressItem(
+  event: Record<string, unknown>, item: Record<string, unknown>, diagnostic?: DiagnosticRecorder
+): boolean {
+  return isClosedItemBase(event, item, diagnostic) &&
+    schemaIsValid(ToolProgressTurnItem.safeParse(item), diagnostic, 'item_schema', 'item')
 }
 
-function isClosedApprovalItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
-  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'approvalId', 'toolName', 'summary']) &&
-    isClosedItemBase(event, item) && item.role === 'tool' && isSafePublicId(item.approvalId) &&
-    isSafeToolName(item.toolName) && ApprovalTurnItem.safeParse(item).success
+function isClosedApprovalItem(
+  event: Record<string, unknown>, item: Record<string, unknown>, diagnostic?: DiagnosticRecorder
+): boolean {
+  return (hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'approvalId', 'toolName', 'summary']) ||
+      invalidValidation(diagnostic, 'item_contract', 'unknown_fields', ['item'])) &&
+    isClosedItemBase(event, item, diagnostic) && item.role === 'tool' && isSafePublicId(item.approvalId) &&
+    isSafeToolName(item.toolName) &&
+    schemaIsValid(ApprovalTurnItem.safeParse(item), diagnostic, 'item_schema', 'item')
 }
 
-function isClosedUserInputItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
-  return hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'inputId', 'prompt', 'questions']) &&
-    isClosedItemBase(event, item) &&
+function isClosedUserInputItem(
+  event: Record<string, unknown>, item: Record<string, unknown>, diagnostic?: DiagnosticRecorder
+): boolean {
+  return (hasOnlyKeys(item, [...ITEM_BASE_KEYS, 'inputId', 'prompt', 'questions', 'timedWait']) ||
+      invalidValidation(diagnostic, 'item_contract', 'unknown_fields', ['item'])) &&
+    isClosedItemBase(event, item, diagnostic) &&
     item.role === 'system' && isSafePublicId(item.inputId) &&
-    UserInputTurnItem.safeParse(item).success
+    schemaIsValid(UserInputTurnItem.safeParse(item), diagnostic, 'item_schema', 'item')
 }
 
-function isClosedCompactionItem(event: Record<string, unknown>, item: Record<string, unknown>): boolean {
+function isClosedCompactionItem(
+  event: Record<string, unknown>, item: Record<string, unknown>, diagnostic?: DiagnosticRecorder
+): boolean {
+  if (item.schemaVersion === 5) {
+    return isClosedItemBase(event, item, diagnostic) &&
+      schemaIsValid(CompactionTurnItem.safeParse(item), diagnostic, 'item_schema', 'item')
+  }
   const allowed = [
     ...ITEM_BASE_KEYS, 'summary', 'replacedTokens', 'auto', 'sourceDigest', 'digestMarker',
     'sourceItemIds', 'pinnedConstraints', 'schemaVersion', 'reasoningExcluded', 'reasoningExclusionProof',
@@ -506,7 +681,8 @@ function isClosedCompactionItem(event: Record<string, unknown>, item: Record<str
   ]
   const continuationV4 = item.schemaVersion === 4
   const publicCaseV2 = item.schemaVersion === 3 && item.caseHistoryProjectionVersion === 2
-  return hasOnlyKeys(item, allowed) && isClosedItemBase(event, item) && item.role === 'system' &&
+  return (hasOnlyKeys(item, allowed) || invalidValidation(diagnostic, 'item_contract', 'unknown_fields', ['item'])) &&
+    isClosedItemBase(event, item, diagnostic) && item.role === 'system' &&
     item.status === 'completed' &&
     item.summary === (publicCaseV2 ? CASE_COMPACTION_SUMMARY : GENERAL_COMPACTION_SUMMARY) &&
     (publicCaseV2 ? item.replacedTokens === undefined : isSafeSequence(item.replacedTokens)) &&
@@ -535,65 +711,81 @@ function isClosedCompactionItem(event: Record<string, unknown>, item: Record<str
       item.sourceItemIds.length === 0 && item.assistantProseExcluded === true &&
       item.toolPayloadsExcluded === true && item.caseFactsExcluded === true)) &&
     (continuationV4
-      ? item.auto === true && TaskContinuationSnapshotV1Schema.safeParse(item.taskContinuation).success
+      ? item.auto === true && schemaIsValid(TaskContinuationSnapshotV1Schema.safeParse(item.taskContinuation),
+        diagnostic, 'item_schema', 'item.taskContinuation')
       : item.taskContinuation === undefined)
 }
 
-function isClosedItem(event: Record<string, unknown>): boolean {
-  if (!isRecord(event.item)) return false
+function isClosedItem(event: Record<string, unknown>, diagnostic?: DiagnosticRecorder): boolean {
+  if (!isRecord(event.item)) return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item'])
   const item = event.item
   switch (item.kind) {
     case 'user_message':
-      return isClosedUserMessageItem(event, item)
+      return isClosedUserMessageItem(event, item, diagnostic)
     case 'tool_call':
-      return isClosedItemBase(event, item) && ToolCallTurnItem.safeParse(item).success
+      return isClosedItemBase(event, item, diagnostic) &&
+        schemaIsValid(ToolCallTurnItem.safeParse(item), diagnostic, 'item_schema', 'item')
     case 'tool_result': {
-      if (!isClosedItemBase(event, item)) return false
-      return ToolResultTurnItem.safeParse(item).success
+      if (!isClosedItemBase(event, item, diagnostic)) return false
+      return schemaIsValid(ToolResultTurnItem.safeParse(item), diagnostic, 'item_schema', 'item')
     }
     case 'approval':
-      return isClosedApprovalItem(event, item)
+      return isClosedApprovalItem(event, item, diagnostic)
     case 'user_input':
-      return isClosedUserInputItem(event, item)
+      return isClosedUserInputItem(event, item, diagnostic)
     case 'compaction':
-      return isClosedCompactionItem(event, item)
+      return isClosedCompactionItem(event, item, diagnostic)
     case 'error':
-      return isClosedErrorItem(event, item)
+      return isClosedErrorItem(event, item, diagnostic)
     case 'tool_progress':
-      return isClosedToolProgressItem(event, item)
+      return isClosedToolProgressItem(event, item, diagnostic)
     default:
       // Assistant/review prose is never an ordinary live item. Accepted
       // assistant output is carried only by a sealed accepted-final batch.
-      return false
+      return invalidValidation(diagnostic, 'item_contract', 'unsupported_item_kind', ['item.kind'])
   }
 }
 
-function validateItemLifecycleEvent(event: Record<string, unknown>): boolean {
-  if (!isSafePublicId(event.turnId)) return false
+function validateItemLifecycleEvent(event: Record<string, unknown>, diagnostic?: DiagnosticRecorder): boolean {
+  if (!isSafePublicId(event.turnId)) return invalidValidation(diagnostic, 'item_binding', 'invalid_field', ['turnId'])
   if (event.item !== undefined) {
-    if (event.stage !== undefined || event.callId !== undefined || event.toolName !== undefined ||
-        event.status !== undefined || event.message !== undefined || event.child !== undefined ||
-        event.details !== undefined || !isClosedItem(event)) return false
+    for (const key of ['stage', 'callId', 'toolName', 'status', 'message', 'child', 'details'] as const) {
+      if (event[key] !== undefined) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', [key])
+    }
+    if (!isClosedItem(event, diagnostic)) return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item'])
     const item = event.item as Record<string, unknown>
     // A completed host error is part of an accepted-final or general-terminal
     // suffix. Exposing the same item as a detached ordinary frame would let a
     // spoofed/legacy stream advance the desktop cursor without the matching
     // usage and terminal disposition.
-    if (item.kind === 'error') return false
-    if (event.kind === 'tool_call_started') return item.kind === 'tool_call' && item.status === 'running'
+    if (item.kind === 'error') return invalidValidation(diagnostic, 'item_contract', 'detached_terminal_item', ['item.kind'])
+    if (event.kind === 'tool_call_started') {
+      if (item.kind !== 'tool_call') return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.kind'])
+      return item.status === 'running' || invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.status'])
+    }
     if (event.kind === 'tool_call_finished') {
-      return item.kind === 'tool_result' && new Set(['completed', 'failed']).has(String(item.status))
+      if (item.kind !== 'tool_result') return invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.kind'])
+      return new Set(['completed', 'failed']).has(String(item.status)) ||
+        invalidValidation(diagnostic, 'item_contract', 'invalid_field', ['item.status'])
     }
     return new Set(['item_created', 'item_updated', 'item_completed']).has(String(event.kind))
   }
-  if (!new Set(['item_created', 'item_updated', 'item_completed']).has(String(event.kind)) ||
-      event.message !== 'child output withheld' || !isOptionalSafePublicId(event.callId) ||
-      !isOptionalSafeIdentifier(event.toolName) || !isOptionalEnum(event.status, JOB_STATUSES) ||
-      (event.stage !== undefined && !isClosedChildStage(event.stage)) ||
-      (event.itemId !== undefined && !isSafePublicId(event.itemId))) return false
+  if (!new Set(['item_created', 'item_updated', 'item_completed']).has(String(event.kind))) {
+    return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['kind'])
+  }
+  if (event.message !== 'child output withheld') return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['message'])
+  if (!isOptionalSafePublicId(event.callId)) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['callId'])
+  if (!isOptionalSafeIdentifier(event.toolName)) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['toolName'])
+  if (!isOptionalEnum(event.status, JOB_STATUSES)) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['status'])
+  if (event.stage !== undefined && !isClosedChildStage(event.stage)) {
+    return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['stage'])
+  }
+  if (event.itemId !== undefined && !isSafePublicId(event.itemId)) {
+    return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['itemId'])
+  }
   const child = event.child !== undefined && isClosedChildMetadata(event.child)
   const details = event.details !== undefined && isClosedChildMetadata(event.details)
-  return Boolean(child || details)
+  return Boolean(child || details) || invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['child', 'details'])
 }
 
 function validateToolCallReadyEvent(event: Record<string, unknown>): boolean {
@@ -664,26 +856,31 @@ function validateChildPauseEvent(event: Record<string, unknown>): boolean {
     (event.resumedAt === undefined || isCanonicalTimestamp(event.resumedAt))
 }
 
-function validateApprovalEvent(event: Record<string, unknown>): boolean {
+function validateApprovalEvent(event: Record<string, unknown>, diagnostic?: DiagnosticRecorder): boolean {
   const allowed = event.kind === 'approval_requested'
     ? new Set(['pending'])
     : new Set(['allowed', 'denied', 'expired'])
   return eventHasTurnWithOptionalItem(event) && isSafePublicId(event.approvalId) && isSafeToolName(event.toolName) &&
     typeof event.status === 'string' && allowed.has(event.status) &&
     isOptionalEnum(event.approvalPolicy, APPROVAL_POLICIES) && isOptionalEnum(event.sandboxMode, SANDBOX_MODES) &&
-    ApprovalEvent.safeParse(event).success
+    schemaIsValid(ApprovalEvent.safeParse(event), diagnostic, 'event_schema', '$')
 }
 
-function validateUserInputEvent(event: Record<string, unknown>): boolean {
+function validateUserInputEvent(event: Record<string, unknown>, diagnostic?: DiagnosticRecorder): boolean {
   const allowed = event.kind === 'user_input_requested'
     ? new Set(['pending'])
-    : new Set(['submitted', 'cancelled'])
+    : new Set(['submitted', 'cancelled', 'continued'])
   return eventHasTurnWithOptionalItem(event) && isSafePublicId(event.inputId) &&
-    typeof event.status === 'string' && allowed.has(event.status) && UserInputEvent.safeParse(event).success
+    typeof event.status === 'string' && allowed.has(event.status) &&
+    schemaIsValid(UserInputEvent.safeParse(event), diagnostic, 'event_schema', '$')
 }
 
 function validateCompactionEvent(event: Record<string, unknown>): boolean {
   if (!eventHasTurn(event)) return false
+  if (event.schemaVersion === 3) return CompactionEvent.safeParse(event).success
+  if (event.kind === 'compaction_failed') return false
+  if (['compactionId', 'summaryKind', 'summaryDigest', 'checkpointDigest', 'shadowedItemCount', 'tokenCountKind',
+    'tokenEstimatorVersion', 'turn', 'createdAt', 'startedAt', 'finishedAt', 'reasonCode'].some(key => event[key] !== undefined)) return false
   if (event.kind === 'compaction_started') return event.auto === undefined || typeof event.auto === 'boolean'
   const caseCompaction = event.summary === CASE_COMPACTION_SUMMARY
   return (event.summary === GENERAL_COMPACTION_SUMMARY || caseCompaction) &&
@@ -794,6 +991,7 @@ function isClosedChildStage(value: unknown): boolean {
 }
 
 function validatePipelineEvent(event: Record<string, unknown>): boolean {
+  if (event.stage === 'logical_step_started' || event.stage === 'logical_step_assembled' || event.stage === 'logical_step_closed') return isClosedLogicalStepEvent(event)
   if (!eventHasTurn(event) || !isOptionalSafeSequence(event.attempt) || !isOptionalSafeSequence(event.maxAttempt)) return false
   const hasChild = event.child !== undefined || (event.details !== undefined && isClosedChildMetadata(event.details))
   if (hasChild) {
@@ -803,7 +1001,13 @@ function validatePipelineEvent(event: Record<string, unknown>): boolean {
   }
   const label = pipelineLabel(event.stage)
   return label !== null && event.label === label && event.message === undefined &&
-    (event.details === undefined || isClosedPipelineDetails(event.details))
+    (event.details === undefined || isClosedPipelineDetails(event.details, event.stage)) &&
+    (!isRecord(event.details) || event.details.retry === undefined || (
+      isSafeSequence(event.attempt) && event.attempt > 0 && event.attempt <= 1e15 &&
+      isSafeSequence(event.maxAttempt) && event.maxAttempt >= event.attempt && event.maxAttempt <= 1e15 &&
+      isRecord(event.details.retry) && event.attempt === (event.details.retry.source === 'transport_reconnect'
+        ? event.details.retry.physicalAttempt : event.details.retry.outerAttempt)
+    ))
 }
 
 function isClosedUsageSnapshot(value: unknown): boolean {
@@ -865,7 +1069,7 @@ function isClosedCacheDiagnostics(value: unknown): boolean {
 
 function validateUsageEvent(event: Record<string, unknown>): boolean {
   if (!eventHasTurn(event) || !isOptionalSafeIdentifier(event.model) ||
-      !isOptionalSafeIdentifier(event.providerId) || !isOptionalEnum(event.endpointFormat, ENDPOINT_FORMATS) ||
+      !isOptionalSafeIdentifier(event.providerId) || !(event.endpointFormat === undefined || isPublicProviderEndpointFormat(event.endpointFormat)) ||
       !isOptionalEnum(event.effort, new Set(['auto', 'off', 'low', 'medium', 'high', 'max'])) ||
       !isOptionalSafeIdentifier(event.usageSource) || !isOptionalSafePublicId(event.childRunId) ||
       !isClosedUsageSnapshot(event.usage) ||
@@ -924,7 +1128,7 @@ function fixedHostErrorMessage(code: string): string {
 }
 
 function isClosedHostError(codeValue: unknown, messageValue: unknown): boolean {
-  if (typeof codeValue !== 'string' || !HOST_ERROR_CODES.has(codeValue) || typeof messageValue !== 'string') return false
+  if (!isPublicHostErrorCode(codeValue) || typeof messageValue !== 'string') return false
   return messageValue === fixedHostErrorMessage(codeValue) ||
     messageValue === `Runtime request failed (${codeValue}).`
 }
@@ -1024,57 +1228,6 @@ function isClosedChildMetadata(value: unknown): boolean {
   return true
 }
 
-function isClosedPipelineDetails(value: unknown): boolean {
-  if (!isRecord(value)) return false
-  const allowed = [
-    'visibleRecovery', 'recoveryKind', 'recoveryAttempt', 'maxRecoveryAttempt',
-    'maxRecoveryAttempts', 'recoveryExhausted', 'partialToolStarted', 'maxModelSteps', 'toolName',
-    'guardKind', 'stormCount', 'providerError', 'reasonCode', 'firstReasoningLatencyMs'
-  ]
-  if (!hasOnlyKeys(value, allowed) || !isOptionalBoolean(value.visibleRecovery) ||
-      !isOptionalEnum(value.recoveryKind, new Set([
-        'interrupted_stream', 'step_limit_final_answer', 'empty_final'
-      ])) || !isOptionalSafeSequence(value.recoveryAttempt) ||
-      !isOptionalSafeSequence(value.maxRecoveryAttempt) ||
-      !isOptionalSafeSequence(value.maxRecoveryAttempts) || !isOptionalBoolean(value.recoveryExhausted) ||
-      !isOptionalBoolean(value.partialToolStarted) || !isOptionalSafeSequence(value.maxModelSteps) ||
-      !isOptionalSafeSequence(value.stormCount) || !isOptionalSafeSequence(value.firstReasoningLatencyMs) ||
-      !isOptionalSafeIdentifier(value.toolName) ||
-      !isOptionalEnum(value.guardKind, new Set([
-        'tool_failure', 'invalid_tool_arguments'
-      ])) ||
-      (value.reasonCode !== undefined &&
-        (typeof value.reasonCode !== 'string' || !HOST_ERROR_CODES.has(value.reasonCode)))) return false
-  if (value.providerError === undefined) return true
-  if (!isRecord(value.providerError) || !hasOnlyKeys(value.providerError, [
-    'kind', 'code', 'providerId', 'family', 'endpointFormat', 'model', 'authStatus', 'hasApiKey',
-    'retryable', 'status', 'retryAfterMs', 'attempt', 'failureStage', 'dispatchState'
-  ])) return false
-  const diagnostic = value.providerError
-  const kindAttributed = typeof diagnostic.kind === 'string' && new Set([
-    'auth', 'rate_limit', 'insufficient_balance', 'request', 'server', 'network', 'http',
-    'invalid_model', 'unknown'
-  ]).has(diagnostic.kind)
-  const stageAttributed = typeof diagnostic.failureStage === 'string' &&
-    PROVIDER_FAILURE_STAGES.has(diagnostic.failureStage) &&
-    typeof diagnostic.dispatchState === 'string' && PROVIDER_DISPATCH_STATES.has(diagnostic.dispatchState)
-  return (kindAttributed || stageAttributed) &&
-    (diagnostic.code === undefined ||
-      (typeof diagnostic.code === 'string' && HOST_ERROR_CODES.has(diagnostic.code))) &&
-    isOptionalSafeIdentifier(diagnostic.providerId) && isOptionalSafeIdentifier(diagnostic.family) &&
-    isOptionalSafeIdentifier(diagnostic.model) && isOptionalEnum(diagnostic.endpointFormat, ENDPOINT_FORMATS) &&
-    isOptionalEnum(diagnostic.authStatus, new Set(['none', 'possible', 'required', 'unknown'])) &&
-    isOptionalBoolean(diagnostic.hasApiKey) && isOptionalBoolean(diagnostic.retryable) &&
-    (diagnostic.attempt === undefined ||
-      (isSafeSequence(diagnostic.attempt) && diagnostic.attempt <= 1_000_000)) &&
-    isOptionalEnum(diagnostic.failureStage, PROVIDER_FAILURE_STAGES) &&
-    isOptionalEnum(diagnostic.dispatchState, PROVIDER_DISPATCH_STATES) &&
-    (diagnostic.status === undefined ||
-      (isSafeSequence(diagnostic.status) && diagnostic.status <= 599)) &&
-    (diagnostic.retryAfterMs === undefined ||
-      (isSafeSequence(diagnostic.retryAfterMs) && diagnostic.retryAfterMs <= 900_000))
-}
-
 function isClosedGeneralTerminalErrorDetails(value: unknown): boolean {
   if (!isRecord(value) || !hasOnlyKeys(value, [
     'status', 'retryAfterMs', 'attempt', 'maxAttempt', 'recoveryAttempt', 'maxRecoveryAttempt',
@@ -1101,13 +1254,13 @@ function isClosedGeneralTerminalErrorDetails(value: unknown): boolean {
     ])) && isOptionalEnum(value.promptRoute, new Set([
       'direct_answer', 'light_agent', 'tool_agent', 'subagent_agent'
     ])) &&
-    isOptionalEnum(value.endpointFormat, ENDPOINT_FORMATS) &&
+    (value.endpointFormat === undefined || isPublicProviderEndpointFormat(value.endpointFormat)) &&
     isOptionalEnum(value.kind, new Set([
       'auth', 'rate_limit', 'insufficient_balance', 'request', 'server', 'network', 'http',
       'invalid_model', 'unknown'
     ])) && isOptionalEnum(value.authStatus, new Set(['none', 'required'])) &&
-    isOptionalEnum(value.failureStage, PROVIDER_FAILURE_STAGES) &&
-    isOptionalEnum(value.dispatchState, PROVIDER_DISPATCH_STATES) &&
+    (value.failureStage === undefined || isPublicProviderFailureStage(value.failureStage)) &&
+    (value.dispatchState === undefined || isPublicProviderDispatchState(value.dispatchState)) &&
     isOptionalBoolean(value.hasApiKey) && isOptionalBoolean(value.retryable) &&
     isOptionalBoolean(value.executed) && isOptionalBoolean(value.partialToolStarted) &&
     isOptionalBoolean(value.visibleRecovery) && isOptionalBoolean(value.recoveryExhausted)
@@ -1123,14 +1276,14 @@ function isClosedErrorDetails(value: unknown): boolean {
   return (value.status === undefined || (isSafeSequence(value.status) && value.status <= 599)) &&
     isOptionalSafeIdentifier(value.providerId) && isOptionalSafeIdentifier(value.provider) &&
     isOptionalSafeIdentifier(value.family) && isOptionalSafeIdentifier(value.model) &&
-    isOptionalEnum(value.endpointFormat, ENDPOINT_FORMATS) &&
+    (value.endpointFormat === undefined || isPublicProviderEndpointFormat(value.endpointFormat)) &&
     isOptionalEnum(value.kind, new Set([
       'auth', 'rate_limit', 'insufficient_balance', 'request', 'server', 'network', 'http',
       'invalid_model', 'unknown'
     ])) && isOptionalEnum(value.authStatus, new Set(['none', 'possible', 'required', 'unknown'])) &&
     isOptionalBoolean(value.hasApiKey) && isOptionalBoolean(value.retryable) &&
-    isOptionalEnum(value.failureStage, PROVIDER_FAILURE_STAGES) &&
-    isOptionalEnum(value.dispatchState, PROVIDER_DISPATCH_STATES) &&
+    (value.failureStage === undefined || isPublicProviderFailureStage(value.failureStage)) &&
+    (value.dispatchState === undefined || isPublicProviderDispatchState(value.dispatchState)) &&
     isOptionalSafeSequence(value.attempt) && isOptionalSafeSequence(value.maxAttempt) &&
     (value.port === undefined || (isSafeSequence(value.port) && value.port <= 65_535)) &&
     isOptionalEnum(value.backend, new Set(['go', 'runtime-go', 'go-runtime-default'])) &&
@@ -1139,13 +1292,13 @@ function isClosedErrorDetails(value: unknown): boolean {
     isOptionalEnum(value.phase, new Set(['setup', 'highest_seq', 'replay', 'live']))
 }
 
-function isClosedAcceptedFinalDeliveryBatch(event: Record<string, unknown>): boolean {
+function isClosedAcceptedFinalDeliveryBatch(event: Record<string, unknown>, diagnostic?: DiagnosticRecorder): boolean {
   const allowed = [
     'kind', 'seq', 'timestamp', 'threadId', 'turnId', 'schemaVersion', 'purpose', 'batchId',
     'firstSeq', 'lastSeq', 'publicationCommitId', 'eventManifestDigest', 'publicationAuthority',
     'events', 'trace'
   ]
-  if (!AcceptedFinalDeliveryBatchV2Schema.safeParse(event).success ||
+  if (!schemaIsValid(AcceptedFinalDeliveryBatchV2Schema.safeParse(event), diagnostic, 'event_schema', '$') ||
       !hasOnlyKeys(event, allowed) || event.schemaVersion !== 2 ||
       event.purpose !== 'analytix.accepted-final-delivery-batch/v2' ||
       event.kind !== 'accepted_final_batch' || !isExactNonEmptyString(event.threadId) ||
@@ -1212,7 +1365,7 @@ function isClosedAcceptedFinalDeliverySeal(value: unknown): boolean {
     isExactNonEmptyString(value.timestamp) && isSafeSequence(value.firstSeq) && isSafeSequence(value.lastSeq)
 }
 
-function isClosedGeneralTerminalDeliveryBatch(event: Record<string, unknown>): boolean {
+function isClosedGeneralTerminalDeliveryBatch(event: Record<string, unknown>, diagnostic?: DiagnosticRecorder): boolean {
   const allowed = [
     'kind', 'seq', 'timestamp', 'threadId', 'turnId', 'schemaVersion', 'purpose',
     'batchDigest', 'firstSeq', 'lastSeq', 'generalTerminalCommitId',
@@ -1221,7 +1374,8 @@ function isClosedGeneralTerminalDeliveryBatch(event: Record<string, unknown>): b
     'factAnswerAllowed', 'events', 'eventManifest'
   ]
   const parsed = GeneralTerminalDeliveryBatchV1Schema.safeParse(event)
-  if (!parsed.success || containsInternalCaseEntityReference(event) || !hasOnlyKeys(event, allowed) ||
+  if (!schemaIsValid(parsed, diagnostic, 'event_schema', '$') ||
+      containsInternalCaseEntityReference(event) || !hasOnlyKeys(event, allowed) ||
       !isCanonicalTimestamp(event.timestamp) || !isSafePublicId(event.threadId) ||
       !isSafePublicId(event.turnId) || !isSafeSequence(event.seq) ||
       !isSafeSequence(event.firstSeq) || !isSafeSequence(event.lastSeq) ||
@@ -1260,18 +1414,40 @@ function claimsAcceptedFinalDeliveryAuthority(event: Record<string, unknown>): b
 }
 
 export function isClosedPublicRuntimeSseEvent(event: Record<string, unknown>): boolean {
+  return validateClosedPublicRuntimeSseEvent(event)
+}
+
+function validateClosedPublicRuntimeSseEvent(
+  event: Record<string, unknown>, diagnostic?: DiagnosticRecorder
+): boolean {
   const kind = typeof event.kind === 'string' ? event.kind : ''
-  if (kind === 'public_projection_revoked') return isPublicProjectionRevokedEvent(event)
-  if (kind === 'accepted_final_batch') return isClosedAcceptedFinalDeliveryBatch(event)
-  if (kind === 'general_terminal_batch') return isClosedGeneralTerminalDeliveryBatch(event)
+  if (kind === 'goal_activation_changed') {
+    return GoalActivationChangedEventV1.safeParse(event).success && isSafePublicId(event.threadId) &&
+      isCanonicalTimestamp(event.timestamp) && isPublicSseIpcPayload({ streamId: 'goal-live-validation', events: [event] })
+  }
+  if (kind === 'public_projection_revoked') {
+    return schemaIsValid(PublicProjectionRevokedEventSchema.safeParse(event), diagnostic, 'event_schema', '$')
+  }
+  if (kind === 'accepted_final_batch') return isClosedAcceptedFinalDeliveryBatch(event, diagnostic)
+  if (kind === 'general_terminal_batch') return isClosedGeneralTerminalDeliveryBatch(event, diagnostic)
   const contract = PUBLIC_EVENT_CONTRACTS[kind]
-  if (!contract || !hasOnlyKeys(event, [...BASE_EVENT_KEYS, ...contract.keys])) return false
-  if (!isSafeSequence(event.seq) || !isCanonicalTimestamp(event.timestamp) ||
-      !isSafePublicId(event.threadId) ||
-      (event.turnId !== undefined && !isSafePublicId(event.turnId)) ||
-      (event.itemId !== undefined && !isSafePublicId(event.itemId)) ||
-      !isClosedTrace(event.trace) || !contract.validate(event)) return false
-  return isPublicSseIpcPayload({ streamId: 'strict-sse-validation', events: [event] })
+  if (!contract) return invalidValidation(diagnostic, 'event_contract', 'unsupported_event_kind', ['kind'])
+  if (!hasOnlyKeys(event, [...BASE_EVENT_KEYS, ...contract.keys])) {
+    return invalidValidation(diagnostic, 'event_contract', 'unknown_fields', ['$'])
+  }
+  if (!isSafeSequence(event.seq)) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['seq'])
+  if (!isCanonicalTimestamp(event.timestamp)) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['timestamp'])
+  if (!isSafePublicId(event.threadId)) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['threadId'])
+  if (event.turnId !== undefined && !isSafePublicId(event.turnId)) {
+    return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['turnId'])
+  }
+  if (event.itemId !== undefined && !isSafePublicId(event.itemId)) {
+    return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['itemId'])
+  }
+  if (!isClosedTrace(event.trace)) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['trace'])
+  if (!contract.validate(event, diagnostic)) return invalidValidation(diagnostic, 'event_contract', 'invalid_field', ['$'])
+  return isPublicSseIpcPayload({ streamId: 'strict-sse-validation', events: [event] }) ||
+    invalidValidation(diagnostic, 'public_content', 'public_content_rejected', ['$'])
 }
 
 export function isStrictPublicRuntimeSseIpcPayload(value: unknown): value is {
@@ -1393,45 +1569,96 @@ function parseStrictFrame(block: string): {
 export function projectPublicRuntimeSseBlock(
   block: string,
   expectedThreadId: string,
-  filter: PublicRuntimeEventFilter
+  filter: PublicRuntimeEventFilter,
+  onDiagnostic?: (diagnostic: PublicRuntimeSseDecodeDiagnostic) => void
 ): PublicRuntimeSseDecision | null {
+  let firstDiagnostic: PublicRuntimeSseDecodeDiagnostic | undefined
+  const recordDiagnostic = (validation: PublicRuntimeSseDecodeDiagnostic['validation']): DiagnosticRecorder =>
+    (stage, reason, fieldPaths) => {
+      if (!onDiagnostic || firstDiagnostic) return
+      firstDiagnostic = Object.freeze({
+        validation, stage, reason, fieldPaths: Object.freeze([...fieldPaths].slice(0, 12))
+      })
+    }
+  const inputDiagnostic = onDiagnostic ? recordDiagnostic('input') : undefined
+  const projectedDiagnostic = onDiagnostic ? recordDiagnostic('projected') : undefined
+  const reject = (
+    decision: Extract<PublicRuntimeSseDecision, { status: 'invalid' | 'withheld' }>,
+    stage: DiagnosticStage,
+    reason: DiagnosticReason,
+    fieldPaths: readonly DiagnosticFieldPath[],
+    validation: PublicRuntimeSseDecodeDiagnostic['validation'] = 'input'
+  ): PublicRuntimeSseDecision => {
+    // A specific first-validation failure takes precedence over its caller's
+    // generic fallback. Observing it must not change the stream decision.
+    recordDiagnostic(validation)(stage, reason, fieldPaths)
+    if (firstDiagnostic && onDiagnostic) {
+      try {
+        onDiagnostic(firstDiagnostic)
+      } catch {
+        // Observer errors do not change the decoder decision.
+      }
+    }
+    return decision
+  }
   const trimmed = block.trim()
   if (!trimmed || trimmed.split(/\r?\n/).every((line) => !line || line.startsWith(':'))) return null
   const parsed = parseStrictFrame(block)
-  if (!parsed) return { status: 'invalid', reason: 'malformed_frame' }
+  if (!parsed) return reject({ status: 'invalid', reason: 'malformed_frame' }, 'frame', 'malformed_frame', ['$'])
   if (parsed.event === 'public_projection_revoked') {
     if (parsed.id !== undefined || parsed.data.kind !== parsed.event) {
-      return { status: 'invalid', reason: 'malformed_frame' }
+      return reject({ status: 'invalid', reason: 'malformed_frame' }, 'frame', 'malformed_frame', ['$'])
     }
-    if (!isPublicProjectionRevokedEvent(parsed.data)) {
-      return { status: 'invalid', reason: 'invalid_public_projection' }
+    // Keep this parse at the original revocation gate; do not revalidate for
+    // diagnosis after a boolean failure.
+    const revocation = PublicProjectionRevokedEventSchema.safeParse(parsed.data)
+    if (!schemaIsValid(revocation, inputDiagnostic, 'event_schema', '$')) {
+      return reject({ status: 'invalid', reason: 'invalid_public_projection' }, 'event_schema', 'invalid_field', ['$'])
     }
     if (parsed.data.threadId !== expectedThreadId) {
-      return { status: 'invalid', reason: 'event_thread_mismatch' }
+      return reject({ status: 'invalid', reason: 'event_thread_mismatch' }, 'transport_binding', 'binding_mismatch', ['threadId'])
     }
-    return { status: 'revoke', event: parsed.data }
+    // The original guard narrows this value to the same schema type. The
+    // parsed output is intentionally not substituted for the transport item.
+    return { status: 'revoke', event: parsed.data as PublicProjectionRevokedEvent }
   }
-  if (parsed.id === undefined) return { status: 'invalid', reason: 'missing_transport_binding' }
+  if (parsed.event === 'goal_activation_changed') {
+    if (parsed.id !== undefined || parsed.data.kind !== parsed.event || parsed.data.threadId !== expectedThreadId ||
+        !validateClosedPublicRuntimeSseEvent(parsed.data)) {
+      return reject({ status: 'invalid', reason: 'invalid_public_projection' }, 'event_contract', 'invalid_field', ['$'])
+    }
+    const projected = filter.push(parsed.data)
+    if (!projected || !validateClosedPublicRuntimeSseEvent(projected)) {
+      return reject({ status: 'invalid', reason: 'invalid_public_projection' }, 'projection_filter', 'projection_rejected', ['$'])
+    }
+    // Zero is only the decoder's non-durable scheduling sentinel. It never
+    // enters the payload, transport id, ACK cursor or persisted history.
+    return { status: 'emit', event: projected, seq: 0 }
+  }
+  if (parsed.id === undefined) return reject({ status: 'invalid', reason: 'missing_transport_binding' },
+    'transport_binding', 'missing_transport_binding', ['seq'])
   const seq = Number(parsed.id)
-  if (!Number.isSafeInteger(seq)) return { status: 'invalid', reason: 'missing_transport_binding' }
-  if (parsed.data.kind !== parsed.event) return { status: 'invalid', reason: 'event_kind_mismatch' }
+  if (!Number.isSafeInteger(seq)) return reject({ status: 'invalid', reason: 'missing_transport_binding' },
+    'transport_binding', 'missing_transport_binding', ['seq'])
+  if (parsed.data.kind !== parsed.event) return reject({ status: 'invalid', reason: 'event_kind_mismatch' },
+    'transport_binding', 'binding_mismatch', ['kind'])
   if (parsed.data.seq !== seq || !isSafeSequence(parsed.data.seq)) {
-    return { status: 'invalid', reason: 'event_sequence_mismatch' }
+    return reject({ status: 'invalid', reason: 'event_sequence_mismatch' }, 'transport_binding', 'binding_mismatch', ['seq'])
   }
   if (parsed.data.threadId !== expectedThreadId || !isExactNonEmptyString(parsed.data.threadId)) {
-    return { status: 'invalid', reason: 'event_thread_mismatch' }
+    return reject({ status: 'invalid', reason: 'event_thread_mismatch' }, 'transport_binding', 'binding_mismatch', ['threadId'])
   }
   if (PRIVATE_EVENT_KINDS.has(parsed.event)) {
-    return { status: 'withheld', seq, reason: 'restricted_content' }
+    return reject({ status: 'withheld', seq, reason: 'restricted_content' }, 'public_content', 'restricted_content', ['kind'])
   }
   if (!PUBLIC_EVENT_CONTRACTS[parsed.event]) {
-    return { status: 'invalid', reason: 'unsupported_event_kind' }
+    return reject({ status: 'invalid', reason: 'unsupported_event_kind' }, 'event_contract', 'unsupported_event_kind', ['kind'])
   }
   // Validate the host-owned closed event before the generic public-content
   // filter. The filter may withhold private fields, but it must never turn an
   // open provider/tool/MCP payload into a new public contract.
-  if (!isClosedPublicRuntimeSseEvent(parsed.data)) {
-    return { status: 'invalid', reason: 'invalid_public_projection' }
+  if (!validateClosedPublicRuntimeSseEvent(parsed.data, inputDiagnostic)) {
+    return reject({ status: 'invalid', reason: 'invalid_public_projection' }, 'event_contract', 'invalid_field', ['$'])
   }
 
   const projected = filter.push(parsed.data)
@@ -1442,12 +1669,22 @@ export function projectPublicRuntimeSseBlock(
       parsed.event === 'agent_reasoning' ||
       item?.kind === 'assistant_reasoning'
     return privateKind || parsed.event === 'assistant_text_delta'
-      ? { status: 'withheld', seq, reason: 'restricted_content' }
-      : { status: 'invalid', reason: 'invalid_public_projection' }
+      ? reject({ status: 'withheld', seq, reason: 'restricted_content' },
+        'projection_filter', 'restricted_content', ['$'], 'projected')
+      : reject({ status: 'invalid', reason: 'invalid_public_projection' },
+        'projection_filter', 'projection_rejected', ['$'], 'projected')
   }
-  if (projected.kind !== parsed.event || projected.seq !== seq || projected.threadId !== expectedThreadId ||
-      !isClosedPublicRuntimeSseEvent(projected)) {
-    return { status: 'invalid', reason: 'invalid_public_projection' }
+  if (projected.kind !== parsed.event) {
+    return reject({ status: 'invalid', reason: 'invalid_public_projection' }, 'projected_binding', 'binding_mismatch', ['kind'], 'projected')
+  }
+  if (projected.seq !== seq) {
+    return reject({ status: 'invalid', reason: 'invalid_public_projection' }, 'projected_binding', 'binding_mismatch', ['seq'], 'projected')
+  }
+  if (projected.threadId !== expectedThreadId) {
+    return reject({ status: 'invalid', reason: 'invalid_public_projection' }, 'projected_binding', 'binding_mismatch', ['threadId'], 'projected')
+  }
+  if (!validateClosedPublicRuntimeSseEvent(projected, projectedDiagnostic)) {
+    return reject({ status: 'invalid', reason: 'invalid_public_projection' }, 'event_contract', 'invalid_field', ['$'], 'projected')
   }
   return { status: 'emit', event: projected, seq }
 }

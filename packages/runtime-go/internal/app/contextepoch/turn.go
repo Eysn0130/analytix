@@ -15,10 +15,15 @@ import (
 
 const SecurityBindingSourceID = "turn-security-binding"
 
+// InitialUserSkillKind is reserved for user-requested, turn-local snapshot instructions.
+const InitialUserSkillKind = "initial-user-skill"
+
 type PrepareTurnInput struct {
-	Thread          map[string]any
-	SecurityContext domainsecurity.TurnSecurityContext
-	At              time.Time
+	ReplaceInitialSkills bool
+	Sources              []domaincontextepoch.SourceEntry
+	Thread               map[string]any
+	SecurityContext      domainsecurity.TurnSecurityContext
+	At                   time.Time
 }
 
 type PrepareTurnResult struct {
@@ -29,6 +34,7 @@ type PrepareTurnResult struct {
 }
 
 type PrepareStartRecordsInput struct {
+	Sources          []domaincontextepoch.SourceEntry
 	Thread           map[string]any
 	SecurityContext  domainsecurity.TurnSecurityContext
 	At               time.Time
@@ -46,7 +52,7 @@ type PrepareStartRecordsResult struct {
 }
 
 func PrepareAndAttachStartRecords(ctx context.Context, input PrepareStartRecordsInput) (PrepareStartRecordsResult, error) {
-	prepared, err := PrepareTurn(PrepareTurnInput{Thread: input.Thread, SecurityContext: input.SecurityContext, At: input.At})
+	prepared, err := PrepareTurn(PrepareTurnInput{Thread: input.Thread, SecurityContext: input.SecurityContext, At: input.At, Sources: input.Sources, ReplaceInitialSkills: true})
 	if err != nil {
 		return PrepareStartRecordsResult{}, err
 	}
@@ -116,6 +122,37 @@ func PrepareTurn(input PrepareTurnInput) (PrepareTurnResult, error) {
 		state, _, err = ParseOrDefault(value, input.SecurityContext.ThreadID, input.SecurityContext.ContextEpoch, at)
 		if err != nil {
 			return PrepareTurnResult{}, err
+		}
+	}
+	// Initial skill sources are selected anew for each initial admission. Never
+	// replay an old skill merely because its gesture remains in history.
+	if input.ReplaceInitialSkills {
+		selected := map[string]bool{}
+		for _, source := range input.Sources {
+			selected[source.SourceID] = true
+		}
+		for _, source := range append([]domaincontextepoch.SourceEntry(nil), state.Registry...) {
+			if source.Kind == InitialUserSkillKind && !selected[source.SourceID] {
+				var sourceChanged bool
+				var err error
+				state, sourceChanged, err = Remove(state, source.SourceID, false)
+				if err != nil {
+					return PrepareTurnResult{}, err
+				}
+				reconcileCurrent = reconcileCurrent || sourceChanged
+			}
+		}
+		for _, source := range input.Sources {
+			if source.Kind != InitialUserSkillKind || source.PromptBoundary != domaincontextepoch.BoundaryDynamicContext {
+				return PrepareTurnResult{}, errors.New("initial skill source boundary is invalid")
+			}
+			var sourceChanged bool
+			var err error
+			state, sourceChanged, err = Upsert(state, source, false)
+			if err != nil {
+				return PrepareTurnResult{}, err
+			}
+			reconcileCurrent = reconcileCurrent || sourceChanged
 		}
 	}
 	if reconcileCurrent {

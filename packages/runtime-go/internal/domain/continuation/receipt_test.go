@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
@@ -68,6 +69,61 @@ func TestContinuationReceiptRoundTripAndTamperRejected(t *testing.T) {
 	unknown := strings.TrimSuffix(string(body), "}") + `,"unknown":true}`
 	if _, err := ParseReceipt([]byte(unknown)); err == nil {
 		t.Fatal("unknown continuation receipt fields must be rejected")
+	}
+}
+
+func TestContinuationReceiptSignsExactOptionalModelVisibleDefinitionV1(t *testing.T) {
+	base, privateKey := continuationPayloadFixture(t, KindApproval, "write_file", "pending", time.Now().UTC())
+	for _, definition := range []*domainmodel.ToolDefinitionSnapshotV1{
+		nil,
+		{SchemaJSON: `{"name":"write_file","description":"ACTUAL_REQUEST","parameters":{"type":"object"}}`},
+		{Truncated: true},
+	} {
+		// Old nil and both new observations use the same authority key and
+		// original payload; adding display facts does not rotate authority.
+		payload := base
+		payload.ModelVisibleToolDefinition = definition
+		publicKey := privateKey.Public().(ed25519.PublicKey)
+		receipt, err := NewReceipt(payload, domainsecurity.SHA256Hex(publicKey), publicKey, func(message []byte) ([]byte, error) {
+			return ed25519.Sign(privateKey, message), nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := ReceiptBytes(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := ParseReceipt(body)
+		if err != nil || !ed25519.Verify(publicKey, ReceiptSigningBytes(parsed), mustReceiptSignature(t, parsed)) || parsed.Payload.ExecutionGrant.SchemaHash != payload.ExecutionGrant.SchemaHash {
+			t.Fatal("optional display definition changed grant authority or lost its signature", err)
+		}
+		roundTrip, err := ReceiptBytes(parsed)
+		if err != nil || !bytes.Equal(roundTrip, body) {
+			t.Fatal("signed receipt bytes changed after parsing")
+		}
+		if definition == nil {
+			if parsed.Payload.ModelVisibleToolDefinition != nil || bytes.Contains(body, []byte("modelVisibleToolDefinition")) {
+				t.Fatal("old nil definition changed the wire")
+			}
+			continue
+		}
+		if parsed.Payload.ModelVisibleToolDefinition == nil || *parsed.Payload.ModelVisibleToolDefinition != *definition {
+			t.Fatal("original definition was not retained")
+		}
+		definition.SchemaJSON, definition.Truncated = `{"name":"write_file","description":"LATER_CATALOG","parameters":{}}`, false
+		if *receipt.Payload.ModelVisibleToolDefinition == *definition {
+			t.Fatal("receipt kept the producer's mutable pointer")
+		}
+		tampered := parsed
+		tampered.Payload.ModelVisibleToolDefinition = domainmodel.CloneToolDefinitionSnapshotV1(definition)
+		if ValidateReceipt(tampered) == nil {
+			t.Fatal("changed display definition reused the receipt digest")
+		}
+		tampered.ReceiptID = payloadDigest(tampered.Payload)
+		if ed25519.Verify(publicKey, ReceiptSigningBytes(tampered), mustReceiptSignature(t, parsed)) {
+			t.Fatal("model-visible definition was not signed")
+		}
 	}
 }
 
@@ -168,6 +224,7 @@ func TestContinuationV3UsesV3SigningDomains(t *testing.T) {
 
 func TestLegacyV2ContinuationRemainsVerifiableButCannotResume(t *testing.T) {
 	payload, privateKey := continuationPayloadFixture(t, KindApproval, "write_file", "pending", time.Now().UTC())
+	currentPayload := payload
 	payload.Version, payload.ProviderNamespace, payload.TerminalRecoveryKind = ContractVersionV2, ProviderContinuationNamespaceV1{}, TerminalRecoveryNoneV1
 	payload = withoutProviderStepBinding(payload)
 	publicKey := privateKey.Public().(ed25519.PublicKey)
@@ -180,12 +237,30 @@ func TestLegacyV2ContinuationRemainsVerifiableButCannotResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if bytes.Contains(body, []byte("modelVisibleToolDefinition")) {
+		t.Fatal("legacy nil definition changed signed wire bytes")
+	}
 	parsed, err := ParseReceipt(body)
 	if err != nil || !ed25519.Verify(publicKey, ReceiptSigningBytes(parsed), mustReceiptSignature(t, parsed)) {
 		t.Fatalf("legacy V2 continuation lost audit verification: err=%v", err)
 	}
+	currentPayload.ModelVisibleToolDefinition = &domainmodel.ToolDefinitionSnapshotV1{SchemaJSON: `{"name":"write_file","description":"ACTUAL_REQUEST","parameters":{}}`}
+	current, err := NewReceipt(currentPayload, parsed.AuthorityKeyID, publicKey, func(message []byte) ([]byte, error) {
+		return ed25519.Sign(privateKey, message), nil
+	})
+	if err != nil || current.AuthorityKeyID != parsed.AuthorityKeyID || !ed25519.Verify(publicKey, ReceiptSigningBytes(current), mustReceiptSignature(t, current)) {
+		t.Fatal("old V2 and new V3 definition did not verify under the same existing authority key", err)
+	}
 	if err := ValidateReceiptForExecution(parsed); err == nil {
 		t.Fatal("legacy V2 continuation authorized provider resume")
+	}
+	if parsed.Payload.ModelVisibleToolDefinition != nil {
+		t.Fatal("legacy receipt acquired a current definition")
+	}
+	withDefinition := parsed
+	withDefinition.Payload.ModelVisibleToolDefinition = &domainmodel.ToolDefinitionSnapshotV1{SchemaJSON: `{"name":"write_file","description":"new","parameters":{}}`}
+	if ValidateReceipt(withDefinition) == nil {
+		t.Fatal("legacy V2 accepted an unsigned new definition")
 	}
 	injected := parsed
 	injected.Payload.PrivateProtocolObserved = true
@@ -494,4 +569,198 @@ func mustReceiptSignature(t *testing.T, receipt Receipt) []byte {
 		t.Fatal(err)
 	}
 	return signature
+}
+
+func TestPrivateQuestionDraftReceiptIsPurposeSeparatedAndNeverAGate(t *testing.T) {
+	now := time.Now().UTC()
+	payload, private := continuationPayloadFixture(t, KindUserInput, "request_user_input", "not_required", now)
+	public := private.Public().(ed25519.PublicKey)
+	keyID := domainsecurity.SHA256Hex(public)
+	sign := func(body []byte) ([]byte, error) { return ed25519.Sign(private, body), nil }
+	source, err := NewReceipt(payload, keyID, public, sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := UserInputDraftSnapshotV1{CurrentPage: 0, Answers: []UserInputDraftAnswerV1{{QuestionID: source.Payload.GateID + "_1", OptionIDs: []string{}, CustomText: "  unfinished\n  "}}}
+	revision := "00000000-0000-4000-8000-000000000001"
+	draft, err := NewUserInputDraftReceiptV1(source, revision, nil, snapshot, domainsecurity.SHA256Hex([]byte("synthetic-empty-capture-set")), now.Add(2*time.Second), keyID, public, sign)
+	if err != nil || draft.Payload.Kind != KindUserInputDraft || ValidateUserInputDraftSourceV1(draft, source) != nil {
+		t.Fatal("draft source authority failed", err)
+	}
+	body, err := ReceiptBytes(draft)
+	parsed, parseErr := ParseReceipt(body)
+	if err != nil || parseErr != nil || !ed25519.Verify(public, ReceiptSigningBytes(parsed), mustReceiptSignature(t, parsed)) || !bytes.HasPrefix(ReceiptSigningBytes(parsed), []byte(userInputDraftSigningDomainV1)) {
+		t.Fatal("signed draft roundtrip failed")
+	}
+	// The new private purpose must not serialize zero security or provider
+	// authority, and must reject both omitted linkage and extra authority.
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(body, &envelope) != nil {
+		t.Fatal("draft envelope is invalid")
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(envelope["payload"], &fields) != nil || len(fields) != 9 {
+		t.Fatal("draft payload did not use its minimal wire")
+	}
+	for _, bad := range []string{
+		strings.Replace(string(body), `"parentRevision":null,`, ``, 1),
+		strings.Replace(string(body), `"kind":"user_input_draft"`, `"kind":"user_input_draft","arguments":null`, 1),
+		strings.Replace(string(body), `"kind":"user_input_draft"`, `"kind":"user_input_draft","kind":"user_input_draft"`, 1),
+		strings.Replace(string(body), `"snapshot":`, `"snapshot":null,"snapshot":`, 1),
+	} {
+		if _, err := ParseReceipt([]byte(bad)); err == nil {
+			t.Fatal("nonclosed draft wire accepted")
+		}
+	}
+	type ordinaryWire Payload
+	ordinaryBytes, ordinaryErr := json.Marshal(ordinaryWire(source.Payload))
+	actualBytes, actualErr := json.Marshal(source.Payload)
+	if ordinaryErr != nil || actualErr != nil || !bytes.Equal(ordinaryBytes, actualBytes) {
+		t.Fatal("ordinary payload signing wire changed")
+	}
+	if ValidateReceiptForExecution(draft) == nil {
+		t.Fatal("draft authorized execution")
+	}
+	if _, err := NewDisposition(draft, StatusSubmitted, "user_input_submitted", now.Add(3*time.Second), keyID, public, sign); err == nil {
+		t.Fatal("draft acquired a gate disposition")
+	}
+	other, err := NewUserInputDraftReceiptV1(source, "00000000-0000-4000-8000-000000000002", nil, snapshot, draft.Payload.UserInputDraft.CaptureSetSHA256, now.Add(2*time.Second), keyID, public, sign)
+	if err != nil || other.Payload.GateID != draft.Payload.GateID || other.ReceiptID == draft.ReceiptID {
+		t.Fatal("different children escaped the same parent slot")
+	}
+	copied := CloneUserInputDraftSnapshotV1(snapshot)
+	copied.Answers[0].CustomText = "changed"
+	tampered := draft
+	link := *draft.Payload.UserInputDraft
+	link.Snapshot = copied
+	tampered.Payload.UserInputDraft = &link
+	tampered.ReceiptID = payloadDigest(tampered.Payload)
+	if ed25519.Verify(public, ReceiptSigningBytes(tampered), mustReceiptSignature(t, draft)) {
+		t.Fatal("draft signature did not cover unfinished content")
+	}
+	tampered = draft
+	tampered.Payload.Arguments = json.RawMessage(`{"raw":"not-draft"}`)
+	if _, err := json.Marshal(tampered.Payload); err == nil {
+		t.Fatal("private wire silently dropped extra authority")
+	}
+	if ValidatePayload(tampered.Payload) == nil {
+		t.Fatal("draft carried copied model/tool authority")
+	}
+}
+
+func TestPrivateQuestionDraftSnapshotRequiresClosedPartialState(t *testing.T) {
+	inputID := "input_" + strings.Repeat("a", 64)
+	valid := `{"currentPage":0,"answers":[{"questionId":"` + inputID + `_1","optionIds":[],"customText":" \n ","skipped":false}]}`
+	var snapshot UserInputDraftSnapshotV1
+	if json.Unmarshal([]byte(valid), &snapshot) != nil || ValidateUserInputDraftSnapshotV1(snapshot, inputID) != nil {
+		t.Fatal("blank unfinished text rejected")
+	}
+	for _, raw := range []string{
+		strings.Replace(valid, `"skipped":false`, `"skipped":false,"skipped":true`, 1),
+		strings.Replace(valid, `,"skipped":false`, ``, 1),
+		strings.Replace(valid, `"optionIds":[]`, `"optionIds":null`, 1),
+		strings.Replace(valid, `"currentPage":0`, `"currentPage":0,"extra":true`, 1),
+		strings.Replace(valid, `"customText":" \n "`, `"customText":"\ud800"`, 1),
+	} {
+		if json.Unmarshal([]byte(raw), &snapshot) == nil {
+			t.Fatal("open/ambiguous partial draft accepted")
+		}
+	}
+}
+
+func TestQuestionUnknownContinuedIsReasonBoundAndNeverLiveUnlimitedTimeout(t *testing.T) {
+	now := time.Now().UTC()
+	payload, privateKey := continuationPayloadFixture(t, KindUserInput, "request_user_input", "not_required", now)
+	payload.UserInputTimedWait = &UserInputTimedWaitV1{TimeoutSeconds: -1}
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	keyID := domainsecurity.SHA256Hex(publicKey)
+	sign := func(body []byte) ([]byte, error) { return ed25519.Sign(privateKey, body), nil }
+	receipt, err := NewReceipt(payload, keyID, publicKey, sign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewDisposition(receipt, StatusContinued, ReasonUserInputContinuedV1, now.Add(2*time.Second), keyID, publicKey, sign); err == nil {
+		t.Fatal("live unlimited call became a successful foreground timeout")
+	}
+	disposition, err := NewDisposition(receipt, StatusContinued, ReasonUserInputOutcomeUnknownAfterRestartV1, now.Add(2*time.Second), keyID, publicKey, sign)
+	if err != nil || ValidateDisposition(disposition) != nil || !ValidUserInputContinuedReasonV1(payload.UserInputTimedWait, disposition.ReasonCode) {
+		t.Fatal("unknown reason did not preserve interrupted unlimited association", err)
+	}
+	if projection, ok := ResolveProjection(KindUserInput, disposition.Status, disposition.ReasonCode); !ok || projection.PublicStatus != "continued" {
+		t.Fatal("unknown Question public reopen relation lost")
+	}
+	if ValidUserInputContinuedReasonV1(nil, ReasonUserInputOutcomeUnknownAfterRestartV1) {
+		t.Fatal("ordinary legacy Question was converted to timed continued")
+	}
+}
+
+func TestPrivateDraftWaitChoicePreservesOmissionAndClosedClone(t *testing.T) {
+	inputID := "input_" + strings.Repeat("a", 64)
+	for _, wait := range []string{"waiting", "editing"} {
+		raw := `{"currentPage":0,"answers":[],"wait":"` + wait + `"}`
+		var snapshot UserInputDraftSnapshotV1
+		if json.Unmarshal([]byte(raw), &snapshot) != nil || ValidateUserInputDraftSnapshotV1(snapshot, inputID) != nil || snapshot.Wait == nil || *snapshot.Wait != wait {
+			t.Fatal("private wait choice did not round trip")
+		}
+		copy := CloneUserInputDraftSnapshotV1(snapshot)
+		*copy.Wait = "waiting"
+		if wait == "editing" && *snapshot.Wait != "editing" {
+			t.Fatal("draft wait clone retained mutable pointer")
+		}
+	}
+	for _, raw := range []string{`{"currentPage":0,"answers":[],"wait":null}`, `{"currentPage":0,"answers":[],"wait": null }`, `{"currentPage":0,"answers":[],"wait":"approved"}`} {
+		var snapshot UserInputDraftSnapshotV1
+		if err := json.Unmarshal([]byte(raw), &snapshot); err == nil && ValidateUserInputDraftSnapshotV1(snapshot, inputID) == nil {
+			t.Fatal("invalid wait choice became authority")
+		}
+	}
+	var old UserInputDraftSnapshotV1
+	if json.Unmarshal([]byte(`{"currentPage":0,"answers":[]}`), &old) != nil || old.Wait != nil {
+		t.Fatal("old signed snapshot omission changed")
+	}
+	body, _ := json.Marshal(old)
+	if bytes.Contains(body, []byte(`"wait"`)) {
+		t.Fatal("old canonical signing bytes gained a wait field")
+	}
+}
+
+func TestPlanReviewReceiptRemainsLegacyBlocking(t *testing.T) {
+	payload, _ := continuationPayloadFixture(t, KindUserInput, "exit_plan_mode", "not_required", time.Now().UTC())
+	if err := ValidatePayload(payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, seconds := range []int{-1, 1, 120} {
+		payload.UserInputTimedWait = &UserInputTimedWaitV1{TimeoutSeconds: seconds}
+		if ValidatePayload(payload) == nil {
+			t.Fatal("plan review acquired timed policy")
+		}
+	}
+}
+
+func TestOutputCapContinuationIsSignedScopedAndLegacyOmitted(t *testing.T) {
+	payload, privateKey := continuationPayloadFixture(t, KindApproval, "write_file", "pending", time.Now().UTC())
+	legacy, _ := json.Marshal(payload)
+	if bytes.Contains(legacy, []byte(`"outputCapLogicalSequence"`)) {
+		t.Fatal("legacy signing bytes changed")
+	}
+	payload.OutputCapLogicalSequence = 1
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	receipt, err := NewReceipt(payload, domainsecurity.SHA256Hex(publicKey), publicKey, func(message []byte) ([]byte, error) { return ed25519.Sign(privateKey, message), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := ReceiptBytes(receipt)
+	parsed, err := ParseReceipt(body)
+	if err != nil || parsed.Payload.OutputCapLogicalSequence != 1 || parsed.Payload.ThreadID != payload.ThreadID || parsed.Payload.TurnID != payload.TurnID {
+		t.Fatal("output cap did not survive its exact signed turn continuation")
+	}
+	tampered := parsed
+	tampered.Payload.OutputCapLogicalSequence = 0
+	if ValidateReceipt(tampered) == nil {
+		t.Fatal("unsigned cap removal accepted")
+	}
+	payload.OutputCapLogicalSequence = 2
+	if ValidatePayload(payload) == nil {
+		t.Fatal("future output cap sequence accepted")
+	}
 }

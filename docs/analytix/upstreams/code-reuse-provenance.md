@@ -3,7 +3,8 @@
 Status: Operational admission and attribution ledger.
 Applies to: copied, ported, vendored, generated, extracted, or substantially
 adapted upstream code, tests, prompts, documentation, binaries, and assets.
-Current as of: 2026-10-02.
+Current as of: 2026-10-11 for scoped source-record reconciliation and the Schedule and Present candidates below;
+other reviews retain their recorded dates and evidence bounds.
 Source of truth: pinned Git objects, written authorization records, source
 history, file-level licenses/notices, and reviewed Analytix diffs.
 
@@ -31,11 +32,28 @@ Allowed dispositions are `candidate`, `unverified`, `blocked`, `approved`,
 `rejected`, and `retired`. `unverified` is not approval to ship a copied or
 substantially adapted implementation.
 
+The DSH port follows the user-confirmed [migration rule](deepseek-harness-presentation-sync.md#confirmed-migration-rule).
+Cross-product defect repairs require official implementation evidence and
+recorded behavior changes, plus this ledger's existing file-level license,
+provenance and admission checks; the rule grants no additional reuse rights.
+
 ## Current Review Queue
 
 | Item | Admission scope | Source id | Evidence | Current disposition | Required closure |
 | --- | --- | --- | --- | --- | --- |
-| DeepSeek Harness central presentation leaves | `artifact-entering` | `deepseek-harness` | [Exact pinned objects, paths, MIT terms and adaptation boundaries](deepseek-harness-presentation-sync.md) | `candidate` | Close focused source/UI evidence and coordinator integration; no native/live/parity claim. |
+| DeepSeek Harness user message CSS and shared calendar destinations | `artifact-entering` | `deepseek-harness` | [Existing pinned objects and updated destination map](#dsh-user-message-destination-update--2026-10-15-utc) | `candidate` | Preserve existing MIT notice and native editing/privacy contracts; combined regression and rendered acceptance remain pending. |
+| DeepSeek Harness independent public trajectory v2 | `artifact-entering` | `deepseek-harness` | [Ten pinned presentation sources and v2 destinations](#deepseek-harness-independent-public-trajectory-source-intake--2026-10-15-utc) | `candidate` | Preserve existing MIT notice, public projection and protected Inspect ownership; candidate application and coordinated execution acceptance remain pending. |
+| DeepSeek Harness Markdown, protected-local Shell/Read, central composition and inline process/work-details policy | `artifact-entering` | `deepseek-harness` | [Pinned source objects, retained MIT notice and scoped 2100397 integration](deepseek-harness-presentation-sync.md#2026-10-10--scoped-source-admission-at-2100397) | `approved` for the listed source objects and adaptations only | Source admission is checked at candidate `210039729892bf80fb8e0e9a7c909b70266ec6bc`; all listed source path/blob pairs match fixed pin `5badb150…`. Earlier `0ac4f84d…` and subsequent source freezes retain their historical test/environment bounds. Existing protected-local authority, explicit Footer Fork semantic adaptation, selected Browse three-path artwork and full MIT notice are preserved. Full DSH parity, native/installed behavior, current CI/main, packaged distribution and release remain OPEN. |
+| DeepSeek Harness settled grep/glob Search leaves | `artifact-entering` | `deepseek-harness` | [Four pinned leaf objects and protected-local adaptations](#deepseek-harness-settled-search-candidate); [current source admission](deepseek-harness-presentation-sync.md#2026-10-10--scoped-source-admission-at-2100397) | `approved` for these four source leaves and adapters only | The four recorded source blobs and current destinations are verified in integrated candidate `210039729892bf80fb8e0e9a7c909b70266ec6bc`; historical checkpoint `155951ff…` is its ancestor. Prior freeze hashes and validation counts remain bound to their original inputs. Preserve fixed source maps, headers, complete MIT notice and existing protected-local authority; full Search/DSH parity, native, current CI/main, packaged distribution and release remain OPEN. |
+| DeepSeek Harness capped process-group scroll adaptation | `artifact-entering` | `deepseek-harness` | [Two pinned scroll-source objects and existing renderer owner](deepseek-harness-presentation-sync.md#capped-process-group-scroll-source-delta-2026-10-11) | `candidate` | Exact pin/blob and MIT notice are recorded; focused process-scroll regressions pass, while the wider visual unit retains an unresolved Records counterexample. Independent delta review, canonical integration and runtime acceptance remain pending. Preserve existing display authority and the full notice; no outer transcript controller, upstream store or execution authority is imported. |
+| DeepSeek Harness process glyphs and public searchable folds | `artifact-entering` | `deepseek-harness` | [Exact selected glyph/helper objects and public/private adaptations](deepseek-harness-presentation-sync.md#process-glyphs-and-public-searchable-folds-source-candidate-2026-10-11); [bounded integration evidence](deepseek-harness-presentation-sync.md#svgfind-and-width-source-integration-checkpoint-2026-10-11) | `candidate` | Fixed pin/blob and scoped MIT reads are verified; A17 is locally integrated with the byte-matched SVG/find and width validation. Preserve selected Plan/AgentPreset artwork, existing Question/Browse/Globe, full notice and private leaf retirement. Native Chromium/Electron find/focus/visibility/scroll and full admission/parity remain OPEN. |
+| DeepSeek Harness main Conversation width controls | `artifact-entering` | `deepseek-harness` | [Exact pinned width/phase/style sources and existing renderer owners](deepseek-harness-presentation-sync.md#main-conversation-width-candidate-2026-10-11); [bounded integration evidence](deepseek-harness-presentation-sync.md#svgfind-and-width-source-integration-checkpoint-2026-10-11) | `candidate` | Pinned source objects and full MIT notice are retained; B8 is locally integrated with byte-matched grouped tests, types, affected lint and renderer build. Continuable parent and elected overlay producer seams, native UI, full admission and parity remain OPEN. No upstream store, runtime phase or execution authority is imported. |
+| DeepSeek Harness generated Office deliveries and selected shared file artwork | `artifact-entering` | `deepseek-harness` | [Exact ten-object map, selected artwork and license bounds](deepseek-harness-presentation-sync.md#generated-office-deliveries-and-shared-file-artwork-source-candidate-2026-10-11); [bounded admission record](#deepseek-harness-generated-office-deliveries-and-selected-file-artwork-candidate) | `candidate` | The 11-file renderer unit is locally integrated with Plan7/Shell5 and bounded fixture/type/lint/renderer evidence. Real Office receipts, protected-local Inspect, existing preview authority and full MIT notice are retained; native and full admission remain OPEN. Selected W/P/MD/file/grid/DeliverDoc artwork is explicitly included; CodeFileIcon/simple-icons and unselected assets remain excluded. Full DSH declaration/action parity is OPEN. |
+| DeepSeek Harness submitted readonly Plan history cards | `artifact-entering` | `deepseek-harness` | [Pinned PlanCard/CSS subsets and shared Markdown artwork](deepseek-harness-presentation-sync.md#generated-office-deliveries-and-shared-file-artwork-source-candidate-2026-10-11) | `candidate` | Plan7 is locally integrated with the byte-matched 23-file source combination. Exact signed-history selectors and fresh Host-authorized private reads remain the only Plan identity/display authority. History offers Open only; normal pending approval retains its existing implementation route. Native and full DSH parity remain OPEN. |
+| DeepSeek Harness single-message feedback actions, optional modal and canonical-log semantics | `artifact-entering` | `deepseek-harness` | [Exact pinned feedback/selected-artwork source map and bounded candidate evidence](deepseek-harness-presentation-sync.md#single-message-feedback-source-candidate-2026-10-11) | `candidate` | Forty isolated source paths retain the b090 base and full MIT notice. Two P2 owner/portal deltas are repaired with 14 affected-case, web-type and five-file lint passes; byte-identical Go/unrelated evidence is reused. Existing canonical event-log and protected authority/content guards are preserved. Feedback commit `c5b8434765b76128a081462bee21c9f3aef1b464` is locally integrated into the coordinated branch at `90c2578e5521bbcd11e606d7e2588871ebcc1f66`; 38 blobs and both IPC hunk deltas are verified. Current combined validation, final admission, native/full parity, packaging, CI and release remain OPEN. No upstream store/runtime, log upload or third-party sending code is imported. |
+| DeepSeek Harness Schedule creation tail and native right task-detail presentation | `artifact-entering` | `deepseek-harness` | [Exact pinned Schedule/artwork/token objects, MIT notice and local source binding](deepseek-harness-presentation-sync.md#schedule-presentation-source-candidate-2026-10-11) | `candidate` | UI37, Analytix-owned Backend20 and Markdown2 are locally integrated at `eff56c96d3975d6d3435bd1d667089ce43b0a96a`, tree `fd586ee76b6c68b0baec811b647e72b148df8712`; all 59 blobs/modes bind the green exact4a62 archive. Selected 328 tests, web/node/runtime types, affected lint and one renderer-only build pass; unchanged Backend 86 Go/133 TS evidence is reused separately. Fixed pin `5badb150…`, selected object map and complete MIT notice are retained. Fresh Host receipt/catalog authority and actual Workbench Sidebar are preserved. Native/installed visual, absent delivery/timing/session capabilities, full admission/parity, CI/main, packaging and release remain OPEN. |
+| DeepSeek Harness Subagent Started rows and Todo failure/parallel-active presentation | `artifact-entering` | `deepseek-harness` | [Selected fixed objects, native adaptations and exact combined source binding](deepseek-harness-presentation-sync.md#subagent-and-todo-local-integration-2026-10-11) | `candidate` | Subagent15, Todo failure3 and Todo parallel18 are locally integrated at `41617a787278edeb0c413778524a0959a621727d`, tree `c3eab1b3a02e15bfd35055d04c9f831709867b78`. Fixed pin `5badb150…`, MIT and the complete notice apply. Typed Started receipt/native child controls, verbatim protected failed/stopped IN, concurrent active Todo contracts and authoritative store updates retain existing owners. Exact combined nine-file 222/222 and separate store 131/131 pass; types/lint and one renderer-only build are source-bound, without adding old owner counts. Native/installed UI, full DSH parity, current CI/main, packaging and release remain OPEN. |
+| DeepSeek Harness Present declaration/process cards, grouped file deliveries and native file-action presentation | `artifact-entering` | `deepseek-harness` | [Pinned source map and local integration checkpoint](deepseek-harness-presentation-sync.md#present-declaration-file-actions-and-local-integration-2026-10-11); [bounded admission record](#deepseek-harness-present-declaration-and-file-actions-candidate) | `candidate` | TS/Host/UI44 `47989644c…` and Go20 `fe915a405…` are normally merged at `17ff805a7fe3ab9338bf2ca511947c01cd497d88`, tree `3292e9a10c981d6ed32968e91699f3939fb7588d`; all64 modes/blobs match their frozen sources. Existing 20 unique fixture suites / 966 cases use scoped reuse; Go V3 evidence is reported separately. One fresh-archive renderer-only build passes (644 files / 42,416,109 bytes). Three existing provenance/notice documents record the closure; original rejection and preflight diagnostic records remain preserved. Native/installed, Provider, CI/main, full admission/parity, packaging and release remain OPEN. |
 | Kun-derived product baseline | `artifact-entering` | `kun` | Exact matching historical trees prove the inherited baseline; representative file/blob mappings and both historical/current license blobs are recorded below | `blocked` | Owner must provide material-specific commercial authorization and approve a complete inherited-file attribution inventory; the team authorization declaration is not that evidence. |
 | Reasonix-derived `packages/runtime-go/internal/netclient/netclient.go` | `artifact-entering` | `deepseek-reasonix` | Exact source, introduction, current destination, MIT license, notice, modifications, reviewer, and test mapping are recorded below | `approved` | Preserve the file header, `THIRD_PARTY_NOTICES.md`, exact object record, and focused contract tests. |
 | Reasonix-derived `packages/runtime-go/internal/diff/diff.go` | `artifact-entering` | `deepseek-reasonix` | Exact source, introduction, current destination, MIT license, notice, modifications, reviewer, and test mapping are recorded below | `approved` | Preserve the file header, `THIRD_PARTY_NOTICES.md`, exact object record, and focused contract tests. |
@@ -47,7 +65,64 @@ substantially adapted implementation.
 | Claude Code code/prompts/plugin text | `research-only` | `claude-code` | `LICENSE.md` is all-rights-reserved under commercial terms | `rejected` absent authorization | Clean-room behavioral requirements/tests only. |
 | OpenCode, Hermes, Lazy, and Claw candidate files | `research-only` | `multiple` | Root licenses are MIT, with file-level exceptions in Hermes/Lazy; no Analytix destination admitted | `candidate` | Record exact source/destination blobs and preserve applicable MIT/Apache/NOTICE material before copying. |
 
-| OpenAI Apps SDK UI renderer icon candidates | `artifact-entering` | `openai/apps-sdk-ui` | 139 exact public MIT source blobs, real consumers, full decisions, notice and bounded adapter recorded below | `approved` for these vector sources only | Preserve pinned vectors/notice and explicit semantic/brand/data exceptions; current-web pixel identity is not claimed. |
+| OpenAI Apps SDK UI renderer icon candidates | `artifact-entering` | `openai/apps-sdk-ui` | [Fixed official source, retained MIT license and registration](openai-apps-sdk-ui-sync.md); the 139-object approval/map remains below | `approved` for these vector sources only | All 139 fixed source tuples and actual destinations match; preserve pin, complete MIT notice and explicit semantic/brand/data exceptions. Marker remains `not-proven`/null. New ledger tracked-HEAD binding is required before artifact admission; detached/no-tracking freshness and default-root availability remain separate. Current-web identity, native, CI/main and distribution acceptance remain OPEN. |
+
+
+## 2026-10-10 — scoped source-record reconciliation
+
+The two DSH queue dispositions above approve bounded source admission at
+candidate `210039729892bf80fb8e0e9a7c909b70266ec6bc`, tree
+`2a59d76106a0e042a690f8a94281a7f7f7e64893`. Independent read-only review read
+134 distinct source path/blob pairs (1,222,506 bytes) from the fixed DSH Git
+checkout, verified the complete MIT license/notice and checked current
+integration. The [presentation ledger](deepseek-harness-presentation-sync.md#2026-10-10--scoped-source-admission-at-2100397)
+records the exact scope, historical checkpoint ancestry and retired shared CSS
+mapping. Earlier candidate descriptions remain historical; only their source
+admission and integration-open statements are superseded here. Their test,
+compiler, build, native and behavior claims keep their original inputs.
+
+The manifest's current `analytixCommit` is this scoped candidate. Its former
+`196c6dd3f6d74c660224b88117963ba52508389f` object is available but is not an
+ancestor of this candidate; the unchanged pre-rewrite commit/map retain the
+previous review's history context. This rebinding does not merge private
+history, refresh every other upstream review or establish release acceptance.
+
+The initial four-path freeze left Apps SDK UI source registration OPEN. A
+subsequently authorized normal retrieval from the official repository now
+closes actual source readback at pin
+`0f00143c7a639906f1621fe58e1b6be7b5bea46d`, tree
+`5c2aabc9e419aa1c55d6ebb8d219e19287bbb494`: all 139 source path/blob/SHA-256
+tuples (168,494 bytes), the existing approval table, actual destination bytes
+and candidate 210 tracked objects match. The root MIT license is exactly
+1054 bytes, blob `b8ac8dc0f960bbe0b0cc90cd06d58b672151773f`, SHA-256
+`f26a46776c890b0d7b45d042cb8a78fdca9c4742a5c7fd97f0f53767411b1cc6`;
+it matches the local LICENSE and complete NOTICE. Two read-only reviewers
+found no nested license/notice exception, gitlink, linked asset or runtime
+import. The historical 139-vector approval remains bounded to those objects.
+
+The [independent Apps SDK ledger](openai-apps-sdk-ui-sync.md) binds the exact
+source id/pin and `not-proven`/null marker. The registry records the actual
+isolated checkout basename `apps-sdk-ui`, official origin and empty detached
+branch; it does not manufacture branch tracking. The closed license catalogue
+adds only the verified content hash. Unknown/altered license bytes and
+source/pin/marker mismatch remain rejected. New ledger tracked-HEAD binding
+is still required; a correct uncommitted ledger does not establish artifact
+admission. Default-root availability and latest/tracking freshness are
+separate; the Apps-only source root leaves the overall research inventory
+UNVERIFIED. The exact source/marker and negative regressions are in the
+existing upstream-source contract, without a generic source or MIT exemption.
+
+The current NOTICE digest is
+`3199c29b46b438513c7b578b618dae2e6f87df26ffabb40cf4ada850d3f97d94`.
+Its only changes from fixed historic `bbae1caa` are the verified DSH scope and
+three-path Browse artwork attribution; other sources and MIT terms are
+byte-identical. The artifact audit's fixed digest is updated to those exact
+reviewed bytes, retaining its fail-closed comparison. This record work is limited
+to the existing direct upstream-source contract and JSON/link/diff checks; no
+Go, compiler, build or native check is authorized. Full DSH/native, current
+CI/main, packaged distribution and release remain OPEN; Kun remains blocked
+on material-specific commercial authorization and the complete inherited-file
+inventory.
 
 ## File-level closure records
 
@@ -572,3 +647,1605 @@ Canvas admission and full provenance for external redistribution remain separate
 
 - Reviewer: delegated UI coordinating writer, 2026-10-03; fixed source object, license, import/asset boundary and 20px contact sheet reviewed before copy. Attribution remains the exact MIT text in `openai-icons/LICENSE` and `THIRD_PARTY_NOTICES.md`; packaged NOTICE propagation remains mandatory.
 - Validation: exact 139 vendor/manifest/adapter source sets and source/MIT hashes passed; the complete 203 export, 37 inline and 22 registry decisions passed owner checks. Focused renderer tests (159 distinct cases across the initial run and necessary repaired reruns), type checking, scoped lint, renderer build and packaged-NOTICE positive/negative selftests passed. Eight native Electron synthetic combinations covered light/dark, 900/1440 widths, 100/125% scale and 14–24px glyphs; actual sidebar menu, pin and Escape focus were checked. Independent read-only semantic/license/visual review found one stale five-source scope description, corrected before delivery. Existing reduced-motion spinner behavior remains outside this icon change. This evidence does not establish installed-product, Provider, performance, CI or release acceptance.
+
+
+### DeepSeek Harness typed-tool candidate
+
+`artifact-entering` / `candidate`, reviewed official pin
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`; exact source/destination/blob and
+adaptation obligations are recorded in the [typed-tool intake section](deepseek-harness-presentation-sync.md#typed-tool-model-and-leaf-candidate).
+MIT terms and DeepSeek copyright remain in existing `THIRD_PARTY_NOTICES.md`.
+No new asset, dependency, Cordis runtime, raw tool history, or default side effect
+is admitted. Reviewer: typed-tool writer with read-only source reviewer. Five affected suites pass on the exact candidate; the additional shared chat
+suite has two retained DOM-selector failures owned by parallel unit B. Compiler,
+scoped lint, renderer build, B-owned locale combination and coordinator
+integration remain pending; this row is not parity.
+
+
+The subsequent [A+B configured-Mac validation](deepseek-harness-presentation-sync.md#typed-tool-and-turn-state-combined-source-validation)
+uses the exact 07dd fresh archive and disjoint 39-path payload. Ten suites pass
+351 cases; the missing-turnId test-only type repair passes the overlapping 117
+mapper cases. Web/unchanged Node types and scoped affected lint pass with zero
+lint errors/warnings; the renderer-only 640-file artifact passes with manifest
+SHA-256 `35c29db857f6aa455838d384303091a5d292134af1d7aaab47d962b906fbb0e0`.
+Exact failures, input revisions and unchanged-program proofs stay in private
+receipts; stable public test/compiler/build methods are linked in that section. B-owned en/zh labels and shared
+Bash selector are verified in the combination. This closes those local checks,
+not the explicit missing producer fields, full parity or coordinator integration.
+No dependency install, main/preload/Go/native/Provider/CI/release result is added.
+
+
+### DeepSeek Harness settled Search candidate
+
+`artifact-entering` / `candidate`, reviewed official repository
+`deepseek-ai/deepseek-harness` at
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`. Reuse mode: `port-and-adapt`.
+The four ordinary source blobs below have no separate file-level license notice
+or asset dependency. SPDX `MIT`; copyright (c) 2026 DeepSeek. Root `LICENSE`
+blob `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785` and the existing complete
+DeepSeek MIT section in `THIRD_PARTY_NOTICES.md` cover this bounded intake.
+The four destination headers retain the pin and copyright/NOTICE pointer.
+
+| Fixed upstream path | Blob | Analytix destination | Frozen destination SHA-256 |
+| --- | --- | --- | --- |
+| `packages/client/ui-tool/src/client/tool/toolviews/search-row.tsx` | `a500d170eee7295b04767aee6d72233e6e693810` | `src/renderer/src/components/chat/presentation/chat/toolviews/search-row.tsx` | `2697109e7356446a7383f793f69184301f3d6ae6f05f946064762d6f83674be4` |
+| `packages/client/ui-tool/src/client/tool/models/search-card-model.ts` | `cc4d25b6b51127002677562f04f4fde543671a9a` | `src/renderer/src/components/chat/presentation/chat/models/search-card-model.ts` | `3089bc9530518323f483a467ab6998c6790530cecaad68d731b3396173b506e2` |
+| `packages/client/ui-primitives/src/SearchBlock.tsx` | `c2328d6a9d16ed29c1cc0a5b8e293cdf5aa6d559` | `src/renderer/src/components/chat/presentation/SearchBlock.tsx` | `7ac578cdfb483577416c5f88d4ed07ee391ea7f702ab1fcbc70354e28d5c915c` |
+| `packages/client/ui-primitives/src/SearchBlock.module.css` | `9b95d72f3d98eafe2c3aa3c423db5d57bf45758d` | `src/renderer/src/components/chat/presentation/SearchBlock.module.css` | `a8556f29bdf46798b23b6c3f0e83a11b254f44bbf7433dc2a68545d1448c40c8` |
+
+Modifications preserve DSH's exact settled root `grep`/`glob` specialization,
+file grouping, real line numbers, file disclosure, eight-row Chat head/tail
+preview and copy independent of UI folding. Analytix replaces raw public result
+metadata with the existing authorized protected-local capture/CAS/display and
+Host effect routes. Actual producer context rows and columns are retained;
+unknown totals stay null. Producer truncation and display-capture truncation are
+distinct. Snapshot identity/digest replaces DSH's raw full-result text locator;
+it does not promise recovery of results omitted before capture. Paths are display
+text without navigation targets. Nonspecialized authorized captures use private IN/OUT; unavailable or legacy
+records retain their existing generic fallback. No Cordis/slot/session package or new dependency is copied.
+
+The Go producer, closed DTO, transport propagation, public identity selector,
+SearchRow export and fifteen en/zh `dshSearch.*` strings are Analytix-owned
+adapters. Locale wording is authored for the local contract, including unknown
+totals and redacted copying; upstream locale files are not admitted by this row.
+Reviewer: Search dedicated owner and public wiring writer, with independent
+read-only source/key review. Source is bound to baseline
+`155951ff79d4134fd9099e67e6697da6e1f640e5`, tree
+`2b204b95bf10bba6213c5052ce8d30641a024a75`, and the coordinator's 22-path
+Search freeze (14 production paths and eight test paths), source fingerprint
+`703a00f2e6afc3efd3a76c202605cbb82585019c670de26ffaabaebf334a09ad`.
+The seven-path public wiring delta is separate and disjoint; it does not consume unfrozen Live fields.
+
+Validation: pinned Git blobs, existing notice, current leaf keys and disjoint
+owner paths checked by read-only inspection; source tests are prepared but
+unexecuted. Combined producer/CAS/DTO/consumer tests, affected types/lint,
+renderer build, native/GUI evidence and canonical integration remain OPEN.
+No earlier Web or Question PASS is transferred to this candidate. See the
+[settled Search source record](deepseek-harness-presentation-sync.md#settled-search-source-candidate)
+for the bounded behavior and remaining seams. This row does not establish full
+Search parity, Provider/CI or release acceptance.
+
+
+### Historical Fetch Core item isolation follow-up
+
+The native exact155 checkpoint (HEAD
+`155951ff79d4134fd9099e67e6697da6e1f640e5`, tree
+`2b204b95bf10bba6213c5052ce8d30641a024a75`) retained Question's normal-flow
+PASS and Fetch's immediate PASS, with Fetch history/thread-switch/reopen FAIL.
+The source-bound synthetic native receipt has SHA-256
+`924e8ae813f301ea3f38f61e32f0ce7307780a28d875c7378121281b9673f17d`;
+its failure remains evidence for that unchanged checkpoint.
+
+The local adapter repair keeps the original Core item separate from a closed
+five-field renderer turn context in `getThreadDetail`. The mapper strict-validates
+the original tool result, constructs the closed Web/Search identity selector,
+then projects renderer context through the existing disclosure helper. No Core
+schema is loosened and no original unknown fields are removed. Item checkpoint
+precedence and user/approval display metadata retain their existing rules.
+The clone-only timeline helper is retired after its sole consumer adopts the
+explicit item/context pair. These are local adapters, not new upstream reuse.
+
+The public writer adds the existing `analytix-runtime.ts` and
+`chat/toolviews/web-fetch-row.test.tsx` to its original seven-path delta, for nine
+public paths. With frozen Search22 and prefs2 the combined candidate is 33 paths;
+prior Search7/29/31 source receipts remain historical bindings. New regression
+sources use real history loading → mapper → ProtectedToolResult/Inspect,
+including completed/failed HTTP, absent/populated turn context and original
+unknown Core/output denial. At that source freeze they were prepared and unexecuted; the subsequent
+Search33 checkpoint below records fresh results. Current-source
+TS/Go/type/lint/build validation and native Web history/thread-switch/reopen
+retest remain OPEN; the earlier Question and immediate Fetch results are not
+relabeled as proof for the repaired source.
+
+
+### Search33 isolated validation checkpoint
+
+The coordinator-granted serial source window completed on 2026-10-08 against
+exact `155951ff79d4134fd9099e67e6697da6e1f640e5`, tree
+`2b204b95bf10bba6213c5052ce8d30641a024a75`, plus disjoint frozen Search22,
+public9 (including the historical Fetch repair) and prefs2 patches. The tested
+33-path source fingerprint is
+`7417b00605334f0863d7be99ed9e29f319d047e86cc786fb742704ceb88b4c2e`;
+the immutable `validation.json` receipt SHA-256 is
+`8fc3cf538204f967c8447d00aef2d9f8fddc3a939fa15113b329e7095a2ad3e3`.
+This record is appended after execution; it does not rewrite the source-freeze
+or previous native failure receipts. Only these two provenance documents change
+after the tested freeze; the 31 non-document paths retain their tested bytes.
+
+Focused TypeScript results are 72 passed and two failed across 74 selected cases:
+historical Core DTO isolation through real history/mapper/Fetch/Inspect 16 PASS;
+Search closed DTO/Host lease/public mapper 38 PASS; desktop preference and
+hydration nine PASS; existing history pair coalescing one PASS; four Search
+leaf suites eight PASS and two FAIL. Filtered existing cases were not rerun and
+are not counted. Web, Node and runtime type checks PASS with TypeScript 5.9.3.
+The serial Go three-package selection PASSes all ten selected top-level tests,
+including real Search producer → capture/CAS close-reopen → authorized display,
+count/truncation and physical-envelope denial, and existing Web restart
+compatibility; Go 1.26.4 uses local toolchain and disabled module network access.
+No real Provider or external webpage request is used.
+
+The Search leaf FAILs remain open in the original owner's scope. The isolated
+`ProtectedToolResult.search.test.tsx` lacks the initialized i18n instance used by
+existing pane tests: repeated translation identities trigger the unchanged
+retirement effect. Do not remove the existing lease/retirement fences to make
+this test pass. The actual Search mapper/dispatch test reaches an undefined
+component after the `SearchRow → ToolViews → message-timeline-bubbles →
+ToolCallTree` module initialization cycle. The original Search writer and
+coordinator must close that real dispatch boundary; changing only test import
+order does not establish a source fix. Search failure log SHA-256:
+`b7e7af558e70deb71daada2680e2a65135f691cf06e08ed3a3bd37b0e008dce0`.
+
+The changed 20-path lint run FAILs its zero-warning gate on one
+`react-hooks/exhaustive-deps` warning in
+`chat-presentation-preferences.test.ts:75` (`settings` is an unnecessary outer
+scope dependency). The prefs writer owns that repair. Lint log SHA-256:
+`dfc5a40174cd36ac112e1e637f4965c076fc363b12750c4c99664dbc9173c1a8`.
+Renderer build is BLOCKED by these fresh failures and was not started. The
+heavy window is released. Repaired-source native Web history/thread-switch/
+reopen, canonical integration and current CI remain OPEN. Question's old PASS
+and Fetch's old immediate PASS retain their exact155 native binding; no native,
+full Search parity, Live, commit, push or release acceptance is added here.
+
+
+### Shared DSH conversation chrome source checkpoint (unvalidated)
+
+The public writer continues exact `155951ff79d4134fd9099e67e6697da6e1f640e5`.
+The coordinator-approved shared/public consumers, existing ProcessPane/Tree,
+main-stage geometry, seven additional visual/font paths and two newly approved
+main-chat font consumer paths, the approved actual MarkdownTable owner and
+the existing TextShimmer owner comprise32 changed paths (original28 plus4).
+This source checkpoint supersedes no historical test receipt: the repaired
+bytes await the authorized final focused tests, type checks, lint and one
+renderer-only build. The first isolated86
+candidate ran 585 tests: 577 passed and8 failed, with web types failing one
+Search fixture literal0 constraint; node/runtime types, affected lint and the
+single renderer-only build passed for that exact earlier source. Those results
+are not acceptance of these repaired bytes. Canonical integration and full
+DSH acceptance remain OPEN. Search's exact22 input after its nine-byte fixture
+type correction is separately frozen at fingerprint
+`e7b39308ca156129c775ae0cdb6a6b2b414c93ccde81ed4a9dc4f08457acccbb`;
+only its required public fallback, count locales, transparent Search margin
+and explicit Web fixture error assertion are incorporated by this writer.
+No dedicated Search/Live producer, private wire schema, Main authority or model
+egress source is copied into this worktree. Original Live producer corrections
+and their refreshed freeze remain the original owner's responsibility.
+
+Selected sources at upstream `5badb15009ae1756c3afe0ae0cef1faafc290ccc`:
+
+| Pinned source | Git blob |
+| --- | --- |
+| `packages/client/ui-primitives/src/icons/index.tsx` | `d22cbdd06d50289f15154996564b250b2af4163a` |
+| `packages/client/ui-primitives/src/icons/shared-artwork.tsx` | `ab7b4083246dbb3c8ec4be78c6ecae89e9821532` |
+| `packages/client/ui-primitives/src/DisclosureRow.tsx` | `7b98eca2fcd72c0a41331670f7d5023849979781` |
+| `packages/client/ui-primitives/src/DisclosureRow.module.css` | `90fc1f8c2dc88a33035866076ae5f6774d547ca8` |
+| `packages/client/ui-tool/src/client/tool/components/ToolRow.tsx` | `5bc7af68358a4427af4f37ebee7561817ad78f3c` |
+| `packages/client/ui-tool/src/client/tool/components/ToolRow.module.css` | `5be4d641be0c5f9d7a13ae7413c07db72671502c` |
+| `packages/client/ui-tool/src/client/tool/toolviews/GenericToolCard.tsx` | `bc0faacb13fe6fe4a3a4e834828d2c5333f22320` |
+| `packages/client/ui-primitives/src/CodeCard.module.css` | `359002d14ff847d17920d53f7ff46f97dba91d5b` |
+| `packages/client/ui-user-questions/src/client/QuestionComposer.module.css` | `5f2eb4701ba2222f2959110ed066469047626ad7` |
+| `packages/client/ui-approval/src/client/ApprovalPanel.module.css` | `edf5a7bf792d4a7f42ba6ee2229ec023b87600e5` |
+| `packages/client/ui-chat/src/client/chat/ChatGroupSeat.tsx` | `443cb0407a3eb0b6b7e22d2b8be315d4eecd3155` |
+| `packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css` | `3aa0a9d1f933651c53851358d0be59f8bef8ca49` |
+| `packages/client/ui-theme/src/styles/base.css` | `23be07f678050d8f144199d0312697118b9f33bc` |
+| `packages/client/ui-theme/src/styles/design-platform.css` | `eb67869c92bf53162dbd443c8a0e4fe8baabb11b` |
+| `packages/client/ui-theme/src/styles/gradient-shadow-text.css` | `863776c7d3360a3363fdc588392fc525c6795666` |
+| `packages/client/ui-theme/src/theme-settings.ts` | `d00af8e9cf53650edf55ed69e57242323e365bdc` |
+| `packages/client/ui-theme/src/boot-theme.ts` | `5eb180bd80804d2b720f0a872fa96d3aa7fd3eb9` |
+| `packages/client/ui-chat/src/client/chat/MessageItem.module.css` | `5d194833358d96278bbd1c31e69169f485bb2dbb` |
+| `packages/client/ui-conversation/src/client/skeleton/InputBar.module.css` | `4676f4cd7dd400937d00f531c5b0ecadc1056081` |
+| `packages/client/ui-conversation/src/client/locales.ts` | `5f978ed0c8d6666ee4daa7f4fea9940e38b83cd3` |
+
+All selected material is MIT, Copyright (c) 2026 DeepSeek; the full existing
+`THIRD_PARTY_NOTICES.md` notice and license blob
+`c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785` are retained.
+`DshToolIcons.tsx` admits only the selected non-brand Search/Browse/Api/Edit/Code/
+Sparkle/Think/Globe/Chevron/Inspect paths with the pinned viewBox, fill and
+stroke weights. Props are closed decorative size/className. The outer OpenAI
+icon registry remains its existing owner. URL fallback uses a generic globe
+without hostname branding or fabricated href; Host effects retain their actual
+authorized target. The original Live writer receives the exact Think/Api/
+Chevron/Inspect import interface; its owned ReasoningRow and Bash row are not
+rewritten here. ChatGroupSeat uses the local pinned chevrons without a lifecycle
+change.
+
+The shared DisclosureRow and ToolRow adapt pinned fixed24-plus-font-delta
+geometry, whole-header nested shimmer, separator decoration, state colors,
+Inspect12 glyph and small-code11/16 IN/OUT. Real actions stay outside the inert
+shimmer copy. Existing IME229/composition/repeat/child-target guards and
+aria-controls are retained as Analytix interaction adaptations. Error paints
+summary/OUT rather than business identity; stopped retains its business
+summary in amber. Search's root and recovery footer own their margins.
+Central existing DOM owners receive selected pinned default light/dark, code
+fonts12/19 and11/19, radii4/8/12/16/20 and normal/danger/solid hover aliases.
+Question/Approval use the pinned radius20, input-major, warning/state and stroke
+aliases; CodeCard toolbar buttons use24px. Elevation is recomputed per element
+to honor card-local stroke overrides. No upstream theme/runtime/store/slot
+dependency or second icon registry is added.
+
+The local host adaptation removes global body zoom0.82 and the corresponding
+darwin clearance divisions: body portals and chat use real CSS pixels,
+safe block50px and inset100px. Outer navigation structure/width-fit logic is
+not rewritten, but its physical size changes with removal of global zoom.
+The existing Workbench route test now expects fixed clearance/bodyzoom1 while
+retaining its navigation invariants. Within the approved main-stage CSS owner,
+a typed inherited length freezes DSH's default content cap
+C=clamp(680px,64% of stage,920px) before nested composer containers consume it.
+Transcript and active Question/Approval cards share min(C,stage-64px); normal
+input is min(C+32px,stage-32px). Zero stage inset and symmetric scroll gutters
+adapt Analytix's separate scrollport/composer topology. DSH user-width controls
+and the embedded branch are not imported; @property, narrow geometry and
+native clearance remain unvalidated.
+
+The existing applyUiFontScale producer now writes --dsh-content-font-size in
+addition to its original --ds-ui-scale; startup, reload and Settings preview
+reuse their existing calls. DSH persists an integer size10–22px, default14px,
+with no small/medium/large tiers. Analytix retains its existing saved enum and
+factor0.82/0.88/1, normalized defaultsmall, and primary text ratios. The finite
+adaptation is `14 * factor / 0.82`: small14px, medium15.024390243902438px and
+large17.073170731707318px. Fractional values belong to this Analytix enum
+adaptation; the DSH integer persistence schema is not imported. The existing
+renderer invalid-value fallbackmedium is not changed or used to reset a valid
+saved selection. No settings store, schema, second token family or migration
+is added.
+
+The three existing DSH delta variables use its pinned formulas: primary=size−14;
+secondary=min(size−1,max(13,size−2)); secondarydelta=secondary−13. They now live
+exactly once in eagerly loaded base-shell :root and are removed from lazy
+DshAssistant tokens. Main's existing root producer still preserves valid saved
+choices; asynchronous setting hydration and actual first-frame behavior remain
+unvalidated. Code typography stays fixed. Existing scoped central Markdown
+consumers, including side conversation, retain their prior font inheritance;
+this source change is not isotropic scaling of the whole app.
+
+The new user/input overrides are explicitly scoped to the actual main
+.ds-chat-stage. The shared ordinary bubble keeps its original global16/24px;
+only a bubble within the real timeline/chat-view gets body size and22px+delta.
+Rewind retains its original global15px/1.58 utilities and all edit/IME/ref/state/
+submit behavior. A finite data-user-message-editor marker enables only the
+main-chat CSS to inherit its bubble's font size/line height. This is an
+Analytix adaptation: this DSH pin has no homologous inline rewind editor.
+The original global ProseMirror16/26px and compact14/26px remain; only the
+actual main composer host's noncompact editor gets body size and24px+delta.
+Write Tiptap, CodeMirror, document preview and their --write-editor-font-*
+axis do not match these selectors and are not changed. Side/SDD/inspector
+user/input typography also keeps its previous rules.
+
+The newly approved exact owner is
+src/renderer/src/components/chat/presentation/markdown/MarkdownTable.tsx.
+Its body portal now derives one renderer-only data-analytix-main-chat-table
+attribute directly from the connected real fullscreen opener under actual
+.ds-chat-stage/timeline ancestry. Role/class alone still does not select a
+main origin. The already owned tokens formatter aliases move intact to one
+shared block that additionally matches only the real table dialog with this
+explicit main marker. Ordinary dialogs and side/SDD/subagent table origins
+retain their existing root typography; those generic role/class origins do
+not acquire the marker.
+
+One nullable actual opener state now owns the existing fullscreen lifecycle;
+fullscreen is derived rather than maintained as a separate bool/ref pair.
+Closing via button, backdrop or existing Escape callback sets opener to null,
+so the modal and its marker are removed in that React commit. A replacement
+button updates the state and recalculates the attribute without retaining an
+independent origin flag. The existing revision/busy reset also clears opener
+in its original passive effect. This preserves its previous timing; no
+before-paint revision-reset claim is made. Detached opener ancestry is checked
+on render; this adds no observer for unrelated external DOM mutations.
+The normal owner unmount removes the portal. Existing useModalFocus captures
+the mounted modal's original opener object for restoration; close-state
+clearing does not discard that captured target. No new effect, context,
+portal framework, wire field, shared schema or persistence is added.
+Copy/download, menu, inert handling, original table node and scroll retention
+remain under their existing owners and have not run fresh renderer checks.
+
+Two authored apply-theme cases cover default14px, valid saved tiers, retained
+ratios and later selection; neither has run. The narrow style/marker changes
+add no test framework or implementation-mirroring test. First-frame font
+application, main/side/Write boundary, rewind editing/IME, long-text sizing
+and the portal origin remain distinct pending renderer acceptance seams.
+
+ProcessPane/Tree consume the original Live source's closed SourceV2 fields.
+Provider reasoning joins native reasoning under immutable actual source
+coordinates and retained ownership. Running selected reasoning can display
+its permitted body; actual running shell can display its command-only terminal
+before a body, without fabricated output or exit. Tool preparation consumes
+the existing Host model, shimmers without expansion, and yields to a public
+row only when real unit.calls plus exact call/item anchors match. Retired
+preparation retains body-free control identity to keep discovery of the real
+capture moving. The mounted renderer also retains parsed closed state for
+visibility control: folding clears private metadata, a preparing-only seat can
+rehydrate, and retired preparation stays suppressed. This is component-local
+control state, not a public or shared wire-schema extension.
+
+Sorting remains PARTIAL across unrelated origins and public sections. The
+Tree now compares the exact closed native/provider/preparation sourceOrdinal
+with BigInt only inside the same unit/producer/providerSequence. It replaces
+those sources' existing traversal slots; draft/capture/unrelated slots retain
+their order. The Pane keeps immutable source pins and rejects mixed-counter
+reuse across retained and incoming replies. These are bounded consumer
+corrections, not a proof of complete DSH visual chronology.
+The actual Chat producer creates independent named A→P→C blocks as[A,P,C];
+same-index native reasoning continues the same block. DSH also accumulates
+same-index reasoning and presents the step's reasoning rows within one
+Assistant member anchored to its first visible output. Ordinary named Chat
+A→P→C and native same-index accumulation are therefore not grounds for a new
+wire protocol or fabricated separate C seat. The earlier broad producer-order
+claim has been withdrawn.
+
+The coordinator's remaining approved sorting case is an actual tool delta
+with index0/callID/argument prefix but no name, followed by visible reasoning,
+then the same call's name write. DSH keeps the hidden Tool Context's first
+start coordinate and uses it once preparation becomes visible. The current
+Analytix producer previously lost that earliest unnamed anchor. The original
+Live owner's final contract now carries a bounded body-free unnamed start in
+private control state and required preparation.sourceOrdinal: nonzero decimal
+uint64 string, allocated from the same service counter as native/provider
+reasoning. That hidden unnamed start creates no display block. This writer
+consumes the exact final DTO in the existing Pane/Tree and interaction test.
+The final contract SHA256 is
+16005e1f8919609f3245c014d1974f5f72bc7409d25e80b7d04c33cc289d0d28;
+the supplied full Live31 patch SHA256 is
+3cf46c3b961cf7ee699b7b1ba2071d10135399f0dda6c8a77d2833fbf2122e4c.
+Before an actual call boundary arrives, preparation may borrow only the
+nearest validated reasoning bucket from that same origin and attempt. A real
+preparation plus unit.calls and exact call/item anchors may refine before/after
+placement inside an existing permanent parent. No cross-parent move or
+farther-owner fallback is admitted. No timestamp, provider index guess,
+guessed join, new protocol, or native-item split is implemented. Public row
+order/parent retain their ownership; a settled-only capture cannot fabricate
+a call-start coordinate. Selection continuity when an existing reasoning node
+moves across an already mounted public call remains a browser observation gap.
+
+Immutable source coordinates, staged unit attempt maxima, logical owner
+uniqueness and permanent in-lease retirement guards preserve existing scope/
+revision/generation/ticket/selected-payload boundaries. Private prose and
+arguments stay out of ChatBlock/history/model/public events; the six rolled
+back stdout owners remain untouched. The original Live owner supplied a final
+source-bound Go owner/seam PASS and released that window. It supersedes its
+earlier partial receipt for its recorded source; no Go check is rerun here and
+no TS/native acceptance is inherited. The coordinator authorized one isolated
+exact155 + Search22 + Prefs2 + Live31 + shared31 TS/renderer verification; it
+completed with the source-bound partial result described above. No Go/native
+command or real Provider/website was run. The renderer build is a source-only
+check; it does not prove desktop pixels or selection semantics.
+
+The authored actual-consumer tests belong to their recorded source bytes.
+The first run exposed a real visibility-growth defect: adding a preparation
+seat cleared a retained reasoning selection even though its node, parent and
+body stayed mounted. The existing Pane now clears only IDs that leave the
+visible set; retirement, fold and revocation guards remain. Web fixtures now
+separate the pinned first-line error summary from a private response tail and
+retain every tail-hidden/Inspect-full-body assertion. The approved32nd owner
+now exposes the existing TextShimmer decorative-copy context to ToolRow.
+File, Host Web and existing href summaries use static labels in that inert
+copy; the original interactive element retains its existing click, double-click
+and keyboard propagation owners. The obsolete inline Web button is removed
+from the actual Pane fallback and its sealed request-role effect uses the
+existing ToolRow onOpenLink entry. No renderer URL becomes effect authority.
+Private labels stay inside the original protected container; no portal,
+persistence or new public/model export is added. Existing TextShimmer CSS,
+including reduced-motion rules, is byte-preserved. This finite adaptation
+covers the current effect-free label sources; it is not an arbitrary ReactNode
+sanitizer. Three additional actual ToolRow cases assert one real file/Web/href
+entry, static decoration, original callbacks and synthetic private containment.
+They use explicit jsdom dispatch, not native Tab, screen-reader or navigation
+acceptance. The original Pane link-count and Selection assertions remain.
+The tests otherwise
+cover SVG geometry, running/settled/error/stopped, keyboard/IME/Host link
+actions, selected body/command/preparation handoff, received control order,
+ordinary-running selection retention, replay denial and font mapping. Six new
+real-consumer fixtures cover late ordinal insertion, draft/preparation/capture
+handoff and fold/reopen, same-parent boundary refinement, immutable ordinal
+drift rejection, fresh reversed delivery and cross-reply mixed-counter reuse.
+Prior
+static diff/JSON/patch checks belong to their recorded source bytes; no new
+PASS is inherited. CSS pixels, native inert focus, light/dark/narrow layout
+and current Web history/thread switch/reopen remain separate pending seams.
+
+### Timed question desktop consumer candidate
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`; reviewer: delegated
+DSH desktop consumer writer. Fixed source repository DeepSeek Harness, commit
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`. MIT, Copyright (c) 2026 DeepSeek;
+license blob `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`. Full license and
+attribution remain in `THIRD_PARTY_NOTICES.md`; destination source headers retain
+this notice. No other artwork or upstream runtime/dependency is admitted.
+
+| Source path (under `packages/client/`) | Blob | Destination under `src/renderer/src/components/chat/presentation/` |
+| --- | --- | --- |
+| `ui-primitives/src/icons/index.tsx` (selected Regular Question, Check, Close, Left, Right, Copy, Nowrap, Wrap; existing Edit/Up/Down) | `d22cbdd06d50289f15154996564b250b2af4163a` | `DshToolIcons.tsx`, `chat/QuestionComposer.tsx`, `chat/QuestionReplyView.tsx`, `chat/toolviews/ask-question-row.tsx` |
+| `ui-primitives/src/Button.module.css` (36px medium primary/outline geometry, tokens and hover/disabled states) | `731c593f7adb7ced790f5cba2305c745816a66f2` | `chat/QuestionComposer.module.css` |
+| `ui-primitives/src/markdown/render.tsx` (Question-seat URL glyph, image-only glyph suppression, normal image and failed-image fallback) | `cdb9afcbdad8f2e2d6f73834ee9ded97560bfc6d` | `markdown/render.tsx`: existing glyph/CSS and private native action span; no file-image delegate/lightbox |
+| `ui-user-questions/src/client/QuestionComposer.tsx` | `33bbcbec0aa3b887e65c3636ba5e5215bfeb7cee` | `chat/QuestionComposer.tsx`, `chat/useUserInputTimedWait.ts`, `chat/useUserInputPrivateDraft.ts` |
+| `ui-user-questions/src/client/draft-store.ts` (partial/page restoration behavior reference; upstream store not imported) | `4d04ec283382bcf48398e6c8f18415f53b1aa992` | `chat/QuestionComposer.tsx`, independent Host-owned `chat/useUserInputPrivateDraft.ts` |
+| `ui-user-questions/src/client/QuestionComposer.module.css` | `5f2eb4701ba2222f2959110ed066469047626ad7` | `chat/QuestionComposer.module.css` |
+| `ui-user-questions/src/client/QuestionReplyView.tsx` | `8cd59f5b4d831da7b1fe2d9a078c864bed7dbfb0` | `chat/QuestionReplyView.tsx` |
+| `ui-user-questions/src/client/QuestionReplyView.module.css` | `651fe889dc26d392fe3179b73ad5fef915404124` | `chat/QuestionReplyView.module.css` |
+| `ui-tool/src/client/tool/toolviews/ask-question-row.tsx` | `5bf38d3e25b9e66bfb7af72e94853a1327b5fa66` | `chat/toolviews/ask-question-row.tsx` |
+| `ui-tool/src/client/tool/components/QuestionToolRow.tsx` | `2ce27821555e450170a53608ea8e9bb0988201bd` | `chat/toolviews/ask-question-row.tsx` |
+| `ui-tool/src/client/tool/components/QuestionToolRow.module.css` | `20c82c56a7e4109932171343dfb3bd9ec855a599` | `chat/toolviews/ask-question-row.module.css` |
+| `ui-tool/src/client/tool/components/AskQuestionCard.tsx` | `d704aea5013455090967c8b801bab625e6a67450` | `chat/toolviews/ask-question-row.tsx` |
+| `ui-tool/src/client/tool/components/AskQuestionCard.module.css` | `ae969921c90f5baaabfcdfee87e759ba2629d18e` | `chat/toolviews/ask-question-row.module.css` |
+
+The same licensed candidate admits the following PlanReview selection. Source
+review verified the fixed blobs below, React/parse-only imports and absence of
+file-level license exceptions; behavioral/native validation remains separate.
+No runtime, browser draft storage, file editor, new dependency or brand asset
+is imported. Adaptations keep raw plan text in freshly authorized native leaves
+and retain only selector/opened metadata in the existing workspace-tab owner.
+
+| Pinned source under `packages/client/` | Blob | Repository destination / selected behavior |
+| --- | --- | --- |
+| `ui-user-questions/src/client/contract/slots.ts` | `4d1e9fd0e983227c1e80a6e6dcb5291bea610c55` | `src/renderer/src/components/chat/presentation/chat/question-plan-review.ts`: narrow private intent / actual option identity |
+| `ui-user-questions/src/client/PlanReviewPanel.tsx`, `PlanReviewPanel.module.css` | `b63a64c0e06bdbcb5aad8244d47b449079d50cfa`, `67b302e3b5efd5e9928616055a26cf2db47d1242` | Same-named desktop `chat/` panel/CSS: complete summary and existing Host decision route |
+| `ui-primitives/src/markdown/plain-text.ts` | `6797fdec6e63b47e187972de435445663ef5bffa` | `src/shared/markdown/plain-text.ts`: same existing `parseGfm`, first visible line / semantic paragraph |
+| `ui-primitives/src/Button.tsx`, `Button.module.css`; `StateDot.tsx`, `StateDot.module.css` | `31a6edd78f51e35b9b70129d857f403b2d568ba3`, `731c593f7adb7ced790f5cba2305c745816a66f2`; `ec480c69810919601e992b22a187178b3106833d`, `1a692c68924e317e2e044da9db7ac96d5ff49ef2` | Selected 36px decision button, warning dot and busy spinner in desktop PlanReview panel/CSS |
+| `ui-plan/src/client/PlanCard.tsx`, `review-store.ts` | `e629b024c3a8e67991fa01d37a033c0d2d99bd1b`, `b35b5daa394639ef708a03be5be11e98345edf7b` | Existing `workspace-tabs-store.ts`: Session-memory auto-open once, manual reopen, selector-only tab |
+| `ui-plan/src/client/PlanPreview.tsx`, `PlanPreview.module.css` | `fdee35e7b9423c448d71d9db618e1713251a5d32`, `6344ddeb79deca18d1f9a384c974d61d164c5387` | `src/renderer/src/components/workbench/QuestionPlanPreview.tsx` and CSS: complete private Markdown, unchanged dock/overlay owner |
+
+The desktop source uses actual Go wait/continue/late-response contracts through
+existing Main/preload/provider lifetime. Original local question/detail/answer
+and draft bytes remain complete in their private owners; public events/model
+projection retain their separate contracts. Machine association requires the
+private top-level callId; Reply additionally requires actual accepted delivery
+plus the real public user-item/client identity. No browser draft store, generic
+model-history envelope or global timer engine is added.
+
+The earlier v13 isolated composition used Core
+69498d0649d6de73f0bc971df425d84ff8b827f5 plus private-draft commit
+363c152d036d76c1cfaf5d960522801ab5f62325 and its recorded desktop patch.
+Its scoped tests, original runtime/Web/Node types, lint and one renderer-only
+build passed in their recorded scopes; failed receipts remain retained.
+The independent module v3 repair freeze then passed 681 scoped fixture tests;
+517 tests were skipped by explicit owner/name filtering. Original
+`tsc --noEmit -p` runtime, Web and Node projects passed; affected-file lint had
+0 errors and 3 warnings. The v3 input SHA256 is
+`4db7d11dcba6a675266991154d629a90bee3961efa3000ec635f15326def3159`,
+and its scoped receipt SHA256 is
+`4270c2b613120236de9d6b906e44749b4476e7d0ed64532c3a64d2277f681dfd`.
+It used a Core 363c152 archive, exact desktop blobs, existing verified
+Node 22.22.1/ABI 127 dependencies and the byte-identical private DTO snapshot
+`49a9fb8da5f3afe987c08e4620cbddb29e60aa77273b5596b95b7af4fad6ee2b`.
+No dirty Go overlay, native window, build, installation or Provider ran.
+
+The later v4 wait-consumer freeze passed 181 direct UI and 176 contract/config
+fixtures (`vitest run`, one worker, file parallelism disabled). Its input SHA256
+is `73c0901f1c7371feb30aa8c01eced37434ab1f0c1cfb09fd6fb8d1bfe03acf4d`;
+receipt SHA256 is
+`79d82e67091c86c1a71c177a982d7238b8064326efebb0d9f840e6c905827da7`.
+**Those passes do not validate the newest PlanReview/sidebar source, the
+subsequent continued-wait/private-only-timing regressions, or the current
+replacement cleanup and AppShell route tests.** Their tests/types/lint await
+the coordinated window. Failed earlier receipts remain retained.
+Canonical integration, current CI, native acceptance and full parity are unproven.
+
+Within the approved Question scope, the DSH replacement removes the old
+`QuestionComposer.tsx` undefined-selector/public-raw question and public-answer
+seed paths, the duplicate legacy/structured submit validator and label/value
+generator, and the unused `chat-store-maintenance-actions.ts` /
+`chat-store-types.ts` continue action. Normal production enters through the
+actual private native selector; signed Host question/option IDs determine
+answers. Private legacy submission display remains for real stored history,
+and native/runtime wait continuation remains the real Host owner. Existing
+paired/unpaired tool rows, secondary/retired seats, ordinary GUI plans and
+ordinary Markdown still have actual consumers. Shared parser old paths remain
+byte-identical reexports for their real imports. DSH button tokens and
+hover/disabled states replace the old Question adapter; real remote anchors,
+bottom Copy tooltip, empty-detail selector recognition and Request changes
+without a late target use the fixed-source behavior. Actual native PlanReview
+production still rejects empty plans; the helper fixture does not prove native
+admission. Immediate Hide flushes the retained same-owner leaf and removes
+the obsolete closing waiters without a global draft queue. The same metadata-only
+global plan authority observer moves from Workbench to the persistent AppShell, so
+ordinary Settings return reacquires a fresh native leaf without extra Retry;
+true revocation during Settings still requires explicit fresh authorization.
+Observer detachment only unsubscribes and cannot fabricate retirement during
+StrictMode replay. Question anchors reuse the existing URL glyph; normal
+remote images keep the fixed-source CSS and failed-image alt fallback, with
+no Question file-image delegate or lightbox. The corresponding private-boundary and actual shell-route tests
+are prepared, not executed for these replacement bytes.
+
+Fixed-source inspection distinguishes the normal Question seat from the ChatView
+Markdown delegate. DSH normal detail has full code with Wrap then Copy, without
+Collapse/Expand/Download/table exports. HTTP(S) images are ordinary lazy/async/
+no-referrer images without a click lightbox. Local images display alt and local
+file links display text because this seat has no file delegate. Reply detail
+remains plain text. Caller-scoped actions preserve ordinary Markdown defaults.
+Main derives code/link/Reply bytes from fresh Host data and the same shared
+grammar; Renderer effect IPC carries selector/view/node-position or actual
+accepted-reply identity metadata. Modified and middle link activation use that
+route; right activation is inert. Native inline URL eligibility matches the
+renderer HTTP(S) parser and opens the normalized anchor destination. Authorized local selection is allowed;
+authority loss still retires stale raw leaves and actions.
+
+| Behavior | Current repair source | Remaining evidence/dependency |
+| --- | --- | --- |
+| Reply Q/A Copy and selection | Native source-bound Copy, exact DSH text/labels/SVG and ACK feedback; authorized local selection in all Question leaves. | v3 scoped fixture pass; newest combined source and native acceptance pending: Main/preload/Reply and actual clipboard/revocation. |
+| Detail code, links and images | Full code with Copy/Wrap, no extra exports, outside disabled answer fieldset; native remote-link action; remote image rendering and local inert fallback. | v3 scoped fixture pass; newest combined source and native acceptance pending: caller/default Markdown and readonly actions. Existing Electron img-src excludes most remote hosts; actual remote-image parity remains open for coordinated route/policy and native evidence. |
+| Full settled Review | Explicit review metadata mounts selected terminal card readonly; queued Review stays inline. | v3 scoped fixture pass; newest combined source and native acceptance pending: real row/store/Float path, pagination and close/reopen, nullable/unavailable owner. |
+| Persistent Take-time | Frozen private DTO adds optional waiting/editing; the existing draft writer preserves it and the existing Host wait owner replays it only on fresh pending authority. Continued retains metadata without starting a wait; old drafts infer editing only from changed answers. | v4 scoped UI/contract pass; newer continued/private-only regressions and real save/read/restart await validation. Saving wait never extends a deadline. |
+| Declared PlanReview | Frozen signed private intent selects exact summary/decision controls and actual approval option ID. The existing workspace shows the full plan in a fresh native leaf; automatic open is once per thread/call, ordinary GUI plan remains separate. Only metadata survives tab changes; true authority retirement covers inactive tabs and dock/overlay, with explicit fresh reopen. | SOURCE_PREPARED_UNTESTED: newest Plan consumer, dock/overlay/revoke, signed producer integration and native behavior. No prose/order inference or file-editor writes. |
+| 16KiB nonadmission retry | Exact canonical POST/409/closed Host body maps to fixed desktop late-too-large; repeated facade/IPC projection preserves only its exact fixed envelope. Edited new UUID only after definite nonadmission, exact retries for unknown outcomes. | v3 scoped fixture pass; newest combined source and native acceptance pending: sanitizer/facade/consumer matrix. Actual queue/promotion/Provider carrier remains Core-owned. |
+| Longer history | Arbitrary over-32 fallbacks removed, preserving existing bounded private scheduler/raw-seat/transient budgets. | v3 scoped fixture pass; newest combined source and native acceptance pending: 40th exact match, ambiguity, capacity/close/authority. |
+| Foreground to continued | Real same-owner continued retires submit/cancel epoch and old ACK; pending-only resolving; writer retained during foreground wait/failure. | v3 scoped fixture pass; newest combined source and native acceptance pending: deferred continued/late-action/old ACK; loading-null must not retire current late attempts. |
+| Semantics/legacy | Reply group/name/toggle/outcome, cancelled action removal, queued answered-count, original legacy value and trimmed structured presentation. | v3 scoped fixture pass; newest combined source and native acceptance pending: semantic/native keyboard evidence; real legacy late producer unverified. |
+| Thread detach | Existing store subscription synchronously flushes the current native leaf on thread/route change. Only bounded selector/revision/unsent warning metadata survives unmount; fresh matching Host revision or current save ACK clears it. Live native revoke prevents same-batch cleanup from reinserting it; confirmed deletion clears only that thread. | v3 scoped fixture pass; newest combined source and native acceptance pending: old/new leaf, actual Float/store thread switching, unconfirmed/unsent warning, late ACK, native revoke and confirmed deletion. No browser raw persistence. |
+| Immediate background/Hide | First edit prompt, later finite coalescing in one writer. DSH panel Hide flushes and dismisses immediately; its retained same-owner leaf keeps the latest child chain and actual save/error state. System background admits no new save, while previously visible-admitted saves may finish for the same document; true authority retires all. | SOURCE_PREPARED_UNTESTED: delayed first/latest child ACK, saved/capacity reveal, hung-save background and real revoke regressions; actual Float/native acceptance pending. No close-success gate, hidden native grant or browser raw queue. |
+
+Local display/draft budgets remain distinct from late steering admission.
+Source repairs are not acceptance exceptions. Native pixels/spacing, light-dark/
+narrow layout, clipboard, keyboard/screen reader, focus/blur, thread switching,
+reconnect and restart require the parent-assigned exact-candidate window.
+Idle-agent late-answer admission and correlation into a new normal turn remain
+a Core contract dependency; the UI must not fabricate a running turn or weaken
+target ACK checks. Private wait/intent schemas are frozen for consumer source;
+actual signed persistence/producer/model-history/recovery validation remains
+Core-owned. The latest consumer and exact combined candidate remain unverified.
+
+
+## Footer and normal performance/usage preference candidate (2026-10-09)
+
+Reference/admission for the selected desktop port, pinned to DSH
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`. Reuse mode is
+`port-and-adapt`; license is MIT, copyright (c) 2026 DeepSeek. The complete
+notice remains in `THIRD_PARTY_NOTICES.md`, and adapted source headers point
+to that notice and this fixed-pin ledger. The coordinating desktop writer is
+the source reviewer; read-only helpers checked the fixed blobs and owner routes.
+
+| Exact upstream source | Fixed Git blob | Actual local destination / selected scope |
+| --- | --- | --- |
+| `packages/client/ui-chat/src/client/chat/TurnUsagePanel.tsx` | `460d1092a2f64f0869ff81a649b6401bfd5a6572` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.tsx: turn panel adapter |
+| `packages/client/ui-chat/src/client/chat/TurnUsagePanel.module.css` | `dfdfca258b6aaa676c96cd3b528b49ffef14c72f` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.module.css: panel styles |
+| `packages/client/ui-chat/src/client/chat/StatsPills.tsx` | `838effb768a02f6230c8bcbe6593a5bd0d1870c3` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.tsx: SessionStatsPills and formatters |
+| `packages/client/ui-chat/src/client/chat/StatsPills.module.css` | `44dab514307156a7a121604c18c1a7f04e83fa9c` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.module.css: pill styles |
+| `packages/client/ui-chat/src/client/chat/MessageIconActions.tsx` | `fd2b674edd5323873eed1d7f97271b31038e79fb` | src/renderer/src/components/chat/presentation/chat/TurnTailView.tsx and src/renderer/src/components/chat/message-timeline-bubbles.tsx: selected actions / CopyFeedbackButton |
+| `packages/client/ui-chat/src/client/chat/MessageIconActions.module.css` | `29c1c9e7137ae45886c1e535f24383c229162670` | src/renderer/src/components/chat/presentation/chat/turn-state/TurnState.module.css: selected actions |
+| `packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx` | `a3d58a8cfe48d00b1cd922e315ef6d831ad572b2` | src/renderer/src/components/chat/presentation/chat/TurnTailView.tsx: selected tail and native owner adapter |
+| `packages/client/ui-chat/src/client/chat/TurnTailNodeView.module.css` | `bfa386d31c983b35912cbd210ab7a36f5f37d3b0` | src/renderer/src/components/chat/presentation/chat/turn-state/TurnState.module.css: selected tail styles |
+| `packages/client/ui-chat/src/client/chat/stat-dialog.ts` | `43ee6cd220bac3541153a56bcdd63124f31886b3` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.tsx: useStatDialog |
+| `packages/client/ui-chat/src/client/chat/stat-dialog.module.css` | `4c5de52c51153962cf3b627498f424f5526dec3b` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.module.css: dialog styles |
+| `packages/client/ui-chat/src/client/chat/token-format.ts` | `20936ff2f14227b93d83dcc01e83ac7319c5b728` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.tsx: token formatters |
+| `packages/client/ui-chat/src/client/chat/message-chrome.ts` | `e078d28177066fbd4110fb12afbe3e81bcce7bd1` | src/renderer/src/components/chat/presentation/chat/TurnTailView.tsx: clock formatter |
+| `packages/client/ui-chat/src/client/chat/use-calendar-day.ts` | `29e5311383fa5d6cba826b6b607d60cb1cc95d1b` | src/renderer/src/components/chat/presentation/chat/TurnTailView.tsx: calendar-day hook |
+| `packages/client/ui-primitives/src/clipboard.ts` | `aa45f4c76d197532bac80a53a7aaaa518f2857ac` | src/renderer/src/components/chat/message-timeline-bubbles.tsx: CopyFeedbackButton fallback |
+| `packages/client/ui-primitives/src/useAnchoredPosition.ts` | `f87e4d06975ced7bc10484d70741a6f8178814a6` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.tsx: selected position adapter |
+| `packages/client/ui-primitives/src/useDismissOnOutsidePointer.ts` | `2f16f43476d3821ac142edf86d53751d0942d72a` | src/renderer/src/components/chat/presentation/useDismissOnOutsidePointer.ts: existing source unchanged; new Settings consumer in src/renderer/src/components/settings-performance-usage.tsx; Footer selected local adapter in src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.tsx |
+| `packages/client/ui-primitives/src/overlay-top-margin.ts` | `02ed6792808a0ac4048f8cba7ccaa7a080f3288a` | src/renderer/src/components/chat/presentation/overlay-top-margin.ts: existing source unchanged; new Settings consumer in src/renderer/src/components/settings-performance-usage.tsx; Footer selected local adapter in src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.tsx |
+| `packages/client/ui-primitives/src/icons/index.tsx` | `d22cbdd06d50289f15154996564b250b2af4163a` | src/renderer/src/components/chat/presentation/DshToolIcons.tsx: Branch / Database / Gauge; existing ChevronDown / Check reused unchanged |
+| `packages/client/ui-chat/src/client/locale.ts` | `4c4bfa7e12648a55a70eef435a490620938488c1` | src/renderer/src/locales/en/common.json, src/renderer/src/locales/zh/common.json, src/renderer/src/locales/en/settings.json and src/renderer/src/locales/zh/settings.json: selected labels/units |
+| `packages/client/ui-chat/src/chat-settings.ts` | `c4c6ce3b954749f01e9b4c99cc4e40920b65a95c` | src/shared/app-settings-types.ts, src/shared/app-settings-normalize.ts, src/shared/app-settings-runtime.ts and src/main/ipc/app-ipc-schemas.ts: mode/default reference; native persistence adapter |
+| `packages/client/ui-chat/src/client/performance-usage.ts` | `b0313649a7a5dd4595ccff6136dd4b47d0473563` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.tsx: process-local UI mode and normal accepted settings reconciliation |
+| `packages/client/ui-chat/src/client/settings/PerformanceUsageRow.tsx` | `db05aaebb95ebb92e596acbd9123ad3e9f84a7a1` | src/renderer/src/components/settings-performance-usage.tsx: selected two-option row |
+| `packages/client/ui-chat/src/client/settings/PreferenceRow.tsx` | `bfad7b5316d80f36c27df23e9a35060a2eafeb65` | src/renderer/src/components/settings-performance-usage.tsx: selected two-option row |
+| `packages/client/ui-chat/src/client/settings/PreferenceRow.module.css` | `2042d54db3da566f5b397df5c1a3fd99ef951e6c` | src/renderer/src/components/settings-performance-usage.module.css: selected two-option row |
+| `packages/client/ui-primitives/src/Menu.tsx` | `fd5b655d5c061c748377dd82a2b8002f5a0b30a3` | src/renderer/src/components/settings-performance-usage.tsx: actual two-option menu/material/focus/IME subset |
+| `packages/client/ui-primitives/src/Menu.module.css` | `a6d6714783d8e46c17f19b6bb5dee26e6693ee3c` | src/renderer/src/components/settings-performance-usage.module.css: actual two-option menu/material/focus/IME subset |
+| `packages/client/ui-primitives/src/MenuSurface.tsx` | `1bdefd0d6a8339e526ebbd37272455177edf95f7` | src/renderer/src/components/settings-performance-usage.tsx: actual two-option menu/material/focus/IME subset |
+| `packages/client/ui-primitives/src/MenuSurface.module.css` | `57d930845524b4e88f42b83a3650bf92f7ac5bee` | src/renderer/src/components/settings-performance-usage.module.css: actual two-option menu/material/focus/IME subset |
+| `packages/client/ui-primitives/src/focus.ts` | `bc7e5a372a89e2c1502b12b787bdf08884af0de3` | src/renderer/src/components/settings-performance-usage.tsx: actual two-option menu/material/focus/IME subset |
+| `packages/client/ui-primitives/src/keyboard-composition.ts` | `6c21bbda9577fa6b821f1389ffd29f5c664a70c9` | src/renderer/src/components/settings-performance-usage.tsx: actual two-option menu/material/focus/IME subset |
+| `packages/client/ui-theme/src/styles/base.css` | `23be07f678050d8f144199d0312697118b9f33bc` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.module.css and src/renderer/src/components/settings-performance-usage.module.css: selected local theme values |
+| `packages/client/ui-theme/src/styles/design-platform.css` | `eb67869c92bf53162dbd443c8a0e4fe8baabb11b` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.module.css and src/renderer/src/components/settings-performance-usage.module.css: selected local theme values |
+| `packages/client/ui-theme/src/styles/gradient-shadow-text.css` | `863776c7d3360a3363fdc588392fc525c6795666` | src/renderer/src/components/chat/presentation/chat/TurnUsagePanel.module.css and src/renderer/src/components/settings-performance-usage.module.css: selected local theme values |
+| `packages/client/ui-settings/src/client/config-form.ts` | `cf77536a97779bab13bbbd59940cf54c88a57372` | src/renderer/src/components/SettingsView.tsx: selected performanceUsage failure-recovery port-and-adapt; native IPC/write identity adapter |
+
+Destinations under `src/renderer/src/components/chat/presentation/chat/`
+retain the prior historical destinations as separate evidence. New Settings
+leaf destinations are under `src/renderer/src/components/`; locale destinations
+are the existing `src/renderer/src/locales/{en,zh}/{common,settings}.json`.
+The native settings save/readback, real thread owners, verified terminal-batch
+receipts and real Host rewind are local adapters. No DSH Host/configuration
+engine, modal registry, global statistics engine or new endpoint is imported.
+
+Immediate UI preference uses a separate display-only notification. Only the
+normal accepted settings save/readback publishes the full settings event; save
+failure does not turn a UI choice into accepted persistence. Default is Detailed.
+The selected failure-recovery behavior is prepared in the normal SettingsView
+owner. Its detached existing settings:get IPC readback preserves the save queue;
+only the current entry, write request, draft generation and exact failed-form
+identity may recover performanceUsageMode and invalidate stale query cache.
+Unrelated draft fields and the original save error remain. Unlike fixed DSH's
+structured response.ok=false branch, native IPC rejection also enters recovery,
+including Host commit followed by ACK failure. This adapter neither waits for a
+full shared describe mirror nor imports namespace revisions or memory persistence.
+Unavailable readback retains the pending UI choice/error; no successful full
+settings event is fabricated. The real SettingsView fixture covers failure,
+queue progress, late readback, external accepted state, unmount and cache recovery.
+Body portals receive local fixed-pin material tokens because chat/Settings
+ancestor tokens do not cross the portal boundary. Footer stat dialogs use
+specific-menu with border-l1; Settings menus use MenuSurface material, dark
+border-l3 and the macOS backing. Existing platform tagging and body isolation
+are reused. The menu port is limited to the actual two options, keyboard/IME,
+focus, positioning and dismissal behavior; no unused submenu engine is copied.
+
+Candidate status: `BOUNDED_TS_VALIDATION_PASS_WITH_OPEN_TARGET_GAPS`,
+`NOT_INTEGRATED`.
+On 2026-10-09, the isolated Git363 + frozen Core52 composition (actual Core commit
+`48ab34fbd7846df05f8e219623036851e6cc56e9`) + Desktop98 + Docs2 + Markdown4 +
+Footer57 candidate passed the registered 23-file module's latest 1,361 cases.
+That count selects the latest result per case after one complete run and affected
+reruns; first failures remain evidence, and repeat executions are not added.
+It includes 13 normal General settings cases and real bounded replay, concurrent
+same-cursor commit, rewind and Inspector revoke regressions. Runtime/web/node
+strict types, 48 affected TypeScript files' lint (zero errors or warnings), and
+one renderer-only build passed with existing matching dependencies.
+No dependency install, Main/preload/native build, GUI, live Provider or Git write
+ran for this extension. These checks do not establish native layout, real
+clipboard behavior, normal credential readiness or full DSH equivalence. Prior
+Question and Markdown evidence remains bound to its own exact inputs.
+
+P2 restores verified historical terminal receipts without manufacturing completion.
+Normal whole-log composer accounting still requires a frozen public producer DTO.
+Missing groups stay absent; LastResult, turn-map sums and old snapshots do not
+substitute. Secondary Fork remains a consumer wiring gap: side/Inspector have real
+thread and turn identities, but the current UI hides Fork and its store action
+captures the main owner. Removing only the UI restriction would fork the wrong
+thread; explicit source-owner wiring and actual Host proof are still needed.
+A leading newline in public failure text also remains a target conflict: fixed DSH
+keeps the empty first line, while the current local mapper selects the first
+nonempty line. Its existing assertion describes as-built behavior; the other-owned
+mapper has not been changed or declared equivalent.
+
+Producer review limits: observation completeness alone does not prove all durable
+started attempts settled; the turn footer's current physical-attempt fields need
+that producer proof before full-turn billing acceptance. Composer may eventually
+show reported partial totals independently of that stricter turn-footer contract.
+LogicalCallHMAC includes OuterAttempt and cannot supply DSH steps; cacheMiss is
+uncached plus created, not uncached alone. Tool timing requires real durable
+ready item identity and matching thread/turn/callId finished events; old presence
+and route identity remain unknown. This desktop candidate adds no producer DTO
+or guessed defaults for these gaps.
+
+
+## Exact Footer Fork event boundary candidate (2026-10-09)
+
+Status: `artifact-entering`, `partial`; parent-assigned source candidate with
+fresh bounded evidence below, on `codex/dsh-fork-event-boundary`, based on
+`332731d18054bd777cb09a0c81275a08d53a3c85`. Reuse mode: `port-and-adapt`
+(selected semantics, with Go implementation using existing Analytix owners).
+Reviewer: coordinating Fork source writer; read-only helpers checked the fixed
+DSH producer, prefix and repair paths. Source pin:
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`, tree
+`a9d30743edbe97adac9c8cb0811b648a0d9f6660`.
+
+| Exact upstream source | Fixed Git blob | Local destination / selected adaptation |
+| --- | --- | --- |
+| `packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx` | `a3d58a8cfe48d00b1cd922e315ef6d831ad572b2` | `src/renderer/src/store/chat-store-maintenance-actions.ts`: forward captured Footer endSeq |
+| `packages/client/ui-chat/src/client/apply.ts` | `e83c851c3bf6cdd108bd5d856fcac4426ddc61d3` | `src/renderer/src/agent/analytix-runtime.ts`, `types.ts`, `packages/runtime/src/contracts/threads.ts`: optional exact boundary through the current provider/HTTP contract |
+| `packages/api/session-controller/src/commands.ts` | `7e900b92aee6e6862d433ecfe03bc83399f75c0c` | `packages/runtime-go/internal/app/thread/service.go`, `internal/adapters/inbound/httpapi/thread.go`: selected explicit versus omitted boundary routing |
+| `packages/core/session/src/fork.ts` | `8d5b2219768ce0a660b461166d50dcb80f3bcff2` | `packages/runtime-go/internal/app/thread/fork_event_prefix.go`, `internal/server/durable_threads.go`: inclusive prefix reconstruction and inert inherited seed in the existing event log |
+| `packages/core/session/src/index.ts` | `c3b783bf38adb69a692de677072929177221b1c4` | same Go owners: actual continuous event sequence and current source authority validation; historical turns remain legal |
+| `packages/core/session/src/repair.ts` | `bb32f01ca06af2c496fa4c68fed287297e1b7fce` | existing `internal/app/thread/fork_projection.go` remains the deauthority and closed-tail owner; no new auto continuation |
+
+MIT root license blob: `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`;
+copyright (c) 2026 DeepSeek. The full MIT notice is retained in
+`THIRD_PARTY_NOTICES.md`. The selected sources are regular source blobs under
+that root; no gitlink, vendored asset, private reasoning, DSH queue/store/runtime
+or Provider authority is imported. Adaptations bind the current public projector,
+Host identities, normal CAS/outbox and existing Go mutation mutex. CASE inherited
+history remains on its existing signed private chain; this port does not enlarge
+CASE disclosure or model egress.
+
+The public DTO adds a nonnullable optional positive safe integer `endSeq`, paired
+with `turnId`. Whole-thread and Side omissions retain their current meaning.
+Turn-only compatibility resolves an actual terminal event. Missing or invalid
+boundaries fail before identity allocation; old history is unavailable only when
+its required bytes cannot be proved from existing records. The retained TS
+server-test-support oracle explicitly rejects a turn boundary rather than
+silently cloning current items. Source and native acceptance remain separate;
+no model, full-access, Provider or native validation is claimed here.
+
+The ordinary creation producer writes one atomic bundle in the existing log:
+`thread_created` binds child, parent and captured source E; bounded private
+`thread_fork_seed` parts close with `thread_fork_seed_completed`. Inherited E
+is the complete bundle's last sequence. Each frame retains the existing byte
+limit; decoded turns retain the existing closed public history validation.
+Order, count, identities, byte length and SHA bind the bundle. Strict JSONL
+numbers are compared as validated exact integers, including source E.
+A marked primary is staged outside the thread inventory before rename; normal
+sidecars, index/list visibility and publication wait for complete readback.
+Missing or partial creation remains unusable after restart. A committed append
+error requires the same complete bundle readback and never causes reappend.
+
+Existing producer propagation is limited to admitted steering metadata, exact
+background-completion history bytes and the committed compaction turn. Exact
+late-reply replay compares the immutable admission metadata; verified promotion
+and terminal state do not rewrite that event or append it again. Private
+seed records remain outside public SSE; CASE retains its signed private chain
+and workspace. No new history store, queue, execution grant or Provider path is
+introduced.
+
+Fresh evidence on macOS 26.5.2 arm64, Node 22.22.1, exact base above, and the
+37-file uncommitted candidate: the synthetic production HTTP test
+`TestForkEventBoundaryExcludesDurableLateCallbackBeforeDelivery` fails on the
+base with “same captured E inherited the durably late callback” and passes on
+the candidate. All eight `TestForkEventBoundary*` production seam tests pass
+with normal command exit0, including real GENERAL CAS/outbox/job admission,
+restart, creation cuts/readback and CASE inherited authority. The affected
+Fork owner rerun passes 30 cases with exit0. The earlier six-owner matrix logs
+234 PASS and no failures; its Go CLI was interrupted with exit143 during
+post-test directory I/O, so it is package-level evidence rather than a normal
+command-completion claim.
+
+Existing production continuation compatibility also ran through the real
+timer, late queue, signed promotion, terminal and restart duplicate response:
+`TestTimedQuestionProductionTimeoutLateQueuePromotionAndRestart` passes with
+normal exit0 after immutable admission metadata replay was corrected. The
+earlier combined run had one pre-late-reply pending-result assertion mismatch.
+The unchanged single-test rerun passed with fresh random Host IDs, so it does not
+clear the failed input; that input's cause remains unproven and the failure is
+retained as a compatibility evidence gap.
+No privacy or model-egress owner was changed to make it pass. Other bounded
+CASE, reservations, archive, protected-result and Host-ID compatibility tests
+passed; a 150-second combined-command timeout is retained separately.
+
+Four direct TS contract/provider/maintenance files pass 279 tests; the full
+ChatView jsdom file passes 70 tests with `--pool=threads`. Default forks worker
+startup failed twice before test-body execution and remains `blocked` on this
+host route. Runtime and desktop typechecks and all eleven affected TS-file
+lint checks pass. These are synthetic source tests, not native, installed-app,
+live Provider or actual model/full-access acceptance. Integration awaits the
+parent's Git window; this candidate has not been staged, committed or pushed.
+
+
+P2 follow-up within the same 37-file candidate preserves exact raw JSON numeric
+precision for `endSeq` before float conversion; fractional decimals that round
+to an integer are rejected. The established strict numeric text bound and a
+local exact rational check retain positive-safe-integer semantics without
+changing other request fields. Genuine Question history is recognized only
+through the trusted signed steering reader or a verified complete creation
+seed. Its inert codec slot keeps the complete closed Question body across
+Fork, restart and refork; plain JSON-shaped text cannot acquire that slot.
+Ordinary and Question leaf budgets remain unchanged. A verification copy skips
+legacy strings only and retains every turn and other entry for the existing
+last-running-turn, signature and identity-conflict constraints.
+
+The new bounded production RED (`p2-red-v12.jsonl`, exit1) reproduces both
+rounded fractional HTTP acceptance and failure to Fork the legal three-answer
+400,000-character-per-answer Question. The repaired targeted run
+(`p2-green-v13.jsonl`, exit0) passes the raw HTTP cases, real Fork/restart/refork,
+closed Question owner negatives and four admission replay compatibility cases:
+legacy event without metadata, cancelled precise replay, conflicting content
+and duplicate event rejection. `gates_routes.go` is unchanged from the prior
+frozen candidate. A read-only review found the legacy-string combination;
+its real signed-record collector RED is retained (`p2-legacy-red-v14.jsonl`,
+exit1). Its identity-conflict negative fixture was strengthened before GREEN
+to a real signed ordinary entry, rather than an invalid Question-shaped map.
+The final two-target server run (`p2-server-green-v16.jsonl`, exit0) passes the
+complete large Question Fork/restart/refork and legacy combination, including
+invalid entry, pending not last and conflicting identity rejection. Exact
+command arguments, input hashes, logs and exits are retained in the task-owned
+receipt; no timeout was extended and no pending/Provider owner was changed.
+
+The complete two-direct-owner run (`p2-owners-green-v15.jsonl`, exit1) has a
+passing Fork owner package but one HTTP display test failure at
+`user_input_local_display_test.go:99`. Its display DTO, HTTP handler and test
+are byte-identical to base332 and outside this 37-file scope. This failure is
+retained for parent coordination, not repaired or reported as an overall PASS.
+The same shell sourced the cache helper; all new Go tests use the local offline
+Go1.26.4 toolchain and 90-second limits. Earlier TS, timeout/latequeue and native
+limitations above remain separate; these P2 source results do not establish
+installed/live Provider or actual model/full-access acceptance.
+
+### Goal/Todo, Skill and recorded Job presentation candidate
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`; reviewer: delegated
+DSH specialized ToolView renderer writer. Source pin is
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc` (MIT, Copyright (c) 2026 DeepSeek).
+The full existing `THIRD_PARTY_NOTICES.md` notice applies. Source files were
+read at the exact pin; no file-level license exceptions, upstream execution
+framework, dependency or brand asset is imported.
+
+| Source under `packages/client/` | Git blob | Destination under `src/renderer/src/components/chat/presentation/` |
+| --- | --- | --- |
+| `ui-tool/src/client/tool/toolviews/details-row.tsx` | `df96a5ffd0b02ed4b31ab14ea8ab025ba9b3fc9a` | `chat/toolviews/recorded-tool-row.tsx` |
+| `ui-tool/src/client/tool/models/details-card-model.ts` | `c7e8e4fdcc7eb64b8b55b4dbfc4a6afdaaa185f9` | `chat/models/details-card-model.ts`, `recorded-tool-card-model.ts` |
+| `ui-tool/src/client/tool/toolviews/todo-row.tsx` | `9aafae3fbccde25db4608f53f4cb8b21771c29c2` | `chat/toolviews/todo-row.tsx` |
+| `ui-tool/src/client/tool/toolviews/plan-summary.ts` | `df609e7b3fd37b69b7504a162281d49b696ef36a` | `chat/models/todo-card-model.ts` |
+| `ui-tool/src/client/tool/models/todo-diff-model.ts` | `f8451b12d3d602aad994f364c37cc4c55e93ee35` | `chat/models/todo-card-model.ts` |
+| `ui-tool/src/client/tool/models/todo-history.ts` (baseline semantics only) | `591bc05ca5ac416415c9d4a347675f1242bc9c56` | `chat/models/todo-card-model.ts`; native authorized predecessor owner supplies history |
+| `ui-skill/src/client/SkillRow.tsx` | `cee91367cff91302bc6662534fca483f9b522769` | `chat/toolviews/skill-row.tsx` |
+| `ui-skill/src/client/SkillRow.module.css` | `8c74cf67636d3be69b0ddc60d577d8a9326f3839` | `chat/toolviews/skill-row.module.css` |
+| `ui-skill/src/client/locales.ts` (row labels only) | `1028a827b49f9a32c1c8d91317fc3e370a0d49e9` | existing English/Chinese `common.json` |
+| `ui-tool/src/client/tool/models/control-details-model.ts` | `47d6edceb839505f36a6fbdbb1d6e7431276b7dc` | `chat/models/recorded-tool-card-model.ts` (recorded list/status/receipt layout only) |
+| `ui-tool/src/client/tool/models/detail-model-shared.ts` (finite badge presentation only) | `46c6b6b886ef42ead647553a997eb2220a827000` | `chat/models/recorded-tool-card-model.ts` |
+| `ui-tool/src/client/tool/components/ToolDetails.tsx` | `618d998ce383a126d662e3500debdd190fdc230e` | `chat/toolviews/ToolDetails.tsx` |
+| `ui-tool/src/client/tool/components/ToolDetails.module.css` | `de9133c4677403afb7894248517bcde4535ec566` | `chat/toolviews/ToolDetails.module.css` |
+| `ui-primitives/src/icons/index.tsx` (selected regular Goal, Checklist, Play and Skill artwork) | `d22cbdd06d50289f15154996564b250b2af4163a` | `DshToolIcons.tsx` |
+
+These leaves consume presentation inputs supplied by an independently validated
+native contract; the pure view models are not wire validators or new authority.
+Goal rounds/activation, teammate wait timeout/noProgress and differentiated
+cancellation receipts are not synthesized. Todo identity uses native stable IDs,
+including duplicate content, content edits and failed/canceled statuses. Job
+output retains its real withheld meaning. No raw result JSON parser, current
+catalog/job lookup, default clipboard/save/file effect or new execution control
+is imported. Native disclosure/shimmer, protected container and existing
+child/diagnostics action owners remain authoritative.
+
+This is an uncommitted renderer candidate based on `9e80fa321…`, with layouts,
+selected artwork/styles, pure presentation models and exact mapper/dispatcher
+hookup to Core DTO freeze v1 (`items.ts` blob `efce7b305a9e07d92f06ec52e934e6238f1e3e67`,
+`tool-result-local-display.ts` blob `da6f5ea89c7ef384bd9daa94f3d00c462a9710b2`).
+The independent contract files are not copied into this renderer worktree.
+DSH Inspect opens the selected call trajectory. Analytix adapts that user purpose
+to the existing same-window `ToolResultInspector.tsx` and its single current
+selection. Goal/Todo/Skill retain the current protected snapshot/lease; recorded
+Job consumes only its admitted public record. Actual call/result identity and,
+where published, snapshot identity accompany Summary and typed Result. These
+domains have no raw Payload, Schema, Timing, Copy/Save or new IPC. The entry is
+a read-only call-detail adaptation, not original trajectory parity. Optional
+`onInspect` was an observer at the v1 source freeze; production completion at
+that freeze did not depend on it. The A increment below supersedes that wiring.
+Prepared synthetic model/leaf regressions do not prove producer or native/UI
+acceptance. No test, type/lint check, build, package or live Provider result is
+claimed for this candidate yet; canonical integration remains open.
+
+### Conversation records Inspect handoff increment
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`; reviewer: delegated
+renderer owner with independent read-only source review. The same exact DSH
+pin, MIT copyright and full `THIRD_PARTY_NOTICES.md` obligations above apply.
+This increment preserves the separately frozen nine-key renderer v1 source
+anchor; it does not replace that evidence with a new parity claim.
+
+| Exact source under `packages/client/ui-trajectory/src/client/` | Git blob | Destination |
+| --- | --- | --- |
+| `TrajectoryTable.tsx` (exact call lookup, actual ancestor expansion, Overview and pending scroll purpose) | `9eeeb5c2abb0e62994ae0031be32f21a4d806c06` | `src/renderer/src/components/chat/MessageTimeline.tsx`, `presentation/chat/ConversationRecords.tsx` |
+| `TrajectoryTable.module.css` (30px record, finite hover/selected state and row boundary) | `12b03b1c51ff6b7791a03c7abe7d1a44c2e647ad` | `src/renderer/src/components/chat/presentation/chat/ConversationRecords.module.css` |
+| `trajectory-record.ts` (stable physical record identity purpose) | `bd37189fa499433ddd1291166d65b2dfa5464ad4` | `src/renderer/src/components/chat/presentation/chat/models/conversation-record-model.ts` |
+
+The native view retains actual admitted thread/turn/call and separate physical
+call/result item witnesses through hydration and live renderer projection. A
+cross-turn or cross-thread merge cannot manufacture a valid pair. Records group
+by native turn identity even when a late call appears after another User; the
+original physical chat grouping does not establish call ancestry. Missing or
+ambiguous targets stay pending; only a uniquely mounted actual row is applied.
+The existing turn window, measured cache and scroll hook remain the sole
+virtualization owner. No upstream virtualizer, session store or backend is
+imported. New requests and thread/scope/hide/revoke transitions retire prior
+selection. Production Inspect now hands off to this conversation-local mode;
+standalone rows retain the existing B Inspector behavior without a callback.
+
+The selected private details remain mounted inside `ProtectedToolResult` with
+its original Host lease and copy/cut/drag containment. The stable details seat
+is outside virtual rows but is not a portal or a public snapshot store. Public
+Job receipts reuse the same Inspector; a call with unavailable details shows
+only actual public identity Overview. No raw payload, invocation-time schema,
+PTC ancestry, nearest-Assistant association, catalog substitute or UI clock is
+invented. This is the minimum admitted renderer navigation loop, not full DSH
+trajectory dataset or action parity. Synthetic regressions are prepared;
+tests/type checks/build/UI acceptance and canonical integration remain pending
+the coordinating owner's combined validation and Git windows.
+
+### Counted Goal lifecycle and live activation candidate
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`; reviewer: delegated
+DSH Core writer. Fixed source `5badb15009ae1756c3afe0ae0cef1faafc290ccc`
+is MIT, Copyright (c) 2026 DeepSeek; the existing full notice in
+`THIRD_PARTY_NOTICES.md` applies. No file exception, dependency, upstream agent,
+store, execution engine or authority framework is imported.
+
+| Exact source | Git blob | Analytix destination and adaptation |
+| --- | --- | --- |
+| `packages/goal/goal/src/types.ts` | `eb7cd602ed7e39c75c133351b413e56d0c140ed0` | `domain/goal/round.go`, public `contracts/goal.ts`: closed refs and real user-item round source |
+| `packages/goal/goal/src/runtime.ts` | `2f5c40735aad3c6504ab7b6ace38a5ad8575535b` | `app/goal/lifecycle.go`: fresh identity, CAS lifecycle, cumulative budget; no legacy adoption |
+| `packages/goal/goal/src/domain.ts` | `63f1573dc7dab6e8cdffa73b0037a8daea6cd5b1` | existing Go Goal store mutation and lifecycle validation |
+| `packages/goal/goal/src/fold.ts` | `6396c7f75b50348f97c9aefd1ce1cad3696b6f8f` | `app/turnstart/goal_admission.go`, existing primary durable turn writer: count actual admitted user item atomically |
+| `packages/goal/goal-round-driver/src/index.ts` | `c4ca27e5deb7a9099c4af7c14641315a3e227e91` | `app/goal/round_driver.go`: process-only activation feeding existing foreground reservation and SendTurn; cold restore disarmed |
+| `packages/goal/goal-round-driver/src/prompt.ts` | `d98f0bb83a90710da0a8c45fbb80facc76f5652f` | same Go driver: bounded attributed continuation, retaining Analytix evidence/todo/self-check policy |
+| `packages/client/ui-goal/src/client/activation-source.ts` | `f1e74c866873623065996baf1c80bac4650d3c62` | renderer Goal epoch/ref fences and metadata-only live state; immutable snapshot history |
+
+All Go destinations are under `packages/runtime-go/internal/`. Lifecycle edits
+preserve phase and rounds. Legacy absent facts remain unknown and do not arm;
+explicit clear/create establishes a new counted identity. Model completion
+retains the existing evidence ledger, todo and strict self-check gates. Blocking
+reports for counted Goals require actual recorded Goal user items. Activation
+has no durable seq, history, provider grant or automatic cold-start effect.
+The existing public Goal-prose SSE refusal remains closed; Goal history is
+read only through the independently validated thread snapshot. Native gate,
+case authority and protected-local disclosure remain their original owners.
+
+Candidate base: `3705debe5a2b9cc59573cab686ac786cc0b6417a`, branch
+`codex/dsh-goal-lifecycle`. Direct Goal owner regressions and the isolated
+synthetic two-round HTTP/SSE chain passed, including foreground revocation,
+interruption after edit, derived-thread history and live-attach metadata.
+The ordinary receipt readback publication regression passed separately.
+Recorded test inputs retain their own bounds. The affected TypeScript
+dependency tests, runtime and desktop type checks, and scoped lint passed.
+Native acceptance and canonical integration remain open.
+
+### DeepSeek Harness generated Office deliveries and selected file artwork candidate
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`. Task owner: delegated
+Office/Deliverables renderer writer; coordinating read-only review found no
+behavior defect in the frozen source. The fixed source is
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`. The ten Office and two submitted-Plan source/blob/subset/
+destination tuples are recorded in the
+[Office source map](deepseek-harness-presentation-sync.md#generated-office-deliveries-and-shared-file-artwork-source-candidate-2026-10-11).
+This scope includes the selected file artwork now shared with submitted Plan
+cards through `src/renderer/src/components/chat/presentation/DeliverableIcons.tsx`;
+it does not admit other primitives from the imported source files.
+
+The root `LICENSE` is blob
+`c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`, SHA-256
+`ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be`:
+MIT, Copyright (c) 2026 DeepSeek. At the same pin, the three package manifests
+also declare MIT: `ui-deliverables/package.json` blob
+`174fcf3f72dcfa26309e346aec2d34d0dd5963ad`,
+`ui-primitives/package.json` blob `8d02970440e7a127270f834a2d3c3cbd740f9554`,
+and `ui-theme/package.json` blob `2e43211b92b1f4a1adb6a99febf24996b13effac`.
+The selected Plan subtree also declares MIT in `ui-plan/package.json`, blob
+`efaa5d5869892e416da088f9eefa83cf6f27f42e`; its two selected sources are
+ordinary `100644` blobs with no nearer license exception.
+The selected source objects are ordinary `100644` blobs, not gitlinks. No nearer
+LICENSE/COPYING/NOTICE or file-level license exception was found in the selected
+source directories and ancestors at this pin. The existing full DeepSeek MIT
+notice is retained once in `THIRD_PARTY_NOTICES.md`; selected source headers
+retain the fixed pin, copyright and notice pointer.
+
+The package `ui-primitives` declares devDependency `simple-icons` `16.31.0`.
+The selected file contour/fold, spreadsheet grid and W/P/MD type marks are
+literal inline SVG in `FileTypeIcon.tsx`; the DeliverDoc glyph is five literal
+inline paths in `icons/index.tsx`. No separate artwork license or third-party
+attribution was found for those selected paths. `CodeFileIcon.tsx`,
+`code-file-icon-artwork.ts`, `CODE_FILE_ARTWORK`, code-file classification,
+`simple-icons` artwork/imports and every unselected glyph or brand asset are
+excluded. No conclusion about their separate licenses is made. This review
+records the selected source and notices; it does not establish independent
+original authorship, trademark rights or rights to every asset in the repository.
+
+The candidate ports `PresentedFileCard`/`Deliverables` and selected `PresentRow`
+presentation into existing Analytix owners. The actual
+`generate_office_document` -> CreatedReceipt -> `artifact_status` ->
+`generatedArtifact` -> turn delivery projection and protected existing Office
+preview remain the only data/action authorities. The generation process branch
+matches actual producer plus `toolKind === 'file_change'`; Inspect retains the
+original call identities and lazy protected-local result lease. No upstream
+runtime, session store, declaration-addressing service, IPC, permission or new
+artifact framework is imported. The superseded Office list/card presentation
+is replaced at `GeneratedFilesPanel`; media delivery remains its existing owner.
+
+Submitted Plan history adapts only the ordered `PlanCards` card/exact-call
+Open subset of `ui-plan/src/client/PlanCard.tsx` and card CSS from
+`PlanPreview.module.css`. `SubmittedPlanCards` reads the original signed
+Question selector through existing private Host leases; public tabs retain
+only selector and verified callId. Raw title/Markdown stays in authorized
+mounted leaves. No Build control, upstream auto-open/store, runtime engine or
+new authority is imported. The separate live pending approval and independent
+file-plan owners remain their existing routes. Four pinned neutral fallbacks,
+actual `data-theme` selectors and existing motion preferences are local CSS
+adaptations; shared Markdown artwork is covered by the Office map above.
+
+Local authored integration is limited to precise ToolCallTree dispatch,
+receipt grouping, en/zh wording and two focused regression files. The existing
+strict receipt schema, settled-success selection, ID deduplication, thread/
+workspace preview scope and existing native Office opener are preserved.
+Theme selectors use actual Analytix `data-theme` and motion preferences;
+selected source palette values stay local fallback values rather than changing
+the shared theme. Actual opener false/rejection/error keeps failure visible;
+only an actual successful opener starts the adapted success hold/fade.
+
+The en/zh `reviewPlanCardHint` and `reviewPlanOpen` keys are retired only after
+read-only combination projection with the frozen submitted-Plan
+`MessageTimeline.tsx` and `message-timeline-cards.tsx` proves zero renderer
+consumers. The independent `planBuild` key remains. This locale cleanup depends
+on that combined Plan replacement; the isolated older base is not claimed to
+have already retired its old Plan component.
+
+Baseline remains `dab5b9b331ee49382793ae60c160e79d1fa21524`, tree
+`f6ac5f0ffe79f6a09fcf17f2300c694ea6263c49`. Office v3 is commit
+`59e49e3a26794195e5a35d86c864f3130d0fdec2`, fingerprint
+`926a4acd30bca833d4cf53357ff5bfbc6ab42567700808b4ca1117252196afd3`,
+patch SHA-256 `0402372a47e9f1c37a2e325db6ca937365aff7121607042f2ffdcce03c45e7a7`.
+Only its two regression files changed from v2; the nine other source hashes
+remain unchanged. Plan7 is commit `f827ddb2cbf516831f1ccf9df83d6b4f12a7f262`,
+fingerprint `de2ba942ee5a3d6bae5b9bb537d9a73151a2b794311d01c9b208fe5ca8061a4e`.
+Shell5 is commit `3d79f5c5a804ceda39ebe6763f98ab1f64537a9f`; its existing
+terminal mappings cover the command adapter and command whitespace correction.
+No additional upstream source or copyright block is introduced for Shell.
+
+The coordinating branch locally integrated these 23 byte-matched source files
+at `e50fb4c7b42fcb837004a5312547eddb64f17ad9`, tree
+`83872d9e6ed4930f930e2f6aaa833ae0910c20e9`. The combined fingerprint is
+`18518379da583eb64029c414442fcbd89afd1001724f0bf0ea2fcb783c1443ba`;
+all other inherited source blobs/modes remain unchanged. The scoped fixture,
+type/lint and latest CSS-only renderer evidence is bounded in the
+[combined source map](deepseek-harness-presentation-sync.md#generated-office-deliveries-and-shared-file-artwork-source-candidate-2026-10-11).
+The original queued hunk receipt, Office v2 four-test failure and skipped build
+remain preserved as history. No native, Provider, CI, main, package, release or
+full DSH acceptance is inferred from these local commits.
+
+Arbitrary existing-file presentation producers, actual filename/path/description
+fields absent from the public Office receipt, DSH seq/index addressing, native
+reveal/application actions, specialized preparing-tool ownership beyond the
+existing shared owner and full DSH/native parity remain OPEN. No inferred
+filename/path, fabricated description/index or simulated action closes them.
+
+
+## DeepSeek Harness Present declaration and file actions candidate
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`. The source is DeepSeek
+Harness at `5badb15009ae1756c3afe0ae0cef1faafc290ccc`, MIT, Copyright (c) 2026
+DeepSeek. The complete notice remains in [THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md).
+The root LICENSE blob is `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`;
+the selected `ui-open-in-app/package.json` blob
+`e1b15cdf7247fc31960b486860708fad806e9080` declares MIT. All newly listed
+objects and their ordinary-file modes were checked at the fixed pin. Existing
+selected file/type palette artwork and its scoped license bounds retain the
+[Office admission record](#deepseek-harness-generated-office-deliveries-and-selected-file-artwork-candidate).
+CodeFileIcon, simple-icons, unselected artwork, fonts and assets remain excluded;
+no additional authorship or trademark-rights claim is made.
+
+The [Present checkpoint](deepseek-harness-presentation-sync.md#present-declaration-file-actions-and-local-integration-2026-10-11)
+records the exact source/blob/destination mapping, source commits, evidence
+chain and actual local merge/build checkpoint. DSH source contributes selected card/group/row/menu
+presentation, timing/ordering semantics, labels and FolderOpen artwork. Go
+protected Present receipts/history, private DTO validation, sealed file identity,
+Host lifecycle and native file authority are Analytix-owned compatibility work;
+no upstream runtime/store/controller, public history-order API, execution
+permission or application-path authority is copied.
+
+The TS/Host/UI44 source was normally committed as
+`47989644c9d55cecd045c1aa38d1f44f3b450218` on `codex/dsh-native-event-hookup`
+from `68ed3d00549a50bfaa87b1b42e896a43306a6fa8`, tree
+`3b4c3a366855c83e7d19a3237dec4111fbd9b80b`. All 29 source and 15 direct-test
+blobs/modes match the reviewed frozen composition. The coordinating author
+reports independent review complete, with the final pending-Tab P2 closed.
+Local fixture evidence covers 966 distinct cases across 20 unique suites with
+scoped unchanged-owner reuse; it is not a fresh full-suite execution. Go V3
+HTTP/app/server evidence is separately reported by its author, not freshly run
+in this checkpoint. The two initial normal-merge approval attempts were
+rejected before execution: the first required exact Go authorization; the sole
+same-tool/same-parameter retry treated the supplied transcript as untrusted
+delegated evidence. At that stage no third attempt or alternate actor/route was
+used. Those historical records remain preserved. A subsequent direct user
+message explicitly authorized the exact Go commit and this closure. The same
+exec_command reviewer then accepted the normally executed `--no-ff` merge.
+
+Go20 `fe915a405ac59a9412ae29ae685aa3822009b442` is integrated at
+`17ff805a7fe3ab9338bf2ca511947c01cd497d88`, tree `3292e9a10c981d6ed32968e91699f3939fb7588d`.
+The merge parents are the exact TS44 and Go20 source commits; the 64 frozen
+modes/blobs match, and its delta from TS44 consists only of the 20 Go paths.
+One renderer-only build from a new exact Git archive passed (21.835s,
+644 files / 42,416,109 bytes), using matching existing package versions and
+unchanged cache helper in the same shell. A package-metadata preflight error
+occurred before any Vite build; its script/log are retained, and the corrected
+metadata lookup preceded the sole actual renderer build. Only the three
+existing provenance/notice documents change after the source merge; prose is
+not renderer input and no rebuild is performed. Fresh receipts are recorded
+in the linked checkpoint. These source/test/build records do not close
+native/installed, live Provider, current CI/main, full source admission/parity,
+packaging or release acceptance. The earlier Office11 OPEN claims remain
+historical and bound to that earlier candidate.
+
+## Schedule rule/calendar adaptation preparation — 2026-10-11
+
+Status: candidate; bounded rule validation passes; whole Schedule integration remains pending.
+Source is DeepSeek Harness `5badb15009ae1756c3afe0ae0cef1faafc290ccc`,
+`packages/schedule/schedule/src/domain.ts`, blob
+`28748ace0aa02b61de09987d3543890761f0a47a`; package manifest blob
+`7ea453734aca03f7796dff9258e27ba8dc241084` pins Temporal 0.5.1.
+License object `LICENSE` is `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`,
+MIT, Copyright (c) 2026 DeepSeek; the existing complete notice is retained.
+The DSH desktop consumer writer ports/adapts only timezone/weekday validation,
+cron parser/star-preserving canonical encoders and next-calendar-target functions
+into `packages/runtime/src/contracts/schedule-rule.ts` and
+`src/main/schedule-calendar.ts`, with their direct tests. No Session/store/framing,
+Cordis package or general calendar framework is imported. Adaptations preserve
+Analytix legacy four fields and HH:mm, detach pure validation from Temporal,
+keep Temporal only in Main, and retain legacy daily/Claw behavior.
+Root manifest/lock adopt the regular npm production dependency
+`@js-temporal/polyfill` exactly 0.5.1. Source object/license identity was checked
+before adaptation; source-bound checks, dependency license intake and coordinator
+review are pending, without native/parity/package/release claims.
+
+Rule/calendar natural boundary: the normal isolated npm ci/postinstall completed
+with new manifest/lock and official root/runtime stamps current on Node 22.22.1,
+ABI 127, npm 10.9.4. Only Temporal 0.5.1 and jsbi 4.3.2 lock entries were added;
+existing entries are unchanged. Temporal's ISC notice is preserved above the
+existing complete DSH MIT notice reference; jsbi retains Apache-2.0.
+Nine owner files provide 46 selected fixture/regression cases: seven unchanged
+owners passed 30 selected cases; the initial two Main suites failed transform
+because an extracted function lacked a closing brace, then only those two owners
+were rerun and passed 16 selected cases after repair. Unselected cases were not
+run. Node, Web and runtime type checks and one 21-file affected lint pass.
+These are fixture/type/source checks, not runtime/native/Provider or renderer
+build acceptance. Origin, admission ACK/history and the Host source-authentication
+seam are not implemented in this rules phase. The source remains uncommitted,
+with no staging, push, main mutation or package build.
+
+Schedule History source adaptation (implementation pending verification): selected
+`packages/client/ui-schedule/src/client/DeliveryHistory.tsx` and
+`TaskManagerPage.module.css` at the same fixed DSH pin are adapted into existing
+`ScheduleTaskDetail.tsx`/CSS. Copyright (c) 2026 DeepSeek and the complete existing
+MIT notice apply. Changes use the actual Main ACK page API and stable attempt
+identity, preserve native task/owner retirement, and reuse the already admitted
+clock/chevron SVGs and font/tokens. No remote/store/component framework is imported.
+The Host original-thread navigation remains separate from last-run navigation.
+
+
+### DeepSeek Harness elected Records composer overlay source intake (2026-10-12 UTC)
+
+This scoped intake extends the existing main Conversation width candidate;
+its earlier producer-OPEN statement remains bound to that earlier checkpoint.
+Research and source admission are fixed to `5badb15009ae1756c3afe0ae0cef1faafc290ccc`.
+Reuse mode is bounded adaptation, reviewed by the coordinating renderer owner.
+The existing MIT license object `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`,
+Copyright (c) 2026 DeepSeek, and complete `THIRD_PARTY_NOTICES.md` notice apply.
+No assets, upstream store, slot framework or measurement controller are imported.
+
+| Exact pinned source | Git blob | Selected destination and adaptation |
+| --- | --- | --- |
+| `packages/client/ui-trajectory/src/client/TrajectoryView.tsx` | `6c2cd98ec8de072f940a2d2fae627dbcd1ca409b` | `src/renderer/src/components/chat/MessageTimeline.tsx`: the elected `data-conversation-composer-overlay` marker is bound to the existing scoped Records mode, including Inspect handoff; no Trajectory state or ledger implementation is copied. |
+| `packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css` | `3aa0a9d1f933651c53851358d0be59f8bef8ca49` | Existing `Workbench.tsx`, `workbench-layout.ts` and `styles/base-shell.css`: full-bleed view scroller, floating composer seat and gutter compensation. Existing composer ResizeObserver measurement supplies bottom clearance; ordinary chat retains its existing width axis and symmetric gutter. |
+
+The source window is based on Analytix `4428236a780c34655d09c4b8f0b7c5d881c73b85`.
+Direct validation owners are the existing Records, workbench-layout and
+ConversationWidthControls wiring tests. Tests are pending at intake; web types,
+affected lint, renderer build and native/installed acceptance are not claimed.
+No stage, commit, merge, push, main modification or live Provider use is admitted.
+
+
+## Schedule original-session integration checkpoint — 2026-10-12 UTC
+
+Status: locally integrated candidate with bounded renderer evidence. Normal merge
+`4428236a780c34655d09c4b8f0b7c5d881c73b85`, tree
+`1ee612b3fb983b00f0873312fc7e301eaaab0db3`, combines TS40
+`6fc30573570713b5140ef44d3ebecedfe50f88fd` and Go23
+`66023f7ebce6250f5109c1b3f86e296eb821f56a` without conflicts or path overlap.
+Exact modes/blobs and unchanged out-of-scope entries bind this source checkpoint.
+The selected History adaptation adds `packages/client/ui-schedule/src/client/DeliveryHistory.tsx`
+(blob `2e6c1f3a3679fc4d25522efa26d26bc197a0d22f`) and the History subset of
+`TaskManagerPage.module.css` (blob `25b573fcd4c84b938632d9ed90fb4a48ed2ca8b7`)
+at the existing fixed DSH pin to the existing `ScheduleTaskDetail.tsx`/CSS owners.
+The complete MIT notice remains. Earlier rules/history preparation and UI37 gaps
+are retained as phase history; their current source integration is this checkpoint.
+
+Exactly one renderer-only build from the merged Git archive passed, exit 0,
+70.834 seconds, 644 files / 42,601,619 bytes. The official cache helper ran in
+that shell; only `vite.build(resolved.config.renderer)` was invoked. No fresh
+Go23 test PASS or full dependency byte-identity proof is added here. This build
+covers the committed merge and excludes later Overlay, media and logical-usage
+source preparation. See the [combination record](deepseek-harness-presentation-sync.md#schedule-original-session-combination-checkpoint-2026-10-12-utc).
+Native, Provider, CI/main, full DSH parity, packaging and release remain OPEN.
+
+## DSH Excel parser and viewer source intake — 2026-10-12 UTC
+
+Currentness: source-intake preparation statements below predate the later [installation qualification](#excel-installation-qualification--2026-10-12-utc) and [finite implementation qualification](#excel-finite-implementation-qualification-2026-10-12-utc). Preserve them as phase history; the later evidence closes only its named implementation/standalone gaps. Browser/native viewer and complete Copy acceptance remain OPEN.
+
+Disposition: candidate; reuse mode: port-and-adapt. Fixed DeepSeek Harness pin
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`, MIT, Copyright (c) 2026 DeepSeek;
+root LICENSE blob `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785` and the existing
+complete [notice](../../../THIRD_PARTY_NOTICES.md) apply to these selected
+ordinary source objects. Coordinating source writer checked these exact objects
+and bounded imports before preparation. Independent review and executable
+validation are pending; this is intake, not a viewer or artifact PASS.
+
+| Source at the fixed pin | Git blob | Exact destination | Current scope |
+| --- | --- | --- | --- |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/ExcelBody.module.css` | `69f5a58c44ab20d872e11c5840519f8e8dd84625` | `src/renderer/src/components/file-preview/excel/ExcelBody.module.css` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/LazyExcelBody.tsx` | `1c4c657a24719c0f07a0ec1075f6e0b01e2d4df0` | `src/renderer/src/components/file-preview/excel/LazyExcelBody.tsx` | UI source candidate; execution pending |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/convert.ts` | `0ad1e5b9a7e8ad7ddf6cd3e6207bd3870434864b` | `src/shared/excel/convert.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/delimited.ts` | `8c2cc80d510dbca7afec1aeae7b0e063d4042719` | `src/shared/excel/delimited.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/error.ts` | `e3e6affd620d34eaca2285e93286271d1252825e` | `src/shared/excel/error.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/excel.tsx` | `ca3fcb8425588610d12e468a83497a37d3bb0175` | `src/renderer/src/components/file-preview/excel/ExcelBody.tsx` | UI source candidate; execution pending |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/format.ts` | `6385c9de841db59dc9df29348f3d8ce91c45fe1a` | `src/shared/excel/format.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/locales.ts` | `79b97690a44885b40925380b86eddc79dc6f2fad` | `src/renderer/src/components/file-preview/excel/locales.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/model.ts` | `51c2796f973ca40782991610f729e7dc5562bcd5` | `src/shared/excel/model.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/parse.ts` | `6e27de1b195075c6cfb07c9497b6f2c5f02463b4` | `src/renderer/src/components/file-preview/excel/parse.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/worker.ts` | `0fbea7a3535c4120dbc444689ba5aab2fedb0b09` | `src/renderer/src/components/file-preview/excel/worker.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/xls.ts` | `43a4eb12374a9075fe47c487c561d5ff70821a81` | `src/shared/excel/xls.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/xlsx-archive.ts` | `b8e5d3b7c7484cafcb1c73aa4ba2efc4cb177470` | `src/shared/excel/xlsx-archive.ts` | parser/style/locale source preparation |
+| `packages/client/ui-sidebar-documentpreview/src/client/excel/xlsx.ts` | `7c4608cc04753d054006f8c0f67b4777208034e4` | `src/shared/excel/xlsx.ts` | parser/style/locale source preparation |
+
+The parser keeps XLSX/BIFF/CSV/TSV saved values and limits, without formula
+recalculation or external-link execution. Selected adaptations remove the
+upstream raw-IIFE worker loader, TS import suffixes and Cordis locale declaration;
+a same-origin Vite module Worker retains copied bytes, timeout, termination and
+abort retirement. CSS selects warning/secondary fallback colors from
+`ui-theme/src/styles/design-platform.css` (blob `eb67869c92bf53162dbd443c8a0e4fe8baabb11b`)
+and radius8 from `ui-theme/src/styles/base.css` (blob
+`23be07f678050d8f144199d0312697118b9f33bc`), under the real `data-theme`.
+No new font, icon package, parser framework, RPC/store/plugin, CSP grant,
+public Go event DTO or renderer path authority is included. `index.ts` and
+`asset-imports.d.ts` are excluded. The two UI leaves now use the existing file
+preview pane, Tooltip and locale system. Complete bytes enter through the
+existing files/preload/Main route; protected Copy retains the original Present
+index, selector, snapshot digest and native document lease. The eight pure
+converter files have one shared implementation; no duplicate parser or thin
+renderer re-export files remain. Execution qualification remains pending.
+
+FortuneSheet's original complete MIT notice (Copyright (c) 2022 Suzhou Ruilisi
+Technology Co., Ltd) is retained byte-for-byte from
+`packages/client/ui-sidebar-documentpreview/licenses/FortuneSheet.txt`, blob
+`065d1f9e7eade6f4765ffbc2413cd087b09c9a3d`, at
+`src/renderer/src/components/file-preview/excel/licenses/FortuneSheet.txt`.
+The fixed dependency/patch proposal retains Fortune core/react1.0.4 and
+ExcelJS4.4.0 with all three DSH patches. The manifest, local patches and normal
+postinstall owner are prepared; package-lock resolution and installation await
+one coordinated normal npm window. Stock versions are not asserted equivalent. SheetJS0.20.3's Apache-2.0 payload/notice remains
+subject to actual package admission. No dependency is installed by this intake.
+
+
+The Regular warning triangle slice in
+`packages/client/ui-primitives/src/icons/index.tsx`, blob
+`d22cbdd06d50289f15154996564b250b2af4163a`, is ported to
+`src/renderer/src/components/chat/presentation/DeliverableIcons.tsx`. Its two
+paths, rounded joins/caps and Regular stroke width retain the same DSH MIT
+notice; no icon package or other artwork is introduced.
+
+| Fixed DSH patch source | Git blob | Local npm patch destination |
+| --- | --- | --- |
+| `patches/@fortune-sheet__core@1.0.4.patch` | `747433a75db13de814985a54d3284d077ad0f61b` | `patches/@fortune-sheet+core+1.0.4.patch` |
+| `patches/@fortune-sheet__react@1.0.4.patch` | `4be77d9609e17c053985a97a29b395a2350430eb` | `patches/@fortune-sheet+react+1.0.4.patch` |
+| `patches/exceljs@4.4.0.patch` | `87ee0151b2cd7d0c863e9f920bd1f59f3f3acae8` | `patches/exceljs+4.4.0.patch` |
+
+The core/react adaptation adds a dedicated synchronous `protectedCopy` prop,
+not a claimed upstream hook. Undefined retains ordinary behavior; null,
+not-ready, throwing or asynchronous handlers cannot fall through to native
+clipboard or session storage. The common Copy entry clones the current sheet
+and bounded closed ranges; the original handleCopy prechecks remain, and protected
+KeyC prevents its native default synchronously. This is source intent, pending
+actual dispatch qualification and native UI evidence.
+
+Official fixed package bytes were read without executing package code. All
+13 modified postimages (core4, react2, ExcelJS7) were reconstructed as text and
+frozen by SHA-256. The two original DSH core patch after-index fields are stale;
+they are not postimage evidence. The local wrapper checks the exact three
+ordinary patch files, versions and actual postimages; its bytes and patch bytes
+enter the existing installation digest, with read-only Doctor qualification and
+fail-closed postinstall stamping. Patch application has not yet run.
+
+The renderer Worker and the fixed second codec entry import the same converter.
+The second entry uses the existing codec builder/payload validator, existing
+Mac Helper resolver and owned-process lifecycle; generation stdin/stdout stays
+unchanged. The prepared entry closes external package/dynamic require and
+network/process-launch builtin imports. It has no workbook path or raw-text
+export authority. This is application-level isolation, not an OS network
+sandbox. Real Node import, number-format and standalone closure qualification
+remain pending.
+
+Source budgets are16MiB compressed bytes,64MiB total ZIP expansion checked
+before inflation,250000 rectangular cells and15000ms parsing. The shared converter checks a16MiB complete data-message budget before
+structured-clone/JSON allocation, including repeated shared-string amplification. The Copy codec
+has16MiB output and Host selected text has1MiB UTF-8; over-limit inputs fail
+closed rather than truncating or silently omitting cells. Workbook formulas use
+saved caches, including zero/false; absent caches remain missing/empty. The
+Host owns selection serialization, ordinary export projection and the final
+current-file/digest/lease checks. Pending test sources do not establish PASS. The
+protected adapter now carries1–32 ranges and parsed number-format/date markers.
+The Host admits same-axis nonoverlapping ranges within250000 cells, preserves
+first-seen row/column order, gives date display `m` precedence, uses `v` for the
+fixed W/w format exception and otherwise falls back from nil `m` to `v`; empty
+`m` stays empty. Regression sources are prepared but not executed. The current
+TSV sink is a controlled base route, not complete DSH Copy acceptance.
+
+### Copy completion remains OPEN
+
+Currentness: this matrix and missing-seam description preserve the pre-HTML candidate. See the [later finite qualification](#excel-finite-implementation-qualification-2026-10-12-utc) for implemented and executed subitems; browser/native full Copy remains OPEN.
+
+The positions below refer to the official core1.0.4 `dist/index.esm.js` source;
+its actual package bytes and the fixed DSH patch remain the source inputs.
+Full-chain source review supersedes the withdrawn partial hidden-filter reading.
+No hidden-filter hunk was applied.
+
+| Behavior | Fixed native source behavior / position | Current candidate and gap |
+| --- | --- | --- |
+| Hidden rows/columns | `copy`62935–62975 filters only state calculations; `rangeValueToHtml`62612–62638 retains all selected indices. | Hidden coordinates retained; same source behavior, runtime comparison pending. |
+| Entry/range semantics | `handleCopy`76760–76834 accepts same-axis nonoverlapping keyboard ranges and rejects partial merges; React ContextMenu44–62 rejects multi-selection. | Original prechecks retained; Host validates bounded ranges and original first-seen ordering. Source prepared; tests pending.32 ranges is an explicit candidate input limit. |
+| W, dates, numbers and caches | `getCellValue`60399–60432 makes `ct.t=d` use `m` even for `v`;62670–62676 chooses W/w raw values;62863–62869 falls back only for nil `m`. | Parsed metadata now reaches Host; W/date/zero/false/empty/missing-cache cases prepared, not executed. |
+| Merge |62681–62686 adds master rowspan/colspan;62829–62833 omits shadow td. | TSV master plus empty shadows does not carry HTML merge structure: OPEN. |
+| Styles/dimensions |61258–61299 and62649–62862 carry style helpers, borders, column widths and row heights. | Current neutral Copy frame/text sink has no HTML styles or dimensions: OPEN. |
+| Rich text/formula/link | Fixed selection chain has no active rich-run span branch, formula/raw-v dataattrs or hyperlink output. DSH patch uses `_.escape` at62869. | No invented rich-run framework is required; saved joined text and omission of f/links still need actual qualification. |
+| Newline/tab/quotes | `clipboard.writeHtml`61435–61466 copies a DOM table; browser innerText/textContent determines plain text. | Quoted TSV is explicit; exact browser whitespace/delimiters and dual-format behavior: OPEN. |
+| CF execution | `getStyleByCell`61258–61266 unconditionally calls getComputeMap/checkCF. | Future HTML must reject CF rules and use a checked empty-CF context; current TSV calls neither helper. HTML qualification OPEN. |
+
+The minimal missing seam is within this same protected effect:
+`ToolResultLocalDisplayHostV1` currently accepts `copy(text)` and registration
+calls `clipboard.writeText`; `projectOrdinaryWriteExportContentV1` is text-only.
+Core actually exports `rangeValueToHtml`, `getStyleByCell` and `getCellValue`.
+Reusing those helpers requires bounded typed styles/config from the same
+converter, ordinary text projection before HTML escaping, explicit no-CF
+qualification and rejection of executable or remote-resource output. The same
+Main sink then needs optional checked HTML alongside text while preserving
+freshness, digest, authority and existing byte limits. No renderer HTML,
+DOM/sessionStorage copier or new ordinary clipboard outlet is authorized by
+this plan. This OPEN subitem does not block the normal dependency-install
+window or read-only viewer qualification and does not establish Copy parity.
+
+### Excel installation qualification — 2026-10-12 UTC
+
+The configured Mac executed one script-enabled normal root `npm install`
+(exit1,286.451s), retained its generated lock and failure, repaired only the
+patch-package8.0.0 bin string/path normalization, then recovered the original
+pipeline with `npm run postinstall` (exit0,31.110s). Runtime `npm ci`, clean,
+TypeScript compilation and the existing native/stamp lifecycle actually ran.
+The13 installed core/react/ExcelJS postimages match the reviewed SHA-256
+manifest. Existing app/runtime stamp checks and the Electron in-memory SQLite
+plus terminal module-load ABI check PASS (5.018s). Original shared dependency
+link targets and canonical source remain unchanged; actual dependency/build
+outputs belong to this task's worktree. No second root install, script skipping,
+force/legacy-peer-deps, GUI, real document, Provider or Git write occurred.
+
+The root lock now records the exact approved versions and official SheetJS
+0.20.3 tarball/integrity; its SHA-256 is
+`39351352979f91ccab9eb1b83320b5f0fca992ff448c199607146df4de13ef76`.
+This establishes installed inputs and actual patch application, not complete
+packaged-license admission, standalone closure, viewer or Copy acceptance.
+The [installation checkpoint](deepseek-harness-presentation-sync.md#excel-dependency-installation-checkpoint-2026-10-12-utc)
+records the bounded commands, elapsed times and remaining evidence.
+
+A single Node probe loaded actual core `update` and ExcelJS with no DOM shim;
+`update('0.00',1.234)` returned `1.23`. Its eight-file local CJS erasure
+harness stopped at the import-only SheetJS codepage export with
+`ERR_PACKAGE_PATH_NOT_EXPORTED` (exit1,22.350s), before CSV/XLSX conversion
+samples. Real Node module/formatter load is observed; converter display-value
+qualification is still pending. Production Vite receives ESM imports before
+emitting CJS, so the probe's require-condition failure is not a production build
+failure. No source import was changed to conceal this verification gap.
+
+
+### Excel finite implementation qualification 2026-10-12 UTC
+
+Currentness: the preceding source-intake and Copy OPEN matrix describe earlier
+preparation. Their formatter, merge/style and selected-owner execution gaps are
+superseded only by this bounded evidence; complete browser/native Copy and
+viewer acceptance remain OPEN. The [current qualification record](deepseek-harness-presentation-sync.md#excel-finite-owner-and-paired-copy-qualification-2026-10-12-utc)
+preserves the installation checkpoint, original CJS probe failure, subsequent
+ESM qualification, finite owner selection and later combined web failure.
+
+The Excel v5 validation snapshot has59 task-owned source/test/dependency/notice
+and provenance paths, frozen at HEAD
+`e4ac34c5d191ab3c5b3745f953fc6dbd03abfcc8` in
+`/tmp/analytix-dsh-excel-html-source-freeze-v5.json`, SHA-256
+`754327e749ac8864df083123a913e2d6ede63bf06665dbcc243caef0f2f677e8`.
+No new upstream pin, parser, package version or notice is introduced by the
+HTML adaptation. Installed Fortune's actual public formatter and value/merge
+helpers run through the same fixed codec and shared converter with checked
+styles/config and empty CF. Ordinary literal projection precedes HTML escaping;
+Host admits only the fixed table grammar, matching projected literals and merge
+coverage. The paired complete-text guard was repaired after horizontal/vertical
+cross-cell privacy RED cases, and the affected green cases retain zero native
+effects on refusal. One Main dual-format clipboard write follows the unchanged
+original current-file/digest/lease checks; neither renderer content nor a raw
+DOM/browser copier supplies authority.
+
+Finite evidence is244 unique PASS:221 selected Vitest cases across13 owners,
+19 patch-wrapper cases and4 standalone codec cases. The510 named-scope skips
+remain skipped, and unchanged-input reuse is explicit in
+`/tmp/analytix-dsh-excel-final-owner-results-v1.json`. Final v4 Node types,
+affected lint and actual standalone build/closure exit0. The Node ESM v2
+synthetic CSV/XLSX qualification passes with real npm import resolution and no
+DOM shim; the earlier CJS resolver failure remains historical evidence.
+
+The separate62-path isolated Excel/Plan combination has144/144 Plan cases and
+three-file lint PASS, but web types are blocked: exit2, nine DOM/Node timer
+errors plus missing browser-bridge `readExcel`. Original Plan worktree files
+were unchanged. Seven source-only timer/browser-reader repairs have since been
+integrated, bringing the owned candidate to66 paths; their new single case,
+seven-file lint and combined web types are pending. The244 PASS remains the
+earlier59-path Excel qualification, not a66-path or web type PASS. No renderer Worker build,
+native GUI/keyboard/menu, browser native text MIME, PTY process, packaged,
+current CI/release or full DSH acceptance is added. Existing installation and
+license observations retain their original scope.
+
+## Overlay media logical-usage and Settings candidate — 2026-10-12 UTC
+
+Status: uncommitted candidate on `codex/dsh-native-event-hookup`, base
+`4428236a780c34655d09c4b8f0b7c5d881c73b85`; the final affected Settings suites
+passed31/31, including two departure/reload error regressions, and the current
+bilingual Legacy owner retains its unchanged-input12/12 pass. The initial four Settings TS-file lint and later two-file affected lint exited0
+with no warnings. The exact current batch has35 source/test paths plus three selected
+provenance document deltas. The earlier Records source intake above supplies
+its two fixed-pin source objects and existing MIT attribution; no new third-party
+source object or dependency is admitted by media, logical-usage or Settings.
+
+The coordinating sole TS/UI source writer reviewed the final scoped diff.
+Records elects the real existing overlay marker and measured composer clearance,
+including thread-scope retirement. Protected Present media reuses existing
+ImagePreview/WritePdfViewer consumers through original selector/digest/lease
+checks and complete bounded Host bytes. Logical-usage follows the closed wire
+contract, including unknown counts independent of proven timing and complete
+billing coverage. Settings retains local drafts on failed or stale departure,
+with explicit retry; the Legacy card reports observed folder names and honestly
+unavailable import/detection instead of exposing unimplemented actions.
+
+The [bounded evidence record](deepseek-harness-presentation-sync.md#overlay-media-logical-usage-and-settings-candidate-2026-10-12-utc)
+preserves initial failures, focused repairs and unchanged-input reuse separately.
+The independent Settings Host-readback epoch guard passed the existing
+late-recovery regression; departure, retry and draft-retirement checks also
+passed. A late rejected reload cannot replace a newer draft's saving status; a
+current failed departure shows a notice without presenting a false save failure. The earlier four-suite49/50 failure remains in its original receipt.
+This is scoped repaired evidence, not a newly run complete50-case pass.
+Final web noEmit passed for the exact35 source/test candidate after the two
+Settings files changed. Node/runtime inputs exclude these renderer-only owners;
+their individual passing commands are reused without repeating types. Excel and
+renderer-build acceptance remain outside this evidence. The exact35 source/test
+files and three selected document deltas are frozen in the bounded evidence
+record, with Excel-only paragraphs excluded from the batch patch.
+The15 untracked Excel files and their intake/notice paragraphs remain a separate
+next batch. No install, combined renderer build, native/Provider execution,
+stage, commit, merge, push or main change is included in this checkpoint.
+
+
+## DSH running indicator source intake — 2026-10-13 UTC
+
+Status: candidate; reuse mode: port-and-adapt. Source is DeepSeek Harness
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`, MIT, license object
+`c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`; existing DeepSeek copyright
+and MIT text remain in `THIRD_PARTY_NOTICES.md`. Reviewer: coordinating
+DSH source owner. This adds no dependency or product authority.
+
+| Source under `packages/client/ui-chat/src/client/chat/` | Git blob | Destination under `src/renderer/src/components/chat/presentation/chat/turn-state/` |
+| --- | --- | --- |
+| `RunningWhaleTail.tsx` | `d528c7502a0d51f50575ba1a152b488e39e493b9` | `RunningWhaleTail.tsx` |
+| `running-whale@2x.png` | `daa680536c0a2b9044adc5b310a396deb0308a80` | `running-whale@2x.png` |
+| `ChatView.module.css` (running indicator only) | `ff121998a6ba3dad6df5583200750642066abea9` | `TurnState.module.css` |
+
+Adaptations: local CSS module, existing Analytix color/font tokens, and the
+application reduced-motion setting in addition to the OS preference. The
+APNG is copied without pixel changes. Local status text and clocks remain
+bound to actual runtime facts. Source review is complete; affected tests,
+bundle and native visual acceptance are pending for this candidate.
+
+
+## DSH resident input and initial conversation candidate — 2026-10-13 UTC
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`. Source repository:
+DeepSeek Harness, full commit `5badb15009ae1756c3afe0ae0cef1faafc290ccc`.
+All source paths below are under
+`packages/client/ui-conversation/src/client/skeleton/`; destinations are under
+`src/renderer/src/`. Each raw byte stream's Git blob matches the official
+fixed-commit object. The registered local checkout is unavailable; the bounded
+intake uses the official public fixed-commit source rather than another branch.
+Root MIT license object `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`,
+Copyright (c) 2026 DeepSeek, is retained in full in `THIRD_PARTY_NOTICES.md`.
+Ancestor listings, the selected package tree and selected file notices show no
+nearer license exception. No separate proprietary authorization is required.
+
+| Exact source leaf | Git blob | Destination and selected adaptation |
+| --- | --- | --- |
+| `InputBar.tsx` | `031413132b461b76c8632a06dfbdadd2d5f38dd9` | `components/chat/InputBar.tsx`: resident input/attachment/toolbar seats; existing Analytix editor, gestures and submission authority retained |
+| `InputBar.module.css` | `4676f4cd7dd400937d00f531c5b0ecadc1056081` | `styles/base-shell.css`: shared card/editor/toolbar geometry for main, SDD and Inspector |
+| `ConversationMainPanel.tsx` | `674b644a9fa50ee0997259288fc816966bb41812` | Existing `conversationPresentationPhase` through Workbench to the initial row and resident input attributes |
+| `ConversationContent.tsx` | `15bfdd8732f577df9d7f1a7f58274e8eae362000` | Workbench's one permanent composer seat and phase-only visual transition |
+| `EmptyHero.tsx` | `40df87269b5f9b434dbe561b03f3d368d0d53301` | `components/chat/message-timeline-empty.tsx`: separate hero chrome, existing Analytix brand and locale copy |
+| `HeroShell.module.css` | `aac6a5cf616ca5b7a0d14a1b2bce9356624b92ec` | `styles/base-shell.css`: headline 26/32 weight500, mark34, gap10/12; no upstream fish artwork |
+| `ConversationRoot.module.css` | `3aa0a9d1f933651c53851358d0be59f8bef8ca49` | Existing width/scroll/composer authority retained; hero positioning and settling visibility added without remounting input |
+
+The coordinating input writer adapts composition and geometry to the existing
+Analytix workspace/thread drafts, ProseMirror mention model, upload/currentness
+checks and Host submission fences. Main, SDD and Inspector invoke their own
+existing submission callbacks. Protected Gate overlays and their selectors,
+leases and retained question seats keep their original owners. Fork, Claw,
+workspace recovery and Write/native preparation boundaries remain in place.
+No DSH Runtime/Session store, Cordis/slot framework, Lexical editor, dictionary,
+fish asset or second draft state machine is imported. `SessionInputShell` is
+a class in `packages/client/ui-conversation/src/client/input/facade.ts`
+(blob `9f4a264e46e6f09451d3fb1c7118da8a34ebb63d`), reached through
+`input/hub.ts` (blob `fb8d8a736f3722b058aee708add2c36628e38f56`).
+Those two verified objects are reference-only: their state-machine/editor
+implementation is not admitted or imported by this unit.
+
+The old FloatingComposer/Island and no-op composer factories are retired after
+all three real consumers switch. The unused old queue view and initial-only
+heatmap are retired; real queued-message and measured session-usage leaves remain.
+The new owner preserves the old feedback-toast DOM anchor as a compatibility
+class, with styling owned by InputBar. Source review includes an independent
+read-only boundary review. `git diff --check` passes for the static candidate;
+direct regressions, types/lint, combined build and native acceptance are pending
+the coordinator's exclusive execution window. This is source admission only,
+not full DSH parity, current CI, distribution or release approval.
+
+The hero brand amendment uses first-party formal Analytix assets and user-owned
+product copy, not the upstream fish or dictionaries. Exact badge token/font
+reference reuses previously admitted `packages/client/ui-theme/src/styles/design-platform.css`
+(`eb67869c92bf53162dbd443c8a0e4fe8baabb11b`) and `base.css`
+(`23be07f678050d8f144199d0312697118b9f33bc`); their raw bytes are rechecked at
+the same fixed pin with the existing full MIT notice. Upstream's intentional
+above-center bottom padding is adapted to symmetric padding for the user's
+explicit available-chat-area centering. This remains a candidate pending the
+new direct checks and coordinated rendered/native acceptance.
+
+The amended input source subsequently passes its direct owner regressions
+(188 interaction tests plus one selected real Footer fork adapter case), web/node
+types and affected-file lint. Initial failure and fixed-pin baseline evidence
+remain preserved; the local delayed-focus repair does not import additional
+upstream behavior. Combined build and rendered/native acceptance remain pending.
+
+## DSH user message destination update — 2026-10-15 UTC
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`; reviewer: delegated A
+renderer/documentation owner with independent read-only source review. The
+existing DeepSeek Harness source remains fixed to
+`5badb15009ae1756c3afe0ae0cef1faafc290ccc`; MIT license object
+`c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`, Copyright (c) 2026 DeepSeek.
+The complete existing notice in [THIRD_PARTY_NOTICES.md](../../../THIRD_PARTY_NOTICES.md#deepseek-harness-presentation-leaves)
+and adapted source headers are retained. This supplements the historical Footer
+source map above with the extracted helper and user-only CSS destinations.
+
+| Exact upstream source | Fixed Git blob | Actual local destination / selected scope |
+| --- | --- | --- |
+| `packages/client/ui-chat/src/client/chat/MessageItem.module.css` | `5d194833358d96278bbd1c31e69169f485bb2dbb` | `src/renderer/src/components/chat/UserMessage.module.css`: right-aligned user row/stack, width cap, bubble geometry and local token adaptation. |
+| `packages/client/ui-chat/src/client/chat/message-chrome.ts` | `e078d28177066fbd4110fb12afbe3e81bcce7bd1` | `src/renderer/src/components/chat/presentation/chat/message-chrome.ts`: existing local clock formatter extracted from `TurnTailView.tsx`, shared by user and assistant consumers. |
+| `packages/client/ui-chat/src/client/chat/use-calendar-day.ts` | `29e5311383fa5d6cba826b6b607d60cb1cc95d1b` | `src/renderer/src/components/chat/presentation/chat/message-chrome.ts`: existing local calendar-day hook extracted without changing its body. |
+
+Existing action CSS and admitted Copy/Check/Edit SVGs remain in their recorded
+owners. Analytix editing, public text projection and protected reply authority
+are preserved. Direct regressions are prepared; tests, types/build and rendered
+acceptance remain for the coordinating validation window. This records source
+destinations, not a runtime, parity, canonical integration or release result.
+
+### DeepSeek Harness independent public trajectory source intake — 2026-10-15 UTC
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`; reviewer: delegated
+trajectory writer with independent read-only UI/wire review. Research/source identity is fixed to `5badb15009ae1756c3afe0ae0cef1faafc290ccc`.
+The exact MIT license object is `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`,
+Copyright (c) 2026 DeepSeek; the complete existing MIT notice in
+`THIRD_PARTY_NOTICES.md` applies. Each adapted presentation file retains the pin,
+copyright, and notice pointer. `pin/manifest.json` contains SHA-256 and Git blob
+identities for every selected source below. No file exception, assets, upstream
+store, execution engine, protected provider parser, slot framework, dependency or
+PTC parser is imported.
+
+Every short destination below is relative to `src/renderer/src/components/trajectory/`.
+
+| Exact source under `packages/client/ui-trajectory/src/client/` | Git blob | Destination and bounded adaptation |
+| --- | --- | --- |
+| `TrajectoryView.tsx` | `6c2cd98ec8de072f940a2d2fae627dbcd1ca409b` | `src/renderer/src/components/trajectory/TrajectoryPanel.tsx`: independent conversation view, public record coordination, floating-composer marker, resident50/+50, selected record seat. |
+| `views.module.css` | `687f4a465782f1fa87e7200a79ca3026bf5efcef` | `src/renderer/src/components/trajectory/TrajectoryPanel.module.css`: full-bleed flex shell and existing composer-height clearance. |
+| `TrajectoryToolbar.tsx` | `c3861f03a95f96183ca22e2e67fe7f432f3c353f` | `TrajectoryPanel.tsx`: visible Duration, Turns/Calls bulk fold and AND public search. Hidden Actual time control remains unexposed. |
+| `TrajectoryToolbar.module.css` | `ac89529bd5b50c96f7e48c194564d5aa8df17a7b` | `TrajectoryPanel.module.css`: selected 32px/20px toolbar, horizontal padding/gaps and flex search rules, existing Analytix tokens. |
+| `TrajectoryTimeline.tsx` | `148de3bc018def403f5eb73a5245c8769a8e5b29` | `TrajectoryTimeline.tsx`: drag min3, wheel exp(deltaY*.0015), cursor anchor, right pan, range/reset, edge pan, equal lanes and actual point/span selection. |
+| `TrajectoryTimeline.module.css` | `ec7d45db17eb4a0a5ed739d8a16520950887b8f3` | `TrajectoryPanel.module.css`: selected50px plot/44px labels/14px lanes/8px spans, range/hover/search/selection rules. |
+| `timeline.ts` | `40cf1c72879f0681f00c7a4bdd084275e0fd1957` | `trajectory-timeline-model.ts`: equal sequence slots; Duration compresses idle gaps from real Host intervals; full-retained coordinates stabilize local prepend. Unknown ends stay points. |
+| `trajectory-record.ts` | `bd37189fa499433ddd1291166d65b2dfa5464ad4` | `trajectory-adapter.ts`, `TrajectoryPanel.tsx`: record identity/navigation purpose; actual DTO projection is Analytix-specific closed public whitelist with stable turn/logical-step and call/item IDs. |
+| `TrajectoryTable.tsx` | `9eeeb5c2abb0e62994ae0031be32f21a4d806c06` | `TrajectoryTable.tsx`, `TrajectoryInspector.tsx`, `TrajectoryPanel.tsx`: chronological turn/runs, stable group folding, selected-row reveal, viewport/tail/prepend anchor, public Inspector tabs/resizer. No model→tool parent is inferred. |
+| `TrajectoryTable.module.css` | `12b03b1c51ff6b7791a03c7abe7d1a44c2e647ad` | `TrajectoryPanel.module.css`: selected 30px rows/header,122px/84px Event column, .5px boundaries, Inspector clamp(320px,38%,440px),42px header/34px tabs/94px overview and narrow overlay. |
+
+Analytix changes source input and authority: only the existing validated finite
+replay and accepted live dispatch fan out into an isolated public projection;
+there is no second SSE, ACK owner, chat store/mapper mutation, raw-event archive,
+provider-body capture or protected path persistence. Model start→assembled uses
+the new Host assembly event, never close/HTTP counters; tool ready is separate
+from actual execution. Retry folds by real logical-step UUID. Terminal public
+assistant text remains its own ledger record because the wire has no step→text
+item identity. PTC and inferred model/tool ancestry remain absent. Turns/Calls are
+folds, not filters. Public facts determine available Inspector tabs. Tool Inspect
+uses an explicit existing real-identity callback and ProtectedToolResult owner.
+
+Memory is one current-thread display binding plus live/replay/view leases, with
+old thread retirement. Stable IDs and source field sequence numbers deduplicate
+replay/live without an unbounded event-ID set. Each retained projection is capped
+at2000 records,16Ki UTF-16 preview units/record and128Ki total preview units. A
+monotonic discarded seq floor prevents old replay/tombstones from resurrecting a
+discarded prefix. Truncation is visible, completeThroughSeq becomes unknown, and
+search is explicitly limited to retained previews; no server paging is invented.
+
+Direct synthetic regression sources cover identity/time/privacy, replay watermark,
+retirement/caps, resident+50, drag/zoom/pan/reset, stable prepend coordinates,
+fold/search/reveal, tail/prepend/resize scroll, explicit protected intent retirement
+and unchanged accepted dispatch→ACK→observer ordering. Static reviewer findings
+were repaired. No tests, types, lint, builds, GUI/native or Provider acceptance ran
+in this writer window. No pixel-equivalence, whole DSH parity, admission PASS,
+canonical integration, commit, push, release or publication is claimed.

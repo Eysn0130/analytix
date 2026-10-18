@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "reviewedAt": "2026-08-23",
-  "analytixCommit": "196c6dd3f6d74c660224b88117963ba52508389f",
+  "reviewedAt": "2026-10-10",
+  "analytixCommit": "210039729892bf80fb8e0e9a7c909b70266ec6bc",
   "analytixPreRewriteCommit": "8ddfdfd1fda2a744eaca1ad6a99fe5a48354a448",
   "analytixHistoryRewriteMap": "docs/analytix/history-rewrite-provenance-2026-07-10.json",
   "authorization": {
@@ -202,7 +202,22 @@
         "blob": "c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785",
         "name": "MIT",
         "class": "permissive-with-notice",
-        "reusePolicy": "Only reviewed presentation leaves; exact file provenance, MIT notice and focused evidence required. DSH runtime/session/state authority is excluded."
+        "reusePolicy": "Reviewed presentation leaves and explicitly admitted interaction/session behavior ports; exact file provenance, MIT notice and focused evidence required. DSH runtime/session storage, raw payloads and provider authority are not imported."
+      }
+    },
+    {
+      "id": "openai/apps-sdk-ui",
+      "directory": "apps-sdk-ui",
+      "branch": "",
+      "commit": "0f00143c7a639906f1621fe58e1b6be7b5bea46d",
+      "remote": "https://github.com/openai/apps-sdk-ui.git",
+      "ledger": "docs/analytix/upstreams/openai-apps-sdk-ui-sync.md",
+      "license": {
+        "path": "LICENSE",
+        "blob": "b8ac8dc0f960bbe0b0cc90cd06d58b672151773f",
+        "name": "MIT",
+        "class": "permissive-with-notice",
+        "reusePolicy": "Only the 139 mapped vector sources, retained complete MIT license/notice and existing bounded renderer adapter are admitted; no SDK runtime/dependency, brand/data exceptions or current-web parity are added."
       }
     }
   ]

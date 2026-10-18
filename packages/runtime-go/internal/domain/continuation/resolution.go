@@ -28,6 +28,8 @@ func ResolveProjection(kind, status, reasonCode string) (ResolutionProjection, b
 		projection.PublicStatus, projection.Decision = "denied", "deny"
 	case kind == KindUserInput && status == StatusSubmitted && reasonCode == "user_input_submitted":
 		projection.PublicStatus = "submitted"
+	case kind == KindUserInput && status == StatusContinued && (reasonCode == ReasonUserInputContinuedV1 || reasonCode == ReasonUserInputOutcomeUnknownAfterRestartV1):
+		projection.PublicStatus = "continued"
 	case kind == KindUserInput && status == StatusCancelled && reasonCode == "user_input_cancelled":
 		projection.PublicStatus = "cancelled"
 	default:

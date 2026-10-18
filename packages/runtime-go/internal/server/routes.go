@@ -224,6 +224,7 @@ func (h *runtimeServerHandler) handleThreadEvents(w http.ResponseWriter, r *http
 				return result.Events, nil
 			},
 			SubscribeEvents:               h.store.SubscribeEvents,
+			InitialGoalActivation:         h.initialGoalActivationV1,
 			SealAcceptedFinalDelivery:     threadapp.NewAcceptedFinalDeliverySealer(r.Context(), h.publicProjector),
 			ValidateAcceptedFinalDelivery: threadapp.NewAcceptedFinalDeliveryValidator(r.Context(), h.publicProjector),
 			PreflightPublic:               threadapp.NewPublicProjectionPreflight(h.store, h.publicProjector),

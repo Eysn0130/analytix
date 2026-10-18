@@ -1,13 +1,16 @@
+/* Selected ContextMeter colors adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md. Analytix owns the five-category model. */
 import type { ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ContextCapacity, ContextCategoryKey } from '../../lib/context-capacity'
 import { formatCompactNumber, formatPercent } from '../../hooks/use-thread-usage'
+import css from './InputBarDock.module.css'
 
 const CATEGORY_COLORS: Record<ContextCategoryKey, string> = {
-  tools: '#3b82d8',
-  system: '#8b7be8',
+  tools: 'rgb(167, 139, 250)',
+  system: 'rgb(173, 178, 184)',
   skills: '#1d9e75',
-  messages: '#e0673a',
+  messages: 'rgb(77, 147, 248)',
   other: '#d8910d'
 }
 
@@ -47,11 +50,9 @@ export function ContextCapacityPopover({ capacity, thresholdRatio = 0.9 }: Props
 
   return (
     <div
-      className="ds-context-capacity w-[300px] rounded-2xl border border-ds-border-muted bg-ds-card p-3.5 text-ds-ink shadow-[var(--ax-shadow-popover)]"
-      role="dialog"
-      aria-label={t('contextCapacityTitle')}
+      className="ds-context-capacity min-w-0"
     >
-      <div className="flex items-baseline justify-between gap-2">
+      <div className={css.capacityHeader}>
         <span className="text-[13.5px] font-medium">{t('contextCapacityTitle')}</span>
         <span className="text-[12px] tabular-nums text-ds-faint">
           <span className="font-medium" style={{ color: accent }}>
@@ -66,10 +67,9 @@ export function ContextCapacityPopover({ capacity, thresholdRatio = 0.9 }: Props
         </span>
       </div>
 
-      <div className="relative mb-1.5 mt-3">
+      <div className={css.capacityBarWrap}>
         <div
-          className="flex h-2 overflow-hidden rounded-full"
-          style={{ background: 'var(--ds-surface-subtle)' }}
+          className={css.capacityBar}
           role="img"
           aria-label={t('contextCapacityBarAria', { percent: formatPercent(capacity.usedRatio) })}
         >
@@ -77,7 +77,9 @@ export function ContextCapacityPopover({ capacity, thresholdRatio = 0.9 }: Props
             <span
               key={segment.key}
               style={{
-                width: `${segment.ratio * 100}%`,
+                // Include decorative gaps in the occupied share, rather than
+                // borrowing their pixels from the actual free region.
+                width: `max(0px, calc(${segment.ratio * 100}% - ${capacity.usedRatio > 0 ? (visibleSegments.length - 1) * segment.ratio / capacity.usedRatio : 0}px))`,
                 minWidth: segment.key === 'messages' ? undefined : 2,
                 background: CATEGORY_COLORS[segment.key]
               }}
@@ -106,7 +108,7 @@ export function ContextCapacityPopover({ capacity, thresholdRatio = 0.9 }: Props
           const category = capacity.categories.find((c) => c.key === key)
           if (!category) return null
           return (
-            <div key={key} className="grid grid-cols-[13px_1fr_auto_46px] items-center gap-x-2 py-[3px]">
+            <div key={key} className={css.capacityRow}>
               <span
                 className="h-[9px] w-[9px] rounded-[3px]"
                 style={{ background: CATEGORY_COLORS[key] }}
@@ -122,7 +124,7 @@ export function ContextCapacityPopover({ capacity, thresholdRatio = 0.9 }: Props
           )
         })}
 
-        <div className="mt-1 grid grid-cols-[13px_1fr_auto_46px] items-center gap-x-2 border-t border-ds-border-muted pt-1.5">
+        <div className={`${css.capacityRow} mt-1 border-t border-ds-border-muted pt-1.5`}>
           <span className="h-[8px] w-[8px] rounded-[3px] border border-ds-faint" />
           <span className="truncate text-[12.5px] text-ds-faint">{t('contextCapacityCat_free')}</span>
           <span className="text-[12px] tabular-nums text-ds-faint">

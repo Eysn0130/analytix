@@ -6,6 +6,109 @@ import (
 	"testing"
 )
 
+func syntheticTaskJobSummaryV1() map[string]any {
+	return map[string]any{"schemaVersion": 1, "id": "job-synthetic", "kind": "subagent", "status": "failed", "background": false, "terminal": true,
+		"outputWithheld": true, "outputTrustStatus": "untrusted_child_output", "factAnswerAllowed": false, "evidenceAuthority": false, "canReadOutput": false, "canContinueParent": false}
+}
+
+func syntheticTaskJobProjectionV1(t *testing.T) PublicToolResultProjectionV1 {
+	t.Helper()
+	payload, err := NewTaskJobResultV1("list", map[string]any{"jobs": []any{syntheticTaskJobSummaryV1()}, "count": float64(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := WithheldProjectionV1("completed", "tool_output_private")
+	projection.ProjectionKind, projection.MessageKey, projection.Code, projection.TaskJob = ProjectionTaskJobResult, "tool_completed", "tool_completed", payload
+	return projection
+}
+
+func TestTaskJobProjectionV1ClosedRequiredFieldsAndLifecycle(t *testing.T) {
+	projection := syntheticTaskJobProjectionV1(t)
+	record := PublicToolResultProjectionRecordV1(projection)
+	if parsed, err := ParsePublicToolResultProjectionV1(record); err != nil || parsed.TaskJob.List.Jobs[0].Status != "failed" {
+		t.Fatal("actual failed job metadata must remain a successful query")
+	}
+	if status, err := SettlementLifecycleStatusV1(projection, false); err != nil || status != "completed" {
+		t.Fatal("job projection settlement rejected", err)
+	}
+	for _, field := range []string{"schemaVersion", "projectionKind", "disclosure", "messageKey", "status", "code", "privatePayloadWithheld", "factAnswerAllowed", "evidenceAuthority", "taskJob"} {
+		for _, omit := range []bool{true, false} {
+			body, _ := json.Marshal(record)
+			value := map[string]any{}
+			_ = json.Unmarshal(body, &value)
+			if omit {
+				delete(value, field)
+			} else {
+				value[field] = nil
+			}
+			if _, err := ParsePublicToolResultProjectionV1(value); err == nil {
+				t.Fatalf("missing/null %s accepted", field)
+			}
+		}
+	}
+	for _, key := range []string{"plan", "rpcError", "artifact", "web", "output"} {
+		value := PublicToolResultProjectionRecordV1(projection)
+		value[key] = nil
+		if _, err := ParsePublicToolResultProjectionV1(value); err == nil {
+			t.Fatalf("incompatible %s accepted", key)
+		}
+	}
+	for _, field := range []string{"schemaVersion", "id", "kind", "status", "background", "terminal", "outputWithheld", "outputTrustStatus", "factAnswerAllowed", "evidenceAuthority", "canReadOutput", "canContinueParent"} {
+		for _, omit := range []bool{true, false} {
+			job := syntheticTaskJobSummaryV1()
+			if omit {
+				delete(job, field)
+			} else {
+				job[field] = nil
+			}
+			if _, err := NewTaskJobResultV1("list", map[string]any{"jobs": []any{job}, "count": 1}); err == nil {
+				t.Fatalf("missing/null summary %s accepted", field)
+			}
+		}
+	}
+	for _, mutation := range []map[string]any{{"active": "false"}, {"status": "invented"}, {"terminal": false}, {"output": "private"}, {"id": "../job"}, {"evidenceAuthority": true}} {
+		job := syntheticTaskJobSummaryV1()
+		for key, value := range mutation {
+			job[key] = value
+		}
+		if _, err := NewTaskJobResultV1("list", map[string]any{"jobs": []any{job}, "count": 1}); err == nil {
+			t.Fatal("malformed native producer accepted")
+		}
+	}
+	job := syntheticTaskJobSummaryV1()
+	job["active"] = false
+	if payload, err := NewTaskJobResultV1("list", map[string]any{"jobs": []any{job}, "count": 1}); err != nil {
+		t.Fatal(err)
+	} else if body, _ := json.Marshal(payload); strings.Contains(string(body), "active") {
+		t.Fatal("runtime registration state leaked into history")
+	}
+	if _, err := NewTaskJobResultV1("list", map[string]any{"jobs": []any{}, "count": 1}); err == nil {
+		t.Fatal("count mismatch accepted")
+	}
+}
+
+func TestTaskJobProjectionV1BindsOriginalHostCall(t *testing.T) {
+	callID := "call_host_" + strings.Repeat("b", 64)
+	item := map[string]any{"id": ToolResultItemIDV1("turn-job", callID), "threadId": "thread-job", "turnId": "turn-job", "kind": "tool_result", "role": "tool",
+		"callId": callID, "toolName": "list_jobs", "toolKind": "command_execution", "status": "completed", "isError": false, "createdAt": "2026-10-10T00:00:00Z",
+		"output": PublicToolResultProjectionRecordV1(syntheticTaskJobProjectionV1(t))}
+	if PublicToolResultItemRecordV1(item)["output"].(map[string]any)["projectionKind"] != "task_job_result" {
+		t.Fatal("native paired job result downgraded")
+	}
+	for _, mutation := range []map[string]any{{"toolName": "wait"}, {"toolKind": "tool_call"}, {"isError": true}, {"id": "item_result_" + strings.Repeat("a", 64)}} {
+		changed := map[string]any{}
+		for key, value := range item {
+			changed[key] = value
+		}
+		for key, value := range mutation {
+			changed[key] = value
+		}
+		if PublicToolResultItemRecordV1(changed)["output"].(map[string]any)["projectionKind"] == "task_job_result" {
+			t.Fatal("forged job pairing accepted")
+		}
+	}
+}
+
 func TestPlanTargetBoundsMatchPublicResult(t *testing.T) {
 	for _, tc := range []struct {
 		id, path string
@@ -488,5 +591,70 @@ func TestMCPDiagnosticRequiresCanonicalCodeForClass(t *testing.T) {
 	projection.RPCError.Code = -32602
 	if err := ValidatePublicToolResultProjectionV1(projection); err != nil {
 		t.Fatalf("canonical MCP diagnostic rejected: %v", err)
+	}
+}
+
+// Native Search preserves exact tool kinds. Ordinary Inspect can retain a
+// binding for other valid tool identities; the protected envelope validates
+// their capture kind, and the local reader checks the actual settled grant.
+func TestPrivateDurableSnapshotNativeAndInspectToolNamesV1(t *testing.T) {
+	binding := ProtectedSnapshotBindingRecordV1(ProtectedSnapshotBindingV1{
+		Version: 1, Purpose: ProtectedSnapshotPurposeV1,
+		SnapshotDigest: strings.Repeat("c", 64), BodyDigest: strings.Repeat("d", 64),
+	})
+	for _, tc := range []struct {
+		name, kind string
+		allowed    bool
+	}{
+		{"grep", "tool_call", true}, {"glob", "tool_call", true},
+		{"grep", "command_execution", false}, {"glob", "file_change", false},
+		{"grep", "skill", false}, {"glob", "subagent", false}, {"grep", "", false},
+		{"web_search", "tool_call", true}, {"code_index", "tool_call", true},
+		{"find", "tool_call", true}, {"list", "tool_call", true},
+		{"mcp__synthetic__grep", "tool_call", true}, {"Grep", "tool_call", true},
+		{"ls", "tool_call", true}, {"write_file", "file_change", true},
+		{"ls", "", false}, {"", "tool_call", false}, {" ls ", "tool_call", false},
+		{"ls\x00", "tool_call", false}, {strings.Repeat("x", 257), "tool_call", false},
+	} {
+		t.Run(tc.name+"_"+tc.kind, func(t *testing.T) {
+			item := map[string]any{
+				"id": "item-result", "turnId": "turn-search", "threadId": "thread-search",
+				"role": "tool", "kind": "tool_result", "status": "completed", "isError": false,
+				"createdAt": "2026-10-08T00:00:00Z", "finishedAt": "2026-10-08T00:00:01Z",
+				"toolName": tc.name, "toolKind": tc.kind, "callId": "call_host_" + strings.Repeat("a", 64),
+				"contextDigest": strings.Repeat("a", 64), "contextEpoch": uint64(1), "executionGrantId": strings.Repeat("b", 64),
+				"output":                        PublicToolResultProjectionRecordV1(WithheldProjectionV1("completed", "tool_output_private")),
+				ProtectedSnapshotBindingFieldV1: binding,
+			}
+			private, allowed := PrivateDurableToolResultItemRecordV1(item)
+			if allowed != tc.allowed {
+				t.Fatalf("protected settlement admission mismatch: allowed=%v", allowed)
+			}
+			if !allowed {
+				return
+			}
+			if _, err := ParseProtectedSnapshotBindingV1(private[ProtectedSnapshotBindingFieldV1]); err != nil {
+				t.Fatal("admitted result lost its typed snapshot binding")
+			}
+			public, err := json.Marshal(PublicToolResultItemRecordV1(private))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, forbidden := range []string{ProtectedSnapshotBindingFieldV1, "snapshotDigest", "bodyDigest", "contextDigest", "executionGrantId"} {
+				if strings.Contains(string(public), forbidden) {
+					t.Fatal("private snapshot authority entered public result")
+				}
+			}
+			delete(item, "executionGrantId")
+			if _, allowed := PrivateDurableToolResultItemRecordV1(item); allowed {
+				t.Fatal("Search accepted incomplete host authority")
+			}
+			item["executionGrantId"] = strings.Repeat("b", 64)
+			item[ProtectedSnapshotBindingFieldV1] = map[string]any{"version": 1, "purpose": ProtectedSnapshotPurposeV1,
+				"snapshotDigest": strings.Repeat("c", 64), "bodyDigest": strings.Repeat("d", 64), "rawBody": "SYNTHETIC_PRIVATE_BODY"}
+			if _, allowed := PrivateDurableToolResultItemRecordV1(item); allowed {
+				t.Fatal("Search accepted an extra private binding field")
+			}
+		})
 	}
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Archive, Folder, RotateCcw, Search, Trash2 } from '../design/AnalytixUiIcons'
 import type { NormalizedThread } from '../agent/types'
@@ -6,6 +6,7 @@ import { confirmDialog } from '../lib/confirm-dialog'
 import { formatRelativeTime } from '../lib/format-relative-time'
 import { workspaceLabelFromPath } from '../lib/workspace-label'
 import { SettingsCard, SettingRow } from './settings-controls'
+import { getProvider } from '../agent/registry'
 
 export function filterArchivedThreads(threads: NormalizedThread[], query: string): NormalizedThread[] {
   const normalizedQuery = query.trim().toLowerCase()
@@ -41,10 +42,8 @@ export function ArchivedThreadsSettingsSection({ ctx }: { ctx: Record<string, an
   const {
     t,
     tCommon,
-    threads,
     runtimeReady,
     locale,
-    refreshThreads,
     openCode,
     selectThread,
     archiveThread,
@@ -52,26 +51,60 @@ export function ArchivedThreadsSettingsSection({ ctx }: { ctx: Record<string, an
   } = ctx
 
   const [query, setQuery] = useState('')
+  const [threads, setThreads] = useState<NormalizedThread[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [busyThreadIds, setBusyThreadIds] = useState<Record<string, boolean>>({})
+  const entry = useRef({ version: 0, active: false, ready: false })
+  const request = useRef(0)
+  const isCurrentEntry = useCallback((version: number): boolean =>
+    entry.current.active && entry.current.ready && entry.current.version === version, [])
+  const refreshArchivedThreads = useCallback(async (version: number): Promise<void> => {
+    if (!isCurrentEntry(version)) return
+    const read = ++request.current
+    setLoading(true)
+    setError(null)
+    try {
+      const loaded = await getProvider().listThreads({ archivedOnly: true, limit: 0 })
+      if (isCurrentEntry(version) && read === request.current) setThreads(loaded)
+    } catch (failure) {
+      if (isCurrentEntry(version) && read === request.current) setError(failure instanceof Error ? failure.message : String(failure))
+    } finally {
+      if (isCurrentEntry(version) && read === request.current) setLoading(false)
+    }
+  }, [isCurrentEntry])
 
-  useEffect(() => {
-    if (!runtimeReady || typeof refreshThreads !== 'function') return
-    void refreshThreads()
-  }, [refreshThreads, runtimeReady])
+  useLayoutEffect(() => {
+    const owner = entry.current
+    owner.version += 1
+    owner.active = true
+    owner.ready = runtimeReady
+    setThreads([])
+    setError(null)
+    setBusyThreadIds({})
+    if (runtimeReady) void refreshArchivedThreads(owner.version)
+    else setLoading(false)
+    return () => { owner.active = false; owner.version += 1; request.current += 1 }
+  }, [refreshArchivedThreads, runtimeReady])
 
   const archivedThreads = useMemo(
-    () => filterArchivedThreads(Array.isArray(threads) ? threads : [], query),
+    () => filterArchivedThreads(threads, query),
     [query, threads]
   )
   const groups = useMemo(() => groupArchivedThreads(archivedThreads), [archivedThreads])
-  const totalArchived = (Array.isArray(threads) ? threads : []).filter((thread) => thread.archived === true).length
+  const totalArchived = threads.filter((thread) => thread.archived === true).length
 
-  const runThreadAction = async (threadId: string, action: () => Promise<void>): Promise<void> => {
+  const runThreadAction = async (threadId: string, action: () => Promise<void>, refresh = false): Promise<void> => {
+    const version = entry.current.version
+    if (!isCurrentEntry(version)) return
     setBusyThreadIds((current) => ({ ...current, [threadId]: true }))
     try {
       await action()
+      if (refresh) await refreshArchivedThreads(version)
+    } catch (failure) {
+      if (isCurrentEntry(version)) setError(failure instanceof Error ? failure.message : String(failure))
     } finally {
-      setBusyThreadIds((current) => {
+      if (isCurrentEntry(version)) setBusyThreadIds((current) => {
         const next = { ...current }
         delete next[threadId]
         return next
@@ -89,25 +122,29 @@ export function ArchivedThreadsSettingsSection({ ctx }: { ctx: Record<string, an
   const restoreThread = async (threadId: string): Promise<void> => {
     await runThreadAction(threadId, async () => {
       if (typeof archiveThread === 'function') await archiveThread(threadId, false)
-    })
+    }, true)
   }
 
   const removeThread = async (thread: NormalizedThread): Promise<void> => {
+    const version = entry.current.version
+    if (!isCurrentEntry(version)) return
     const ok = await confirmDialog(
       t('archivesDeleteConfirmTitle', { title: thread.title }),
       t('archivesDeleteConfirmDesc')
     )
-    if (!ok) return
+    if (!ok || !isCurrentEntry(version)) return
     await runThreadAction(thread.id, async () => {
       if (typeof deleteThread === 'function') await deleteThread(thread.id)
-    })
+    }, true)
   }
 
   const emptyMessage = !runtimeReady
     ? t('archivesOffline')
-    : query.trim()
-      ? t('archivesSearchEmpty')
-      : t('archivesEmpty')
+    : loading
+      ? t('loading')
+      : query.trim()
+        ? t('archivesSearchEmpty')
+        : t('archivesEmpty')
 
   return (
     <SettingsCard title={t('archivesTitle')}>
@@ -130,11 +167,12 @@ export function ArchivedThreadsSettingsSection({ ctx }: { ctx: Record<string, an
               </label>
               <div className="flex shrink-0 items-center gap-2 rounded-xl border border-ds-border-muted bg-ds-main/50 px-3 py-2 text-[12px] font-medium text-ds-muted">
                 <Archive className="h-3.5 w-3.5" strokeWidth={1.75} />
-                {t('archivesCount', { count: totalArchived })}
+                {loading ? t('loading') : error ? '—' : t('archivesCount', { count: totalArchived })}
               </div>
             </div>
 
-            {groups.length === 0 ? (
+            {error ? <p role="alert" className="text-[13px] text-red-600">{error}</p> : null}
+            {groups.length === 0 && !error ? (
               <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-ds-border-muted bg-ds-main/40 px-4 py-10 text-center">
                 <Archive className="h-7 w-7 text-ds-faint" strokeWidth={1.5} />
                 <div className="text-[13px] text-ds-faint">{emptyMessage}</div>

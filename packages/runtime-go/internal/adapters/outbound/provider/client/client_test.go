@@ -21,6 +21,10 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 )
 
+// This credential-shaped fixture is built only from a public hexadecimal alphabet.
+// Local synthetic test fixture; never sourced from an account.
+const syntheticProviderClientTestCredentialV1 = "sk-0123456789abcdef0123456789abcdef"
+
 func TestStreamIdleTimeoutZeroDisablesWatchdog(t *testing.T) {
 	client := NewHTTPProviderClient(nil)
 	client.StreamIdleTimeout = 0
@@ -366,7 +370,10 @@ func TestHTTPProviderClientRejectsSuccessReturnedAfterHostCancellation(t *testin
 }
 
 func TestHTTPProviderClientReturnsSanitizedProviderError(t *testing.T) {
-	const secret = "sk-test-provider-secret"
+	const secret = syntheticProviderClientTestCredentialV1
+	if sanitizeProviderSecretText(secret, "") == secret {
+		t.Fatal("synthetic credential fixture must exercise provider secret sanitization")
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":{"message":"Authentication Fails, api key ` + secret + ` is invalid"}}`))
@@ -399,7 +406,10 @@ func TestHTTPProviderClientReturnsSanitizedProviderError(t *testing.T) {
 }
 
 func TestHTTPProviderClientReturns404DiagnosticsWithModelAndRequestURL(t *testing.T) {
-	const secret = "sk-test-provider-secret"
+	const secret = syntheticProviderClientTestCredentialV1
+	if sanitizeProviderSecretText(secret, "") == secret {
+		t.Fatal("synthetic credential fixture must exercise provider secret sanitization")
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
@@ -530,8 +540,8 @@ func TestHTTPProviderClientReplaysPreOutputStreamCut(t *testing.T) {
 	if len(result.Chunks) == 0 || !hasChunkKind(result.Chunks, domainmodel.ChunkDone) {
 		t.Fatalf("expected completed replayed stream: %#v", result.Chunks)
 	}
-	if len(retryChunks) != 1 || retryChunks[0].RetryAttempt != 2 {
-		t.Fatalf("expected one retrying chunk before output: %#v", retryChunks)
+	if len(retryChunks) != 2 || retryChunks[0].RetryAttempt != 2 || retryChunks[1].RetryAttempt != 2 || retryChunks[0].Retry == nil || retryChunks[1].Retry == nil || retryChunks[0].Retry.Phase != "scheduled" || retryChunks[1].Retry.Phase != "started" {
+		t.Fatalf("expected one scheduled/started reconnect before output: %#v", retryChunks)
 	}
 	mu.Lock()
 	gotRequests := requests
@@ -1458,5 +1468,451 @@ func TestHTTPProviderClientTrustedHTTPSReuseRotationAndRetirement(t *testing.T) 
 	}
 	if len(headers) != 4 {
 		t.Fatal("close triggered an extra send")
+	}
+}
+
+func TestHTTPProviderClientProcessFramesPreserveEmptyNativeBlocksAndPrivateContinuation(t *testing.T) {
+	const thinking = "PRIVATE_NATIVE_THINKING_TEXT"
+	const signature = "PRIVATE_NATIVE_SIGNATURE_ONLY"
+	const redacted = "PRIVATE_REDACTED_THINKING_DATA"
+	payload := strings.Join([]string{
+		`data: {"type":"message_start","message":{"id":"msg-native-process","model":"claude-test","usage":{"input_tokens":10,"output_tokens":0}}}`,
+		`data: {"type":"content_block_start","index":3,"content_block":{"type":"thinking","thinking":""}}`,
+		`data: {"type":"content_block_stop","index":3}`,
+		`data: {"type":"content_block_start","index":8,"content_block":{"type":"thinking","thinking":""}}`,
+		`data: {"type":"content_block_delta","index":8,"delta":{"type":"thinking_delta","thinking":"` + thinking + `"}}`,
+		`data: {"type":"content_block_delta","index":8,"delta":{"type":"signature_delta","signature":"` + signature + `"}}`,
+		`data: {"type":"content_block_stop","index":8}`,
+		`data: {"type":"content_block_start","index":11,"content_block":{"type":"redacted_thinking","data":"` + redacted + `"}}`,
+		`data: {"type":"content_block_stop","index":11}`,
+		`data: {"type":"content_block_start","index":14,"content_block":{"type":"text","text":""}}`,
+		`data: {"type":"content_block_delta","index":14,"delta":{"type":"text_delta","text":"visible answer"}}`,
+		`data: {"type":"content_block_stop","index":14}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}`,
+		`data: {"type":"message_stop"}`,
+	}, "\n\n") + "\n\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer server.Close()
+	var frames []domainmodel.ProcessFrameV1
+	result, err := NewHTTPProviderClient(server.Client()).Stream(context.Background(), domainmodel.Request{
+		ProviderID: "anthropic", Family: "anthropic", EndpointFormat: "messages",
+		BaseURL: server.URL, APIKey: "fixture-key", Model: "claude-test",
+		Messages: []domainmodel.Message{{Role: "user", Content: "fixture question"}},
+		OnChunk: func(chunk domainmodel.Chunk) error {
+			if chunk.ProcessFrame != nil {
+				frames = append(frames, *chunk.ProcessFrame)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var native []domainmodel.ProcessFrameV1
+	for _, frame := range frames {
+		if frame.Attempt != 1 || frame.ProviderSequence != 0 {
+			t.Fatalf("client changed physical or host sequence ownership: %#v", frame)
+		}
+		if frame.Source == "assistant_draft" {
+			if frame.Kind != "delta" || frame.Text != "visible answer" || frame.ContentClassification != "provider_text" || frame.NativeID != "" || frame.NativeIndex != 0 {
+				t.Fatal("assistant draft claimed native source identity")
+			}
+			continue
+		}
+		switch frame.Kind {
+		case "start", "delta", "end":
+			native = append(native, frame)
+		case "reset", "terminal":
+			if frame.Text != "" {
+				t.Fatal("lifecycle metadata carried provider bytes")
+			}
+		default:
+			t.Fatalf("unexpected process kind %q", frame.Kind)
+		}
+		if strings.Contains(frame.Text, signature) || strings.Contains(frame.Text, redacted) {
+			t.Fatal("signature or redacted data entered the display channel")
+		}
+	}
+	want := []domainmodel.ProcessFrameV1{
+		{Kind: "start", Attempt: 1, NativeIndex: 3},
+		{Kind: "end", Attempt: 1, NativeIndex: 3},
+		{Kind: "start", Attempt: 1, NativeIndex: 8},
+		{Kind: "delta", Attempt: 1, NativeIndex: 8, Text: thinking},
+		{Kind: "end", Attempt: 1, NativeIndex: 8},
+	}
+	if !reflect.DeepEqual(native, want) {
+		t.Fatalf("native thinking boundaries or source indexes changed: got=%#v want=%#v", native, want)
+	}
+	if collectClientChunkText(result.Chunks, domainmodel.ChunkReasoning) != thinking ||
+		collectClientChunkText(result.Chunks, domainmodel.ChunkText) != "visible answer" {
+		t.Fatal("display framing altered the original provider text")
+	}
+	var continuationSignature string
+	for _, chunk := range result.Chunks {
+		if chunk.Kind == domainmodel.ChunkReasoning && chunk.Signature != "" {
+			continuationSignature = chunk.Signature
+		}
+		if chunk.ProcessFrame != nil && chunk.Text == "" && chunk.Signature == "" {
+			t.Fatal("callback-only lifecycle frame entered the provider result")
+		}
+	}
+	if continuationSignature != signature {
+		t.Fatal("display framing altered the original continuation signature")
+	}
+}
+
+func TestHTTPProviderClientProcessFramesIdentifyEveryPhysicalReconnect(t *testing.T) {
+	const discarded = "PRIVATE_FAILED_NATIVE_THINKING"
+	const replacement = "PRIVATE_REPLACEMENT_NATIVE_THINKING"
+	var mu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requests++
+		attempt := requests
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"type":"content_block_start","index":8,"content_block":{"type":"thinking","thinking":""}}` + "\n\n"))
+		text := discarded
+		if attempt == 2 {
+			text = replacement
+		}
+		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":8,"delta":{"type":"thinking_delta","thinking":"` + text + `"}}` + "\n\n"))
+		if attempt == 1 {
+			return
+		}
+		_, _ = w.Write([]byte(`data: {"type":"content_block_stop","index":8}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_stop"}` + "\n\n"))
+	}))
+	defer server.Close()
+	provider := NewHTTPProviderClient(server.Client())
+	provider.MaxStreamReconnects = 1
+	var frames []domainmodel.ProcessFrameV1
+	result, err := provider.Stream(context.Background(), domainmodel.Request{
+		ProviderID: "anthropic", Family: "anthropic", EndpointFormat: "messages",
+		BaseURL: server.URL, APIKey: "fixture-key", Model: "claude-test",
+		Messages: []domainmodel.Message{{Role: "user", Content: "fixture question"}},
+		OnChunk: func(chunk domainmodel.Chunk) error {
+			if chunk.ProcessFrame != nil {
+				frames = append(frames, *chunk.ProcessFrame)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	totalRequests := requests
+	mu.Unlock()
+	if totalRequests != 2 || collectClientChunkText(result.Chunks, domainmodel.ChunkReasoning) != replacement {
+		t.Fatal("thinking-only stream cut did not settle as one clean replacement")
+	}
+	var resets, terminals, deltaAttempts []uint64
+	var deltaText []string
+	for _, frame := range frames {
+		switch frame.Kind {
+		case "reset":
+			resets = append(resets, frame.Attempt)
+		case "terminal":
+			terminals = append(terminals, frame.Attempt)
+		case "delta":
+			if frame.NativeIndex != 8 {
+				t.Fatalf("source block index changed on reconnect: %#v", frame)
+			}
+			deltaAttempts = append(deltaAttempts, frame.Attempt)
+			deltaText = append(deltaText, frame.Text)
+		}
+	}
+	if !reflect.DeepEqual(resets, []uint64{1, 2}) || !reflect.DeepEqual(terminals, []uint64{1, 2}) ||
+		!reflect.DeepEqual(deltaAttempts, []uint64{1, 2}) || !reflect.DeepEqual(deltaText, []string{discarded, replacement}) {
+		t.Fatalf("display frames did not identify physical retries: %#v", frames)
+	}
+	for _, chunk := range result.Chunks {
+		if strings.Contains(chunk.Text, discarded) ||
+			(chunk.ProcessFrame != nil && chunk.Text == "" && chunk.Signature == "") {
+			t.Fatal("failed or callback-only frame survived the provider result")
+		}
+	}
+}
+
+func TestProcessFrameSidecarHasNoGenericJSONRepresentation(t *testing.T) {
+	frame := domainmodel.ProcessFrameV1{
+		Kind: "delta", Attempt: 7, NativeIndex: 8, NativeID: "native-id-private",
+		Text: "PRIVATE_PROCESS_FRAME_JSON_SENTINEL", ProviderSequence: 9,
+		ProjectionSecrets: []string{"PRIVATE_PROCESS_FRAME_SECRET_HINT_SENTINEL"},
+	}
+	frameJSON, err := json.Marshal(frame)
+	if err != nil || string(frameJSON) != "{}" {
+		t.Fatalf("process frame fields entered generic JSON: %s err=%v", frameJSON, err)
+	}
+	resultJSON, err := json.Marshal(domainmodel.Result{Chunks: []domainmodel.Chunk{
+		{Kind: domainmodel.ChunkText, Text: "ordinary text", ProcessFrame: &frame},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(resultJSON), "ordinary text") ||
+		strings.Contains(string(resultJSON), frame.Text) || strings.Contains(string(resultJSON), frame.NativeID) ||
+		strings.Contains(string(resultJSON), frame.ProjectionSecrets[0]) ||
+		strings.Contains(string(resultJSON), "processFrame") || strings.Contains(string(resultJSON), "nativeIndex") {
+		t.Fatal("private sidecar escaped through a generic result serializer")
+	}
+}
+
+func TestTransportReconnectLifecycleUsesActualPhysicalInvocation(t *testing.T) {
+	var order []string
+	calls := 0
+	client := NewHTTPProviderClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		order = append(order, "do")
+		body := "data: {}\n\n"
+		if calls > 1 {
+			body = "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+	client.MaxStreamReconnects = 1
+	request := domainmodel.Request{ProviderID: "provider", Family: "openai", EndpointFormat: "chat_completions", BaseURL: "https://provider.invalid", APIKey: "synthetic-offline-key", Model: "model", Messages: []domainmodel.Message{{Role: "user", Content: "fixture"}}, PrivateProviderTelemetry: &domainmodel.ProviderTelemetryBindingV1{LogicalSequence: 7, OuterAttempt: 3}}
+	request.OnPipelineStage = func(stage domainmodel.PipelineStage) error { order = append(order, stage.Stage); return nil }
+	request.OnChunk = func(chunk domainmodel.Chunk) error {
+		if chunk.Kind == domainmodel.ChunkRetrying {
+			if chunk.Retry == nil {
+				t.Fatal("reconnect has no lifecycle owner")
+			}
+			if chunk.Retry.LogicalSequence != 7 || chunk.Retry.OuterAttempt != 3 || chunk.Retry.PhysicalAttempt != 2 {
+				t.Fatalf("invented attempt identity: %#v", chunk.Retry)
+			}
+			if chunk.Retry.Phase == "scheduled" && (chunk.Retry.DelayMs == nil || *chunk.Retry.DelayMs != 0 || chunk.Retry.DeadlineUnixMs == nil) {
+				t.Fatal("immediate retry lacks frozen zero delay")
+			}
+			if chunk.RetryMax != 2 {
+				t.Fatal("lifecycle changed the frozen invocation budget")
+			}
+			if chunk.Retry.Phase == "scheduled" {
+				client.MaxStreamReconnects = 0
+			}
+			order = append(order, chunk.Retry.Phase)
+		}
+		return nil
+	}
+	_, err := client.Stream(context.Background(), request)
+	if err != nil || calls != 2 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	if want := []string{"pre_send", "do", "post_send", "scheduled", "pre_send", "started", "do", "post_send"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("ordering=%v want=%v", order, want)
+	}
+}
+
+func TestTransportReconnectCancelsBeforeInvocationExactlyOnce(t *testing.T) {
+	for _, name := range []string{"context_cancelled", "deadline_exceeded", "before_send", "currentness", "pre_send", "started_record"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			client := NewHTTPProviderClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {}\n\n"))}, nil
+			})})
+			client.MaxStreamReconnects = 1
+			request := domainmodel.Request{ProviderID: "provider", Family: "openai", EndpointFormat: "chat_completions", BaseURL: "https://provider.invalid", APIKey: "synthetic-offline-key", Model: "model", Messages: []domainmodel.Message{{Role: "user", Content: "fixture"}}, PrivateProviderTelemetry: &domainmodel.ProviderTelemetryBindingV1{LogicalSequence: 1, OuterAttempt: 1}}
+			request.BeforeSend = func(attempt int) error {
+				if attempt == 2 && name == "before_send" {
+					return errors.New("before send rejected")
+				}
+				if attempt == 2 && name == "deadline_exceeded" {
+					return context.DeadlineExceeded
+				}
+				return nil
+			}
+			request.PrivateProviderCurrentnessBeforeSend = func(attempt int) error {
+				if attempt == 2 && name == "currentness" {
+					return errors.New("authority revoked")
+				}
+				return nil
+			}
+			request.OnPipelineStage = func(stage domainmodel.PipelineStage) error {
+				if calls == 1 && stage.Stage == "pre_send" && name == "pre_send" {
+					return errors.New("pre send record failed")
+				}
+				return nil
+			}
+			var retries []domainmodel.ProviderRetryV1
+			request.OnChunk = func(chunk domainmodel.Chunk) error {
+				if chunk.Kind == domainmodel.ChunkRetrying {
+					if chunk.Retry == nil {
+						t.Fatal("missing lifecycle")
+					}
+					retries = append(retries, *chunk.Retry)
+					if chunk.Retry.Phase == "scheduled" && name == "context_cancelled" {
+						cancel()
+					}
+					if chunk.Retry.Phase == "started" && name == "started_record" {
+						return errors.New("started record failed")
+					}
+				}
+				return nil
+			}
+			_, err := client.Stream(ctx, request)
+			if err == nil || calls != 1 {
+				t.Fatalf("rejected attempt sent: calls=%d err=%v", calls, err)
+			}
+			if name == "started_record" {
+				if len(retries) != 2 || retries[1].Phase != "started" {
+					t.Fatal("failed recording invented cancellation")
+				}
+				return
+			}
+			reason := "attempt_rejected"
+			if name == "context_cancelled" || name == "deadline_exceeded" {
+				reason = name
+			}
+			if len(retries) != 2 || retries[0].Phase != "scheduled" || retries[1].Phase != "cancelled" || retries[1].CancelReason != reason {
+				t.Fatalf("pending cancellation=%#v", retries)
+			}
+		})
+	}
+}
+
+func TestAllProviderOutputCapsCompleteWithoutReconnect(t *testing.T) {
+	fixtures := map[string]string{
+		"chat_completions": "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":9,\"total_tokens\":16}}\n\ndata: [DONE]\n\n",
+		"responses":        "data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":7,\"output_tokens\":9,\"total_tokens\":16}}}\n\n",
+		"messages":         "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":0}}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":9}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+	}
+	for format, payload := range fixtures {
+		t.Run(format, func(t *testing.T) {
+			text := map[string]string{"chat_completions": `data: {"choices":[{"delta":{"content":"withheld cap candidate"}}]}`, "responses": `data: {"type":"response.output_text.delta","delta":"withheld cap candidate"}`, "messages": `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"withheld cap candidate"}}`}
+			payload = text[format] + "\n\n" + payload
+			calls := 0
+			client := NewHTTPProviderClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
+			})})
+			result, err := client.Stream(context.Background(), domainmodel.Request{ProviderID: "fixture", Family: "openai", EndpointFormat: format, BaseURL: "https://provider.invalid", APIKey: "synthetic-offline-key", Model: "fixture", Messages: []domainmodel.Message{{Role: "user", Content: "fixture"}}})
+			if err != nil || calls != 1 || !result.StreamCompleted || result.Usage.FinishReason != "length" || result.Usage.CompletionTokens != 9 {
+				t.Fatalf("cap became completion/reconnect: calls=%d usage=%#v completed=%v err=%v", calls, result.Usage, result.StreamCompleted, err)
+			}
+			for _, chunk := range result.Chunks {
+				if chunk.Kind == domainmodel.ChunkToolCall {
+					t.Fatal("cap authorized tool execution")
+				}
+			}
+		})
+	}
+}
+
+func TestAssistantDraftHTTPClientObservesAllProtocolsBeforeFinishV1(t *testing.T) {
+	for _, format := range []string{"chat_completions", "responses", "messages"} {
+		t.Run(format, func(t *testing.T) {
+			finish := make(chan struct{})
+			advance := make(chan struct{})
+			var once sync.Once
+			release := func() { once.Do(func() { close(finish) }) }
+			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				write := func(payload string) { _, _ = w.Write([]byte("data: " + payload + "\n\n")); w.(http.Flusher).Flush() }
+				if format == "messages" {
+					write(`{"type":"message_start","message":{"model":"fixture","usage":{"input_tokens":4,"output_tokens":0}}}`)
+					write(`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+				}
+				for _, text := range []string{"first draft ", "second draft "} {
+					var value any
+					switch format {
+					case "chat_completions":
+						value = map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": text}}}}
+					case "responses":
+						value = map[string]any{"type": "response.output_text.delta", "delta": text}
+					case "messages":
+						value = map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": text}}
+					}
+					encoded, _ := json.Marshal(value)
+					write(string(encoded))
+					select {
+					case <-advance:
+					case <-finish:
+						return
+					}
+				}
+				<-finish
+				switch format {
+				case "chat_completions":
+					write(`{"choices":[{"delta":{},"finish_reason":"stop"}]}`)
+					write(`[DONE]`)
+				case "responses":
+					write(`{"type":"response.completed"}`)
+				case "messages":
+					write(`{"type":"content_block_stop","index":0}`)
+					write(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`)
+					write(`{"type":"message_stop"}`)
+				}
+			}))
+			defer func() { release(); fake.Close() }()
+			observed := make(chan domainmodel.ProcessFrameV1, 2)
+			type outcome struct {
+				result domainmodel.Result
+				err    error
+			}
+			done := make(chan outcome, 1)
+			family := "openai"
+			if format == "messages" {
+				family = "anthropic"
+			}
+			go func() {
+				result, err := NewHTTPProviderClient(fake.Client()).Stream(context.Background(), domainmodel.Request{
+					ProviderID: "fixture", Family: family, EndpointFormat: format, BaseURL: fake.URL, APIKey: "synthetic-fixture-key", Model: "fixture", Messages: []domainmodel.Message{{Role: "user", Content: "synthetic prompt"}},
+					OnChunk: func(chunk domainmodel.Chunk) error {
+						if chunk.ProcessFrame != nil && chunk.ProcessFrame.Source == "assistant_draft" {
+							observed <- *chunk.ProcessFrame
+							return errors.New("optional private observer failure")
+						}
+						return nil
+					},
+				})
+				done <- outcome{result, err}
+			}()
+			for _, want := range []string{"first draft ", "second draft "} {
+				select {
+				case frame := <-observed:
+					if frame.Text != want || frame.Attempt != 1 || frame.ProviderSequence != 0 || frame.Kind != "delta" || frame.NativeID != "" || frame.NativeIndex != 0 {
+						t.Fatal("real HTTP observation invented source/attempt")
+					}
+					class := "provider_text"
+					if format == "chat_completions" {
+						class = "unclassified_inline"
+					}
+					if frame.ContentClassification != class {
+						t.Fatal("draft classification lost")
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("private HTTP observation was deferred until finish")
+				}
+				select {
+				case <-done:
+					t.Fatal("Provider finished before the controlled finish boundary")
+				default:
+				}
+				advance <- struct{}{}
+			}
+			release()
+			select {
+			case out := <-done:
+				if out.err != nil || collectClientChunkText(out.result.Chunks, domainmodel.ChunkText) != "first draft second draft " {
+					t.Fatalf("optional observer changed Provider result: %v", out.err)
+				}
+				for _, chunk := range out.result.Chunks {
+					if chunk.ProcessFrame != nil {
+						t.Fatal("raw draft metadata entered continuation")
+					}
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("synthetic Provider did not finish")
+			}
+		})
 	}
 }

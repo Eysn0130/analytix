@@ -1,4 +1,11 @@
+import type { ToolResultLocalEffectRequestV1, ToolResultLocalPresentFileRequestV1 } from '../../packages/runtime/src/contracts/tool-result-local-display'
+
 export type WorkspaceFileTarget = {
+  /** Explicit protected navigation remains a source preview, outside Write/model state. */
+  preview?: 'source'
+  protectedRead?: ToolResultLocalEffectRequestV1
+  /** Current Present file; index stays bound to its original Host snapshot. */
+  protectedPresent?: ToolResultLocalPresentFileRequestV1
   path: string
   workspaceRoot?: string
   line?: number
@@ -108,6 +115,11 @@ export type WorkspaceImageReadResult =
       mimeType: string
       size: number
     }
+  | { ok: false; message: string }
+
+export type WorkspaceExcelReadResult =
+  | { ok: true; path: string; dataBase64: string; format: import('./excel/format').ExcelFormat;
+      size: number; contentDigest: string; limits: import('./excel/model').ExcelLimits }
   | { ok: false; message: string }
 
 export type WorkspacePdfReadResult =

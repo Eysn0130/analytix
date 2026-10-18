@@ -45,6 +45,12 @@ func ResolveCurrentChildCaseDelegationV1(
 		return CurrentChildCaseDelegationV1{}, errors.New("case delegation replay authority is unavailable")
 	}
 	record, err := input.Jobs.LoadChildRun(childRunID)
+	if err == nil && record.HostChildInput != nil {
+		if domainjob.ValidateHostChildInputRecordV1(record) != nil || input.Blocker(record) != "" || record.ChildThreadID != input.ChildThreadID || record.ChildTurnID != input.SecurityContext.TurnID {
+			return CurrentChildCaseDelegationV1{}, errors.New("Host child input current authority is unavailable")
+		}
+		return CurrentChildCaseDelegationV1{Prompt: input.Prompt, CurrentRecord: record}, nil
+	}
 	if err != nil || record.ID != childRunID || record.ChildThreadID != input.ChildThreadID ||
 		record.SecurityBinding == nil || input.Blocker(record) != "" {
 		return CurrentChildCaseDelegationV1{}, errors.New("durable child case delegation is unavailable")

@@ -44,6 +44,33 @@ const nativeRevision = z.string().regex(/^[a-f0-9]{64}$/)
 const nativeOperation = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/)
 const nativeToken = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/)
 const nativeSequence = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+const nativeThread = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)
+const nativeLocalPath = z.string().min(1).max(32768).refine(value => !value.includes('\0'))
+
+/** User creation is resolved inside Core's current thread workspace; no caller path grants authority. */
+export const nativeOfficeCreateInputSchema = z.object({
+  threadId: nativeThread, operationId: nativeOperation,
+  fileName: z.string().min(6).max(255).refine(value => value.trim() === value &&
+    !/[\\/\p{Cc}:*?"<>|]/u.test(value) && /\.docx$/i.test(value) &&
+    value.slice(0, -5).trim().length > 0 && new TextEncoder().encode(value).byteLength <= 255)
+}).strict()
+export const nativeOfficeCreationSchema = z.object({
+  operationId: nativeOperation, workspace: nativeLocalPath, path: nativeLocalPath,
+  revision: nativeRevision, kind: z.literal('docx'),
+  byteSize: z.number().int().positive().max(MaxNativeOfficeBytes), savedAt: z.string().datetime({ offset: true })
+}).strict()
+/** Core persists this authority before Main permits the first native manual mutation. */
+export const nativeOfficeManualBeginInputSchema = z.object({
+  sessionId: selectionSession, threadId: nativeThread, operationId: nativeOperation, baseRevision: nativeRevision
+}).strict()
+export const nativeOfficeManualAuthoritySchema = z.object({
+  version: z.literal(2), origin: z.literal('manual'), changeId: nativeRevision,
+  baseRevision: nativeRevision, saveOperationId: nativeOperation, undoOperationId: nativeOperation
+}).strict()
+export type NativeOfficeCreateInput = z.infer<typeof nativeOfficeCreateInputSchema>
+export type NativeOfficeCreation = z.infer<typeof nativeOfficeCreationSchema>
+export type NativeOfficeManualBeginInput = z.infer<typeof nativeOfficeManualBeginInputSchema>
+export type NativeOfficeManualAuthority = z.infer<typeof nativeOfficeManualAuthoritySchema>
 export const MaxNativeOfficeSelectionUTF16 = 4096
 const selectionText = z.string().max(65_536).refine(value => {
   for (let index = 0; index < value.length; index++) {
@@ -133,7 +160,7 @@ export const nativeOfficeReplacementSchema = z.object({
 // Raw review text is protected-local display data. Never include this in a
 // model tool result, reference card, or persisted conversation message.
 export const nativeOfficeLocalReviewSchema = z.object({ proposalId: scopeId, beforeText: selectionText, afterText: selectionText, workbook:nativeWorkbookReviewSchema.optional(), presentation:nativePresentationReviewSchema.optional() }).strict()
-export const nativeOfficeChangeSchema = z.object({
+const nativeOfficeProposalChangeSchema = z.object({
   changeId: nativeRevision, threadId: selectionCapture.shape.threadId, proposalId: scopeId,
   baseRevision: nativeRevision, revision: z.union([nativeRevision, z.literal('')]),
   status: z.enum(['prepared', 'unknown', 'committed', 'conflict', 'undone', 'cancelled', 'superseded']),
@@ -142,6 +169,11 @@ export const nativeOfficeChangeSchema = z.object({
   canCancel: z.boolean(), canRetryUndo: z.boolean(), canResume: z.boolean(),
   createdAt: z.string().max(64), savedAt: z.string().max(64)
 }).strict()
+// The legacy proposal arm is unchanged. Missing proposalId never implies manual authority.
+export const nativeOfficeManualChangeSchema = nativeOfficeProposalChangeSchema.omit({
+  proposalId: true, beforeText: true, afterText: true, workbook: true, presentation: true
+}).extend({version: z.literal(2), origin: z.literal('manual')}).strict()
+export const nativeOfficeChangeSchema = z.union([nativeOfficeProposalChangeSchema, nativeOfficeManualChangeSchema])
 export const nativeOfficeRecoverySchema = z.object({current:nativeOfficeChangeSchema.nullable(),pending:nativeOfficeChangeSchema.nullable()}).strict()
 // Annotation drafts are protected-local notes, never persisted selection authority.
 export const nativeOfficeAnnotationNoteSchema = selectionText.refine(value => value.length <= 4096)
@@ -153,6 +185,8 @@ export const nativeOfficeAnnotationSchema = z.object({
 export type NativeOfficeAnnotation = z.infer<typeof nativeOfficeAnnotationSchema>
 export const nativeOfficeSelectionResponseSchema = z.union([
   objectEditingResponseSchema,
+  z.object({ ok: z.literal(true), creation: nativeOfficeCreationSchema }).strict(),
+  z.object({ ok: z.literal(true), manual: nativeOfficeManualAuthoritySchema }).strict(),
   z.object({ ok: z.literal(true), scope: nativeOfficeSelectionScopeSchema }).strict(),
   z.object({ ok: z.literal(true), proposals: z.array(nativeOfficeProposalSchema).max(16), localReviews: z.array(nativeOfficeLocalReviewSchema).max(16) }).strict(),
   z.object({ ok: z.literal(true), recovery: nativeOfficeRecoverySchema }).strict(),

@@ -95,6 +95,28 @@ func (h *runtimeServerHandler) beginRuntimeThreadScopeTransition(
 	return &runtimeThreadTransition{inner: inner, release: release}, nil
 }
 
+func (h *runtimeServerHandler) beginRuntimeThreadArchiveRead(
+	ctx context.Context,
+	threadID, workspaceRealPath, tenantID, userID string,
+) (func(), error) {
+	releaseAdmission, err := h.runtimeControl().ReserveIdleThreadTransition(threadID)
+	if err != nil {
+		return nil, err
+	}
+	releaseRead, err := h.runtimeSubagentState().AcquireSecurityScopeRead(ctx, threadID, workspaceRealPath, tenantID, userID)
+	if err != nil {
+		releaseAdmission()
+		return nil, err
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			releaseRead()
+			releaseAdmission()
+		})
+	}, nil
+}
+
 func (h *runtimeServerHandler) beginRuntimeWorkspaceScopeTransition(
 	ctx context.Context,
 	threadID, previousWorkspaceRealPath, targetWorkspaceRealPath, tenantID, userID string,

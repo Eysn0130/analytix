@@ -14,6 +14,7 @@ import {
   normalizeClawSettings,
   normalizeGuiUpdateChannel,
   normalizeAppMotionPreference,
+  normalizePerformanceUsageMode,
   normalizeKeyboardShortcuts,
   normalizeModelProviderSettings,
   normalizeScheduleSettings,
@@ -26,7 +27,7 @@ import type { GuiUpdateInfo } from '@shared/gui-update'
 type RendererSettingsShape = AppSettingsPatch
 type SettingsPatch = AppSettingsPatch
 
-export const DEFAULT_WORKSPACE_ROOT = '~/.analytix/default_workspace'
+export const DEFAULT_WORKSPACE_ROOT = '~/Analytix'
 
 export function splitSettingsList(raw: string): string[] {
   return raw
@@ -85,13 +86,14 @@ export function coerceRendererSettings(settings: AppSettingsV1): AppSettingsV1 {
   const uiFontScale =
     raw.uiFontScale === 'small' || raw.uiFontScale === 'medium' || raw.uiFontScale === 'large'
       ? raw.uiFontScale
-      : 'medium'
+      : 'small'
   return {
     version: 1,
     locale: raw.locale === 'en' ? 'en' : 'zh',
     theme,
     uiFontScale,
     motionPreference: normalizeAppMotionPreference(raw.motionPreference ?? DEFAULT_APP_MOTION_PREFERENCE),
+    performanceUsageMode: normalizePerformanceUsageMode(raw.performanceUsageMode),
     cursorSpotlight: raw.cursorSpotlight !== false,
     provider: normalizeModelProviderSettings(raw.provider),
     runtime: mergeAnalytixRuntimeSettings(defaultAnalytixRuntimeSettings(), getAnalytixRuntimeSettings(settings)),

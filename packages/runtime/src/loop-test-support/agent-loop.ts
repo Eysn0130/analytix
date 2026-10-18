@@ -262,10 +262,15 @@ type ModelClientDiagnostics = {
   configuredModel?: string
 }
 
-const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
+// This compatibility loop does not produce the Go-owned assembly boundary.
+type AgentLoopPipelineStage = Exclude<PipelineStage, 'logical_step_assembled'>
+
+const PIPELINE_STAGE_LABELS: Record<AgentLoopPipelineStage, string> = {
   setup: 'Setup',
   pre_start: 'Pre-Start',
   post_start: 'Post-Start',
+  logical_step_started: 'Logical step started',
+  logical_step_closed: 'Logical step closed',
   input_received: 'Input Received',
   input_cached: 'Input Cached',
   input_routed: 'Input Routed',
@@ -3110,7 +3115,7 @@ export class AgentLoop {
   private async recordPipelineStage(
     threadId: string,
     turnId: string,
-    stage: PipelineStage,
+    stage: AgentLoopPipelineStage,
     details?: Record<string, unknown>
   ): Promise<void> {
     await this.opts.events.record({

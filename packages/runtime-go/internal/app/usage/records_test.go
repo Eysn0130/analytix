@@ -205,3 +205,22 @@ func containsAnyString(items []any, expected string) bool {
 	}
 	return false
 }
+
+func TestConversationProjectionDoesNotChangeLegacyCounters(t *testing.T) {
+	legacy := []Record{{ThreadID: "thread-known", Model: "model", Provider: "provider", CompletedAt: "2026-07-14T00:00:00Z", Usage: Snapshot{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, Turns: 1}}}
+	projection := ConversationUsageV1{SchemaVersion: "conversation-usage.v1"}
+	combined := append(append([]Record{}, legacy...), Record{ThreadID: "thread-open", ProjectionOnly: true, Conversation: &projection})
+	if SumRecords(combined).TotalTokens != 12 || len(BySourceResponse(combined)) != len(BySourceResponse(legacy)) {
+		t.Fatal("projection changed legacy usage")
+	}
+	response := ThreadResponse(combined)
+	if response["totals"].(map[string]any)["thread_count"] != 1 || len(response["buckets"].([]any)) != 2 {
+		t.Fatalf("legacy totals drift: %#v", response)
+	}
+	for _, raw := range response["buckets"].([]any) {
+		row := raw.(map[string]any)
+		if row["thread_id"] == "thread-open" && row["conversationUsage"] != &projection {
+			t.Fatal("open usage projection was lost")
+		}
+	}
+}

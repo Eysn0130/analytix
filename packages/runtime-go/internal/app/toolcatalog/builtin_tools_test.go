@@ -10,7 +10,7 @@ import (
 
 func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T) {
 	tools := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: true, WebFetch: true, NativeSelections: true})
-	if len(tools) != 21 {
+	if len(tools) != 22 {
 		t.Fatalf("builtin schema count drifted: %d", len(tools))
 	}
 	seen := map[string]bool{}
@@ -20,7 +20,7 @@ func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T)
 		}
 		seen[tool.Name] = true
 	}
-	for _, name := range []string{"native_selection_read", "native_selection_propose", "read_task_history", "read", "bash", "write", "edit", "grep", "find", "glob", "code_index", "ls", "read_file", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "web_fetch"} {
+	for _, name := range []string{"native_selection_read", "native_selection_propose", "read_task_history", "read", "present", "bash", "write", "edit", "grep", "find", "glob", "code_index", "ls", "read_file", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "web_fetch"} {
 		if !seen[name] {
 			t.Fatalf("missing builtin tool schema %s", name)
 		}
@@ -29,7 +29,7 @@ func TestBuiltinToolSchemasPreserveSourceAndBackgroundBashBoundary(t *testing.T)
 		t.Fatalf("foreground bash schema should allow background when configured")
 	}
 	foregroundOnly := BuiltinToolSchemas(BuiltinToolSchemaInput{AllowBackgroundBash: false, WebFetch: false, NativeSelections: true})
-	if len(foregroundOnly) != 20 {
+	if len(foregroundOnly) != 21 {
 		t.Fatalf("foreground-only schema count drifted: %d", len(foregroundOnly))
 	}
 	if schemaHasProperty(t, schemaByName(t, foregroundOnly, "bash"), "run_in_background") {
@@ -167,6 +167,38 @@ func TestNativePresentationToolSchemaHasOnlyFiniteExclusivePatches(t *testing.T)
 	for _, expected := range []string{"image-region", "noteParts", "imageObservation is unavailable", "no image pixels"} {
 		if !strings.Contains(description, expected) {
 			t.Fatal("image observation boundary missing", expected)
+		}
+	}
+}
+
+func TestPresentBuiltinSchemaDefaultsAndClosedInputV1(t *testing.T) {
+	schemas := BuiltinToolSchemas(BuiltinToolSchemaInput{})
+	tool := schemaByName(t, schemas, "present")
+	if tool.Source != "builtin" || !strings.Contains(tool.Description, "current file") || !strings.Contains(tool.Description, "does not copy") {
+		t.Fatal("present declaration semantics missing")
+	}
+	for _, arguments := range []string{`{"files":[{"path":"result.docx"}]}`, `{"files":[{"path":"result.docx","description":""}]}`} {
+		if _, blocked := ValidateToolCallArguments(domainmodel.ToolCall{Name: "present", Arguments: json.RawMessage(arguments)}, schemas); blocked {
+			t.Fatal("valid declaration rejected")
+		}
+	}
+	for _, arguments := range []string{`{"files":[]}`, `{"files":[{"path":"a","index":0}]}`, `{"files":[{"path":"a","description":null}]}`, `{"files":[{"path":"a"}],"seq":1}`} {
+		if _, blocked := ValidateToolCallArguments(domainmodel.ToolCall{Name: "present", Arguments: json.RawMessage(arguments)}, schemas); !blocked {
+			t.Fatal("open declaration admitted")
+		}
+	}
+	files := make([]any, 8)
+	for index := range files {
+		files[index] = map[string]any{"path": "result"}
+	}
+	for _, count := range []int{8, 9} {
+		if count == 9 {
+			files = append(files, map[string]any{"path": "result"})
+		}
+		body, _ := json.Marshal(map[string]any{"files": files})
+		_, blocked := ValidateToolCallArguments(domainmodel.ToolCall{Name: "present", Arguments: body}, schemas)
+		if blocked != (count == 9) {
+			t.Fatal("present ceiling differs from default 8")
 		}
 	}
 }

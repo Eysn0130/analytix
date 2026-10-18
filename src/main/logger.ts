@@ -1,6 +1,11 @@
 import { appendFile, mkdir, readdir, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createRuntimeStatusPublicV1, type RuntimeStatusPublicV1Input } from '../shared/analytix-runtime-status'
+import { isPublicRuntimeSseRejectionReasonCode } from '../shared/public-runtime-sse'
 import { startupOwnerPhasesV1 } from './runtime/startup-owner-trace-v1'
+import { normalizeNativeManualBeginPhaseV1, type NativeManualBeginPhaseV1 } from './runtime/native-manual-begin-phase-v1'
+import type { PluginPackageHostResponse } from '../../packages/runtime/src/contracts/plugin-package-host'
+import type { ObjectEditingResponse } from '../../packages/runtime/src/contracts/object-editing'
 
 export type LogLevel = 'error' | 'warn' | 'info'
 
@@ -24,11 +29,95 @@ export type ManagedChildLogRecord =
   | { code: 'ANALYTIX_CHILD_STDERR_CAPTURED'; bytes: number; sha256: string }
 
 type FixedLogCategory = 'child' | 'git' | 'logger' | 'main' | 'renderer'
-type FixedLogDetail = Record<string, number | boolean | string>
+type FixedLogDetail = Record<string, number | boolean | string | null>
+export const GO_RUNTIME_STARTUP_FAILURE_CLASSES = [
+  'private_frame_failed',
+  'stdout_unavailable',
+  'ready_output_limit',
+  'ready_line_invalid',
+  'ready_payload_invalid',
+  'ready_parse_failed',
+  'ready_child_exited',
+  'ready_child_error',
+  'ready_timeout',
+  'ready_wait_failed',
+  'ready_identity_failed',
+  'post_ready_failed'
+] as const
+export type GoRuntimeStartupFailureClass = typeof GO_RUNTIME_STARTUP_FAILURE_CLASSES[number]
+export const NATIVE_OFFICE_DIAGNOSTIC_STAGES = [
+  'ipc_admission', 'ipc_resolve_present', 'ipc_controller_open',
+  'controller_validation', 'controller_package', 'controller_open_object', 'controller_content',
+  'controller_surface_create', 'controller_surface_attach', 'controller_surface_open', 'controller_recovery', 'controller_manual_begin',
+  'controller_surface_open_guard_before', 'controller_surface_open_guard_after',
+  'controller_surface_open_guard_final', 'controller_surface_open_current_final',
+  'surface_admission', 'surface_preload', 'surface_assets', 'surface_asset_server',
+  'surface_view', 'surface_load', 'surface_transfer_guard', 'surface_bind', 'surface_ready',
+  'surface_open', 'surface_request'
+] as const
+export type NativeOfficeDiagnosticStage = typeof NATIVE_OFFICE_DIAGNOSTIC_STAGES[number]
+const NATIVE_OFFICE_OPEN_FAILURE_BOOLEAN_KEYS = [
+  'openDispatched', 'openResolved', 'guardPassed', 'owns', 'visible', 'epochMatch', 'snapshotCurrent', 'ownerAborted'
+] as const
+export type NativeOfficeOpenFailureState = Record<typeof NATIVE_OFFICE_OPEN_FAILURE_BOOLEAN_KEYS[number], boolean>
+const NATIVE_OFFICE_MANUAL_BEGIN_FAILURE_KEYS = [
+  'schemaAccepted', 'outerCode', 'innerCode', 'pendingSave', 'pendingRecovery', 'pendingManualCancel'
+] as const
+export type NativeOfficeManualBeginFailureState = {
+  /** Last completed response schema parse in this begin attempt; null before any parse. */
+  schemaAccepted: boolean | null
+  outerCode: Extract<PluginPackageHostResponse, { ok: false }>['code'] | null
+  innerCode: Extract<ObjectEditingResponse, { ok: false }>['code'] | null
+  pendingSave: boolean
+  pendingRecovery: boolean
+  pendingManualCancel: boolean
+}
+const NATIVE_OFFICE_MANUAL_BEGIN_OUTER_CODES = {
+  unavailable: true, invalid_request: true, identity_invalid: true, package_not_found: true,
+  conflict: true, disabled: true, adapter_unavailable: true, persistence_failure: true
+} as const satisfies Record<NonNullable<NativeOfficeManualBeginFailureState['outerCode']>, true>
+const NATIVE_OFFICE_MANUAL_BEGIN_INNER_CODES = {
+  unavailable: true, unsupported_platform: true, invalid_request: true, session_invalid: true,
+  capacity: true, forbidden: true, not_text: true, too_large: true, conflict: true,
+  operation_mismatch: true, operation_not_found: true, persistence_failure: true,
+  draft_stale: true, scope_invalid: true, proposal_invalid: true,
+  projection_unavailable: true, protected_span_invalid: true
+} as const satisfies Record<NonNullable<NativeOfficeManualBeginFailureState['innerCode']>, true>
+const NATIVE_OFFICE_DIAGNOSTIC_STAGE_SET: ReadonlySet<string> = new Set(NATIVE_OFFICE_DIAGNOSTIC_STAGES)
+const USER_INPUT_LOCAL_READ_DIAGNOSTIC_STAGES = [
+  'ipc_authority', 'request_admission', 'owner_admission', 'view_capacity', 'runtime_request',
+  'response_owner', 'response_http', 'response_limit', 'response_json', 'response_schema', 'response_selector', 'display_owner', 'display_digest'
+] as const
+export type UserInputLocalReadDiagnosticStage = typeof USER_INPUT_LOCAL_READ_DIAGNOSTIC_STAGES[number]
+const USER_INPUT_LOCAL_READ_DIAGNOSTIC_STAGE_SET: ReadonlySet<string> = new Set(USER_INPUT_LOCAL_READ_DIAGNOSTIC_STAGES)
+const NATIVE_OFFICE_DIAGNOSTIC_ERROR_CODES = [
+  'invalid_request', 'unavailable', 'forbidden', 'package_unavailable', 'package_changed', 'invalid_response',
+  'engine_unavailable', 'unsaved_changes', 'conflict', 'unknown', 'save_failed', 'stale_selection',
+  'unsupported_selection', 'capacity', 'office-startup-failed', 'office-assets-unavailable',
+  'office-protocol-invalid', 'office-operation-timeout-unknown', 'office-engine-closed-unknown',
+  'engine-load-failed', 'engine-operation-failed', 'unexpected'
+] as const
+export type NativeOfficeDiagnosticErrorCode = typeof NATIVE_OFFICE_DIAGNOSTIC_ERROR_CODES[number]
+const NATIVE_OFFICE_DIAGNOSTIC_ERROR_CODE_SET: ReadonlySet<string> = new Set(NATIVE_OFFICE_DIAGNOSTIC_ERROR_CODES)
+const GO_RUNTIME_STARTUP_FAILURE_CLASS_SET: ReadonlySet<string> = new Set(GO_RUNTIME_STARTUP_FAILURE_CLASSES)
+const GO_RUNTIME_STARTUP_SIGNAL_SET: ReadonlySet<string> = new Set([
+  'SIGABRT', 'SIGALRM', 'SIGBUS', 'SIGFPE', 'SIGHUP', 'SIGILL', 'SIGINT',
+  'SIGKILL', 'SIGPIPE', 'SIGQUIT', 'SIGSEGV', 'SIGTERM', 'SIGTRAP', 'SIGUSR1', 'SIGUSR2'
+])
 const RENDERER_LOG_EVENT_CODES = [
   'renderer_approval_failed',
   'renderer_create_thread_failed',
   'renderer_diagnostic_failed',
+  'renderer_sse_event_active',
+  'renderer_sse_event_aborted',
+  'renderer_sse_event_closed',
+  'renderer_sse_ack_false_active',
+  'renderer_sse_ack_false_aborted',
+  'renderer_sse_ack_false_closed',
+  'renderer_sse_ack_transport_active',
+  'renderer_sse_ack_transport_aborted',
+  'renderer_sse_ack_transport_closed',
+
   'renderer_git_checkpoint_failed',
   'renderer_gui_update_failed',
   'renderer_interrupt_failed',
@@ -59,6 +148,15 @@ const MAIN_LOG_EVENT_CODE_BY_LEVEL: Readonly<Record<LogLevel, MainLogEventCode>>
   info: 'main_info',
   warn: 'main_warn'
 }
+const SSE_ACK_DIAGNOSTIC_REASONS: ReadonlySet<string> = new Set([
+  'invalid_ack_request',
+  'stream_unavailable',
+  'owner_mismatch',
+  'undelivered_sequence',
+  'accepted_final_receipt_mismatch',
+  'accepted_final_sequence_invalid',
+  'unexpected_accepted_final_receipt',
+])
 const SAFE_NUMBER_DETAIL_KEYS = new Set([
   'attempt',
   'attempts',
@@ -215,8 +313,105 @@ async function pruneOldLogs(): Promise<void> {
   }
 }
 
+function projectGoRuntimeStartupDetail(value: Record<string, unknown>): FixedLogDetail | undefined {
+  const { stage, attempt, failureClass, exitCode, signal, cleanupAfterStartupFailure } = value
+  if ((stage !== 'go startup:failed' && stage !== 'go process:exited') ||
+      !Number.isSafeInteger(attempt) || (attempt as number) <= 0 ||
+      (failureClass !== null && (typeof failureClass !== 'string' ||
+        !GO_RUNTIME_STARTUP_FAILURE_CLASS_SET.has(failureClass))) ||
+      (exitCode !== null && (!Number.isSafeInteger(exitCode) ||
+        (exitCode as number) < -2_147_483_648 || (exitCode as number) > 2_147_483_647)) ||
+      (signal !== null && typeof signal !== 'string') ||
+      typeof cleanupAfterStartupFailure !== 'boolean' ||
+      (stage === 'go startup:failed' && (failureClass === null || cleanupAfterStartupFailure)) ||
+      (cleanupAfterStartupFailure && failureClass === null)) return undefined
+  return {
+    stage,
+    attempt: attempt as number,
+    failureClass: failureClass as GoRuntimeStartupFailureClass | null,
+    exitCode: exitCode as number | null,
+    signal: signal === null ? null : GO_RUNTIME_STARTUP_SIGNAL_SET.has(signal as string) ? signal as string : 'OTHER',
+    cleanupAfterStartupFailure
+  }
+}
+
+function projectRuntimeStatusDetail(value: Record<string, unknown>): FixedLogDetail | undefined {
+  const input: Record<string, unknown> = {}
+  for (const key of [
+    'code', 'source', 'at', 'attempt', 'maxAttempts', 'stderrBytes', 'stderrSha256',
+    'errorBytes', 'errorSha256', 'rolledBack'
+  ]) {
+    if (!Object.hasOwn(value, key)) continue
+    const entry = value[key]
+    if (entry === undefined) return undefined
+    input[key] = entry
+  }
+  const status = createRuntimeStatusPublicV1(input as RuntimeStatusPublicV1Input)
+  if (!Object.hasOwn(value, 'state') || value.state !== status.state) return undefined
+  const projected: FixedLogDetail = { code: status.code, state: status.state, source: status.source }
+  if (status.rolledBack !== undefined) projected.rolledBack = status.rolledBack
+  if (status.errorBytes !== undefined && status.errorSha256 !== undefined) {
+    projected.errorBytes = status.errorBytes
+    projected.errorSha256 = status.errorSha256
+  }
+  return projected
+}
+
 function projectFixedDetail(value: unknown, category: string): FixedLogDetail | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  if (category === 'runtime-status') return projectRuntimeStatusDetail(value as Record<string, unknown>)
+  if (category === 'sse') {
+    const { code, reasonCode } = value as Record<string, unknown>
+    if (code === 'sse_event_rejected') {
+      return isPublicRuntimeSseRejectionReasonCode(reasonCode) ? { code, reasonCode } : undefined
+    }
+    if (code === 'sse_ack_rejected') {
+      return typeof reasonCode === 'string' && SSE_ACK_DIAGNOSTIC_REASONS.has(reasonCode)
+        ? { code, reasonCode } : undefined
+    }
+  }
+  if (category === 'go-runtime-startup') return projectGoRuntimeStartupDetail(value as Record<string, unknown>)
+  if (category === 'user-input-local-read') {
+    const { stage, statusCode } = value as Record<string, unknown>
+    if (typeof stage !== 'string' || !USER_INPUT_LOCAL_READ_DIAGNOSTIC_STAGE_SET.has(stage) ||
+        statusCode !== null && (typeof statusCode !== 'number' || !Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599)) return undefined
+    return { stage, statusCode }
+  }
+  if (category === 'native-office') {
+    const { stage, errorCode, protectedPresent } = value as Record<string, unknown>
+    if (stage === 'core_manual_begin_phase' || Object.hasOwn(value, 'phaseFrame')) {
+      if (stage !== 'core_manual_begin_phase' || Object.keys(value).length !== 2 ||
+          !Object.hasOwn(value, 'stage') || !Object.hasOwn(value, 'phaseFrame')) return undefined
+      const frame = normalizeNativeManualBeginPhaseV1((value as Record<string, unknown>).phaseFrame)
+      return frame ? { stage, ...frame } : undefined
+    }
+    if (typeof stage !== 'string' || !NATIVE_OFFICE_DIAGNOSTIC_STAGE_SET.has(stage) ||
+        typeof errorCode !== 'string' || !NATIVE_OFFICE_DIAGNOSTIC_ERROR_CODE_SET.has(errorCode) ||
+        typeof protectedPresent !== 'boolean') return undefined
+    if (stage === 'controller_manual_begin' || Object.hasOwn(value, 'manualBegin')) {
+      const state = (value as Record<string, unknown>).manualBegin
+      if (stage !== 'controller_manual_begin' || protectedPresent || Object.hasOwn(value, 'openState') ||
+          !state || typeof state !== 'object' || Array.isArray(state) ||
+          !NATIVE_OFFICE_MANUAL_BEGIN_FAILURE_KEYS.every(key => Object.hasOwn(state, key))) return undefined
+      const { schemaAccepted, outerCode, innerCode, pendingSave, pendingRecovery, pendingManualCancel } = state as Record<string, unknown>
+      if (schemaAccepted !== null && typeof schemaAccepted !== 'boolean' ||
+          outerCode !== null && (typeof outerCode !== 'string' || !Object.hasOwn(NATIVE_OFFICE_MANUAL_BEGIN_OUTER_CODES, outerCode)) ||
+          innerCode !== null && (typeof innerCode !== 'string' || !Object.hasOwn(NATIVE_OFFICE_MANUAL_BEGIN_INNER_CODES, innerCode)) ||
+          typeof pendingSave !== 'boolean' || typeof pendingRecovery !== 'boolean' || typeof pendingManualCancel !== 'boolean') return undefined
+      return { stage, errorCode, protectedPresent, schemaAccepted, outerCode, innerCode, pendingSave, pendingRecovery, pendingManualCancel }
+    }
+    const projected: FixedLogDetail = { stage, errorCode, protectedPresent }
+    const state = (value as Record<string, unknown>).openState
+    if (state !== undefined) {
+      if (!protectedPresent || !state || typeof state !== 'object' || Array.isArray(state)) return undefined
+      for (const key of NATIVE_OFFICE_OPEN_FAILURE_BOOLEAN_KEYS) {
+        const entry = (state as Record<string, unknown>)[key]
+        if (typeof entry !== 'boolean') return undefined
+        projected[key] = entry
+      }
+    }
+    return projected
+  }
   const projected: FixedLogDetail = {}
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     if (key === 'stage' && category === 'startup' && typeof entry === 'string' && STARTUP_TRACE_STAGE_SET.has(entry)) {
@@ -304,6 +499,22 @@ export function logError(category: string, _message: string, detail?: unknown): 
 
 export function logWarn(category: string, _message: string, detail?: unknown): void {
   void appendFixedLogLine('warn', projectMainLog('warn', category, detail))
+}
+
+export function logNativeOfficeFailure(stage: NativeOfficeDiagnosticStage, errorCode: NativeOfficeDiagnosticErrorCode, protectedPresent: boolean, openState?: NativeOfficeOpenFailureState): void {
+  logWarn('native-office', '', { stage, errorCode, protectedPresent, ...(openState ? { openState } : {}) })
+}
+
+export function logNativeOfficeManualBeginFailure(errorCode: NativeOfficeDiagnosticErrorCode, state: NativeOfficeManualBeginFailureState): void {
+  logWarn('native-office', '', { stage: 'controller_manual_begin', errorCode, protectedPresent: false, manualBegin: state })
+}
+
+export function logNativeOfficeManualBeginPhaseV1(frame: NativeManualBeginPhaseV1): void {
+  logWarn('native-office', '', { stage: 'core_manual_begin_phase', phaseFrame: frame })
+}
+
+export function logUserInputLocalReadFailure(stage: UserInputLocalReadDiagnosticStage, statusCode: number | null): void {
+  logWarn('user-input-local-read', '', { stage, statusCode })
 }
 
 export function logInfo(category: string, _message: string, detail?: unknown): void {

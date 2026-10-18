@@ -153,14 +153,16 @@ func canonicalCostCurrenciesFromAny(value any) ([]string, bool) {
 }
 
 type Record struct {
-	ThreadID    string
-	TurnID      string
-	Model       string
-	Provider    string
-	CompletedAt string
-	UsageSource string
-	ChildRunID  string
-	Usage       Snapshot
+	ThreadID       string
+	TurnID         string
+	Model          string
+	Provider       string
+	CompletedAt    string
+	UsageSource    string
+	ChildRunID     string
+	Usage          Snapshot
+	Conversation   *ConversationUsageV1
+	ProjectionOnly bool
 }
 
 type Window struct {
@@ -313,6 +315,9 @@ func RuntimeResponse(records []Record, threadIDs []string) map[string]any {
 	total := SumRecords(records)
 	recordsByThread := map[string][]Record{}
 	for _, record := range records {
+		if record.ProjectionOnly {
+			continue
+		}
 		recordsByThread[record.ThreadID] = append(recordsByThread[record.ThreadID], record)
 	}
 	perThread := make([]any, 0, len(threadIDs))
@@ -337,6 +342,9 @@ func BySourceResponse(records []Record) []any {
 	buckets := map[string][]Record{}
 	childRunIDs := map[string]map[string]bool{}
 	for _, record := range records {
+		if record.ProjectionOnly {
+			continue
+		}
 		source := RecordSource(record)
 		buckets[source] = append(buckets[source], record)
 		childRunID := strings.TrimSpace(record.ChildRunID)
@@ -419,6 +427,9 @@ func DailyResponse(records []Record, window Window) map[string]any {
 		buckets[day] = emptyCounters()
 	}
 	for _, record := range records {
+		if record.ProjectionOnly {
+			continue
+		}
 		day := Day(record.CompletedAt, window.Location)
 		bucket := buckets[day]
 		if bucket == nil {
@@ -450,7 +461,14 @@ func DailyResponse(records []Record, window Window) map[string]any {
 
 func ThreadResponse(records []Record) map[string]any {
 	buckets := map[string]*counters{}
+	projections := map[string]*ConversationUsageV1{}
 	for _, record := range records {
+		if record.Conversation != nil {
+			projections[record.ThreadID] = record.Conversation
+		}
+		if record.ProjectionOnly {
+			continue
+		}
 		bucket := buckets[record.ThreadID]
 		if bucket == nil {
 			bucket = emptyCounters()
@@ -465,6 +483,12 @@ func ThreadResponse(records []Record) map[string]any {
 			bucket.LastCacheMissReasons = append([]string(nil), record.Usage.CacheMissReasons...)
 			bucket.LastCacheSuggestions = append([]string(nil), record.Usage.CacheSuggestions...)
 			bucket.LatestProvider = record.Provider
+		}
+	}
+	legacyThreadCount := len(buckets)
+	for id := range projections {
+		if buckets[id] == nil {
+			buckets[id] = emptyCounters()
 		}
 	}
 	threadIDs := make([]string, 0, len(buckets))
@@ -484,9 +508,13 @@ func ThreadResponse(records []Record) map[string]any {
 	for _, threadID := range threadIDs {
 		bucket := buckets[threadID]
 		total.AddCounters(bucket)
-		out = append(out, bucket.ThreadMap(threadID))
+		row := bucket.ThreadMap(threadID)
+		if projection := projections[threadID]; projection != nil {
+			row["conversationUsage"] = projection
+		}
+		out = append(out, row)
 	}
-	totals := total.ThreadTotalsMap(len(threadIDs))
+	totals := total.ThreadTotalsMap(legacyThreadCount)
 	return map[string]any{
 		"group_by": "thread",
 		"buckets":  out,
@@ -506,6 +534,9 @@ func ModelResponse(records []Record, window Window) map[string]any {
 	}
 	modelBuckets := map[string]*counters{}
 	for _, record := range records {
+		if record.ProjectionOnly {
+			continue
+		}
 		day := Day(record.CompletedAt, window.Location)
 		dayBucket := dayBuckets[day]
 		if dayBucket == nil {
@@ -749,6 +780,9 @@ func SumRecords(records []Record) Snapshot {
 	coverage := costCoverage{status: "none"}
 	hasTelemetry := false
 	for _, record := range records {
+		if record.ProjectionOnly {
+			continue
+		}
 		total.PromptTokens += record.Usage.PromptTokens
 		total.CompletionTokens += record.Usage.CompletionTokens
 		total.ReasoningTokens += record.Usage.ReasoningTokens

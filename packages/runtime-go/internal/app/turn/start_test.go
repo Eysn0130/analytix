@@ -273,3 +273,14 @@ func TestResolveStartPoliciesFallBackToRuntimeDefault(t *testing.T) {
 		t.Fatalf("invalid approval should be empty: %q", got)
 	}
 }
+
+func TestHostQuestionWakeStartOmitsInventedHumanMessage(t *testing.T) {
+	plan := BuildStartPlan(StartPlanInput{ThreadID: "thread_synthetic", TurnNumber: 31, CreatedAt: "2026-10-09T00:00:00Z", OmitInitialUserMessage: true})
+	items, ok := plan.Record.Turn["items"].([]any)
+	if !ok || len(items) != 0 || plan.UserItemID != "" || plan.Record.UserItemID != "" || plan.Record.UserItem != nil || plan.Record.UserItemCreatedEvent != nil {
+		t.Fatal("idle wake invented a regular human message")
+	}
+	if plan.Record.TurnStartedEvent == nil {
+		t.Fatal("normal new turn admission event was omitted")
+	}
+}

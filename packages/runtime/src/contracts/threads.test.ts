@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { PublicToolResultProjectionV1, ToolResultTurnItem } from './items.js'
 import {
+  ForkThreadRequest,
   ListThreadsResponse,
   SetThreadTodosRequest,
   ThreadSummaryResponse,
   ThreadSummaryTaskMutationResponse,
   ThreadSummaryTaskOutputResponse,
-  ThreadTodoListSchema
+  ThreadTodoListSchema,
+  UpdateThreadRequest
 } from './threads.js'
 import {
   TaskJobKillResponseV1Schema,
@@ -17,6 +20,44 @@ import {
 } from './task-job-output.js'
 
 const PRIVATE_OUTPUT_SENTINEL = 'SOL_PRIVATE_REASONING_SENTINEL_7F3C'
+
+describe('formal own Side promotion intent', () => {
+  it('accepts only the sole true intent and rejects relation/parent mutation', () => {
+    expect(UpdateThreadRequest.parse({ promoteSide: true })).toEqual({ promoteSide: true })
+    for (const body of [
+      { promoteSide: false }, { promoteSide: null }, { promoteSide: 'true' },
+      { promoteSide: true, title: 'changed' }, { promoteSide: true, unknown: true },
+      { promoteSide: true, archived: false }, { relation: 'fork' }, { relation: undefined },
+      { parentThreadId: null }, { parentThreadId: undefined }, { promoteSide: true, relation: 'primary' }
+    ]) expect(UpdateThreadRequest.safeParse(body).success).toBe(false)
+  })
+})
+
+describe('closed historic native Job tool result', () => {
+  const job = { schemaVersion: 1, id: 'job-a', kind: 'subagent', status: 'failed', background: false, terminal: true,
+    outputWithheld: true, outputTrustStatus: 'untrusted_child_output', factAnswerAllowed: false, evidenceAuthority: false, canReadOutput: false, canContinueParent: false }
+  const output = { schemaVersion: 1, projectionKind: 'task_job_result', disclosure: 'metadata_only', status: 'completed',
+    messageKey: 'tool_completed', code: 'tool_completed', privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false,
+    taskJob: { operation: 'list', result: { jobs: [job], count: 1 } } }
+  it('retains failed job metadata as successful query and rejects transient/raw facts', () => {
+    expect(PublicToolResultProjectionV1.parse(output)).toEqual(output)
+    for (const bad of [
+      { ...output, factAnswerAllowed: undefined }, { ...output, evidenceAuthority: null }, { ...output, plan: null },
+      { ...output, taskJob: { operation: 'list', result: { jobs: [job], count: 2 } } },
+      ...[{ active: false }, { output: PRIVATE_OUTPUT_SENTINEL }, { terminal: false }].map(extra =>
+        ({ ...output, taskJob: { operation: 'list', result: { jobs: [{ ...job, ...extra }], count: 1 } } }))
+    ]) expect(PublicToolResultProjectionV1.safeParse(bad).success).toBe(false)
+  })
+  it('binds operation to the admitted native call kind and Host identity formats', () => {
+    const item = { id: 'item_result_' + 'a'.repeat(64), threadId: 'thread-a', turnId: 'turn-a', kind: 'tool_result',
+      role: 'tool', status: 'completed', createdAt: '2026-10-10T00:00:00Z', toolName: 'list_jobs', toolKind: 'command_execution',
+      callId: 'call_host_' + 'b'.repeat(64), isError: false, output }
+    expect(ToolResultTurnItem.safeParse(item).success).toBe(true)
+    for (const extra of [{ toolName: 'wait' }, { toolKind: 'tool_call' }, { callId: 'provider_call' }, { isError: true }]) {
+      expect(ToolResultTurnItem.safeParse({ ...item, ...extra }).success).toBe(false)
+    }
+  })
+})
 
 describe('Thread todo lifecycle contracts', () => {
   const item = {
@@ -49,17 +90,23 @@ describe('Thread todo lifecycle contracts', () => {
     }
   })
 
-  it('rejects duplicate ids, multiple active items, and unknown properties', () => {
+  it('retains parallel active state across request and durable read contracts', () => {
+    const todos = [{ id: 'first', content: '  First  ', status: 'in_progress' },
+      { id: 'second', content: 'Second', status: 'in_progress' }]
+    const request = SetThreadTodosRequest.parse({ todos })
+    expect(request.todos.map(todo => todo.status)).toEqual(['in_progress', 'in_progress'])
+    expect(request.todos[0].content).toBe('First')
+    const items = request.todos.map(todo => ({ ...todo, createdAt: item.createdAt, updatedAt: item.updatedAt }))
+    const list = { threadId: 'thread-1', updatedAt: item.updatedAt, items }
+    expect(ThreadTodoListSchema.parse(JSON.parse(JSON.stringify(list)))).toEqual(list)
+    expect(ThreadTodoListSchema.safeParse({ ...list, items: [items[0], items[0]] }).success).toBe(false)
+  })
+
+  it('rejects duplicate ids and unknown properties', () => {
     expect(SetThreadTodosRequest.safeParse({
       todos: [
         { id: 'same', content: 'one', status: 'pending' },
         { id: 'same', content: 'two', status: 'pending' }
-      ]
-    }).success).toBe(false)
-    expect(SetThreadTodosRequest.safeParse({
-      todos: [
-        { content: 'one', status: 'in_progress' },
-        { content: 'two', status: 'in_progress' }
       ]
     }).success).toBe(false)
     expect(SetThreadTodosRequest.safeParse({
@@ -429,5 +476,20 @@ describe('ThreadSummaryResponse', () => {
         updatedAt: '2026-07-20T00:00:01Z'
       }]
     }).success).toBe(false)
+  })
+})
+
+
+describe('ForkThreadRequest terminal boundary', () => {
+  it('preserves a captured E and whole-thread/side omission', () => {
+    expect(ForkThreadRequest.parse({ turnId: 'turn-1', endSeq: 13 })).toEqual({ relation: 'fork', turnId: 'turn-1', endSeq: 13 })
+    expect(ForkThreadRequest.parse(undefined)).toBeUndefined()
+    expect(ForkThreadRequest.parse({ relation: 'side', title: 'Side' })).toEqual({ relation: 'side', title: 'Side' })
+  })
+  it('rejects unbound, nullable, fractional and unsafe cursors', () => {
+    expect(ForkThreadRequest.safeParse({ endSeq: 13 }).success).toBe(false)
+    for (const endSeq of [null, 0, -1, 1.5, '13', Number.MAX_SAFE_INTEGER + 1, Infinity]) {
+      expect(ForkThreadRequest.safeParse({ turnId: 'turn-1', endSeq }).success).toBe(false)
+    }
   })
 })

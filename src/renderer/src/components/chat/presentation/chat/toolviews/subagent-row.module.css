@@ -1,0 +1,5 @@
+/* DSH compact recorded receipt, adapted to the native public control owner. */
+.publicBody { margin-left: 22px; padding-top: 4px; }
+.nativeActions { display: flex; align-items: center; justify-content: flex-end; }
+.nativeControls { display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.6; }
+.nativeDetails { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

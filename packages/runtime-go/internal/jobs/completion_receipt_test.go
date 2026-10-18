@@ -50,8 +50,11 @@ func TestTrustedChildCompletionReceiptPersistsAndRestartsStrictly(t *testing.T) 
 	if receipt.ChildRunID != record.ID {
 		t.Fatalf("fixture run identity mismatch: receipt=%s record=%s", receipt.ChildRunID, record.ID)
 	}
+	ref := testProtectedOutputReferenceV1("private child completion")
+	ref.ChildThreadID, ref.ChildTurnID = child.ThreadID, child.TurnID
 	completed, err := manager.UpdateChildRun(record.ID, UpdateRequest{
 		Status: string(domainjob.StatusCompleted), ChildTurnID: child.TurnID, ChildCompletionReceipt: &receipt,
+		ProtectedOutputSnapshot: ref,
 	})
 	if err != nil || completed.ChildCompletionReceipt == nil || completed.Output != "" {
 		t.Fatalf("trusted completion persistence failed: record=%#v err=%v", completed, err)
@@ -65,6 +68,7 @@ func TestTrustedChildCompletionReceiptPersistsAndRestartsStrictly(t *testing.T) 
 	replayed, err := manager.UpdateChildRun(record.ID, UpdateRequest{
 		Status: string(domainjob.StatusCompleted), ChildTurnID: child.TurnID,
 		ChildCompletionReceipt: &receipt, ToolInvocations: &toolInvocations,
+		ProtectedOutputSnapshot: domainjob.CloneProtectedOutputSnapshotV1(ref),
 	})
 	if err != nil || replayed.UpdatedAt != completed.UpdatedAt || replayed.FinishedAt != completed.FinishedAt {
 		t.Fatalf("exact completion replay was not idempotent: before=%#v after=%#v err=%v", completed, replayed, err)
@@ -78,7 +82,8 @@ func TestTrustedChildCompletionReceiptPersistsAndRestartsStrictly(t *testing.T) 
 		t.Fatal(err)
 	}
 	restored, err := restarted.LoadChildRun(record.ID)
-	if err != nil || restored.ChildCompletionReceipt == nil || restored.ChildCompletionReceipt.ReceiptDigest != receipt.ReceiptDigest {
+	if err != nil || restored.ChildCompletionReceipt == nil || restored.ChildCompletionReceipt.ReceiptDigest != receipt.ReceiptDigest ||
+		restored.ProtectedOutputSnapshot == nil || *restored.ProtectedOutputSnapshot != *ref {
 		t.Fatalf("strict restart lost trusted completion: record=%#v err=%v", restored, err)
 	}
 	if _, err := NewManager(root); err == nil {
@@ -185,19 +190,31 @@ func TestForegroundHandoffReceiptPersistsAuditOnlyWithoutChildBodyOrRestartAutho
 	}); err == nil {
 		t.Fatal("foreground child body entered durable completion")
 	}
+	ref := testProtectedOutputReferenceV1("private foreground completion")
+	ref.ChildThreadID, ref.ChildTurnID = child.ThreadID, child.TurnID
 	completed, err := manager.UpdateChildRun(record.ID, UpdateRequest{
 		Status: string(domainjob.StatusCompleted), ChildTurnID: child.TurnID,
 		ForegroundChildHandoffReceipt: &receipt,
+		ProtectedOutputSnapshot:       ref,
 	})
 	if err != nil || completed.Output != "" || completed.ForegroundChildHandoffReceipt == nil {
 		t.Fatalf("foreground audit receipt did not persist safely: record=%#v err=%v", completed, err)
 	}
+	beforeReplay, err := os.ReadFile(filepath.Join(root, record.ID+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	replayed, err := manager.UpdateChildRun(record.ID, UpdateRequest{
 		Status: string(domainjob.StatusCompleted), ChildTurnID: child.TurnID,
 		ForegroundChildHandoffReceipt: &receipt,
+		ProtectedOutputSnapshot:       domainjob.CloneProtectedOutputSnapshotV1(ref),
 	})
 	if err != nil || replayed.UpdatedAt != completed.UpdatedAt || replayed.FinishedAt != completed.FinishedAt {
 		t.Fatalf("exact foreground receipt replay mutated durable state: before=%#v after=%#v err=%v", completed, replayed, err)
+	}
+	afterReplay, err := os.ReadFile(filepath.Join(root, record.ID+".json"))
+	if err != nil || !bytes.Equal(beforeReplay, afterReplay) {
+		t.Fatalf("exact foreground receipt replay rewrote durable bytes: err=%v", err)
 	}
 	conflict, err := domainjob.NewForegroundChildHandoffReceiptV1(domainjob.ForegroundChildHandoffReceiptInputV1{
 		ParentThreadID: parent.ThreadID, ParentTurnID: parent.TurnID, ParentRunID: parent.TurnID,
@@ -224,7 +241,8 @@ func TestForegroundHandoffReceiptPersistsAuditOnlyWithoutChildBodyOrRestartAutho
 	}
 	restored, err := restarted.LoadChildRun(record.ID)
 	if err != nil || restored.Output != "" || restored.ForegroundChildHandoffReceipt == nil ||
-		restored.ForegroundChildHandoffReceipt.ReceiptDigest != receipt.ReceiptDigest {
+		restored.ForegroundChildHandoffReceipt.ReceiptDigest != receipt.ReceiptDigest ||
+		restored.ProtectedOutputSnapshot == nil || *restored.ProtectedOutputSnapshot != *ref {
 		t.Fatalf("foreground receipt restart projection drifted: record=%#v err=%v", restored, err)
 	}
 }

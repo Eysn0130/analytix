@@ -25,6 +25,63 @@ type auxiliaryCloser struct {
 	reason domaincache.ProviderTurnTerminalReasonV1
 }
 
+func TestAuxiliaryCompleteSummaryRejectsCapEmptyAndUnknownParts(t *testing.T) {
+	for _, fault := range []string{"complete", "capped", "empty", "unknown", "hard_limit"} {
+		t.Run(fault, func(t *testing.T) {
+			frozen := newLoopGeneralContextV2(t, "thread", "aux_summary", t.TempDir())
+			closer := &auxiliaryCloser{}
+			calls := 0
+			provider := auxiliaryProviderFunc(func(ctx context.Context, request domainmodel.Request) (domainmodel.Result, error) {
+				calls++
+				if err := request.OnPipelineStage(domainmodel.PipelineStage{Stage: "pre_send"}); err != nil {
+					return domainmodel.Result{}, err
+				}
+				if err := request.OnPipelineStage(domainmodel.PipelineStage{Stage: "post_send"}); err != nil {
+					return domainmodel.Result{}, err
+				}
+				chunk := domainmodel.Chunk{Kind: domainmodel.ChunkText, Text: "Complete task summary."}
+				if fault == "empty" {
+					chunk.Text = ""
+				}
+				if fault == "unknown" {
+					chunk.Kind = domainmodel.ChunkKind("image")
+				}
+				if err := request.OnChunk(chunk); err != nil {
+					return domainmodel.Result{}, err
+				}
+				result := domainmodel.Result{Chunks: []domainmodel.Chunk{chunk}, StreamCompleted: true}
+				if fault == "capped" {
+					result.Usage.FinishReason = "length"
+				}
+				return result, nil
+			})
+			window := 128_000
+			if fault == "hard_limit" {
+				window = 100
+			}
+			text, err := RunAuxiliaryProvider(context.Background(), AuxiliaryProviderInput{SecurityContext: frozen, RequireCompleteText: true, ContextWindowTokens: window,
+				Request: domainmodel.Request{Messages: []domainmodel.Message{{Role: "user", Content: strings.Repeat("selected history ", 100)}}}}, AuxiliaryProviderDependencies{
+				Provider: provider, Closer: closer, Stage: func(domainmodel.PipelineStage) error { return nil },
+				Acquire: func(ctx context.Context, _ int) (context.Context, func(), error) { return ctx, func() {}, nil },
+				Prepare: func(_ context.Context, _ int, request domainmodel.Request) (domainmodel.Request, ProviderAttemptSettlement, error) {
+					return request, func(context.Context, string, string) error { return nil }, nil
+				},
+				ValidateCurrent: func(context.Context) error { return nil },
+			})
+			if fault == "complete" {
+				if err != nil || text != "Complete task summary." {
+					t.Fatalf("complete summary rejected: %q %v", text, err)
+				}
+			} else if err == nil || text != "" {
+				t.Fatalf("incomplete summary accepted: %q %v", text, err)
+			}
+			if closer.calls != 1 || fault == "hard_limit" && calls != 0 {
+				t.Fatalf("closure or hard-limit boundary changed: closes=%d calls=%d", closer.calls, calls)
+			}
+		})
+	}
+}
+
 func (c *auxiliaryCloser) CloseTurn(ctx context.Context, _ domainsecurity.TurnSecurityContext, reason domaincache.ProviderTurnTerminalReasonV1, _ time.Time) (domaincache.ProviderTurnClosureV1, error) {
 	c.calls++
 	c.reason = reason

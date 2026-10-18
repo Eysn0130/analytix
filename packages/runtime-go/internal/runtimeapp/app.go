@@ -34,10 +34,12 @@ import (
 	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
 	piiauthorizationstore "analytix.local/runtime-go/internal/adapters/outbound/piiauthorization"
 	processadapter "analytix.local/runtime-go/internal/adapters/outbound/process"
+	processhistorystore "analytix.local/runtime-go/internal/adapters/outbound/processdisplay"
 	providerclient "analytix.local/runtime-go/internal/adapters/outbound/provider/client"
 	reportpublicationstore "analytix.local/runtime-go/internal/adapters/outbound/reportpublication"
 	secretstore "analytix.local/runtime-go/internal/adapters/outbound/secretstore"
 	threadriskpolicystore "analytix.local/runtime-go/internal/adapters/outbound/threadriskpolicy"
+	toolresultsnapshotstore "analytix.local/runtime-go/internal/adapters/outbound/toolresultsnapshot"
 	turnterminalstore "analytix.local/runtime-go/internal/adapters/outbound/turnterminalstore"
 	attachmentauthorityapp "analytix.local/runtime-go/internal/app/attachmentauthority"
 	attachmentuseapp "analytix.local/runtime-go/internal/app/attachmentuse"
@@ -65,6 +67,7 @@ import (
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
+	toolresultsnapshotapp "analytix.local/runtime-go/internal/app/toolresultsnapshot"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	turnterminalapp "analytix.local/runtime-go/internal/app/turnterminal"
@@ -247,10 +250,18 @@ func newRuntimeServerHandlerWithRootsModeE(
 	originalCreates *runtimeOriginalCreateStartupV1,
 	inheritedChildFloors ...domainpendingwork.ChildIdentityFloorsV1,
 ) (_ http.Handler, resultErr error) {
+	startupPhase := "configuration"
+	diagnosticPhase := startupPhase
+	joinStartupCleanup := errors.Join
+	if planStartup || simulation {
+		joinStartupCleanup = joinRuntimeStartupCleanupV1
+		defer func() {
+			resultErr = wrapRuntimeStartupPreparationV1(diagnosticPhase, resultErr)
+		}()
+	}
 	if err := validateDevelopmentProviderAuthority(config); err != nil {
 		return nil, err
 	}
-	startupPhase := "configuration"
 	if simulation {
 		defer func() {
 			if resultErr != nil {
@@ -321,7 +332,6 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, err
 		}
 	}
-	uncontainedMCPConfigured := len(mcpSpecs) > 0
 	mcpSpecs = mcp.BindHostScheduleMCPServerV1(mcpSpecs, config.HostScheduleMCPServer)
 	mcpSearch := loadRuntimeMCPSearchSettings(document, hasRuntimeConfig)
 	skillCatalog, err := loadRuntimeSkillCatalog(config, document, hasRuntimeConfig)
@@ -329,6 +339,10 @@ func newRuntimeServerHandlerWithRootsModeE(
 		return nil, err
 	}
 	subagentConfig, err := loadRuntimeSubagentConfig(document, hasRuntimeConfig)
+	if err != nil {
+		return nil, err
+	}
+	userInputConfig, hasUserInputConfig, err := loadRuntimeUserInputConfig(document, hasRuntimeConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +362,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if configuredTimeout, configured := loadRuntimeStreamIdleTimeout(document, hasRuntimeConfig); configured {
 		streamIdleTimeout = configuredTimeout
 	}
-	configurationDigest, err := runtimeStartupConfigurationDigest(
+	configurationDigest, err := runtimeUserInputConfigurationDigest(userInputConfig, hasUserInputConfig,
 		runtimeStartupSecurityConfiguration(config), mcpSpecs, document, hasRuntimeConfig, mcpSearch, skillCatalog, subagentConfig, sandboxSettings,
 		webConfig, visionBridgeConfig, stepLimits, streamIdleTimeout,
 	)
@@ -362,6 +376,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, err
 	}
+	diagnosticPhase = "child-inventory"
 	childIdentityStartup, err := prepareRuntimeChildIdentityStartupV1(ctx, persistenceRoots, rootAuthority, privateCASAccessAuthority, optionalInstallation, originalCreates)
 	if err != nil {
 		return nil, err
@@ -376,18 +391,22 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, err
 	}
+	diagnosticPhase = "persistence-authority-advance"
 	authorityAdvanceStartup, err := prepareRuntimeAuthorityAdvanceStartupV2(ctx, persistenceRoots, rootAuthority, privateCASAccessAuthority, optionalInstallation)
 	if err != nil {
 		return nil, err
 	}
+	diagnosticPhase = "persistence-report-preservation"
 	reportRestartPreservation, err := prepareRuntimeReportPreservationBeforeRecoveryV1(ctx, childIdentityStartup, privateCASAccessAuthority, optionalInstallation, authorityAdvanceStartup)
 	if err != nil {
 		return nil, err
 	}
+	diagnosticPhase = "persistence-final-history-bind"
 	ctx, reportRestartPreservation.finalHistory, err = bindRuntimeOriginalFinalHistoryV1(ctx, childIdentityStartup, reportRestartPreservation)
 	if err != nil {
 		return nil, err
 	}
+	diagnosticPhase = "persistence-retained-original"
 	retainedOriginalCreates, err := originalCreates.retainedV1(ctx, reportRestartPreservation)
 	if err != nil {
 		return nil, err
@@ -402,6 +421,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		planOutput.finalHistoryQualification, _ = ctx.Value(runtimeFinalHistoryQualificationKeyV1{}).(*runtimeFinalHistoryQualificationV1)
 	}
 	if planStartup {
+		diagnosticPhase = "persistence-journal-load"
 		_, recoveryJournalErr := privateCASRecoveryJournal.Load(ctx)
 		resumeSignedPrivateCASRecovery := recoveryJournalErr == nil
 		if recoveryJournalErr != nil && !errors.Is(recoveryJournalErr, privatecasport.ErrJournalAbsent) {
@@ -412,32 +432,39 @@ func newRuntimeServerHandlerWithRootsModeE(
 		// applying an authenticated residue. Prove every non-private managed
 		// surface first; the signed recovery transaction separately validates
 		// the exact private authority topology and residue inventory.
+		diagnosticPhase = "persistence-child-revalidate"
 		if err := childIdentityStartup.revalidate(ctx); err != nil {
 			return nil, err
 		}
+		diagnosticPhase = "persistence-authority-revalidate"
 		if err := authorityAdvanceStartup.revalidate(ctx); err != nil {
 			return nil, err
 		}
 		if resumeSignedPrivateCASRecovery {
+			diagnosticPhase = "persistence-signed-recovery-validation"
 			if err := persistencefs.ValidateNoSemanticStartupStateForPrivateCASRecoveryV1(
 				ctx, persistenceRoots, journalAuthority,
 			); err != nil {
 				return nil, err
 			}
 		} else {
+			diagnosticPhase = "persistence-create-residues"
 			if err := recoverRuntimePrivateCASCreateResidues(ctx, config.DataDir, privateCASAccessAuthority, reportRestartPreservation); err != nil {
 				return nil, err
 			}
 			// Healthy original creation residues have completed their native
 			// cleanup. Subsequent observations retain only the selected owners.
 			childIdentityStartup.originalCreates = retainedOriginalCreates
+			diagnosticPhase = "persistence-semantic-recovery"
 			if err := semanticBuilder.RecoverAuthenticatedExisting(ctx); err != nil {
 				return nil, err
 			}
+			diagnosticPhase = "persistence-orphan-topology"
 			if err := recoverRuntimePrivateCASOrphanTopology(ctx, config.DataDir, privateCASAccessAuthority, reportRestartPreservation); err != nil {
 				return nil, err
 			}
 		}
+		diagnosticPhase = "persistence-owner-recovery"
 		if err := recoverRuntimePrivateCASOwnersWithPreservationV1(
 			ctx, config.DataDir, privateCASAccessAuthority, optionalInstallation, reportRestartPreservation, privateCASRecoveryJournal,
 		); err != nil {
@@ -447,12 +474,14 @@ func newRuntimeServerHandlerWithRootsModeE(
 		// is a distinct prebaseline phase. Its exact delta is verified before
 		// the first semantic planning session is allowed to exist.
 		snapshotReader := persistencefs.NewStartupSnapshotReaderWithOriginalCreateResiduesV1(persistenceRoots, retainedOriginalCreates.proofV1())
+		diagnosticPhase = "persistence-checkpoint-recovery"
 		checkpointRecovery, checkpointRecoveryDelta, err := recoverAuthenticatedCheckpointOperationsBeforeSemanticBaselineV1(
 			ctx, snapshotReader, config.DataDir, privateCASAccessAuthority, sandboxSettings.AllowWriteRoots, time.Now().UTC(), reportRestartPreservation.report,
 		)
 		if err != nil {
 			return nil, err
 		}
+		diagnosticPhase = "semantic-plan"
 		startupSession, err = startupapp.BeginReadOnlyStartupPlanV1(ctx, snapshotReader)
 		if err != nil {
 			return nil, err
@@ -477,7 +506,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 					return authorityErr
 				}
 				defer func() {
-					stageErr = errors.Join(stageErr, stageAccessAuthority.Close())
+					stageErr = joinStartupCleanup(stageErr, stageAccessAuthority.Close())
 				}()
 				stageOriginalCreates, err := retainedOriginalCreates.copiedV1(ctx, stageRoots, stageAccessAuthority)
 				if err != nil {
@@ -504,7 +533,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, errors.Join(err, prepared.Close())
 		}
 		if err := prepared.Close(); err != nil {
-			return nil, err
+			return nil, joinStartupCleanup(nil, err)
 		}
 		if !activateAfterPlan {
 			return nil, nil
@@ -513,6 +542,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}
 	config = applyRuntimePersistenceRoots(config, persistenceRoots)
 	startupPhase = "durable-store-open"
+	diagnosticPhase = startupPhase
 	mcpProxyURL := strings.TrimSpace(config.MCPProxyURL)
 	if mcpProxyURL == "" {
 		mcpProxyURL = strings.TrimSpace(config.ModelProxyURL)
@@ -674,7 +704,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	evidenceResourcesOwnedByHandler := false
 	defer func() {
 		if !evidenceResourcesOwnedByHandler {
-			resultErr = errors.Join(resultErr, evidenceAuthorityStoresV2.Close(), datasetSnapshotStoresV2.Close())
+			resultErr = joinStartupCleanup(resultErr, evidenceAuthorityStoresV2.Close(), datasetSnapshotStoresV2.Close())
 		}
 	}()
 	if evidenceDomainAvailable {
@@ -700,7 +730,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	caseEntityOwnedByHandler := false
 	defer func() {
 		if !caseEntityOwnedByHandler {
-			resultErr = errors.Join(resultErr, caseEntityCapability.Close())
+			resultErr = joinStartupCleanup(resultErr, caseEntityCapability.Close())
 		}
 	}()
 	threadRiskPolicyStore, err := threadriskpolicystore.NewStore(
@@ -709,6 +739,26 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, err
 	}
+	toolSnapshots, err := toolresultsnapshotstore.NewStore(ctx, filepath.Join(config.DataDir, "private", "tool-result-snapshots-v1"), privateCASAccessAuthority)
+	if err != nil {
+		return nil, err
+	}
+	toolSnapshotsOwnedByHandler := false
+	defer func() {
+		if !toolSnapshotsOwnedByHandler {
+			resultErr = joinStartupCleanup(resultErr, toolSnapshots.Close())
+		}
+	}()
+	processHistory, err := processhistorystore.NewStore(ctx, filepath.Join(config.DataDir, "private", "process-history-v1"), privateCASAccessAuthority, processhistorystore.DefaultLimitsV1())
+	if err != nil {
+		return nil, err
+	}
+	processHistoryOwnedByHandler := false
+	defer func() {
+		if !processHistoryOwnedByHandler {
+			resultErr = joinStartupCleanup(resultErr, processHistory.Close())
+		}
+	}()
 	checkpointAuthorityStore, err := checkpointauthority.NewStoreContext(ctx,
 		filepath.Join(config.DataDir, "private", "checkpoint-authority"), privateCASAccessAuthority,
 	)
@@ -717,7 +767,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}
 	sensitiveResourceOwner := &controlledPIIResourceOwnerV1{}
 	defer func() {
-		resultErr = errors.Join(resultErr, sensitiveResourceOwner.Close())
+		resultErr = joinStartupCleanup(resultErr, sensitiveResourceOwner.Close())
 	}()
 	var piiAuthorizationStore *piiauthorizationstore.Store
 	var reportPublicationStores *reportpublicationstore.Stores
@@ -1057,7 +1107,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	providerClientOwnedByHandler := false
 	defer func() {
 		if !providerClientOwnedByHandler {
-			resultErr = errors.Join(resultErr, providerClient.Close())
+			resultErr = joinStartupCleanup(resultErr, providerClient.Close())
 		}
 	}()
 	if strings.TrimSpace(config.ProviderAuditSocketPath) != "" {
@@ -1081,10 +1131,10 @@ func newRuntimeServerHandlerWithRootsModeE(
 	var hostLocalEvidenceOwnersV1 *runtimeHostLocalEvidenceOwnersV1
 	defer func() {
 		if !evidenceResourcesOwnedByHandler && sharedEvidenceDatasetSnapshotV2.registryOwner != nil {
-			resultErr = errors.Join(resultErr, sharedEvidenceDatasetSnapshotV2.registryOwner.Close())
+			resultErr = joinStartupCleanup(resultErr, sharedEvidenceDatasetSnapshotV2.registryOwner.Close())
 		}
 		if !evidenceResourcesOwnedByHandler && hostLocalEvidenceOwnersV1 != nil {
-			resultErr = errors.Join(resultErr, hostLocalEvidenceOwnersV1.Close())
+			resultErr = joinStartupCleanup(resultErr, hostLocalEvidenceOwnersV1.Close())
 		}
 	}()
 	hostSelectorPresent, hostHeadPresent, err := runtimeHostLocalProfileRootsPresentV1(config.DataDir)
@@ -1258,6 +1308,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	}
 	var legacyTypeScriptLineageWitness *jobs.FrozenLegacyTypeScriptLineageWitnessV1
 	startupPhase = "case-compaction-recovery"
+	diagnosticPhase = startupPhase
 	caseThreads.SetActiveInheritedHistoryIdentityValidatorV1(runtimeActiveHistoryIdentityValidatorV1(config.DataDir, pendingWorkPreflight, privateFinalStore, finalAuthority))
 	// Authenticate active inherited prefixes before any context/compaction repair.
 	// Original/held scopes retain their separately qualified observer.
@@ -1282,11 +1333,13 @@ func newRuntimeServerHandlerWithRootsModeE(
 		return nil, err
 	}
 	startupPhase = "case-context-repair"
+	diagnosticPhase = startupPhase
 	if err := casethreadapp.RepairCommittedContexts(caseThreads, store); err != nil {
 		return nil, err
 	}
 	if simulation {
 		startupPhase = "legacy-lineage-witness"
+		diagnosticPhase = startupPhase
 		legacyTypeScriptLineageWitness, err = newFrozenLegacyTypeScriptChildLineageWitnessV1(
 			filepath.Join(config.DataDir, "child-runs"), newLegacyTypeScriptRawThreadReaderV1(persistenceRoots.DurableDir),
 		)
@@ -1294,11 +1347,13 @@ func newRuntimeServerHandlerWithRootsModeE(
 			return nil, err
 		}
 		startupPhase = "semantic-content-migration"
+		diagnosticPhase = startupPhase
 		if err := store.ApplySemanticStartupMigrationsAfterAuthorityRepair(); err != nil {
 			return nil, err
 		}
 	}
 	startupPhase = "final-authority-reconciliation"
+	diagnosticPhase = startupPhase
 	existingAuthorityReader := runtimeRestartFinalPublicReaderV1(ctx, threadapp.NewCaseThreadRestartAuthorityReaderV1(ctx, store, caseThreads), reportRestartPreservation.report)
 	finalPublicReader = existingAuthorityReader
 	evidenceIssuer := evidenceapp.Issuer{Registry: evidenceStore, SettlementStore: settlementStore, Authority: finalAuthority}
@@ -1370,6 +1425,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		return nil, err
 	}
 	startupPhase = "case-restart-reconciliation"
+	diagnosticPhase = startupPhase
 	if err := casethreadapp.ApplyRestartInventory(caseThreads, restartInventory); err != nil {
 		return nil, err
 	}
@@ -1393,6 +1449,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		return nil, err
 	}
 	startupPhase = "evidence-final-event-reconciliation"
+	diagnosticPhase = startupPhase
 	if err := attachmentUses.ApplyRestartDispositions(ctx, attachmentRestartPlan, time.Now().UTC()); err != nil {
 		return nil, err
 	}
@@ -1424,6 +1481,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		return nil, err
 	}
 	startupPhase = "fact-final-witness-recovery"
+	diagnosticPhase = startupPhase
 	restoreRuntimeFactTerminalsV1(ctx, trustedFinals, terminalRecovery.FactCandidates, evidenceStore,
 		func(ctx context.Context, record domainevidence.PrivateAcceptedFinalRecord) error {
 			return turnsecurityapp.ValidateCurrentInsideExactDatasetCapability(turnsecurityapp.CurrentValidationInput{
@@ -1488,6 +1546,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	var jobManager *jobs.Manager
 	if simulation {
 		startupPhase = "child-run-migration"
+		diagnosticPhase = startupPhase
 		jobManager, err = jobs.NewManagerForSemanticStartupWithRestartPreservationV1(
 			ctx, filepath.Join(config.DataDir, "child-runs"), filepath.Join(authorityDataDir, "child-runs"), storedChildVerifier,
 			legacyTypeScriptLineageWitness, childPreservation, childFloors,
@@ -1499,6 +1558,10 @@ func newRuntimeServerHandlerWithRootsModeE(
 		return nil, err
 	}
 	startupPhase = "runtime-composition"
+	diagnosticPhase = startupPhase
+	if err := store.RecoverOrdinaryCompactions(ctx); err != nil {
+		return nil, err
+	}
 	continuations := continuationapp.NewService(finalAuthority, continuationStore)
 	pendingWork := pendingworkapp.NewService(finalAuthority, pendingWorkStore, store)
 	if history := reportRestartPreservation.history; history != nil && len(history.closedResults) != 0 {
@@ -1763,6 +1826,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		hostFundsNativeOwnerCurrent = nativeOwner.ValidateCurrentDataEngine
 	}
 	mcpManager = mcp.NewProductionManagerWithOptions(mcpSpecs, mcp.ProductionManagerOptions{
+		HostScheduleServer:          config.HostScheduleMCPServer,
 		CacheDir:                    filepath.Join(config.DataDir, "mcp-schema-cache"),
 		ProxyURL:                    mcpProxyURL,
 		ProtectedReadDirs:           processProtectedRoots,
@@ -1781,6 +1845,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		),
 		evidenceapp.ToolEvidenceService{Issuer: evidenceIssuer, Reader: mcpManager},
 	)
+	diagnosticPhase = "provider-authority"
 	var providerRegistryAuthority *providerRegistryAuthorityV1
 	if config.DevelopmentProviderAuthorityDir != "" {
 		providerRegistryAuthority, err = openDevelopmentProviderAuthority(ctx, config, simulation)
@@ -1803,7 +1868,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 	providerRegistryAuthorityTransferred := false
 	defer func() {
 		if !providerRegistryAuthorityTransferred {
-			resultErr = errors.Join(resultErr, providerRegistryAuthority.Close())
+			resultErr = joinStartupCleanup(resultErr, providerRegistryAuthority.Close())
 		}
 	}()
 	asyncObserver, _ := ctx.Value(asyncTurnObservationContextKeyV1{}).(func(server.AsyncTurnObservationV1))
@@ -1813,13 +1878,64 @@ func newRuntimeServerHandlerWithRootsModeE(
 	objectEditingHTTP := newObjectEditingHandler(config, identityAuthority, sandboxSettings.ProtectedReadDirs)
 	objectEditingHandler, _ := objectEditingHTTP.(httpapi.ObjectEditingHandler)
 	workspaceRead := &workspacereadapp.Service{Files: filestore.NewWorkspaceReadFiles(sandboxSettings.ProtectedReadDirs)}
+	validateToolSnapshotCurrentOrigin := func(readCtx context.Context, node map[string]any, original domainsecurity.TurnSecurityContext) (domainsecurity.TurnSecurityContext, error) {
+		workspace, _ := node["workspace"].(string)
+		current, err := toolresultsnapshotapp.CurrentOwnContextV1(node, original)
+		if err != nil {
+			return domainsecurity.TurnSecurityContext{}, err
+		}
+		if err := turnsecurityapp.ValidateCurrentOrdinaryEffect(turnsecurityapp.CurrentValidationInput{
+			OperationContext: readCtx, Identity: identityAuthority, Observer: filestore.CaseBindingReader{}, RiskAuthority: threadRiskAuthority,
+			SnapshotAuthority: datasetSnapshotAuthority, SnapshotAuthorityV2: datasetSnapshotAuthorityV2, Context: current, Workspace: workspace,
+		}); err != nil {
+			return domainsecurity.TurnSecurityContext{}, err
+		}
+		if caseThreads.IsCaseThread(current.ThreadID) {
+			exact, err := currentCaseAuthority.ValidateCurrent(current.ThreadID, node)
+			if err != nil || exact != current {
+				return domainsecurity.TurnSecurityContext{}, errors.New("tool result current origin is unavailable")
+			}
+		}
+		inherited, err := threadapp.ValidateActiveInheritedHistoryV1(readCtx, node, caseThreads, store)
+		if err != nil || inherited[original.TurnID] {
+			return domainsecurity.TurnSecurityContext{}, errors.New("tool result current origin is unavailable")
+		}
+		return current, nil
+	}
+	diagnosticPhase = "runtime-components"
 	handler, err := server.NewRuntimeServerHandlerFromComponents(config, server.RuntimeServerComponents{
+		UserInputConfig:       userInputConfig,
+		ToolResultSnapshots:   toolSnapshots,
+		SettledProcessHistory: processHistory,
+		ToolResultSnapshotHistoryValidate: func(readCtx context.Context, thread map[string]any, frozen domainsecurity.TurnSecurityContext) error {
+			if _, err := validateToolSnapshotCurrentOrigin(readCtx, thread, frozen); err != nil {
+				return err
+			}
+			return toolresultsnapshotapp.ValidateHistoricalScopeV1(readCtx, thread, frozen, toolresultsnapshotapp.HistoricalScopeDependenciesV1{
+				Primary:               store,
+				ValidateCurrentOrigin: validateToolSnapshotCurrentOrigin,
+				ObserveCaseContexts: func(ctx context.Context) (*casethreadapp.VerifiedCommittedContextInventoryV1, error) {
+					records, err := caseThreadStore.List(ctx)
+					if err != nil {
+						return nil, err
+					}
+					return casethreadapp.VerifyCommittedContextInventoryV1(ctx, records, finalAuthority)
+				},
+				ObserveChildren: func(ctx context.Context) (pendingworkapp.TrustedInventoryV1, []domainjob.Record, bool, error) {
+					inventory, err := pendingWorkPreflight.TrustedInventoryV1(ctx)
+					if err != nil {
+						return pendingworkapp.TrustedInventoryV1{}, nil, false, err
+					}
+					runs, err := jobs.ReadChildRunIdentitySnapshotV1(ctx, filepath.Join(config.DataDir, "child-runs"))
+					return inventory, runs.Records, runs.HasLegacyTypeScript, err
+				},
+			})
+		},
 		DocumentCodec:       newDocumentCodec(config),
 		ManagedEditingFiles: managededitingfiles.New(),
 		ObjectEditing:       objectEditingHandler.Service,
 		WorkspaceRead:       workspaceRead,
 		OfficeAdapters:      officeAdapters, OfficePackageHost: officePackageHost,
-		UncontainedMCPConfigured: uncontainedMCPConfigured,
 		AsyncTurnObserverV1:      asyncObserver,
 		AsyncTurnPhaseObserverV1: phaseObserver,
 
@@ -1844,6 +1960,7 @@ func newRuntimeServerHandlerWithRootsModeE(
 		PublicProjector:   publicProjector,
 		InfoDataDir:       runtimeInfoDataDir,
 		Provider:          providerClient,
+		ProviderUsage:     providerTelemetry,
 		ProviderConfig:    providerConfig,
 		ProviderExecution: newProviderRegistryExecutionResolverWithPricingV1(providerRegistryAuthority.Manager(), config.ModelProvidersJSON),
 		ProviderRegistry:  providerRegistryAuthority.Service(),
@@ -1895,6 +2012,21 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}
+	processProvider, ok := handler.(interface{ ProcessLocalDisplayV1() http.Handler })
+	if !ok {
+		return nil, errors.Join(errors.New("protected process display composition unavailable"), nativeAuthority.Close())
+	}
+	processHTTP := processProvider.ProcessLocalDisplayV1()
+	processLifecycle, ok := processHTTP.(interface{ Shutdown(context.Context) error })
+	if !ok || processHTTP == nil {
+		return nil, errors.Join(errors.New("protected process display lifecycle unavailable"), nativeAuthority.Close())
+	}
+	processOwnedByHandler := false
+	defer func() {
+		if !processOwnedByHandler {
+			resultErr = joinStartupCleanup(resultErr, processLifecycle.Shutdown(context.Background()))
+		}
+	}()
 	maintenanceOwner := handler
 	artifactResolver, ok := handler.(interface {
 		ResolveGeneratedArtifact(context.Context, string, string) (generationapp.Resolved, error)
@@ -1922,14 +2054,32 @@ func newRuntimeServerHandlerWithRootsModeE(
 	if !simulation && caseEntityCapability.store != nil {
 		ownedResources = append(ownedResources, &caseEntityCapability)
 	}
+	toolSnapshotHTTP, ok := handler.(interface{ ToolResultLocalDisplayV1() http.Handler })
+	if !ok {
+		return nil, errors.New("protected tool snapshot composition unavailable")
+	}
+	userInputDisplayHTTP, ok := handler.(interface{ UserInputLocalDisplayV1() http.Handler })
+	if !ok {
+		return nil, errors.New("protected user input display composition unavailable")
+	}
+
+	scheduleHTTP, ok := handler.(interface{ ScheduleAdmissionV1() http.Handler })
+	if !ok {
+		return nil, errors.New("private schedule admission composition unavailable")
+	}
+
 	handler, err = bindRuntimeOwnedResourcesV1(handler, ownedResources...)
 	if err != nil {
 		return nil, errors.Join(err, nativeAuthority.Close())
 	}
 	localDisplayHandler := httpapi.LocalDisplayMuxV1{
-		RuntimeToken: config.RuntimeToken,
-		Insecure:     config.Insecure,
-		Next:         handler,
+		ScheduleAdmissions: scheduleHTTP.ScheduleAdmissionV1(),
+		ToolResults:        toolSnapshotHTTP.ToolResultLocalDisplayV1(),
+		UserInputs:         userInputDisplayHTTP.UserInputLocalDisplayV1(),
+		Processes:          processHTTP,
+		RuntimeToken:       config.RuntimeToken,
+		Insecure:           config.Insecure,
+		Next:               handler,
 		LocalDisplay: httpapi.LocalDisplayHandlerV1{
 			GeneratedArtifacts:     httpapi.GeneratedArtifactHandler{Resolve: artifactResolver.ResolveGeneratedArtifact},
 			ObjectEditing:          objectEditingHTTP,
@@ -1995,9 +2145,13 @@ func newRuntimeServerHandlerWithRootsModeE(
 		evidenceResourcesOwnedByHandler = true
 	}
 	// Semantic-stage handlers are discarded after planning, so their Registry
-	// resources close through the defer above. Only a live handler owns them.
+	// resources and process display close through the defers above. Only a live
+	// handler owns them.
 	providerRegistryAuthorityTransferred = !simulation
 	providerClientOwnedByHandler = !simulation
+	toolSnapshotsOwnedByHandler = !simulation
+	processHistoryOwnedByHandler = !simulation
+	processOwnedByHandler = !simulation
 	return boundHandler, nil
 }
 

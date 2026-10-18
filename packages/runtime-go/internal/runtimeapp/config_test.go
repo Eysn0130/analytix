@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"time"
 
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
+	providerclient "analytix.local/runtime-go/internal/adapters/outbound/provider/client"
+	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 )
 
 func TestControlledArtifactHostV2ConfigurationIsTLSBoundAndComplete(t *testing.T) {
@@ -230,8 +233,8 @@ func TestRuntimeAppLoadsSettingsFromSingleConfigDocument(t *testing.T) {
 
 func TestRuntimeConfigurationConsumersUseOneImmutableSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	oldBody := `{"servers":{"old-server":{"command":"old-command","trustScope":"user"}},"runtime":{"streamIdleTimeoutMs":1000}}`
-	newBody := `{"servers":{"new-server":{"command":"new-command","trustScope":"user"}},"runtime":{"streamIdleTimeoutMs":2000}}`
+	oldBody := `{"servers":{"old-server":{"command":"old-command","trustScope":"user"}},"runtime":{"streamIdleTimeoutMs":1000,"userInput":{"policy":"timed","defaultTimeoutSeconds":7}}}`
+	newBody := `{"servers":{"new-server":{"command":"new-command","trustScope":"user"}},"runtime":{"streamIdleTimeoutMs":2000,"userInput":{"policy":"legacy","defaultTimeoutSeconds":2}}}`
 	if err := os.WriteFile(path, []byte(oldBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -254,6 +257,10 @@ func TestRuntimeConfigurationConsumersUseOneImmutableSnapshot(t *testing.T) {
 	timeout, configured := loadRuntimeStreamIdleTimeout(document, ok)
 	if !configured || timeout != time.Second {
 		t.Fatalf("document consumer observed a different generation: timeout=%s configured=%v", timeout, configured)
+	}
+	userInput, present, err := loadRuntimeUserInputConfig(document, ok)
+	if err != nil || !present || userInput.Mode != "timed" || userInput.TimeoutSeconds == nil || *userInput.TimeoutSeconds != 7 {
+		t.Fatalf("user input consumer observed a different generation: present=%v config=%#v err=%v", present, userInput, err)
 	}
 }
 
@@ -306,5 +313,145 @@ func TestRuntimeAppNormalizeConfigDefaultsToSafeInteractivePolicy(t *testing.T) 
 	}
 	if config.SandboxMode != "workspace-write" {
 		t.Fatalf("sandbox mode = %q, want workspace-write", config.SandboxMode)
+	}
+}
+
+func TestRuntimeUserInputConfiguration(t *testing.T) {
+	cases := []struct {
+		name, document, policy string
+		seconds                int
+		present, invalid       bool
+	}{
+		{name: "absent document", policy: "legacy", seconds: 120},
+		{name: "empty document", document: `{}`, policy: "legacy", seconds: 120},
+		{name: "empty runtime", document: `{"runtime":{}}`, policy: "legacy", seconds: 120},
+		{name: "MCP only", document: `{"servers":{}}`, policy: "legacy", seconds: 120},
+		{name: "legacy", document: `{"runtime":{"userInput":{"policy":"legacy"}}}`, policy: "legacy", seconds: 120, present: true},
+		{name: "legacy timeout", document: `{"runtime":{"userInput":{"policy":"legacy","defaultTimeoutSeconds":7}}}`, policy: "legacy", seconds: 7, present: true},
+		{name: "timed default", document: `{"runtime":{"userInput":{"policy":"timed"}}}`, policy: "timed", seconds: 120, present: true},
+		{name: "timed null", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":null}}}`, policy: "timed", seconds: 120, present: true},
+		{name: "timed infinite", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":-1}}}`, policy: "timed", seconds: -1, present: true},
+		{name: "timed minimum", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":1}}}`, policy: "timed", seconds: 1, present: true},
+		{name: "timed maximum", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":2147483}}}`, policy: "timed", seconds: 2147483, present: true},
+		{name: "null leaf", document: `{"runtime":{"userInput":null}}`, present: true, invalid: true},
+		{name: "array leaf", document: `{"runtime":{"userInput":[]}}`, present: true, invalid: true},
+		{name: "string leaf", document: `{"runtime":{"userInput":"timed"}}`, present: true, invalid: true},
+		{name: "boolean leaf", document: `{"runtime":{"userInput":true}}`, present: true, invalid: true},
+		{name: "missing policy", document: `{"runtime":{"userInput":{}}}`, present: true, invalid: true},
+		{name: "timeout alone", document: `{"runtime":{"userInput":{"defaultTimeoutSeconds":7}}}`, present: true, invalid: true},
+		{name: "null policy", document: `{"runtime":{"userInput":{"policy":null}}}`, present: true, invalid: true},
+		{name: "boolean policy", document: `{"runtime":{"userInput":{"policy":true}}}`, present: true, invalid: true},
+		{name: "unknown policy", document: `{"runtime":{"userInput":{"policy":"auto"}}}`, present: true, invalid: true},
+		{name: "empty policy", document: `{"runtime":{"userInput":{"policy":""}}}`, present: true, invalid: true},
+		{name: "uppercase policy", document: `{"runtime":{"userInput":{"policy":"Timed"}}}`, present: true, invalid: true},
+		{name: "padded policy", document: `{"runtime":{"userInput":{"policy":"timed "}}}`, present: true, invalid: true},
+		{name: "mode alias", document: `{"runtime":{"userInput":{"mode":"timed"}}}`, present: true, invalid: true},
+		{name: "timeout alias", document: `{"runtime":{"userInput":{"policy":"timed","timeoutSeconds":7}}}`, present: true, invalid: true},
+		{name: "unknown field", document: `{"runtime":{"userInput":{"policy":"timed","enabled":true}}}`, present: true, invalid: true},
+		{name: "zero timeout", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":0}}}`, present: true, invalid: true},
+		{name: "negative timeout", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":-2}}}`, present: true, invalid: true},
+		{name: "above maximum", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":2147484}}}`, present: true, invalid: true},
+		{name: "fractional timeout", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":1.5}}}`, present: true, invalid: true},
+		{name: "string timeout", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":"7"}}}`, present: true, invalid: true},
+		{name: "boolean timeout", document: `{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":true}}}`, present: true, invalid: true},
+		{name: "invalid legacy timeout", document: `{"runtime":{"userInput":{"policy":"legacy","defaultTimeoutSeconds":0}}}`, present: true, invalid: true},
+	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			snapshot, err := loadRuntimeConfigurationSnapshot(Config{MCPConfigJSON: item.document})
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, ok, err := loadRuntimeConfigDocumentFromSnapshot(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config, present, err := loadRuntimeUserInputConfig(document, ok)
+			if present != item.present {
+				t.Fatalf("leaf presence = %v, want %v", present, item.present)
+			}
+			if item.invalid {
+				if err == nil || !strings.HasPrefix(err.Error(), "runtime.userInput") {
+					t.Fatalf("invalid leaf did not fail explicitly: %v", err)
+				}
+				return
+			}
+			if err != nil || config.Mode != item.policy || config.TimeoutSeconds == nil || *config.TimeoutSeconds != item.seconds {
+				t.Fatalf("config = %#v, error = %v; want %s/%d", config, err, item.policy, item.seconds)
+			}
+			wait, err := toolcatalogapp.UserInputTimedWait(config, json.RawMessage(`{"prompt":"synthetic"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.Mode == "legacy" && wait != nil {
+				t.Fatal("legacy configuration enabled a timer")
+			}
+			if config.Mode == "timed" && (wait == nil || wait.TimeoutSeconds != item.seconds) {
+				t.Fatal("timed configuration did not reach the wait policy")
+			}
+			after, err := json.Marshal(document)
+			if err != nil || !bytes.Equal(original, after) {
+				t.Fatal("normalization mutated the immutable document")
+			}
+		})
+	}
+}
+
+func TestRuntimeUserInputConfigurationDigest(t *testing.T) {
+	for _, body := range []string{"", `{}`, `{"servers":{}}`, `{"runtime":{}}`, `{"runtime":{"userInput":{"policy":"legacy"}}}`, `{"runtime":{"userInput":{"policy":"timed"}}}`} {
+		t.Run(body, func(t *testing.T) {
+			config := Config{MCPConfigJSON: body, DataDir: t.TempDir()}
+			_, specs, document, ok, err := loadRuntimeConfiguration(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			skills, err := loadRuntimeSkillCatalog(config, document, ok)
+			if err != nil {
+				t.Fatal(err)
+			}
+			subagents, err := loadRuntimeSubagentConfig(document, ok)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Preserve the pre-opt-in twelve input positions, including a present
+			// runtime/MCP document that has no userInput leaf.
+			legacyValues := []any{
+				runtimeStartupSecurityConfiguration(config), specs, document, ok,
+				loadRuntimeMCPSearchSettings(document, ok), skills, subagents,
+				loadRuntimeSandboxSettings(config, document, ok), loadRuntimeWebConfig(document, ok),
+				loadRuntimeVisionBridgeConfig(document, ok), loadRuntimeStepLimitConfig(document, ok), providerclient.DefaultStreamIdleTimeout,
+			}
+			legacyDigest, err := runtimeStartupConfigurationDigest(legacyValues...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			userInput, present, err := loadRuntimeUserInputConfig(document, ok)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, err := runtimeUserInputConfigurationDigest(userInput, present, legacyValues...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !present {
+				if actual != legacyDigest {
+					t.Fatal("absent leaf changed the legacy twelve-input digest")
+				}
+				return
+			}
+			if actual == legacyDigest {
+				t.Fatal("explicit policy was not bound into the configuration digest")
+			}
+			changed := 7
+			userInput.TimeoutSeconds = &changed
+			changedDigest, err := runtimeUserInputConfigurationDigest(userInput, true, legacyValues...)
+			if err != nil || changedDigest == actual {
+				t.Fatal("normalized timeout is not bound into the configuration digest")
+			}
+		})
 	}
 }

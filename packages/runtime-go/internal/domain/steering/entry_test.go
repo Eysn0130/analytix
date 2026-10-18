@@ -354,3 +354,68 @@ func sealPendingEntryForTest(
 	}
 	return sealed
 }
+
+func lateQuestionPendingForDiscardTest(t *testing.T, public ed25519.PublicKey, private ed25519.PrivateKey, turnID, clientID string) map[string]any {
+	t.Helper()
+	source := "input_" + strings.Repeat("a", 64)
+	identity := UserInputReplyIdentityV1{CallID: "call_host_" + strings.Repeat("b", 64), ToolName: "request_user_input", Questions: []UserInputReplyQuestionIdentityV1{{ID: source + "_1", OptionIDs: []string{}, SelectedOptionIDs: []string{}}}}
+	pending, err := BindPendingEntryV1(map[string]any{
+		"id": EntryIDV1(turnID, clientID), "clientUserMessageId": clientID,
+		"text":       `{"kind":"question_reply_content","questions":[{"question":"Synthetic question?","header":"","options":[],"multiSelect":false}],"answers":[{"selected":[],"custom":"synthetic answer"}]}`,
+		"admittedAt": "2026-07-18T01:02:03Z", "delivery": "steer", "userInputId": source,
+		"userInputCaptureReceiptId": strings.Repeat("c", 64), "userInputReplyIdentity": UserInputReplyIdentityMapV1(identity),
+	}, testContextDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealPendingEntryForTest(t, pending, public, private)
+}
+
+func sealQuestionDiscardForTest(t *testing.T, raw map[string]any, digest string, public ed25519.PublicKey, private ed25519.PrivateKey) map[string]any {
+	t.Helper()
+	body, err := CancelledUserInputEntrySigningBytesV1(raw, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := SealCancelledUserInputEntryAuthorityV1(raw, digest, sha256HexForTest(public), public, ed25519.Sign(private, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealed
+}
+
+func TestQuestionDiscardAuthorityIsClosedAndPurposeSeparated(t *testing.T) {
+	public, private, _, _ := steeringPrefixAuthorityForTest(t)
+	pending := lateQuestionPendingForDiscardTest(t, public, private, "turn-prefix", "client-discard")
+	candidate := cloneEntryMap(pending)
+	candidate["status"], candidate["cancelReason"], candidate["cancelledAt"] = "cancelled", UserInputDiscardReasonV1, "2026-07-18T01:02:04Z"
+	cancelled := sealQuestionDiscardForTest(t, candidate, testContextDigest, public, private)
+	admission, err := AdmissionAuthorityMaterialV1(cancelled, testContextDigest)
+	if err != nil || !bytes.Equal(admission.Signature, ed25519.Sign(private, admission.SigningBytes)) {
+		t.Fatal("discard lost admission authority")
+	}
+	material, err := EntryAuthorityMaterialV1(cancelled, testContextDigest)
+	if err != nil || !ed25519.Verify(public, material.SigningBytes, material.Signature) || bytes.Equal(material.SigningBytes, admission.SigningBytes) {
+		t.Fatal("discard did not use separate authority")
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"timestamp":       func(v map[string]any) { v["cancelledAt"] = "2026-07-18T01:02:05Z" },
+		"reason":          func(v map[string]any) { v["cancelReason"] = "aborted" },
+		"source":          func(v map[string]any) { v["userInputId"] = "input_" + strings.Repeat("d", 64) },
+		"capture":         func(v map[string]any) { v["userInputCaptureReceiptId"] = strings.Repeat("d", 64) },
+		"context":         func(v map[string]any) { v["contextDigest"] = strings.Repeat("d", 64) },
+		"uuid":            func(v map[string]any) { v["clientUserMessageId"] = "other" },
+		"admission proof": func(v map[string]any) { delete(v, "authoritySignature") },
+		"cancel proof":    func(v map[string]any) { delete(v, "cancellationAuthoritySignature") },
+		"unknown":         func(v map[string]any) { v["approval"] = true },
+		"promotion proof": func(v map[string]any) { v["promotionAuthoritySignature"] = v["cancellationAuthoritySignature"] },
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := cloneEntryMap(cancelled)
+			mutate(v)
+			if ValidateCancelledUserInputEntryForContextV1(v, testContextDigest) == nil {
+				t.Fatal("tamper retained discard authority")
+			}
+		})
+	}
+}

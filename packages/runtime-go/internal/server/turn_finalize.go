@@ -44,7 +44,42 @@ func (h *runtimeServerHandler) runtimeCacheDiagnostics(threadID string, security
 	for key, value := range inputDiagnostics {
 		diagnostics[key] = value
 	}
-	for key, value := range appusage.ProviderAttemptDiagnostics(result.CacheObservations) {
+	attemptDiagnostics := appusage.ProviderAttemptDiagnostics(result.CacheObservations)
+	if h.providerUsage != nil {
+		replay, scopeErr := h.store.LoadEventsSince(threadID, 0)
+		var contexts []domainsecurity.TurnSecurityContext
+		if scopeErr == nil && len(replay.Diagnostics) != 0 {
+			scopeErr = errors.New("conversation usage event inventory is unavailable")
+		}
+		if scopeErr == nil {
+			thread, scopeErr = h.conversationUsageHistoryV1(thread, replay.Events)
+		}
+		if scopeErr == nil {
+			contexts, scopeErr = conversationUsageContextsV1(thread, replay.Events)
+		}
+		if scopeErr == nil {
+			found := false
+			selected := []domainsecurity.TurnSecurityContext{}
+			for _, frozen := range contexts {
+				if frozen.TurnID == securityContext.TurnID {
+					selected = append(selected, frozen)
+					found = found || frozen.ContextDigest == securityContext.ContextDigest
+				}
+			}
+			if !found {
+				selected = append(selected, securityContext)
+			}
+			inventories, inventoryErr := h.providerUsage.ObserveTurnInventoriesV1(context.Background(), selected)
+			if inventoryErr == nil {
+				attemptDiagnostics = appusage.ProviderInventoryDiagnostics(inventories)
+			} else {
+				attemptDiagnostics = map[string]any{"providerAttemptTelemetrySchema": appusage.ProviderAttemptTelemetrySchemaV1, "providerAttemptTelemetryValid": false, "providerAttemptTelemetryError": "invalid_or_incomplete", "providerAttemptInventoryComplete": false}
+			}
+		} else {
+			attemptDiagnostics = map[string]any{"providerAttemptTelemetrySchema": appusage.ProviderAttemptTelemetrySchemaV1, "providerAttemptTelemetryValid": false, "providerAttemptTelemetryError": "invalid_or_incomplete", "providerAttemptInventoryComplete": false}
+		}
+	}
+	for key, value := range attemptDiagnostics {
 		diagnostics[key] = value
 	}
 	if observed {

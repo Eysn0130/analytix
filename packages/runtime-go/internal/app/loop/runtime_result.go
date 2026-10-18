@@ -10,6 +10,7 @@ import (
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
+	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 )
 
 const RuntimeCandidateInputClassOrdinaryOnly = "ordinary_only"
@@ -21,6 +22,8 @@ type RuntimeAgentLoopResult struct {
 	AssistantText                string
 	LastResult                   domainmodel.Result
 	TerminalRecoveryKind         RuntimeTerminalRecoveryKind
+	// OutputCapLogicalSequence is a host fact scoped by this turn/run. It is never a permission.
+	OutputCapLogicalSequence uint64 `json:"-"`
 	// CaseSourceUnavailable is host-owned sticky state. It records that a
 	// protected case-data step was unavailable even when independent ordinary
 	// work was allowed to continue. The final evidence gate consumes it; it is
@@ -166,4 +169,19 @@ func NormalizeRuntimeFailure(cause error) NormalizedRuntimeFailure {
 	normalized.Severity = normalized.Public.Severity()
 	normalized.Details = contracts.CloneMap(normalized.Public.Details())
 	return normalized
+}
+
+func providerResultOutputCapped(result domainmodel.Result) bool {
+	return result.StreamCompleted && domainmodel.NormalizeFinishReason(result.Usage.FinishReason) == "length"
+}
+
+// RuntimeCompletionEndReason is consumed only after a successful loop return.
+// Safety/source/step-limit boundaries keep their more specific terminal outcome.
+func RuntimeCompletionEndReason(result RuntimeAgentLoopResult) *domainterminal.EndReason {
+	if result.OutputCapLogicalSequence == 0 || result.Paused || result.CaseSourceUnavailable ||
+		result.TerminalRecoveryKind == RuntimeTerminalRecoveryStepLimit ||
+		(result.OrdinaryResult != nil && result.OrdinaryResult.CandidateOrigin == domainordinaryresult.ResultSlotOriginHostFixedV1) {
+		return nil
+	}
+	return &domainterminal.EndReason{Kind: domainterminal.EndReasonMaxTokens}
 }

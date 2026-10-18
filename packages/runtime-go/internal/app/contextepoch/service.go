@@ -258,6 +258,7 @@ func BuildProviderContext(ctx context.Context, state domaincontextepoch.State, r
 		selectedFragments = append(selectedFragments, selected{
 			id: source.SourceID,
 			fragment: domaincontextepoch.ProviderFragment{
+				SourceID: source.SourceID, Kind: source.Kind,
 				Boundary: source.PromptBoundary,
 				Content:  content.Text,
 			},

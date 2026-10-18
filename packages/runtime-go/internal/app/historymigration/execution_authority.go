@@ -2,6 +2,7 @@ package historymigration
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 
 	executiongrantapp "analytix.local/runtime-go/internal/app/executiongrant"
@@ -51,8 +52,11 @@ func StripUntrustedExecutionAuthority(thread map[string]any) (map[string]any, bo
 		if explicitOwnedTurnSecurityContextV2(turn, threadID) {
 			return nil, false, errors.New("current execution authority is invalid")
 		}
-		turns[index] = stripTurnExecutionAuthority(turn, threadID, stableMigrationTime(projected, turn))
-		changed = true
+		stripped := stripTurnExecutionAuthority(turn, threadID, stableMigrationTime(projected, turn))
+		if !reflect.DeepEqual(turn, stripped) {
+			turns[index] = stripped
+			changed = true
+		}
 	}
 	projected["turns"] = turns
 	if derived && !rootContextBelongsToThread(projected, threadID) {
@@ -103,7 +107,13 @@ func ProjectAuthorityFreeSidecarItem(threadID string, item map[string]any, at st
 	}
 	delete(projected, "acceptedFinal")
 	delete(projected, "acceptedFinalView")
+	// CloneItemForThread retains only a canonical historical question identity.
+	// Preserve that identity while stripping every continuation authority field.
+	historicalInputID := stringField(projected, "inputId")
 	stripAuthorityFields(projected)
+	if historicalInputID != "" {
+		projected["inputId"] = historicalInputID
+	}
 	return projected, true
 }
 

@@ -6,6 +6,8 @@ import {
   RETIRED_CLAW_GUI_PLAN_TOOL_NAMES,
 } from "./claw-schedule-mcp-server";
 
+const nativeOrigin = { version: 1, threadId: "origin-thread", turnId: "origin-turn", toolCallId: "call_host_" + "a".repeat(64), grantId: "historical-grant" };
+
 const activeToolNames = [
   "claw_schedule_create",
   "claw_schedule_delete",
@@ -45,7 +47,7 @@ const validArguments: Record<
   claw_schedule_create: {
     title: "Daily review",
     prompt: "Review evidence",
-    schedule: { kind: "daily", timeOfDay: "09:00" },
+    schedule: { kind: "daily", timeOfDay: "09:00", timeZone: "UTC" },
   },
   gui_schedule_create: {
     title: "Daily review",
@@ -63,10 +65,10 @@ const validArguments: Record<
   },
 };
 
-async function connectScheduleMcp() {
+async function connectScheduleMcp(secret = "test-secret") {
   const server = createClawScheduleMcpServer({
     baseUrl: "http://127.0.0.1:8787",
-    secret: "test-secret",
+    secret,
   });
   const client = new Client({
     name: "schedule-contract-test",
@@ -201,6 +203,7 @@ describe("claw schedule MCP server: strict bidirectional contract", () => {
         const result = await connection.client.callTool({
           name,
           arguments: validArguments[name],
+          ...(name === "gui_schedule_create" ? { _meta: { analytixScheduleOriginV1: nativeOrigin } } : {}),
         });
         expect(result.isError, name).not.toBe(true);
         expect(
@@ -234,6 +237,7 @@ describe("claw schedule MCP server: strict bidirectional contract", () => {
         const result = await connection.client.callTool({
           name,
           arguments: validArguments[name],
+          ...(name === "gui_schedule_create" ? { _meta: { analytixScheduleOriginV1: nativeOrigin } } : {}),
         });
         expect(result.isError, name).toBe(true);
         const structured = result.structuredContent as
@@ -246,3 +250,39 @@ describe("claw schedule MCP server: strict bidirectional contract", () => {
     }
   });
 });
+
+describe('authenticated native Schedule metadata', () => {
+  it('moves the exact outer Host origin through authenticated HTTP without adding it to tool arguments or output', async () => {
+    const fetchMock = vi.fn(async (_url: unknown, _init: RequestInit) => new Response(JSON.stringify({ ok: true, task: scheduledTask }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const connection = await connectScheduleMcp()
+    try {
+      const result = await connection.client.callTool({ name: 'gui_schedule_create', arguments: validArguments.gui_schedule_create,
+        _meta: { analytixScheduleOriginV1: nativeOrigin } })
+      expect(result.isError).not.toBe(true)
+      const init = fetchMock.mock.calls[0][1] as RequestInit, body = JSON.parse(String(init.body))
+      expect(body.origin).toEqual({ threadId: nativeOrigin.threadId, turnId: nativeOrigin.turnId, toolCallId: nativeOrigin.toolCallId, grantId: nativeOrigin.grantId })
+      expect(body.input).not.toHaveProperty('origin')
+      expect(init.headers).toMatchObject({ Authorization: 'Bearer test-secret', 'X-Analytix-Schedule-Origin': 'typed-v1' })
+      expect(JSON.stringify(result)).not.toContain('historical-grant')
+    } finally { await connection.close() }
+  })
+  it.each([undefined, null, { ...nativeOrigin, version: 2 }, { ...nativeOrigin, toolCallId: 'invented' }, { ...nativeOrigin, extra: true }])('fails missing/malformed GUI origin before HTTP', async value => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock)
+    const connection = await connectScheduleMcp()
+    try {
+      const result = await connection.client.callTool({ name: 'gui_schedule_create', arguments: validArguments.gui_schedule_create,
+        ...(value === undefined ? {} : { _meta: { analytixScheduleOriginV1: value } }) })
+      expect(result.isError).toBe(true); expect(fetchMock).not.toHaveBeenCalled()
+    } finally { await connection.close() }
+  })
+  it('rejects a declared native origin when the helper has no authentication', async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock)
+    const connection = await connectScheduleMcp('')
+    try {
+      const result = await connection.client.callTool({ name: 'gui_schedule_create', arguments: validArguments.gui_schedule_create,
+        _meta: { analytixScheduleOriginV1: nativeOrigin } })
+      expect(result.isError).toBe(true); expect(fetchMock).not.toHaveBeenCalled()
+    } finally { await connection.close() }
+  })
+})

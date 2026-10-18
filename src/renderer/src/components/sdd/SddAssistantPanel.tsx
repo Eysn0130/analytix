@@ -26,11 +26,12 @@ import {
   type SddWorkflowStage
 } from '../../sdd/pm-skill-frameworks'
 import type { AttachmentReference, ChatBlock, RuntimeConnectionStatus } from '../../agent/types'
+import type { ComposerAttachmentUpload } from '../../store/composer-drafts'
 import type { QueuedUserMessage } from '../../store/chat-store-types'
 import type { ModelProviderModelGroup } from '@shared/analytix-api'
 import type { SddDraft } from '../../sdd/sdd-draft-store'
 import { MessageTimeline } from '../chat/MessageTimeline'
-import { FloatingComposer } from '../chat/FloatingComposer'
+import { InputBar } from '../chat/InputBar'
 import type { ComposerReasoningEffort } from '../chat/FloatingComposerModelPicker'
 import { PanelCollapseButton } from '../workbench/PanelCollapseButton'
 
@@ -76,15 +77,18 @@ type Props = {
   setComposerModel: (modelId: string, providerId?: string) => void
   setComposerReasoningEffort: (effort: ComposerReasoningEffort) => void
   queuedMessages: QueuedUserMessage[]
-  removeQueuedMessage: (id: string) => void
+  removeQueuedMessage: (threadId: string, id: string) => void
   attachments?: AttachmentReference[]
   attachmentUploadEnabled?: boolean
   attachmentUploadBusy?: boolean
   attachmentUploadError?: string | null
+  attachmentUploads?: readonly ComposerAttachmentUpload[]
+  onRetryAttachmentUpload?: (id: string) => void
+  onRemoveAttachmentUpload?: (id: string) => void
   onPickAttachments?: (files: File[]) => void
   onPasteClipboardImage?: (options?: { silentNoImage?: boolean }) => void | Promise<void>
   onRemoveAttachment?: (id: string) => void
-  onSend: () => void
+  onSend: (intent?: 'queue' | 'steer') => void
   onInterrupt: (options?: { discard?: boolean }) => void
   onRetryConnection: () => void
   onOpenSettings: () => void
@@ -119,6 +123,9 @@ export function SddAssistantPanel({
   attachmentUploadEnabled = false,
   attachmentUploadBusy = false,
   attachmentUploadError = null,
+  attachmentUploads,
+  onRetryAttachmentUpload,
+  onRemoveAttachmentUpload,
   onPickAttachments,
   onPasteClipboardImage,
   onRemoveAttachment,
@@ -243,7 +250,7 @@ export function SddAssistantPanel({
       </div>
 
       <div className="sdd-assistant-composer shrink-0 border-t border-ds-border-muted bg-white/92 px-4 pb-4 pt-3 dark:bg-ds-card">
-        <FloatingComposer
+        <InputBar
           variant="compact"
           workspaceRootOverride={draft.workspaceRoot}
           input={input}
@@ -267,6 +274,9 @@ export function SddAssistantPanel({
           attachmentUploadEnabled={attachmentUploadEnabled}
           attachmentUploadBusy={attachmentUploadBusy}
           attachmentUploadError={attachmentUploadError}
+          attachmentUploads={attachmentUploads}
+          onRetryAttachmentUpload={onRetryAttachmentUpload}
+          onRemoveAttachmentUpload={onRemoveAttachmentUpload}
           onPickAttachments={onPickAttachments}
           onPasteClipboardImage={onPasteClipboardImage}
           onRemoveAttachment={onRemoveAttachment}

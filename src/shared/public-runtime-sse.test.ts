@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { GeneralTerminalDeliveryBatchV1Schema, generalTerminalFailureMessageV1 } from '../../packages/runtime/src/contracts/events'
+import { ToolCallTurnItem } from '../../packages/runtime/src/contracts/items'
 import { isPublicSseIpcPayload, PublicRuntimeEventFilter } from './public-runtime-content'
 import {
   isClosedPublicRuntimeSseEvent,
@@ -737,6 +738,132 @@ describe('public runtime SSE boundary', () => {
     )).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
   })
 
+  describe('initial user skill IDs across SSE and IPC', () => {
+    const timestamp = '2026-10-18T00:00:00Z'
+    const eventWithSkills = (activeSkillIds: unknown) => ({
+      kind: 'item_created', seq: 22, timestamp, threadId: 'thread-strict',
+      turnId: 'turn-user', itemId: 'item-user',
+      item: { id: 'item-user', threadId: 'thread-strict', turnId: 'turn-user',
+        role: 'user', status: 'completed', createdAt: timestamp, kind: 'user_message',
+        text: '/synthetic-skill review this', activeSkillIds }
+    })
+
+    it.each([
+      ['synthetic-skill'],
+      ['a', 'office.docx', 'my_skill', '7-skill', 'z'.repeat(128)],
+      Array.from({ length: 16 }, (_, index) => `skill-${index}`)
+    ].flatMap(ids => ['item_created', 'item_completed'].map(kind => ({ ids, kind }))))(
+      'preserves the exact admitted initial item through decoder and IPC (%#)', ({ ids, kind }) => {
+        const event = { ...eventWithSkills(ids), kind }
+        const diagnostics = vi.fn()
+        expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+        expect(projectPublicRuntimeSseBlock(frame('22', kind, event), 'thread-strict',
+          new PublicRuntimeEventFilter(), diagnostics)).toEqual({ status: 'emit', seq: 22, event })
+        expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'initial-skills', events: [event] })).toBe(true)
+        expect(diagnostics).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each([
+      null, 'synthetic-skill', {}, [], [null], [1], [true], [['review']],
+      [{ body: 'PRIVATE_SKILL_BODY_SENTINEL' }], ['Review'], [' review'], ['review '],
+      ['review\n'], ['review\r\n'], ['review\u2028'], ['review/entry'], ['-review'], ['review_'], ['review.'], ['réview'],
+      ['a'.repeat(129)], ['review', 'review'],
+      Array.from({ length: 17 }, (_, index) => `skill-${index}`), new Array(1)
+    ].map(ids => ({ ids })))('rejects malformed, duplicate, or over-budget skill IDs before filtering (%#)', ({ ids }) => {
+      const event = eventWithSkills(ids)
+      const diagnostics = vi.fn()
+      const filter = new PublicRuntimeEventFilter()
+      const push = vi.spyOn(filter, 'push')
+      expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
+      const decision = projectPublicRuntimeSseBlock(frame('22', event.kind, event), 'thread-strict', filter, diagnostics)
+      expect(decision).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'initial-skills', events: [event] })).toBe(false)
+      expect(push).not.toHaveBeenCalled()
+      expect(diagnostics).toHaveBeenCalledExactlyOnceWith({
+        validation: 'input', stage: 'item_contract', reason: 'invalid_field', fieldPaths: ['item.activeSkillIds']
+      })
+      expect(JSON.stringify({ decision, diagnostics: diagnostics.mock.calls })).not.toContain('PRIVATE_SKILL_BODY_SENTINEL')
+    })
+
+    it('rejects a present undefined value at the object and IPC boundaries', () => {
+      const event = eventWithSkills(undefined)
+      expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'initial-skills', events: [event] })).toBe(false)
+    })
+
+    it('rejects loaded IDs on a steering item', () => {
+      const event = eventWithSkills(['synthetic-skill'])
+      Object.assign(event.item, { delivery: 'steer', clientUserMessageId: '00000000-0000-4000-8000-000000000001' })
+      expect(projectPublicRuntimeSseBlock(frame('22', event.kind, event), 'thread-strict',
+        new PublicRuntimeEventFilter())).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'initial-skills', events: [event] })).toBe(false)
+    })
+
+    it('keeps the field unavailable to other item kinds', () => {
+      const event = { ...eventWithSkills(['synthetic-skill']), item: {
+        id: 'item-user', threadId: 'thread-strict', turnId: 'turn-user', role: 'tool',
+        status: 'running', createdAt: timestamp, kind: 'tool_call', toolName: 'read_file',
+        callId: 'call_host_' + 'a'.repeat(64), toolKind: 'tool_call',
+        arguments: { schemaVersion: 1, projectionKind: 'withheld', disclosure: 'metadata_only',
+          messageKey: 'tool_arguments_withheld', privatePayloadWithheld: true,
+          factAnswerAllowed: false, evidenceAuthority: false }
+      } }
+      expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+      Object.assign(event.item, { activeSkillIds: ['synthetic-skill'] })
+      expect(projectPublicRuntimeSseBlock(frame('22', event.kind, event), 'thread-strict',
+        new PublicRuntimeEventFilter())).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'initial-skills', events: [event] })).toBe(false)
+    })
+
+    it.each(['event-root', 'item-meta'])('keeps arbitrary metadata closed at %s', owner => {
+      const event = eventWithSkills(['synthetic-skill'])
+      if (owner === 'event-root') Object.assign(event, { activeSkillIds: ['synthetic-skill'] })
+      else Object.assign(event.item, { meta: { activeSkillIds: ['synthetic-skill'] } })
+      expect(projectPublicRuntimeSseBlock(frame('22', event.kind, event), 'thread-strict',
+        new PublicRuntimeEventFilter())).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'initial-skills', events: [event] })).toBe(false)
+    })
+  })
+
+  describe('typed user file references across the SSE boundary', () => {
+    const reference = { path: '/synthetic/workspace/queue-fixture.txt', relativePath: 'queue-fixture.txt',
+      name: 'queue-fixture.txt', kind: 'file' }
+    const eventWithReferences = (fileReferences: unknown) => ({
+      kind: 'item_created', seq: 22, timestamp: '2026-10-14T00:38:04Z',
+      threadId: 'thread-strict', turnId: 'turn-user', itemId: 'item-user',
+      trace: { sse_sent_at: 1791938335000, sse_live_emitted_at: 1791938335000 },
+      item: { id: 'item-user', threadId: 'thread-strict', turnId: 'turn-user', role: 'user',
+        status: 'completed', createdAt: '2026-10-14T00:38:04Z', kind: 'user_message',
+        text: 'Synthetic queued message.', fileReferences }
+    })
+    it.each([[], [reference], [{ ...reference, kind: 'directory' }], [{
+      path: reference.path, relativePath: reference.relativePath, name: reference.name
+    }]].map(references => ({ references })))('preserves exact closed file references through decoder and IPC (%j)', ({ references }) => {
+      const event = eventWithReferences(references)
+      const diagnostics = vi.fn()
+      expect(projectPublicRuntimeSseBlock(frame('22', 'item_created', event), 'thread-strict',
+        new PublicRuntimeEventFilter(), diagnostics)).toEqual({ status: 'emit', seq: 22, event })
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'typed-references', events: [event] })).toBe(true)
+      expect(diagnostics).not.toHaveBeenCalled()
+    })
+    it.each([
+      null, reference, [null], [{ ...reference, path: '' }], [{ ...reference, relativePath: '' }],
+      [{ ...reference, name: '' }], [{ ...reference, path: 1 }], [{ ...reference, kind: 'unknown' }],
+      [{ ...reference, content: 'PRIVATE_REFERENCE_BODY_SENTINEL' }],
+      [{ ...reference, selector: { authority: 'PRIVATE_REFERENCE_AUTHORITY_SENTINEL' } }],
+      Array.from({ length: 4097 }, () => reference)
+    ].map(references => ({ references })))('rejects invalid or open reference metadata without exposing it (%#)', ({ references }) => {
+      const event = eventWithReferences(references)
+      const diagnostics = vi.fn()
+      const decision = projectPublicRuntimeSseBlock(frame('22', 'item_created', event), 'thread-strict',
+        new PublicRuntimeEventFilter(), diagnostics)
+      expect(decision).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'typed-references', events: [event] })).toBe(false)
+      expect(JSON.stringify({ decision, diagnostics: diagnostics.mock.calls })).not.toContain('PRIVATE_REFERENCE_')
+    })
+  })
+
   it('admits the closed invalid-tool-arguments recovery guard without tool arguments', () => {
     const event = {
       seq: 11,
@@ -1184,5 +1311,576 @@ describe('public child ledger contract', () => {
   it('requires a host callId outside the closed background ledger families', () => {
     const event = childLedgerEvent(publicChildLedger('subagent_running', 'running'))
     expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'ledger-stream', events: [event] })).toBe(false)
+  })
+})
+
+
+describe('closed Host retry lifecycle wire', () => {
+  const scheduled = { schemaVersion: 1, source: 'provider_retry', phase: 'scheduled',
+    logicalSequence: 7, outerAttempt: 2, delayMs: 0, deadlineUnixMs: 1700000000000 }
+  const wire = (retry: unknown = scheduled, overrides: Record<string, unknown> = {}) => ({
+    kind: 'pipeline_stage', seq: 41, threadId: 'thread-strict', turnId: 'turn-retry',
+    timestamp: '2026-10-07T00:00:00.123456789Z', stage: 'provider_retrying',
+    label: 'Retrying provider stream', attempt: 2, maxAttempt: 3, details: { retry }, ...overrides
+  })
+  it.each(['provider_retry', 'transport_reconnect'])('admits all actual %s phases including zero delay and past deadline', source => {
+    for (const phase of ['scheduled', 'started', 'cancelled']) {
+      const retry = { schemaVersion: 1, source, phase, logicalSequence: 7, outerAttempt: 2,
+        ...(source === 'transport_reconnect' ? { physicalAttempt: 3 } : {}),
+        ...(phase === 'scheduled' ? { delayMs: 0, deadlineUnixMs: 1700000000000 } : {}),
+        ...(phase === 'cancelled' ? { cancelReason: 'attempt_rejected' } : {}) }
+      const event = wire(retry, { attempt: source === 'transport_reconnect' ? 3 : 2 })
+      expect(projectPublicRuntimeSseBlock(frame('41', 'pipeline_stage', event), 'thread-strict',
+        new PublicRuntimeEventFilter())).toEqual({ status: 'emit', seq: 41, event })
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'retry-stream', events: [event] })).toBe(true)
+    }
+  })
+  it('preserves realistic retry epochs without public-content rejection diagnostics', () => {
+    const event = wire()
+    const diagnostics: unknown[] = []
+    expect(projectPublicRuntimeSseBlock(frame('41', 'pipeline_stage', event), 'thread-strict',
+      new PublicRuntimeEventFilter(), diagnostic => diagnostics.push(diagnostic)))
+      .toEqual({ status: 'emit', seq: 41, event })
+    expect(diagnostics).toEqual([])
+  })
+  it.each([
+    null, {}, { ...scheduled, privateText: 'DO_NOT_EXPOSE' }, { ...scheduled, schemaVersion: 2 },
+    { ...scheduled, source: 'visibleRecovery' }, { ...scheduled, phase: 'unknown' },
+    { ...scheduled, logicalSequence: 0 }, { ...scheduled, logicalSequence: 1.5 },
+    { ...scheduled, logicalSequence: 1e15 + 1 }, { ...scheduled, outerAttempt: 1e15 + 1 },
+    { ...scheduled, source: 'transport_reconnect', physicalAttempt: 1e15 + 1 },
+    { ...scheduled, delayMs: 1e15 + 1 }, { ...scheduled, deadlineUnixMs: 1e15 + 1 },
+    { ...scheduled, logicalSequence: Number.MAX_SAFE_INTEGER + 1 }, { ...scheduled, logicalSequence: null },
+    { ...scheduled, outerAttempt: 0 }, { ...scheduled, outerAttempt: -1 },
+    { ...scheduled, physicalAttempt: 3 }, { ...scheduled, source: 'transport_reconnect' },
+    { ...scheduled, source: 'transport_reconnect', physicalAttempt: 0 },
+    { ...scheduled, source: 'transport_reconnect', physicalAttempt: 1.5 },
+    { ...scheduled, delayMs: -1 }, { ...scheduled, delayMs: null }, { ...scheduled, delayMs: 0.1 },
+    { ...scheduled, delayMs: Number.MAX_SAFE_INTEGER + 1 }, { ...scheduled, delayMs: undefined },
+    { ...scheduled, deadlineUnixMs: 0 }, { ...scheduled, deadlineUnixMs: null },
+    { ...scheduled, deadlineUnixMs: Number.MAX_SAFE_INTEGER + 1 }, { ...scheduled, deadlineUnixMs: undefined },
+    { ...scheduled, cancelReason: 'context_cancelled' }, { ...scheduled, phase: 'started' },
+    { ...scheduled, phase: 'cancelled', cancelReason: 'deadline_exceeded' },
+    { schemaVersion: 1, source: 'provider_retry', phase: 'cancelled', logicalSequence: 1, outerAttempt: 2 },
+    { schemaVersion: 1, source: 'provider_retry', phase: 'started', logicalSequence: 1, outerAttempt: 2, cancelReason: 'attempt_rejected' },
+    { schemaVersion: 1, source: 'provider_retry', phase: 'cancelled', logicalSequence: 1, outerAttempt: 2, cancelReason: 'private reason' },
+    ...[null, ['context_cancelled'], { toString: 'context_cancelled' }].map(cancelReason => ({
+      schemaVersion: 1, source: 'provider_retry', phase: 'cancelled', logicalSequence: 1, outerAttempt: 2, cancelReason
+    }))
+  ])('rejects incomplete, open or impossible retry facts: %j', retry => {
+    const event = wire(retry)
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
+    expect(projectPublicRuntimeSseBlock(frame('41', 'pipeline_stage', event), 'thread-strict',
+      new PublicRuntimeEventFilter())).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'retry-stream', events: [event] })).toBe(false)
+  })
+  it('retains stage, message, id, sequence, thread and privacy barriers', () => {
+    for (const event of [
+      wire(scheduled, { stage: 'response_received', label: 'Response Received' }),
+      wire(scheduled, { message: 'user-controlled message' }),
+      wire(scheduled, { details: { retry: scheduled, visibleRecovery: true } }),
+      wire(scheduled, { details: { retry: scheduled, privatePayload: 'secret' } }),
+      wire(scheduled, { timestamp: null }), wire(scheduled, { turnId: null }),
+      wire(scheduled, { attempt: 1 }), wire(scheduled, { attempt: 0 }),
+      wire(scheduled, { attempt: undefined }), wire(scheduled, { maxAttempt: undefined }),
+      wire(scheduled, { maxAttempt: 1 }), wire(scheduled, { maxAttempt: 1e15 + 1 })
+    ]) expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
+    expect(projectPublicRuntimeSseBlock(frame('40', 'pipeline_stage', wire()), 'thread-strict',
+      new PublicRuntimeEventFilter())).toMatchObject({ status: 'invalid', reason: 'event_sequence_mismatch' })
+    expect(projectPublicRuntimeSseBlock(frame('41', 'pipeline_stage', wire()), 'different-thread',
+      new PublicRuntimeEventFilter())).toMatchObject({ status: 'invalid', reason: 'event_thread_mismatch' })
+    const legacy = wire(undefined, { details: { visibleRecovery: true, recoveryKind: 'interrupted_stream' } })
+    expect(isClosedPublicRuntimeSseEvent(legacy)).toBe(true)
+    expect(isClosedPublicRuntimeSseEvent(wire(undefined, { details: {} }))).toBe(true)
+  })
+  it('admits only a scoped length observation at response_received', () => {
+    const details = { stopReason: 'length', streamCompleted: false, logicalSequence: 7 }
+    expect(isClosedPublicRuntimeSseEvent(wire(undefined, { stage: 'response_received', label: 'Response Received', details: { ...details, streamCompleted: true } }))).toBe(true)
+    expect(isClosedPublicRuntimeSseEvent(wire(undefined, { stage: 'response_received', label: 'Response Received', details }))).toBe(true)
+    expect(isClosedPublicRuntimeSseEvent(wire(undefined, { stage: 'response_received', label: 'Response Received', details: { ...details, toolCallCount: 0 } }))).toBe(true)
+    for (const invalid of [{ ...details, logicalSequence: 1e15 + 1 }, { ...details, toolCallCount: 1e15 + 1 },
+      { ...details, toolCallCount: null }, { ...details, toolCallCount: -1 }, { ...details, toolCallCount: 0.1 },
+      { ...details, streamCompleted: 'true' }, { ...details, stopReason: 'stop' },
+      { ...details, logicalSequence: 0 }, { ...details, logicalSequence: 1.5 },
+      { ...details, logicalSequence: null }, { ...details, streamCompleted: null }]) {
+      expect(isClosedPublicRuntimeSseEvent(wire(undefined, { stage: 'response_received', label: 'Response Received', details: invalid }))).toBe(false)
+    }
+    expect(isClosedPublicRuntimeSseEvent(wire(undefined, { details }))).toBe(false)
+  })
+
+
+})
+
+describe('modern Core user-input replay binding', () => {
+  const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+  const question = { id: `${inputId}_1`, header: 'Path', question: 'Choose', multiSelect: true,
+    options: [{ id: `${inputId}_1_option_1`, label: 'Fast', description: '' }] }
+  const event = { kind: 'user_input_requested', seq: 173, timestamp: '2026-10-08T00:00:00Z',
+    threadId: 'thread-strict', turnId: 'turn-strict', inputId, status: 'pending', prompt: 'Choose', questions: [question] }
+  it('replays exact question/option IDs with numeric opaque digest runs', () => {
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame('173', event.kind, event), event.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: 173 })
+  })
+  it.each([
+    { questions: [{ ...question, id: 'other' }] },
+    { questions: [{ ...question, options: [{ ...question.options[0], id: `${inputId}_2_option_1` }] }] },
+    { questions: [{ ...question, options: [{ label: 'Fast', description: '' }] }] },
+    { questions: [{ ...question, multiSelect: undefined }] },
+    { questions: [question, { id: 'legacy', header: 'Other', question: 'Other', options: [] }] }
+  ])('rejects detached, incomplete or downgraded modern identities', ({ questions }) => {
+    expect(isClosedPublicRuntimeSseEvent({ ...event, questions })).toBe(false)
+  })
+})
+
+describe('timed question public boundary', () => {
+  const inputId = 'input_' + 'a'.repeat(64), timedWait = { timeoutSeconds: 120, deadlineAt: '2026-10-09T00:00:00.000Z' }
+  const requested = { kind: 'user_input_requested', seq: 180, timestamp: '2026-10-08T00:00:00Z', threadId: 'thread-strict', turnId: 'turn-strict', inputId,
+    status: 'pending', prompt: 'Safe projection', questions: [{ id: inputId + '_1', header: 'Safe header', question: 'Safe question', multiSelect: false, options: [] }], timedWait }
+  it('admits bounded timing metadata and a real continued resolution', () => {
+    expect(isClosedPublicRuntimeSseEvent(requested)).toBe(true)
+    expect(isClosedPublicRuntimeSseEvent({ kind: 'user_input_resolved', seq: 181, timestamp: requested.timestamp, threadId: requested.threadId, turnId: requested.turnId, inputId, status: 'continued' })).toBe(true)
+  })
+  it.each([{ callId: 'private-call' }, { lateReply: { state: 'queued' } }, { submission: { answers: [] } }, { timedWait: { ...timedWait, remainingMs: 20 } }])('rejects private or open timed fields %j', fields => {
+    expect(isClosedPublicRuntimeSseEvent({ ...requested, ...fields })).toBe(false)
+  })
+})
+
+const nativeWitnessFs = await vi.importActual<{ readFileSync: (path: string, encoding: 'utf8') => string }>('node:fs')
+const nativeWitnessProcess = await vi.importActual<{ env: Record<string, string | undefined> }>('node:process')
+
+type NativeHookupEventWitness = {
+  rawBuilder: Record<string, unknown>
+  projected: Record<string, unknown>
+  expected: Record<string, unknown>
+  promotion: Record<string, unknown>
+}
+
+function nativeHookupEventWitness(): NativeHookupEventWitness {
+  const witnessPath = nativeWitnessProcess.env.ANALYTIX_NATIVE_HOOKUP_EVENT_WITNESS
+  if (witnessPath === undefined) {
+    const timestamp = '2026-10-09T00:00:00.123456789Z'
+    const expected = {
+      kind: 'turn_steered', seq: 41, timestamp, threadId: 'synthetic-native-hookup-thread',
+      turnId: 'synthetic-native-hookup-turn', clientUserMessageId: 'synthetic-native-hookup-message',
+      admittedSeq: 40, model: 'synthetic-model', providerId: 'synthetic-provider',
+      approvalPolicy: 'on-request', sandboxMode: 'workspace-write', mode: 'agent',
+      disableUserInput: false, maxModelSteps: 0
+    }
+    return {
+      rawBuilder: { ...expected, text: 'SYNTHETIC_NATIVE_HOOKUP_RAW_BUILDER_BODY' },
+      projected: { ...expected },
+      expected,
+      promotion: {
+        kind: 'item_created', seq: 42, timestamp, threadId: expected.threadId,
+        turnId: expected.turnId, itemId: 'synthetic-native-hookup-item', item: {
+          id: 'synthetic-native-hookup-item', threadId: expected.threadId, turnId: expected.turnId,
+          role: 'user', kind: 'user_message', status: 'completed', createdAt: timestamp,
+          finishedAt: timestamp, delivery: 'steer', clientUserMessageId: expected.clientUserMessageId,
+          text: 'Synthetic marker-free late reply'
+        }
+      }
+    }
+  }
+  // A configured exporter is required to supply every original object. Never
+  // repair a producer witness by filling metadata or removing its extra text.
+  if (witnessPath.trim().length === 0) throw new Error('Native hookup witness path is empty')
+  const value: unknown = JSON.parse(nativeWitnessFs.readFileSync(witnessPath, 'utf8'))
+  const record = (candidate: unknown): candidate is Record<string, unknown> =>
+    candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)
+  if (!record(value) || !record(value.rawBuilder) || !record(value.projected) ||
+      !record(value.expected) || !record(value.promotion)) {
+    throw new Error('Native hookup witness requires rawBuilder/projected/expected/promotion objects')
+  }
+  for (const event of [value.projected, value.expected, value.promotion]) {
+    if (!Number.isSafeInteger(event.seq) || typeof event.threadId !== 'string' ||
+        typeof event.turnId !== 'string' || typeof event.timestamp !== 'string') {
+      throw new Error('Native hookup witness is missing an original event binding')
+    }
+  }
+  if (value.rawBuilder.kind !== 'turn_steered' || value.projected.kind !== 'turn_steered' ||
+      value.expected.kind !== 'turn_steered' || 'text' in value.expected ||
+      value.promotion.kind !== 'item_created' || !record(value.promotion.item) ||
+      value.promotion.item.kind !== 'user_message' || value.promotion.item.status !== 'completed' ||
+      value.promotion.threadId !== value.expected.threadId) {
+    throw new Error('Native hookup witness has an unexpected event purpose or owner')
+  }
+  return {
+    rawBuilder: value.rawBuilder, projected: value.projected,
+    expected: value.expected, promotion: value.promotion
+  }
+}
+
+
+describe('native steering producer public SSE witness', () => {
+  const witness = nativeHookupEventWitness()
+  const owner = witness.expected.threadId as string
+  const decode = (event: Record<string, unknown>, frameId = String(event.seq)) =>
+    projectPublicRuntimeSseBlock(frame(frameId, String(event.kind), event), owner,
+      new PublicRuntimeEventFilter())
+
+  it('TARGET: delivers the original Go projected steering metadata without adding or removing fields', () => {
+    // With the unfixed Go producer, projected still has extra text: this must
+    // stay RED rather than normalizing the actual witness in the test.
+    const decision = decode(witness.projected)
+    expect(decision?.status).toBe('emit')
+    expect(decision).toEqual({ status: 'emit', seq: witness.expected.seq, event: witness.expected })
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'native-hookup', events: [witness.projected] })).toBe(true)
+    expect(witness.projected).toEqual(witness.expected)
+  })
+
+  it('keeps raw builder text outside the closed public steering contract', () => {
+    expect(typeof witness.rawBuilder.text).toBe('string')
+    expect(isClosedPublicRuntimeSseEvent(witness.rawBuilder)).toBe(false)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'native-hookup', events: [witness.rawBuilder] })).toBe(false)
+  })
+
+  it('delivers a real completed user-message promotion as item_created', () => {
+    expect(decode(witness.promotion)).toEqual({
+      status: 'emit', seq: witness.promotion.seq, event: witness.promotion
+    })
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'native-hookup', events: [witness.promotion] })).toBe(true)
+  })
+
+  it.each([
+    ['text', { text: 'SYNTHETIC_NATIVE_HOOKUP_FORBIDDEN_BODY' }],
+    ['unknown field', { unexpectedField: true }],
+    ['illegal status', { status: 'queued' }]
+  ] as const)('rejects steering %s without using a generic sanitizer to repair it', (_name, fields) => {
+    const event = { ...witness.expected, ...fields }
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'native-hookup', events: [event] })).toBe(false)
+    expect(decode(event)).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+  })
+
+  it('binds steering transport to the actual subscribed thread and exact sequence', () => {
+    expect(decode({ ...witness.expected, threadId: `${owner}-foreign` })).toEqual({
+      status: 'invalid', reason: 'event_thread_mismatch'
+    })
+    expect(decode(witness.expected, String(Number(witness.expected.seq) + 1))).toEqual({
+      status: 'invalid', reason: 'event_sequence_mismatch'
+    })
+    const invalidSequence = { ...witness.expected, seq: -1 }
+    expect(decode(invalidSequence, String(witness.expected.seq))).toEqual({ status: 'invalid', reason: 'event_sequence_mismatch' })
+    expect(decode(invalidSequence)).toEqual({ status: 'invalid', reason: 'malformed_frame' })
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'native-hookup', events: [invalidSequence] })).toBe(false)
+  })
+
+  it.each([
+    { status: 'queued' },
+    { threadId: 'synthetic-foreign-promotion-thread' },
+    { id: 'synthetic-foreign-promotion-item' },
+    { unexpectedField: true }
+  ])('rejects an unbound or open promotion item %j', fields => {
+    const event = { ...witness.promotion, item: { ...(witness.promotion.item as Record<string, unknown>), ...fields } }
+    expect(decode(event)).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'native-hookup', events: [event] })).toBe(false)
+  })
+})
+
+
+describe('continued Host question SSE correlation', () => {
+  const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+  const timestamp = '2026-10-08T00:00:00Z'
+  const question = { id: `${inputId}_1`, header: 'Path', question: 'Choose', multiSelect: false,
+    options: [{ id: `${inputId}_1_option_1`, label: 'Fast', description: '' }] }
+  const resolved = { kind: 'user_input_resolved', seq: 183, timestamp,
+    threadId: 'thread-strict', turnId: 'turn-strict', inputId, status: 'continued',
+    prompt: 'Choose', questions: [question] }
+  const item = { id: 'item-continued-question', threadId: resolved.threadId, turnId: resolved.turnId,
+    kind: 'user_input', role: 'system', status: 'continued', createdAt: timestamp, finishedAt: timestamp,
+    inputId, prompt: 'Choose', questions: [question], timedWait: { timeoutSeconds: 1, deadlineAt: timestamp } }
+  const completed = { kind: 'item_completed', seq: 184, timestamp, threadId: item.threadId,
+    turnId: item.turnId, itemId: item.id, item }
+
+  it.each(['submitted', 'cancelled', 'continued'])('delivers %s resolution without reclassifying Host IDs as prose', status => {
+    const event = { ...resolved, status }
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'continued-question', events: [event] })).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame(String(event.seq), event.kind, event), event.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event, seq: event.seq })
+  })
+
+  it('delivers the continued item_completed through both shared IPC guards', () => {
+    expect(isPublicSseIpcPayload({ streamId: 'continued-question', events: [completed] })).toBe(true)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'continued-question', events: [completed] })).toBe(true)
+    expect(projectPublicRuntimeSseBlock(frame(String(completed.seq), completed.kind, completed), item.threadId,
+      new PublicRuntimeEventFilter())).toEqual({ status: 'emit', event: completed, seq: completed.seq })
+  })
+
+  it('keeps detached IDs, wrong roles and display PII outside continued SSE', () => {
+    for (const unsafe of [
+      { ...completed, item: { ...item, role: 'user' } },
+      { ...completed, item: { ...item, questions: [{ ...question, id: `${inputId}_2` }] } },
+      { ...resolved, questions: [{ ...question, question: 'account=6222020202020202020' }] },
+      { ...resolved, questions: [{ ...question, options: [{ ...question.options[0], description: 'phone=13800138000' }] }] },
+      { ...resolved, kind: 'user_input_requested' }
+    ]) {
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'continued-question', events: [unsafe] })).toBe(false)
+      expect(projectPublicRuntimeSseBlock(frame(String(unsafe.seq), unsafe.kind, unsafe), resolved.threadId,
+        new PublicRuntimeEventFilter())).not.toMatchObject({ status: 'emit' })
+    }
+  })
+})
+
+describe('first-validation SSE diagnostics', () => {
+  function toolCallEvent(): Record<string, unknown> {
+    return {
+      ...heartbeat(), kind: 'item_created', turnId: 'turn-diagnostic', itemId: 'item-diagnostic',
+      item: {
+        id: 'item-diagnostic', threadId: 'thread-strict', turnId: 'turn-diagnostic',
+        role: 'tool', status: 'running', createdAt: '2026-07-14T00:00:00.000Z',
+        kind: 'tool_call', toolName: 'read_file', callId: 'call-diagnostic', toolKind: 'tool_call',
+        arguments: {
+          schemaVersion: 1, projectionKind: 'withheld', disclosure: 'metadata_only',
+          messageKey: 'tool_arguments_withheld', privatePayloadWithheld: true,
+          factAnswerAllowed: false, evidenceAuthority: false
+        }
+      }
+    }
+  }
+
+  it('records the original failed item parse once before touching the stateful filter', () => {
+    const event = toolCallEvent()
+    const item = event.item as Record<string, unknown>
+    const args = item.arguments as Record<string, unknown>
+    args.privatePayloadWithheld = false
+    const parse = vi.spyOn(ToolCallTurnItem, 'safeParse')
+    const filter = new PublicRuntimeEventFilter()
+    const push = vi.spyOn(filter, 'push')
+    const diagnostic = vi.fn()
+    try {
+      expect(projectPublicRuntimeSseBlock(frame('7', 'item_created', event), 'thread-strict', filter, diagnostic))
+        .toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+      expect(parse).toHaveBeenCalledTimes(1)
+      expect(push).not.toHaveBeenCalled()
+      expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+        validation: 'input', stage: 'item_schema', reason: 'schema_invalid_value',
+        fieldPaths: ['item.arguments.privatePayloadWithheld']
+      })
+    } finally {
+      parse.mockRestore()
+    }
+  })
+
+  it.each([
+    ['event', 'event_contract', '$'], ['item', 'item_schema', 'item'],
+    ['arguments', 'item_schema', 'item.arguments']
+  ])('reports only a known container for unknown %s fields', (owner, stage, fieldPath) => {
+    const event = toolCallEvent()
+    const item = event.item as Record<string, unknown>
+    const target = owner === 'event' ? event : owner === 'item' ? item : item.arguments as Record<string, unknown>
+    // Deterministic synthetic bearer fixture; never use a real credential.
+    const syntheticPrivateBearer = 'Bearer ' + 'x'.repeat(23)
+    target.PRIVATE_UNKNOWN_KEY_SENTINEL = {
+      text: 'PRIVATE_BODY_SENTINEL', arguments: '/tmp/PRIVATE_PATH_SENTINEL',
+      credential: syntheticPrivateBearer
+    }
+    const diagnostic = vi.fn()
+    const filter = new PublicRuntimeEventFilter()
+    const push = vi.spyOn(filter, 'push')
+    const decision = projectPublicRuntimeSseBlock(frame('7', 'item_created', event), 'thread-strict', filter, diagnostic)
+    expect(decision).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+      validation: 'input', stage, reason: 'unknown_fields', fieldPaths: [fieldPath]
+    })
+    expect(push).not.toHaveBeenCalled()
+    expect(JSON.stringify({ decision, diagnostics: diagnostic.mock.calls })).not.toContain('PRIVATE_')
+  })
+
+  it('truncates unknown path segments, normalizes indexes, and never reads issue contents', () => {
+    const issue = (path: PropertyKey[]) => Object.defineProperties({ code: 'unrecognized_keys', path },
+      Object.fromEntries(['keys', 'message', 'input', 'errors'].map((key) => [key, {
+        get() { throw new Error('PRIVATE_ISSUE_CONTENT_SENTINEL') }
+      }])))
+    const parse = vi.spyOn(ToolCallTurnItem, 'safeParse').mockReturnValueOnce({
+      success: false,
+      error: { issues: [
+        issue(['arguments', 'PRIVATE_PATH_SEGMENT', 'status']),
+        issue(['arguments.schemaVersion']),
+        issue(['questions', 987654321, 'id']),
+        ...Array.from({ length: 9 }, () => issue(['PRIVATE_EXCESS_SEGMENT'])),
+        Object.defineProperty({ code: 'unrecognized_keys' }, 'path', {
+          get() { throw new Error('PRIVATE_OVER_BUDGET_ISSUE') }
+        })
+      ] }
+    } as never)
+    const diagnostic = vi.fn()
+    const filter = new PublicRuntimeEventFilter()
+    const push = vi.spyOn(filter, 'push')
+    try {
+      expect(projectPublicRuntimeSseBlock(frame('7', 'item_created', toolCallEvent()), 'thread-strict', filter, diagnostic))
+        .toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+      expect(parse).toHaveBeenCalledTimes(1)
+      expect(push).not.toHaveBeenCalled()
+      expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+        validation: 'input', stage: 'item_schema', reason: 'unknown_fields',
+        fieldPaths: ['item.arguments', 'item', 'item.questions.[].id']
+      })
+      const metadata = diagnostic.mock.calls[0][0]
+      expect(Object.isFrozen(metadata)).toBe(true)
+      expect(Object.isFrozen(metadata.fieldPaths)).toBe(true)
+      const serialized = JSON.stringify(metadata)
+      expect(serialized).not.toContain('PRIVATE_')
+      expect(serialized).not.toContain('987654321')
+      expect(serialized).not.toContain('item.arguments.status')
+    } finally {
+      parse.mockRestore()
+    }
+  })
+
+  it('keeps the first binding guard ahead of subsequent timestamp and schema failures', () => {
+    const event = toolCallEvent()
+    const item = event.item as Record<string, unknown>
+    item.threadId = 'PRIVATE_DETACHED_THREAD'
+    item.createdAt = 'PRIVATE_TIMESTAMP_VALUE'
+    const parse = vi.spyOn(ToolCallTurnItem, 'safeParse')
+    const diagnostic = vi.fn()
+    const filter = new PublicRuntimeEventFilter()
+    const push = vi.spyOn(filter, 'push')
+    try {
+      expect(projectPublicRuntimeSseBlock(frame('7', 'item_created', event), 'thread-strict', filter, diagnostic))
+        .toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+      expect(parse).not.toHaveBeenCalled()
+      expect(push).not.toHaveBeenCalled()
+      expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+        validation: 'input', stage: 'item_binding', reason: 'binding_mismatch', fieldPaths: ['item.threadId']
+      })
+    } finally {
+      parse.mockRestore()
+    }
+  })
+
+  it('preserves valid event and seq while calling the filter only once', () => {
+    const filter = new PublicRuntimeEventFilter()
+    const push = vi.spyOn(filter, 'push')
+    const diagnostic = vi.fn()
+    const event = heartbeat()
+    expect(projectPublicRuntimeSseBlock(frame('7', 'heartbeat', event), 'thread-strict', filter, diagnostic))
+      .toEqual({ status: 'emit', event, seq: 7 })
+    expect(push).toHaveBeenCalledExactlyOnceWith(event)
+    expect(diagnostic).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['filter rejection', null, 'projection_filter', 'projection_rejected', '$'],
+    ['projected binding', heartbeat({ seq: 8 }), 'projected_binding', 'binding_mismatch', 'seq'],
+    ['projected contract', heartbeat({ PRIVATE_EXTRA_FIELD: 'PRIVATE_PROJECTED_BODY' }),
+      'event_contract', 'unknown_fields', '$']
+  ] as const)('uses the single original filter result for %s', (_label, projected, stage, reason, fieldPath) => {
+    const filter = new PublicRuntimeEventFilter()
+    const push = vi.spyOn(filter, 'push').mockReturnValueOnce(projected)
+    const diagnostic = vi.fn()
+    expect(projectPublicRuntimeSseBlock(frame('7', 'heartbeat', heartbeat()), 'thread-strict', filter, diagnostic))
+      .toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+      validation: 'projected', stage, reason, fieldPaths: [fieldPath]
+    })
+    expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('PRIVATE_')
+  })
+
+  it('isolates observer failures and leaves the next valid decision unchanged', () => {
+    const filter = new PublicRuntimeEventFilter()
+    const push = vi.spyOn(filter, 'push')
+    const observer = vi.fn(() => { throw new Error('PRIVATE_OBSERVER_ERROR') })
+    expect(projectPublicRuntimeSseBlock(frame('7', 'heartbeat', heartbeat({ PRIVATE_EXTRA: 'PRIVATE_BODY' })),
+      'thread-strict', filter, observer)).toEqual({ status: 'invalid', reason: 'invalid_public_projection' })
+    expect(observer).toHaveBeenCalledTimes(1)
+    expect(push).not.toHaveBeenCalled()
+    const next = heartbeat({ seq: 8 })
+    expect(projectPublicRuntimeSseBlock(frame('8', 'heartbeat', next), 'thread-strict', filter, observer))
+      .toEqual({ status: 'emit', event: next, seq: 8 })
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(observer).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves private withheld, revocation, and atomic terminal decisions', () => {
+    const filter = new PublicRuntimeEventFilter()
+    const push = vi.spyOn(filter, 'push')
+    const diagnostic = vi.fn()
+    expect(projectPublicRuntimeSseBlock(frame('8', 'assistant_reasoning_delta', {
+      ...heartbeat({ seq: 8, kind: 'assistant_reasoning_delta' }), text: 'PRIVATE_REASONING'
+    }), 'thread-strict', filter, diagnostic)).toEqual({ status: 'withheld', seq: 8, reason: 'restricted_content' })
+    expect(push).not.toHaveBeenCalled()
+    expect(diagnostic).toHaveBeenCalledExactlyOnceWith({
+      validation: 'input', stage: 'public_content', reason: 'restricted_content', fieldPaths: ['kind']
+    })
+    diagnostic.mockClear()
+    const revoked = projectionRevoked()
+    expect(projectPublicRuntimeSseBlock(`event: public_projection_revoked\ndata: ${JSON.stringify(revoked)}`,
+      'thread-strict', filter, diagnostic)).toEqual({ status: 'revoke', event: revoked })
+    expect(push).not.toHaveBeenCalled()
+    const batch = generalTerminalBatch()
+    expect(projectPublicRuntimeSseBlock(frame(String(batch.seq), 'general_terminal_batch', batch),
+      'thread-strict', filter, diagnostic)).toEqual({ status: 'emit', seq: batch.seq, event: batch })
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(diagnostic).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('logical-step strict public SSE', () => {
+  const id = { schemaVersion: 1, logicalStepId: '11111111-1111-4111-8111-111111111111' }
+  const close = { ...id, assistantMessageAssembled: true, llmMs: 40, ttftMs: 10, decodeMs: 30, decodeTokens: 7 }
+  const wire = (stage = 'logical_step_closed', details: unknown = close, overrides: Record<string, unknown> = {}) => ({
+    kind: 'pipeline_stage', seq: 62, timestamp: '2026-10-12T00:00:00Z', threadId: 'thread-strict', turnId: 'turn-logical',
+    stage, label: stage === 'logical_step_started' ? 'Logical step started' :
+      stage === 'logical_step_assembled' ? 'Logical step assembled' : 'Logical step closed', details, ...overrides })
+  it('emits each actual stage exactly, including zero timing and failed/aborted unassembled closes', () => {
+    for (const event of [wire('logical_step_started', id), wire('logical_step_assembled', id), wire(), wire('logical_step_closed', { ...id, assistantMessageAssembled: false }),
+      wire('logical_step_closed', { ...id, assistantMessageAssembled: true }),
+      wire('logical_step_closed', { ...close, llmMs: 0, ttftMs: 0, decodeMs: 0, decodeTokens: 0 }),
+      wire('logical_step_closed', { ...close, llmMs: Number.MAX_SAFE_INTEGER, ttftMs: 0,
+        decodeMs: Number.MAX_SAFE_INTEGER, decodeTokens: Number.MAX_SAFE_INTEGER })]) {
+      expect(projectPublicRuntimeSseBlock(frame('62', 'pipeline_stage', event), 'thread-strict', new PublicRuntimeEventFilter()))
+        .toEqual({ status: 'emit', seq: 62, event })
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'logical-stream', events: [event] })).toBe(true)
+    }
+  })
+  it('rejects open or impossible details, absent fields, mismatched labels and trace', () => {
+    for (const details of [null, {}, { ...close, schemaVersion: 2 }, { ...close, logicalStepId: '11111111-1111-1111-8111-111111111111' },
+      { ...close, logicalStepId: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' }, { ...close, assistantMessageAssembled: null },
+      { ...close, assistantMessageAssembled: false }, { ...close, llmMs: null }, { ...close, llmMs: -1 },
+      { ...close, llmMs: 0.5 }, { ...close, llmMs: Number.MAX_SAFE_INTEGER + 1 }, { ...close, ttftMs: 41 },
+      { ...close, decodeTokens: undefined }, { ...close, decodeMs: undefined }, { ...close, ttftMs: undefined },
+      { ...close, llmMs: undefined }, { ...close, decodeMs: 29 }, { ...close, extra: 'unadmitted' }]) {
+      expect(isClosedPublicRuntimeSseEvent(wire('logical_step_closed', details))).toBe(false)
+    }
+    for (const event of [wire('logical_step_started', { ...id, llmMs: 0 }), wire(undefined, undefined, { details: undefined }),
+      wire(undefined, undefined, { label: 'Wrong label' }), wire(undefined, undefined, { turnId: undefined }),
+      wire(undefined, undefined, { attempt: 1 }), wire(undefined, undefined, { maxAttempt: 2 }),
+      wire(undefined, undefined, { trace: { sse_sent_at: 1, sse_live_emitted_at: 1 } }),
+      wire(undefined, undefined, { itemId: 'item-extra' }), wire(undefined, undefined, { extra: 0 })]) {
+      expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'logical-stream', events: [event] })).toBe(false)
+    }
+  })
+  it('keeps assembly identity-only and rejects unadmitted metadata at the transport seam', () => {
+    for (const details of [{}, { ...id, schemaVersion: 2 }, { ...id, logicalStepId: 'invalid' },
+      { ...id, assistantMessageAssembled: true }, { ...id, llmMs: 0 },
+      { ...id, body: 'PRIVATE_BODY' }, { ...id, StepBindingHMAC: 'PRIVATE_HMAC' }]) {
+      expect(isClosedPublicRuntimeSseEvent(wire('logical_step_assembled', details))).toBe(false)
+    }
+    for (const patch of [{ label: 'wrong' }, { turnId: undefined }, { itemId: 'extra' }, { child: {} },
+      { attempt: 1 }, { maxAttempt: 2 }, { trace: {} }, { body: 'PRIVATE_BODY' }]) {
+      const event = wire('logical_step_assembled', id, patch)
+      expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'logical-stream', events: [event] })).toBe(false)
+      const decision = projectPublicRuntimeSseBlock(frame('62', 'pipeline_stage', event), 'thread-strict', new PublicRuntimeEventFilter())
+      expect(decision).not.toBeNull()
+      if (decision === null) throw new Error('malformed assembly must produce an explicit rejection')
+      expect(decision.status).toBe('invalid')
+    }
+  })
+  it('admits literal logical metrics version only on post_start while preserving maxModelSteps', () => {
+    const post = { ...wire(), stage: 'post_start', label: 'Post-Start', details: { maxModelSteps: 5, logicalStepMetricsVersion: 1 } }
+    expect(projectPublicRuntimeSseBlock(frame('62', 'pipeline_stage', post), 'thread-strict', new PublicRuntimeEventFilter()))
+      .toEqual({ status: 'emit', seq: 62, event: post })
+    for (const version of [null, 0, 2, '1', true]) {
+      expect(isClosedPublicRuntimeSseEvent({ ...post, details: { maxModelSteps: 5, logicalStepMetricsVersion: version } })).toBe(false)
+    }
+    expect(isClosedPublicRuntimeSseEvent({ ...post, stage: 'response_received', label: 'Response Received' })).toBe(false)
+    expect(isClosedPublicRuntimeSseEvent({ ...post, details: { maxModelSteps: 5 } })).toBe(true)
   })
 })

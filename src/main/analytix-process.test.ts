@@ -29,6 +29,17 @@ vi.mock('electron', () => ({
 
 let tempRoot: string | null = null
 
+type AnalytixProcessModule = typeof import('./analytix-process')
+let initializedProcessModule: AnalytixProcessModule | undefined
+let processModuleLoad: Promise<AnalytixProcessModule> | undefined
+function loadAnalytixProcessFixture(): Promise<AnalytixProcessModule> {
+  // Start loading inside the requesting test; its original timeout still applies.
+  return processModuleLoad ??= import('./analytix-process').then(module => {
+    initializedProcessModule = module
+    return module
+  })
+}
+
 function sealAuthorizedLocalRemountFixture(
   pluginDir: string,
   pluginName: string,
@@ -139,7 +150,7 @@ function createSettings(binaryPath: string): AppSettingsV1 {
 
 describe('runtime stderr diagnostics', () => {
   it('exposes only byte count and digest, never stderr content', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const raw = '<think>PRIVATE_RUNTIME_REASONING</think>fatal'
     const diagnostic = module.analytixStderrDiagnostic(raw)
     expect(diagnostic.stderrBytes).toBe(Buffer.byteLength(raw, 'utf8'))
@@ -159,7 +170,7 @@ describe('runtime model provider snapshot', () => {
   })
 
   it('keeps the Go runtime boot configuration valid when provider credentials are absent', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('')
 
     const env = module.buildRuntimeModelProvidersEnv(settings, settings.runtime)
@@ -175,7 +186,7 @@ describe('runtime model provider snapshot', () => {
   })
 
   it('serializes key-free provider metadata for per-thread runtime routing', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('')
     const preset = getModelProviderPreset('zai-coding-plan')
     expect(preset).not.toBeNull()
@@ -217,7 +228,7 @@ describe('runtime model provider snapshot', () => {
   })
 
   it('uses provider.activeProviderId as the managed runtime default provider when runtime providerId is blank', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('')
     const provider = {
       id: 'deepseek-live',
@@ -253,7 +264,7 @@ describe('runtime model provider snapshot', () => {
   })
 
   it('does not inject the in-memory Hub gateway token into Provider metadata', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const { setHubGatewayRuntimeToken, clearHubGatewayRuntimeToken } = await import('./services/hub-gateway-runtime-secret')
     const settings = createSettings('')
     const provider: AppSettingsV1['provider']['providers'][number] = {
@@ -291,7 +302,7 @@ describe('runtime model provider snapshot', () => {
   })
 
   it('keeps the Hub and official DeepSeek context windows provider-specific in the Go runtime snapshot', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('')
     const hubProvider: AppSettingsV1['provider']['providers'][number] = {
       id: 'analytix-hub',
@@ -342,7 +353,7 @@ describe('runtime model provider snapshot', () => {
   })
 
   it('keeps preset providers in the Go runtime snapshot when their baseUrl is left blank', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('')
     const defaults = defaultModelProviderSettings()
     settings.provider = {
@@ -372,7 +383,7 @@ describe('runtime model provider snapshot', () => {
   })
 
   it('refreshes provider endpoint and model-profile currentness in the managed runtime env snapshot', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('')
     const provider: AppSettingsV1['provider']['providers'][number] = {
       id: 'current-provider',
@@ -443,7 +454,7 @@ describe('runtime model provider snapshot', () => {
   })
 
   it('serializes provider pricing for Go runtime usage cost', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('')
     const provider: AppSettingsV1['provider']['providers'][number] = {
       id: 'priced-provider',
@@ -512,19 +523,25 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  const module = await import('./analytix-process')
-  await module.stopAnalytixChildAndWait()
-  module.configureAnalytixProcessMainPrivatePaths(null)
-  configureLogger({ dir: '', enabled: true, retentionDays: 2 })
-  if (tempRoot) {
-    rmSync(tempRoot, { recursive: true, force: true })
-    tempRoot = null
+  try {
+    const module = initializedProcessModule
+    if (module) {
+      await module.stopAnalytixChildAndWait()
+      module.configureAnalytixProcessMainPrivatePaths(null)
+      module.configureGuiManagedAnalytixSettingsReader()
+    }
+  } finally {
+    configureLogger({ dir: '', enabled: true, retentionDays: 2 })
+    if (tempRoot) {
+      rmSync(tempRoot, { recursive: true, force: true })
+      tempRoot = null
+    }
   }
 })
 
 describe('startAnalytixChild', () => {
   it('resolves the standalone development codec with the existing macOS Helper', async () => {
-    const { resolveDocumentCodecLaunch } = await import('./analytix-process')
+    const { resolveDocumentCodecLaunch } = await loadAnalytixProcessFixture()
     expect(resolveDocumentCodecLaunch({ appPath: '/synthetic/source', execPath: '/synthetic/Electron.app/Contents/MacOS/Electron', isPackaged: false }, 'darwin')).toEqual({
       executable: '/synthetic/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper',
       entry: '/synthetic/source/out/office-codec/office-generation-codec-entry.js'
@@ -532,7 +549,7 @@ describe('startAnalytixChild', () => {
   })
 
   it('resolves the packaged codec to real unpacked files without using ASAR paths for Go', async () => {
-    const { resolveDocumentCodecLaunch } = await import('./analytix-process')
+    const { resolveDocumentCodecLaunch } = await loadAnalytixProcessFixture()
     expect(resolveDocumentCodecLaunch({ appPath: '/synthetic/Analytix.app/Contents/Resources/app.asar', execPath: '/synthetic/Analytix.app/Contents/MacOS/Analytix', isPackaged: true }, 'darwin')).toEqual({
       executable: '/synthetic/Analytix.app/Contents/Frameworks/Analytix Helper.app/Contents/MacOS/Analytix Helper',
       entry: '/synthetic/Analytix.app/Contents/Resources/app.asar.unpacked/out/office-codec/office-generation-codec-entry.js'
@@ -543,7 +560,7 @@ describe('startAnalytixChild', () => {
   })
 
   it('rejects the retired TypeScript child runtime path without spawning a process', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     await expect(module.startAnalytixChild(createSettings('/tmp/retired-runtime.js'))).rejects.toThrow(
       /TypeScript Analytix child runtime is retired/
     )
@@ -553,7 +570,7 @@ describe('startAnalytixChild', () => {
 
 describe('reclaimAnalytixPort', () => {
   it('recognizes stale Go runtime-server commands without matching generic servers', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     expect(module.commandLooksLikeStaleAnalytixRuntime(
       '/var/folders/go-build/exe/runtime-server --addr 127.0.0.1:8901 --fixtures-dir /Users/sun/Projects/analytix/packages/runtime/src/conformance/fixtures --runtime-token tok-1 --durable-root /Users/sun/.analytix/data/runtime-go'
@@ -577,7 +594,7 @@ describe('reclaimAnalytixPort', () => {
     })
     try {
       const address = server.address() as AddressInfo
-      const module = await import('./analytix-process')
+      const module = await loadAnalytixProcessFixture()
 
       await expect(module.reclaimAnalytixPort(address.port)).resolves.toEqual({
         ok: false,
@@ -589,7 +606,7 @@ describe('reclaimAnalytixPort', () => {
   })
 
   it('allows non-positive ports so Analytix can request an ephemeral port', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await expect(module.reclaimAnalytixPort(0)).resolves.toEqual({ ok: true })
   })
@@ -615,7 +632,7 @@ describe('reclaimAnalytixPort', () => {
       throw new Error('Could not find consecutive test ports')
     }
     try {
-      const module = await import('./analytix-process')
+      const module = await loadAnalytixProcessFixture()
 
       const resolved = await module.resolveAvailableAnalytixPort(preferredPort)
 
@@ -651,7 +668,7 @@ describe('reclaimAnalytixPort', () => {
         sibling.stdout?.once('data', (chunk: Buffer) => resolve(Number(String(chunk).trim())))
       })
       expect(preferredPort).toBeGreaterThan(0)
-      const module = await import('./analytix-process')
+      const module = await loadAnalytixProcessFixture()
 
       await expect(module.reclaimAnalytixPort(preferredPort)).resolves.toEqual({
         ok: false, message: `port ${preferredPort} is in use`
@@ -670,13 +687,13 @@ describe('reclaimAnalytixPort', () => {
 
 describe('resolveAnalytixDataDir', () => {
   it('expands Windows-style home-relative data directories', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     expect(module.resolveAnalytixDataDir({ dataDir: '~\\deepseek\\analytix' })).toBe(join(homedir(), 'deepseek', 'analytix'))
   })
 
   it('does not expand non-home tilde prefixes', async () => {
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     expect(module.resolveAnalytixDataDir({ dataDir: '~other\\analytix' })).toBe('~other\\analytix')
   })
@@ -684,7 +701,7 @@ describe('resolveAnalytixDataDir', () => {
 
 describe('parseListeningPidsFromNetstat', () => {
   it('extracts the listening TCP PIDs for the port across IPv4/IPv6, ignoring everything else', async () => {
-    const { parseListeningPidsFromNetstat } = await import('./analytix-process')
+    const { parseListeningPidsFromNetstat } = await loadAnalytixProcessFixture()
     const output = [
       '',
       'Active Connections',
@@ -706,7 +723,7 @@ describe('parseListeningPidsFromNetstat', () => {
   })
 
   it('returns no PIDs when nothing listens on the port', async () => {
-    const { parseListeningPidsFromNetstat } = await import('./analytix-process')
+    const { parseListeningPidsFromNetstat } = await loadAnalytixProcessFixture()
     const output = '  TCP    127.0.0.1:8899         0.0.0.0:0              LISTENING       6789'
 
     expect(parseListeningPidsFromNetstat(output, 9999)).toEqual([])
@@ -714,6 +731,170 @@ describe('parseListeningPidsFromNetstat', () => {
 })
 
 describe('syncGuiManagedAnalytixConfig', () => {
+  it('retires only previous GUI profiles and default while preserving manual profiles across repeated startup', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const module = await loadAnalytixProcessFixture()
+    const previous = createSettings('/tmp/synthetic-unused-child.js')
+    previous.runtime.subagents.profiles = { reviewer: {
+      prompt: 'Synthetic reviewer', model: '', effort: '', toolPolicy: 'readOnly', tools: []
+    } }
+    previous.runtime.subagents.defaultProfile = 'reviewer'
+    const configPath = join(tempRoot, 'config.json')
+    writeFileSync(configPath, JSON.stringify({ capabilities: { subagents: {
+      profiles: { reviewer: { toolPolicy: 'readOnly' }, manual: { toolPolicy: 'inherit', promptPreamble: 'Manual' } },
+      defaultProfile: 'reviewer'
+    } } }), 'utf8')
+    const next = structuredClone(previous)
+    next.runtime.subagents.profiles = {}
+    next.runtime.subagents.defaultProfile = ''
+    await module.syncGuiManagedAnalytixConfig(tempRoot, next.runtime, { previousGuiSettings: previous,
+      mcpConfigPath: join(tempRoot, 'missing-mcp.json') })
+    await module.syncGuiManagedAnalytixConfig(tempRoot, next.runtime, { mcpConfigPath: join(tempRoot, 'missing-mcp.json') })
+    const result = JSON.parse(readFileSync(configPath, 'utf8'))
+    expect(result.capabilities.subagents.profiles.reviewer).toBeUndefined()
+    expect(result.capabilities.subagents.profiles.manual).toMatchObject({ promptPreamble: 'Manual' })
+    expect(result.capabilities.subagents.defaultProfile).toBeUndefined()
+  })
+
+  it('clears a GUI default without deleting its profile and retains an independently manual default', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const module = await loadAnalytixProcessFixture()
+    const previous = createSettings('/tmp/synthetic-unused-child.js')
+    previous.runtime.subagents.profiles = { reviewer: {
+      prompt: '', model: '', effort: '', toolPolicy: 'readOnly', tools: []
+    } }
+    previous.runtime.subagents.defaultProfile = 'reviewer'
+    const next = structuredClone(previous); next.runtime.subagents.defaultProfile = ''
+    const configPath = join(tempRoot, 'config.json')
+    writeFileSync(configPath, JSON.stringify({ capabilities: { subagents: {
+      profiles: { reviewer: { toolPolicy: 'readOnly' }, manual: { toolPolicy: 'inherit' } }, defaultProfile: 'reviewer'
+    } } }), 'utf8')
+    const options = { previousGuiSettings: previous, mcpConfigPath: join(tempRoot, 'missing-mcp.json') }
+    await module.syncGuiManagedAnalytixConfig(tempRoot, next.runtime, options)
+    let result = JSON.parse(readFileSync(configPath, 'utf8'))
+    expect(result.capabilities.subagents.defaultProfile).toBeUndefined()
+    expect(result.capabilities.subagents.profiles.reviewer).toBeDefined()
+    result.capabilities.subagents.defaultProfile = 'manual'; writeFileSync(configPath, JSON.stringify(result), 'utf8')
+    await module.syncGuiManagedAnalytixConfig(tempRoot, next.runtime, options)
+    result = JSON.parse(readFileSync(configPath, 'utf8'))
+    expect(result.capabilities.subagents.defaultProfile).toBe('manual')
+  })
+
+  it('removes an old GUI extra skill root instead of importing it as manual on the next startup', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const module = await loadAnalytixProcessFixture()
+    const previous = createSettings('/tmp/synthetic-unused-child.js')
+    previous.workspaceRoot = join(tempRoot, 'workspace')
+    const removed = join(tempRoot, 'removed-gui-skills'), manual = join(tempRoot, 'manual-skills')
+    mkdirSync(removed, { recursive: true }); mkdirSync(manual, { recursive: true })
+    previous.claw.skills.extraDirs = [removed]
+    const next = structuredClone(previous); next.claw.skills.extraDirs = []
+    const configPath = join(tempRoot, 'config.json')
+    writeFileSync(configPath, JSON.stringify({ capabilities: { skills: { roots: [removed, manual] } } }), 'utf8')
+    const scheduleMcp = { settings: next, launch: {
+      appPath: '/tmp/analytix-test-app', execPath: '/tmp/electron', isPackaged: false
+    } }
+    await module.syncGuiManagedAnalytixConfig(tempRoot, next.runtime, { scheduleMcp,
+      previousGuiSettings: previous, mcpConfigPath: join(tempRoot, 'missing-mcp.json') })
+    await module.syncGuiManagedAnalytixConfig(tempRoot, next.runtime, { scheduleMcp,
+      mcpConfigPath: join(tempRoot, 'missing-mcp.json') })
+    const result = JSON.parse(readFileSync(configPath, 'utf8'))
+    expect(result.capabilities.skills.roots).not.toContain(removed)
+    expect(result.capabilities.skills.roots).toContain(manual)
+  })
+
+  it('holds retirement through settings commit and admits a late startup only against current Host settings', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const module = await loadAnalytixProcessFixture()
+    const previous = createSettings('/tmp/synthetic-unused-child.js')
+    previous.runtime.dataDir = tempRoot
+    previous.runtime.subagents.profiles = { removed: {
+      prompt: '', model: '', effort: '', toolPolicy: 'readOnly', tools: []
+    } }
+    const next = structuredClone(previous); next.runtime.subagents.profiles = {}
+    let currentHost = previous, hostReads = 0
+    module.configureGuiManagedAnalytixSettingsReader(async () => { hostReads += 1; return currentHost })
+    const configPath = join(tempRoot, 'config.json')
+    const fundsRoot = join(tempRoot, 'preserved-plugin-funds', 'skills')
+    const mcp = { enabled: true, servers: { plugin_owned: { command: 'synthetic-plugin', args: [], env: {},
+      url: null, enabled: true, required: false, trustScope: 'user' } } }
+    writeFileSync(configPath, JSON.stringify({ capabilities: { mcp, skills: { roots: [fundsRoot] },
+      subagents: { profiles: { removed: { toolPolicy: 'readOnly' }, manual: { toolPolicy: 'inherit' } } } } }), 'utf8')
+    const release = await module.prepareGuiManagedAnalytixSettingsTransition(tempRoot, previous, next)
+    const retired = JSON.parse(readFileSync(configPath, 'utf8'))
+    expect(retired.capabilities.mcp).toEqual(mcp)
+    expect(retired.capabilities.skills.roots).toContain(fundsRoot)
+    const late = module.syncGuiManagedAnalytixConfig(tempRoot, previous.runtime, {
+      scheduleMcp: { settings: previous, launch: {
+        appPath: '/tmp/analytix-test-app', execPath: '/tmp/electron', isPackaged: false
+      } }, mcpConfigPath: join(tempRoot, 'missing-mcp.json')
+    })
+    await Promise.resolve()
+    expect(hostReads).toBe(0)
+    currentHost = next; release(); await late
+    const projected = JSON.parse(readFileSync(configPath, 'utf8'))
+    expect(hostReads).toBe(1)
+    expect(projected.capabilities.subagents.profiles.removed).toBeUndefined()
+    expect(projected.capabilities.subagents.profiles.manual).toBeDefined()
+  })
+
+  it.each(['{"capabilities":', '{"capabilities":{"skills":{"roots":null}}}', '{"capabilities":{"subagents":[]}}'])(
+    'refuses a malformed precommit projection without masking its input: %s', async raw => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const module = await loadAnalytixProcessFixture(), settings = createSettings('/tmp/synthetic-unused-child.js')
+    const configPath = join(tempRoot, 'config.json')
+    writeFileSync(configPath, raw, 'utf8')
+    await expect(module.prepareGuiManagedAnalytixSettingsTransition(tempRoot, settings, settings)).rejects.toThrow()
+    expect(readFileSync(configPath, 'utf8')).toBe(raw)
+    writeFileSync(configPath, '{}', 'utf8')
+    const release = await module.prepareGuiManagedAnalytixSettingsTransition(tempRoot, settings, settings)
+    release()
+  })
+
+  it('holds the old-directory writer through a data directory switch without rewriting the retired directory', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const module = await loadAnalytixProcessFixture(), previous = createSettings('/tmp/synthetic-unused-child.js')
+    previous.runtime.dataDir = tempRoot
+    const next = structuredClone(previous); next.runtime.dataDir = join(tempRoot, 'next-data')
+    let currentHost = previous
+    module.configureGuiManagedAnalytixSettingsReader(async () => currentHost)
+    const configPath = join(tempRoot, 'config.json'), raw = '{"capabilities":{}}'
+    writeFileSync(configPath, raw, 'utf8')
+    const oldWriter = await module.acquireGuiConfigWrite(tempRoot)
+    let switchAdmitted = false
+    const switching = module.acquireGuiConfigWrite(tempRoot).then(release => { switchAdmitted = true; return release })
+    await Promise.resolve(); expect(switchAdmitted).toBe(false)
+    oldWriter(); const releaseSwitch = await switching
+    const stale = module.syncGuiManagedAnalytixConfig(tempRoot, previous.runtime, {
+      scheduleMcp: { settings: previous, launch: {
+        appPath: '/tmp/analytix-test-app', execPath: '/tmp/electron', isPackaged: false
+      } }
+    })
+    const rejected = expect(stale).rejects.toThrow('Runtime settings changed before configuration projection.')
+    currentHost = next; releaseSwitch(); await rejected
+    expect(readFileSync(configPath, 'utf8')).toBe(raw)
+  })
+
+  it('does not introduce a new GUI profile before its settings intent has committed', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const module = await loadAnalytixProcessFixture(), previous = createSettings('/tmp/synthetic-unused-child.js')
+    const next = structuredClone(previous)
+    next.runtime.subagents.profiles = { uncommitted: {
+      prompt: 'Uncommitted fixture', model: '', effort: '', toolPolicy: 'readOnly', tools: []
+    } }
+    next.runtime.subagents.defaultProfile = 'uncommitted'
+    const configPath = join(tempRoot, 'config.json')
+    writeFileSync(configPath, JSON.stringify({ capabilities: { subagents: {
+      profiles: { manual: { toolPolicy: 'inherit' } }, defaultProfile: 'manual'
+    } } }), 'utf8')
+    const release = await module.prepareGuiManagedAnalytixSettingsTransition(tempRoot, previous, next)
+    release()
+    const projected = JSON.parse(readFileSync(configPath, 'utf8'))
+    expect(projected.capabilities.subagents.profiles.uncommitted).toBeUndefined()
+    expect(projected.capabilities.subagents.profiles.manual).toBeDefined()
+    expect(projected.capabilities.subagents.defaultProfile).toBe('manual')
+  })
+
   it('uses the configured main-private MCP path when the caller does not pass one', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const dataDir = join(tempRoot, 'runtime-data')
@@ -731,7 +912,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     module.configureAnalytixProcessMainPrivatePaths({
       mcpConfigPath: isolatedMcpConfigPath
     })
@@ -748,7 +929,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('creates a production runtime config containing only active settings', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings())
 
@@ -785,7 +966,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('writes GUI-managed subagent profiles into runtime capabilities config', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, {
       ...defaultAnalytixRuntimeSettings(),
@@ -830,7 +1011,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('does not copy Electron-only image generation settings or secrets into runtime config', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const runtime = {
       ...defaultAnalytixRuntimeSettings(),
       imageGeneration: {
@@ -859,7 +1040,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('keeps the config stable across repeated syncs with imageGen configured', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const runtime = {
       ...defaultAnalytixRuntimeSettings(),
       imageGeneration: {
@@ -888,7 +1069,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('does not copy unsupported media generation settings or secrets into runtime config', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const runtime = {
       ...defaultAnalytixRuntimeSettings(),
       textToSpeech: {
@@ -943,7 +1124,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('adds the built-in schedule MCP server to Analytix runtime capabilities', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('/tmp/fake-analytix-child.js')
     settings.schedule.internal.port = 9788
     settings.schedule.internal.secret = 'top-secret'
@@ -1017,7 +1198,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('/tmp/fake-analytix-child.js')
     settings.schedule.internal.port = 9788
 
@@ -1044,7 +1225,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
 
   it('snapshots the persisted and private schedule projection before asynchronous config work', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('/tmp/fake-analytix-child.js')
     settings.schedule.internal.port = 9788
     settings.schedule.internal.secret = 'initial-secret'
@@ -1083,7 +1264,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('closes an invalid schedule projection without blocking ordinary runtime config', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     const syncResult = await module.syncGuiManagedAnalytixConfig(
       tempRoot,
@@ -1109,7 +1290,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('closes an escape-expanded oversized schedule frame without blocking ordinary runtime config', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('/tmp/fake-analytix-child.js')
     settings.schedule.internal.port = 9788
     settings.schedule.internal.secret = '&'.repeat(90_000)
@@ -1135,10 +1316,10 @@ describe('syncGuiManagedAnalytixConfig', () => {
     expect(AnalytixConfigSchema.safeParse(parsed).success).toBe(true)
   })
 
-  it('auto-registers the bundled Analytix Computer Use MCP server when enabled', async () => {
+  it('registers the enabled bundled Computer Use MCP spec for deferred first-use connection', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const command = join(tempRoot, 'analytix-computer-use')
     const previousCommand = process.env.ANALYTIX_COMPUTER_USE_MCP_COMMAND
     writeFileSync(command, '', 'utf8')
@@ -1152,6 +1333,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
     }
 
     const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as any
+    expect(AnalytixConfigSchema.safeParse(parsed).success).toBe(true)
     expect(parsed.capabilities.mcp.enabled).toBe(true)
     expect(parsed.capabilities.mcp.servers['analytix-computer-use']).toMatchObject({
       enabled: true,
@@ -1162,14 +1344,14 @@ describe('syncGuiManagedAnalytixConfig', () => {
         ANALYTIX_COMPUTER_USE_MANAGED_BY: 'analytix'
       },
       trustScope: 'user',
-      backgroundStart: false,
+      backgroundStart: true,
       timeoutMs: 30000
     })
   })
 
   it('resolves the packaged Windows Analytix Computer Use native executable before command shims', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const root = join(tempRoot, 'app.asar.unpacked')
     const native = join(
       root,
@@ -1199,7 +1381,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
   it('adds GUI project and configured global skill roots to Analytix runtime capabilities', async () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('/tmp/fake-analytix-child.js')
     const workspaceRoot = join(tempRoot, 'workspace')
     const extraRoot = join(tempRoot, 'extra-skills')
@@ -1235,7 +1417,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
     writeFileSync(configPath, JSON.stringify({
       capabilities: { skills: { enabled: false, roots: [], legacySkillMd: true } }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     const settings = createSettings('/tmp/fake-analytix-child.js')
     const workspaceRoot = join(tempRoot, 'workspace')
     settings.workspaceRoot = workspaceRoot
@@ -1315,7 +1497,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, {
       ...defaultAnalytixRuntimeSettings(),
@@ -1423,6 +1605,12 @@ describe('syncGuiManagedAnalytixConfig', () => {
           enabled: true,
           disabled: false
         },
+        'custom-eager': {
+          enabled: true,
+          command: 'custom-eager-mcp',
+          args: ['serve'],
+          backgroundStart: false
+        },
         'docs-mcp': {
           url: 'https://mcp.example.test/mcp',
           headers: {
@@ -1431,7 +1619,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath
@@ -1450,6 +1638,14 @@ describe('syncGuiManagedAnalytixConfig', () => {
       },
       lowPriority: true,
       backgroundStart: true,
+      trustScope: 'user'
+    })
+    expect(parsed.capabilities.mcp.servers['custom-eager']).toMatchObject({
+      enabled: true,
+      transport: 'stdio',
+      command: 'custom-eager-mcp',
+      args: ['serve'],
+      backgroundStart: false,
       trustScope: 'user'
     })
     expect(parsed.capabilities.mcp.servers['docs-mcp']).toMatchObject({
@@ -1496,7 +1692,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
       }
     }), 'utf8')
     sealAuthorizedLocalRemountFixture(pluginDir, 'memory', '2026.1.26')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath
@@ -1554,7 +1750,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
       JSON.stringify(['demo-bin', 'demo-plugin']),
       'utf8'
     )
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     let firstConfigText = ''
     let firstSidecarText = ''
 
@@ -1646,7 +1842,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
       }
     }), 'utf8')
     sealAuthorizedLocalRemountFixture(pluginDir, 'extension-demo', '1.0.0')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath: join(tempRoot, 'missing-mcp.json')
@@ -1704,7 +1900,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
     }), 'utf8')
     sealSelfAuthoredHubInstallFixture(pluginDir, 'forged-plugin', '1.0.0')
 
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
     await module.syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath: join(tempRoot, 'missing-mcp.json')
     })
@@ -1771,7 +1967,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     try {
       await module.syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
@@ -1825,7 +2021,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
     sealAuthorizedLocalRemountFixture(pluginDir, 'demo-plugin', '1.0.0')
     mkdirSync(dataDir, { recursive: true })
     writeFileSync(configPath, JSON.stringify({ capabilities: { mcp: { enabled: false } } }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     try {
       await module.syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
@@ -1891,7 +2087,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     try {
       await module.syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
@@ -1940,7 +2136,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
       }
     }), 'utf8')
     sealAuthorizedLocalRemountFixture(pluginDir, 'escape-plugin', '1.0.0')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath
@@ -1991,7 +2187,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
       }
     }), 'utf8')
     writeBoundPluginMcpSidecar(dataDir, configPath, ['app-resource'])
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(dataDir, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath
@@ -2039,7 +2235,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
       }
     }), 'utf8')
     writeBoundPluginMcpSidecar(tempRoot, configPath, ['demo-plugin'])
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath
@@ -2073,7 +2269,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     writeManualConfig()
     writeFileSync(sidecarPath, JSON.stringify(['manual']), 'utf8')
@@ -2128,7 +2324,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
     }), 'utf8')
     writeFileSync(sidecarPath, '{"schemaVersion":1,"schemaVersion":2}', 'utf8')
     chmodSync(sidecarPath, 0o600)
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath: join(tempRoot, 'missing-mcp.json')
@@ -2152,7 +2348,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
     }), 'utf8')
     writeFileSync(externalPath, JSON.stringify(['manual']), 'utf8')
     symlinkSync(externalPath, sidecarPath)
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await expect(module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath: join(tempRoot, 'missing-mcp.json')
@@ -2184,7 +2380,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings(), {
       mcpConfigPath
@@ -2199,7 +2395,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
     if (!tempRoot) throw new Error('temp root not initialized')
     const configPath = join(tempRoot, 'config.json')
     writeFileSync(configPath, '{ legacy config', 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings())
 
@@ -2217,7 +2413,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     const syncResult = await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings(), {
       scheduleMcp: {
@@ -2247,7 +2443,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings())
 
@@ -2268,7 +2464,7 @@ describe('syncGuiManagedAnalytixConfig', () => {
         }
       }
     }), 'utf8')
-    const module = await import('./analytix-process')
+    const module = await loadAnalytixProcessFixture()
 
     await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings())
 
@@ -2278,6 +2474,36 @@ describe('syncGuiManagedAnalytixConfig', () => {
       fetchEnabled: false,
       searchEnabled: true,
       provider: 'custom-search'
+    })
+  })
+})
+
+describe('normal user-input policy config writer', () => {
+  it('keeps the leaf absent until Settings explicitly configures it', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const module = await loadAnalytixProcessFixture()
+    await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings(), { mcpConfigPath: join(tempRoot, 'isolated-mcp.json') })
+    const configPath = join(tempRoot, 'config.json')
+    expect(JSON.parse(readFileSync(configPath, 'utf8')).runtime.userInput).toBeUndefined()
+    await module.syncGuiManagedAnalytixConfig(tempRoot, { ...defaultAnalytixRuntimeSettings(), userInput: { policy: 'timed', defaultTimeoutSeconds: null } }, { mcpConfigPath: join(tempRoot, 'isolated-mcp.json') })
+    expect(JSON.parse(readFileSync(configPath, 'utf8')).runtime.userInput).toEqual({ policy: 'timed', defaultTimeoutSeconds: null })
+  })
+  it('preserves a legitimate existing leaf when old GUI settings lack it', async () => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const configPath = join(tempRoot, 'config.json'), existing = { runtime: { userInput: { policy: 'timed', defaultTimeoutSeconds: -1 } } }
+    writeFileSync(configPath, JSON.stringify(existing), 'utf8')
+    const module = await loadAnalytixProcessFixture()
+    await module.syncGuiManagedAnalytixConfig(tempRoot, defaultAnalytixRuntimeSettings(), { mcpConfigPath: join(tempRoot, 'isolated-mcp.json') })
+    expect(JSON.parse(readFileSync(configPath, 'utf8')).runtime.userInput).toEqual(existing.runtime.userInput)
+  })
+  it.each([{ userInput: { defaultTimeoutSeconds: 120 } }, { userInput: { policy: 'timed', defaultTimeoutSeconds: 0 } },
+    { userInput: { policy: 'timed' }, streamIdleTimeoutMs: -1 }])('fails closed before writing an invalid active section %j', runtime => {
+    if (!tempRoot) throw new Error('temp root not initialized')
+    const configPath = join(tempRoot, 'config.json'), before = JSON.stringify({ runtime })
+    writeFileSync(configPath, before, 'utf8')
+    return loadAnalytixProcessFixture().then(async module => {
+      await expect(module.syncGuiManagedAnalytixConfig(tempRoot!, defaultAnalytixRuntimeSettings(), { mcpConfigPath: join(tempRoot!, 'isolated-mcp.json') })).rejects.toThrow()
+      expect(readFileSync(configPath, 'utf8')).toBe(before)
     })
   })
 })

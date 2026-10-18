@@ -1,0 +1,1686 @@
+diff --git a/node_modules/@fortune-sheet/core/dist/index.esm.js b/node_modules/@fortune-sheet/core/dist/index.esm.js
+index 5c9820b1a261305d500e69eeaf350821872beaf4..2e1469ed8e7f6f37f2dc78390f6c4d347adb7f6e 100644
+--- a/node_modules/@fortune-sheet/core/dist/index.esm.js
++++ b/node_modules/@fortune-sheet/core/dist/index.esm.js
+@@ -62866,7 +62866,7 @@
+         if (_.isNil(c_value)) {
+           c_value = "";
+         }
+-        column += escapeHTMLTag(c_value);
++        column += _.escape(c_value);
+       } else {
+         var _style = "";
+         if (borderInfoCompute && borderInfoCompute["".concat(r, "_").concat(c)]) {
+@@ -62923,6 +62923,36 @@
+   return "<table data-type=\"fortune-copy-action-table\">".concat(colgroup).concat(cpdata, "</table>");
+ }
+ function copy(ctx) {
++  if (ctx.protectedCopy !== undefined) {
++    try {
++      var protectedCopy = ctx.protectedCopy;
++      var protectedSelections = ctx.luckysheet_select_save;
++      var protectedSheetId = ctx.currentSheetId;
++      if (typeof protectedCopy !== "function" || typeof protectedSheetId !== "string" ||
++          !Array.isArray(ctx.luckysheetfile) || !ctx.luckysheetfile.some(function (sheet) { return sheet.id === protectedSheetId; }) ||
++          !Array.isArray(protectedSelections) || protectedSelections.length < 1 || protectedSelections.length > 32) return;
++      var protectedBounds = trueSheetBounds(ctx);
++      if (!protectedBounds) return;
++      var protectedRanges = [];
++      for (var protectedIndex = 0; protectedIndex < protectedSelections.length; protectedIndex += 1) {
++        var protectedRange = protectedSelections[protectedIndex];
++        if (!protectedRange || !Array.isArray(protectedRange.row) || protectedRange.row.length !== 2 ||
++            !Array.isArray(protectedRange.column) || protectedRange.column.length !== 2) return;
++        var protectedRow = [protectedRange.row[0], protectedRange.row[1]];
++        var protectedColumn = [protectedRange.column[0], protectedRange.column[1]];
++        if (!protectedRow.concat(protectedColumn).every(function (value) { return Number.isSafeInteger(value) && value >= 0; }) ||
++            protectedRow[0] > protectedRow[1] || protectedColumn[0] > protectedColumn[1] ||
++            protectedRow[1] >= protectedBounds.rows || protectedColumn[1] >= protectedBounds.columns) return;
++        protectedRanges.push({ row: protectedRow, column: protectedColumn });
++      }
++      // Synchronous handoff only. Every return value, including a Promise,
++      // remains in this protected branch and cannot authorize native fallback.
++      protectedCopy({ sheetId: protectedSheetId, ranges: protectedRanges });
++    } catch (error) {
++      // An unavailable or throwing owner never reaches the native clipboard.
++    }
++    return;
++  }
+   var flowdata = getFlowdata(ctx);
+   ctx.luckysheet_selection_range = [];
+   var copyRange = [];
+@@ -63429,6 +63459,7 @@
+     zoomRatio: 1,
+     showGridLines: true,
+     allowEdit: true,
++    readonlyViewport: false,
+     fontList: [],
+     defaultFontSize: 10,
+     luckysheetPaintModelOn: false,
+@@ -67746,6 +67777,7 @@
+   var y = e.pageY - rect.top - ctx.columnHeaderHeight;
+   x += scrollLeft;
+   y += scrollTop;
++  if (!readonlyTruePixel(ctx, x, y)) return undefined;
+   var r = rowLocation(y, ctx.visibledatarow)[2];
+   var c = colLocation(x, ctx.visibledatacolumn)[2];
+   var margeset = mergeBorder(ctx, flowdata, r, c);
+@@ -69693,6 +69725,10 @@
+   var offsetY = 0;
+   x += scrollLeft;
+   y += scrollTop;
++  if (!readonlyTruePixel(ctx, x, y)) {
++    ctx.hoveredCommentBox = undefined;
++    return;
++  }
+   var r = rowLocation(y, ctx.visibledatarow)[2];
+   var c = colLocation(x, ctx.visibledatacolumn)[2];
+   var margeset = mergeBorder(ctx, flowdata, r, c);
+@@ -70517,6 +70553,7 @@
+   }
+ }
+ function createDropCellRange(ctx, e, container) {
++  if (isReadonlyViewport(ctx)) return;
+   ctx.luckysheet_cell_selected_extend = true;
+   ctx.luckysheet_scroll_status = true;
+   var scrollLeft = ctx.scrollLeft,
+@@ -70541,6 +70578,7 @@
+   }, container);
+ }
+ function onDropCellSelect(ctx, e, scrollX, scrollY, container) {
++  if (isReadonlyViewport(ctx)) return;
+   var scrollLeft = scrollX.scrollLeft;
+   var scrollTop = scrollY.scrollTop;
+   var rect = container.getBoundingClientRect();
+@@ -72397,6 +72435,7 @@
+   var _ctx$luckysheet_selec3;
+   ctx.luckysheet_cell_selected_extend = false;
+   hideDropCellSelection(container);
++  if (isReadonlyViewport(ctx)) return;
+   var scrollLeft = ctx.scrollLeft,
+     scrollTop = ctx.scrollTop;
+   var rect = container.getBoundingClientRect();
+@@ -72602,8 +72641,192 @@
+     canvasborder.lineWidth = 1;
+   }
+ }
++function isReadonlyViewport(ctx) {
++  return ctx.readonlyViewport === true && ctx.allowEdit === false;
++}
++function readonlyViewAxis(real, minimumCount, viewportPixels, defaultSize, zoom) {
++  if (!Array.isArray(real) || !Number.isFinite(viewportPixels) ||
++      !Number.isFinite(defaultSize) || defaultSize < 0 ||
++      !Number.isFinite(zoom) || zoom <= 0) return null;
++  var realLast = real.length === 0 ? 0 : real[real.length - 1];
++  if (!Number.isFinite(realLast) || realLast < 0) return null;
++  var step = Math.max(1, Math.round((defaultSize + 1) * zoom));
++  if (!Number.isFinite(step)) return null;
++  var extra = Math.ceil(Math.max(0, viewportPixels) / step) + 1;
++  var count = Math.max(real.length, minimumCount, real.length + extra);
++  if (!Number.isSafeInteger(count)) return null;
++  return { real: real, count: count, step: step, last: realLast };
++}
++function readonlyViewAxisEnd(axis, index) {
++  if (index < 0) return 0;
++  return index < axis.real.length
++    ? axis.real[index]
++    : axis.last + (index - axis.real.length + 1) * axis.step;
++}
++// Matches lodash.sortedIndex semantics; do not change real rowLocation/colLocation.
++function readonlyViewAxisIndex(axis, pixel) {
++  if (pixel <= axis.last && axis.real.length > 0) {
++    return _.sortedIndex(axis.real, pixel);
++  }
++  var index = axis.real.length + Math.max(0,
++    Math.ceil((pixel - axis.last) / axis.step) - 1);
++  // count sets DOM scroll extent; the draw tail may include one partial
++  // row/column beyond that edge if scrollbar/canvas client sizes differ.
++  return index;
++}
++function createReadonlyViewGeometry(ctx) {
++  if (!isReadonlyViewport(ctx)) return null;
++  var rows = readonlyViewAxis(ctx.visibledatarow, 1000,
++    ctx.cellmainHeight, ctx.defaultrowlen, ctx.zoomRatio);
++  var columns = readonlyViewAxis(ctx.visibledatacolumn, 256,
++    ctx.cellmainWidth, ctx.defaultcollen, ctx.zoomRatio);
++  if (!rows || !columns) return null;
++  var height = readonlyViewAxisEnd(rows, rows.count - 1);
++  var width = readonlyViewAxisEnd(columns, columns.count - 1);
++  if (!Number.isFinite(height) || !Number.isFinite(width)) return null;
++  return {
++    rows: rows, columns: columns,
++    height: height, width: width
++  };
++}
++function drawReadonlyVirtualHeader(owner, renderCtx, isRow, scroll, size, offset) {
++  var geometry = owner.readonlyViewGeometry;
++  if (!geometry) return;
++  var ctx = owner.sheetCtx;
++  var axis = isRow ? geometry.rows : geometry.columns;
++  var first = Math.max(axis.real.length, readonlyViewAxisIndex(axis, scroll));
++  var last = readonlyViewAxisIndex(axis, scroll + size);
++  for (var index = first; index <= last; index += 1) {
++    var start = readonlyViewAxisEnd(axis, index - 1) - scroll - (isRow ? 1 : 0);
++    var end = readonlyViewAxisEnd(axis, index) - scroll;
++    var text = isRow ? String(index + 1) : indexToColumnChar(index);
++    renderCtx.fillStyle = '#ffffff';
++    if (isRow) {
++      renderCtx.fillRect(0, start + offset,
++        ctx.rowHeaderWidth - 1, end - start + 1);
++    } else {
++      renderCtx.fillRect(start + offset - 1, 0,
++        end - start, ctx.columnHeaderHeight - 1);
++    }
++    renderCtx.fillStyle = '#000000';
++    renderCtx.save();
++    renderCtx.scale(ctx.zoomRatio, ctx.zoomRatio);
++    var metrics = getMeasureText(text, renderCtx, ctx);
++    var textX = isRow ? (ctx.rowHeaderWidth - metrics.width) / 2
++      : Math.round(start + (end - start) / 2 + offset - metrics.width / 2);
++    var textY = isRow ? start + (end - start) / 2 + offset
++      : Math.round(ctx.columnHeaderHeight / 2);
++    renderCtx.fillText(text, textX / ctx.zoomRatio, textY / ctx.zoomRatio);
++    renderCtx.restore();
++    renderCtx.beginPath();
++    renderCtx.lineWidth = 1;
++    renderCtx.strokeStyle = defaultStyle.strokeStyle;
++    if (isRow) {
++      renderCtx.moveTo(-1, end + offset - 2 + 0.5);
++      renderCtx.lineTo(ctx.rowHeaderWidth - 1, end + offset - 2 + 0.5);
++      renderCtx.moveTo(ctx.rowHeaderWidth - 2 + 0.5, start + offset - 2);
++      renderCtx.lineTo(ctx.rowHeaderWidth - 2 + 0.5, end + offset - 2);
++    } else {
++      renderCtx.moveTo(end + offset - 2 + 0.5, 0);
++      renderCtx.lineTo(end + offset - 2 + 0.5, ctx.columnHeaderHeight - 2);
++      renderCtx.moveTo(start + offset - 1, ctx.columnHeaderHeight - 2 + 0.5);
++      renderCtx.lineTo(end + offset - 1, ctx.columnHeaderHeight - 2 + 0.5);
++    }
++    renderCtx.stroke();
++    renderCtx.closePath();
++  }
++}
++function drawReadonlyViewportBlank(owner, renderCtx, scrollWidth, scrollHeight,
++    drawWidth, drawHeight, offsetLeft, offsetTop) {
++  var geometry = owner.readonlyViewGeometry;
++  if (!geometry) return;
++  var ctx = owner.sheetCtx;
++  var x0 = offsetLeft - 1;
++  var y0 = offsetTop - 1;
++  var width = Math.max(0, Math.min(drawWidth,
++    ctx.luckysheetTableContentHW[0] - x0));
++  var height = Math.max(0, Math.min(drawHeight,
++    ctx.luckysheetTableContentHW[1] - y0));
++  if (width === 0 || height === 0) return;
++  var rightStart = Math.max(x0, Math.min(x0 + width,
++    geometry.columns.last - scrollWidth + x0));
++  var bottomStart = Math.max(y0, Math.min(y0 + height,
++    geometry.rows.last - scrollHeight + y0));
++  renderCtx.save();
++  renderCtx.beginPath();
++  renderCtx.rect(rightStart, y0, x0 + width - rightStart, height);
++  renderCtx.rect(x0, bottomStart, width, y0 + height - bottomStart);
++  renderCtx.clip();
++  renderCtx.fillStyle = '#ffffff';
++  renderCtx.fillRect(x0, y0, width, height);
++  if (!ctx.luckysheetcurrentisPivotTable && ctx.showGridLines) {
++    renderCtx.beginPath();
++    renderCtx.lineWidth = 1;
++    renderCtx.strokeStyle = defaultStyle.strokeStyle;
++    var firstRow = readonlyViewAxisIndex(geometry.rows, scrollHeight);
++    var lastRow = readonlyViewAxisIndex(geometry.rows, scrollHeight + height);
++    for (var row = firstRow; row <= lastRow; row += 1) {
++      var rowEdge = readonlyViewAxisEnd(geometry.rows, row);
++      var y = rowEdge - scrollHeight + offsetTop - 2 + 0.5;
++      renderCtx.moveTo(x0, y);
++      renderCtx.lineTo(x0 + width, y);
++      if (row < geometry.rows.real.length) {
++        row = Math.max(row, _.sortedLastIndex(geometry.rows.real, rowEdge) - 1);
++      }
++    }
++    var firstColumn = readonlyViewAxisIndex(geometry.columns, scrollWidth);
++    var lastColumn = readonlyViewAxisIndex(geometry.columns, scrollWidth + width);
++    for (var column = firstColumn; column <= lastColumn; column += 1) {
++      var columnEdge = readonlyViewAxisEnd(geometry.columns, column);
++      var x = columnEdge - scrollWidth + offsetLeft - 2 + 0.5;
++      renderCtx.moveTo(x, y0);
++      renderCtx.lineTo(x, y0 + height);
++      if (column < geometry.columns.real.length) {
++        column = Math.max(column,
++          _.sortedLastIndex(geometry.columns.real, columnEdge) - 1);
++      }
++    }
++    renderCtx.stroke();
++    renderCtx.closePath();
++  }
++  renderCtx.restore();
++}
++function trueSheetBounds(ctx) {
++  if (typeof ctx.currentSheetId !== 'string' || !Array.isArray(ctx.luckysheetfile)) return null;
++  var sheet = ctx.luckysheetfile.find(function (item) { return item && item.id === ctx.currentSheetId; });
++  if (!sheet || !Array.isArray(sheet.data) || sheet.data.length === 0 ||
++      !Array.isArray(sheet.data[0]) || sheet.data[0].length === 0) return null;
++  // data is the actual already initialized rectangular workbook matrix.
++  // No getFlowdata(), padding, conversion, max scan or used-bound recomputation.
++  return { rows: sheet.data.length, columns: sheet.data[0].length };
++}
++function trueRangeInBounds(bounds, range) {
++  if (!bounds || !range || !Array.isArray(range.row) || range.row.length !== 2 ||
++      !Array.isArray(range.column) || range.column.length !== 2) return false;
++  var r0 = range.row[0], r1 = range.row[1], c0 = range.column[0], c1 = range.column[1];
++  return [r0, r1, c0, c1].every(function (value) { return Number.isSafeInteger(value) && value >= 0; }) &&
++    r0 <= r1 && c0 <= c1 && r1 < bounds.rows && c1 < bounds.columns;
++}
++function trueSelectionsInBounds(ctx, selections) {
++  var bounds = trueSheetBounds(ctx);
++  return !!bounds && Array.isArray(selections) && selections.length > 0 &&
++    selections.every(function (range) { return trueRangeInBounds(bounds, range); });
++}
++function readonlyTruePixel(ctx, x, y) {
++  if (!isReadonlyViewport(ctx)) return true;
++  var rows = ctx.visibledatarow;
++  var columns = ctx.visibledatacolumn;
++  if (!Array.isArray(rows) || !Array.isArray(columns)) return false;
++  // null means this header/operation checks only the other axis.
++  if (x !== null && (!Number.isFinite(x) || x < 0 || columns.length === 0 ||
++      x >= columns[columns.length - 1])) return false;
++  if (y !== null && (!Number.isFinite(y) || y < 0 || rows.length === 0 ||
++      y >= rows[rows.length - 1])) return false;
++  return true;
++}
++
+ var Canvas = /*#__PURE__*/function () {
+-  function Canvas(canvasElement, ctx) {
++  function Canvas(canvasElement, ctx, readonlyViewGeometry) {
+     _classCallCheck(this, Canvas);
+     this.canvasElement = void 0;
+     this.sheetCtx = void 0;
+@@ -72611,6 +72834,7 @@
+     this.cellOverflowMapCache = void 0;
+     this.canvasElement = canvasElement;
+     this.sheetCtx = ctx;
++    this.readonlyViewGeometry = isReadonlyViewport(ctx) ? readonlyViewGeometry || null : null;
+     this.cellOverflowMapCache = {};
+   }
+   return _createClass(Canvas, [{
+@@ -72641,6 +72865,7 @@
+       if (dataset_row_ed === -1) {
+         dataset_row_ed = this.sheetCtx.visibledatarow.length - 1;
+       }
++      if (this.readonlyViewGeometry) dataset_row_ed = Math.min(dataset_row_ed, this.sheetCtx.visibledatarow.length - 1);
+       renderCtx.save();
+       renderCtx.beginPath();
+       renderCtx.rect(0, offsetTop - 1, this.sheetCtx.rowHeaderWidth - 1, drawHeight - 2);
+@@ -72704,6 +72929,7 @@
+         preEndR = end_r;
+         (_this$sheetCtx$hooks$2 = (_this$sheetCtx$hooks2 = this.sheetCtx.hooks).afterRenderRowHeaderCell) === null || _this$sheetCtx$hooks$2 === void 0 ? void 0 : _this$sheetCtx$hooks$2.call(_this$sheetCtx$hooks2, "".concat(r + 1), r, start_r + offsetTop + firstOffset, this.sheetCtx.rowHeaderWidth - 1, end_r - start_r + 1 + lastOffset - firstOffset, renderCtx);
+       }
++      drawReadonlyVirtualHeader(this, renderCtx, true, scrollHeight, drawHeight, offsetTop);
+       renderCtx.restore();
+       renderCtx.restore();
+     }
+@@ -72735,6 +72961,7 @@
+       if (dataset_col_ed === -1) {
+         dataset_col_ed = this.sheetCtx.visibledatacolumn.length - 1;
+       }
++      if (this.readonlyViewGeometry) dataset_col_ed = Math.min(dataset_col_ed, this.sheetCtx.visibledatacolumn.length - 1);
+       renderCtx.save();
+       renderCtx.beginPath();
+       renderCtx.rect(offsetLeft - 1, 0, drawWidth, this.sheetCtx.columnHeaderHeight - 1);
+@@ -72799,6 +73026,7 @@
+         preEndC = end_c;
+         (_this$sheetCtx$hooks$4 = (_this$sheetCtx$hooks4 = this.sheetCtx.hooks).afterRenderColumnHeaderCell) === null || _this$sheetCtx$hooks$4 === void 0 ? void 0 : _this$sheetCtx$hooks$4.call(_this$sheetCtx$hooks4, abc, c, start_c + offsetLeft - 1, end_c - start_c, this.sheetCtx.columnHeaderHeight - 1, renderCtx);
+       }
++      drawReadonlyVirtualHeader(this, renderCtx, false, scrollWidth, drawWidth, offsetLeft);
+       renderCtx.restore();
+       renderCtx.restore();
+     }
+@@ -72851,6 +73079,27 @@
+       renderCtx.scale(this.sheetCtx.devicePixelRatio, this.sheetCtx.devicePixelRatio);
+       if (clear) {
+         renderCtx.clearRect(0, 0, this.sheetCtx.luckysheetTableContentHW[0], this.sheetCtx.luckysheetTableContentHW[1]);
++      }
++      var geometry = isReadonlyViewport(this.sheetCtx) ? this.readonlyViewGeometry : null;
++      if (geometry) {
++        var viewLeft = offsetLeft - 1;
++        var viewTop = offsetTop - 1;
++        var viewWidth = Math.max(0, Math.min(drawWidth, this.sheetCtx.luckysheetTableContentHW[0] - viewLeft));
++        var viewHeight = Math.max(0, Math.min(drawHeight, this.sheetCtx.luckysheetTableContentHW[1] - viewTop));
++        if (viewWidth === 0 || viewHeight === 0) {
++          renderCtx.restore();
++          return;
++        }
++        renderCtx.beginPath();
++        renderCtx.rect(viewLeft, viewTop, viewWidth, viewHeight);
++        renderCtx.clip();
++        if (geometry.rows.real.length === 0 || geometry.columns.real.length === 0 ||
++            scrollHeight >= geometry.rows.last || scrollWidth >= geometry.columns.last) {
++          drawReadonlyViewportBlank(this, renderCtx, scrollWidth, scrollHeight,
++            drawWidth, drawHeight, offsetLeft, offsetTop);
++          renderCtx.restore();
++          return;
++        }
+       }
+       var rowStart;
+       var rowEnd;
+@@ -73167,6 +73416,10 @@
+       if (colEnd === this.sheetCtx.visibledatacolumn.length - 1) {
+         renderCtx.clearRect(colEndX - scrollWidth + offsetLeft - 1, offsetTop - 1, this.sheetCtx.ch_width - this.sheetCtx.visibledatacolumn[colEnd], rowEndY - scrollHeight);
+       }
++      if (geometry) {
++        drawReadonlyViewportBlank(this, renderCtx, scrollWidth, scrollHeight,
++          drawWidth, drawHeight, offsetLeft, offsetTop);
++      }
+       renderCtx.restore();
+       this.measureTextCacheTimeOut = setTimeout(function () {
+         clearMeasureTextCache();
+@@ -73869,6 +74122,7 @@
+   }, {
+     key: "drawFreezeLine",
+     value: function drawFreezeLine(_ref2) {
++      if (this.sheetCtx.allowEdit === false) return;
+       var horizontalTop = _ref2.horizontalTop,
+         verticalLeft = _ref2.verticalLeft;
+       var renderCtx = this.canvasElement.getContext("2d");
+@@ -76737,6 +76991,7 @@
+   config: {},
+   devicePixelRatio: 0,
+   allowEdit: true,
++  readonlyViewport: false,
+   lang: null,
+   forceCalculation: false,
+   rowHeaderWidth: 46,
+@@ -76758,6 +77013,8 @@
+ };
+ 
+ function handleCopy(ctx) {
++  if ((ctx.protectedCopy !== undefined || isReadonlyViewport(ctx)) &&
++      !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   if (ctx.luckysheetPaintModelOn) {
+     cancelPaintModel(ctx);
+   }
+@@ -76970,6 +77227,7 @@
+   } else if (e.code === "KeyB") {
+     handleBold(ctx, cellInput);
+   } else if (e.code === "KeyC") {
++    if (ctx.protectedCopy !== undefined) e.preventDefault();
+     handleCopy(ctx);
+     e.stopPropagation();
+     return;
+@@ -77244,6 +77502,34 @@
+   var _cache$searchDialog;
+   if (((_cache$searchDialog = cache.searchDialog) === null || _cache$searchDialog === void 0 ? void 0 : _cache$searchDialog.mouseEnter) && ctx.showSearch && ctx.showReplace) return;
+   if (ctx.filterContextMenu != null) return;
++  if (isReadonlyViewport(ctx)) {
++    e.preventDefault();
++    if (![0, 1, 2].includes(e.deltaMode) ||
++        !Number.isFinite(e.deltaX) || !Number.isFinite(e.deltaY)) return;
++    var viewGeometry = createReadonlyViewGeometry(ctx);
++    if (!viewGeometry) return;
++    var unitX = e.deltaMode === 1 ? viewGeometry.columns.step : e.deltaMode === 2 ? ctx.cellmainWidth : 1;
++    var unitY = e.deltaMode === 1 ? viewGeometry.rows.step : e.deltaMode === 2 ? ctx.cellmainHeight : 1;
++    var deltaX = e.deltaX * unitX;
++    var deltaY = e.deltaY * unitY;
++    if (!Number.isFinite(unitX) || unitX <= 0 || !Number.isFinite(unitY) || unitY <= 0 ||
++        !Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
++    scrollbarX.scrollLeft += deltaX;
++    scrollbarY.scrollTop += deltaY;
++    ctx.scrollLeft = scrollbarX.scrollLeft;
++    ctx.scrollTop = scrollbarY.scrollTop;
++    return;
++  }
++  // Read-only trackpad panning follows pixel deltas on both axes without a gesture lock.
++  if (ctx.allowEdit === false && e.deltaMode === 0) {
++    scrollbarX.scrollLeft += e.deltaX;
++    scrollbarY.scrollTop += e.deltaY;
++    // Keep React scrollbar effects aligned with the browser-clamped offsets.
++    ctx.scrollLeft = scrollbarX.scrollLeft;
++    ctx.scrollTop = scrollbarY.scrollTop;
++    e.preventDefault();
++    return;
++  }
+   var scrollLeft = scrollbarX.scrollLeft;
+   var scrollTop = scrollbarY.scrollTop;
+   var visibledatacolumn_c = ctx.visibledatacolumn;
+@@ -77330,6 +77616,8 @@
+   };
+ }
+ function handleCellAreaMouseDown(ctx, globalCache, e, cellInput, container, fxInput, canvas) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   var _globalCache$freezen, _ctx$hooks$beforeCell, _ctx$hooks, _flowdata$row_index;
+   ctx.contextMenu = {};
+   ctx.filterContextMenu = undefined;
+@@ -77351,6 +77639,7 @@
+     y = _fixPositionOnFrozenC.y,
+     inHorizontalFreeze = _fixPositionOnFrozenC.inHorizontalFreeze,
+     inVerticalFreeze = _fixPositionOnFrozenC.inVerticalFreeze;
++  if (!readonlyTruePixel(ctx, x, y)) return;
+   var row_location = rowLocation(y, ctx.visibledatarow);
+   var row = row_location[1];
+   var row_pre = row_location[0];
+@@ -77569,6 +77858,7 @@
+     if (e.shiftKey) {
+       var _ctx$luckysheet_selec;
+       var _last = (_ctx$luckysheet_selec = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec === void 0 ? void 0 : _ctx$luckysheet_selec[ctx.luckysheet_select_save.length - 1];
++      if (isReadonlyViewport(ctx)) _last = _.cloneDeep(_last);
+       if (_last && _last.top != null && _last.left != null && _last.height != null && _last.width != null && _last.row_focus != null && _last.column_focus != null) {
+         var _top2 = 0;
+         var _height2 = 0;
+@@ -77630,11 +77920,12 @@
+         _last.width_move = _width2;
+         _last.top_move = _top2;
+         _last.height_move = _height2;
++        if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), _last)) return;
+         ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1] = _last;
+       }
+     } else if (e.ctrlKey || e.metaKey) {
+       var _ctx$luckysheet_selec2;
+-      (_ctx$luckysheet_selec2 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec2 === void 0 ? void 0 : _ctx$luckysheet_selec2.push({
++      var readonlyCandidateRange = {
+         left: col_pre,
+         width: col - col_pre - 1,
+         top: row_pre,
+@@ -77647,9 +77938,11 @@
+         column: [col_index, col_index_ed],
+         row_focus: row_index,
+         column_focus: col_index
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      (_ctx$luckysheet_selec2 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec2 === void 0 ? void 0 : _ctx$luckysheet_selec2.push(readonlyCandidateRange);
+     } else {
+-      ctx.luckysheet_select_save = [{
++      var readonlyCandidateSelection = [{
+         left: col_pre,
+         width: col - col_pre - 1,
+         top: row_pre,
+@@ -77663,9 +77956,13 @@
+         row_focus: row_index,
+         column_focus: col_index
+       }];
+-    }
+-  }
+-  ctx.luckysheet_select_save = normalizeSelection(ctx, ctx.luckysheet_select_save);
++      if (isReadonlyViewport(ctx) && !trueSelectionsInBounds(ctx, readonlyCandidateSelection)) return;
++      ctx.luckysheet_select_save = readonlyCandidateSelection;
++    }
++  }
++  var readonlyCandidateSelection = normalizeSelection(ctx, ctx.luckysheet_select_save);
++  if (isReadonlyViewport(ctx) && !trueSelectionsInBounds(ctx, readonlyCandidateSelection)) return;
++  ctx.luckysheet_select_save = readonlyCandidateSelection;
+   if (ctx.hooks.afterCellMouseDown) {
+     setTimeout(function () {
+       var _ctx$hooks$afterCellM, _ctx$hooks2, _flowdata$row_index2;
+@@ -77725,7 +78022,13 @@
+   luckysheetUpdateCell(ctx, row_index, col_index);
+ }
+ function handleContextMenu(ctx, settings, e, workbookContainer, container, area) {
+-  if (!ctx.allowEdit) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
++  var readonlyProtectedCopyOnly = ctx.allowEdit === false &&
++    ctx.protectedCopy !== undefined && area === "cell" &&
++    Array.isArray(settings.cellContextMenu) &&
++    settings.cellContextMenu.length === 1 && settings.cellContextMenu[0] === "copy";
++  if (!ctx.allowEdit && !readonlyProtectedCopyOnly) {
+     return;
+   }
+   var flowdata = getFlowdata(ctx);
+@@ -77755,6 +78058,11 @@
+     var _fixPositionOnFrozenC3 = fixPositionOnFrozenCells((_ctx$getRefs$globalCa = ctx.getRefs().globalCache.freezen) === null || _ctx$getRefs$globalCa === void 0 ? void 0 : _ctx$getRefs$globalCa[ctx.currentSheetId], _selected_x, _selected_y, mouseX, mouseY),
+       selected_x = _fixPositionOnFrozenC3.x,
+       selected_y = _fixPositionOnFrozenC3.y;
++    if (!readonlyTruePixel(ctx, selected_x, selected_y)) {
++      ctx.contextMenu = {};
++      e.preventDefault();
++      return;
++    }
+     var row_location = rowLocation(selected_y, ctx.visibledatarow);
+     var row = row_location[1];
+     var row_pre = row_location[0];
+@@ -77782,7 +78090,7 @@
+             height = _changeparam4[3],
+             left = _changeparam4[4],
+             width = _changeparam4[5];
+-          (_ctx$luckysheet_selec4 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec4 === void 0 ? void 0 : _ctx$luckysheet_selec4.push({
++          var readonlyCandidateRange = {
+             left: left,
+             width: width - 1,
+             top: top,
+@@ -77795,11 +78103,13 @@
+             column: columnseleted,
+             row_focus: rowseleted[0],
+             column_focus: columnseleted[0]
+-          });
++          };
++          if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++          (_ctx$luckysheet_selec4 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec4 === void 0 ? void 0 : _ctx$luckysheet_selec4.push(readonlyCandidateRange);
+           return;
+         }
+       }
+-      (_ctx$luckysheet_selec5 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec5 === void 0 ? void 0 : _ctx$luckysheet_selec5.push({
++      var readonlyCandidateRange = {
+         left: col_pre,
+         width: col - col_pre - 1,
+         top: row_pre,
+@@ -77812,7 +78122,9 @@
+         column: [col_index, col_index],
+         row_focus: row_index,
+         column_focus: col_index
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      (_ctx$luckysheet_selec5 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec5 === void 0 ? void 0 : _ctx$luckysheet_selec5.push(readonlyCandidateRange);
+       return;
+     }
+     if (isInSelection) return;
+@@ -77831,7 +78143,7 @@
+           _height3 = _changeparam6[3],
+           _left3 = _changeparam6[4],
+           _width3 = _changeparam6[5];
+-        ctx.luckysheet_select_save = [{
++        var readonlyCandidateSelection = [{
+           left: _left3,
+           width: _width3 - 1,
+           top: _top3,
+@@ -77845,10 +78157,12 @@
+           row_focus: _rowseleted3[0],
+           column_focus: _columnseleted3[0]
+         }];
++        if (isReadonlyViewport(ctx) && !trueSelectionsInBounds(ctx, readonlyCandidateSelection)) return;
++        ctx.luckysheet_select_save = readonlyCandidateSelection;
+         return;
+       }
+     }
+-    ctx.luckysheet_select_save = [{
++    var readonlyCandidateSelection = [{
+       left: col_pre,
+       width: col - col_pre - 1,
+       top: row_pre,
+@@ -77862,6 +78176,8 @@
+       row_focus: row_index,
+       column_focus: col_index
+     }];
++    if (isReadonlyViewport(ctx) && !trueSelectionsInBounds(ctx, readonlyCandidateSelection)) return;
++    ctx.luckysheet_select_save = readonlyCandidateSelection;
+   } else if (area === "rowHeader") {
+     var _ctx$getRefs$globalCa2;
+     _.set(ctx.contextMenu, "headerMenu", "row");
+@@ -77884,8 +78200,7 @@
+     var _top4 = _row_pre;
+     var _height4 = _row - _row_pre - 1;
+     var _rowseleted4 = [_row_index, _row_index];
+-    ctx.luckysheet_select_save = [];
+-    ctx.luckysheet_select_save.push({
++    var readonlyCandidateRange = {
+       left: colLocationByIndex(0, ctx.visibledatacolumn)[0],
+       width: colLocationByIndex(0, ctx.visibledatacolumn)[1] - colLocationByIndex(0, ctx.visibledatacolumn)[0] - 1,
+       top: _top4,
+@@ -77899,7 +78214,10 @@
+       row_focus: _row_index,
+       column_focus: 0,
+       row_select: true
+-    });
++    };
++    if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++    ctx.luckysheet_select_save = [];
++    ctx.luckysheet_select_save.push(readonlyCandidateRange);
+   } else if (area === "columnHeader") {
+     var _ctx$getRefs$globalCa3;
+     _.set(ctx.contextMenu, "headerMenu", "column");
+@@ -77922,8 +78240,7 @@
+     var _left4 = _col_pre2;
+     var _width4 = _col2 - _col_pre2 - 1;
+     var _columnseleted4 = [_col_index2, _col_index2];
+-    ctx.luckysheet_select_save = [];
+-    ctx.luckysheet_select_save.push({
++    var readonlyCandidateRange = {
+       left: _left4,
+       width: _width4,
+       top: rowLocationByIndex(0, ctx.visibledatarow)[0],
+@@ -77937,10 +78254,15 @@
+       row_focus: 0,
+       column_focus: _col_index2,
+       column_select: true
+-    });
++    };
++    if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++    ctx.luckysheet_select_save = [];
++    ctx.luckysheet_select_save.push(readonlyCandidateRange);
+   }
+ }
+ function mouseRender(ctx, globalCache, e, cellInput, scrollX, scrollY, container, fxInput) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   var _ctx$rangeDialog;
+   var rect = container.getBoundingClientRect();
+   if (ctx.luckysheet_scroll_status && !ctx.luckysheet_cols_change_size && !ctx.luckysheet_rows_change_size) {
+@@ -77982,6 +78304,10 @@
+     var _fixPositionOnFrozenC6 = fixPositionOnFrozenCells(freeze, _x, _y, mouseX - ctx.rowHeaderWidth, mouseY - ctx.columnHeaderHeight),
+       _x2 = _fixPositionOnFrozenC6.x,
+       _y2 = _fixPositionOnFrozenC6.y;
++    var readonlyDragSelection = ctx.luckysheet_select_save && ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1];
++    var readonlyDragX = readonlyDragSelection && readonlyDragSelection.row_select ? null : _x2;
++    var readonlyDragY = readonlyDragSelection && readonlyDragSelection.column_select ? null : _y2;
++    if (!readonlyTruePixel(ctx, readonlyDragX, readonlyDragY)) return;
+     var row_location = rowLocation(_y2, ctx.visibledatarow);
+     var row = row_location[1];
+     var row_pre = row_location[0];
+@@ -78070,6 +78396,7 @@
+       last.row[1] = rowMax;
+       last.height_move = ctx.visibledatarow[rowMax] - 1;
+     }
++    if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), last)) return;
+     ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1] = last;
+     scrollToFrozenRowCol(ctx, (_globalCache$freezen4 = globalCache.freezen) === null || _globalCache$freezen4 === void 0 ? void 0 : _globalCache$freezen4[ctx.currentSheetId]);
+   } else if (ctx.formulaCache.rangestart) {
+@@ -78415,6 +78742,8 @@
+   }
+ }
+ function handleRowHeaderMouseDown(ctx, globalCache, e, container, cellInput, fxInput) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   var _globalCache$freezen5;
+   if (!checkProtectionAllSelected(ctx, ctx.currentSheetId)) {
+     return;
+@@ -78427,6 +78756,7 @@
+   var freeze = (_globalCache$freezen5 = globalCache.freezen) === null || _globalCache$freezen5 === void 0 ? void 0 : _globalCache$freezen5[ctx.currentSheetId];
+   var _fixPositionOnFrozenC7 = fixPositionOnFrozenCells(freeze, 0, _y, 0, mouseY),
+     y = _fixPositionOnFrozenC7.y;
++  if (!readonlyTruePixel(ctx, null, y)) return;
+   var row_location = rowLocation(y, ctx.visibledatarow);
+   var row = row_location[1];
+   var row_pre = row_location[0];
+@@ -78611,10 +78941,11 @@
+       _last2.row = _rowseleted;
+       _last2.top_move = _top;
+       _last2.height_move = _height;
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), _last2)) return;
+       ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1] = _last2;
+     } else if (e.ctrlKey || e.metaKey) {
+       var _ctx$luckysheet_selec18;
+-      (_ctx$luckysheet_selec18 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec18 === void 0 ? void 0 : _ctx$luckysheet_selec18.push({
++      var readonlyCandidateRange = {
+         left: colLocationByIndex(0, ctx.visibledatacolumn)[0],
+         width: colLocationByIndex(0, ctx.visibledatacolumn)[1] - colLocationByIndex(0, ctx.visibledatacolumn)[0] - 1,
+         top: top,
+@@ -78628,10 +78959,11 @@
+         row_focus: row_index,
+         column_focus: 0,
+         row_select: true
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      (_ctx$luckysheet_selec18 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec18 === void 0 ? void 0 : _ctx$luckysheet_selec18.push(readonlyCandidateRange);
+     } else {
+-      ctx.luckysheet_select_save = [];
+-      ctx.luckysheet_select_save.push({
++      var readonlyCandidateRange = {
+         left: colLocationByIndex(0, ctx.visibledatacolumn)[0],
+         width: colLocationByIndex(0, ctx.visibledatacolumn)[1] - colLocationByIndex(0, ctx.visibledatacolumn)[0] - 1,
+         top: top,
+@@ -78645,13 +78977,18 @@
+         row_focus: row_index,
+         column_focus: 0,
+         row_select: true
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      ctx.luckysheet_select_save = [];
++      ctx.luckysheet_select_save.push(readonlyCandidateRange);
+       ctx.luckysheet_select_status = true;
+       ctx.luckysheet_scroll_status = true;
+     }
+   }
+ }
+ function handleColumnHeaderMouseDown(ctx, globalCache, e, container, cellInput, fxInput) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   var _globalCache$freezen6;
+   if (!checkProtectionAllSelected(ctx, ctx.currentSheetId)) {
+     return;
+@@ -78664,6 +79001,7 @@
+   var freeze = (_globalCache$freezen6 = globalCache.freezen) === null || _globalCache$freezen6 === void 0 ? void 0 : _globalCache$freezen6[ctx.currentSheetId];
+   var _fixPositionOnFrozenC8 = fixPositionOnFrozenCells(freeze, _x, 0, mouseX, 0),
+     x = _fixPositionOnFrozenC8.x;
++  if (!readonlyTruePixel(ctx, x, null)) return;
+   var row_index = ctx.visibledatarow.length - 1;
+   var row = ctx.visibledatarow[row_index];
+   var row_pre = 0;
+@@ -78851,10 +79189,11 @@
+       _last3.column = _columnseleted;
+       _last3.left_move = _left;
+       _last3.width_move = _width;
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), _last3)) return;
+       ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1] = _last3;
+     } else if (e.ctrlKey || e.metaKey) {
+       var _ctx$luckysheet_selec20;
+-      (_ctx$luckysheet_selec20 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec20 === void 0 ? void 0 : _ctx$luckysheet_selec20.push({
++      var readonlyCandidateRange = {
+         left: left,
+         width: width,
+         top: rowLocationByIndex(0, ctx.visibledatarow)[0],
+@@ -78868,10 +79207,11 @@
+         row_focus: 0,
+         column_focus: col_index,
+         column_select: true
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      (_ctx$luckysheet_selec20 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec20 === void 0 ? void 0 : _ctx$luckysheet_selec20.push(readonlyCandidateRange);
+     } else {
+-      ctx.luckysheet_select_save = [];
+-      ctx.luckysheet_select_save.push({
++      var readonlyCandidateRange = {
+         left: left,
+         width: width,
+         top: rowLocationByIndex(0, ctx.visibledatarow)[0],
+@@ -78885,7 +79225,10 @@
+         row_focus: 0,
+         column_focus: col_index,
+         column_select: true
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      ctx.luckysheet_select_save = [];
++      ctx.luckysheet_select_save.push(readonlyCandidateRange);
+       ctx.luckysheet_select_status = true;
+       ctx.luckysheet_scroll_status = true;
+     }
+@@ -80366,4 +80709,4 @@
+   } else ;
+ }
+ 
+-export { CFSplitRange, Canvas, FormulaCache, MAX_ZOOM_RATIO, MIN_ZOOM_RATIO, addSheet, index as api, applyLocation, attrToCssName, autoSelectionFormula, calcSelectionInfo, cancelActiveImgItem, cancelFunctionrangeSelected, cancelNormalSelected, cancelPaintModel, cellFocus, cfSplitRange, changeSheet, chatatABC, checkCF, checkCellIsLocked, checkProtectionAllSelected, checkProtectionFormatCells, checkProtectionSelectLockedOrUnLockedCells, checkboxChange, clearFilter, clearMeasureTextCache, colHasMerged, colLocation, colLocationByIndex, colors, columnCharToIndex, commentBoxProps, compute, computeRowlenArr, confirmMessage, convertCssToStyleList, convertSpanToShareString, copy, createDropCellRange, createFilter, createFilterOptions, createFormulaRangeSelect, createRangeHightlight, dataRangeSelection, datenum_local, defaultContext, defaultFont, defaultSettings, defaultStyle, delFunctionGroup, deleteCellInSave, deleteComment, deleteRowCol, deleteSelectedCellText, deleteSheet, diff, drawArrow, drawLineInfo, dropCellCache, editComment, editSheetName, ensureSheetIndex, error, escapeHTMLTag, escapeScriptTag, execFunctionGroup, execfunction, expandRowsAndColumns, extractFormulaCellOps, filterPatch, fixColumnStyleOverflowInFreeze, fixPositionOnFrozenCells, fixRowStyleOverflowInFreeze, functionCopy, functionHTMLGenerate, functionStrChange, genarate, generateRandomId, generateRandomSheetName, getAllFunctionGroup, getArrowCanvasSize, getBorderInfoCompute, getBorderInfoComputeRange, getCellHyperlink, getCellRowColumn, getCellTextInfo, getCellTopRightPostion, getCellValue, getColMerge, getColorGradation, getCommentBoxByRC, getCommentBoxPosition, getComputeMap, getCurrentRules, getDataArr, getDataBySelectionNoCopy, getDropdownList, getFailureText, getFilterColumnColors, getFilterColumnValues, getFlattenedRange, getFlowdata, getFontSet, getFontStyleByCell, getFrozenHandleLeft, getFrozenHandleTop, getHintText, getHistoryRules, getInlineStringHTML, getInlineStringNoStyle, getMeasureText, getNowDateTime, getNullData, getOptionValue, getOrigincell, getQKBorder, getRange, getRangeArr, getRangeByTxt, getRangetxt, getRealCellValue, getRegExpStr, getRegStr, getRowMerge, getSearchIndexArr, getSelectRange, getSheetByIndex, getSheetIdByName, getSheetIndex, getStyleByCell, getTypeItemHide, getcellFormula, getcellrange, getdatabyselection, getrangeseleciton, goToLink, groupValuesRefresh, handleArrowKey, handleBold, handleBorder, handleCellAreaDoubleClick, handleCellAreaMouseDown, handleClearFormat, handleColFreezeHandleMouseDown, handleColSizeHandleMouseDown, handleColumnHeaderMouseDown, handleContextMenu, handleCopy, handleCurrencyFormat, handleFormatPainter, handleFormulaInput, handleFreeze, handleGlobalEnter, handleGlobalKeyDown, handleGlobalWheel, handleHorizontalAlign, handleItalic, handleKeydownForZoom, handleLink, handleMerge, handleNumberDecrease, handleNumberIncrease, handleOverlayMouseMove, handleOverlayMouseUp, handleOverlayTouchEnd, handleOverlayTouchMove, handleOverlayTouchStart, handlePaste, handlePasteByClick, handlePercentageFormat, handleRowFreezeHandleMouseDown, handleRowHeaderMouseDown, handleRowSizeHandleMouseDown, handleScreenShot, handleSort, handleStrikeThrough, handleSum, handleTextBackground, handleTextColor, handleTextSize, handleUnderline, handleVerticalAlign, handleWithCtrlOrMetaKey, hasChinaword, hasPartMC, hideCRCount, hideDropCellSelection, hideSelected, imageProps, indexToColumnChar, initFreeze, initSheetIndex, inlineStyleAffectAttribute, inlineStyleAffectCssName, insertImage, insertRowCol, insertUpdateFunctionGroup, inverseRowColOptions, isAllSelectedCellsInStatus, isAllowEdit, isFormula, isFunctionRange, isInlineStringCT, isInlineStringCell, isLinkValid, isRealNull, isRealNum, isShowHidenCR, isSupportBoundingBox, is_date, iscelldata, isdatatype, isdatatypemulti, isdatetime, israngeseleciton, jfrefreshgrid, labelFilterOptionState, locale, luckysheetUpdateCell, mergeBorder, mergeCells, mergeMoveMain, mousePosition, moveHighlightCell, moveHighlightRange, moveToEnd, newComment, normalizeSelection, normalizedAttr, normalizedCellAttr, onCellsMove, onCellsMoveEnd, onCellsMoveStart, onCommentBoxMove, onCommentBoxMoveEnd, onCommentBoxMoveStart, onCommentBoxResize, onCommentBoxResizeEnd, onCommentBoxResizeStart, onDropCellSelect, onDropCellSelectEnd, onFormulaRangeDragEnd, onImageMove, onImageMoveEnd, onImageMoveStart, onImageResize, onImageResizeEnd, onImageResizeStart, onRangeSelectionModalMove, onRangeSelectionModalMoveEnd, onRangeSelectionModalMoveStart, onSearchDialogMove, onSearchDialogMoveEnd, onSearchDialogMoveStart, opToPatch, orderbydata, orderbydatafiler, overShowComment, pasteHandlerOfPaintModel, patchToOp, rangeDrag, rangeDragColumn, rangeDragRow, rangeHightlightselected, rangeSetValue, rangeValueToHtml, removeActiveImage, removeEditingComment, removeHyperlink, replace, replaceAll, replaceHtml, rgbToHex, rowHasMerged, rowLocation, rowLocationByIndex, saveFilter, saveHyperlink, saveImage, scrollToFrozenRowCol, scrollToHighlightCell, searchAll, searchNext, selectAll, selectIsOverlap, selectTextContent, selectTextContentCross, selectTitlesMap, selectTitlesRange, selectionCache, selectionCopyShow, seletedHighlistByindex, setCaretPosition, setCellValue, setConditionRules, setDropcownValue, setEditingComment, setFormulaCellInfoMap, showComments, showDropCellSelection, showHideAllComments, showHideComment, showImgChooser, showLinkCard, showSelected, sortDataRange, sortSelection, storeSheetParamALL, toolbarItemClickHandler, toolbarItemSelectedFunc, update, updateCell, updateContextWithCanvas, updateContextWithSheetData, updateDropCell, updateFormat, updateFormatCell, updateInlineStringFormat, updateInlineStringFormatOutside, updateItem, updateMoreCell, updateSheet, validateCellData, validateIdCard, valueIsError, valueShowEs };
++export { CFSplitRange, Canvas, FormulaCache, MAX_ZOOM_RATIO, MIN_ZOOM_RATIO, addSheet, index as api, applyLocation, attrToCssName, autoSelectionFormula, calcSelectionInfo, cancelActiveImgItem, cancelFunctionrangeSelected, cancelNormalSelected, cancelPaintModel, cellFocus, cfSplitRange, changeSheet, chatatABC, checkCF, checkCellIsLocked, checkProtectionAllSelected, checkProtectionFormatCells, checkProtectionSelectLockedOrUnLockedCells, checkboxChange, clearFilter, clearMeasureTextCache, colHasMerged, colLocation, colLocationByIndex, colors, columnCharToIndex, commentBoxProps, compute, computeRowlenArr, confirmMessage, convertCssToStyleList, convertSpanToShareString, copy, createDropCellRange, createFilter, createFilterOptions, createFormulaRangeSelect, createRangeHightlight, createReadonlyViewGeometry, dataRangeSelection, datenum_local, defaultContext, defaultFont, defaultSettings, defaultStyle, delFunctionGroup, deleteCellInSave, deleteComment, deleteRowCol, deleteSelectedCellText, deleteSheet, diff, drawArrow, drawLineInfo, dropCellCache, editComment, editSheetName, ensureSheetIndex, error, escapeHTMLTag, escapeScriptTag, execFunctionGroup, execfunction, expandRowsAndColumns, extractFormulaCellOps, filterPatch, fixColumnStyleOverflowInFreeze, fixPositionOnFrozenCells, fixRowStyleOverflowInFreeze, functionCopy, functionHTMLGenerate, functionStrChange, genarate, generateRandomId, generateRandomSheetName, getAllFunctionGroup, getArrowCanvasSize, getBorderInfoCompute, getBorderInfoComputeRange, getCellHyperlink, getCellRowColumn, getCellTextInfo, getCellTopRightPostion, getCellValue, getColMerge, getColorGradation, getCommentBoxByRC, getCommentBoxPosition, getComputeMap, getCurrentRules, getDataArr, getDataBySelectionNoCopy, getDropdownList, getFailureText, getFilterColumnColors, getFilterColumnValues, getFlattenedRange, getFlowdata, getFontSet, getFontStyleByCell, getFrozenHandleLeft, getFrozenHandleTop, getHintText, getHistoryRules, getInlineStringHTML, getInlineStringNoStyle, getMeasureText, getNowDateTime, getNullData, getOptionValue, getOrigincell, getQKBorder, getRange, getRangeArr, getRangeByTxt, getRangetxt, getRealCellValue, getRegExpStr, getRegStr, getRowMerge, getSearchIndexArr, getSelectRange, getSheetByIndex, getSheetIdByName, getSheetIndex, getStyleByCell, getTypeItemHide, getcellFormula, getcellrange, getdatabyselection, getrangeseleciton, goToLink, groupValuesRefresh, handleArrowKey, handleBold, handleBorder, handleCellAreaDoubleClick, handleCellAreaMouseDown, handleClearFormat, handleColFreezeHandleMouseDown, handleColSizeHandleMouseDown, handleColumnHeaderMouseDown, handleContextMenu, handleCopy, handleCurrencyFormat, handleFormatPainter, handleFormulaInput, handleFreeze, handleGlobalEnter, handleGlobalKeyDown, handleGlobalWheel, handleHorizontalAlign, handleItalic, handleKeydownForZoom, handleLink, handleMerge, handleNumberDecrease, handleNumberIncrease, handleOverlayMouseMove, handleOverlayMouseUp, handleOverlayTouchEnd, handleOverlayTouchMove, handleOverlayTouchStart, handlePaste, handlePasteByClick, handlePercentageFormat, handleRowFreezeHandleMouseDown, handleRowHeaderMouseDown, handleRowSizeHandleMouseDown, handleScreenShot, handleSort, handleStrikeThrough, handleSum, handleTextBackground, handleTextColor, handleTextSize, handleUnderline, handleVerticalAlign, handleWithCtrlOrMetaKey, hasChinaword, hasPartMC, hideCRCount, hideDropCellSelection, hideSelected, imageProps, indexToColumnChar, initFreeze, initSheetIndex, inlineStyleAffectAttribute, inlineStyleAffectCssName, insertImage, insertRowCol, insertUpdateFunctionGroup, inverseRowColOptions, isAllSelectedCellsInStatus, isAllowEdit, isFormula, isFunctionRange, isInlineStringCT, isInlineStringCell, isLinkValid, isRealNull, isRealNum, isShowHidenCR, isSupportBoundingBox, is_date, iscelldata, isdatatype, isdatatypemulti, isdatetime, israngeseleciton, jfrefreshgrid, labelFilterOptionState, locale, luckysheetUpdateCell, mergeBorder, mergeCells, mergeMoveMain, mousePosition, moveHighlightCell, moveHighlightRange, moveToEnd, newComment, normalizeSelection, normalizedAttr, normalizedCellAttr, onCellsMove, onCellsMoveEnd, onCellsMoveStart, onCommentBoxMove, onCommentBoxMoveEnd, onCommentBoxMoveStart, onCommentBoxResize, onCommentBoxResizeEnd, onCommentBoxResizeStart, onDropCellSelect, onDropCellSelectEnd, onFormulaRangeDragEnd, onImageMove, onImageMoveEnd, onImageMoveStart, onImageResize, onImageResizeEnd, onImageResizeStart, onRangeSelectionModalMove, onRangeSelectionModalMoveEnd, onRangeSelectionModalMoveStart, onSearchDialogMove, onSearchDialogMoveEnd, onSearchDialogMoveStart, opToPatch, orderbydata, orderbydatafiler, overShowComment, pasteHandlerOfPaintModel, patchToOp, rangeDrag, rangeDragColumn, rangeDragRow, rangeHightlightselected, rangeSetValue, rangeValueToHtml, removeActiveImage, removeEditingComment, removeHyperlink, replace, replaceAll, replaceHtml, rgbToHex, rowHasMerged, rowLocation, rowLocationByIndex, saveFilter, saveHyperlink, saveImage, scrollToFrozenRowCol, scrollToHighlightCell, searchAll, searchNext, selectAll, selectIsOverlap, selectTextContent, selectTextContentCross, selectTitlesMap, selectTitlesRange, selectionCache, selectionCopyShow, seletedHighlistByindex, setCaretPosition, setCellValue, setConditionRules, setDropcownValue, setEditingComment, setFormulaCellInfoMap, showComments, showDropCellSelection, showHideAllComments, showHideComment, showImgChooser, showLinkCard, showSelected, sortDataRange, sortSelection, storeSheetParamALL, toolbarItemClickHandler, toolbarItemSelectedFunc, update, updateCell, updateContextWithCanvas, updateContextWithSheetData, updateDropCell, updateFormat, updateFormatCell, updateInlineStringFormat, updateInlineStringFormatOutside, updateItem, updateMoreCell, updateSheet, validateCellData, validateIdCard, valueIsError, valueShowEs };
+diff --git a/node_modules/@fortune-sheet/core/dist/index.js b/node_modules/@fortune-sheet/core/dist/index.js
+index 04113a18dee9feee28e9434ee3023626c800e7d3..fdebe04b6a81b2540bd176822268eaa58c9cda0e 100644
+--- a/node_modules/@fortune-sheet/core/dist/index.js
++++ b/node_modules/@fortune-sheet/core/dist/index.js
+@@ -62876,7 +62876,7 @@
+         if (___default['default'].isNil(c_value)) {
+           c_value = "";
+         }
+-        column += escapeHTMLTag(c_value);
++        column += ___default['default'].escape(c_value);
+       } else {
+         var _style = "";
+         if (borderInfoCompute && borderInfoCompute["".concat(r, "_").concat(c)]) {
+@@ -62933,6 +62933,36 @@
+   return "<table data-type=\"fortune-copy-action-table\">".concat(colgroup).concat(cpdata, "</table>");
+ }
+ function copy(ctx) {
++  if (ctx.protectedCopy !== undefined) {
++    try {
++      var protectedCopy = ctx.protectedCopy;
++      var protectedSelections = ctx.luckysheet_select_save;
++      var protectedSheetId = ctx.currentSheetId;
++      if (typeof protectedCopy !== "function" || typeof protectedSheetId !== "string" ||
++          !Array.isArray(ctx.luckysheetfile) || !ctx.luckysheetfile.some(function (sheet) { return sheet.id === protectedSheetId; }) ||
++          !Array.isArray(protectedSelections) || protectedSelections.length < 1 || protectedSelections.length > 32) return;
++      var protectedBounds = trueSheetBounds(ctx);
++      if (!protectedBounds) return;
++      var protectedRanges = [];
++      for (var protectedIndex = 0; protectedIndex < protectedSelections.length; protectedIndex += 1) {
++        var protectedRange = protectedSelections[protectedIndex];
++        if (!protectedRange || !Array.isArray(protectedRange.row) || protectedRange.row.length !== 2 ||
++            !Array.isArray(protectedRange.column) || protectedRange.column.length !== 2) return;
++        var protectedRow = [protectedRange.row[0], protectedRange.row[1]];
++        var protectedColumn = [protectedRange.column[0], protectedRange.column[1]];
++        if (!protectedRow.concat(protectedColumn).every(function (value) { return Number.isSafeInteger(value) && value >= 0; }) ||
++            protectedRow[0] > protectedRow[1] || protectedColumn[0] > protectedColumn[1] ||
++            protectedRow[1] >= protectedBounds.rows || protectedColumn[1] >= protectedBounds.columns) return;
++        protectedRanges.push({ row: protectedRow, column: protectedColumn });
++      }
++      // Synchronous handoff only. Every return value, including a Promise,
++      // remains in this protected branch and cannot authorize native fallback.
++      protectedCopy({ sheetId: protectedSheetId, ranges: protectedRanges });
++    } catch (error) {
++      // An unavailable or throwing owner never reaches the native clipboard.
++    }
++    return;
++  }
+   var flowdata = getFlowdata(ctx);
+   ctx.luckysheet_selection_range = [];
+   var copyRange = [];
+@@ -63439,6 +63469,7 @@
+     zoomRatio: 1,
+     showGridLines: true,
+     allowEdit: true,
++    readonlyViewport: false,
+     fontList: [],
+     defaultFontSize: 10,
+     luckysheetPaintModelOn: false,
+@@ -67756,6 +67787,7 @@
+   var y = e.pageY - rect.top - ctx.columnHeaderHeight;
+   x += scrollLeft;
+   y += scrollTop;
++  if (!readonlyTruePixel(ctx, x, y)) return undefined;
+   var r = rowLocation(y, ctx.visibledatarow)[2];
+   var c = colLocation(x, ctx.visibledatacolumn)[2];
+   var margeset = mergeBorder(ctx, flowdata, r, c);
+@@ -69703,6 +69735,10 @@
+   var offsetY = 0;
+   x += scrollLeft;
+   y += scrollTop;
++  if (!readonlyTruePixel(ctx, x, y)) {
++    ctx.hoveredCommentBox = undefined;
++    return;
++  }
+   var r = rowLocation(y, ctx.visibledatarow)[2];
+   var c = colLocation(x, ctx.visibledatacolumn)[2];
+   var margeset = mergeBorder(ctx, flowdata, r, c);
+@@ -70527,6 +70563,7 @@
+   }
+ }
+ function createDropCellRange(ctx, e, container) {
++  if (isReadonlyViewport(ctx)) return;
+   ctx.luckysheet_cell_selected_extend = true;
+   ctx.luckysheet_scroll_status = true;
+   var scrollLeft = ctx.scrollLeft,
+@@ -70551,6 +70588,7 @@
+   }, container);
+ }
+ function onDropCellSelect(ctx, e, scrollX, scrollY, container) {
++  if (isReadonlyViewport(ctx)) return;
+   var scrollLeft = scrollX.scrollLeft;
+   var scrollTop = scrollY.scrollTop;
+   var rect = container.getBoundingClientRect();
+@@ -72407,6 +72445,7 @@
+   var _ctx$luckysheet_selec3;
+   ctx.luckysheet_cell_selected_extend = false;
+   hideDropCellSelection(container);
++  if (isReadonlyViewport(ctx)) return;
+   var scrollLeft = ctx.scrollLeft,
+     scrollTop = ctx.scrollTop;
+   var rect = container.getBoundingClientRect();
+@@ -72612,8 +72651,192 @@
+     canvasborder.lineWidth = 1;
+   }
+ }
++function isReadonlyViewport(ctx) {
++  return ctx.readonlyViewport === true && ctx.allowEdit === false;
++}
++function readonlyViewAxis(real, minimumCount, viewportPixels, defaultSize, zoom) {
++  if (!Array.isArray(real) || !Number.isFinite(viewportPixels) ||
++      !Number.isFinite(defaultSize) || defaultSize < 0 ||
++      !Number.isFinite(zoom) || zoom <= 0) return null;
++  var realLast = real.length === 0 ? 0 : real[real.length - 1];
++  if (!Number.isFinite(realLast) || realLast < 0) return null;
++  var step = Math.max(1, Math.round((defaultSize + 1) * zoom));
++  if (!Number.isFinite(step)) return null;
++  var extra = Math.ceil(Math.max(0, viewportPixels) / step) + 1;
++  var count = Math.max(real.length, minimumCount, real.length + extra);
++  if (!Number.isSafeInteger(count)) return null;
++  return { real: real, count: count, step: step, last: realLast };
++}
++function readonlyViewAxisEnd(axis, index) {
++  if (index < 0) return 0;
++  return index < axis.real.length
++    ? axis.real[index]
++    : axis.last + (index - axis.real.length + 1) * axis.step;
++}
++// Matches lodash.sortedIndex semantics; do not change real rowLocation/colLocation.
++function readonlyViewAxisIndex(axis, pixel) {
++  if (pixel <= axis.last && axis.real.length > 0) {
++    return _.sortedIndex(axis.real, pixel);
++  }
++  var index = axis.real.length + Math.max(0,
++    Math.ceil((pixel - axis.last) / axis.step) - 1);
++  // count sets DOM scroll extent; the draw tail may include one partial
++  // row/column beyond that edge if scrollbar/canvas client sizes differ.
++  return index;
++}
++function createReadonlyViewGeometry(ctx) {
++  if (!isReadonlyViewport(ctx)) return null;
++  var rows = readonlyViewAxis(ctx.visibledatarow, 1000,
++    ctx.cellmainHeight, ctx.defaultrowlen, ctx.zoomRatio);
++  var columns = readonlyViewAxis(ctx.visibledatacolumn, 256,
++    ctx.cellmainWidth, ctx.defaultcollen, ctx.zoomRatio);
++  if (!rows || !columns) return null;
++  var height = readonlyViewAxisEnd(rows, rows.count - 1);
++  var width = readonlyViewAxisEnd(columns, columns.count - 1);
++  if (!Number.isFinite(height) || !Number.isFinite(width)) return null;
++  return {
++    rows: rows, columns: columns,
++    height: height, width: width
++  };
++}
++function drawReadonlyVirtualHeader(owner, renderCtx, isRow, scroll, size, offset) {
++  var geometry = owner.readonlyViewGeometry;
++  if (!geometry) return;
++  var ctx = owner.sheetCtx;
++  var axis = isRow ? geometry.rows : geometry.columns;
++  var first = Math.max(axis.real.length, readonlyViewAxisIndex(axis, scroll));
++  var last = readonlyViewAxisIndex(axis, scroll + size);
++  for (var index = first; index <= last; index += 1) {
++    var start = readonlyViewAxisEnd(axis, index - 1) - scroll - (isRow ? 1 : 0);
++    var end = readonlyViewAxisEnd(axis, index) - scroll;
++    var text = isRow ? String(index + 1) : indexToColumnChar(index);
++    renderCtx.fillStyle = '#ffffff';
++    if (isRow) {
++      renderCtx.fillRect(0, start + offset,
++        ctx.rowHeaderWidth - 1, end - start + 1);
++    } else {
++      renderCtx.fillRect(start + offset - 1, 0,
++        end - start, ctx.columnHeaderHeight - 1);
++    }
++    renderCtx.fillStyle = '#000000';
++    renderCtx.save();
++    renderCtx.scale(ctx.zoomRatio, ctx.zoomRatio);
++    var metrics = getMeasureText(text, renderCtx, ctx);
++    var textX = isRow ? (ctx.rowHeaderWidth - metrics.width) / 2
++      : Math.round(start + (end - start) / 2 + offset - metrics.width / 2);
++    var textY = isRow ? start + (end - start) / 2 + offset
++      : Math.round(ctx.columnHeaderHeight / 2);
++    renderCtx.fillText(text, textX / ctx.zoomRatio, textY / ctx.zoomRatio);
++    renderCtx.restore();
++    renderCtx.beginPath();
++    renderCtx.lineWidth = 1;
++    renderCtx.strokeStyle = defaultStyle.strokeStyle;
++    if (isRow) {
++      renderCtx.moveTo(-1, end + offset - 2 + 0.5);
++      renderCtx.lineTo(ctx.rowHeaderWidth - 1, end + offset - 2 + 0.5);
++      renderCtx.moveTo(ctx.rowHeaderWidth - 2 + 0.5, start + offset - 2);
++      renderCtx.lineTo(ctx.rowHeaderWidth - 2 + 0.5, end + offset - 2);
++    } else {
++      renderCtx.moveTo(end + offset - 2 + 0.5, 0);
++      renderCtx.lineTo(end + offset - 2 + 0.5, ctx.columnHeaderHeight - 2);
++      renderCtx.moveTo(start + offset - 1, ctx.columnHeaderHeight - 2 + 0.5);
++      renderCtx.lineTo(end + offset - 1, ctx.columnHeaderHeight - 2 + 0.5);
++    }
++    renderCtx.stroke();
++    renderCtx.closePath();
++  }
++}
++function drawReadonlyViewportBlank(owner, renderCtx, scrollWidth, scrollHeight,
++    drawWidth, drawHeight, offsetLeft, offsetTop) {
++  var geometry = owner.readonlyViewGeometry;
++  if (!geometry) return;
++  var ctx = owner.sheetCtx;
++  var x0 = offsetLeft - 1;
++  var y0 = offsetTop - 1;
++  var width = Math.max(0, Math.min(drawWidth,
++    ctx.luckysheetTableContentHW[0] - x0));
++  var height = Math.max(0, Math.min(drawHeight,
++    ctx.luckysheetTableContentHW[1] - y0));
++  if (width === 0 || height === 0) return;
++  var rightStart = Math.max(x0, Math.min(x0 + width,
++    geometry.columns.last - scrollWidth + x0));
++  var bottomStart = Math.max(y0, Math.min(y0 + height,
++    geometry.rows.last - scrollHeight + y0));
++  renderCtx.save();
++  renderCtx.beginPath();
++  renderCtx.rect(rightStart, y0, x0 + width - rightStart, height);
++  renderCtx.rect(x0, bottomStart, width, y0 + height - bottomStart);
++  renderCtx.clip();
++  renderCtx.fillStyle = '#ffffff';
++  renderCtx.fillRect(x0, y0, width, height);
++  if (!ctx.luckysheetcurrentisPivotTable && ctx.showGridLines) {
++    renderCtx.beginPath();
++    renderCtx.lineWidth = 1;
++    renderCtx.strokeStyle = defaultStyle.strokeStyle;
++    var firstRow = readonlyViewAxisIndex(geometry.rows, scrollHeight);
++    var lastRow = readonlyViewAxisIndex(geometry.rows, scrollHeight + height);
++    for (var row = firstRow; row <= lastRow; row += 1) {
++      var rowEdge = readonlyViewAxisEnd(geometry.rows, row);
++      var y = rowEdge - scrollHeight + offsetTop - 2 + 0.5;
++      renderCtx.moveTo(x0, y);
++      renderCtx.lineTo(x0 + width, y);
++      if (row < geometry.rows.real.length) {
++        row = Math.max(row, _.sortedLastIndex(geometry.rows.real, rowEdge) - 1);
++      }
++    }
++    var firstColumn = readonlyViewAxisIndex(geometry.columns, scrollWidth);
++    var lastColumn = readonlyViewAxisIndex(geometry.columns, scrollWidth + width);
++    for (var column = firstColumn; column <= lastColumn; column += 1) {
++      var columnEdge = readonlyViewAxisEnd(geometry.columns, column);
++      var x = columnEdge - scrollWidth + offsetLeft - 2 + 0.5;
++      renderCtx.moveTo(x, y0);
++      renderCtx.lineTo(x, y0 + height);
++      if (column < geometry.columns.real.length) {
++        column = Math.max(column,
++          _.sortedLastIndex(geometry.columns.real, columnEdge) - 1);
++      }
++    }
++    renderCtx.stroke();
++    renderCtx.closePath();
++  }
++  renderCtx.restore();
++}
++function trueSheetBounds(ctx) {
++  if (typeof ctx.currentSheetId !== 'string' || !Array.isArray(ctx.luckysheetfile)) return null;
++  var sheet = ctx.luckysheetfile.find(function (item) { return item && item.id === ctx.currentSheetId; });
++  if (!sheet || !Array.isArray(sheet.data) || sheet.data.length === 0 ||
++      !Array.isArray(sheet.data[0]) || sheet.data[0].length === 0) return null;
++  // data is the actual already initialized rectangular workbook matrix.
++  // No getFlowdata(), padding, conversion, max scan or used-bound recomputation.
++  return { rows: sheet.data.length, columns: sheet.data[0].length };
++}
++function trueRangeInBounds(bounds, range) {
++  if (!bounds || !range || !Array.isArray(range.row) || range.row.length !== 2 ||
++      !Array.isArray(range.column) || range.column.length !== 2) return false;
++  var r0 = range.row[0], r1 = range.row[1], c0 = range.column[0], c1 = range.column[1];
++  return [r0, r1, c0, c1].every(function (value) { return Number.isSafeInteger(value) && value >= 0; }) &&
++    r0 <= r1 && c0 <= c1 && r1 < bounds.rows && c1 < bounds.columns;
++}
++function trueSelectionsInBounds(ctx, selections) {
++  var bounds = trueSheetBounds(ctx);
++  return !!bounds && Array.isArray(selections) && selections.length > 0 &&
++    selections.every(function (range) { return trueRangeInBounds(bounds, range); });
++}
++function readonlyTruePixel(ctx, x, y) {
++  if (!isReadonlyViewport(ctx)) return true;
++  var rows = ctx.visibledatarow;
++  var columns = ctx.visibledatacolumn;
++  if (!Array.isArray(rows) || !Array.isArray(columns)) return false;
++  // null means this header/operation checks only the other axis.
++  if (x !== null && (!Number.isFinite(x) || x < 0 || columns.length === 0 ||
++      x >= columns[columns.length - 1])) return false;
++  if (y !== null && (!Number.isFinite(y) || y < 0 || rows.length === 0 ||
++      y >= rows[rows.length - 1])) return false;
++  return true;
++}
++
+ var Canvas = /*#__PURE__*/function () {
+-  function Canvas(canvasElement, ctx) {
++  function Canvas(canvasElement, ctx, readonlyViewGeometry) {
+     _classCallCheck(this, Canvas);
+     this.canvasElement = void 0;
+     this.sheetCtx = void 0;
+@@ -72621,6 +72844,7 @@
+     this.cellOverflowMapCache = void 0;
+     this.canvasElement = canvasElement;
+     this.sheetCtx = ctx;
++    this.readonlyViewGeometry = isReadonlyViewport(ctx) ? readonlyViewGeometry || null : null;
+     this.cellOverflowMapCache = {};
+   }
+   return _createClass(Canvas, [{
+@@ -72651,6 +72875,7 @@
+       if (dataset_row_ed === -1) {
+         dataset_row_ed = this.sheetCtx.visibledatarow.length - 1;
+       }
++      if (this.readonlyViewGeometry) dataset_row_ed = Math.min(dataset_row_ed, this.sheetCtx.visibledatarow.length - 1);
+       renderCtx.save();
+       renderCtx.beginPath();
+       renderCtx.rect(0, offsetTop - 1, this.sheetCtx.rowHeaderWidth - 1, drawHeight - 2);
+@@ -72714,6 +72939,7 @@
+         preEndR = end_r;
+         (_this$sheetCtx$hooks$2 = (_this$sheetCtx$hooks2 = this.sheetCtx.hooks).afterRenderRowHeaderCell) === null || _this$sheetCtx$hooks$2 === void 0 ? void 0 : _this$sheetCtx$hooks$2.call(_this$sheetCtx$hooks2, "".concat(r + 1), r, start_r + offsetTop + firstOffset, this.sheetCtx.rowHeaderWidth - 1, end_r - start_r + 1 + lastOffset - firstOffset, renderCtx);
+       }
++      drawReadonlyVirtualHeader(this, renderCtx, true, scrollHeight, drawHeight, offsetTop);
+       renderCtx.restore();
+       renderCtx.restore();
+     }
+@@ -72745,6 +72971,7 @@
+       if (dataset_col_ed === -1) {
+         dataset_col_ed = this.sheetCtx.visibledatacolumn.length - 1;
+       }
++      if (this.readonlyViewGeometry) dataset_col_ed = Math.min(dataset_col_ed, this.sheetCtx.visibledatacolumn.length - 1);
+       renderCtx.save();
+       renderCtx.beginPath();
+       renderCtx.rect(offsetLeft - 1, 0, drawWidth, this.sheetCtx.columnHeaderHeight - 1);
+@@ -72809,6 +73036,7 @@
+         preEndC = end_c;
+         (_this$sheetCtx$hooks$4 = (_this$sheetCtx$hooks4 = this.sheetCtx.hooks).afterRenderColumnHeaderCell) === null || _this$sheetCtx$hooks$4 === void 0 ? void 0 : _this$sheetCtx$hooks$4.call(_this$sheetCtx$hooks4, abc, c, start_c + offsetLeft - 1, end_c - start_c, this.sheetCtx.columnHeaderHeight - 1, renderCtx);
+       }
++      drawReadonlyVirtualHeader(this, renderCtx, false, scrollWidth, drawWidth, offsetLeft);
+       renderCtx.restore();
+       renderCtx.restore();
+     }
+@@ -72861,6 +73089,27 @@
+       renderCtx.scale(this.sheetCtx.devicePixelRatio, this.sheetCtx.devicePixelRatio);
+       if (clear) {
+         renderCtx.clearRect(0, 0, this.sheetCtx.luckysheetTableContentHW[0], this.sheetCtx.luckysheetTableContentHW[1]);
++      }
++      var geometry = isReadonlyViewport(this.sheetCtx) ? this.readonlyViewGeometry : null;
++      if (geometry) {
++        var viewLeft = offsetLeft - 1;
++        var viewTop = offsetTop - 1;
++        var viewWidth = Math.max(0, Math.min(drawWidth, this.sheetCtx.luckysheetTableContentHW[0] - viewLeft));
++        var viewHeight = Math.max(0, Math.min(drawHeight, this.sheetCtx.luckysheetTableContentHW[1] - viewTop));
++        if (viewWidth === 0 || viewHeight === 0) {
++          renderCtx.restore();
++          return;
++        }
++        renderCtx.beginPath();
++        renderCtx.rect(viewLeft, viewTop, viewWidth, viewHeight);
++        renderCtx.clip();
++        if (geometry.rows.real.length === 0 || geometry.columns.real.length === 0 ||
++            scrollHeight >= geometry.rows.last || scrollWidth >= geometry.columns.last) {
++          drawReadonlyViewportBlank(this, renderCtx, scrollWidth, scrollHeight,
++            drawWidth, drawHeight, offsetLeft, offsetTop);
++          renderCtx.restore();
++          return;
++        }
+       }
+       var rowStart;
+       var rowEnd;
+@@ -73177,6 +73426,10 @@
+       if (colEnd === this.sheetCtx.visibledatacolumn.length - 1) {
+         renderCtx.clearRect(colEndX - scrollWidth + offsetLeft - 1, offsetTop - 1, this.sheetCtx.ch_width - this.sheetCtx.visibledatacolumn[colEnd], rowEndY - scrollHeight);
+       }
++      if (geometry) {
++        drawReadonlyViewportBlank(this, renderCtx, scrollWidth, scrollHeight,
++          drawWidth, drawHeight, offsetLeft, offsetTop);
++      }
+       renderCtx.restore();
+       this.measureTextCacheTimeOut = setTimeout(function () {
+         clearMeasureTextCache();
+@@ -73879,6 +74132,7 @@
+   }, {
+     key: "drawFreezeLine",
+     value: function drawFreezeLine(_ref2) {
++      if (this.sheetCtx.allowEdit === false) return;
+       var horizontalTop = _ref2.horizontalTop,
+         verticalLeft = _ref2.verticalLeft;
+       var renderCtx = this.canvasElement.getContext("2d");
+@@ -76747,6 +77001,7 @@
+   config: {},
+   devicePixelRatio: 0,
+   allowEdit: true,
++  readonlyViewport: false,
+   lang: null,
+   forceCalculation: false,
+   rowHeaderWidth: 46,
+@@ -76768,6 +77023,8 @@
+ };
+ 
+ function handleCopy(ctx) {
++  if ((ctx.protectedCopy !== undefined || isReadonlyViewport(ctx)) &&
++      !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   if (ctx.luckysheetPaintModelOn) {
+     cancelPaintModel(ctx);
+   }
+@@ -76980,6 +77237,7 @@
+   } else if (e.code === "KeyB") {
+     handleBold(ctx, cellInput);
+   } else if (e.code === "KeyC") {
++    if (ctx.protectedCopy !== undefined) e.preventDefault();
+     handleCopy(ctx);
+     e.stopPropagation();
+     return;
+@@ -77254,6 +77512,34 @@
+   var _cache$searchDialog;
+   if (((_cache$searchDialog = cache.searchDialog) === null || _cache$searchDialog === void 0 ? void 0 : _cache$searchDialog.mouseEnter) && ctx.showSearch && ctx.showReplace) return;
+   if (ctx.filterContextMenu != null) return;
++  if (isReadonlyViewport(ctx)) {
++    e.preventDefault();
++    if (![0, 1, 2].includes(e.deltaMode) ||
++        !Number.isFinite(e.deltaX) || !Number.isFinite(e.deltaY)) return;
++    var viewGeometry = createReadonlyViewGeometry(ctx);
++    if (!viewGeometry) return;
++    var unitX = e.deltaMode === 1 ? viewGeometry.columns.step : e.deltaMode === 2 ? ctx.cellmainWidth : 1;
++    var unitY = e.deltaMode === 1 ? viewGeometry.rows.step : e.deltaMode === 2 ? ctx.cellmainHeight : 1;
++    var deltaX = e.deltaX * unitX;
++    var deltaY = e.deltaY * unitY;
++    if (!Number.isFinite(unitX) || unitX <= 0 || !Number.isFinite(unitY) || unitY <= 0 ||
++        !Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
++    scrollbarX.scrollLeft += deltaX;
++    scrollbarY.scrollTop += deltaY;
++    ctx.scrollLeft = scrollbarX.scrollLeft;
++    ctx.scrollTop = scrollbarY.scrollTop;
++    return;
++  }
++  // Read-only trackpad panning follows pixel deltas on both axes without a gesture lock.
++  if (ctx.allowEdit === false && e.deltaMode === 0) {
++    scrollbarX.scrollLeft += e.deltaX;
++    scrollbarY.scrollTop += e.deltaY;
++    // Keep React scrollbar effects aligned with the browser-clamped offsets.
++    ctx.scrollLeft = scrollbarX.scrollLeft;
++    ctx.scrollTop = scrollbarY.scrollTop;
++    e.preventDefault();
++    return;
++  }
+   var scrollLeft = scrollbarX.scrollLeft;
+   var scrollTop = scrollbarY.scrollTop;
+   var visibledatacolumn_c = ctx.visibledatacolumn;
+@@ -77340,6 +77626,8 @@
+   };
+ }
+ function handleCellAreaMouseDown(ctx, globalCache, e, cellInput, container, fxInput, canvas) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   var _globalCache$freezen, _ctx$hooks$beforeCell, _ctx$hooks, _flowdata$row_index;
+   ctx.contextMenu = {};
+   ctx.filterContextMenu = undefined;
+@@ -77361,6 +77649,7 @@
+     y = _fixPositionOnFrozenC.y,
+     inHorizontalFreeze = _fixPositionOnFrozenC.inHorizontalFreeze,
+     inVerticalFreeze = _fixPositionOnFrozenC.inVerticalFreeze;
++  if (!readonlyTruePixel(ctx, x, y)) return;
+   var row_location = rowLocation(y, ctx.visibledatarow);
+   var row = row_location[1];
+   var row_pre = row_location[0];
+@@ -77579,6 +77868,7 @@
+     if (e.shiftKey) {
+       var _ctx$luckysheet_selec;
+       var _last = (_ctx$luckysheet_selec = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec === void 0 ? void 0 : _ctx$luckysheet_selec[ctx.luckysheet_select_save.length - 1];
++      if (isReadonlyViewport(ctx)) _last = _.cloneDeep(_last);
+       if (_last && _last.top != null && _last.left != null && _last.height != null && _last.width != null && _last.row_focus != null && _last.column_focus != null) {
+         var _top2 = 0;
+         var _height2 = 0;
+@@ -77640,11 +77930,12 @@
+         _last.width_move = _width2;
+         _last.top_move = _top2;
+         _last.height_move = _height2;
++        if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), _last)) return;
+         ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1] = _last;
+       }
+     } else if (e.ctrlKey || e.metaKey) {
+       var _ctx$luckysheet_selec2;
+-      (_ctx$luckysheet_selec2 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec2 === void 0 ? void 0 : _ctx$luckysheet_selec2.push({
++      var readonlyCandidateRange = {
+         left: col_pre,
+         width: col - col_pre - 1,
+         top: row_pre,
+@@ -77657,9 +77948,11 @@
+         column: [col_index, col_index_ed],
+         row_focus: row_index,
+         column_focus: col_index
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      (_ctx$luckysheet_selec2 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec2 === void 0 ? void 0 : _ctx$luckysheet_selec2.push(readonlyCandidateRange);
+     } else {
+-      ctx.luckysheet_select_save = [{
++      var readonlyCandidateSelection = [{
+         left: col_pre,
+         width: col - col_pre - 1,
+         top: row_pre,
+@@ -77673,9 +77966,13 @@
+         row_focus: row_index,
+         column_focus: col_index
+       }];
+-    }
+-  }
+-  ctx.luckysheet_select_save = normalizeSelection(ctx, ctx.luckysheet_select_save);
++      if (isReadonlyViewport(ctx) && !trueSelectionsInBounds(ctx, readonlyCandidateSelection)) return;
++      ctx.luckysheet_select_save = readonlyCandidateSelection;
++    }
++  }
++  var readonlyCandidateSelection = normalizeSelection(ctx, ctx.luckysheet_select_save);
++  if (isReadonlyViewport(ctx) && !trueSelectionsInBounds(ctx, readonlyCandidateSelection)) return;
++  ctx.luckysheet_select_save = readonlyCandidateSelection;
+   if (ctx.hooks.afterCellMouseDown) {
+     setTimeout(function () {
+       var _ctx$hooks$afterCellM, _ctx$hooks2, _flowdata$row_index2;
+@@ -77735,7 +78032,13 @@
+   luckysheetUpdateCell(ctx, row_index, col_index);
+ }
+ function handleContextMenu(ctx, settings, e, workbookContainer, container, area) {
+-  if (!ctx.allowEdit) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
++  var readonlyProtectedCopyOnly = ctx.allowEdit === false &&
++    ctx.protectedCopy !== undefined && area === "cell" &&
++    Array.isArray(settings.cellContextMenu) &&
++    settings.cellContextMenu.length === 1 && settings.cellContextMenu[0] === "copy";
++  if (!ctx.allowEdit && !readonlyProtectedCopyOnly) {
+     return;
+   }
+   var flowdata = getFlowdata(ctx);
+@@ -77765,6 +78068,11 @@
+     var _fixPositionOnFrozenC3 = fixPositionOnFrozenCells((_ctx$getRefs$globalCa = ctx.getRefs().globalCache.freezen) === null || _ctx$getRefs$globalCa === void 0 ? void 0 : _ctx$getRefs$globalCa[ctx.currentSheetId], _selected_x, _selected_y, mouseX, mouseY),
+       selected_x = _fixPositionOnFrozenC3.x,
+       selected_y = _fixPositionOnFrozenC3.y;
++    if (!readonlyTruePixel(ctx, selected_x, selected_y)) {
++      ctx.contextMenu = {};
++      e.preventDefault();
++      return;
++    }
+     var row_location = rowLocation(selected_y, ctx.visibledatarow);
+     var row = row_location[1];
+     var row_pre = row_location[0];
+@@ -77792,7 +78100,7 @@
+             height = _changeparam4[3],
+             left = _changeparam4[4],
+             width = _changeparam4[5];
+-          (_ctx$luckysheet_selec4 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec4 === void 0 ? void 0 : _ctx$luckysheet_selec4.push({
++          var readonlyCandidateRange = {
+             left: left,
+             width: width - 1,
+             top: top,
+@@ -77805,11 +78113,13 @@
+             column: columnseleted,
+             row_focus: rowseleted[0],
+             column_focus: columnseleted[0]
+-          });
++          };
++          if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++          (_ctx$luckysheet_selec4 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec4 === void 0 ? void 0 : _ctx$luckysheet_selec4.push(readonlyCandidateRange);
+           return;
+         }
+       }
+-      (_ctx$luckysheet_selec5 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec5 === void 0 ? void 0 : _ctx$luckysheet_selec5.push({
++      var readonlyCandidateRange = {
+         left: col_pre,
+         width: col - col_pre - 1,
+         top: row_pre,
+@@ -77822,7 +78132,9 @@
+         column: [col_index, col_index],
+         row_focus: row_index,
+         column_focus: col_index
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      (_ctx$luckysheet_selec5 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec5 === void 0 ? void 0 : _ctx$luckysheet_selec5.push(readonlyCandidateRange);
+       return;
+     }
+     if (isInSelection) return;
+@@ -77841,7 +78153,7 @@
+           _height3 = _changeparam6[3],
+           _left3 = _changeparam6[4],
+           _width3 = _changeparam6[5];
+-        ctx.luckysheet_select_save = [{
++        var readonlyCandidateSelection = [{
+           left: _left3,
+           width: _width3 - 1,
+           top: _top3,
+@@ -77855,10 +78167,12 @@
+           row_focus: _rowseleted3[0],
+           column_focus: _columnseleted3[0]
+         }];
++        if (isReadonlyViewport(ctx) && !trueSelectionsInBounds(ctx, readonlyCandidateSelection)) return;
++        ctx.luckysheet_select_save = readonlyCandidateSelection;
+         return;
+       }
+     }
+-    ctx.luckysheet_select_save = [{
++    var readonlyCandidateSelection = [{
+       left: col_pre,
+       width: col - col_pre - 1,
+       top: row_pre,
+@@ -77872,6 +78186,8 @@
+       row_focus: row_index,
+       column_focus: col_index
+     }];
++    if (isReadonlyViewport(ctx) && !trueSelectionsInBounds(ctx, readonlyCandidateSelection)) return;
++    ctx.luckysheet_select_save = readonlyCandidateSelection;
+   } else if (area === "rowHeader") {
+     var _ctx$getRefs$globalCa2;
+     ___default['default'].set(ctx.contextMenu, "headerMenu", "row");
+@@ -77894,8 +78210,7 @@
+     var _top4 = _row_pre;
+     var _height4 = _row - _row_pre - 1;
+     var _rowseleted4 = [_row_index, _row_index];
+-    ctx.luckysheet_select_save = [];
+-    ctx.luckysheet_select_save.push({
++    var readonlyCandidateRange = {
+       left: colLocationByIndex(0, ctx.visibledatacolumn)[0],
+       width: colLocationByIndex(0, ctx.visibledatacolumn)[1] - colLocationByIndex(0, ctx.visibledatacolumn)[0] - 1,
+       top: _top4,
+@@ -77909,7 +78224,10 @@
+       row_focus: _row_index,
+       column_focus: 0,
+       row_select: true
+-    });
++    };
++    if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++    ctx.luckysheet_select_save = [];
++    ctx.luckysheet_select_save.push(readonlyCandidateRange);
+   } else if (area === "columnHeader") {
+     var _ctx$getRefs$globalCa3;
+     ___default['default'].set(ctx.contextMenu, "headerMenu", "column");
+@@ -77932,8 +78250,7 @@
+     var _left4 = _col_pre2;
+     var _width4 = _col2 - _col_pre2 - 1;
+     var _columnseleted4 = [_col_index2, _col_index2];
+-    ctx.luckysheet_select_save = [];
+-    ctx.luckysheet_select_save.push({
++    var readonlyCandidateRange = {
+       left: _left4,
+       width: _width4,
+       top: rowLocationByIndex(0, ctx.visibledatarow)[0],
+@@ -77947,10 +78264,15 @@
+       row_focus: 0,
+       column_focus: _col_index2,
+       column_select: true
+-    });
++    };
++    if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++    ctx.luckysheet_select_save = [];
++    ctx.luckysheet_select_save.push(readonlyCandidateRange);
+   }
+ }
+ function mouseRender(ctx, globalCache, e, cellInput, scrollX, scrollY, container, fxInput) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   var _ctx$rangeDialog;
+   var rect = container.getBoundingClientRect();
+   if (ctx.luckysheet_scroll_status && !ctx.luckysheet_cols_change_size && !ctx.luckysheet_rows_change_size) {
+@@ -77992,6 +78314,10 @@
+     var _fixPositionOnFrozenC6 = fixPositionOnFrozenCells(freeze, _x, _y, mouseX - ctx.rowHeaderWidth, mouseY - ctx.columnHeaderHeight),
+       _x2 = _fixPositionOnFrozenC6.x,
+       _y2 = _fixPositionOnFrozenC6.y;
++    var readonlyDragSelection = ctx.luckysheet_select_save && ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1];
++    var readonlyDragX = readonlyDragSelection && readonlyDragSelection.row_select ? null : _x2;
++    var readonlyDragY = readonlyDragSelection && readonlyDragSelection.column_select ? null : _y2;
++    if (!readonlyTruePixel(ctx, readonlyDragX, readonlyDragY)) return;
+     var row_location = rowLocation(_y2, ctx.visibledatarow);
+     var row = row_location[1];
+     var row_pre = row_location[0];
+@@ -78080,6 +78406,7 @@
+       last.row[1] = rowMax;
+       last.height_move = ctx.visibledatarow[rowMax] - 1;
+     }
++    if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), last)) return;
+     ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1] = last;
+     scrollToFrozenRowCol(ctx, (_globalCache$freezen4 = globalCache.freezen) === null || _globalCache$freezen4 === void 0 ? void 0 : _globalCache$freezen4[ctx.currentSheetId]);
+   } else if (ctx.formulaCache.rangestart) {
+@@ -78425,6 +78752,8 @@
+   }
+ }
+ function handleRowHeaderMouseDown(ctx, globalCache, e, container, cellInput, fxInput) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   var _globalCache$freezen5;
+   if (!checkProtectionAllSelected(ctx, ctx.currentSheetId)) {
+     return;
+@@ -78437,6 +78766,7 @@
+   var freeze = (_globalCache$freezen5 = globalCache.freezen) === null || _globalCache$freezen5 === void 0 ? void 0 : _globalCache$freezen5[ctx.currentSheetId];
+   var _fixPositionOnFrozenC7 = fixPositionOnFrozenCells(freeze, 0, _y, 0, mouseY),
+     y = _fixPositionOnFrozenC7.y;
++  if (!readonlyTruePixel(ctx, null, y)) return;
+   var row_location = rowLocation(y, ctx.visibledatarow);
+   var row = row_location[1];
+   var row_pre = row_location[0];
+@@ -78621,10 +78951,11 @@
+       _last2.row = _rowseleted;
+       _last2.top_move = _top;
+       _last2.height_move = _height;
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), _last2)) return;
+       ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1] = _last2;
+     } else if (e.ctrlKey || e.metaKey) {
+       var _ctx$luckysheet_selec18;
+-      (_ctx$luckysheet_selec18 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec18 === void 0 ? void 0 : _ctx$luckysheet_selec18.push({
++      var readonlyCandidateRange = {
+         left: colLocationByIndex(0, ctx.visibledatacolumn)[0],
+         width: colLocationByIndex(0, ctx.visibledatacolumn)[1] - colLocationByIndex(0, ctx.visibledatacolumn)[0] - 1,
+         top: top,
+@@ -78638,10 +78969,11 @@
+         row_focus: row_index,
+         column_focus: 0,
+         row_select: true
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      (_ctx$luckysheet_selec18 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec18 === void 0 ? void 0 : _ctx$luckysheet_selec18.push(readonlyCandidateRange);
+     } else {
+-      ctx.luckysheet_select_save = [];
+-      ctx.luckysheet_select_save.push({
++      var readonlyCandidateRange = {
+         left: colLocationByIndex(0, ctx.visibledatacolumn)[0],
+         width: colLocationByIndex(0, ctx.visibledatacolumn)[1] - colLocationByIndex(0, ctx.visibledatacolumn)[0] - 1,
+         top: top,
+@@ -78655,13 +78987,18 @@
+         row_focus: row_index,
+         column_focus: 0,
+         row_select: true
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      ctx.luckysheet_select_save = [];
++      ctx.luckysheet_select_save.push(readonlyCandidateRange);
+       ctx.luckysheet_select_status = true;
+       ctx.luckysheet_scroll_status = true;
+     }
+   }
+ }
+ function handleColumnHeaderMouseDown(ctx, globalCache, e, container, cellInput, fxInput) {
++  if (isReadonlyViewport(ctx) && Array.isArray(ctx.luckysheet_select_save) &&
++      ctx.luckysheet_select_save.length > 0 && !trueSelectionsInBounds(ctx, ctx.luckysheet_select_save)) return;
+   var _globalCache$freezen6;
+   if (!checkProtectionAllSelected(ctx, ctx.currentSheetId)) {
+     return;
+@@ -78674,6 +79011,7 @@
+   var freeze = (_globalCache$freezen6 = globalCache.freezen) === null || _globalCache$freezen6 === void 0 ? void 0 : _globalCache$freezen6[ctx.currentSheetId];
+   var _fixPositionOnFrozenC8 = fixPositionOnFrozenCells(freeze, _x, 0, mouseX, 0),
+     x = _fixPositionOnFrozenC8.x;
++  if (!readonlyTruePixel(ctx, x, null)) return;
+   var row_index = ctx.visibledatarow.length - 1;
+   var row = ctx.visibledatarow[row_index];
+   var row_pre = 0;
+@@ -78861,10 +79199,11 @@
+       _last3.column = _columnseleted;
+       _last3.left_move = _left;
+       _last3.width_move = _width;
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), _last3)) return;
+       ctx.luckysheet_select_save[ctx.luckysheet_select_save.length - 1] = _last3;
+     } else if (e.ctrlKey || e.metaKey) {
+       var _ctx$luckysheet_selec20;
+-      (_ctx$luckysheet_selec20 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec20 === void 0 ? void 0 : _ctx$luckysheet_selec20.push({
++      var readonlyCandidateRange = {
+         left: left,
+         width: width,
+         top: rowLocationByIndex(0, ctx.visibledatarow)[0],
+@@ -78878,10 +79217,11 @@
+         row_focus: 0,
+         column_focus: col_index,
+         column_select: true
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      (_ctx$luckysheet_selec20 = ctx.luckysheet_select_save) === null || _ctx$luckysheet_selec20 === void 0 ? void 0 : _ctx$luckysheet_selec20.push(readonlyCandidateRange);
+     } else {
+-      ctx.luckysheet_select_save = [];
+-      ctx.luckysheet_select_save.push({
++      var readonlyCandidateRange = {
+         left: left,
+         width: width,
+         top: rowLocationByIndex(0, ctx.visibledatarow)[0],
+@@ -78895,7 +79235,10 @@
+         row_focus: 0,
+         column_focus: col_index,
+         column_select: true
+-      });
++      };
++      if (isReadonlyViewport(ctx) && !trueRangeInBounds(trueSheetBounds(ctx), readonlyCandidateRange)) return;
++      ctx.luckysheet_select_save = [];
++      ctx.luckysheet_select_save.push(readonlyCandidateRange);
+       ctx.luckysheet_select_status = true;
+       ctx.luckysheet_scroll_status = true;
+     }
+@@ -80416,6 +80759,7 @@
+ exports.convertSpanToShareString = convertSpanToShareString;
+ exports.copy = copy;
+ exports.createDropCellRange = createDropCellRange;
++exports.createReadonlyViewGeometry = createReadonlyViewGeometry;
+ exports.createFilter = createFilter;
+ exports.createFilterOptions = createFilterOptions;
+ exports.createFormulaRangeSelect = createFormulaRangeSelect;
+diff --git a/node_modules/@fortune-sheet/core/dist/settings.d.ts b/node_modules/@fortune-sheet/core/dist/settings.d.ts
+index 3ba3d898d6d63cf031bf3fd1480538266b3e6a4e..f187f73eee9642c49264eb5784ff5f576e11f534 100644
+--- a/node_modules/@fortune-sheet/core/dist/settings.d.ts
++++ b/node_modules/@fortune-sheet/core/dist/settings.d.ts
+@@ -57,11 +57,17 @@
+     beforeUpdateSheetName?: (id: string, oldName: string, newName: string) => boolean;
+     afterUpdateSheetName?: (id: string, oldName: string, newName: string) => void;
+ };
++export type ProtectedCopySelection = {
++    sheetId: string;
++    ranges: Array<{ row: [number, number]; column: [number, number] }>;
++};
++export type ProtectedCopyHandler = (selection: ProtectedCopySelection) => boolean;
+ export type Settings = {
+     column?: number;
+     row?: number;
+     addRows?: number;
+     allowEdit?: boolean;
++    readonlyViewport?: boolean;
+     showToolbar?: boolean;
+     showFormulaBar?: boolean;
+     showSheetTabs?: boolean;
+@@ -82,6 +88,7 @@
+     filterContextMenu?: string[];
+     generateSheetId?: () => string;
+     hooks?: Hooks;
++    protectedCopy?: ProtectedCopyHandler | null;
+     customToolbarItems?: {
+         key: string;
+         tooltip?: string;
+@@ -92,4 +99,4 @@
+     }[];
+     currency?: string;
+ };
+-export declare const defaultSettings: Required<Settings>;
++export declare const defaultSettings: Required<Omit<Settings, "protectedCopy">> & Pick<Settings, "protectedCopy">;
+diff --git a/node_modules/@fortune-sheet/core/dist/context.d.ts b/node_modules/@fortune-sheet/core/dist/context.d.ts
+index 6bb0ae43cd7fd0fa4a819d0220dbe53534c995e7..38b45bdb1f0549ae9c4ceea2d029ced7ef52d967 100644
+--- a/node_modules/@fortune-sheet/core/dist/context.d.ts
++++ b/node_modules/@fortune-sheet/core/dist/context.d.ts
+@@ -1,6 +1,6 @@
+ import { SheetConfig } from ".";
+ import { FormulaCache } from "./modules";
+-import { Hooks } from "./settings";
++import { Hooks, ProtectedCopyHandler } from "./settings";
+ import { Sheet, Selection, Cell, CommentBox, Rect, Image, Presence, LinkCardProps, FilterOptions, RangeDialogProps, DataRegulationProps, ConditionRulesProps, GlobalCache } from "./types";
+ interface MutableRefObject<T> {
+     current: T;
+@@ -160,6 +160,7 @@
+     zoomRatio: number;
+     showGridLines: boolean;
+     allowEdit: boolean;
++    readonlyViewport: boolean;
+     fontList: any[];
+     defaultFontSize: number;
+     luckysheetPaintModelOn: boolean;
+@@ -168,6 +169,7 @@
+     groupValuesRefreshData: any[];
+     formulaCache: FormulaCache;
+     hooks: Hooks;
++    protectedCopy?: ProtectedCopyHandler | null;
+     showSheetList?: Boolean;
+     forceFormulaRef?: Boolean;
+     sheetFocused: boolean;
+diff --git a/node_modules/@fortune-sheet/core/dist/canvas.d.ts b/node_modules/@fortune-sheet/core/dist/canvas.d.ts
+index 8dc215dbaa1d3927358947dc36c74ac12c656247..ba8eb429b3d3f4bf501f25f14c48ded3a944067b 100644
+--- a/node_modules/@fortune-sheet/core/dist/canvas.d.ts
++++ b/node_modules/@fortune-sheet/core/dist/canvas.d.ts
+@@ -6,12 +6,26 @@
+     rowFillStyle: string;
+     textAlign: string;
+ };
++export type ReadonlyViewAxis = {
++    readonly real: readonly number[];
++    readonly count: number;
++    readonly step: number;
++    readonly last: number;
++};
++export type ReadonlyViewGeometry = {
++    readonly rows: ReadonlyViewAxis;
++    readonly columns: ReadonlyViewAxis;
++    readonly height: number;
++    readonly width: number;
++};
++export declare function createReadonlyViewGeometry(ctx: ReturnType<typeof defaultContext>): ReadonlyViewGeometry | null;
+ export declare class Canvas {
+     canvasElement: HTMLCanvasElement;
+     sheetCtx: ReturnType<typeof defaultContext>;
+     measureTextCacheTimeOut: any;
+     cellOverflowMapCache: any;
+-    constructor(canvasElement: HTMLCanvasElement, ctx: ReturnType<typeof defaultContext>);
++    readonly readonlyViewGeometry: ReadonlyViewGeometry | null;
++    constructor(canvasElement: HTMLCanvasElement, ctx: ReturnType<typeof defaultContext>, readonlyViewGeometry?: ReadonlyViewGeometry | null);
+     drawRowHeader(scrollHeight: number, drawHeight?: number, offsetTop?: number): void;
+     drawColumnHeader(scrollWidth: number, drawWidth?: number, offsetLeft?: number): void;
+     drawMain({ scrollWidth, scrollHeight, drawWidth, drawHeight, offsetLeft, offsetTop, columnOffsetCell, rowOffsetCell, clear, }: {

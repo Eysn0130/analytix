@@ -12,6 +12,8 @@ import type {
   OpenEditorPathOptions
 } from '../../shared/editor'
 import { pathExists, resolveOpenTargetPath } from './workspace-paths'
+import { z } from 'zod'
+import { toolResultLocalPresentApplicationSchemaV1, type ToolResultLocalPresentApplicationsResultV1, type ToolResultLocalEffectResultV1 } from '../../../packages/runtime/src/contracts/tool-result-local-display'
 
 const execFileAsync = promisify(execFile)
 
@@ -371,7 +373,8 @@ async function macIcnsPathToDataUrl(iconPath: string): Promise<string | undefine
 
 async function getFileIconDataUrl(targetPath: string): Promise<string | undefined> {
   try {
-    const icon = await app.getFileIcon(targetPath, { size: 'large' })
+    // Electron's macOS loader can trap on large before a Promise rejection.
+    const icon = await app.getFileIcon(targetPath, { size: process.platform === 'darwin' ? 'normal' : 'large' })
     return nativeImageToDataUrl(icon)
   } catch {
     return undefined
@@ -533,4 +536,78 @@ export async function openEditorPath(payload: OpenEditorPathOptions): Promise<Ed
       message: error instanceof Error ? error.message : String(error)
     }
   }
+}
+
+
+// Present uses the actual per-file Launch Services association. Product editor
+// IDs, command discovery and ordinary unknown-editor fallback are unrelated.
+const PRESENT_FILE_APPLICATIONS_SCRIPT = `
+ObjC.import('Foundation'); ObjC.import('AppKit');
+function run(argv) {
+  var workspace = $.NSWorkspace.sharedWorkspace;
+  var fileURL = $.NSURL.fileURLWithPath($(argv[0]));
+  var defaultURL = workspace.URLForApplicationToOpenURL(fileURL);
+  var urls = workspace.respondsToSelector('URLsForApplicationsToOpenURL:')
+    ? workspace.URLsForApplicationsToOpenURL(fileURL) : defaultURL ? $.NSArray.arrayWithObject(defaultURL) : $.NSArray.array;
+  var result = [];
+  for (var index = 0; index < Number(ObjC.unwrap(urls.count)); index++) {
+    var url = urls.objectAtIndex(index);
+    var bundle = $.NSBundle.bundleWithURL(url);
+    var identifier = ObjC.unwrap(bundle.bundleIdentifier);
+    if (!identifier) continue;
+    var path = ObjC.unwrap(url.path);
+    result.push({ applicationId: identifier, label: ObjC.unwrap($.NSFileManager.defaultManager.displayNameAtPath($(path))),
+      isDefault: Boolean(defaultURL && defaultURL.isEqual(url)), appPath: path });
+  }
+  return JSON.stringify(result);
+}`
+const presentNativeApplicationSchema = toolResultLocalPresentApplicationSchemaV1.omit({ iconDataUrl: true }).extend({
+  appPath: z.string().max(4096).refine(value => isAbsolute(value) && !value.includes('\0'))
+}).strict()
+type PresentNativeApplication = z.infer<typeof presentNativeApplicationSchema>
+type PresentFileGuard = () => Promise<boolean>
+async function currentPresentFileApplications(targetPath: string, current: PresentFileGuard): Promise<PresentNativeApplication[] | null> {
+  if (process.platform !== 'darwin' || !await current()) return null
+  try {
+    // Fixed source and argv keep file text outside the script language.
+    const { stdout } = await execFileAsync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', PRESENT_FILE_APPLICATIONS_SCRIPT, targetPath],
+      { timeout: 5000, windowsHide: true, maxBuffer: 256 << 10 })
+    if (!await current()) return null
+    const parsed = z.array(presentNativeApplicationSchema).max(32).safeParse(JSON.parse(stdout))
+    if (!parsed.success) return null
+    // One real bundle identity can occur more than once for duplicate installs.
+    // Keep its observed first associated URL, including the actual default URL.
+    const applications = new Map<string, PresentNativeApplication>()
+    for (const value of parsed.data) {
+      if (!applications.has(value.applicationId) || value.isDefault) applications.set(value.applicationId, value)
+    }
+    const values = [...applications.values()]
+    return values.filter(value => value.isDefault).length <= 1 ? values : null
+  } catch { return null }
+}
+export async function listPresentFileApplications(targetPath: string, current: PresentFileGuard): Promise<ToolResultLocalPresentApplicationsResultV1> {
+  const applications = await currentPresentFileApplications(targetPath, current)
+  if (!applications) return { ok: false, code: process.platform === 'darwin' ? 'unavailable' : 'unsupported' }
+  const visible = []
+  for (const { appPath, ...application } of applications) {
+    if (!await current()) return { ok: false, code: 'unavailable' }
+    const iconDataUrl = await getFileIconDataUrl(appPath)
+    if (!await current()) return { ok: false, code: 'unavailable' }
+    visible.push({ ...application, ...(iconDataUrl && isValidIconDataUrl(iconDataUrl) ? { iconDataUrl } : {}) })
+  }
+  return { ok: true, applications: visible }
+}
+export async function openPresentFileApplication(targetPath: string, applicationId: string | undefined, current: PresentFileGuard): Promise<ToolResultLocalEffectResultV1> {
+  const applications = await currentPresentFileApplications(targetPath, current)
+  if (!applications) return { ok: false, code: process.platform === 'darwin' ? 'unavailable' : 'unsupported' }
+  const application = applicationId === undefined ? applications.find(value => value.isDefault)
+    : applications.find(value => value.applicationId === applicationId)
+  if (!application) return { ok: false, code: 'unsupported' }
+  // This is the exact current associated application URL, not an app name or
+  // a caller-selected executable. The async authority guard sits at the effect.
+  if (!await current()) return { ok: false, code: 'unavailable' }
+  try {
+    await execFileAsync('/usr/bin/open', ['-a', application.appPath, targetPath], { timeout: 10000, windowsHide: true })
+    return await current() ? { ok: true } : { ok: false, code: 'unavailable' }
+  } catch { return { ok: false, code: 'unavailable' } }
 }

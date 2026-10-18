@@ -13,7 +13,7 @@ import {
   sanitizePublicRuntimeValue,
   stripASCIIControlCharacters
 } from './public-runtime-content'
-import { projectPublicRuntimeSseBlock } from './public-runtime-sse'
+import { isStrictPublicRuntimeSseIpcPayload, projectPublicRuntimeSseBlock } from './public-runtime-sse'
 
 function closedTerminalCacheDiagnostics(): Record<string, unknown> {
   const complete = (value: number) => ({
@@ -346,6 +346,77 @@ describe('public runtime content', () => {
     })
     expect(containsPrivateReasoningContent({ reasoningTokens: 12, reasoningEffort: 'high' })).toBe(false)
     expect(sanitizePublicRuntimeValue({ reasoningEffort: 'auto' })).toEqual({ reasoningEffort: 'auto' })
+  })
+
+  it.each([
+    { name: 'unknown zero', count: { reportedValue: 0, knownAttemptCount: 0, attemptCount: 2, complete: false } },
+    { name: 'known zero', count: { reportedValue: 0, knownAttemptCount: 2, attemptCount: 2, complete: true } },
+    { name: 'partial nonzero', count: { reportedValue: 7, knownAttemptCount: 1, attemptCount: 2, complete: false } },
+    { name: 'complete nonzero', count: { reportedValue: 7, knownAttemptCount: 2, attemptCount: 2, complete: true } }
+  ])('preserves $name reported reasoning counters recursively and idempotently', ({ count }) => {
+    const value = {
+      usage: { reasoningTokens: count },
+      turns: [{ billing: { reasoningTokens: { ...count } } }]
+    }
+    const sanitized = sanitizePublicRuntimeValue(value)
+    expect(sanitized).toEqual(value)
+    expect(sanitizePublicRuntimeValue(sanitized)).toEqual(value)
+    expect(containsPrivateReasoningContent(value)).toBe(false)
+    expect(containsPrivateReasoningContent(sanitized)).toBe(false)
+  })
+
+  it.each(['reportedValue', 'knownAttemptCount', 'attemptCount'] as const)(
+    'rejects invalid reported reasoning counter numbers in %s',
+    (field) => {
+      const count = { reportedValue: 0, knownAttemptCount: 0, attemptCount: 2, complete: false }
+      const invalidValues: unknown[] = [
+        -1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, -Infinity, -0,
+        '0', null, true, []
+      ]
+      for (const invalid of invalidValues) {
+        const value = { usage: { reasoningTokens: { ...count, [field]: invalid } } }
+        expect(sanitizePublicRuntimeValue(value)).toBeUndefined()
+        expect(containsPrivateReasoningContent(value)).toBe(true)
+      }
+    }
+  )
+
+  it('rejects incomplete, extended and inconsistent reported reasoning counter objects', () => {
+    const count = { reportedValue: 0, knownAttemptCount: 0, attemptCount: 2, complete: false }
+    const missingFields = Object.keys(count).map((missing) => Object.fromEntries(
+      Object.entries(count).filter(([key]) => key !== missing)
+    ))
+    const invalidCounts: unknown[] = [
+      ...missingFields,
+      'PRIVATE_REASONING_SENTINEL', null, true, false, [], [count],
+      { ...count, extra: 0 },
+      { ...count, text: 'PRIVATE_REASONING_SENTINEL' },
+      { ...count, reasoningContent: 'PRIVATE_REASONING_SENTINEL' },
+      { ...count, raw: 'PRIVATE_REASONING_SENTINEL' },
+      { ...count, complete: 'false' },
+      { ...count, knownAttemptCount: 3 },
+      { ...count, reportedValue: 1 }
+    ]
+    for (const reasoningTokens of invalidCounts) {
+      const value = { usage: { reasoningTokens } }
+      expect(sanitizePublicRuntimeValue(value)).toBeUndefined()
+      expect(containsPrivateReasoningContent(value)).toBe(true)
+    }
+  })
+
+  it('keeps legacy numeric reasoning metadata and admits no counter object as latency', () => {
+    for (const scalar of [0, 17, -0]) {
+      const value = { usage: { reasoningTokens: scalar }, firstReasoningLatencyMs: scalar }
+      expect(sanitizePublicRuntimeValue(value)).toEqual(value)
+      expect(containsPrivateReasoningContent(value)).toBe(false)
+    }
+    const value = {
+      firstReasoningLatencyMs: {
+        reportedValue: 7, knownAttemptCount: 2, attemptCount: 2, complete: true
+      }
+    }
+    expect(sanitizePublicRuntimeValue(value)).toBeUndefined()
+    expect(containsPrivateReasoningContent(value)).toBe(true)
   })
 
   it('preserves the closed model reasoning capability but rejects content-shaped objects', () => {
@@ -973,6 +1044,30 @@ describe('public runtime content', () => {
     expect(sanitizePublicRuntimeValue(value)).toEqual(value)
   })
 
+  it.each([
+    '00000.  0000000000', '123456\r\n789012', '20260716153045', '1700000000000'
+  ])('preserves Core-safe numeric user text and prompts without mutating history: %s', text => {
+      const item = Object.freeze({ role: 'user', kind: 'user_message', text })
+      const turn = Object.freeze({ prompt: text, items: Object.freeze([item]) })
+      const value = Object.freeze({ turns: Object.freeze([turn]) })
+      const before = JSON.stringify(value)
+      const sanitized = sanitizePublicRuntimeValue(value)
+      expect(sanitized).toEqual(value)
+      expect(sanitizePublicRuntimeValue(sanitized)).toEqual(value)
+      expect(JSON.stringify(value)).toBe(before)
+    })
+
+  it.each([
+    '账号 00000.  0000000000', '001234567890', '金额 13800138000', '金额 11010519491231002X'
+  ])('keeps financial and valid identity/phone PII behind the original public entry: %s', text => {
+      const value = Object.freeze({ turns: Object.freeze([
+        Object.freeze({ prompt: text, items: Object.freeze([Object.freeze({ role: 'user', kind: 'user_message', text })]) })
+      ]) })
+      const before = JSON.stringify(value)
+      expect(sanitizePublicRuntimeValue(value)).toBeUndefined()
+      expect(JSON.stringify(value)).toBe(before)
+    })
+
   it('fails closed on unprojected secret and PII values in ordinary public content', () => {
     for (const value of [
       'account=6222020202020202020',
@@ -1189,5 +1284,165 @@ describe('public runtime content', () => {
     expect(sanitizePublicSerializedText('public\nreasoning: "PRIVATE"\nafter')).toBe('')
     expect(sanitizePublicSerializedText('public\nthinking = PRIVATE\nafter')).toBe('')
     expect(sanitizePublicSerializedText('  public\nbytes  ')).toBe('  public\nbytes  ')
+  })
+})
+
+describe('modern question identity in public thread detail', () => {
+  it.each(['pending', 'submitted', 'cancelled', 'continued'])('preserves Core option IDs in %s items but rejects PII-bearing option display text', status => {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const option = { id: `${inputId}_1_option_1`, label: 'Fast', description: '' }
+    const item = { kind: 'user_input', role: 'system', status, inputId, prompt: 'Choose',
+      questions: [{ id: `${inputId}_1`, header: 'Path', question: 'Choose', multiSelect: false, options: [option] }] }
+    const thread = { id: 'thread-gate', turns: [{ id: 'turn-gate', items: [item] }] }
+    expect(sanitizePublicRuntimeValue(thread)).toEqual(thread)
+    const unsafe = { ...thread, turns: [{ id: 'turn-gate', items: [{ ...item,
+      questions: [{ ...item.questions[0], options: [{ ...option, description: 'phone=13800138000' }] }] }] }] }
+    expect(sanitizePublicRuntimeValue(unsafe)).toBeUndefined()
+  })
+})
+
+
+describe('closed Host retry numeric metadata privacy', () => {
+  const scheduled = { schemaVersion: 1, source: 'provider_retry', phase: 'scheduled',
+    logicalSequence: 7, outerAttempt: 2, delayMs: 0, deadlineUnixMs: 1700000000000 }
+  const wire = (retry: Record<string, unknown> = scheduled, overrides: Record<string, unknown> = {}) => {
+    const attempt = Number(retry.source === 'transport_reconnect' ? retry.physicalAttempt : retry.outerAttempt)
+    return { kind: 'pipeline_stage', seq: 15, timestamp: '2026-10-10T00:00:00.123456789Z',
+      threadId: 'thread-retry', turnId: 'turn-retry', stage: 'provider_retrying',
+      label: 'Retrying provider stream', attempt, maxAttempt: Math.max(3, attempt),
+      details: { retry }, ...overrides }
+  }
+  const expectExactAdmission = (event: ReturnType<typeof wire>) => {
+    const before = JSON.stringify(event)
+    expect(sanitizePublicRuntimeValue(event)).toEqual(event)
+    expect(new PublicRuntimeEventFilter().push(event)).toEqual(event)
+    expect(isPublicSseIpcPayload({ streamId: 'retry-stream', events: [event] })).toBe(true)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'retry-stream', events: [event] })).toBe(true)
+    expect(JSON.stringify(event)).toBe(before)
+  }
+
+  it.each(['provider_retry', 'transport_reconnect'])('preserves real %s deadlines, phases and optional absence', source => {
+    for (const phase of ['scheduled', 'started', 'cancelled']) {
+      const retry = { schemaVersion: 1, source, phase, logicalSequence: 7, outerAttempt: 2,
+        ...(source === 'transport_reconnect' ? { physicalAttempt: 3 } : {}),
+        ...(phase === 'scheduled' ? { delayMs: 0, deadlineUnixMs: 1700000000000 } : {}),
+        ...(phase === 'cancelled' ? { cancelReason: 'context_cancelled' } : {}) }
+      const event = wire(retry, { details: { retry, visibleRecovery: false,
+        providerError: { kind: 'network', retryable: true, status: 503 } } })
+      Object.freeze(retry)
+      Object.freeze(event.details)
+      Object.freeze(event)
+      expectExactAdmission(event)
+    }
+  })
+
+  it.each(['logicalSequence', 'outerAttempt', 'physicalAttempt', 'delayMs', 'deadlineUnixMs'])('preserves the valid %s numeric upper bound', key => {
+    const retry = { ...scheduled, source: 'transport_reconnect', physicalAttempt: 3, [key]: 1e15 }
+    expectExactAdmission(wire(retry))
+  })
+
+  it('preserves no-retry recovery, cap observations and ordinary retry-named data', () => {
+    expectExactAdmission(wire(scheduled, { details: {} }))
+    expectExactAdmission(wire(scheduled, { details: { retry: undefined } }))
+    expectExactAdmission(wire(scheduled, { details: { visibleRecovery: true, recoveryKind: 'interrupted_stream' } }))
+    expectExactAdmission(wire(scheduled, { stage: 'response_received', label: 'Response Received',
+      details: { stopReason: 'length', streamCompleted: false, logicalSequence: 7, toolCallCount: 0 } }))
+    for (const value of [{ details: { retry: null } }, { retry: scheduled },
+      { kind: 'user_message', text: 'ordinary literal', details: { retry: scheduled } }]) {
+      const before = JSON.stringify(value)
+      expect(sanitizePublicRuntimeValue(value)).toEqual(value)
+      expect(JSON.stringify(value)).toBe(before)
+    }
+  })
+
+  it('keeps invalid original events and unrelated PII behind the existing gates', () => {
+    for (const event of [
+      wire(scheduled, { stage: 'response_received' }), wire(scheduled, { label: 'Wrong label' }),
+      wire(scheduled, { seq: 1.5 }), wire(scheduled, { timestamp: 'invalid' }),
+      wire(scheduled, { threadId: 'invalid id' }), wire(scheduled, { turnId: undefined }),
+      wire(scheduled, { itemId: 'item-other' }), wire(scheduled, { child: {} }),
+      wire(scheduled, { attempt: 1 }), wire(scheduled, { maxAttempt: 1 }),
+      wire(scheduled, { extra: 'closed' }), wire(scheduled, { thinkingTokens: 0 }),
+      wire(scheduled, { trace: { sse_sent_at: 1 } }),
+      wire(scheduled, { details: { retry: scheduled, toolName: '13800138000' } }),
+      wire(scheduled, { details: { retry: scheduled, firstReasoningLatencyMs: 1700000000000 } }),
+      wire({ ...scheduled, source: 'untrusted' }), wire({ ...scheduled, phase: 'untrusted' }),
+      wire({ ...scheduled, deadlineUnixMs: 1700000000000.5 }),
+      wire({ ...scheduled, deadlineUnixMs: 1e15 + 1 }),
+      wire({ ...scheduled, extra: 'closed' }),
+      ...[null, false, 3, 'scheduled'].map(retry => wire(scheduled, { details: { retry } }))
+    ]) {
+      expect(sanitizePublicRuntimeValue(event)).toBeUndefined()
+      expect(new PublicRuntimeEventFilter().push(event)).toBeNull()
+      expect(isPublicSseIpcPayload({ streamId: 'retry-stream', events: [event] })).toBe(false)
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'retry-stream', events: [event] })).toBe(false)
+    }
+    for (const value of [{ wrapper: wire() }, [wire()],
+      { streamId: 'retry-stream', events: [wire()], thinkingTokens: 0 }]) {
+      expect(sanitizePublicRuntimeValue(value)).toBeUndefined()
+      expect(isPublicSseIpcPayload(value)).toBe(false)
+    }
+  })
+})
+
+
+describe('closed logical-step metadata privacy', () => {
+  const details = { schemaVersion: 1, logicalStepId: '13800138-0000-4000-8000-138001380000',
+    assistantMessageAssembled: true, llmMs: 1700000000000, ttftMs: 0, decodeMs: 1700000000000, decodeTokens: 13800138000 }
+  const event = (overrides: Record<string, unknown> = {}) => ({ kind: 'pipeline_stage', seq: 61,
+    timestamp: '2026-10-12T00:00:00.123456789Z', threadId: 'thread-logical', turnId: 'turn-logical',
+    stage: 'logical_step_closed', label: 'Logical step closed', details, ...overrides })
+  it('preserves admitted metadata bytes without treating UUIDs and timing counters as prose', () => {
+    const wire = event(), before = JSON.stringify(wire)
+    Object.freeze(details); Object.freeze(wire)
+    expect(sanitizePublicRuntimeValue(wire)).toEqual(wire)
+    expect(new PublicRuntimeEventFilter().push(wire)).toEqual(wire)
+    expect(isPublicSseIpcPayload({ streamId: 'logical-stream', events: [wire] })).toBe(true)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'logical-stream', events: [wire] })).toBe(true)
+    expect(JSON.stringify(wire)).toBe(before)
+  })
+  it('preserves exact assembly identity and Host time without carrying close metrics', () => {
+    const id = { schemaVersion: 1, logicalStepId: details.logicalStepId }
+    const wire = event({ stage: 'logical_step_assembled', label: 'Logical step assembled', details: id })
+    const before = JSON.stringify(wire)
+    expect(sanitizePublicRuntimeValue(wire)).toEqual(wire)
+    expect(new PublicRuntimeEventFilter().push(wire)).toEqual(wire)
+    expect(isPublicSseIpcPayload({ streamId: 'logical-stream', events: [wire] })).toBe(true)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'logical-stream', events: [wire] })).toBe(true)
+    expect(JSON.stringify(wire)).toBe(before)
+    for (const patch of [{ details: { ...id, llmMs: 0 } }, { details: { ...id, body: 'PRIVATE_BODY' } },
+      { details: { ...id, StepBindingHMAC: 'PRIVATE_HMAC' } }, { body: 'PRIVATE_BODY' }, { trace: {} },
+      { reasoning: '' }]) {
+      const invalid = { ...wire, ...patch }, original = JSON.stringify(invalid)
+      expect(sanitizePublicRuntimeValue(invalid)).toBeUndefined()
+      expect(new PublicRuntimeEventFilter().push(invalid)).toBeNull()
+      expect(isPublicSseIpcPayload({ streamId: 'logical-stream', events: [invalid] })).toBe(false)
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'logical-stream', events: [invalid] })).toBe(false)
+      expect(JSON.stringify(invalid)).toBe(original)
+    }
+    for (const wrapper of [[wire], { wrapper: wire }, { streamId: 'logical-stream', events: [wire], extra: 0 },
+      { streamId: 'logical-stream', events: [wire, { wrapper: wire }] }]) {
+      expect(sanitizePublicRuntimeValue(wrapper)).toBeUndefined()
+      expect(isPublicSseIpcPayload(wrapper)).toBe(false)
+    }
+  })
+  it('preserves the existing canonical opaque identifier treatment', () => {
+    const wire = event({ threadId: '13800138000' })
+    expect(sanitizePublicRuntimeValue(wire)).toEqual(wire)
+    expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'logical-stream', events: [wire] })).toBe(true)
+  })
+  it('does not exempt malformed events, wrappers, arbitrary detail fields or unrelated PII', () => {
+    for (const wire of [event({ label: 'Wrong label' }), event({ turnId: undefined }), event({ timestamp: 'invalid' }),
+      event({ trace: { sse_sent_at: 1, sse_live_emitted_at: 1 } }), event({ itemId: 'item-extra' }),
+      event({ details: { ...details, decodeMs: 1 } }), event({ details: { ...details, extra: 0 } }),
+      event({ phone: '13800138000' }), event({ threadId: 'invalid id' }), event({ child: {} }), event({ seq: 0.5 })]) {
+      expect(sanitizePublicRuntimeValue(wire)).toBeUndefined()
+      expect(isPublicSseIpcPayload({ streamId: 'logical-stream', events: [wire] })).toBe(false)
+      expect(isStrictPublicRuntimeSseIpcPayload({ streamId: 'logical-stream', events: [wire] })).toBe(false)
+    }
+    for (const wrapper of [[event()], { wrapper: event() }, { streamId: 'logical-stream', events: [event()], extra: 0 }]) {
+      expect(sanitizePublicRuntimeValue(wrapper)).toBeUndefined()
+      expect(isPublicSseIpcPayload(wrapper)).toBe(false)
+    }
   })
 })

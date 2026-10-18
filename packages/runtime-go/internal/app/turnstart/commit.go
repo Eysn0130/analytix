@@ -10,8 +10,11 @@ import (
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
+	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
+	domaingoal "analytix.local/runtime-go/internal/domain/goal"
 	domainidentity "analytix.local/runtime-go/internal/domain/identity"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	contextsourceport "analytix.local/runtime-go/internal/ports/contextsource"
 )
 
 type DurableStore interface {
@@ -21,6 +24,13 @@ type DurableStore interface {
 }
 
 type PreparedCommitInput struct {
+	ValidateContextSources func(context.Context) error
+	PrepareContextSources  func(context.Context, domainsecurity.TurnSecurityContext) ([]domaincontextepoch.SourceEntry, contextsourceport.Reader, error)
+	GoalAttempt            domaingoal.RoundAdmissionV1
+	GoalPrompt             string
+	// GoalAuthorizePrimary is host-only and wraps just the atomic primary
+	// write, after the Goal driver and durable store owners have been acquired.
+	GoalAuthorizePrimary  func(func() error) error
 	Context               context.Context
 	HostContext           context.Context
 	Store                 DurableStore
@@ -99,6 +109,7 @@ func CommitPreparedTurn(input PreparedCommitInput) (CommitResult, error) {
 	if input.RecordFactory != nil {
 		securityRecords = SecurityRecords{Turn: map[string]any{}, TurnStartedEvent: map[string]any{}, ThreadPatch: map[string]any{}}
 	}
+	securityRecords.PrepareContextSources = input.PrepareContextSources
 	frozenHooks := make([]func(context.Context, domainsecurity.TurnSecurityContext) error, 0, 2)
 	if input.ValidateFrozen != nil {
 		frozenHooks = append(frozenHooks, input.ValidateFrozen)
@@ -129,8 +140,31 @@ func CommitPreparedTurn(input PreparedCommitInput) (CommitResult, error) {
 		turnsecurityapp.AttachStartRecords(commitRecords.Turn, commitRecords.TurnStartedEvent, commitRecords.ThreadPatch, preparation.SecurityContext)
 		contextepochapp.AttachStartRecords(commitRecords.Turn, commitRecords.TurnStartedEvent, commitRecords.ThreadPatch, preparation.EpochState)
 	}
+	if input.ValidateContextSources != nil {
+		if err := input.ValidateContextSources(input.Context); err != nil {
+			return CommitResult{Preparation: preparation}, err
+		}
+	}
+	if err := input.Context.Err(); err != nil {
+		return CommitResult{Preparation: preparation}, err
+	}
 	result := CommitResult{Preparation: preparation, Records: commitRecords}
-	if err := input.Store.AppendTurnToThreadIfBaseline(
+	if input.GoalAttempt != nil {
+		store, ok := input.Store.(interface {
+			AppendGoalTurnIfBaselineV1(string, map[string]any, string, map[string]any, string, string, domaingoal.RoundAdmissionV1, string, func(func() error) error) (GoalAppendOutcomeV1, error)
+		})
+		if !ok {
+			return result, errors.New("Goal atomic admission store is unavailable")
+		}
+		outcome, appendErr := store.AppendGoalTurnIfBaselineV1(input.ThreadID, commitRecords.Turn, providerID, commitRecords.ThreadPatch, input.Workspace, baselineDigest, input.GoalAttempt, input.GoalPrompt, input.GoalAuthorizePrimary)
+		result.Appended = outcome.Committed
+		if appendErr != nil {
+			return result, appendErr
+		}
+		if !outcome.Committed {
+			return result, errors.New("Goal primary admission was not confirmed")
+		}
+	} else if err := input.Store.AppendTurnToThreadIfBaseline(
 		input.ThreadID, commitRecords.Turn, providerID, commitRecords.ThreadPatch, input.Workspace, baselineDigest,
 	); err != nil {
 		return result, err

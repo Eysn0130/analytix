@@ -1,4 +1,4 @@
-/* global Module */
+/* global Module, __emscripten_check_mailbox, _pthread_self */
 // First-party adapter using zetajs 1.2.0 public UNO APIs; see README provenance.
 'use strict';
 Module.zetajs.then(zeta => {
@@ -11,11 +11,38 @@ Module.zetajs.then(zeta => {
   const NEVER_EXECUTE = 0;
   const prop = (Name, Value) => new css.beans.PropertyValue({Name, Value});
   const emit = data => zeta.mainPort.postMessage(data);
-  let channel, model, controller, active, modifyListener, selectionListener;
-  let handleSequence = 0, suppressChanges = false;
+  let channel, model, controller, active, modifyListener, selectionListener, modelFonts;
+  // Private mailbox qualification for the exact Main-verified installed assets.
+  // No arbitrary WASM invocation or renderer-supplied input authority is added.
+  const inputRuntimeQualification = Object.freeze({
+    buildId:'efaf0670b4d055f838a2849becb10f08aa06a257',
+    scriptSha256:'5143e5354f470b87f86ba272bcfef857bd13e6f07b59666e48a7ccb89643cd77',
+    wasmSha256:'9ebd9a487e849a24b9c69f843ebdb451709c27b7722c010e36846433474a5bd4'
+  });
+  const inputRuntimeVersion = Object.values(inputRuntimeQualification).join(':');
+  let inputRuntime, inputToolkit, privateBusy, pendingFreeze;
+  const playActions = ['play-read','play-start','play-current','play-next-effect','play-previous-effect','play-next-slide','play-previous-slide','play-pause','play-resume','play-end'];
+  let presentation, playbackTimer, playbackBusy = false, presentationUncertain = false, presentationStartupUncertain = false, previewBeforePlayback, editorBeforePlayback;
+  let playback = {generation:0, sequence:0, phase:'idle', slideIndex:null, slideCount:null};
+  let handleSequence = 0, suppressChanges = false, mutating = false;
   const handles = new Map();
+  let lastSelectionIdentity = null, currentTextSelection = null;
+  function endTextSelection() { currentTextSelection = null; lastSelectionIdentity = null; }
+  function clearHandles() { handles.clear(); endTextSelection(); }
+  function confirmSelection() {
+    const value = selection();
+    const handle = handles.get(value.token);
+    const identity = handle?.rangeIdentity;
+    const eligible = active.kind === 'docx' && !!identity && !!handle.text.trim();
+    const changed = eligible && (!lastSelectionIdentity || !sameTextRange(lastSelectionIdentity, identity.cursor));
+    lastSelectionIdentity = eligible ? identity : null;
+    event('selection', {selection:value});
+    // Private native confirmation: endpoints, never text equality or a sampling token.
+    event('selection-confirmed', {selectionToken:value.token ?? null, eligible, changed});
+  }
   const state = () => ({documentId:active.documentId, version:active.version, kind:active.kind,
-    changeSequence:active.sequence, acknowledgedSequence:active.acknowledged, dirty:active.sequence !== active.acknowledged});
+    changeSequence:active.sequence, acknowledgedSequence:active.acknowledged, dirty:active.sequence !== active.acknowledged,
+    ...(active.manual ? {manual:{...active.manual}} : {})});
   const event = (type, payload) => emit({type, channel, documentId:active.documentId, version:active.version,
     operationId:active.openOperationId, ...payload});
   const boundedText = value => {
@@ -28,10 +55,63 @@ Module.zetajs.then(zeta => {
     const text = String(value ?? '');
     return {capturedCharacters:boundedText(text).length, totalCharacters:text.length, truncated:text.length > 4096 || !complete, unit:'utf-16', complete:complete && text.length <= 4096};
   }
+  function textRangeIdentity(target) {
+    try {
+      const text = target.getText();
+      let compare;
+      try { compare = text.queryInterface(zeta.type.interface(css.text.XTextRangeCompare)); } catch { /* Optional interface: fail closed below if the text exposes no comparator. */ }
+      if (!compare && typeof text.compareRegionStarts === 'function' && typeof text.compareRegionEnds === 'function') compare = text;
+      if (!compare) return null;
+      const cursor = text.createTextCursorByRange(target.getStart());
+      cursor.gotoRange(target.getEnd(), true);
+      const identity = {text, compare, cursor};
+      return sameTextRange(identity, target) ? identity : null;
+    } catch { return null; }
+  }
+  function sameTextRange(identity, target) {
+    try {
+      return !!identity && !!target && zeta.sameUnoObject(identity.text, target.getText()) &&
+        identity.compare.compareRegionStarts(identity.cursor, target) === 0 &&
+        identity.compare.compareRegionEnds(identity.cursor, target) === 0;
+    } catch { return false; }
+  }
+  function textSelectionBindingCurrent(current) {
+    return !!current && handles.get(current.token) === current.handle && current.documentId === active.documentId &&
+      current.opened === active.openOperationId && current.handle.version === active.version && current.handle.sequence === active.sequence &&
+      current.manualGeneration === (active.manual?.generation ?? null);
+  }
+  function sameCapturedTextRange(handle, target, text) {
+    try {
+      return !!handle?.rangeIdentity && handle.text === text && sameTextRange(handle.rangeIdentity, target) &&
+        sameTextRange(handle.rangeIdentity, handle.target) && handle.rangeIdentity.cursor.getString() === text &&
+        handle.target.getString() === text && target.getString() === text;
+    } catch { return false; }
+  }
+  function currentTextSelectionMatches(token, handle, viewCursor) {
+    const current = currentTextSelection;
+    if (!textSelectionBindingCurrent(current) || current.token !== token || current.handle !== handle) return false;
+    try {
+      if (sameCapturedTextRange(handle, currentTextRange(), handle.text) &&
+          (!viewCursor || sameTextRange(handle.rangeIdentity, viewCursor))) return true;
+    } catch { /* A native comparison failure ends this continuous lease. */ }
+    endTextSelection();
+    return false;
+  }
   function remember(target, text, kind) {
+    const rangeIdentity = kind === 'text' && text.length ? textRangeIdentity(target) : null;
+    if (kind === 'text') {
+      // Only this uninterrupted native range can retain its UI lease. Historical
+      // AI targets remain in handles, but are never searched to revive a lease.
+      if (rangeIdentity && textSelectionBindingCurrent(currentTextSelection) &&
+          sameCapturedTextRange(currentTextSelection.handle, target, text)) return currentTextSelection.token;
+      endTextSelection();
+    }
     // Session-local opaque references: never pointers or guessed text offsets.
     const token = 'selection_' + active.openOperationId.replace(/[^A-Za-z0-9_-]/g, '_') + '_' + (++handleSequence);
-    handles.set(token, {target, text, kind, version:active.version, sequence:active.sequence});
+    const handle = {target, text, kind, version:active.version, sequence:active.sequence, rangeIdentity};
+    handles.set(token, handle);
+    if (kind === 'text' && rangeIdentity) currentTextSelection = {token,handle,documentId:active.documentId,
+      opened:active.openOperationId,manualGeneration:active.manual?.generation ?? null};
     while (handles.size > 32) handles.delete(handles.keys().next().value);
     return token;
   }
@@ -106,7 +186,7 @@ Module.zetajs.then(zeta => {
           if(actual.valueType!==c.valueType||actual.numberFormat!==c.numberFormat||actual.merged||!actual.rowVisible||!actual.columnVisible||c.valueType==='number'&&actual.value!==c.value||c.valueType==='text'&&actual.text!==c.text||c.valueType==='formula'&&(formulaKey(actual.formula)!==formulaKey(c.formula)||targets[i].getError()!==0))throw Error('typed-mutation-failed');
         }
       });
-    }catch {active.mutationFailed=true;handles.clear();throw Error('typed-mutation-failed');}
+    }catch {active.mutationFailed=true;clearHandles();throw Error('typed-mutation-failed');}
   }
 function validPresentationSelection(s) {
   const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
@@ -229,7 +309,12 @@ function validPresentationReview(r) {
       if (active.kind === 'docx') {
         const text = selected.getCount ? Array.from({length:Math.min(selected.getCount(), 16)}, (_, i) => selected.getByIndex(i).getString()).join('\n') : selected.getString();
         const target = selected.getCount ? (selected.getCount() === 1 ? selected.getByIndex(0) : null) : selected;
-        return {...base, kind:'text', scope:'session-text-range-at-version-and-change-sequence', text:boundedText(text), capture:captured(text, !selected.getCount || selected.getCount() <= 16), ...(target ? {token:remember(target, text, 'text')} : {})};
+        if (!target) endTextSelection();
+        const token = target ? remember(target, text, 'text') : null;
+        const handle = token ? handles.get(token) : null;
+        const format = active.manual && !active.manual.frozen && handle?.rangeIdentity ?
+          {rangeLease:{generation:active.manual.generation,sequence:active.sequence,token},formatState:readFormatState(target)} : {};
+        return {...base, kind:'text', scope:'session-text-range-at-version-and-change-sequence', text:boundedText(text), capture:captured(text, !selected.getCount || selected.getCount() <= 16), ...(token ? {token} : {}), ...format};
       }
       if (active.kind === 'xlsx') {
         let addresses;
@@ -280,18 +365,290 @@ function validPresentationReview(r) {
       if(token&&presentation)handles.get(token).presentation=presentation;
       return {...base, kind:'shapes', scope:'page-and-shape-index-at-version-and-change-sequence', shapes, capture:captured(text, !selected.getCount || selected.getCount() <= 64), ...(token?{token}:{}),...(presentation?{presentation}:{})};
     } catch {
+      endTextSelection();
       return {...base, kind:'unavailable', scope:'engine selection interface unavailable in this view'};
     }
   }
   // Local view-only allowlist. These properties belong to the controller/view,
   // never the model, document text, cells or draw-page collection.
-  const viewActions = ['read','reset','fit','zoom-in','zoom-out','previous-page','next-page'];
+  const viewActions = ['read','reset','fit','zoom-in','zoom-out','previous-page','next-page','set-zoom'];
   const viewProperties = () => active.kind === 'docx' ? controller.getViewSettings() : controller;
   function setViewProperty(target, name, value) {
     const type = target.getPropertySetInfo().getPropertyByName(name).Type;
     target.setPropertyValue(name, new zeta.Any(type, value));
   }
-  function viewState() {
+  const fontProperties = {
+    'font-family':['CharFontName','CharFontNameAsian','CharFontNameComplex'],
+    'font-size':['CharHeight','CharHeightAsian','CharHeightComplex'],
+    bold:['CharWeight','CharWeightAsian','CharWeightComplex'],
+    italic:['CharPosture','CharPostureAsian','CharPostureComplex'],
+    underline:['CharUnderline']
+  };
+  const exactFields = (value, fields) => value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') === [...fields].sort().join(',');
+  const requestFields = ['command','operationId','documentId','version','channel'];
+  const digest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+  const nativeOperation = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(value);
+  function inputRuntimeThread(readSelf) {
+    if (typeof __emscripten_check_mailbox !== 'function' || typeof _pthread_self !== 'function') throw Error('native-input-unavailable');
+    let threadId;
+    try { threadId = (readSelf ?? _pthread_self)(); } catch { throw Error('native-input-unavailable'); }
+    if (!Number.isSafeInteger(threadId) || threadId <= 0 || threadId > 0xffffffff) throw Error('native-input-unavailable');
+    return threadId;
+  }
+  function requireInputRuntime() {
+    let valid = false;
+    try {
+      valid = !!inputRuntime && typeof __emscripten_check_mailbox === 'function' && typeof _pthread_self === 'function' &&
+        inputRuntime.mailbox === __emscripten_check_mailbox && inputRuntime.self === _pthread_self &&
+        inputRuntime.threadId === inputRuntimeThread(inputRuntime.self);
+    } catch { /* Retire an already writable sink below. */ }
+    if (!valid) {
+      if (active?.nativeWritable) retireNativeInput(active);
+      throw Error('native-input-unavailable');
+    }
+  }
+  function bindInputRuntime(r) {
+    if (inputRuntime) requireInputRuntime();
+    if (!exactFields(r,[...requestFields,'threadId','assetVersion']) || r.assetVersion !== inputRuntimeVersion ||
+        !Number.isSafeInteger(r.threadId) || r.threadId !== inputRuntimeThread()) throw Error('native-input-unavailable');
+    if (active.manual || active.nativeWritable || pendingFreeze) throw Error('operation-in-progress');
+    if (inputRuntime && (inputRuntime.threadId !== r.threadId || inputRuntime.assetVersion !== r.assetVersion)) throw Error('native-input-unavailable');
+    inputRuntime = Object.freeze({threadId:r.threadId,assetVersion:r.assetVersion,mailbox:__emscripten_check_mailbox,self:_pthread_self});
+  }
+  function retireNativeInput(owner) {
+    inputRuntime = undefined;
+    if (owner && active === owner) {
+      active.mutationFailed = true;
+      delete active.freezeAck;
+      clearHandles();
+    }
+  }
+  function drainNativeInput() {
+    requireInputRuntime();
+    const owner = active, ownsBusy = !privateBusy, busy = privateBusy ?? {};
+    if (ownsBusy) privateBusy = busy;
+    try {
+      // Outer worker message turn only. The admitted Emscripten mailbox drains
+      // the observed Qt target-thread prefix before the VCL/Qt work is drained.
+      // AsyncCallback alone cannot order those two producer channels.
+      const mailbox = inputRuntime.mailbox;
+      mailbox();
+      requireInputRuntime();
+      if (active !== owner) throw Error('native-input-unavailable');
+      if (!inputToolkit) inputToolkit = css.awt.Toolkit.create(context);
+      if (!inputToolkit || typeof inputToolkit.processEventsToIdle !== 'function') throw Error('native-input-unavailable');
+      inputToolkit.processEventsToIdle();
+      requireInputRuntime();
+      if (active !== owner) throw Error('native-input-unavailable');
+    } catch {
+      retireNativeInput(owner);
+      throw Error('native-input-unavailable');
+    } finally {
+      if (ownsBusy && privateBusy === busy) privateBusy = undefined;
+    }
+  }
+  function cancelFreeze(retire = false) {
+    const pending = pendingFreeze;
+    if (!pending) return;
+    pendingFreeze = undefined;
+    pending.done = true;
+    clearTimeout(pending.timeout);
+    clearTimeout(pending.continuation);
+    if (retire) retireNativeInput(pending.owner);
+    pending.reject(Error('native-input-unavailable'));
+  }
+  function freezeManualInput(r) {
+    if (!exactFields(r,[...requestFields,'changeId']) || !nativeOperation(r.operationId)) throw Error('invalid-request');
+    const previous = active.freezeAck;
+    if (active.manual?.frozen) {
+      if (!active.mutationFailed && previous && previous.operationId === r.operationId && previous.changeId === r.changeId &&
+          previous.generation === active.manual.generation && previous.sequence === active.sequence) {
+        requireInputRuntime();
+        return Promise.resolve({...previous});
+      }
+      throw Error('export-awaiting-ack');
+    }
+    requireManual(r);
+    drainNativeInput();
+    requireManual(r);
+    if (typeof crypto === 'undefined' || typeof crypto.randomUUID !== 'function' || typeof css.awt.AsyncCallback?.create !== 'function') {
+      retireNativeInput(active);
+      throw Error('native-input-unavailable');
+    }
+    const owner = active, nativeModel = model, nativeController = controller;
+    let nonce;
+    try { nonce = crypto.randomUUID(); } catch { retireNativeInput(owner); throw Error('native-input-unavailable'); }
+    if (typeof nonce !== 'string' || nonce.length === 0 || nonce.length > 128) { retireNativeInput(owner); throw Error('native-input-unavailable'); }
+    const identity = Object.freeze({nonce,documentId:owner.documentId,version:owner.version,
+      changeId:owner.manual.changeId,operationId:r.operationId,generation:owner.manual.generation,sequence:owner.sequence});
+    const data = JSON.stringify(identity);
+    return new Promise((resolve,reject) => {
+      const pending = {owner,identity,data,resolve,reject,done:false,seen:false,timeout:undefined,continuation:undefined,callback:undefined,service:undefined};
+      pendingFreeze = pending;
+      const current = () => pendingFreeze === pending && !pending.done && active === owner && model === nativeModel && controller === nativeController &&
+        owner.documentId === identity.documentId && owner.version === identity.version && !owner.mutationFailed &&
+        owner.manual?.changeId === identity.changeId && owner.manual.generation === identity.generation && !owner.manual.frozen && owner.sequence === identity.sequence;
+      const fail = () => { if (pendingFreeze === pending) cancelFreeze(true); };
+      try {
+        pending.callback = zeta.unoObject([css.awt.XCallback], {notify(value) {
+          if (pendingFreeze !== pending || pending.done) return;
+          try {
+            if (!current() || zeta.getAnyType(value).toString() !== 'string' || zeta.fromAny(value) !== data) { fail(); return; }
+            if (pending.seen) return;
+            pending.seen = true;
+            // Synchronous UNO notify must return before this continuation.
+            // Never pump, export or await bridge work inside the callback.
+            pending.continuation = setTimeout(() => {
+              if (!current()) { fail(); return; }
+              try { requireInputRuntime(); } catch { fail(); return; }
+              const proof = Object.freeze({changeId:identity.changeId,operationId:identity.operationId,generation:identity.generation,sequence:identity.sequence});
+              owner.manual.frozen = true;
+              owner.freezeAck = proof;
+              pending.done = true; pendingFreeze = undefined;
+              clearTimeout(pending.timeout);
+              resolve({...proof});
+            },0);
+          } catch { fail(); }
+        }});
+        pending.service = css.awt.AsyncCallback.create(context);
+        if (!pending.service || typeof pending.service.addCallback !== 'function') throw Error('native-input-unavailable');
+        // Timeout rejects and retires authority; elapsed time proves nothing.
+        pending.timeout = setTimeout(fail,5000);
+        pending.service.addCallback(pending.callback,new zeta.Any(zeta.type.string,data));
+      } catch { fail(); }
+    });
+  }
+  const validFont = value => typeof value === 'string' && value.length >= 1 && value.length <= 128 && value.trim() === value && !/\p{Cc}/u.test(value);
+  function availableFonts() {
+    if (modelFonts !== undefined) return [...modelFonts];
+    modelFonts = [];
+    try {
+      const device = controller.getFrame().getContainerWindow();
+      if (!device || typeof device.getFontDescriptors !== 'function') return [];
+      const descriptors = device.getFontDescriptors();
+      if (!Array.isArray(descriptors) || descriptors.length > 4096) return [];
+      const names = new Set();
+      for (const descriptor of descriptors) {
+        const name = descriptor?.Name;
+        if (validFont(name)) names.add(name);
+        if (names.size > 256) return [];
+      }
+      modelFonts = Object.freeze([...names].sort());
+    } catch { /* Missing native font capability never fabricates font choices. */ }
+    return [...modelFonts];
+  }
+  const validSize = value => typeof value === 'number' && Number.isFinite(value) && value >= 6 && value <= 96 && Number.isInteger(value * 2);
+  function readCharacterProperty(target, name) {
+    try {
+      // MAYBEVOID and AMBIGUOUS_VALUE are not guessed from a sample run.
+      if (typeof target.getPropertyState !== 'function' || enumNumber(target.getPropertyState(name)) === 2) return null;
+      const value = target.getPropertyValue(name);
+      return value === undefined || value === null ? null : value;
+    } catch { return null; }
+  }
+  function readFormatState(target) {
+    const common = (names, decode) => {
+      const values = names.map(name => decode(readCharacterProperty(target, name)));
+      return values[0] !== null && values.every(value => value === values[0]) ? values[0] : null;
+    };
+    return {
+      fontFamily:common(fontProperties['font-family'], value => validFont(value) ? value : null),
+      fontSize:common(fontProperties['font-size'], value => validSize(value) ? value : null),
+      bold:common(fontProperties.bold, value => value === 150 ? true : value === 100 ? false : null),
+      italic:common(fontProperties.italic, value => enumNumber(value) === 2 ? true : enumNumber(value) === 0 ? false : null),
+      underline:common(fontProperties.underline, value => value === 1 ? true : value === 0 ? false : null)
+    };
+  }
+  function currentTextRange() {
+    const selected = controller.getSelection();
+    return selected.getCount ? (selected.getCount() === 1 ? selected.getByIndex(0) : null) : selected;
+  }
+  function requireManual(r) {
+    requireEditing();
+    if (!active.manual || active.kind !== 'docx' || !active.nativeWritable || r.changeId !== active.manual.changeId) throw Error('unsupported-command');
+    requireInputRuntime();
+    if (active.manual.frozen || active.pendingExport) throw Error('export-awaiting-ack');
+  }
+  function formatSelection(r) {
+    requireManual(r);
+    const lease = r.rangeLease, format = r.format;
+    if (!exactFields(r, [...requestFields,'changeId','rangeLease','format']) ||
+        !exactFields(lease,['generation','sequence','token']) || !Number.isSafeInteger(lease.generation) || lease.generation < 0 ||
+        !Number.isSafeInteger(lease.sequence) || lease.sequence < 0 || typeof lease.token !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(lease.token) ||
+        !exactFields(format,['kind','value']) || typeof format.kind !== 'string' || !Object.hasOwn(fontProperties,format.kind) ||
+        (format.kind === 'font-family' ? !validFont(format.value) : format.kind === 'font-size' ? !validSize(format.value) : typeof format.value !== 'boolean')) throw Error('invalid-control-value');
+    drainNativeInput();
+    requireManual(r);
+    const handle = handles.get(lease.token);
+    let cursor;
+    try {
+      cursor = controller.getViewCursor();
+      if (!cursor) throw Error('stale-selection');
+    } catch { endTextSelection(); throw Error('stale-selection'); }
+    if (lease.generation !== active.manual.generation || lease.sequence !== active.sequence || !handle ||
+        handle.version !== active.version || handle.sequence !== active.sequence || !handle.rangeIdentity ||
+        !currentTextSelectionMatches(lease.token,handle,cursor)) throw Error('stale-selection');
+    const value = format.kind === 'bold' ? (format.value ? 150 : 100) : format.kind === 'italic' ?
+      (format.value ? css.awt.FontSlant.ITALIC : css.awt.FontSlant.NONE) : format.kind === 'underline' ? (format.value ? 1 : 0) : format.value;
+    const field = {'font-family':'fontFamily','font-size':'fontSize',bold:'bold',italic:'italic',underline:'underline'}[format.kind];
+    mutate(() => {
+      for (const name of fontProperties[format.kind]) setViewProperty(cursor,name,value);
+      if (readFormatState(cursor)[field] !== format.value) throw Error('typed-mutation-failed');
+    });
+    const next = selection();
+    if (!next.rangeLease || !next.formatState) { active.mutationFailed = true; throw Error('typed-mutation-failed'); }
+    return {state:state(),selection:next,rangeLease:next.rangeLease,formatState:next.formatState};
+  }
+  function insertManualText(r) {
+    requireManual(r);
+    if (!exactFields(r,[...requestFields,'changeId','text'])) throw Error('invalid-request');
+    if (typeof r.text !== 'string' || r.text.length === 0 || r.text.length > 65536 ||
+        /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(r.text) ||
+        /[\p{Cc}]/u.test(r.text.replace(/[\r\n\t]/g,'')) || new TextEncoder().encode(r.text).byteLength > 65536) throw Error('invalid-control-value');
+    drainNativeInput();
+    requireManual(r);
+    const cursor = controller.getViewCursor(), identity = textRangeIdentity(cursor);
+    if (!identity || !sameTextRange(identity,currentTextRange())) throw Error('native-input-unavailable');
+    const text = cursor.getText();
+    if (typeof text.insertString !== 'function' || typeof cursor.collapseToEnd !== 'function' || typeof cursor.gotoRange !== 'function') throw Error('native-input-unavailable');
+    // Preserve only known current input attributes. Mixed formatting remains
+    // native; it is never normalized from another run or from the full body.
+    const attributes = Object.values(fontProperties).flat().map(name => [name,readCharacterProperty(cursor,name)]).filter(([,value]) => value !== null);
+    // DocInsertStringSplitCR splits only CR into paragraph nodes. Clipboard
+    // CRLF, CR and LF each mean one paragraph; no other code point is changed.
+    const nativeText = r.text.replace(/\r\n|\r|\n/g,'\r');
+    const canonicalLines = value => value.replace(/\r\n|\r/g,'\n');
+    const expected = canonicalLines(r.text);
+    const characters = Array.from(nativeText).length;
+    const sameProperty = (a,b) => a && typeof a === 'object' ? enumNumber(a) === enumNumber(b) : a === b;
+    mutate(() => {
+      text.insertString(cursor,nativeText,true);
+      // SetString expands by UTF-16 length through code-point cursor moves;
+      // its returned selection may include preceding text for emoji. Derive
+      // only the inserted range from the actual end and a bounded code-point
+      // count. This never implements deletion or inspects the full body.
+      const end = cursor.getEnd(), inserted = text.createTextCursorByRange(end);
+      for (let remaining = characters; remaining > 0;) {
+        const count = Math.min(remaining,32767);
+        if (inserted.goLeft(count,true) !== true) throw Error('typed-mutation-failed');
+        remaining -= count;
+      }
+      if (identity.compare.compareRegionEnds(inserted,end) !== 0 || canonicalLines(inserted.getString()) !== expected) throw Error('typed-mutation-failed');
+      for (const [name,value] of attributes) {
+        setViewProperty(inserted,name,value);
+        if (!sameProperty(value,readCharacterProperty(inserted,name))) throw Error('typed-mutation-failed');
+      }
+      cursor.gotoRange(end,false);
+      cursor.collapseToEnd();
+      if (cursor.isCollapsed() !== true || identity.compare.compareRegionEnds(cursor,end) !== 0) throw Error('typed-mutation-failed');
+      for (const [name,value] of attributes) {
+        setViewProperty(cursor,name,value);
+        if (!sameProperty(value,readCharacterProperty(cursor,name))) throw Error('typed-mutation-failed');
+      }
+    });
+  }
+  function editorViewState() {
     const target = viewProperties();
     const zoom = Number(target.getPropertyValue('ZoomValue'));
     const zoomType = Number(target.getPropertyValue('ZoomType'));
@@ -307,14 +664,180 @@ function validPresentationReview(r) {
     }
     return result;
   }
-  function localView(action) {
+  const playing = () => playback.phase === 'running' || playback.phase === 'paused';
+  function samplePlayback(phase, slideIndex = null, slideCount = null) {
+    if (playback.sequence === Number.MAX_SAFE_INTEGER) throw Error('control-limit');
+    playback = {generation:playback.generation, sequence:playback.sequence + 1, phase, slideIndex, slideCount};
+  }
+  function clearPlaybackTimer() {
+    if (playbackTimer !== undefined) clearInterval(playbackTimer);
+    playbackTimer = undefined;
+  }
+  function refreshEditor(restore = false) {
+    const next = model.getCurrentController();
+    if (!next) throw Error('presentation-failed');
+    if (!zeta.sameUnoObject(controller, next)) {
+      if (selectionListener) controller.removeSelectionChangeListener(selectionListener);
+      controller = next;
+      if (selectionListener) controller.addSelectionChangeListener(selectionListener);
+    }
+    if (restore && editorBeforePlayback) {
+      controller.setCurrentPage(editorBeforePlayback.page);
+      if (editorBeforePlayback.selection !== null && editorBeforePlayback.selection !== undefined &&
+          controller.select(editorBeforePlayback.selection) !== true) throw Error('presentation-failed');
+    }
+    const view = editorViewState();
+    if (view.readOnly !== true || view.modified !== false) throw Error('presentation-failed');
+    previewBeforePlayback = view;
+    editorBeforePlayback = undefined;
+  }
+  function endPlayback() {
+    clearPlaybackTimer();
+    playback.generation++;
+    // A pending native configuration callback cannot be cancelled by end()
+    // before it creates the slideshow controller. Only closing/recreating the
+    // surface can retire that startup with certainty.
+    if (presentationStartupUncertain) throw Error('presentation-start-timeout');
+    if (presentation) {
+      presentation.end();
+      if (presentation.isRunning() !== false) throw Error('presentation-failed');
+    }
+    presentation = undefined;
+    presentationUncertain = false;
+    refreshEditor(true);
+    samplePlayback('idle');
+  }
+  function readPlayback(starting = false) {
+    if (!playing() && !starting) { samplePlayback(playback.phase); return; }
+    if (model.isReadonly() !== true || model.isModified() !== false) throw Error('presentation-failed');
+    const running = presentation.isRunning();
+    if (running === false) { endPlayback(); return; }
+    if (running !== true) throw Error('presentation-failed');
+    const show = presentation.getController();
+    if (!show || typeof show.isRunning !== 'function' || show.isRunning() !== true ||
+        typeof show.getSlideCount !== 'function' || typeof show.getCurrentSlideIndex !== 'function' || typeof show.isPaused !== 'function') throw Error('presentation-failed');
+    const count = show.getSlideCount(), index = show.getCurrentSlideIndex(), paused = show.isPaused();
+    if (!Number.isSafeInteger(count) || count < 1 || count > 512 || !Number.isSafeInteger(index) ||
+        index < -1 || index >= count || typeof paused !== 'boolean') throw Error('presentation-failed');
+    samplePlayback(paused ? 'paused' : 'running', index, count);
+  }
+  function playbackView() {
+    if (!previewBeforePlayback) throw Error('view-unavailable');
+    const readOnly = model.isReadonly(), modified = model.isModified();
+    if (typeof readOnly !== 'boolean' || typeof modified !== 'boolean') throw Error('presentation-failed');
+    // Only view geometry is cached. Native authority and modification flags are
+    // always current, including a failure raised by a modification notification.
+    return {...previewBeforePlayback, readOnly, modified, playback:{...playback}};
+  }
+  function publishPlayback() { event('view', {view:playbackView()}); }
+  function failPlayback(error) {
+    clearPlaybackTimer();
+    const code = ['presentation-unsupported','presentation-start-timeout'].includes(error.message) ? error.message : 'presentation-failed';
+    if (code === 'presentation-start-timeout') presentationStartupUncertain = true;
+    presentationUncertain = false;
+    try {
+      if (presentation) {
+        presentation.end();
+        if (presentation.isRunning() !== false) throw Error('presentation-failed');
+      }
+      refreshEditor(true);
+    } catch { presentationUncertain = true; }
+    if (presentationStartupUncertain) presentationUncertain = true;
+    samplePlayback(code === 'presentation-unsupported' ? 'unsupported' : 'error');
+    // Never invent flags when the native model can no longer answer.
+    try { publishPlayback(); }
+    catch { emit({type:'fatal',channel,error:'engine-operation-failed'}); }
+    return Error(code);
+  }
+  function viewState() {
+    if (active.kind !== 'pptx') return editorViewState();
+    if (!playing() && !presentationUncertain) previewBeforePlayback = editorViewState();
+    readPlayback();
+    return playbackView();
+  }
+  async function playView(action, generation) {
+    if (active.kind !== 'pptx') throw Error('unsupported-command');
+    if (action !== 'play-read' && generation !== playback.generation) throw Error('stale-selection');
+    if (action === 'play-start' || action === 'play-current') {
+      if (playing() || presentationUncertain) throw Error('operation-in-progress');
+      if (active.sequence !== active.acknowledged || model.isReadonly() !== true || model.isModified() !== false) throw Error('unsaved-changes');
+      previewBeforePlayback = editorViewState();
+      editorBeforePlayback = {page:controller.getCurrentPage(), selection:controller.getSelection()};
+      playback.generation++;
+      const owner = active;
+      try {
+        if (typeof model.getPresentation !== 'function') throw Error('presentation-unsupported');
+        presentation = model.getPresentation();
+        if (!presentation || !['startWithArguments','isRunning','getController','end'].every(method => typeof presentation[method] === 'function')) throw Error('presentation-unsupported');
+        const args = [prop('IsFullScreen', false), prop('UsePen', false)];
+        // Only the explicit current-slide entry overrides the document's custom show.
+        if (action === 'play-current') args.push(prop('FirstPage', editorBeforePlayback.page.getName()));
+        presentation.startWithArguments(args);
+        // Starting a show may asynchronously switch the native view shell.
+        for (let attempt = 0; attempt < 50; attempt++) {
+          if (active !== owner) throw Error('stale-document-version');
+          if (presentation.isRunning() === true) {
+            const show = presentation.getController();
+            if (show && typeof show.isRunning === 'function' && show.isRunning() === true) {
+              readPlayback(true);
+              publishPlayback();
+              const startedGeneration = playback.generation;
+              playbackTimer = setInterval(() => {
+                if (active !== owner || playback.generation !== startedGeneration || playbackBusy) return;
+                try { readPlayback(); publishPlayback(); }
+                catch (error) { failPlayback(error); }
+              }, 250);
+              return playbackView();
+            }
+          }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        throw Error('presentation-start-timeout');
+      } catch (error) { throw failPlayback(error); }
+    }
+    if (!previewBeforePlayback) previewBeforePlayback = editorViewState();
+    try {
+      if (action === 'play-end') endPlayback();
+      else if (action === 'play-read') {
+        if (!playing() && !presentationUncertain) previewBeforePlayback = editorViewState();
+        readPlayback();
+      } else {
+        if (!playing()) throw Error('operation-in-progress');
+        const show = presentation.getController();
+        const method = {'play-next-effect':'gotoNextEffect','play-previous-effect':'gotoPreviousEffect',
+          'play-next-slide':'gotoNextSlide','play-previous-slide':'gotoPreviousSlide','play-pause':'pause','play-resume':'resume'}[action];
+        if (!show || typeof show[method] !== 'function') throw Error('presentation-failed');
+        show[method]();
+        readPlayback();
+      }
+      publishPlayback();
+      return playbackView();
+    } catch (error) {
+      if (error.message === 'operation-in-progress') throw error;
+      throw failPlayback(error);
+    }
+  }
+  function localView(action, zoom) {
+    if ((action === 'set-zoom' ? !Number.isSafeInteger(zoom) || zoom < 20 || zoom > 400 : zoom !== undefined)) throw Error('invalid-control-value');
     if (!viewActions.includes(action)) throw Error('unsupported-command');
-    if (!model.isReadonly()) throw Error('view-unavailable');
+    if (model.isReadonly() !== true && !(active.kind === 'docx' && active.nativeWritable && model.isReadonly() === false)) throw Error('view-unavailable');
+    if (presentationUncertain) {
+      if (action !== 'read') throw Error('operation-in-progress');
+      return viewState();
+    }
+    if (playing()) {
+      if (action !== 'read') throw Error('operation-in-progress');
+      return viewState();
+    }
     const target = viewProperties();
     if (action === 'reset' || action === 'fit') {
       active.viewFit = active.kind !== 'xlsx';
       setViewProperty(target, 'ZoomType', active.kind === 'docx' ? 1 : active.kind === 'pptx' ? 2 : 3);
       if (active.kind === 'xlsx') setViewProperty(target, 'ZoomValue', 100);
+    } else if (action === 'set-zoom') {
+      setViewProperty(target, 'ZoomType', 3);
+      setViewProperty(target, 'ZoomValue', zoom);
+      active.viewFit = false;
     } else if (action === 'zoom-in' || action === 'zoom-out') {
       const current = viewState();
       const value = Math.min(400, Math.max(20, Math.round(current.zoom / 10) * 10 + (action === 'zoom-in' ? 10 : -10)));
@@ -341,94 +864,243 @@ function validPresentationReview(r) {
     if (background.getPropertyValue('Color') !== 0xf7f7f7) throw Error('view-unavailable');
   }
   function close() {
+    cancelFreeze();
+    privateBusy = undefined;
+    clearPlaybackTimer();
+    if (presentation) { presentation.end(); presentation = undefined; }
     if (model) {
       if (modifyListener) model.removeModifyListener(modifyListener);
       if (selectionListener) controller.removeSelectionChangeListener(selectionListener);
-      model.close(true);
+      try { model.close(true); } catch { retireNativeInput(active); throw Error('native-input-unavailable'); }
     }
     model = controller = active = modifyListener = selectionListener = null;
-    handles.clear();
+    modelFonts = undefined;
+    clearHandles();
+    previewBeforePlayback = editorBeforePlayback = undefined;
+    presentationUncertain = false;
+    presentationStartupUncertain = false;
+    playback = {generation:0, sequence:0, phase:'idle', slideIndex:null, slideCount:null};
   }
-  function requireEditing() { if(active.mutationFailed)throw Error('typed-mutation-failed'); if (!active.editing || model.isReadonly() !== true) throw Error('unsupported-command'); }
+  function requireEditing() {
+    if (active.mutationFailed) throw Error('typed-mutation-failed');
+    if (active.nativeWritable) requireInputRuntime();
+    if (!active.editing || !model ||
+        (model.isReadonly() !== true && !(active.kind === 'docx' && active.nativeWritable && model.isReadonly() === false)) ||
+        active.manual && model.isReadonly() !== false) throw Error('unsupported-command');
+  }
   function targetFor(r) {
     requireEditing();
+    if (active.manual) throw Error('unsupported-command');
     const handle = handles.get(r.selectionToken);
     if (!handle || handle.version !== active.version || handle.sequence !== active.sequence || r.expectedChangeSequence !== active.sequence) throw Error('stale-selection');
     if (handle.text !== null && handle.target.getString() !== handle.text) throw Error('stale-selection');
     return handle;
   }
+  function validateSelection(r) {
+    const fields = ['channel','command','documentId','expectedChangeSequence','operationId','selectionToken','version'];
+    if (Object.keys(r).sort().join(',') !== fields.join(',') || typeof r.selectionToken !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0) throw Error('invalid-request');
+    if (active.kind !== 'docx' || active.mutationFailed || !model ||
+        (model.isReadonly() !== true && !(active.nativeWritable && (active.manual || active.sequence === active.acknowledged) && model.isReadonly() === false))) throw Error('unsupported-selection');
+    if (active.manual && !active.manual.frozen) drainNativeInput();
+    const handle = handles.get(r.selectionToken);
+    if (!handle || handle.version !== active.version || handle.sequence !== active.sequence || r.expectedChangeSequence !== active.sequence) throw Error('stale-selection');
+    if (handle.kind !== 'text' || !handle.text?.trim() || !handle.rangeIdentity) throw Error('unsupported-selection');
+    if (!currentTextSelectionMatches(r.selectionToken,handle)) throw Error('stale-selection');
+  }
   function mutate(operation) {
     requireEditing();
     const before = active.sequence;
+    mutating = true;
     try { operation(); } catch {
       // UNO may change part of a range before throwing. Its state is unknown;
       // no later command may export or continue editing this native model.
       active.mutationFailed = true;
       throw Error('typed-mutation-failed');
     } finally {
+      mutating = false;
       if (active.sequence === before) { active.sequence++; event('changed', {state:state()}); }
-      handles.clear();
+      clearHandles();
     }
+  }
+  function loadNativeModel(kind, readOnly) {
+    modelFonts = undefined;
+    model = desktop.loadComponentFromURL('file:///tmp/analytix-office/input.' + kind, '_default', 0,
+      [prop('MacroExecutionMode', NEVER_EXECUTE), prop('UpdateDocMode', 0), prop('ReadOnly', readOnly), prop('LockEditDoc', true), prop('LockSave', true), prop('LockExport', true), prop('PickListEntry', false)]);
+    if (!model || model.isReadonly() !== readOnly) throw Error('open-failed');
+    controller = model.getCurrentController();
+    if (!controller) throw Error('open-failed');
+    if (kind === 'docx') {
+      try {
+        const view = controller.getViewSettings();
+        setViewProperty(view, 'ShowHoriRuler', false); setViewProperty(view, 'ShowVertRuler', false);
+        if (view.getPropertyValue('ShowHoriRuler') !== false || view.getPropertyValue('ShowVertRuler') !== false) throw Error('view-unavailable');
+      } catch { /* This optional view preference has no document mutation fallback. */ }
+    }
+    controller.getFrame().getContainerWindow().FullScreen = true;
+    const layout = controller.getFrame().LayoutManager;
+    layout.setVisible(false);
+    if (layout.isVisible()) throw Error('native-controls-hide-failed');
+  }
+  function attachModelListeners() {
+    modifyListener = zeta.unoObject([css.util.XModifyListener], {disposing() {}, modified() {
+      if (!active || suppressChanges) return;
+      // View/layout notifications can also reach writable Writer models. Only
+      // a confirmed unmodified model is classified as a non-edit notification.
+      try {
+        const readOnly = model.isReadonly();
+        if (model.isModified() === false && (readOnly === true || active.nativeWritable && readOnly === false)) return;
+      } catch { /* Unknown native state still reaches Main's fail-closed gate. */ }
+      if (active.nativeWritable && (active.manual?.frozen || !active.manual && !mutating)) {
+        active.mutationFailed = true;
+        delete active.freezeAck;
+      }
+      active.sequence++; clearHandles();
+      event('changed', {state:state()});
+    }});
+    selectionListener = zeta.unoObject([css.view.XSelectionChangeListener], {disposing() {}, selectionChanged() {
+      if (active && !suppressChanges) confirmSelection();
+    }});
+    model.addModifyListener(modifyListener);
+    controller.addSelectionChangeListener(selectionListener);
+  }
+  function beginManualEdit(r) {
+    const authority = r.manual;
+    if (!exactFields(r,[...requestFields,'manual']) ||
+        !exactFields(authority,['version','origin','changeId','baseRevision','saveOperationId','undoOperationId']) ||
+        authority.version !== 2 || authority.origin !== 'manual' || !digest(authority.changeId) || !digest(authority.baseRevision) ||
+        !nativeOperation(authority.saveOperationId) || !nativeOperation(authority.undoOperationId) || authority.baseRevision !== active.version) throw Error('invalid-request');
+    if (active.kind !== 'docx') throw Error('unsupported-command');
+    if (active.mutationFailed) throw Error('typed-mutation-failed');
+    requireInputRuntime();
+    if (active.manual) {
+      if (active.manual.frozen || active.pendingExport) throw Error('export-awaiting-ack');
+      if (active.manualOpenOperationId === r.operationId && Object.keys(authority).every(key => authority[key] === active.manualAuthority[key])) return;
+      throw Error('operation-in-progress');
+    }
+    if (active.pendingExport || active.sequence !== active.acknowledged || model.isModified() !== false) throw Error('unsaved-changes');
+    if (active.manualChanges.has(authority.changeId) || active.manualOperations.has(authority.saveOperationId) || active.manualOperations.has(authority.undoOperationId)) throw Error('operation-replayed');
+    requireDocxSizeFidelity();
+    if (active.manualGeneration === Number.MAX_SAFE_INTEGER) throw Error('control-limit');
+    suppressChanges = true;
+    if (!active.nativeWritable) {
+      if (model.isReadonly() !== true) throw Error('native-input-unavailable');
+      let viewData;
+      try { if (typeof controller.getViewData === 'function') viewData = controller.getViewData(); }
+      catch { /* The new native selection is returned; old range leases never survive a reload. */ }
+      try {
+        model.removeModifyListener(modifyListener);
+        controller.removeSelectionChangeListener(selectionListener);
+        // This is a clean copy of the last committed input artifact. Surface
+        // synchronizes that virtual input only after the exact Core receipt.
+        // Never use EditDoc: its implicit reload resets macro policy to config.
+        model.close(true);
+        model = controller = modifyListener = selectionListener = null;
+        loadNativeModel('docx',false);
+        if (model.isModified() !== false) throw Error('native-input-unavailable');
+        active.nativeWritable = true;
+        attachModelListeners();
+        if (viewData !== undefined && typeof controller.restoreViewData === 'function') controller.restoreViewData(viewData);
+        if (model.isModified() !== false) throw Error('native-input-unavailable');
+      } catch {
+        active.mutationFailed = true;
+        throw Error('native-input-unavailable');
+      }
+    } else if (model.isReadonly() !== false) throw Error('native-input-unavailable');
+    // Reload/restore can run native initialization callbacks. Recheck the bound
+    // thread and exact cached wrappers before granting this manual generation.
+    requireInputRuntime();
+    active.manualGeneration++;
+    active.manual = {version:2,origin:'manual',changeId:authority.changeId,baseRevision:authority.baseRevision,generation:active.manualGeneration,frozen:false};
+    active.manualAuthority = {...authority};
+    active.manualOpenOperationId = r.operationId;
+    active.manualChanges.add(authority.changeId);
+    active.manualOperations.add(authority.saveOperationId); active.manualOperations.add(authority.undoOperationId);
+    active.editing = true;
+    clearHandles();
   }
   function openModel(r) {
         if (active || !filters[r.kind]) throw Error('document-already-open');
         // Configuration lives in this isolated browser engine's virtual FS only.
         try { configurePreviewStage(); } catch { /* Optional stage styling must not block read-only preview. */ }
-        model = desktop.loadComponentFromURL('file:///tmp/analytix-office/input.' + r.kind, '_default', 0,
-          [prop('MacroExecutionMode', NEVER_EXECUTE), prop('UpdateDocMode', 0), prop('ReadOnly', true), prop('LockEditDoc', true), prop('LockSave', true), prop('LockExport', true), prop('PickListEntry', false)]);
-        if (!model) throw Error('open-failed');
-        if (model.isReadonly() !== true) { close(); throw Error('open-failed'); }
-        controller = model.getCurrentController();
-        if (r.kind === 'docx') {
-          try {
-            const view = controller.getViewSettings();
-            setViewProperty(view, 'ShowHoriRuler', false); setViewProperty(view, 'ShowVertRuler', false);
-            if (view.getPropertyValue('ShowHoriRuler') !== false || view.getPropertyValue('ShowVertRuler') !== false) throw Error('view-unavailable');
-          } catch { /* This optional view preference has no document mutation fallback. */ }
-        }
-        controller.getFrame().getContainerWindow().FullScreen = true;
-        // XLayoutManager.setVisible(false) hides every managed native UI element.
-        // The product exposes a read-only preview, with no mutation dispatch API.
-        const layout = controller.getFrame().LayoutManager;
-        layout.setVisible(false);
-        if (layout.isVisible()) throw Error('native-controls-hide-failed');
-        active = {documentId:r.documentId, version:r.version, kind:r.kind, openOperationId:r.operationId, sequence:0, acknowledged:0, editing:false, viewFit:r.kind !== 'xlsx'};
-        modifyListener = zeta.unoObject([css.util.XModifyListener], {disposing() {}, modified() {
-          if (!active || suppressChanges) return;
-          // Writer view/layout notifications also use XModifyListener. Only a
-          // confirmed read-only, unmodified model is a non-edit notification.
-          // Failed reads and every other state still reach Main's fail-closed gate.
-          try { if (model.isReadonly() === true && model.isModified() === false) return; }
-          catch { /* Unknown native state must not be classified as an unmodified view. */ }
-          active.sequence++; handles.clear();
-          event('changed', {state:state()});
-        }});
-        selectionListener = zeta.unoObject([css.view.XSelectionChangeListener], {disposing() {}, selectionChanged() {
-          if (active) event('selection', {selection:selection()});
-        }});
-        model.addModifyListener(modifyListener);
-        controller.addSelectionChangeListener(selectionListener);
+        try { loadNativeModel(r.kind,true); }
+        catch (error) { close(); throw error; }
+        active = {documentId:r.documentId, version:r.version, kind:r.kind, openOperationId:r.operationId, sequence:0, acknowledged:0, editing:false, viewFit:r.kind !== 'xlsx',nativeWritable:false,manualGeneration:0,manualChanges:new Set(),manualOperations:new Set()};
+        attachModelListeners();
   }
-  zeta.mainPort.onmessage = ({data:r}) => {
+  zeta.mainPort.onmessage = async ({data:r}) => {
     if (!r || typeof r !== 'object') return;
     if (r.command === 'bind' && !channel && typeof r.channel === 'string') { channel = r.channel; emit({type:'ready', channel}); return; }
     if (r.channel !== channel || !channel) return;
     const reply = payload => emit({type:'result', command:r.command, channel, operationId:r.operationId, documentId:r.documentId, version:r.version, ...payload});
+    const reject = error => {
+      const known = ['typed-mutation-failed','stale-selection','view-unavailable','unsupported-local-control','invalid-control-value','unsupported-selection','single-cell-required','control-limit','invalid-request','unsaved-changes','native-controls-hide-failed','document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch','command-unavailable','unsupported-command','operation-in-progress','operation-replayed','native-input-unavailable','native-composition-pending','presentation-unsupported','presentation-failed','presentation-start-timeout'];
+      reply({ok:false, error:known.includes(error.message) || error.message === 'unsupported-format-fidelity' ? error.message : 'engine-operation-failed'});
+    };
     try {
+      if (privateBusy && r.command !== 'close') {
+        const pending = pendingFreeze;
+        // The original handler owns the one reply. An identical pending retry
+        // must not send a competing rejection under the same operation ID.
+        if (r.command === 'freeze' && pending && exactFields(r,[...requestFields,'changeId']) &&
+            r.documentId === pending.identity.documentId && r.version === pending.identity.version &&
+            r.changeId === pending.identity.changeId && r.operationId === pending.identity.operationId) return;
+        throw Error('operation-in-progress');
+      }
+      if (playbackBusy) throw Error('operation-in-progress');
       if (r.command === 'open') {
         openModel(r);
         reply({ok:true, state:state(), selection:selection()});
         return;
       }
       if (!active || r.documentId !== active.documentId || r.version !== active.version) throw Error('stale-document-version');
+      if (r.command === 'bind-input-runtime') { bindInputRuntime(r); reply({ok:true,state:state(),inputRuntime:{assetVersion:inputRuntimeVersion,threadMatches:true}}); return; }
+      if ((playing() || presentationUncertain) && !['local-view','close'].includes(r.command)) throw Error('operation-in-progress');
       if (r.command === 'local-view') {
-        if (Object.keys(r).sort().join(',') !== 'action,channel,command,documentId,operationId,version') throw Error('invalid-request');
-        reply({ok:true, view:localView(r.action)});
+        if (playActions.includes(r.action)) {
+          const fields = 'action,channel,command,documentId,operationId,version' + (r.action === 'play-read' ? '' : ',playbackGeneration');
+          if (Object.keys(r).sort().join(',') !== fields.split(',').sort().join(',') ||
+              (r.action !== 'play-read' && (!Number.isSafeInteger(r.playbackGeneration) || r.playbackGeneration < 0))) throw Error('invalid-request');
+          playbackBusy = true;
+          playView(r.action, r.playbackGeneration).then(
+            view => { playbackBusy = false; reply({ok:true, view}); },
+            error => { playbackBusy = false; reject(error); }
+          );
+          return;
+        }
+        const fields = r.action === 'set-zoom' ? 'action,channel,command,documentId,operationId,version,zoom' : 'action,channel,command,documentId,operationId,version';
+        if (Object.keys(r).sort().join(',') !== fields) throw Error('invalid-request');
+        reply({ok:true, view:localView(r.action, r.zoom)});
+      } else if (r.command === 'manual-edit') {
+        try {
+          beginManualEdit(r);
+          const fonts = availableFonts();
+          requireInputRuntime();
+          reply({ok:true,state:state(),selection:selection(),inputRuntime:{assetVersion:inputRuntimeVersion,threadMatches:true,generation:active.manual.generation,changeId:active.manual.changeId},availableFonts:fonts});
+        } finally {
+          // No writable listener event is published before this correlated result.
+          suppressChanges = false;
+        }
+      } else if (r.command === 'format') {
+        reply({ok:true,...formatSelection(r)});
+      } else if (r.command === 'insert-text') {
+        insertManualText(r);
+        reply({ok:true,state:state(),selection:selection()});
+      } else if (r.command === 'freeze') {
+        const busy = {};
+        privateBusy = busy;
+        try {
+          const freezeAck = await freezeManualInput(r);
+          reply({ok:true,state:state(),freezeAck});
+        } finally {
+          if (privateBusy === busy) privateBusy = undefined;
+        }
       } else if (r.command === 'edit') {
+        if (active.mutationFailed) throw Error('typed-mutation-failed');
         if (active.sequence !== active.acknowledged) throw Error('unsaved-changes');
-        if (model.isReadonly() !== true) throw Error('unsupported-command');
+        if (active.manual || (model.isReadonly() !== true && !(active.kind === 'docx' && active.nativeWritable && model.isReadonly() === false))) throw Error('unsupported-command');
         requireDocxSizeFidelity();
-        // Internal AI mutation authority; the native view stays read-only.
+        // Internal AI mutation authority. A retained writable Writer model is
+        // usable only while the surface keeps direct body input closed.
         active.editing = true;
         reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'replace') {
@@ -453,10 +1125,20 @@ function validPresentationReview(r) {
       } else if (r.command === 'export') {
         requireEditing();
         if (active.pendingExport) throw Error('export-awaiting-ack');
+        if (active.manual) {
+          const ack = r.freezeAck, proof = active.freezeAck;
+          // Only the bound mailbox/drain/callback path may populate this proof.
+          if (!active.manual.frozen || !exactFields(proof,['changeId','operationId','generation','sequence']) || !nativeOperation(proof.operationId)) throw Error('native-input-unavailable');
+          if (!exactFields(r,[...requestFields,'changeId','freezeAck']) || !exactFields(ack,['changeId','operationId','generation','sequence']) ||
+              r.changeId !== active.manual.changeId || ack.changeId !== active.manual.changeId ||
+              ack.generation !== active.manual.generation || ack.sequence !== active.sequence ||
+              !Object.keys(proof).every(key => proof[key] === ack[key])) throw Error('ack-mismatch');
+        } else if (r.changeId !== undefined || r.freezeAck !== undefined) throw Error('unsupported-command');
         requireDocxSizeFidelity();
         const sequence = active.sequence;
-        // Native UI is readonly and worker commands are serialized. Synchronous
-        // filter/layout notifications during export are not another AI edit.
+        // The surface closes body input for controlled AI edits; manual export
+        // additionally requires the exact frozen proof above. Synchronous
+        // filter/layout notifications are not another user or AI edit.
         suppressChanges = true;
         try { model.storeToURL('file:///tmp/analytix-office/output.' + active.kind, [prop('FilterName', filters[active.kind]), prop('Overwrite', true)]); }
         finally { suppressChanges = false; }
@@ -468,13 +1150,24 @@ function validPresentationReview(r) {
         if (!pending || pending.operationId !== r.exportOperationId || pending.sequence !== r.exportedSequence || !['committed','conflict','failed'].includes(r.status)) throw Error('ack-mismatch');
         if (r.status === 'committed') {
           if (typeof r.persistedVersion !== 'string' || !/^[a-f0-9]{64}$/.test(r.persistedVersion)) throw Error('ack-mismatch');
-          active.version = r.persistedVersion; active.acknowledged = pending.sequence; handles.clear();
+          if (active.manual && pending.sequence !== active.sequence) throw Error('ack-mismatch');
+          active.version = r.persistedVersion; active.acknowledged = pending.sequence; clearHandles();
           if (active.sequence === active.acknowledged) { suppressChanges = true; try { model.setModified(false); } finally { suppressChanges = false; } }
+          if (active.manual) {
+            delete active.manual; delete active.manualAuthority; delete active.manualOpenOperationId; delete active.freezeAck;
+            active.editing = false;
+            // Keep this clean writable model and its actual native selection.
+            // Main closes the input gate before ACK and the next transaction
+            // requires a fresh explicit Core authority, never a missing proposal.
+          }
         }
         delete active.pendingExport;
         reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'captureSelection') {
+        if (active.manual && !active.manual.frozen) drainNativeInput();
         reply({ok:true, state:state(), selection:selection()});
+      } else if (r.command === 'validateSelection') {
+        validateSelection(r); reply({ok:true, state:state()});
       } else if (r.command === 'close') {
         if (!Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0 || typeof r.discard !== 'boolean') throw Error('invalid-request');
         // The condition and close run in the same worker turn; no await permits intervening input.
@@ -482,9 +1175,7 @@ function validPresentationReview(r) {
         close(); reply({ok:true});
       } else throw Error('unsupported-command');
     } catch (error) {
-      const known = ['typed-mutation-failed','stale-selection','view-unavailable','unsupported-local-control','invalid-control-value','unsupported-selection','single-cell-required','control-limit','invalid-request','unsaved-changes','native-controls-hide-failed','document-already-open','open-failed','stale-document-version','export-awaiting-ack','ack-mismatch','command-unavailable','unsupported-command'];
-      const code = known.includes(error.message) || error.message === 'unsupported-format-fidelity' ? error.message : 'engine-operation-failed';
-      reply({ok:false, error:code});
+      reject(error);
     }
   };
   emit({type:'worker-ready'});

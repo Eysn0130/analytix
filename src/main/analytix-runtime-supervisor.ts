@@ -44,6 +44,76 @@ export async function restartAfterPendingEnsure<T>(
   await restart()
 }
 
+export type SettingsRuntimeStopReceipt = Readonly<{
+  child: object
+  generation: number
+  cancelEpoch: number
+}>
+
+/** Only a child actually stopped by the serialized Settings apply can be resumed. */
+export class SettingsRuntimeStopHandoff {
+  private cancelEpoch = 0
+  private pending: SettingsRuntimeStopReceipt | null = null
+  private stopping: SettingsRuntimeStopReceipt | null = null
+
+  begin(child: object, generation: number): SettingsRuntimeStopReceipt {
+    const receipt = { child, generation, cancelEpoch: this.cancelEpoch }
+    this.stopping = receipt
+    return receipt
+  }
+
+  owns(receipt: SettingsRuntimeStopReceipt): boolean {
+    return receipt.cancelEpoch === this.cancelEpoch
+  }
+
+  cancellationWitness(): () => boolean {
+    const epoch = this.cancelEpoch
+    return () => epoch === this.cancelEpoch
+  }
+
+  confirmStopped(receipt: SettingsRuntimeStopReceipt, currentChild: object | null): boolean {
+    if (this.stopping !== receipt || !this.owns(receipt) || currentChild !== null) return false
+    this.stopping = null
+    this.pending = receipt
+    return true
+  }
+
+  hasPending(): boolean {
+    return this.pending !== null
+  }
+
+  admit(generation: number, currentGeneration: number, issuer?: SettingsRuntimeStopReceipt): SettingsRuntimeStopReceipt | null {
+    const receipt = this.pending
+    if (!receipt || !this.owns(receipt) || generation !== currentGeneration) return null
+    return generation > receipt.generation || (issuer === receipt && generation === receipt.generation)
+      ? receipt : null
+  }
+
+  async startAfterPort<T>(
+    receipt: SettingsRuntimeStopReceipt,
+    resolvePort: () => Promise<T>,
+    admitted: () => boolean,
+    start: (settings: T) => Promise<void>
+  ): Promise<T | null> {
+    if (this.pending !== receipt || !this.owns(receipt) || !admitted()) return null
+    const settings = await resolvePort()
+    if (this.pending !== receipt || !this.owns(receipt) || !admitted()) return null
+    await start(settings)
+    this.complete(receipt)
+    return settings
+  }
+
+  complete(receipt: SettingsRuntimeStopReceipt): void {
+    if (this.pending === receipt) this.pending = null
+  }
+
+  cancel(): void {
+    this.cancelEpoch += 1
+    this.pending = null
+    this.stopping = null
+  }
+}
+
 function finiteNumber(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }

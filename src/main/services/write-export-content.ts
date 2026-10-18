@@ -62,3 +62,25 @@ export function projectWriteExportMarkdownTreeV1(tree: MarkdownNode, projectText
     }
   }
 }
+
+// SGR decoration can split an identifier or authority token. Rejoin that
+// ordinary text before the existing Write projection. Other terminal control
+// languages need their own verified projection and cannot enter this effect.
+export function projectOrdinaryToolExportTextV1(body: string): string {
+  let text = ''
+  for (let index = 0; index < body.length; index++) {
+    if (body.charCodeAt(index) === 27 && body[index + 1] === '[') {
+      let end = index + 2
+      while (end < body.length && (body[end] === ';' || body.charCodeAt(end) >= 48 && body.charCodeAt(end) <= 57)) end++
+      if (body[end] === 'm') { index = end; continue }
+    }
+    text += body[index]
+  }
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index)
+    if (code <= 8 || code === 11 || code === 12 || code >= 14 && code <= 31 || code >= 127 && code <= 159) {
+      throw new Error('Unsupported terminal control content.')
+    }
+  }
+  return projectOrdinaryWriteExportContentV1(text)
+}

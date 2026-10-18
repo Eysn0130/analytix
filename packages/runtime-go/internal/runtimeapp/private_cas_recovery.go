@@ -26,8 +26,10 @@ import (
 	pendingworkstore "analytix.local/runtime-go/internal/adapters/outbound/pendingworkstore"
 	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
 	piiauthorizationstore "analytix.local/runtime-go/internal/adapters/outbound/piiauthorization"
+	processhistorystore "analytix.local/runtime-go/internal/adapters/outbound/processdisplay"
 	reportpublicationstore "analytix.local/runtime-go/internal/adapters/outbound/reportpublication"
 	threadriskpolicystore "analytix.local/runtime-go/internal/adapters/outbound/threadriskpolicy"
+	snapshotsstore "analytix.local/runtime-go/internal/adapters/outbound/toolresultsnapshot"
 	turnterminalstore "analytix.local/runtime-go/internal/adapters/outbound/turnterminalstore"
 	domainprivatecas "analytix.local/runtime-go/internal/domain/privatecastopology"
 	domainstartup "analytix.local/runtime-go/internal/domain/startup"
@@ -421,6 +423,14 @@ func runtimePrivateCASOwnerRecoveries(
 	controlledArtifactAccessV2 := filepath.Join(dataDir, "private", "controlled-artifact-access-v2")
 	_, legacyCheckpointAuditErr := persistencefs.LegacyCheckpointSnapshotAuditRootV1(dataDir)
 	return []runtimePrivateCASOwnerRecovery{
+		{name: "tool-result-snapshots-v1", expectedRoots: runtimePrivateCASExpectedRoots(dataDir, "tool-result-snapshots-v1"), standaloneCASRoots: true,
+			prepare: func(ctx context.Context) (runtimePreparedPrivateCASOwnerRecovery, error) {
+				return snapshotsstore.PrepareRecoveryV1(ctx, filepath.Join(dataDir, "private", "tool-result-snapshots-v1"), access)
+			}},
+		{name: "process-history-v1", expectedRoots: runtimePrivateCASExpectedRoots(dataDir, "process-history-v1"), standaloneCASRoots: true,
+			prepare: func(ctx context.Context) (runtimePreparedPrivateCASOwnerRecovery, error) {
+				return processhistorystore.PrepareRecoveryV1(ctx, filepath.Join(dataDir, "private", "process-history-v1"), access)
+			}},
 		{
 			name:               "backend-generation",
 			expectedRoots:      runtimePrivateCASExpectedRoots(dataDir, "backend-generation"),

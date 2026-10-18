@@ -12,6 +12,7 @@ import (
 
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 )
 
 const (
@@ -26,20 +27,21 @@ var acceptedFinalDispositionSignatureDomain = []byte("analytix.final-answer-disp
 var acceptedFinalDispositionSignatureDomainV2 = []byte("analytix.final-answer-disposition/v2\x00")
 
 type TerminalPublicationIntent struct {
-	SchemaVersion         int            `json:"schemaVersion"`
-	CreatedAt             string         `json:"createdAt"`
-	Model                 string         `json:"model,omitempty"`
-	Usage                 map[string]any `json:"usage"`
-	CacheDiagnostics      map[string]any `json:"cacheDiagnostics"`
-	UsageSource           string         `json:"usageSource,omitempty"`
-	ChildRunID            string         `json:"childRunId,omitempty"`
-	TerminalStatus        string         `json:"terminalStatus"`
-	TerminalCode          string         `json:"terminalCode,omitempty"`
-	TerminalMessage       string         `json:"terminalMessage,omitempty"`
-	TerminalSeverity      string         `json:"terminalSeverity,omitempty"`
-	Discard               bool           `json:"discard"`
-	Cancelled             bool           `json:"cancelled"`
-	CancelledPendingGates int            `json:"cancelledPendingGates"`
+	SchemaVersion         int                       `json:"schemaVersion"`
+	CreatedAt             string                    `json:"createdAt"`
+	Model                 string                    `json:"model,omitempty"`
+	Usage                 map[string]any            `json:"usage"`
+	CacheDiagnostics      map[string]any            `json:"cacheDiagnostics"`
+	UsageSource           string                    `json:"usageSource,omitempty"`
+	ChildRunID            string                    `json:"childRunId,omitempty"`
+	TerminalStatus        string                    `json:"terminalStatus"`
+	TerminalCode          string                    `json:"terminalCode,omitempty"`
+	TerminalMessage       string                    `json:"terminalMessage,omitempty"`
+	TerminalSeverity      string                    `json:"terminalSeverity,omitempty"`
+	Discard               bool                      `json:"discard"`
+	Cancelled             bool                      `json:"cancelled"`
+	CancelledPendingGates int                       `json:"cancelledPendingGates"`
+	EndReason             *domainterminal.EndReason `json:"endReason,omitempty"`
 }
 
 type TerminalPublicationIntentInput struct {
@@ -56,6 +58,7 @@ type TerminalPublicationIntentInput struct {
 	Discard               bool
 	Cancelled             bool
 	CancelledPendingGates int
+	EndReason             *domainterminal.EndReason
 }
 
 type AcceptedFinalDispositionState string
@@ -119,6 +122,10 @@ func NewTerminalPublicationIntent(input TerminalPublicationIntentInput, terminal
 		TerminalMessage: strings.TrimSpace(input.TerminalMessage), TerminalSeverity: strings.TrimSpace(input.TerminalSeverity),
 		Discard: input.Discard, Cancelled: input.Cancelled, CancelledPendingGates: input.CancelledPendingGates,
 	}
+	if input.EndReason != nil {
+		reason := *input.EndReason
+		intent.EndReason = &reason
+	}
 	if err := ValidateTerminalPublicationIntent(intent, terminalReason); err != nil {
 		return TerminalPublicationIntent{}, err
 	}
@@ -126,6 +133,10 @@ func NewTerminalPublicationIntent(input TerminalPublicationIntentInput, terminal
 }
 
 func ValidateTerminalPublicationIntent(intent TerminalPublicationIntent, terminalReason string) error {
+	if domainterminal.ValidateEndReason(intent.EndReason) != nil ||
+		(intent.EndReason != nil && (intent.TerminalStatus != "completed" || !domainterminal.CandidateAllowedV1(terminalReason))) {
+		return errors.New("terminal publication end reason is invalid")
+	}
 	expectedStatus, ok := FinalAnswerTerminalStatus(strings.TrimSpace(terminalReason))
 	if intent.SchemaVersion != TerminalPublicationIntentVersion || !ok || strings.TrimSpace(intent.TerminalStatus) != expectedStatus ||
 		intent.CancelledPendingGates < 0 || intent.Usage == nil || intent.CacheDiagnostics == nil {

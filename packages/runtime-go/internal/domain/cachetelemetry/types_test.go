@@ -304,3 +304,24 @@ func assertObservationDecodeFails(t *testing.T, value map[string]any) {
 		t.Fatalf("expected strict decode failure for %s", body)
 	}
 }
+
+func TestNativeCounterPresenceAdmitsIndependentNumbersWithoutWeakeningLegacyCacheGate(t *testing.T) {
+	u := ProviderUsageV1{NativeCounterPresence: true, OutputTokens: TokenCountV1{Known: true, Value: 20}, OutputTokensFinality: ProviderOutputTokensFinalV1, CacheHitTokens: TokenCountV1{Known: true, Value: 5}}
+	if err := u.ValidateForProviderFamily(ProviderFamilyDeepSeek); err != nil {
+		t.Fatal(err)
+	}
+	u.NativeCounterPresence = false
+	if err := u.ValidateForProviderFamily(ProviderFamilyDeepSeek); err == nil {
+		t.Fatal("legacy partial cache gate weakened")
+	}
+	u.NativeCounterPresence = true
+	u.InputTokens = TokenCountV1{Known: true, Value: 4}
+	if err := u.ValidateForProviderFamily(ProviderFamilyDeepSeek); err == nil {
+		t.Fatal("known input upper bound weakened")
+	}
+	u.InputTokens = TokenCountV1{}
+	u.OutputTokensFinality = "invented"
+	if err := u.Validate(); err == nil {
+		t.Fatal("invalid output qualification accepted")
+	}
+}

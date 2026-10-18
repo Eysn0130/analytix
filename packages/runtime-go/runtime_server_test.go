@@ -43,6 +43,7 @@ import (
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
+	domainsecretprojection "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
@@ -62,6 +63,9 @@ const (
 	// Keep it bounded while allowing race-sharded hosts more than the shutdown-only window.
 	runtimeServerProductionCommandTestTimeout = 4 * runtimeServerPositiveTestTimeout
 )
+
+// Local synthetic test fixture; never sourced from an account.
+const runtimeServerSyntheticCredentialForTestV1 = "sk-0123456789abcdef0123456789abcdef"
 
 func runtimeServerPrivateToolArgumentTempDir(t *testing.T, label string) string {
 	t.Helper()
@@ -429,6 +433,9 @@ func TestRuntimeServerDefaultsTurnControlsFromRuntimeSettings(t *testing.T) {
 }
 
 func TestRuntimeServerRuntimeInfoReadsVisionBridgeCapabilityConfig(t *testing.T) {
+	if !domainsecretprojection.ContainsCredentialV1(runtimeServerSyntheticCredentialForTestV1) {
+		t.Fatal("synthetic credential must exercise the existing credential detector")
+	}
 	server := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
@@ -440,7 +447,7 @@ func TestRuntimeServerRuntimeInfoReadsVisionBridgeCapabilityConfig(t *testing.T)
 					"mode":                                "auto",
 					"providerId":                          "xiaomi",
 					"baseUrl":                             "https://api.xiaomimimo.com/v1",
-					"apiKey":                              "bridge-secret-key",
+					"apiKey":                              runtimeServerSyntheticCredentialForTestV1,
 					"endpointFormat":                      "chat_completions",
 					"model":                               "mimo-v2.5",
 					"maxScreenshotsPerTurn":               3,
@@ -466,7 +473,7 @@ func TestRuntimeServerRuntimeInfoReadsVisionBridgeCapabilityConfig(t *testing.T)
 		t.Fatalf("runtime info should preserve probe status and screenshot limit: %#v", visionBridge)
 	}
 	raw := mustJSONString(t, info)
-	for _, secret := range []string{"bridge-secret-key", "api.xiaomimimo.com"} {
+	for _, secret := range []string{runtimeServerSyntheticCredentialForTestV1, "api.xiaomimimo.com"} {
 		if strings.Contains(raw, secret) {
 			t.Fatalf("runtime info must not leak bridge secret/base URL %q: %s", secret, raw)
 		}
@@ -4217,6 +4224,9 @@ Inspect the workspace. The host policy remains authoritative.
 }
 
 func TestRuntimeServerToolsProviderDiagnosticsReflectConfiguredProfilesWithoutSecrets(t *testing.T) {
+	if !domainsecretprojection.ContainsCredentialV1(runtimeServerSyntheticCredentialForTestV1) {
+		t.Fatal("synthetic credential must exercise the existing credential detector")
+	}
 	emptyServer := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
@@ -4252,7 +4262,7 @@ func TestRuntimeServerToolsProviderDiagnosticsReflectConfiguredProfilesWithoutSe
 		ModelProvidersJSON: string(mustJSONNoTest(map[string]any{
 			"defaultProviderId": "deepseek",
 			"providers": []map[string]any{
-				{"id": "deepseek", "apiKey": "sk-secret-provider-key", "baseUrl": "https://api.deepseek.com", "endpointFormat": "chat_completions", "models": []string{"deepseek-chat"}},
+				{"id": "deepseek", "apiKey": runtimeServerSyntheticCredentialForTestV1, "baseUrl": "https://api.deepseek.com", "endpointFormat": "chat_completions", "models": []string{"deepseek-chat"}},
 				{"id": "openai-compatible", "apiKey": "", "baseUrl": "https://openai.example/v1", "endpointFormat": "chat_completions", "models": []string{"gpt-compatible"}},
 			},
 		})),
@@ -4261,7 +4271,7 @@ func TestRuntimeServerToolsProviderDiagnosticsReflectConfiguredProfilesWithoutSe
 
 	configuredTools := assertLiveJSON(t, configuredServer.URL, http.MethodGet, "/v1/runtime/tools", DefaultRuntimeToken, nil, http.StatusOK)
 	configuredRaw := mustJSONString(t, configuredTools)
-	if strings.Contains(configuredRaw, "sk-secret-provider-key") {
+	if strings.Contains(configuredRaw, runtimeServerSyntheticCredentialForTestV1) {
 		t.Fatalf("runtime tools provider diagnostics leaked API key: %s", configuredRaw)
 	}
 	if configuredTools["providerCount"] != float64(2) {
@@ -4273,6 +4283,9 @@ func TestRuntimeServerToolsProviderDiagnosticsReflectConfiguredProfilesWithoutSe
 }
 
 func TestRuntimeServerInfoReflectsConfiguredDefaultProviderWithoutSecrets(t *testing.T) {
+	if !domainsecretprojection.ContainsCredentialV1(runtimeServerSyntheticCredentialForTestV1) {
+		t.Fatal("synthetic credential must exercise the existing credential detector")
+	}
 	server := httptest.NewServer(newRuntimeServerContractTestHandler(t, RuntimeServerContractConfig{
 		RuntimeToken:   DefaultRuntimeToken,
 		DurableTempDir: t.TempDir(),
@@ -4285,7 +4298,7 @@ func TestRuntimeServerInfoReflectsConfiguredDefaultProviderWithoutSecrets(t *tes
 			"providers": []map[string]any{
 				{
 					"id":             "anthropic-main",
-					"apiKey":         "sk-secret-anthropic-key",
+					"apiKey":         runtimeServerSyntheticCredentialForTestV1,
 					"baseUrl":        "https://api.anthropic.example",
 					"endpointFormat": "anthropic_messages",
 					"models":         []string{"claude-first", "claude-selected"},
@@ -4309,7 +4322,7 @@ func TestRuntimeServerInfoReflectsConfiguredDefaultProviderWithoutSecrets(t *tes
 
 	info := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/runtime/info", DefaultRuntimeToken, nil, http.StatusOK)
 	raw := mustJSONString(t, info)
-	if strings.Contains(raw, "sk-secret-anthropic-key") {
+	if strings.Contains(raw, runtimeServerSyntheticCredentialForTestV1) {
 		t.Fatalf("runtime info leaked provider API key: %s", raw)
 	}
 	providerInfo := mapField(t, info, "provider")
@@ -7096,7 +7109,10 @@ func TestRuntimeServerCompactRewritesHistoryAndPreservesCacheSafeSummaryForProvi
 }
 
 func TestRuntimeServerProviderAuthErrorIsStructuredAndRedacted(t *testing.T) {
-	const secret = "sk-runtime-provider-secret"
+	if !domainsecretprojection.ContainsCredentialV1(runtimeServerSyntheticCredentialForTestV1) {
+		t.Fatal("synthetic credential must exercise the existing credential detector")
+	}
+	const secret = runtimeServerSyntheticCredentialForTestV1
 	dataDir := workspacetest.New(t)
 	var providerCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -17921,9 +17937,24 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 		t.Fatalf("free-text user input should not invent submit-only options:\n%s", replay)
 	}
 	pendingID := stringField(start, "pendingId")
-	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/user-inputs/"+pendingID, DefaultRuntimeToken, mustJSON(t, map[string]any{
+	legacyResponse := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/user-inputs/"+pendingID, DefaultRuntimeToken, mustJSON(t, map[string]any{
 		"answers": []map[string]string{{"id": "q1", "label": "Choice", "value": "ship-choice-secret"}},
 	}), http.StatusOK)
+	if !bytes.Equal(mustJSON(t, legacyResponse["answers"]), mustJSON(t, []map[string]string{{"id": "q1", "label": "Choice", "value": "ship-choice-secret"}})) {
+		t.Fatalf("legacy HTTP echo changed original safe ID or record shape: %#v", legacyResponse)
+	}
+	questionID := ""
+	for _, event := range runtimeServerEventsForTurn(t, replay, stringField(start, "turnId")) {
+		if event["kind"] == "user_input_requested" {
+			questions, _ := event["questions"].([]any)
+			if len(questions) == 1 {
+				questionID = stringField(questions[0].(map[string]any), "id")
+			}
+		}
+	}
+	if questionID == "" || !strings.Contains(provider.Body(1), questionID) {
+		t.Fatal("legacy model continuation did not retain normalized Core question identity")
+	}
 	if provider.RequestCount() != 2 {
 		t.Fatalf("user_input resolution should continue the provider loop, got %d", provider.RequestCount())
 	}
@@ -17937,6 +17968,328 @@ func TestRuntimeServerUserInputOnlyAppearsWhenModelCallsTool(t *testing.T) {
 	}
 	if strings.Contains(after, "ship-choice-secret") {
 		t.Fatalf("user input answers must not be persisted into replay events:\n%s", after)
+	}
+}
+
+func TestRuntimeServerTypedUserInputBatchBindsCoreIDsAndClaimsOnce(t *testing.T) {
+	dataDir := workspacetest.New(t)
+	arguments := `{"prompt":"Choose the plan","questions":[{"question":"  Choose several  ","header":"  Scope  ","detail":"  ORIGINAL_QUESTION_DETAIL\n  ","multi_select":true,"options":[{"label":" Same ","description":"  Alpha meaning  "},{"label":" Same ","description":"  Beta meaning  "}]},{"question":"Choose one","options":[" Ship ","Wait"]},{"question":"Extra context","detail":"  Context detail  "}]}`
+	frame := fmt.Sprintf(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_typed_input","type":"function","function":{"name":"request_user_input","arguments":%s}}]},"finish_reason":"tool_calls"}]}`, mustJSON(t, arguments))
+	provider := newCompleteProviderServer(t, [][]string{
+		{frame, `data: [DONE]`},
+		{`data: {"choices":[{"delta":{"content":"typed input completed"}}]}`, `data: [DONE]`},
+	})
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce, startedOnce sync.Once
+	releaseProvider := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseProvider)
+	originalHandler := provider.server.Config.Handler
+	provider.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if provider.RequestCount() == 1 {
+			startedOnce.Do(func() { close(started) })
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		originalHandler.ServeHTTP(w, r)
+	})
+	durableRoot := t.TempDir()
+	config := RuntimeServerContractConfig{
+		RuntimeToken: DefaultRuntimeToken, ProductionDurableRoot: durableRoot, Host: "127.0.0.1", Port: 0,
+		DataDir: dataDir, ModelProvidersJSON: testModelProvidersJSON(provider.URL(), "typed-input-provider", "typed-input-model"),
+	}
+	firstHandler := newRuntimeServerProviderReadyTestHandler(t, config)
+	server := httptest.NewServer(firstHandler)
+	defer server.Close()
+	defer releaseProvider()
+	thread := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads", DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"title": "Typed input", "workspace": dataDir, "providerId": "typed-input-provider", "model": "typed-input-model",
+	}), http.StatusCreated)
+	threadID := stringField(thread, "id")
+	start := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"prompt": "Ask for the required plan choices.", "approvalPolicy": "never", "sandboxMode": "read-only", "disableUserInput": false,
+	}), http.StatusAccepted)
+	inputID := stringField(start, "pendingId")
+	if inputID == "" || start["status"] != "waiting" || provider.RequestCount() != 1 {
+		t.Fatalf("typed input did not pause: %#v", start)
+	}
+	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	var questions []any
+	var requestEvent map[string]any
+	for _, event := range runtimeServerEventsForTurn(t, replay, stringField(start, "turnId")) {
+		if event["kind"] == "user_input_requested" {
+			if requestEvent != nil || stringField(event, "inputId") != inputID || stringField(event, "threadId") != threadID {
+				t.Fatal("question selector did not come from one exact Core request event")
+			}
+			requestEvent = event
+			questions, _ = event["questions"].([]any)
+		}
+	}
+	if len(questions) != 3 {
+		t.Fatalf("public Core questions missing: %#v", questions)
+	}
+	first, second, third := questions[0].(map[string]any), questions[1].(map[string]any), questions[2].(map[string]any)
+	firstOptions, secondOptions := first["options"].([]any), second["options"].([]any)
+	if len(firstOptions) != 2 || len(secondOptions) != 2 {
+		t.Fatalf("Core options missing: %#v", questions)
+	}
+	firstID, secondID, thirdID := stringField(first, "id"), stringField(second, "id"), stringField(third, "id")
+	alphaID, betaID := stringField(firstOptions[0].(map[string]any), "id"), stringField(firstOptions[1].(map[string]any), "id")
+	shipID, waitID := stringField(secondOptions[0].(map[string]any), "id"), stringField(secondOptions[1].(map[string]any), "id")
+	if first["multiSelect"] != true || second["multiSelect"] != false || third["multiSelect"] != false || alphaID == "" || betaID == "" || shipID == "" {
+		t.Fatalf("Core question mode/option identities missing: %#v", questions)
+	}
+	if first["question"] != "Choose several" || first["header"] != "Scope" || first["detail"] != nil ||
+		firstOptions[0].(map[string]any)["label"] != "Same" || firstOptions[0].(map[string]any)["description"] != "Alpha meaning" ||
+		firstOptions[1].(map[string]any)["description"] != "Beta meaning" || secondOptions[0].(map[string]any)["label"] != "Ship" {
+		t.Fatal("public question projection did not retain its trimmed display contract")
+	}
+	if firstID != inputID+"_1" || secondID != inputID+"_2" || thirdID != inputID+"_3" || alphaID != firstID+"_option_1" || betaID != firstID+"_option_2" || shipID != secondID+"_option_1" || waitID != secondID+"_option_2" {
+		t.Fatal("question and option IDs were not minted by Core ordinals")
+	}
+	selector := map[string]any{
+		"threadId": stringField(requestEvent, "threadId"), "turnId": stringField(requestEvent, "turnId"),
+		"itemId": stringField(requestEvent, "itemId"), "requestId": stringField(requestEvent, "inputId"),
+	}
+	if selector["turnId"] != start["turnId"] || selector["itemId"] != "item_"+inputID {
+		t.Fatal("private selector lost its exact Core event binding")
+	}
+	selectorBody := mustJSON(t, selector)
+	// Exercise the real protected route, including duplicate native-sink headers.
+	readPrivate := func(t *testing.T, baseURL string, body json.RawMessage, token string, headers []string, expectedStatus int) map[string]any {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), runtimeServerPositiveTestTimeout)
+		defer cancel()
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/local-display/user-input", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		for _, value := range headers {
+			request.Header.Add("X-Analytix-Local-Display", value)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		data, err := io.ReadAll(response.Body)
+		var decoded map[string]any
+		if err != nil || response.StatusCode != expectedStatus || json.Unmarshal(data, &decoded) != nil || response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("Pragma") != "no-cache" {
+			t.Fatalf("protected question read status=%d want=%d error=%v", response.StatusCode, expectedStatus, err)
+		}
+		if expectedStatus != http.StatusOK && (decoded["questions"] != nil || decoded["submission"] != nil || bytes.Contains(data, []byte("BATCH_CUSTOM_SENTINEL"))) {
+			t.Fatal("rejected private selector disclosed question or answer content")
+		}
+		return decoded
+	}
+	originalQuestions := []map[string]any{
+		{"id": firstID, "header": "  Scope  ", "question": "  Choose several  ", "detail": "  ORIGINAL_QUESTION_DETAIL\n  ", "multiSelect": true, "options": []map[string]string{
+			{"id": alphaID, "label": " Same ", "description": "  Alpha meaning  "}, {"id": betaID, "label": " Same ", "description": "  Beta meaning  "},
+		}},
+		{"id": secondID, "header": "Question 2", "question": "Choose one", "multiSelect": false, "options": []map[string]string{
+			{"id": shipID, "label": " Ship ", "description": ""}, {"id": waitID, "label": "Wait", "description": ""},
+		}},
+		{"id": thirdID, "header": "Question 3", "question": "Extra context", "detail": "  Context detail  ", "multiSelect": false, "options": []map[string]string{}},
+	}
+	assertPrivateIdentity := func(view map[string]any, status, answerState string) {
+		t.Helper()
+		for key, value := range selector {
+			if view[key] != value {
+				t.Fatalf("private question read lost selector %s", key)
+			}
+		}
+		if view["schemaVersion"] != float64(1) || view["status"] != status || view["answerState"] != answerState || !bytes.Equal(mustJSON(t, view["questions"]), mustJSON(t, originalQuestions)) {
+			t.Fatal("private question read changed original question, option, detail or Core identity")
+		}
+	}
+	pendingView := readPrivate(t, server.URL, selectorBody, DefaultRuntimeToken, []string{"typed-v1"}, http.StatusOK)
+	assertPrivateIdentity(pendingView, "pending", "pending")
+	if len(pendingView) != 8 || pendingView["submission"] != nil {
+		t.Fatal("pending private read fabricated answers or exposed an open DTO")
+	}
+	for _, test := range []struct {
+		name    string
+		token   string
+		headers []string
+		status  int
+	}{
+		{"missing bearer", "", []string{"typed-v1"}, http.StatusUnauthorized},
+		{"missing native sink", DefaultRuntimeToken, nil, http.StatusForbidden},
+		{"duplicate native sink", DefaultRuntimeToken, []string{"typed-v1", "typed-v1"}, http.StatusForbidden},
+	} {
+		t.Run("private "+test.name, func(t *testing.T) {
+			readPrivate(t, server.URL, selectorBody, test.token, test.headers, test.status)
+		})
+	}
+	foreignRequestID := "input_" + domainsecurity.SHA256Hex([]byte("foreign-question-request"))
+	for name, test := range map[string]struct {
+		change func(map[string]any)
+		status int
+	}{
+		"foreign thread":       {func(s map[string]any) { s["threadId"] = "foreign-thread" }, http.StatusNotFound},
+		"foreign turn":         {func(s map[string]any) { s["turnId"] = "foreign-turn" }, http.StatusNotFound},
+		"foreign item":         {func(s map[string]any) { s["itemId"] = "item_" + foreignRequestID }, http.StatusBadRequest},
+		"foreign request":      {func(s map[string]any) { s["requestId"] = foreignRequestID }, http.StatusBadRequest},
+		"foreign exact pair":   {func(s map[string]any) { s["itemId"], s["requestId"] = "item_"+foreignRequestID, foreignRequestID }, http.StatusNotFound},
+		"extra selector field": {func(s map[string]any) { s["receiptId"] = "client-authority" }, http.StatusBadRequest},
+	} {
+		t.Run("private "+name, func(t *testing.T) {
+			var altered map[string]any
+			if json.Unmarshal(selectorBody, &altered) != nil {
+				t.Fatal("selector fixture")
+			}
+			test.change(altered)
+			readPrivate(t, server.URL, mustJSON(t, altered), DefaultRuntimeToken, []string{"typed-v1"}, test.status)
+		})
+	}
+	duplicateSelector := append(append([]byte(nil), selectorBody[:len(selectorBody)-1]...), []byte(`,"requestId":`+string(mustJSON(t, inputID))+`}`)...)
+	readPrivate(t, server.URL, duplicateSelector, DefaultRuntimeToken, []string{"typed-v1"}, http.StatusBadRequest)
+	if provider.RequestCount() != 1 {
+		t.Fatal("private question display performed provider execution")
+	}
+	valid := []map[string]any{
+		{"id": firstID, "kind": "answer", "optionIds": []string{alphaID, betaID}, "customText": "  BATCH_CUSTOM_SENTINEL  "},
+		{"id": secondID, "kind": "answer", "optionIds": []string{shipID}},
+		{"id": thirdID, "kind": "skip"},
+	}
+	for name, change := range map[string]func([]map[string]any) []map[string]any{
+		"missing question":          func(a []map[string]any) []map[string]any { return a[:2] },
+		"duplicate question":        func(a []map[string]any) []map[string]any { a[2] = a[0]; return a },
+		"unknown question":          func(a []map[string]any) []map[string]any { a[0]["id"] = "foreign"; return a },
+		"typed legacy alias":        func(a []map[string]any) []map[string]any { a[0]["id"] = "q1"; return a },
+		"cross question option":     func(a []map[string]any) []map[string]any { a[0]["optionIds"] = []string{shipID}; return a },
+		"unknown option":            func(a []map[string]any) []map[string]any { a[0]["optionIds"] = []string{"foreign"}; return a },
+		"duplicate option":          func(a []map[string]any) []map[string]any { a[0]["optionIds"] = []string{alphaID, alphaID}; return a },
+		"single option with custom": func(a []map[string]any) []map[string]any { a[1]["customText"] = "custom"; return a },
+		"single cardinality":        func(a []map[string]any) []map[string]any { a[1]["optionIds"] = []string{shipID, waitID}; return a },
+		"skip with content":         func(a []map[string]any) []map[string]any { a[2]["customText"] = "SKIP_BODY_SENTINEL"; return a },
+		"unknown answer field":      func(a []map[string]any) []map[string]any { a[0]["authority"] = "client"; return a },
+		"implicit blank skip": func(a []map[string]any) []map[string]any {
+			a[2] = map[string]any{"id": thirdID, "kind": "answer", "optionIds": []string{}, "customText": " "}
+			return a
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var batch []map[string]any
+			if err := json.Unmarshal(mustJSON(t, valid), &batch); err != nil {
+				t.Fatal(err)
+			}
+			assertLiveJSON(t, server.URL, http.MethodPost, "/v1/user-inputs/"+inputID, DefaultRuntimeToken, mustJSON(t, map[string]any{"answers": change(batch)}), http.StatusBadRequest)
+			if provider.RequestCount() != 1 {
+				t.Fatal("invalid batch continued provider")
+			}
+		})
+	}
+	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/user-inputs/"+inputID, DefaultRuntimeToken, mustJSON(t, map[string]any{"cancelled": true, "answers": valid}), http.StatusBadRequest)
+	type submissionResult struct {
+		response *http.Response
+		data     []byte
+	}
+	resultChannel := make(chan submissionResult, 1)
+	go func() {
+		response, data := liveRequest(t, server.URL, http.MethodPost, "/v1/user-inputs/"+inputID, DefaultRuntimeToken, mustJSON(t, map[string]any{"answers": valid}))
+		resultChannel <- submissionResult{response, data}
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		releaseProvider()
+		t.Fatal("valid batch did not reach continuation")
+	}
+	submittedView := readPrivate(t, server.URL, selectorBody, DefaultRuntimeToken, []string{"typed-v1"}, http.StatusOK)
+	assertPrivateIdentity(submittedView, "submitted", "available")
+	expectedSubmission := map[string]any{"schemaVersion": 1, "format": "structured", "answers": valid}
+	if len(submittedView) != 9 || !bytes.Equal(mustJSON(t, submittedView["submission"]), mustJSON(t, expectedSubmission)) {
+		t.Fatal("held continuation lost original option IDs, custom whitespace or explicit skip")
+	}
+	publicWhileHeld := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
+	replayWhileHeld := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	for _, publicBody := range []string{string(mustJSON(t, publicWhileHeld)), replayWhileHeld} {
+		if strings.Contains(publicBody, "BATCH_CUSTOM_SENTINEL") || strings.Contains(publicBody, "SKIP_BODY_SENTINEL") || strings.Contains(publicBody, `"submission"`) || strings.Contains(publicBody, `"answers"`) {
+			t.Fatal("held original answers reached public GET or SSE")
+		}
+	}
+	duplicate := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/user-inputs/"+inputID, DefaultRuntimeToken, mustJSON(t, map[string]any{"answers": valid}), http.StatusConflict)
+	if duplicate["code"] != "gate_continuation_unavailable" {
+		t.Fatalf("second claim admitted: %#v", duplicate)
+	}
+	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/user-inputs/"+inputID, DefaultRuntimeToken, mustJSON(t, map[string]any{"cancelled": true}), http.StatusConflict)
+	releaseProvider()
+	var result submissionResult
+	select {
+	case result = <-resultChannel:
+	case <-time.After(5 * time.Second):
+		t.Fatal("continuation did not finish")
+	}
+	var response map[string]any
+	if result.response.StatusCode != http.StatusOK || json.Unmarshal(result.data, &response) != nil || len(response) != 2 || response["inputId"] != inputID || response["status"] != "submitted" {
+		t.Fatalf("typed response leaked content or failed: code=%d body=%s", result.response.StatusCode, result.data)
+	}
+	if provider.RequestCount() != 2 {
+		t.Fatalf("batch resumed provider more than once: %d", provider.RequestCount())
+	}
+	for _, required := range []string{firstID, secondID, thirdID, "Alpha", "Beta", "Ship", "BATCH_CUSTOM_SENTINEL", "selectedOptions", "[skipped]"} {
+		if !strings.Contains(provider.Body(1), required) {
+			t.Fatalf("model continuation lost %q", required)
+		}
+	}
+	_, modelOutput := providerCurrentTurnHostToolResultForName(t, provider.Body(1), "request_user_input")
+	modelAnswers, _ := modelOutput["answers"].([]any)
+	if len(modelAnswers) != 3 {
+		t.Fatalf("model batch missing answers: %#v", modelOutput)
+	}
+	var selectedDetails []map[string]string
+	if err := json.Unmarshal([]byte(stringField(modelAnswers[0].(map[string]any), "selectedOptions")), &selectedDetails); err != nil || !reflect.DeepEqual(selectedDetails, []map[string]string{{"label": "Same", "description": "Alpha meaning"}, {"label": "Same", "description": "Beta meaning"}}) {
+		t.Fatalf("model tool result lost chosen descriptions behind duplicate labels: %#v %v", selectedDetails, err)
+	}
+	assertLiveJSON(t, server.URL, http.MethodPost, "/v1/user-inputs/"+inputID, DefaultRuntimeToken, mustJSON(t, map[string]any{"answers": valid}), http.StatusConflict)
+	after := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	resolutions := 0
+	for _, event := range runtimeServerEventsForTurn(t, after, stringField(start, "turnId")) {
+		if event["kind"] == "user_input_resolved" {
+			resolutions++
+		}
+	}
+	publicThread := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
+	if resolutions != 1 || strings.Contains(after, "BATCH_CUSTOM_SENTINEL") || strings.Contains(after, "SKIP_BODY_SENTINEL") || strings.Contains(string(mustJSON(t, publicThread)), "BATCH_CUSTOM_SENTINEL") {
+		t.Fatalf("resolution duplicated or answer reached ordinary persistence/replay: resolutions=%d", resolutions)
+	}
+	completedView := readPrivate(t, server.URL, selectorBody, DefaultRuntimeToken, []string{"typed-v1"}, http.StatusOK)
+	assertPrivateIdentity(completedView, "submitted", "available")
+	if !bytes.Equal(mustJSON(t, completedView), mustJSON(t, submittedView)) {
+		t.Fatal("completion changed private original question or answer authority before shutdown")
+	}
+	server.Close()
+	shutdown, ok := firstHandler.(interface{ Shutdown(context.Context) error })
+	if !ok {
+		t.Fatal("question runtime handler does not expose shutdown")
+	}
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), runtimeServerShutdownTestTimeout)
+	defer cancelShutdown()
+	if err := shutdown.Shutdown(shutdownContext); err != nil {
+		t.Fatalf("shutdown question runtime: %v", err)
+	}
+	// Reopen the same isolated production stores and signing authority. There is
+	// no second answer submission and the existing Registry fixture stays intact.
+	restarted := httptest.NewServer(newRuntimeServerProviderReadyTestHandler(t, config))
+	defer restarted.Close()
+	reloadedView := readPrivate(t, restarted.URL, selectorBody, DefaultRuntimeToken, []string{"typed-v1"}, http.StatusOK)
+	assertPrivateIdentity(reloadedView, "submitted", "available")
+	if !bytes.Equal(mustJSON(t, reloadedView), mustJSON(t, submittedView)) || provider.RequestCount() != 2 {
+		t.Fatal("reload changed private authority or resubmitted provider continuation")
+	}
+	reloadedThread := assertLiveJSON(t, restarted.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
+	reloadedReplay := liveSSE(t, restarted.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	for _, publicBody := range []string{string(mustJSON(t, reloadedThread)), reloadedReplay} {
+		if strings.Contains(publicBody, "BATCH_CUSTOM_SENTINEL") || strings.Contains(publicBody, "SKIP_BODY_SENTINEL") || strings.Contains(publicBody, `"submission"`) || strings.Contains(publicBody, `"answers"`) {
+			t.Fatal("private original answers entered public GET or SSE after reload")
+		}
 	}
 }
 
@@ -17979,6 +18332,24 @@ func TestUserInputCancelNeverResumesProvider(t *testing.T) {
 		t.Fatalf("user-input cancel must end at the host boundary without another provider call: %d bodies=%#v", provider.RequestCount(), provider.Bodies())
 	}
 	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	questionID := ""
+	for _, event := range runtimeServerEventsForTurn(t, replay, stringField(start, "turnId")) {
+		if event["kind"] == "user_input_requested" {
+			questions, _ := event["questions"].([]any)
+			if len(questions) == 1 {
+				questionID = stringField(questions[0].(map[string]any), "id")
+			}
+		}
+	}
+	if questionID == "" {
+		t.Fatal("cancel fixture lost the original Core question")
+	}
+	late := assertLiveJSON(t, server.URL, http.MethodPost, "/v1/user-inputs/"+pendingID, DefaultRuntimeToken, mustJSON(t, map[string]any{
+		"answers": []map[string]any{{"id": questionID, "kind": "answer", "optionIds": []string{}, "customText": "CANCELLED_CUSTOM_SENTINEL"}},
+	}), http.StatusConflict)
+	if late["code"] != "gate_continuation_unavailable" || provider.RequestCount() != 1 {
+		t.Fatalf("typed answer continued a cancelled gate: %#v", late)
+	}
 	if !strings.Contains(replay, "input_cancelled") || !strings.Contains(replay, "no unverified final response was published") ||
 		strings.Contains(replay, "PROVIDER_MUST_NOT_RUN_AFTER_INPUT_CANCEL") {
 		t.Fatalf("user-input cancellation did not publish only the fixed host boundary:\n%s", replay)

@@ -22,6 +22,19 @@
   box-shadow: none;
 }
 
+/* The same chat leaf owns typography in main, side and Inspector surfaces.
+   Document/SDD editor typography stays outside these mounting roots. */
+:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel]) :is([data-analytix-message-timeline-content], [data-analytix-chat-view]) .ds-user-message-bubble {
+  font-family: var(--dsw-font-family);
+  font-size: var(--dsh-content-font-size, 14px);
+  line-height: calc(22px + var(--dsh-content-font-delta, 0px));
+}
+
+:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel]) :is([data-analytix-message-timeline-content], [data-analytix-chat-view]) .ds-user-message-bubble > textarea[data-user-message-editor] {
+  font-size: inherit;
+  line-height: inherit;
+}
+
 @media (max-width: 640px) {
   .ds-user-message-bubble {
     max-width: 92%;

@@ -25,180 +25,14 @@
   container-name: write-workspace;
 }
 
-.write-pdf-viewer {
-  background: transparent;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.write-pdf-toolbar {
-  backdrop-filter: blur(14px) saturate(112%);
-  -webkit-backdrop-filter: blur(14px) saturate(112%);
-}
-
-.write-pdf-icon-button {
-  display: inline-flex;
-  height: var(--ax-toolbar-button-size, 28px);
-  width: var(--ax-toolbar-button-size, 28px);
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  color: var(--ds-muted);
-  transition:
-    background-color 90ms ease,
-    border-color 90ms ease,
-    box-shadow 90ms ease,
-    color 90ms ease,
-    opacity 90ms ease;
-}
-
-.write-pdf-icon-button:hover:not(:disabled) {
-  border-color: var(--ax-toolbar-hover-border);
-  background: var(--ax-toolbar-hover-bg);
-  box-shadow: var(--ax-shadow-toolbar-hover);
-  color: var(--ds-ink);
-}
-
-.write-pdf-icon-button:active:not(:disabled) {
-  border-color: var(--ax-toolbar-active-border);
-  background: var(--ax-toolbar-active-bg);
-  box-shadow: var(--ax-shadow-toolbar-active);
-  color: var(--ds-ink);
-}
-
-.write-pdf-icon-button > svg {
-  display: block;
-  height: var(--ax-sidebar-toggle-icon-size);
-  width: var(--ax-sidebar-toggle-icon-size);
-}
-
-.write-pdf-icon-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
-.write-pdf-page-input {
-  width: 42px;
-  border: 0;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.72);
-  padding: 3px 6px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ds-ink);
-  outline: none;
-}
-
-[data-theme='dark'] .write-pdf-page-input {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.write-pdf-page {
-  position: relative;
-  overflow: hidden;
-  border-radius: 6px;
-  background: white;
-  user-select: text;
-  -webkit-user-select: text;
-  box-shadow:
-    0 18px 50px rgba(20, 47, 95, 0.14),
-    0 0 0 1px rgba(15, 23, 42, 0.08);
-}
-
-.write-pdf-canvas,
-.write-pdf-text-layer,
-.write-pdf-overlay-layer {
-  position: absolute;
-  inset: 0;
-}
-
-.write-pdf-canvas {
-  display: block;
-}
-
-.write-pdf-text-layer {
-  z-index: 1;
-  overflow: hidden;
-  opacity: 1;
-  pointer-events: auto;
-  line-height: 1;
-  text-align: initial;
-  caret-color: var(--ds-ink);
-  text-size-adjust: none;
-  forced-color-adjust: none;
-  transform-origin: 0 0;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.write-pdf-text-layer :is(span, br) {
-  color: rgba(0, 0, 0, 0.01);
-  position: absolute;
-  white-space: pre;
-  cursor: text;
-  transform-origin: 0% 0%;
-  user-select: text;
-  -webkit-user-select: text;
-  z-index: 1;
-}
-
-.write-pdf-text-layer span.markedContent {
-  top: 0;
-  height: 0;
-}
-
-.write-pdf-text-layer span[role='img'] {
-  cursor: default;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.write-pdf-text-layer ::selection {
-  background: var(--write-selection-bg, var(--ds-selection));
-}
-
-.write-pdf-text-layer br::selection,
-.write-pdf-text-layer .write-pdf-text-ws::selection {
-  background: transparent;
-}
-
-.write-pdf-text-layer .endOfContent {
-  display: block;
-  position: absolute;
-  inset: 100% 0 0;
-  z-index: 0;
-  cursor: default;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.write-pdf-overlay-layer {
-  z-index: 2;
-  pointer-events: none;
-}
-
-.write-pdf-selection-rect {
-  position: absolute;
-  border-radius: 3px;
-  background: var(--write-selection-bg, var(--ds-selection));
-}
-
-/* While the browser paints the native selection, the committed overlay stays
-   invisible so the two highlights never stack. */
-.write-pdf-viewer[data-live-selection] .write-pdf-selection-rect {
-  opacity: 0;
-}
-
 .write-workspace-toolbar-modes,
 .write-workspace-toolbar-actions {
-  min-width: max-content;
+  min-width: 0;
   min-height: var(--ax-toolbar-button-size);
 }
 
 .write-workspace-toolbar-actions {
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .write-workspace-toolbar-modes {
@@ -206,18 +40,9 @@
   align-self: center;
 }
 
-.write-pdf-topbar-status .ds-toolbar-icon-svg {
-  flex: 0 0 16px;
-  height: 16px;
-  max-height: 16px;
-  max-width: 16px;
-  width: 16px;
-}
-
 .write-mode-split-control,
 .write-workspace-toolbar-actions .ds-toolbar-icon-button,
-.write-toolbar-menu-button,
-.write-pdf-topbar-actions .ds-toolbar-icon-button {
+.write-toolbar-menu-button {
   font-size: 12px;
   line-height: 1;
 }
@@ -359,10 +184,7 @@
 .write-workspace-toolbar-actions .ds-toolbar-icon-button > img,
 .write-mode-split-control .ds-toolbar-icon-svg,
 .write-mode-split-control svg,
-.write-mode-split-control img,
-.write-pdf-topbar-actions .ds-toolbar-icon-button > .ds-toolbar-icon-svg,
-.write-pdf-topbar-actions .ds-toolbar-icon-button > svg,
-.write-pdf-topbar-actions .ds-toolbar-icon-button > img {
+.write-mode-split-control img {
   height: 18px;
   max-height: 18px;
   max-width: 18px;
@@ -573,41 +395,6 @@
   }
 }
 
-.write-pdf-topbar-status {
-  display: none;
-  min-width: max-content;
-  align-items: center;
-  gap: 7px;
-  justify-self: end;
-  border-radius: 999px;
-  border: 1px solid var(--ds-border-muted);
-  background: rgba(255, 255, 255, 0.56);
-  padding: 7px 10px;
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--ds-muted);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
-}
-
-[data-theme='dark'] .write-pdf-topbar-status {
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: none;
-}
-
-.write-pdf-topbar-dot {
-  height: 3px;
-  width: 3px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.42;
-}
-
-.write-pdf-topbar-actions {
-  min-width: max-content;
-  gap: 4px;
-  justify-content: flex-end;
-}
-
 .write-start-grid {
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
@@ -749,12 +536,6 @@
 @container write-workspace (min-width: 1280px) {
   .write-start-grid {
     grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
-  }
-}
-
-@container (min-width: 520px) {
-  .write-pdf-topbar-status {
-    display: inline-flex;
   }
 }
 
@@ -1030,3 +811,32 @@
   border: 1px solid var(--ds-border-muted);
   box-shadow: var(--ds-shadow-chip);
 }
+
+
+.write-workspace-controls-menu > summary { width: 36px; justify-content: center; padding: 0; border-radius: 8px; background: transparent; }
+.write-workspace-controls-content { left: auto; right: 0; width: 292px; }
+.write-workspace-controls-content .write-workspace-toolbar-actions { --ax-toolbar-button-size: 36px; gap: 6px; }
+.write-workspace-controls-content .write-workspace-toolbar-modes { min-width: 82px; }
+.write-workspace-controls-content .write-typography-controls { --ax-toolbar-button-size: 36px; max-width: 100%; }
+.write-workspace-controls-content .write-toolbar-action-icons { gap: 6px; }
+.write-workspace-controls-content .write-workspace-toolbar-modes:has(> [role='menu']) { flex-wrap: wrap; height: auto; width: 100%; }
+.write-workspace-controls-content .write-workspace-toolbar-modes > [role='menu'],
+.write-workspace-controls-content .write-toolbar-action-icons > div > [role='menu'] { position: static; width: 100%; margin-top: 6px; box-shadow: none; }
+.write-workspace-controls-content .write-typography-segment { position: static; }
+.write-workspace-controls-content .write-typography-segment > [role='menu'] { right: 6px; max-width: calc(100% - 12px); }
+.write-workspace-controls-content .write-toolbar-action-icons:has([role='menu']) { flex-wrap: wrap; }
+.write-workspace-controls-content .write-toolbar-action-icons > div:has([role='menu']) { flex-wrap: wrap; width: 100%; }
+.write-image-zoom-menu > summary { min-width: 68px; justify-content: center; padding-inline: 6px; border-radius: 8px; background: transparent; }
+.write-image-zoom-controls { --ax-toolbar-button-size: 36px; left: auto; right: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 244px; }
+.write-image-zoom-controls > button { width: 36px; min-width: 36px; padding: 0; justify-content: center; }
+.write-image-zoom-controls > .write-toolbar-menu-button { width: auto; padding-inline: 8px; }
+
+/* Align portalled menus to the pane header, including its trailing controls. */
+.ds-file-viewer-header .ds-file-viewer-controls,
+.ds-file-viewer-header .write-workspace-controls-menu,
+.ds-file-viewer-header .write-image-zoom-menu { position: static; }
+.ds-file-viewer-header .write-workspace-controls-content,
+.ds-file-viewer-header .write-image-zoom-controls { right: 8px; max-width: calc(100% - 16px); }
+
+/* Portalled controls sit outside the write-workspace container. */
+.write-workspace-controls-content .write-typography-button-label:not(.tabular-nums) { display: none; }

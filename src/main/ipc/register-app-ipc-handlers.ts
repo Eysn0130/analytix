@@ -1,3 +1,12 @@
+import { writePrototypeAuthorizePayloadSchema } from '../../shared/write-prototype'
+import { scheduleSettingsReadView } from '../schedule-runtime-helpers'
+import type { ScheduleTaskHistoryResult, ScheduleTaskListResult, ScheduleTaskWriteResult, ScheduleTaskDeleteResult } from '../../shared/schedule-task-mutation'
+import { registerProcessLocalDisplayIpcV1, type ProcessLocalDisplayRuntimeOwnerV1 } from './process-local-display-ipc'
+import { registerUserInputWaitIpcV1 } from './user-input-wait-ipc'
+import type { UserInputWaitTransportV1 } from '../runtime/user-input-wait-owner'
+import { registerUserInputLocalDisplayIpcV1 } from './user-input-local-display-ipc'
+import { registerToolResultLocalDisplayIpcV1 } from './tool-result-local-display-ipc'
+import type { ExcelPreviewCopyReaderV1 } from '../services/excel-preview-copy-service'
 import { registerBrowserSelectionIpc } from '../browser/browser-selection'
 import { authorizeWriteRetrievalSource } from './write-retrieval-ipc'
 import { createWriteExportSnapshotResolver } from './write-export-ipc'
@@ -125,6 +134,10 @@ import {
   skillListPayloadSchema,
   skillSaveFilePayloadSchema,
   settingsPatchSchema,
+  scheduleTaskCreatePayloadSchema,
+  scheduleTaskHistoryPayloadSchema,
+  scheduleTaskUpdatePayloadSchema,
+  scheduleTaskDeletePayloadSchema,
   streamIdSchema,
   uiPluginIdPayloadSchema,
   workspaceDirectoryCreatePayloadSchema,
@@ -135,6 +148,8 @@ import {
   workspaceFileCreatePayloadSchema,
   workspaceFileSaveAsPayloadSchema,
   workspaceFileTargetPayloadSchema,
+  workspaceFileReadPayloadSchema,
+  workspacePresentMediaReadPayloadSchema,
   workspaceFileWatchPayloadSchema,
   workspaceFileWritePayloadSchema,
   speechTranscribePayloadSchema,
@@ -145,6 +160,7 @@ import {
   writeInlineCompletionPayloadSchema,
   writeInlineCompletionCancelSchema,
   writePrototypeFilePayloadSchema,
+  writePrototypeRevokePayloadSchema,
   writeRetrievalPayloadSchema,
   workspaceRootSchema,
   legacySessionImportPayloadSchema
@@ -184,7 +200,6 @@ import {
   loadUiPluginFigures,
   removeUiPlugin
 } from '../services/ui-plugin-service'
-import { ensureBundledUiPlugins } from '../ui-plugin-bundled'
 import {
   createWorkspaceDirectory,
   createWorkspaceFile,
@@ -198,6 +213,7 @@ import {
   readWorkspaceImage,
   readWorkspaceFile,
   readWorkspacePdf,
+  readWorkspaceExcel,
   renameWorkspaceEntry,
   resolveOpenTargetPath,
   resolveWorkspaceFile,
@@ -216,7 +232,8 @@ import {
   type PrivateMediaImageRequest,
   type PrivateMediaImageResult
 } from '../services/write-infographic-service'
-import { authorizePrototypePath } from '../services/prototype-embed-registry'
+import { authorizePrototypePath, authorizePrototypeSnapshot, resolvePrototypePath, revokePrototypeGrant } from '../services/prototype-embed-registry'
+import { captureNativeRendererDocument } from './native-renderer-document'
 import {
   requestSpeechTranscription,
   type PrivateMediaSpeechRequest,
@@ -264,6 +281,7 @@ type WorkspaceFileWatchRecord = {
 }
 
 type RegisterAppIpcHandlersOptions = {
+  excelPreviewCopyReader?: ExcelPreviewCopyReaderV1
   store: JsonSettingsStore
   loadHubAccountService: LoadHubAccountService
   getMainWindow: () => BrowserWindow | null
@@ -285,6 +303,9 @@ type RegisterAppIpcHandlersOptions = {
   /** Fixed Main-only media transport; absent injection must fail closed. */
   privateMediaRequest?: PrivateMediaRuntimeRequest
   localDisplayRequest: (path: string, body: string, signal?: AbortSignal) => Promise<RuntimeRequestResult>
+  userInputWaitTransport?: UserInputWaitTransportV1
+  /** Closure over one Main-owned runtime generation; absent injection fails closed. */
+  captureProcessDisplayRuntimeOwner?: () => ProcessLocalDisplayRuntimeOwnerV1 | null
   restartRuntime: () => Promise<void>
   fetchUpstreamModels: () => Promise<UpstreamModelsResult>
   getClawRuntime: () => ClawRuntime | null
@@ -1414,6 +1435,8 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     getCurrentOwnerBindingInventory,
     getCurrentProfile,
     localDisplayRequest,
+    userInputWaitTransport,
+    captureProcessDisplayRuntimeOwner = () => null,
     privateMediaRequest,
     restartRuntime,
     fetchUpstreamModels,
@@ -1555,16 +1578,16 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     }, 90)
   }
 
-  ipcMain.handle('settings:get', async () => store.load())
+  ipcMain.handle('settings:get', async () => scheduleSettingsReadView(await store.load()))
   ipcMain.handle('settings:set', async (_, partial: unknown) =>
     applySettingsPatch(
       parseIpcPayload('settings:set', settingsPatchSchema, partial) as AppSettingsPatch
-    )
+    ).then(scheduleSettingsReadView)
   )
   ipcMain.handle('settings:save-silent', async (_, partial: unknown) =>
     saveSettingsPatch(
       parseIpcPayload('settings:save-silent', settingsPatchSchema, partial) as AppSettingsPatch
-    )
+    ).then(scheduleSettingsReadView)
   )
 
   ipcMain.handle('hub-account:snapshot', async () =>
@@ -1897,8 +1920,24 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       : oauthForbidden()
   )
 
-  ipcMain.handle('runtime:request', async (_, payload: unknown) => {
+  ipcMain.handle('runtime:request', async (event, payload: unknown) => {
     const request = parseIpcPayload('runtime:request', runtimeRequestPayloadSchema, payload)
+    if (request.path === '/v1/runtime/task-jobs/steer') {
+      const owner = captureWriteRendererOwner(event, getMainWindow)
+      const forbidden = (): RuntimeRequestResult => ({ ok: false, status: 403, body: JSON.stringify({
+        schemaVersion: 1, capabilities: { send: 'disabled', stop: false, reasonCode: 'authority_unavailable' }, code: 'forbidden'
+      }) })
+      if (!owner) return forbidden()
+      try {
+        const response = await localDisplayRequest(request.path, request.body!, owner.signal)
+        if (!owner.isCurrent()) return { ok: false, status: 503, body: JSON.stringify({
+          schemaVersion: 1, capabilities: { send: 'disabled', stop: false, reasonCode: 'child_input_unknown' }, code: 'child_input_unknown'
+        }) }
+        return sanitizeRuntimeResponse(response, request.path, undefined, request.method)
+      } finally {
+        owner.release()
+      }
+    }
     const response = await runtimeRequest(request.path, request.method, request.body)
     return sanitizeRuntimeResponse(response, request.path, undefined, request.method)
   })
@@ -2128,6 +2167,41 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     const scheduleRuntime = getScheduleRuntime()
     if (!scheduleRuntime) return { ok: false, message: 'Schedule runtime is not initialized.' }
     return scheduleRuntime.runTask(normalizedTaskId)
+  })
+
+  ipcMain.handle('schedule:tasks:list', async (): Promise<ScheduleTaskListResult> => {
+    const runtime = getScheduleRuntime()
+    if (!runtime) return { kind: 'unavailable', message: 'Schedule runtime is not initialized.' }
+    try { return { kind: 'success', tasks: await runtime.listTasks() } }
+    catch { return { kind: 'error', message: 'Failed to read schedule tasks.' } }
+  })
+  ipcMain.handle('schedule:task:history', async (_, payload: unknown): Promise<ScheduleTaskHistoryResult> => {
+    const input = parseIpcPayload('schedule:task:history', scheduleTaskHistoryPayloadSchema, payload)
+    const runtime = getScheduleRuntime()
+    if (!runtime) return { kind: 'unavailable', message: 'Schedule runtime is not initialized.' }
+    try { return await runtime.readTaskHistory(input) }
+    catch { return { kind: 'error', message: 'Failed to read schedule history.' } }
+  })
+  ipcMain.handle('schedule:task:create', async (_, payload: unknown): Promise<ScheduleTaskWriteResult> => {
+    const input = parseIpcPayload('schedule:task:create', scheduleTaskCreatePayloadSchema, payload)
+    const runtime = getScheduleRuntime()
+    if (!runtime) return { kind: 'unavailable', message: 'Schedule runtime is not initialized.' }
+    try { return { kind: 'success', task: await runtime.createTaskFromInput(input) } }
+    catch { return { kind: 'error', message: 'Failed to create schedule task.' } }
+  })
+  ipcMain.handle('schedule:task:update', async (_, payload: unknown): Promise<ScheduleTaskWriteResult> => {
+    const input = parseIpcPayload('schedule:task:update', scheduleTaskUpdatePayloadSchema, payload)
+    const runtime = getScheduleRuntime()
+    if (!runtime) return { kind: 'unavailable', message: 'Schedule runtime is not initialized.' }
+    try { return await runtime.updateTaskConfiguration(input) }
+    catch { return { kind: 'error', message: 'Failed to update schedule task.' } }
+  })
+  ipcMain.handle('schedule:task:delete', async (_, payload: unknown): Promise<ScheduleTaskDeleteResult> => {
+    const input = parseIpcPayload('schedule:task:delete', scheduleTaskDeletePayloadSchema, payload)
+    const runtime = getScheduleRuntime()
+    if (!runtime) return { kind: 'unavailable', message: 'Schedule runtime is not initialized.' }
+    try { return await runtime.deleteTask(input) }
+    catch { return { kind: 'error', message: 'Failed to delete schedule task.' } }
   })
 
   ipcMain.handle('schedule:status', async (): Promise<ScheduleRuntimeStatus> =>
@@ -2435,7 +2509,6 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
 
   ipcMain.handle('ui-plugin:list', async () => {
     const analytixHomeDir = join(homedir(), '.analytix')
-    await ensureBundledUiPlugins(analytixHomeDir)
     return { plugins: await listUiPlugins(analytixHomeDir) }
   })
 
@@ -2467,7 +2540,6 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   ipcMain.handle('ui-plugin:load', async (_, payload: unknown) => {
     const request = parseIpcPayload('ui-plugin:load', uiPluginIdPayloadSchema, payload)
     const analytixHomeDir = join(homedir(), '.analytix')
-    await ensureBundledUiPlugins(analytixHomeDir)
     return loadUiPluginFigures(analytixHomeDir, request.id)
   })
 
@@ -2757,7 +2829,6 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   )
 
   const packageHost = createPluginPackageHostHandler(localDisplayRequest)
-  registerNativeOfficeIpc(getMainWindow, packageHost, createOfficePrivateAdmissionProvider(localDisplayRequest))
   registerCanvasIpc(event => isTrustedProviderRegistrySender?.(event) === true, packageHost)
   const rendererPackageHost = createPluginPackageHostHandler(localDisplayRequest, 'renderer')
   ipcMain.handle('plugin:package-host', async (event, payload: unknown) => {
@@ -2769,10 +2840,15 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     return rendererPackageHost(payload)
   })
 
+  registerUserInputWaitIpcV1(getMainWindow, userInputWaitTransport)
+  registerUserInputLocalDisplayIpcV1(getMainWindow, localDisplayRequest)
+  const resolveArtifact = createGeneratedArtifactHandler(localDisplayRequest)
+  const readProtectedToolPreview = registerToolResultLocalDisplayIpcV1(getMainWindow, localDisplayRequest, resolveArtifact, options.excelPreviewCopyReader)
+  registerNativeOfficeIpc(getMainWindow, packageHost, createOfficePrivateAdmissionProvider(localDisplayRequest), (event, selector) => readProtectedToolPreview.office(event, selector))
+  registerProcessLocalDisplayIpcV1(getMainWindow, localDisplayRequest, captureProcessDisplayRuntimeOwner, isTrustedProviderRegistrySender)
   const resolveExportSnapshot = createWriteExportSnapshotResolver(localDisplayRequest)
   registerBrowserSelectionIpc(getMainWindow, localDisplayRequest)
   const objectEditing = createObjectEditingHandler(localDisplayRequest)
-  const resolveArtifact = createGeneratedArtifactHandler(localDisplayRequest)
   ipcMain.handle('object:resolve-artifact', async (event, payload: unknown) => {
     const main = getMainWindow()
     if (!main || main.isDestroyed() || event.sender !== main.webContents || event.senderFrame !== main.webContents.mainFrame) return {ok:false,code:'unavailable'}
@@ -2801,21 +2877,23 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       parseIpcPayload('file:list-workspace-directory', workspaceDirectoryTargetPayloadSchema, payload)
     )
   )
-  ipcMain.handle('file:read-workspace', async (_, payload: unknown) =>
-    readWorkspaceFile(
-      parseIpcPayload('file:read-workspace', workspaceFileTargetPayloadSchema, payload)
-    )
-  )
-  ipcMain.handle('file:read-workspace-image', async (_, payload: unknown) =>
-    readWorkspaceImage(
-      parseIpcPayload('file:read-workspace-image', workspaceFileTargetPayloadSchema, payload)
-    )
-  )
-  ipcMain.handle('file:read-workspace-pdf', async (_, payload: unknown) =>
-    readWorkspacePdf(
-      parseIpcPayload('file:read-workspace-pdf', workspaceFileTargetPayloadSchema, payload)
-    )
-  )
+  ipcMain.handle('file:read-workspace', async (event, payload: unknown) => {
+    const request = parseIpcPayload('file:read-workspace', workspaceFileReadPayloadSchema, payload)
+    return 'protectedPresent' in request ? readProtectedToolPreview(event, request.protectedPresent)
+      : 'protectedRead' in request ? readProtectedToolPreview(event, request.protectedRead) : readWorkspaceFile(request)
+  })
+  ipcMain.handle('file:read-workspace-image', async (event, payload: unknown) => {
+    const request = parseIpcPayload('file:read-workspace-image', workspacePresentMediaReadPayloadSchema, payload)
+    return 'protectedPresent' in request ? readProtectedToolPreview.image(event, request.protectedPresent) : readWorkspaceImage(request)
+  })
+  ipcMain.handle('file:read-workspace-pdf', async (event, payload: unknown) => {
+    const request = parseIpcPayload('file:read-workspace-pdf', workspacePresentMediaReadPayloadSchema, payload)
+    return 'protectedPresent' in request ? readProtectedToolPreview.pdf(event, request.protectedPresent) : readWorkspacePdf(request)
+  })
+  ipcMain.handle('file:read-workspace-excel', async (event, payload: unknown) => {
+    const request = parseIpcPayload('file:read-workspace-excel', workspacePresentMediaReadPayloadSchema, payload)
+    return 'protectedPresent' in request ? readProtectedToolPreview.excel(event, request.protectedPresent) : readWorkspaceExcel(request)
+  })
   ipcMain.handle('file:read-local-pdf-text', async (_, payload: unknown) => {
     const result = await readLocalPdfText(
       parseIpcPayload('file:read-local-pdf-text', localPdfTextTargetPayloadSchema, payload)
@@ -3008,14 +3086,42 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       { executeMediaRequest: (request) => executePrivateMediaImage(privateMediaRequest, request) }
     )
   )
-  ipcMain.handle('write:authorize-prototype', async (_, payload: unknown) => {
-    const request = parseIpcPayload('write:authorize-prototype', writePrototypeFilePayloadSchema, payload)
-    return authorizePrototypePath(request.path, request.workspaceRoot)
+  ipcMain.handle('write:authorize-prototype', async (event, payload: unknown) => {
+    if (isTrustedProviderRegistrySender?.(event) !== true) return { ok: false, message: 'HTML preview is unavailable.' }
+    const request = parseIpcPayload('write:authorize-prototype', writePrototypeAuthorizePayloadSchema, payload)
+    let grantId: string | undefined
+    const owner = captureNativeRendererDocument(event.sender,
+      () => isTrustedProviderRegistrySender?.(event) === true,
+      () => { if (grantId) revokePrototypeGrant(grantId, event.sender.id) })
+    let result
+    if ('protectedPresent' in request) {
+      const snapshot = await readProtectedToolPreview.html(event, request.protectedPresent)
+      if (!snapshot || !owner.isCurrent()) { snapshot?.bytes.fill(0); owner.release(); return { ok: false, message: 'Protected HTML preview is unavailable.' } }
+      try { result = await authorizePrototypeSnapshot(snapshot, { id: event.sender.id, ...owner }) }
+      finally { snapshot.bytes.fill(0) }
+    } else {
+      result = await authorizePrototypePath(request.path, request.workspaceRoot,
+        { id: event.sender.id, ...owner }, request.mode)
+    }
+    if (result.ok) {
+      grantId = result.grantId
+      if (!owner.isCurrent()) {
+        revokePrototypeGrant(grantId, event.sender.id)
+        return { ok: false, message: 'HTML preview is unavailable.' }
+      }
+    }
+    return result
   })
-  ipcMain.handle('write:open-prototype', async (_, payload: unknown) => {
+  ipcMain.handle('write:revoke-prototype', async (event, payload: unknown) => {
+    if (isTrustedProviderRegistrySender?.(event) !== true) return { ok: false }
+    const request = parseIpcPayload('write:revoke-prototype', writePrototypeRevokePayloadSchema, payload)
+    return { ok: revokePrototypeGrant(request.grantId, event.sender.id) }
+  })
+  ipcMain.handle('write:open-prototype', async (event, payload: unknown) => {
+    if (isTrustedProviderRegistrySender?.(event) !== true) return { ok: false, message: 'HTML preview is unavailable.' }
     const request = parseIpcPayload('write:open-prototype', writePrototypeFilePayloadSchema, payload)
-    const authorized = await authorizePrototypePath(request.path, request.workspaceRoot)
-    if (!authorized.ok) return authorized
+    const authorized = await resolvePrototypePath(request.path, request.workspaceRoot, 'write-prototype')
+    if (!authorized.ok || isTrustedProviderRegistrySender?.(event) !== true) return { ok: false, message: 'HTML preview is unavailable.' }
     return openPathWithShell(authorized.absolutePath)
   })
   ipcMain.handle('speech:transcribe', async (_, payload: unknown) =>

@@ -27,6 +27,8 @@ type PipelineStageEventInput struct {
 }
 
 type ProviderRetryingEventInput struct {
+	Retry              map[string]any
+	Timestamp          string
 	ThreadID           string
 	TurnID             string
 	Attempt            int
@@ -105,6 +107,12 @@ func pipelineStageLabel(stage string) string {
 		return "Pre-Start"
 	case "post_start":
 		return "Post-Start"
+	case "logical_step_started":
+		return "Logical step started"
+	case "logical_step_assembled":
+		return "Logical step assembled"
+	case "logical_step_closed":
+		return "Logical step closed"
 	case "input_received":
 		return "Input Received"
 	case "input_cached":
@@ -165,7 +173,10 @@ func BuildToolCallPartialEvent(threadID, turnID, callID, toolName string) map[st
 func BuildProviderRetryingEvent(input ProviderRetryingEventInput) map[string]any {
 	details := providerPipelineDetails(input.ProviderDiagnostic)
 	details["message"] = domainfailure.New(domainfailure.CodeProviderUnavailable, details).Message()
-	return map[string]any{
+	if len(input.Retry) > 0 {
+		details["retry"] = cloneEventMap(input.Retry)
+	}
+	event := map[string]any{
 		"kind":       "pipeline_stage",
 		"threadId":   input.ThreadID,
 		"turnId":     input.TurnID,
@@ -175,6 +186,10 @@ func BuildProviderRetryingEvent(input ProviderRetryingEventInput) map[string]any
 		"maxAttempt": float64(input.MaxAttempts),
 		"details":    details,
 	}
+	if input.Timestamp != "" {
+		event["timestamp"] = input.Timestamp
+	}
+	return event
 }
 
 func BuildStreamInterruptedRecoveryEvent(input StreamInterruptedRecoveryEventInput) map[string]any {

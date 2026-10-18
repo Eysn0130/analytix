@@ -86,12 +86,20 @@ func (h *runtimeServerHandler) mutationToolInput(ctx context.Context, pending ru
 				defer cancel()
 				terminal, err := operationService.Settle(settlementCtx, draft, mutationSucceeded, time.Now().UTC())
 				if err != nil {
+					if pending.Call.Name == "generate_office_document" {
+						recordRuntimeDocumentGenerationFailureTrace(pending.ThreadID, pending.TurnID, "checkpoint_settlement", "unavailable")
+					}
 					return "", err
+				}
+				if mutationSucceeded && terminal.Status != "completed" && pending.Call.Name == "generate_office_document" {
+					recordRuntimeDocumentGenerationFailureTrace(pending.ThreadID, pending.TurnID, "checkpoint_settlement", "incomplete")
 				}
 				if terminal.Status == "completed" {
 					err = h.recordRuntimeCheckpointCaptured(pending.ThreadID, pending.TurnID, checkpointID, sourceCheckpointID)
 					if errors.Is(err, checkpointport.ErrNotFound) {
 						err = nil
+					} else if err != nil && pending.Call.Name == "generate_office_document" {
+						recordRuntimeDocumentGenerationFailureTrace(pending.ThreadID, pending.TurnID, "checkpoint_record", "unavailable")
 					}
 				}
 				return terminal.Status, err

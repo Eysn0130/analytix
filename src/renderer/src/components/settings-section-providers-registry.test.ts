@@ -80,7 +80,7 @@ describe('Provider Settings Registry authority', () => {
       kind: 'openai-compatible',
       endpoint: 'https://registry-minimax.invalid/v1',
       models: ['MiniMax-M2.7'],
-      mediaModels: ['music-2.6'],
+      mediaModels: ['music-2.6', 'unclassified-media'],
       selectedModel: 'MiniMax-M2.7',
       selectedMediaModel: 'music-2.6',
       selectedRoutes: [],
@@ -94,11 +94,11 @@ describe('Provider Settings Registry authority', () => {
 
     const projection = providerProfileFromRegistry(committed)
     expect(projection.models).toEqual(committed.models)
-    expect(projection.music?.models).toEqual(committed.mediaModels)
+    expect(projection.music?.models).toEqual(['music-2.6'])
+    expect(projection.image?.models).toEqual(['unclassified-media'])
     expect(projection.speech).toBeUndefined()
     expect(projection.textToSpeech).toBeUndefined()
     expect(projection.video).toBeUndefined()
-    expect(projection.image).toBeUndefined()
     expect(JSON.stringify(projection)).not.toContain('speech-2.8-hd')
   })
 
@@ -357,4 +357,24 @@ describe('Provider Settings Registry authority', () => {
       .routeProviderIds).toEqual([])
     expect(providerRegistryRoutingDraftWithToggledProvider(enabled, policyId)).toEqual(enabled)
   })
+})
+
+it('overlays only identity-bound preferences onto current Registry-admitted models', () => {
+  const committed: ProviderRegistryPublicProvider = {
+    id: 'provider-alpha', kind: 'openai-compatible', endpoint: 'https://provider.invalid/v1',
+    models: ['model-alpha'], mediaModels: [], selectedModel: 'model-alpha', selectedRoutes: ['primary'],
+    credentialConfigured: true, credentialPurpose: 'provider-api-key', revision: '1', generation: '1',
+    incarnation: `inc_${'b'.repeat(43)}`, tombstone: false
+  }
+  const choice = { id: committed.id, baseUrl: committed.endpoint, endpointFormat: 'chat_completions',
+    modelProfiles: { 'model-alpha': { reasoning: { supportedEfforts: ['off', 'high'], defaultEffort: 'high', requestProtocol: 'deepseek-chat-completions' } },
+      unadmitted: { reasoning: null } }
+  }
+  const projected = providerProfileFromRegistry(committed, [choice])
+  expect(projected.models).toEqual(committed.models)
+  expect(projected.baseUrl).toBe(committed.endpoint)
+  expect(projected.modelProfiles['model-alpha'].reasoning?.defaultEffort).toBe('high')
+  expect(projected.modelProfiles).not.toHaveProperty('unadmitted')
+  expect(providerProfileFromRegistry({ ...committed, endpoint: 'https://changed.invalid/v1' }, [choice]).modelProfiles).toEqual({})
+  expect(providerProfileFromRegistry({ ...committed, kind: 'openai-responses' }, [choice]).modelProfiles).toEqual({})
 })

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_DEEPSEEK_BASE_URL,
+  applyModelProviderPreferences,
+  buildRuntimeModelPreferencesJSON,
+  captureModelProviderPreferences,
+  normalizeModelProviderPreferences,
+  type ModelProviderProfileV1,
+  type ModelProviderPreferencesV1,
   defaultClawSettings,
   defaultKeyboardShortcuts,
   defaultAnalytixRuntimeSettings,
@@ -1379,4 +1385,111 @@ describe('provider presets', () => {
     expect(resolved.modelProfiles['minimax-m3'].endpointFormat).toBe('messages')
     expect(resolved.modelProfiles['glm-5.1'].endpointFormat).toBeUndefined()
   })
+})
+
+describe('closed explicit model preferences', () => {
+  const committed: ModelProviderProfileV1 = {
+    id: 'provider-alpha', name: 'Registry Alpha', baseUrl: 'https://provider.invalid/v1',
+    endpointFormat: 'chat_completions', models: ['model-alpha'], modelProfiles: {}
+  }
+  const on: ModelProviderPreferencesV1 = {
+    id: committed.id, baseUrl: committed.baseUrl, endpointFormat: committed.endpointFormat,
+    modelProfiles: { 'model-alpha': { aliases: ['alpha'], reasoning: {
+      supportedEfforts: ['off', 'high'], defaultEffort: 'high', requestProtocol: 'deepseek-chat-completions'
+    } } }
+  }
+  it('captures only edited admitted aliases and reasoning and preserves the Registry profile', () => {
+    const edited = applyModelProviderPreferences(committed, [on])
+    const preference = captureModelProviderPreferences([], committed, edited, committed)
+    expect(preference).toEqual([on])
+    expect(edited).toMatchObject({ id: committed.id, baseUrl: committed.baseUrl,
+      endpointFormat: committed.endpointFormat, models: committed.models })
+    expect(edited.modelProfiles['model-alpha'].reasoning?.defaultEffort).toBe('high')
+    expect(captureModelProviderPreferences([], committed, committed, committed)).toEqual([])
+  })
+  it('keeps absent legacy/default behavior and preserves explicit off for a preset model', () => {
+    const deepseek = defaultModelProviderSettings().providers[0]
+    expect(applyModelProviderPreferences(deepseek, undefined)).toEqual(deepseek)
+    expect(applyModelProviderPreferences(committed, undefined).modelProfiles).toEqual({})
+    const choice: ModelProviderPreferencesV1 = {
+      id: deepseek.id, baseUrl: deepseek.baseUrl, endpointFormat: deepseek.endpointFormat,
+      modelProfiles: { [deepseek.models[0]]: { reasoning: null } }
+    }
+    const off = applyModelProviderPreferences(deepseek, [choice])
+    expect(off.modelProfiles[deepseek.models[0].toLowerCase()].reasoning).toBeUndefined()
+    const state = settings()
+    state.provider.modelPreferences = [choice]
+    const payload = JSON.parse(buildRuntimeModelPreferencesJSON(state))
+    expect(payload.providers[0].modelProfiles[deepseek.models[0]].reasoning).toEqual({
+      supportedEfforts: ['off'], defaultEffort: 'off', requestProtocol: 'none'
+    })
+    expect(defaultModelProviderSettings().providers[0].modelProfiles['deepseek-v4-pro'].reasoning?.defaultEffort).toBe('high')
+  })
+  it.each([
+    { ...committed, id: 'provider-other' },
+    { ...committed, baseUrl: 'https://changed.invalid/v1' },
+    { ...committed, endpointFormat: 'responses' as const }
+  ])('does not attach preferences after a Registry identity change %#', (other) => {
+    expect(applyModelProviderPreferences(other, [on])).toEqual(other)
+  })
+  it('drops unadmitted model keys from overlay/capture and never serializes route authority', () => {
+    const expanded = { ...on, modelProfiles: { ...on.modelProfiles, unadmitted: on.modelProfiles['model-alpha'] } }
+    expect(applyModelProviderPreferences(committed, [expanded]).modelProfiles).not.toHaveProperty('unadmitted')
+    const edited = applyModelProviderPreferences({ ...committed, models: [...committed.models, 'unadmitted'] }, [expanded])
+    expect(captureModelProviderPreferences([expanded], committed, edited, committed)[0].modelProfiles).not.toHaveProperty('unadmitted')
+    const state = settings(); state.provider.modelPreferences = [on]
+    const payload = JSON.parse(buildRuntimeModelPreferencesJSON(state))
+    expect(Object.keys(payload)).toEqual(['providers'])
+    expect(Object.keys(payload.providers[0]).sort()).toEqual(['baseUrl', 'endpointFormat', 'id', 'modelProfiles'])
+    expect(JSON.stringify(payload)).not.toMatch(/apiKey|credentialRef|proxy|defaultProviderId|supportsToolCalling|contextWindowTokens|name/)
+  })
+  it.each([
+    { ...on, apiKey: 'synthetic-rejected-credential' },
+    { ...on, baseUrl: 'https://user:synthetic@provider.invalid' },
+    { ...on, baseUrl: 'https://provider.invalid?api_key=synthetic' },
+    { ...on, modelProfiles: { 'model-alpha': { supportsToolCalling: true } } },
+    { ...on, modelProfiles: { 'model-alpha': { contextWindowTokens: 1_000_000 } } },
+    { ...on, modelProfiles: { 'model-alpha': { inputModalities: ['text', 'image'] } } },
+    { ...on, modelProfiles: { 'model-alpha': { endpointFormat: 'responses' } } },
+    { ...on, modelProfiles: { 'model-alpha': { reasoning: { supportedEfforts: ['off'], defaultEffort: 'high', requestProtocol: 'none' } } } }
+  ])('rejects malformed/expanded stored preference metadata %#', (value) => {
+    expect(normalizeModelProviderPreferences([value])).toEqual([])
+  })
+})
+
+it('rejects a non-string preference format instead of storing a startup-incompatible value', () => {
+  expect(normalizeModelProviderPreferences([{
+    id: 'provider-alpha', baseUrl: 'https://provider.invalid/v1', endpointFormat: ['messages'], modelProfiles: {}
+  }])).toEqual([])
+})
+
+
+it('does not capture inherited model profiles or reasoning fields as explicit preferences', () => {
+  const inherited: ModelProviderProfileV1 = {
+    id: 'provider-alpha', name: 'Registry Alpha', baseUrl: 'https://provider.invalid/v1',
+    endpointFormat: 'chat_completions', models: ['constructor'], modelProfiles: {}
+  }
+  const edited = { ...inherited, modelProfiles: Object.create({ constructor: {
+    aliases: ['synthetic-alias'], reasoning: {
+      supportedEfforts: ['off', 'high'], defaultEffort: 'high', requestProtocol: 'deepseek-chat-completions'
+    }
+  } }) }
+  expect(captureModelProviderPreferences([], inherited, edited, inherited)).toEqual([])
+  const reasoning = Object.create({
+    supportedEfforts: ['off'], defaultEffort: 'off', requestProtocol: 'none'
+  })
+  expect(normalizeModelProviderPreferences([{
+    id: inherited.id, baseUrl: inherited.baseUrl, endpointFormat: inherited.endpointFormat,
+    modelProfiles: { constructor: { reasoning } }
+  }])).toEqual([])
+})
+
+
+it('bounds the Go-encoded runtime metadata bytes before Main startup', () => {
+  const modelProfiles = Object.fromEntries(Array.from({ length: 100 }, (_, index) => [`model-${index}`, {
+    aliases: Array.from({ length: 50 }, (_, alias) => '<'.repeat(126) + String(alias).padStart(2, '0'))
+  }]))
+  const preferences = [{ id: 'provider-alpha', baseUrl: 'https://provider.invalid/v1', endpointFormat: 'chat_completions', modelProfiles }]
+  expect(new TextEncoder().encode(JSON.stringify({ providers: preferences })).byteLength).toBeLessThan(1_048_576)
+  expect(normalizeModelProviderPreferences(preferences)).toEqual([])
 })

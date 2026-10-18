@@ -1,7 +1,13 @@
 import { z } from 'zod'
+import { GoalRoundSourceSchemaV1 } from './goal.js'
+import { UserInputTimedWaitSchemaV1 } from './approvals.js'
 import { ReviewOutputSchema, ReviewTargetSchema } from './review.js'
 import { RuntimeErrorSeverity } from './errors.js'
 import { generatedArtifactMetadataSchema } from './generated-artifact.js'
+import {
+  TaskJobListResponseV1Schema, TaskJobWaitResponseV1Schema,
+  TaskJobOutputResponseV1Schema, TaskJobKillResponseV1Schema
+} from './task-job-output.js'
 
 /**
  * Conversation items returned as part of a thread or turn.
@@ -925,17 +931,43 @@ export const TurnItemBase = z.object({
   finishedAt: z.string().optional()
 })
 
-const UserInputOptionSchema = z.object({
+export const UserInputOptionSchema = z.object({
+  id: z.string().min(1).optional(),
   label: z.string().min(1),
   description: z.string()
-})
+}).strict()
 
-const UserInputQuestionSchema = z.object({
+export const UserInputQuestionSchema = z.object({
   header: z.string().min(1),
   id: z.string().min(1),
   question: z.string().min(1),
-  options: z.array(UserInputOptionSchema)
+  options: z.array(UserInputOptionSchema),
+  multiSelect: z.boolean().optional()
+}).strict().superRefine((question, ctx) => {
+  if (question.multiSelect !== undefined && question.options.some(option => option.id === undefined)) {
+    ctx.addIssue({ code: 'custom', path: ['options'], message: 'structured question requires Core option identities' })
+  }
 })
+
+/** Bind modern question batches to Core-issued request, question and option IDs. */
+export function isHostUserInputQuestionBatch(inputId: unknown, value: unknown): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value)) return false
+  const records = value.filter((raw): raw is Record<string, unknown> =>
+    raw !== null && typeof raw === 'object' && !Array.isArray(raw))
+  if (records.length !== value.length || records.some(question => !Array.isArray(question.options))) return false
+  const modern = records.some(question => question.multiSelect !== undefined ||
+    (question.options as unknown[]).some(option => option !== null && typeof option === 'object' && 'id' in option))
+  if (!modern) return true // retained legacy DTO; the composer admits only its sole-question form
+  if (typeof inputId !== 'string' || !inputId || value.length === 0 || value.length > 3) return false
+  return records.every((question, index) => {
+    const id = `${inputId}_${index + 1}`
+    const options = question.options as unknown[]
+    return question.id === id && typeof question.multiSelect === 'boolean' && options.length <= 3 &&
+      options.every((option, optionIndex) => option !== null && typeof option === 'object' &&
+        !Array.isArray(option) && (option as Record<string, unknown>).id === `${id}_option_${optionIndex + 1}`)
+  })
+}
 
 export const UserFileReferenceSchema = z.object({
   path: z.string().min(1),
@@ -947,6 +979,8 @@ export type UserFileReference = z.infer<typeof UserFileReferenceSchema>
 
 export const UserTurnItem = TurnItemBase.extend({
   kind: z.literal('user_message'),
+  activeSkillIds: z.array(z.string().regex(/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/)).max(16).optional(),
+  source: GoalRoundSourceSchemaV1.optional(),
   text: z.string(),
   displayText: z.string().optional(),
   delivery: z.literal('steer').optional(),
@@ -1152,15 +1186,97 @@ const PublicToolResultMcpDiagnosticV1 = z.object({
   })
 }).strict()
 
+const PublicToolResultWebFetchStatusV1 = z.object({
+  ...PublicToolResultBaseV1,
+  projectionKind: z.literal('web_fetch_status'),
+  messageKey: z.enum(['tool_completed', 'tool_failed', 'tool_blocked', 'tool_cancelled']),
+  code: z.enum(['tool_completed', 'tool_failed', 'tool_blocked', 'tool_cancelled', 'tool_timeout']),
+  web: z.object({
+    outcome: z.enum(['success', 'http_error', 'read_error', 'transport_error', 'timeout', 'cancelled', 'invalid_url', 'policy_blocked', 'ssrf_blocked', 'disabled']),
+    statusCode: z.number().int().min(100).max(599).optional(),
+    byteCount: z.number().int().nonnegative().safe().optional(),
+    truncated: z.boolean().optional()
+  }).strict().superRefine((web, ctx) => {
+    const completeRead = web.outcome === 'success' || web.outcome === 'http_error'
+    const hasStatus = web.statusCode !== undefined, hasBytes = web.byteCount !== undefined
+    if (completeRead) {
+      if (!hasStatus || !hasBytes || web.truncated === undefined) {
+        ctx.addIssue({ code: 'custom', message: 'complete fetch requires actual response measurements' })
+      }
+      if (web.statusCode !== undefined && (web.statusCode >= 200 && web.statusCode < 300) !== (web.outcome === 'success')) {
+        ctx.addIssue({ code: 'custom', path: ['statusCode'], message: 'fetch outcome does not match HTTP status' })
+      }
+      return
+    }
+    if (web.truncated !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['truncated'], message: 'incomplete fetch has unknown truncation' })
+    }
+    if (web.outcome === 'read_error') {
+      if (!hasStatus || !hasBytes) ctx.addIssue({ code: 'custom', message: 'read failure requires observed response measurements' })
+      return
+    }
+    if (web.outcome === 'timeout' || web.outcome === 'cancelled') {
+      if (hasBytes && !hasStatus) ctx.addIssue({ code: 'custom', path: ['byteCount'], message: 'body measurement requires a response' })
+      return
+    }
+    if (hasBytes || web.outcome === 'disabled' && hasStatus) {
+      ctx.addIssue({ code: 'custom', message: 'fetch before reading cannot carry body measurements' })
+    }
+  })
+}).strict()
+
+export const PublicTaskJobResultDataV1 = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('list'), result: TaskJobListResponseV1Schema }).strict(),
+  z.object({ operation: z.literal('wait'), result: TaskJobWaitResponseV1Schema }).strict(),
+  z.object({ operation: z.literal('output'), result: TaskJobOutputResponseV1Schema }).strict(),
+  z.object({ operation: z.literal('kill'), result: TaskJobKillResponseV1Schema }).strict()
+]).superRefine((data, ctx) => {
+  const jobs = data.operation === 'list' || data.operation === 'wait' ? data.result.jobs :
+    data.operation === 'kill' ? [data.result.job] : []
+  if (jobs.some(job => job.active !== undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'Recorded job metadata excludes runtime registration state' })
+  }
+  if (data.operation === 'list' && data.result.count !== data.result.jobs.length) {
+    ctx.addIssue({ code: 'custom', message: 'Recorded job count must match its snapshot' })
+  }
+})
+export type PublicTaskJobResultDataV1 = z.infer<typeof PublicTaskJobResultDataV1>
+const PublicToolResultTaskJobV1 = z.object({
+  ...PublicToolResultBaseV1,
+  projectionKind: z.literal('task_job_result'), status: z.literal('completed'),
+  messageKey: z.literal('tool_completed'), code: z.literal('tool_completed'),
+  taskJob: PublicTaskJobResultDataV1
+}).strict()
+
 const PublicToolResultProjectionShapeV1 = z.discriminatedUnion('projectionKind', [
   PublicToolResultWithheldV1,
   PublicToolResultHostStatusV1,
   PublicToolResultPlanStatusV1,
   PublicToolResultArtifactStatusV1,
   PublicToolResultCaseSourceStatusV1,
-  PublicToolResultMcpDiagnosticV1
+  PublicToolResultMcpDiagnosticV1,
+  PublicToolResultWebFetchStatusV1,
+  PublicToolResultTaskJobV1
 ])
 export const PublicToolResultProjectionV1 = PublicToolResultProjectionShapeV1.superRefine((projection, ctx) => {
+  if (projection.projectionKind === 'web_fetch_status') {
+    const semantics = {
+      success: ['completed', 'tool_completed', 'tool_completed'],
+      http_error: ['failed', 'tool_failed', 'tool_failed'],
+      read_error: ['failed', 'tool_failed', 'tool_failed'],
+      transport_error: ['failed', 'tool_failed', 'tool_failed'],
+      invalid_url: ['failed', 'tool_failed', 'tool_failed'],
+      policy_blocked: ['blocked', 'tool_blocked', 'tool_blocked'],
+      ssrf_blocked: ['blocked', 'tool_blocked', 'tool_blocked'],
+      disabled: ['blocked', 'tool_blocked', 'tool_blocked'],
+      timeout: ['cancelled', 'tool_cancelled', 'tool_timeout'],
+      cancelled: ['cancelled', 'tool_cancelled', 'tool_cancelled']
+    }[projection.web.outcome]
+    if (projection.status !== semantics[0] || projection.messageKey !== semantics[1] || projection.code !== semantics[2]) {
+      ctx.addIssue({ code: 'custom', message: 'web fetch lifecycle does not match its measured outcome' })
+    }
+    return
+  }
   if (projection.projectionKind !== 'host_status') return
   const unknownStatus = projection.status === 'unknown'
   const unknownMessage = projection.messageKey === 'tool_outcome_unknown'
@@ -1189,8 +1305,24 @@ export const ToolResultTurnItem = TurnItemBase.extend({
   if (item.output.status !== 'unknown' && (item.output.status === 'completed') === item.isError) {
     ctx.addIssue({ code: 'custom', path: ['output', 'status'], message: 'public projection status does not match isError' })
   }
+  if (item.output.projectionKind === 'web_fetch_status') {
+    if (item.toolName !== 'web_fetch') {
+      ctx.addIssue({ code: 'custom', path: ['toolName'], message: 'web fetch projection requires the exact host tool' })
+    }
+    if (item.toolKind !== 'tool_call') {
+      ctx.addIssue({ code: 'custom', path: ['toolKind'], message: 'web fetch projection requires the host tool-call kind' })
+    }
+  }
   if (item.output.projectionKind === 'mcp_diagnostic' && !item.isError) {
     ctx.addIssue({ code: 'custom', path: ['isError'], message: 'MCP rejection must be an error result' })
+  }
+  if (item.output.projectionKind === 'task_job_result') {
+    const name = { list: 'list_jobs', wait: 'wait', output: 'bash_output', kill: 'kill_shell' }[item.output.taskJob.operation]
+    if (item.toolName !== name || item.toolKind !== 'command_execution' || item.status !== 'completed' ||
+        item.isError || !/^call_host_[a-f0-9]{64}$/.test(item.callId) ||
+        !/^item_result_[a-f0-9]{64}$/.test(item.id)) {
+      ctx.addIssue({ code: 'custom', message: 'Recorded job result requires the exact settled host call' })
+    }
   }
 })
 export type ToolResultTurnItem = z.infer<typeof ToolResultTurnItem>
@@ -1324,10 +1456,14 @@ export const UserInputTurnItem = TurnItemBase.extend({
   inputId: z.string().min(1).optional(),
   prompt: z.string(),
   questions: z.array(UserInputQuestionSchema).default([]),
-  status: z.enum(['pending', 'submitted', 'cancelled'])
+  status: z.enum(['pending', 'submitted', 'cancelled', 'continued']),
+  timedWait: UserInputTimedWaitSchemaV1.nullable().optional()
 }).superRefine((item, ctx) => {
   if (item.status === 'pending' && item.inputId === undefined) {
     ctx.addIssue({ code: 'custom', path: ['inputId'], message: 'pending user input requires a live handle' })
+  }
+  if (!isHostUserInputQuestionBatch(item.inputId, item.questions)) {
+    ctx.addIssue({ code: 'custom', path: ['questions'], message: 'question identities are detached from their Core request' })
   }
 })
 export type UserInputTurnItem = z.infer<typeof UserInputTurnItem>
@@ -1421,17 +1557,25 @@ export const CompactionTurnItem = TurnItemBase.extend({
   sourceDigest: z.string().min(1).optional(),
   digestMarker: z.string().min(1).optional(),
   sourceItemIds: z.array(z.string().min(1)).optional(),
-  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
+  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
   reasoningExcluded: z.literal(true).optional(),
   reasoningExclusionProof: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   assistantProseExcluded: z.literal(true).optional(),
   toolPayloadsExcluded: z.literal(true).optional(),
   caseFactsExcluded: z.literal(true).optional(),
-  providerHistoryProjectionVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+  providerHistoryProjectionVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
   caseHistoryProjectionVersion: z.union([z.literal(1), z.literal(2)]).optional(),
-  taskContinuation: TaskContinuationSnapshotV1Schema.optional()
+  taskContinuation: TaskContinuationSnapshotV1Schema.optional(),
+  compactionId: z.string().min(1).optional(),
+  summaryKind: z.literal('conversation').optional(),
+  summaryDigest: Sha256HexSchema.optional(),
+  checkpointDigest: Sha256HexSchema.optional(),
+  shadowedItemCount: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  tokenCountKind: z.literal('estimated').optional(),
+  tokenEstimatorVersion: z.literal(1).optional()
 }).strict().superRefine((item, ctx) => {
   const automaticV4 = item.schemaVersion === 4
+  const conversationV5 = item.schemaVersion === 5
   const publicCaseV2 = item.caseHistoryProjectionVersion === 2 || item.summary === CaseCompactionPublicSummary
   if (publicCaseV2) {
     const sourceDigest = item.sourceDigest ?? ''
@@ -1455,11 +1599,30 @@ export const CompactionTurnItem = TurnItemBase.extend({
   if (!publicCaseV2 && item.replacedTokens === undefined) {
     ctx.addIssue({ code: 'custom', path: ['replacedTokens'], message: 'ordinary compaction requires its token count' })
   }
+  if (conversationV5) {
+    if (publicCaseV2 || item.summaryKind !== 'conversation' || item.summary.trim() === '' ||
+        new TextEncoder().encode(item.summary).length > 16 * 1024 || item.compactionId !== item.id ||
+        item.summaryDigest === undefined || item.checkpointDigest === undefined || item.shadowedItemCount === undefined ||
+        item.replacedTokens === undefined || item.replacedTokens <= 0 || item.tokenCountKind !== 'estimated' || item.tokenEstimatorVersion !== 1 ||
+        item.providerHistoryProjectionVersion !== 3 || item.caseHistoryProjectionVersion !== undefined ||
+        item.assistantProseExcluded !== undefined || item.reasoningExcluded !== true || item.reasoningExclusionProof === undefined ||
+        item.toolPayloadsExcluded !== true || item.caseFactsExcluded !== true || typeof item.auto !== 'boolean' ||
+        item.auto !== (item.taskContinuation !== undefined) || item.sourceItemIds === undefined ||
+        new Set(item.sourceItemIds).size !== item.sourceItemIds.length || item.shadowedItemCount < item.sourceItemIds.length ||
+        !/^[a-f0-9]{64}$/.test(item.sourceDigest ?? '') || item.digestMarker !== `sha256:${item.sourceDigest?.slice(0, 12)}` ||
+        item.finishedAt === undefined || !CanonicalUtcRFC3339NanoSchema.safeParse(item.createdAt).success ||
+        !CanonicalUtcRFC3339NanoSchema.safeParse(item.finishedAt).success || Date.parse(item.finishedAt) < Date.parse(item.createdAt)) {
+      ctx.addIssue({ code: 'custom', message: 'conversation compaction requires complete source-bound summary facts' })
+    }
+  } else if ([item.compactionId, item.summaryKind, item.summaryDigest, item.checkpointDigest, item.shadowedItemCount,
+    item.tokenCountKind, item.tokenEstimatorVersion].some(value => value !== undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'legacy notices cannot acquire conversation summary facts' })
+  }
   if (automaticV4) {
     if (item.auto !== true || item.providerHistoryProjectionVersion !== 2 || !item.taskContinuation) {
       ctx.addIssue({ code: 'custom', path: ['taskContinuation'], message: 'automatic V4 compaction requires its closed continuation' })
     }
-  } else if (item.taskContinuation !== undefined) {
+  } else if (!conversationV5 && item.taskContinuation !== undefined) {
     ctx.addIssue({ code: 'custom', path: ['taskContinuation'], message: 'legacy or manual compaction cannot carry task continuation authority' })
   }
 })

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -23,6 +24,7 @@ import (
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 )
 
 var (
@@ -643,13 +645,35 @@ func ProjectProviderRequestForEffect(
 		request.SystemPrompt,
 		allowedCaseEntityReferences,
 	)
+	validatedLateReplies := map[int]string{}
+	validatedPendingQuestions := map[int]domainmodel.Message{}
 	projected.Messages = cloneMessages(request.Messages)
 	for messageIndex := range projected.Messages {
 		message := &projected.Messages[messageIndex]
 		if containsUninspectableEncodedMediaEnvelope(message.Content) {
 			return domainmodel.Request{}, ErrUninspectableProviderPart
 		}
-		if request.Messages[messageIndex].PrivateProviderSemanticBinding != nil {
+		if message.PrivateUserInputPendingBinding != nil {
+			canonical, err := appmodel.PendingUserInputProviderMessageV1(request.Messages[messageIndex], context)
+			if err != nil {
+				return domainmodel.Request{}, ErrProviderPrivacyAuthorityUnavailable
+			}
+			*message = canonical
+			validatedPendingQuestions[messageIndex] = canonical
+		} else if message.PrivateUserInputReplyRequired || message.PrivateUserInputReplyBinding != nil || appmodel.UserInputReplyProviderContentRequiredV1(message.Content) {
+			identity, content, err := appmodel.UserInputReplyProviderPayloadV1(request.Messages[messageIndex], context)
+			if err != nil {
+				return domainmodel.Request{}, ErrProviderPrivacyAuthorityUnavailable
+			}
+			canonical, err := projectUserInputReplyProviderEnvelopeV1(identity, content, allowedCaseEntityReferences)
+			if err != nil {
+				return domainmodel.Request{}, err
+			}
+			message.Content = canonical
+			message.PrivateUserInputReplyBinding = nil
+			message.PrivateUserInputReplyRequired = false
+			validatedLateReplies[messageIndex] = canonical
+		} else if request.Messages[messageIndex].PrivateProviderSemanticBinding != nil {
 			validated, ok := validatedSemantics[messageIndex]
 			if !ok {
 				return domainmodel.Request{}, ErrProviderPrivacyAuthorityUnavailable
@@ -721,10 +745,12 @@ func ProjectProviderRequestForEffect(
 			}
 		}
 	}
-	if err := validateProviderRequestWithSemanticsV1(
+	if err := validateProviderRequestWithQuestionIdentitiesV1(
 		projected,
 		allowedCaseEntityReferences,
 		validatedSemantics,
+		validatedLateReplies,
+		validatedPendingQuestions,
 	); err != nil {
 		return domainmodel.Request{}, err
 	}
@@ -929,6 +955,25 @@ func validateProviderRequestWithSemanticsV1(
 	allowedCaseEntityReferences providerCaseReferenceAllowsetV1,
 	validatedSemantics map[int]validatedAccountFlowProviderSemanticV1,
 ) error {
+	return validateProviderRequestWithLateRepliesV1(request, allowedCaseEntityReferences, validatedSemantics, nil)
+}
+
+func validateProviderRequestWithLateRepliesV1(
+	request domainmodel.Request,
+	allowedCaseEntityReferences providerCaseReferenceAllowsetV1,
+	validatedSemantics map[int]validatedAccountFlowProviderSemanticV1,
+	validatedLateReplies map[int]string,
+) error {
+	return validateProviderRequestWithQuestionIdentitiesV1(request, allowedCaseEntityReferences, validatedSemantics, validatedLateReplies, nil)
+}
+
+func validateProviderRequestWithQuestionIdentitiesV1(
+	request domainmodel.Request,
+	allowedCaseEntityReferences providerCaseReferenceAllowsetV1,
+	validatedSemantics map[int]validatedAccountFlowProviderSemanticV1,
+	validatedLateReplies map[int]string,
+	validatedPendingQuestions map[int]domainmodel.Message,
+) error {
 	if request.PrivateProviderReferenceBinding != nil {
 		return ErrProviderPrivacyAuthorityUnavailable
 	}
@@ -944,7 +989,18 @@ func validateProviderRequestWithSemanticsV1(
 		if containsUninspectableEncodedMediaEnvelope(message.Content) {
 			return ErrUninspectableProviderPart
 		}
-		if trusted, ok := validatedSemantics[messageIndex]; ok {
+		if message.PrivateUserInputPendingBinding != nil || message.PrivateUserInputReplyBinding != nil || message.PrivateUserInputReplyRequired {
+			return ErrProviderPrivacyAuthorityUnavailable
+		}
+		if canonical, ok := validatedPendingQuestions[messageIndex]; ok {
+			if !reflect.DeepEqual(message, canonical) {
+				return ErrProviderPrivacyAuthorityUnavailable
+			}
+		} else if canonical, ok := validatedLateReplies[messageIndex]; ok {
+			if message.Content != canonical || message.Role != "user" || message.Name != "" || message.ToolCallID != "" || len(message.Parts) != 0 || len(message.ToolCalls) != 0 || message.PrivateProviderSemanticBinding != nil || message.PrivateProviderReferenceBinding != nil {
+				return ErrProviderPrivacyAuthorityUnavailable
+			}
+		} else if trusted, ok := validatedSemantics[messageIndex]; ok {
 			if message.PrivateProviderSemanticBinding != nil ||
 				validateFinalAccountFlowProviderSemanticV1(message, trusted) != nil {
 				return ErrProviderPrivacyAuthorityUnavailable
@@ -1488,6 +1544,10 @@ func projectProviderSchemaKeyword(key string, value any, budget *providerSchemaB
 		return projectProviderSchemaIdentifier(value, budget, depth)
 	case "title", "description", "$comment":
 		return projectProviderSchemaText(value, budget, depth)
+	case "minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties", "minContains", "maxContains",
+		"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+		"uniqueItems", "readOnly", "writeOnly", "deprecated":
+		return projectProviderSchemaMetadata(key, value, budget, depth)
 	case "default", "examples", "example", "const":
 		return projectProviderSchemaContent(value, budget, depth, dataKey)
 	case "enum":
@@ -1495,6 +1555,46 @@ func projectProviderSchemaKeyword(key string, value any, budget *providerSchemaB
 	default:
 		return projectProviderSchemaContent(value, budget, depth, dataKey)
 	}
+}
+
+// Structural scalar constraints describe the schema, not a value of its
+// enclosing property. Content-bearing keywords still use field-aware projection.
+func projectProviderSchemaMetadata(key string, value any, budget *providerSchemaBudget, depth int) (any, bool, error) {
+	if depth > maxProviderSchemaDepth {
+		return nil, false, errors.New("provider schema exceeds depth budget")
+	}
+	if err := budget.consumeNode(); err != nil {
+		return nil, false, err
+	}
+	switch key {
+	case "uniqueItems", "readOnly", "writeOnly", "deprecated":
+		if _, ok := value.(bool); !ok {
+			return nil, false, errors.New("provider schema metadata must be a boolean")
+		}
+		return value, false, nil
+	}
+	number, ok := value.(json.Number)
+	if !ok {
+		return nil, false, errors.New("provider schema metadata must be a number")
+	}
+	if err := domainjsonstrict.ValidateNumberText(number.String(), 0, 0); err != nil {
+		return nil, false, err
+	}
+	exact, ok := new(big.Rat).SetString(number.String())
+	if !ok {
+		return nil, false, errors.New("provider schema metadata must be a valid number")
+	}
+	switch key {
+	case "minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties", "minContains", "maxContains":
+		if exact.Sign() < 0 || !exact.IsInt() {
+			return nil, false, errors.New("provider schema count constraint must be a non-negative integer")
+		}
+	case "multipleOf":
+		if exact.Sign() <= 0 {
+			return nil, false, errors.New("provider schema multipleOf must be positive")
+		}
+	}
+	return value, false, nil
 }
 
 func projectProviderSchemaMap(value any, budget *providerSchemaBudget, depth int) (any, bool, error) {
@@ -1745,4 +1845,59 @@ func cloneToolSchemas(values []domainmodel.ToolSchema) []domainmodel.ToolSchema 
 		out[index].OutputSchema = append(json.RawMessage(nil), schema.OutputSchema...)
 	}
 	return out
+}
+
+// Only the independently verified late Question carrier reaches this path.
+// All question, option and answer strings use the existing effect projection
+// and validator before the receipt-derived identities enter the final envelope.
+func projectUserInputReplyProviderEnvelopeV1(identity domainsteering.UserInputReplyIdentityV1, content domainsteering.UserInputReplyContentV1, allowed providerCaseReferenceAllowsetV1) (string, error) {
+	project := func(value *string) error {
+		if containsUninspectableEncodedMediaEnvelope(*value) {
+			return ErrUninspectableProviderPart
+		}
+		*value = projectProviderTextForEffectV1(*value, allowed)
+		if validateProviderTextForEffectV1(*value, allowed) != nil {
+			return ErrProviderPrivacyAuthorityUnavailable
+		}
+		return nil
+	}
+	for index := range content.Questions {
+		question := &content.Questions[index]
+		for _, value := range []*string{&question.Question, &question.Header, &question.Detail} {
+			if err := project(value); err != nil {
+				return "", err
+			}
+		}
+		for optionIndex := range question.Options {
+			option := &question.Options[optionIndex]
+			for _, value := range []*string{&option.Label, &option.Description} {
+				if err := project(value); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	for index := range content.Answers {
+		answer := &content.Answers[index]
+		for selectedIndex := range answer.Selected {
+			if err := project(&answer.Selected[selectedIndex]); err != nil {
+				return "", err
+			}
+		}
+		if err := project(&answer.Custom); err != nil {
+			return "", err
+		}
+	}
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		return "", ErrProviderPrivacyAuthorityUnavailable
+	}
+	if _, err := domainsteering.ParseUserInputReplyContentV1(string(encoded), identity); err != nil {
+		return "", ErrProviderPrivacyAuthorityUnavailable
+	}
+	envelope, err := domainsteering.UserInputReplyEnvelopeV1(identity, content)
+	if err != nil {
+		return "", ErrProviderPrivacyAuthorityUnavailable
+	}
+	return appmodel.SteeringProviderContent(envelope, nil), nil
 }

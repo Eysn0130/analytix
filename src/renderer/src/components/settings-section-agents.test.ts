@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { createElement } from 'react'
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   DEFAULT_MODEL_PROVIDER_ID,
@@ -11,9 +13,9 @@ import {
   type AppSettingsV1,
   type ModelProviderProfileV1
 } from '@shared/app-settings'
-import { AgentsSettingsSection, modelProvidersSettingsPatch } from './settings-section-agents'
+import { AgentsSettingsSection } from './settings-section-agents'
 import { PermissionsSettingsSection } from './settings-section-permissions'
-import { ProvidersSettingsSection } from './settings-section-providers'
+import { ProvidersSettingsSection, modelProvidersSettingsPatch } from './settings-section-providers'
 import { applyWriteSettingsState } from '../write/write-workspace-settings-actions'
 
 const labels: Record<string, string> = {
@@ -328,6 +330,7 @@ function baseCtx(): Record<string, unknown> {
     skillNotice: null,
     openSkillRoot: asyncNoop,
     openPlugins: noop,
+    openSettingsSection: noop,
     mcpConfigPath: '/tmp/project/.analytix/mcp.json',
     mcpConfigExists: true,
     mcpConfigText: '{"mcpServers":{}}',
@@ -352,6 +355,27 @@ function baseCtx(): Record<string, unknown> {
     splitSettingsList: (value: string) => value.split('\n').filter(Boolean),
     listSettingsText: (value: string[]) => value.join('\n')
   }
+}
+
+async function withMountedAgents(ctx: Record<string, unknown>, run: (host: HTMLDivElement) => Promise<void>): Promise<void> {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const host = document.createElement('div')
+  document.body.append(host)
+  const root = createRoot(host)
+  try {
+    await act(async () => root.render(createElement(AgentsSettingsSection, { ctx })))
+    await run(host)
+  } finally {
+    await act(async () => root.unmount())
+    host.remove()
+    vi.unstubAllGlobals()
+  }
+}
+
+async function clickAgentButton(host: HTMLDivElement, label: string): Promise<void> {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label)
+  expect(button, label).toBeDefined()
+  await act(async () => button!.click())
 }
 
 function diagnosticState(enabled: boolean, available: boolean) {
@@ -677,28 +701,54 @@ describe('AgentsSettingsSection Analytix diagnostics smoke', () => {
     expect(html).not.toContain('imageGen')
   })
 
-  it('preselects provider.activeProviderId when runtime providerId is blank', () => {
+  it('opens Providers without settings writes or a legacy fallback for a Registry-only provider', async () => {
+    const initial = baseCtx()
     const provider = defaultModelProviderSettings()
-    const xiaomi = getModelProviderPreset('xiaomi')
-    expect(xiaomi).not.toBeNull()
-    const xiaomiProvider = modelProviderPresetProfile(xiaomi!)
-    const html = renderToStaticMarkup(createElement(AgentsSettingsSection, {
-      ctx: {
-        ...baseCtx(),
-        provider: {
-          ...provider,
-          activeProviderId: 'xiaomi',
-          providers: [...provider.providers, xiaomiProvider]
-        },
-        analytix: {
-          ...defaultAnalytixRuntimeSettings(),
-          providerId: ''
-        }
-      }
-    }))
+    const update = vi.fn(), updateAnalytix = vi.fn(), openSettingsSection = vi.fn()
+    const ctx = {
+      ...initial,
+      form: { ...(initial.form as Record<string, unknown>), provider },
+      analytix: { ...defaultAnalytixRuntimeSettings(), providerId: 'registry-only-custom', model: 'registry-only-model' },
+      update, updateAnalytix, openSettingsSection
+    }
+    expect(provider.providers.some(item => item.id === ctx.analytix.providerId)).toBe(false)
+    const before = JSON.stringify({ form: ctx.form, runtime: ctx.analytix })
+    await withMountedAgents(ctx, async host => {
+      expect(host.querySelector('option[value="deepseek"]')).toBeNull()
+      expect(host.textContent).not.toContain('DeepSeek')
+      expect(host.querySelector('input[value="registry-only-model"]')).toBeNull()
+      expect(host.textContent).not.toContain(t('analytixModelDesc'))
+      await clickAgentButton(host, t('providers'))
+      expect(openSettingsSection).toHaveBeenCalledExactlyOnceWith('providers')
+      expect(update).not.toHaveBeenCalled()
+      expect(updateAnalytix).not.toHaveBeenCalled()
+      expect(JSON.stringify({ form: ctx.form, runtime: ctx.analytix })).toBe(before)
+    })
+  })
 
-    expect(html).toContain(`<option value="xiaomi" selected="">${xiaomiProvider.name}</option>`)
-    expect(html).not.toContain('<option value="deepseek" selected="">')
+  it('retains Skills and MCP navigation and actions beside the Provider navigation', async () => {
+    const scrollToAgentSection = vi.fn(), openPlugins = vi.fn(), loadMcpConfig = vi.fn(), openMcpConfigDir = vi.fn()
+    const update = vi.fn(), updateAnalytix = vi.fn()
+    await withMountedAgents({ ...baseCtx(), scrollToAgentSection, openPlugins, loadMcpConfig, openMcpConfigDir, update, updateAnalytix }, async host => {
+      await clickAgentButton(host, t('agentsQuickSkill'))
+      await clickAgentButton(host, t('agentsQuickMcp'))
+      expect(scrollToAgentSection.mock.calls).toEqual([['skill'], ['mcp']])
+      await clickAgentButton(host, t('skillsOpenPlugins'))
+      const mcpDisclosure = [...host.querySelectorAll<HTMLElement>('summary')].find(node => node.textContent?.includes(t('mcpAdvanced')))
+      expect(mcpDisclosure).toBeDefined()
+      await act(async () => mcpDisclosure!.click())
+      expect(mcpDisclosure!.closest('details')?.open).toBe(true)
+      await clickAgentButton(host, t('mcpReload'))
+      await clickAgentButton(host, t('mcpOpenDir'))
+      expect(openPlugins).toHaveBeenCalledOnce()
+      expect(loadMcpConfig).toHaveBeenCalledOnce()
+      expect(openMcpConfigDir).toHaveBeenCalledOnce()
+      expect(host.querySelector('textarea[placeholder="~/.agents/skills"]')).not.toBeNull()
+      expect(host.textContent).toContain(t('autoStart'))
+      expect(host.textContent).toContain(t('port'))
+      expect(update).not.toHaveBeenCalled()
+      expect(updateAnalytix).not.toHaveBeenCalled()
+    })
   })
 
   it('renders conservative permission defaults without an elevated-access warning', () => {
@@ -1000,5 +1050,38 @@ describe('AgentsSettingsSection Analytix diagnostics smoke', () => {
         endpointFormat
       })
     }
+  })
+})
+
+
+it('keeps blank-token authentication accurately managed and hides ineffective MCP editing fields', async () => {
+  const ctx = baseCtx(), updateAnalytix = vi.fn()
+  ctx.analytix = { ...defaultAnalytixRuntimeSettings(), runtimeToken: '', insecure: false }
+  ctx.updateAnalytix = updateAnalytix
+  await withMountedAgents(ctx, async host => {
+    expect(host.textContent).toContain('analytixManagedTokenDesc')
+    expect(host.textContent).not.toContain(t('analytixInsecureForcedDesc'))
+    expect(host.querySelector('input[value="0.15"]')).toBeNull()
+    expect(host.textContent).not.toContain(t('mcpSearchTopKMax'))
+    expect(host.textContent).not.toContain(t('mcpSearchMinScore'))
+    const row = [...host.querySelectorAll('div')].find(node => node.textContent?.includes(t('analytixInsecure')) &&
+      node.querySelectorAll('[role="switch"]').length === 1 && node.textContent?.includes('analytixManagedTokenDesc'))!
+    const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!
+    expect(toggle.disabled).toBe(false)
+    await act(async () => toggle.click())
+    expect(updateAnalytix).toHaveBeenCalledWith({ insecure: true })
+  })
+})
+
+it('sends a null tombstone when removing an Agent profile and clears its default', async () => {
+  const ctx = baseCtx(), updateAnalytix = vi.fn()
+  const runtime = defaultAnalytixRuntimeSettings()
+  runtime.subagents.profiles = { reviewer: { prompt: '', model: '', effort: '', toolPolicy: 'readOnly', tools: [] } }
+  runtime.subagents.defaultProfile = 'reviewer'
+  ctx.analytix = runtime; ctx.updateAnalytix = updateAnalytix
+  await withMountedAgents(ctx, async host => {
+    const remove = host.querySelector<HTMLButtonElement>(`button[aria-label="${t('analytixSubagentsRemoveProfile')}"]`)!
+    expect(remove).not.toBeNull(); await act(async () => remove.click())
+    expect(updateAnalytix.mock.calls[0]![0].subagents).toMatchObject({ profiles: { reviewer: null }, defaultProfile: '' })
   })
 })

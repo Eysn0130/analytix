@@ -13,6 +13,7 @@ import (
 )
 
 const ToolCreatePlanName = "create_plan"
+const ToolExitPlanModeName = "exit_plan_mode"
 
 func ToolContractDiagnostics(tools []domainmodel.ToolSchema) []any {
 	entries := make([]map[string]any, 0, len(tools))
@@ -104,7 +105,7 @@ func ToolKind(name string) string {
 }
 
 func IsUserInputTool(name string) bool {
-	return name == "user_input" || name == "request_user_input"
+	return name == "user_input" || name == "request_user_input" || name == ToolExitPlanModeName
 }
 
 // IsCompatibilityToolAlias classifies host-supported compatibility names for

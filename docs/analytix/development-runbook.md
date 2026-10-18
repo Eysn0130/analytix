@@ -260,9 +260,11 @@ npm run dev
 observable behavior being checked and capture failures separately.
 Ordinary `dev` / `dev:fast` retain their existing behavior; do not run them
 against real user state as automated acceptance. The explicit `dev:isolated`
-candidate prepares checkout-specific state and checks native inputs, but also
-requires a provisioned task Keychain. Its provisioning/restart lifecycle is
-not yet a general development bootstrap and has not replaced the default entry.
+candidate prepares checkout-specific private application state, checks native
+inputs and uses the shared protected development credential authority.
+An explicitly requested `--isolated-keychain` retains the separate release/QA
+Keychain path. Whole-desktop provisioning/restart acceptance remains separate
+from the normal development entry.
 See [development baseline](development-baseline.md) for the full development
 loop, platform limits and remaining CI/package work.
 

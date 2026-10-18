@@ -10,6 +10,7 @@ import (
 )
 
 type StartPlanInput struct {
+	OmitInitialUserMessage       bool
 	ThreadID                     string
 	TurnNumber                   int
 	Prompt                       string
@@ -61,6 +62,9 @@ func BuildStartPlan(input StartPlanInput) StartPlan {
 	threadID := strings.TrimSpace(input.ThreadID)
 	turnID := fmt.Sprintf("turn_%d", input.TurnNumber)
 	userItemID := "item_" + turnID + "_user"
+	if input.OmitInitialUserMessage {
+		userItemID = ""
+	}
 	startedAt := strings.TrimSpace(input.CreatedAt)
 	if startedAt == "" {
 		startedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -84,27 +88,28 @@ func BuildStartPlan(input StartPlanInput) StartPlan {
 		sandboxMode = executionpolicy.DefaultSandboxMode
 	}
 	record := BuildStartRecord(StartRecordInput{
-		ThreadID:              threadID,
-		TurnID:                turnID,
-		UserItemID:            userItemID,
-		Prompt:                input.Prompt,
-		DisplayText:           input.DisplayText,
-		Model:                 input.Model,
-		ProviderID:            input.ProviderID,
-		ReasoningEffort:       input.ReasoningEffort,
-		ApprovalPolicy:        approvalPolicy,
-		SandboxMode:           sandboxMode,
-		CreatedAt:             startedAt,
-		Mode:                  input.Mode,
-		AttachmentIDs:         input.AttachmentIDs,
-		Attachments:           privacyprojectionapp.ProjectAttachmentMetadata(input.Attachments.Metadata),
-		AttachmentPipeline:    input.Attachments.PipelineDetails(),
-		FileReferences:        input.FileReferences,
-		WorkspaceCheckpointID: input.WorkspaceCheckpointID,
-		GUIPlan:               input.GUIPlan,
-		DisableUserInput:      input.DisableUserInput,
-		DisableUserInputSet:   input.DisableUserInputSet,
-		MaxModelSteps:         input.MaxModelSteps,
+		OmitInitialUserMessage: input.OmitInitialUserMessage,
+		ThreadID:               threadID,
+		TurnID:                 turnID,
+		UserItemID:             userItemID,
+		Prompt:                 input.Prompt,
+		DisplayText:            input.DisplayText,
+		Model:                  input.Model,
+		ProviderID:             input.ProviderID,
+		ReasoningEffort:        input.ReasoningEffort,
+		ApprovalPolicy:         approvalPolicy,
+		SandboxMode:            sandboxMode,
+		CreatedAt:              startedAt,
+		Mode:                   input.Mode,
+		AttachmentIDs:          input.AttachmentIDs,
+		Attachments:            privacyprojectionapp.ProjectAttachmentMetadata(input.Attachments.Metadata),
+		AttachmentPipeline:     input.Attachments.PipelineDetails(),
+		FileReferences:         input.FileReferences,
+		WorkspaceCheckpointID:  input.WorkspaceCheckpointID,
+		GUIPlan:                input.GUIPlan,
+		DisableUserInput:       input.DisableUserInput,
+		DisableUserInputSet:    input.DisableUserInputSet,
+		MaxModelSteps:          input.MaxModelSteps,
 	})
 	return StartPlan{
 		ThreadID:       threadID,

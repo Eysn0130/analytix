@@ -63,14 +63,22 @@ export function normalizeAppMotionPreference(value: unknown): AppMotionPreferenc
     ? (value as AppMotionPreference)
     : DEFAULT_APP_MOTION_PREFERENCE
 }
+export const PERFORMANCE_USAGE_MODES = ['compact', 'detailed'] as const
+export type PerformanceUsageMode = (typeof PERFORMANCE_USAGE_MODES)[number]
+export const DEFAULT_PERFORMANCE_USAGE_MODE: PerformanceUsageMode = 'detailed'
+export function normalizePerformanceUsageMode(value: unknown): PerformanceUsageMode {
+  return PERFORMANCE_USAGE_MODES.includes(value as PerformanceUsageMode)
+    ? value as PerformanceUsageMode : DEFAULT_PERFORMANCE_USAGE_MODE
+}
 export type ScheduleRunMode = 'agent' | 'plan'
-export type ScheduleKind = 'manual' | 'interval' | 'daily' | 'at'
+export type ScheduleKind = 'manual' | 'interval' | 'daily' | 'at' | 'weekly' | 'cron'
 export type ScheduleTaskStatus = 'idle' | 'running' | 'success' | 'error'
 export const SCHEDULE_TASK_MESSAGE_KEYS = [
   'schedule_task_idle',
   'schedule_task_running',
   'schedule_task_started',
   'schedule_task_completed',
+  'schedule_task_accepted',
   'schedule_task_failed',
   'schedule_task_interrupted'
 ] as const
@@ -79,7 +87,7 @@ export type ScheduleModel = 'deepseek-v4-pro' | 'deepseek-v4-flash'
 export type ScheduleReasoningEffort = 'auto' | 'off' | 'low' | 'medium' | 'high' | 'max'
 export type ClawRunMode = ScheduleRunMode
 export type ClawImProvider = 'feishu' | 'weixin' | 'telegram'
-export type ClawScheduleKind = ScheduleKind
+export type ClawScheduleKind = 'manual' | 'interval' | 'daily' | 'at'
 export type ClawTaskStatus = ScheduleTaskStatus
 export type ClawModel = 'auto' | ScheduleModel
 
@@ -219,12 +227,25 @@ export type ModelProviderProfileV1 = {
   music?: ModelProviderMusicCapabilityV1
   video?: ModelProviderVideoCapabilityV1
 }
+/** Explicit key-free preferences; identity fields only fence a Registry match. */
+export type ModelProviderModelPreferenceV1 = {
+  aliases?: string[]
+  /** Omitted inherits the existing default; null is an explicit off choice. */
+  reasoning?: ModelProviderReasoningCapabilityV1 | null
+}
+export type ModelProviderPreferencesV1 = {
+  id: string
+  baseUrl: string
+  endpointFormat: ModelEndpointFormat
+  modelProfiles: Record<string, ModelProviderModelPreferenceV1>
+}
 export type ModelProviderSettingsV1 = {
   /** Active provider profile for the Analytix runtime when runtime.providerId is unset. */
   activeProviderId?: string
   baseUrl: string
   proxy: NetworkProxySettingsV1
   providers: ModelProviderProfileV1[]
+  modelPreferences?: ModelProviderPreferencesV1[]
 }
 
 export type ModelProviderImageCapabilityPatchV1 = Partial<ModelProviderImageCapabilityV1>
@@ -279,6 +300,8 @@ export type AnalytixRuntimeSettingsV1 = {
   contextCompaction: AnalytixContextCompactionSettingsV1
   /** Low-level loop guards and model argument repair tuning. */
   runtimeTuning: AnalytixRuntimeTuningSettingsV1
+  /** Absent preserves the legacy Host policy and existing startup digest. */
+  userInput?: AnalytixUserInputSettingsV1
   /** Electron-owned image generation provider used by Write image tools. */
   imageGeneration: AnalytixImageGenerationSettingsV1
   /** Speech-to-text provider used for voice input in the composer. */
@@ -554,6 +577,11 @@ export type AnalytixRuntimeStepLimitSettingsV1 = {
   headlessMaxModelSteps: number
 }
 
+export type AnalytixUserInputSettingsV1 = {
+  policy: 'legacy' | 'timed'
+  defaultTimeoutSeconds?: number | null
+}
+
 export type AnalytixRuntimeTuningSettingsV1 = {
   /**
    * Max idle gap (ms) between streaming chunks before a turn fails with
@@ -673,6 +701,12 @@ export type ScheduledTaskScheduleV1 = {
   everyMinutes: number
   timeOfDay: string
   atTime: string
+  /** Absence on a historical daily rule means following the Host's local zone. */
+  timeZone?: string
+  /** Unique sorted ISO weekdays: Monday 1 through Sunday 7. Weekly only. */
+  weekdays?: number[]
+  /** Canonical numeric five-field Vixie cron. Cron only. */
+  expression?: string
 }
 
 export type ScheduledTaskV1 = {
@@ -700,6 +734,10 @@ export type ScheduledTaskV1 = {
    */
   lastMessage: ScheduleTaskMessageKey | ''
   lastThreadId: string
+  /** Read-only Host projection; creation origin is never inferred from lastThreadId. */
+  readonly originalThreadId?: string
+  readonly deliveryKind?: 'origin-delivery' | 'legacy-headless'
+  readonly latestDeliveryAttemptId?: string
 }
 
 export type ScheduleInternalSettingsV1 = {
@@ -754,7 +792,7 @@ export type ClawTaskScheduleV1 = {
   atTime: string
 }
 
-export type ClawTaskV1 = ScheduledTaskV1
+export type ClawTaskV1 = Omit<ScheduledTaskV1, 'schedule' | 'originalThreadId' | 'deliveryKind' | 'latestDeliveryAttemptId'> & { schedule: ClawTaskScheduleV1 }
 
 export type ClawImAgentProfileV1 = {
   name: string
@@ -1034,6 +1072,7 @@ export type AppSettingsV1 = {
   theme: 'system' | 'light' | 'dark'
   uiFontScale: UiFontScale
   motionPreference?: AppMotionPreference
+  performanceUsageMode?: PerformanceUsageMode
   cursorSpotlight?: boolean
   provider: ModelProviderSettingsV1
   runtime: AnalytixRuntimeSettingsV1

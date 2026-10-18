@@ -4,6 +4,22 @@ import { isClosedPublicRuntimeSseEvent, projectPublicRuntimeSseBlock } from './p
 
 const digest = (value: string): string => value.repeat(64)
 
+describe('actual conversation summary public item', () => {
+  it('accepts complete V5 facts while preventing a legacy notice from acquiring them', () => {
+    const event = automaticCompactionEvent()
+    const item = event.item as Record<string, unknown>
+    Object.assign(item, { schemaVersion: 5, providerHistoryProjectionVersion: 3,
+      summary: 'Continue the accepted task using recorded decisions.', summaryKind: 'conversation', compactionId: item.id,
+      summaryDigest: digest('c'), checkpointDigest: digest('d'), shadowedItemCount: 7,
+      tokenCountKind: 'estimated', tokenEstimatorVersion: 1,
+      createdAt: '2026-07-22T00:00:00Z', finishedAt: '2026-07-22T00:00:00Z' })
+    delete item.assistantProseExcluded
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(true)
+    item.schemaVersion = 4
+    expect(isClosedPublicRuntimeSseEvent(event)).toBe(false)
+  })
+})
+
 function automaticCompactionEvent(): Record<string, unknown> {
   const timestamp = '2026-07-22T00:00:00.000Z'
   return {

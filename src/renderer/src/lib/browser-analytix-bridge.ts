@@ -1,3 +1,4 @@
+import { rejectScheduleTaskArrayWrite } from '@shared/schedule-task-mutation'
 import {
   DEFAULT_ANALYTIX_PORT,
   DEFAULT_GUI_UPDATE_CHANNEL,
@@ -539,6 +540,37 @@ function browserThreadSummaryResponseIdentityMatchesV1(path: string, value: unkn
     threadSummaryTaskIdentityMatchesV1((task as Record<string, unknown>).id, taskId))
 }
 
+// Examine a bounded copy; never rewrite an accepted route or fetch protected
+// local-display capabilities through the browser runtime/diagnostics proxy.
+function protectedBrowserRuntimePath(pathAndQuery: string): boolean {
+  let path = pathAndQuery.split(/[?#]/, 1)[0]
+  if (path.length > 16_384 || /%(?![0-9a-f]{2})/i.test(path)) return true
+  for (let pass = 0; pass < 8; pass++) {
+    path = path.replaceAll('\\', '/')
+    const normalized: string[] = []
+    for (const part of path.split('/')) {
+      if (!part || part === '.') continue
+      if (part === '..') normalized.pop()
+      else normalized.push(part)
+    }
+    if (/^\/v1\/local-display(?:[/?#]|$)/i.test('/' + normalized.join('/'))) return true
+    let decoded: string
+    if (pass === 0) {
+      // Validate the actual URL encoding once. Further passes examine escaped
+      // ASCII structure independently, so a literal %AF cannot mask %6c/%2f.
+      try { decoded = decodeURIComponent(path) } catch { return true }
+    } else {
+      decoded = path.replace(/%([0-9a-f]{2})/ig, (escape, hex: string) => {
+        const byte = Number.parseInt(hex, 16)
+        return byte < 0x80 ? String.fromCharCode(byte) : escape
+      })
+    }
+    if (decoded === path) return false
+    path = decoded
+  }
+  return true
+}
+
 async function runtimeRequestViaProxy(
   prefix: string,
   pathAndQuery: string,
@@ -546,10 +578,15 @@ async function runtimeRequestViaProxy(
   body?: string
 ): Promise<{ ok: boolean; status: number; body: string }> {
   try {
+    const proxyPath = buildProxyPath(prefix, pathAndQuery)
+    const pathname = new URL(proxyPath, 'http://analytix.invalid').pathname
+    if (protectedBrowserRuntimePath(pathAndQuery) || protectedBrowserRuntimePath(pathname) || protectedBrowserRuntimePath(pathname.replace(prefix, ''))) {
+      return { ok: false, status: 403, body: JSON.stringify(projectPublicRuntimeHTTPError(403, null)) }
+    }
     const headers = new Headers()
     headers.set('Accept', 'application/json')
     if (body !== undefined) headers.set('Content-Type', 'application/json')
-    const response = await fetch(buildProxyPath(prefix, pathAndQuery), {
+    const response = await fetch(proxyPath, {
       method,
       headers,
       body
@@ -811,7 +848,7 @@ function startBrowserSseLoop(input: {
           const decoder = new TextDecoder()
           let buffer = ''
           let pendingEvents: Record<string, unknown>[] = []
-          let throttleTimer: ReturnType<typeof window.setTimeout> | null = null
+          let throttleTimer: ReturnType<Window['setTimeout']> | null = null
           let firstEventFlushed = false
           let protocolViolationReason = ''
           let authorityRevoked = false
@@ -956,10 +993,39 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
   }
 
   const flatApi = {
+    authorizeProcessPane: async () => ({ status: 'unavailable' as const }),
+    readProcessPane: async () => ({ status: 'unavailable' as const }),
+    setProcessPaneExpanded: async () => ({ status: 'unavailable' as const }),
+    closeProcessPane: async () => ({ status: 'unavailable' as const }),
+    openProcessCapture: async () => ({ status: 'unavailable' as const }),
+    openProcessWebLink: async () => ({ status: 'unavailable' as const }),
+    onProcessPaneInvalidated: (_requestOrHandler: { paneId: string } | (() => void), _handler?: () => void) => () => undefined,
     importMappingPreview: browserLocalDisplayUnavailable,
     cleaningDiffPreview: browserLocalDisplayUnavailable,
     directSourcePreview: browserLocalDisplayUnavailable,
     acceptedSlotDisplay: browserLocalDisplayUnavailable,
+    openUserInputWait: async () => ({ state: 'unavailable' }),
+    closeUserInputWait: async () => undefined,
+    onUserInputWaitChanged: () => () => undefined,
+    discardUserInputLateReply: async () => { throw new Error('Question discard unavailable.') },
+    saveUserInputDraft: async () => ({ ok: false, code: 'unavailable' }),
+    openUserInputLocalDisplay: async () => ({ ok: false, code: 'unavailable' }),
+    closeUserInputLocalDisplay: async () => undefined,
+    invalidateUserInputLocalDisplay: async () => undefined,
+    onUserInputLocalDisplayInvalidated: () => () => undefined,
+    performUserInputLocalEffect: async () => ({ ok: false, code: 'unavailable' as const }),
+    openToolResultLocalDisplay: async () => ({ ok: false, code: 'unavailable' }),
+    closeToolResultLocalDisplay: async () => undefined,
+    copyToolResultLocalDisplay: async () => ({ ok: false, code: 'unavailable' }),
+    saveToolResultLocalDisplay: async () => ({ ok: false, code: 'unavailable' }),
+    navigateToolResultLocalDisplay: async () => ({ ok: false, code: 'unavailable' }),
+    openToolResultLocalPresentHistory: async () => ({ ok: false, code: 'unavailable' }),
+    associateToolResultLocalPresentFile: async () => ({ ok: false, code: 'unavailable' }),
+  listToolResultLocalPresentApplications: async () => ({ ok: false, code: 'unavailable' }),
+    openToolResultLocalPresentFile: async () => ({ ok: false, code: 'unavailable' }),
+    openToolResultLocalWebLink: async () => ({ ok: false as const, code: 'unavailable' as const }),
+    invalidateToolResultLocalDisplay: async () => undefined,
+    onToolResultLocalDisplayInvalidated: () => () => undefined,
     stageFundsCSVSnapshot: browserFundsCSVSnapshotStageUnavailable,
     confirmFundsCSVSnapshot: browserFundsCSVSnapshotConfirmUnavailable,
     cancelFundsCSVImport: browserFundsCSVImportCancelUnavailable,
@@ -977,10 +1043,39 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
     })
   } satisfies Pick<
     AnalytixFlatApi,
+    | 'authorizeProcessPane'
+    | 'readProcessPane'
+    | 'setProcessPaneExpanded'
+    | 'closeProcessPane'
+    | 'openProcessCapture'
+    | 'openProcessWebLink'
+    | 'onProcessPaneInvalidated'
     | 'importMappingPreview'
     | 'cleaningDiffPreview'
     | 'directSourcePreview'
     | 'acceptedSlotDisplay'
+    | 'openUserInputWait'
+    | 'closeUserInputWait'
+    | 'onUserInputWaitChanged'
+    | 'discardUserInputLateReply'
+    | 'saveUserInputDraft'
+    | 'performUserInputLocalEffect'
+    | 'openUserInputLocalDisplay'
+    | 'closeUserInputLocalDisplay'
+    | 'invalidateUserInputLocalDisplay'
+    | 'onUserInputLocalDisplayInvalidated'
+    | 'openToolResultLocalDisplay'
+    | 'closeToolResultLocalDisplay'
+    | 'copyToolResultLocalDisplay'
+    | 'saveToolResultLocalDisplay'
+    | 'navigateToolResultLocalDisplay'
+    | 'openToolResultLocalPresentHistory'
+    | 'associateToolResultLocalPresentFile'
+  | 'listToolResultLocalPresentApplications'
+    | 'openToolResultLocalPresentFile'
+    | 'openToolResultLocalWebLink'
+    | 'invalidateToolResultLocalDisplay'
+    | 'onToolResultLocalDisplayInvalidated'
     | 'stageFundsCSVSnapshot'
     | 'confirmFundsCSVSnapshot'
     | 'cancelFundsCSVImport'
@@ -996,10 +1091,12 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
         return settings
       },
       setSettings: async (partial) => {
+        rejectScheduleTaskArrayWrite(partial)
         await ensureDesktopSettingsLoaded()
         return updateSettings(partial)
       },
       saveSettingsSilent: async (partial) => {
+        rejectScheduleTaskArrayWrite(partial)
         await ensureDesktopSettingsLoaded()
         return updateSettings(partial)
       }
@@ -1129,11 +1226,40 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       delete: browserOAuthUnavailable
     },
     runtime: {
+      authorizeProcessPane: flatApi.authorizeProcessPane,
+      readProcessPane: flatApi.readProcessPane,
+      setProcessPaneExpanded: flatApi.setProcessPaneExpanded,
+      closeProcessPane: flatApi.closeProcessPane,
+      openProcessCapture: flatApi.openProcessCapture,
+      openProcessWebLink: flatApi.openProcessWebLink,
+      onProcessPaneInvalidated: flatApi.onProcessPaneInvalidated,
       runtimeRequest: (path, method, body) => runtimeRequestViaProxy(prefix, path, method, body),
       importMappingPreview: flatApi.importMappingPreview,
       cleaningDiffPreview: flatApi.cleaningDiffPreview,
       directSourcePreview: flatApi.directSourcePreview,
       acceptedSlotDisplay: flatApi.acceptedSlotDisplay,
+      openUserInputWait: flatApi.openUserInputWait,
+      closeUserInputWait: flatApi.closeUserInputWait,
+      onUserInputWaitChanged: flatApi.onUserInputWaitChanged,
+      discardUserInputLateReply: flatApi.discardUserInputLateReply,
+      saveUserInputDraft: flatApi.saveUserInputDraft,
+      performUserInputLocalEffect: flatApi.performUserInputLocalEffect,
+      openUserInputLocalDisplay: flatApi.openUserInputLocalDisplay,
+      closeUserInputLocalDisplay: flatApi.closeUserInputLocalDisplay,
+      invalidateUserInputLocalDisplay: flatApi.invalidateUserInputLocalDisplay,
+      onUserInputLocalDisplayInvalidated: flatApi.onUserInputLocalDisplayInvalidated,
+      openToolResultLocalDisplay: flatApi.openToolResultLocalDisplay,
+      closeToolResultLocalDisplay: flatApi.closeToolResultLocalDisplay,
+      copyToolResultLocalDisplay: flatApi.copyToolResultLocalDisplay,
+      saveToolResultLocalDisplay: flatApi.saveToolResultLocalDisplay,
+      navigateToolResultLocalDisplay: flatApi.navigateToolResultLocalDisplay,
+      openToolResultLocalPresentHistory: flatApi.openToolResultLocalPresentHistory,
+      associateToolResultLocalPresentFile: flatApi.associateToolResultLocalPresentFile,
+    listToolResultLocalPresentApplications: flatApi.listToolResultLocalPresentApplications,
+      openToolResultLocalPresentFile: flatApi.openToolResultLocalPresentFile,
+      openToolResultLocalWebLink: flatApi.openToolResultLocalWebLink,
+      invalidateToolResultLocalDisplay: flatApi.invalidateToolResultLocalDisplay,
+      onToolResultLocalDisplayInvalidated: flatApi.onToolResultLocalDisplayInvalidated,
       stageFundsCSVSnapshot: flatApi.stageFundsCSVSnapshot,
       confirmFundsCSVSnapshot: flatApi.confirmFundsCSVSnapshot,
       cancelFundsCSVImport: flatApi.cancelFundsCSVImport,
@@ -1243,6 +1369,11 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       createTaskFromText: async () => ({ kind: 'noop' })
     },
     schedule: {
+      listTasks: async () => ({ kind: 'unavailable', message: browserPreviewUnavailable('Scheduled tasks') }),
+      readHistory: async () => ({ kind: 'unavailable', message: browserPreviewUnavailable('Scheduled task history') }),
+      createTask: async () => ({ kind: 'unavailable', message: browserPreviewUnavailable('Scheduled tasks') }),
+      updateTask: async () => ({ kind: 'unavailable', message: browserPreviewUnavailable('Scheduled tasks') }),
+      deleteTask: async () => ({ kind: 'unavailable', message: browserPreviewUnavailable('Scheduled tasks') }),
       getStatus: async () => ({
         internalServerRunning: false,
         internalUrl: '',
@@ -1308,6 +1439,10 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       request: async () => ({ ok: false, view: null, error: 'unavailable' }),
       onChange: () => () => undefined
     },
+    docxEditor: {
+      request: async () => ({ok:false,view:null,error:'unavailable'}),
+      onCapture: () => () => undefined
+    },
     packageHost: {
       request: async () => ({ ok: false, code: 'identity_invalid', message: 'Plugin control requires the desktop workspace.' })
     },
@@ -1326,6 +1461,7 @@ function createBrowserAnalytixApi(prefix: string): AnalytixApi {
       read: async () => ({ ok: false, message: browserPreviewUnavailable('Workspace file reading') }),
       readImage: async () => ({ ok: false, message: browserPreviewUnavailable('Workspace image reading') }),
       readPdf: async () => ({ ok: false, message: browserPreviewUnavailable('Workspace PDF reading') }),
+      readExcel: async () => ({ ok: false, message: browserPreviewUnavailable('Workspace spreadsheet reading') }),
       readLocalPdfText: async () => ({ ok: false, message: browserPreviewUnavailable('Local PDF text reading') }),
       saveAs: async () => ({ ok: false, canceled: true, message: browserPreviewUnavailable('Save file') }),
       write: async () => ({ ok: false, message: browserPreviewUnavailable('Workspace file writing') }),

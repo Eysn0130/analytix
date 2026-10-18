@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,8 @@ import (
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
+	testsecurity "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
 
 type repositoryStub struct {
@@ -775,7 +779,7 @@ func TestServiceCompactRecordsLifecycleEvents(t *testing.T) {
 		})
 		turns = append(turns, map[string]any{
 			"id": turnID, "threadId": current.ThreadID, "status": "completed", "securityContext": turnsecurityapp.PublicRecord(frozen),
-			"items": []any{map[string]any{"id": "item_" + turnID, "kind": "user_message", "text": "compact source"}},
+			"items": []any{map[string]any{"id": "item_" + turnID, "kind": "user_message", "text": strings.Repeat("compact source ", 200)}},
 		})
 	}
 	repo := &repositoryStub{thread: map[string]any{
@@ -784,6 +788,7 @@ func TestServiceCompactRecordsLifecycleEvents(t *testing.T) {
 	}}
 	var transition *compactionTransitionStub
 	service := NewService(Dependencies{
+		SummarizeCompaction: summaryForCompactionTest, ProjectCompactionHistory: projectedCompactionHistoryForTest,
 		Repository:      repo,
 		WorkspaceReader: mutationWorkspaceReaderStub{},
 		BeginTransition: func(_ context.Context, target domainsecurity.TurnSecurityContext) (CompactionTransition, error) {
@@ -807,8 +812,8 @@ func TestServiceCompactRecordsLifecycleEvents(t *testing.T) {
 	}
 	manualTurn, _ := listAny(repo.thread["turns"])[0].(map[string]any)
 	manualItem, _ := listAny(manualTurn["items"])[0].(map[string]any)
-	if manualItem["schemaVersion"] != float64(3) || manualItem["taskContinuation"] != nil || manualItem["auto"] != false {
-		t.Fatalf("manual compaction must remain V3 auto=false without continuation: %#v", manualItem)
+	if manualItem["schemaVersion"] != float64(5) || manualItem["summaryKind"] != "conversation" || manualItem["taskContinuation"] != nil || manualItem["auto"] != false {
+		t.Fatalf("manual compaction requires a real V5 summary without automatic continuation: %#v", manualItem)
 	}
 }
 
@@ -887,5 +892,228 @@ func TestServicePropagatesRepositoryErrors(t *testing.T) {
 	service := NewService(Dependencies{Repository: &repositoryStub{err: expected}})
 	if _, err := service.List(ListInput{}); !errors.Is(err, expected) {
 		t.Fatalf("expected list error, got %v", err)
+	}
+}
+
+// These are metadata CAS tests. Production transport/restart acceptance lives
+// in the existing timed Question server fixture, not in these constructed values.
+func mutationQuestionThreadV1(t *testing.T, size, count int) map[string]any {
+	t.Helper()
+	questions, answers := []any{}, []any{}
+	for i := 0; i < 3; i++ {
+		questions = append(questions, map[string]any{"question": "Synthetic detail?", "header": "", "options": []any{}, "multiSelect": false})
+		answers = append(answers, map[string]any{"selected": []any{}, "custom": strings.Repeat(string(rune('a'+i)), size)})
+	}
+	body, err := json.Marshal(map[string]any{"kind": "question_reply_content", "questions": questions, "answers": answers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns := []any{}
+	for i := 0; i < count; i++ {
+		turns = append(turns, map[string]any{"id": fmt.Sprintf("turn-synthetic-%d", i), "items": []any{map[string]any{"kind": "user_message", "delivery": "steer", "text": string(body)}}})
+	}
+	return map[string]any{"id": "thread-synthetic", "workspace": "/synthetic/workspace", "status": "completed", "turns": turns}
+}
+
+func mutationQuestionItemV1(thread map[string]any) map[string]any {
+	return thread["turns"].([]any)[0].(map[string]any)["items"].([]any)[0].(map[string]any)
+}
+
+func TestMutationBaselinePreservesLegacyCanonicalHashV1(t *testing.T) {
+	for _, value := range []map[string]any{
+		{"id": "ordinary", "workspace": "/synthetic", "turns": []any{}},
+		{"id": "ordinary", "exact": json.Number("9007199254740993"), "decimal": json.Number("1.00"), "turns": []any{}},
+		{"id": "ordinary", "nested": json.RawMessage(`{"z":2,"a":1}`), "turns": []any{}},
+	} {
+		body, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := domainsecurity.CanonicalJSONHash(body)
+		actual, err := MutationBaselineDigest(value)
+		if err != nil || !domainsecurity.IsSHA256Hex(expected) || actual != expected {
+			t.Fatal("ordinary canonical digest changed", err)
+		}
+	}
+}
+
+func TestMutationBaselineBindsCompleteQuestionAndExactNumbersV1(t *testing.T) {
+	for _, size := range []int{400000, 900000} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			thread := mutationQuestionThreadV1(t, size, 1)
+			thread["exact"] = json.Number("9007199254740993")
+			thread["decimal"] = json.Number("1.00")
+			body, err := json.Marshal(thread)
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest, err := MutationBaselineDigest(thread)
+			if err != nil || !domainsecurity.IsSHA256Hex(digest) || digest != domainsecurity.SHA256Hex(body) {
+				t.Fatal("complete original canonical value was not bound", err)
+			}
+			thread["exact"] = json.Number("9007199254740992")
+			changed, err := MutationBaselineDigest(thread)
+			if err != nil || changed == digest {
+				t.Fatal("metadata CAS rounded exact number", err)
+			}
+		})
+	}
+}
+
+func TestMutationBaselineAllowsAccumulatedRecordBudgetsV1(t *testing.T) {
+	thread := mutationQuestionThreadV1(t, 900000, 4)
+	body, err := json.Marshal(thread)
+	if err != nil || len(body) <= 8<<20 {
+		t.Fatal("fixture did not cross the accumulated history boundary", err)
+	}
+	digest, err := MutationBaselineDigest(thread)
+	if err != nil || !domainsecurity.IsSHA256Hex(digest) || digest != domainsecurity.SHA256Hex(body) {
+		t.Fatal("legal independent records acquired a whole-history cap", err)
+	}
+}
+
+func TestMutationBaselineRejectsInvalidExpandedValuesV1(t *testing.T) {
+	for _, fixture := range []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"ordinary_leaf", func(v map[string]any) { v["ordinary"] = strings.Repeat("s", (1<<20)+1) }},
+		{"typed_bytes", func(v map[string]any) { v["ordinary"] = make([]byte, 900000) }},
+		{"typed_struct", func(v map[string]any) { v["ordinary"] = struct{ Text string }{strings.Repeat("s", (1<<20)+1)} }},
+		{"number_exponent", func(v map[string]any) { v["number"] = json.Number("1e10001") }},
+		{"number_nonfinite", func(v map[string]any) { v["number"] = math.NaN() }},
+		{"duplicate_keys", func(v map[string]any) { v["raw"] = json.RawMessage(`{"a":1,"a":2}`) }},
+		{"invalid_unicode", func(v map[string]any) { v["raw"] = json.RawMessage(`"\ud800"`) }},
+		{"invalid_turns", func(v map[string]any) { v["turns"] = []any{v["turns"].([]any)[0], "invalid"} }},
+		{"invalid_question", func(v map[string]any) {
+			item := mutationQuestionItemV1(v)
+			original := item["text"]
+			item["text"] = `{"kind":"question_reply_content","questions":[],"answers":[{}]}`
+			v["turns"].([]any)[0].(map[string]any)["items"] = []any{item, map[string]any{"kind": "user_message", "delivery": "steer", "text": original}}
+		}},
+		{"question_leaf", func(v map[string]any) {
+			mutationQuestionItemV1(v)["text"] = mutationQuestionItemV1(mutationQuestionThreadV1(t, (1<<20)+1, 1))["text"]
+		}},
+		{"turn_record", func(v map[string]any) {
+			turn := v["turns"].([]any)[0].(map[string]any)
+			item := mutationQuestionItemV1(v)
+			turn["items"] = []any{item, item, item, item, item, item, item}
+		}},
+		{"null_archive", func(v map[string]any) { v[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1] = nil }},
+		{"invalid_archive", func(v map[string]any) {
+			v[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1] = map[string]any{"unexpected": true}
+		}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			thread := mutationQuestionThreadV1(t, 400000, 1)
+			fixture.edit(thread)
+			digest, err := MutationBaselineDigest(thread)
+			if err == nil || err.Error() == "" || digest != "" {
+				t.Fatal("invalid expanded value returned success or a digest")
+			}
+		})
+	}
+}
+
+func mutationArchiveV1(t *testing.T, turnID string) map[string]any {
+	t.Helper()
+	context, err := testsecurity.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: "thread-synthetic", TurnID: turnID, WorkspaceRealPath: "/synthetic/workspace", ContextEpoch: 2, IssuedAt: time.Unix(1, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := domainturnterminal.NewGeneralTerminalCASBindingV1(context, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := "2026-07-15T00:00:00Z"
+	commit, err := domainturnterminal.NewGeneralTerminalPublicationCommitV1(context, binding, at, []domainturnterminal.GeneralTerminalPublicationDraftV1{
+		{Slot: "usage", Draft: map[string]any{"kind": "usage", "threadId": context.ThreadID, "turnId": context.TurnID, "model": "synthetic", "usage": map[string]any{"totalTokens": float64(3)}, "timestamp": at}},
+		{Slot: "terminal", Draft: map[string]any{"kind": "turn_completed", "threadId": context.ThreadID, "turnId": context.TurnID, "status": "completed", "timestamp": at, "terminalReason": "success", "generalTerminalCASBindingDigest": binding.BindingDigest}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := domainturnterminal.NewGeneralTerminalPublicationArchiveV1([]domainturnterminal.GeneralTerminalPublicationCommitV1{commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return domainturnterminal.GeneralTerminalPublicationArchiveV1Map(archive)
+}
+
+func TestMutationBaselineRejectsStaleCompleteQuestionStateV1(t *testing.T) {
+	for _, fixture := range []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"answer_last_byte", func(v map[string]any) {
+			item := mutationQuestionItemV1(v)
+			text := item["text"].(string)
+			index := strings.LastIndex(text, "ccc")
+			item["text"] = text[:index+2] + "d" + text[index+3:]
+		}},
+		{"identity", func(v map[string]any) { v["id"] = "thread-other" }},
+		{"workspace", func(v map[string]any) { v["workspace"] = "/synthetic/other" }},
+		{"turn_order", func(v map[string]any) { turns := v["turns"].([]any); turns[0], turns[1] = turns[1], turns[0] }},
+		{"archive", func(v map[string]any) {
+			v[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1] = mutationArchiveV1(t, "turn-archive-other")
+		}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			thread := mutationQuestionThreadV1(t, 400000, 2)
+			thread[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1] = mutationArchiveV1(t, "turn-archive-original")
+			digest, err := MutationBaselineDigest(thread)
+			if err != nil || !domainsecurity.IsSHA256Hex(digest) || ValidateMutationBaseline(thread, "thread-synthetic", digest) != nil {
+				t.Fatal("initial complete CAS baseline failed", err)
+			}
+			fixture.edit(thread)
+			changed, err := MutationBaselineDigest(thread)
+			if err != nil || changed == digest || !errors.Is(ValidateMutationBaseline(thread, "thread-synthetic", digest), ErrThreadMutationBaselineConflict) {
+				t.Fatal("changed complete state did not reject stale CAS", err)
+			}
+		})
+	}
+}
+
+func TestMutationBaselineDoesNotApplyExecutionTokenCapToHistoryV1(t *testing.T) {
+	thread := mutationQuestionThreadV1(t, 400000, 1)
+	values := make([]any, 9000)
+	for i := range values {
+		values[i] = "synthetic"
+	}
+	turns := thread["turns"].([]any)
+	for i := 0; i < 24; i++ {
+		turns = append(turns, map[string]any{"id": fmt.Sprintf("turn-metadata-%d", i), "items": []any{}, "metadata": map[string]any{"values": values}})
+	}
+	thread["turns"] = turns
+	body, err := json.Marshal(thread)
+	if err != nil || domainsecurity.CanonicalJSONHash(body) != "" {
+		t.Fatal("fixture did not cross the execution-grant token boundary", err)
+	}
+	digest, err := MutationBaselineDigest(thread)
+	if err != nil || digest != domainsecurity.SHA256Hex(body) {
+		t.Fatal("independent records acquired the execution-grant token cap", err)
+	}
+}
+
+func TestMutationBaselineBudgetsOriginalArchiveFieldsV1(t *testing.T) {
+	for _, slot := range []string{"header", "commit"} {
+		t.Run(slot, func(t *testing.T) {
+			thread := mutationQuestionThreadV1(t, 400000, 1)
+			archive := mutationArchiveV1(t, "turn-archive-original")
+			if slot == "header" {
+				archive["Purpose"] = strings.Repeat("x", (1<<20)+1)
+			} else {
+				archive["commits"].([]any)[0].(map[string]any)["Purpose"] = strings.Repeat("x", (1<<20)+1)
+			}
+			// encoding/json's typed parser accepts a case-insensitive alias
+			// that the lower-case canonical field subsequently overwrites.
+			if _, err := domainturnterminal.ParseGeneralTerminalPublicationArchiveV1(archive); err != nil {
+				t.Fatal("fixture did not expose the typed archive alias boundary", err)
+			}
+			thread[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1] = archive
+			if digest, err := MutationBaselineDigest(thread); err == nil || digest != "" {
+				t.Fatal("original archive scalar escaped its record budget")
+			}
+		})
 	}
 }

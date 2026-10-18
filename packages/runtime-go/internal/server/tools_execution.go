@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -15,8 +17,12 @@ import (
 	subagentapp "analytix.local/runtime-go/internal/app/subagent"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	appturn "analytix.local/runtime-go/internal/app/turn"
+	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	provider "analytix.local/runtime-go/internal/provider"
 )
 
@@ -109,6 +115,7 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		return override, false
 	}
 	h.recordRuntimeToolStarted(pending)
+	h.registerProcessToolInputV2(ctx, pending)
 	if toolcatalogapp.ShouldRecordGenericToolProgress(pending.Call.Name) {
 		h.recordRuntimeToolProgress(pending, "running", "tool running")
 	}
@@ -120,17 +127,19 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 	case "native_selection_read", "native_selection_propose":
 		return h.executeNativeSelectionTool(ctx, pending, args)
 	case "read":
-		output, readContent, isError := executeReadRuntimeTool(pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeWindow)
+		output, readContent, isError := executeReadRuntimeToolWithCapture(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeWindow)
 		h.recordRuntimeRead(pending, output, readContent, isError)
 		return output, isError
+	case "present":
+		return executePresentRuntimeToolV1(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots)
 	case "read_file":
-		output, readContent, isError := executeReadRuntimeTool(pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeNumbered)
+		output, readContent, isError := executeReadRuntimeToolWithCapture(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots, runtimeReadModeNumbered)
 		h.recordRuntimeRead(pending, output, readContent, isError)
 		return output, isError
 	case "ls":
-		return executeListRuntimeTool(pending, args, h.protectedReadDirs, h.allowWriteRoots)
+		return executeListRuntimeTool(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots)
 	case "find":
-		return executeFindRuntimeTool(pending, args, h.protectedReadDirs, h.allowWriteRoots)
+		return executeFindRuntimeTool(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots)
 	case "glob":
 		return executeGlobRuntimeTool(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots)
 	case "code_index":
@@ -138,6 +147,7 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 	case "grep":
 		return executeGrepRuntimeTool(ctx, pending, args, h.protectedReadDirs, h.allowWriteRoots)
 	case "web_fetch":
+		h.registerProcessWebInputV1(ctx, pending)
 		return h.executeWebFetchRuntimeTool(ctx, pending, args)
 	case "read_task_history":
 		thread, err := h.store.GetThread(pending.ThreadID)
@@ -157,17 +167,17 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 		}
 		return output, false
 	case "get_goal":
-		return h.executeRuntimeGetGoalTool(pending)
+		return h.executeRuntimeGetGoalTool(ctx, pending)
 	case "create_goal":
-		return h.executeRuntimeCreateGoalTool(pending, args)
+		return h.executeRuntimeCreateGoalTool(ctx, pending, args)
 	case "complete_step":
 		return h.executeRuntimeCompleteStepTool(ctx, pending, args)
 	case "update_goal":
 		return h.executeRuntimeUpdateGoalTool(ctx, pending, args)
 	case "todo_list":
-		return h.executeRuntimeTodoListTool(pending)
+		return h.executeRuntimeTodoListTool(ctx, pending)
 	case "todo_write":
-		return h.executeRuntimeTodoWriteTool(pending, args)
+		return h.executeRuntimeTodoWriteTool(ctx, pending, args)
 	case "todo_ops", "todo_patch":
 		return h.executeRuntimeTodoOpsTool(ctx, pending, args)
 	case "bash":
@@ -193,23 +203,27 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 	case runtimeCreatePlanToolName:
 		return executeRuntimeCreatePlanTool(ctx, pending, args)
 	case "wait":
-		return h.executeRuntimeTaskJobWait(pending, args)
+		return h.executeRuntimeTaskJobWait(ctx, pending, args)
 	case "list_jobs":
-		return h.executeRuntimeTaskJobList(pending, args)
+		return h.executeRuntimeTaskJobList(ctx, pending, args)
 	case "bash_output":
-		return h.executeRuntimeTaskJobOutput(pending, args)
+		return h.executeRuntimeTaskJobOutput(ctx, pending, args)
 	case "kill_shell":
-		return h.executeRuntimeTaskJobKill(pending, args)
+		return h.executeRuntimeTaskJobKill(ctx, pending, args)
 	case "restart_job":
-		return h.executeRuntimeTaskJobRestart(pending, args)
+		return h.executeRuntimeTaskJobRestart(ctx, pending, args)
 	case "write", "write_file":
 		return h.executeWriteRuntimeTool(ctx, pending, args)
 	case "generate_office_document":
 		return h.executeGenerateDocumentRuntimeTool(ctx, pending, args)
 	default:
 		if mcpapp.IsToolName(pending.Call.Name) {
-			if h.beginOpaqueEditingExecution(ctx) != nil {
-				return map[string]any{"code": "managed_editing_mutation_blocked", "error": "Uncontained MCP execution is unavailable while a controlled editing session is active.", "executed": false}, true
+			if _, managed := h.mcp.(interface {
+				BindEffectAdmission(func(context.Context) error) error
+			}); !managed {
+				if h.beginOpaqueEditingExecution(ctx) != nil {
+					return map[string]any{"code": "managed_editing_mutation_blocked", "error": "Uncontained MCP execution is unavailable while a controlled editing session is active.", "executed": false}, true
+				}
 			}
 			exactArgs, err := mcpapp.DecodeArguments(pending.Call.Arguments)
 			if err != nil {
@@ -222,6 +236,8 @@ func (h *runtimeServerHandler) executeRuntimeToolWithEffectAuthority(ctx context
 }
 
 func (h *runtimeServerHandler) executeAndSettleRuntimeTool(ctx context.Context, pending runtimePendingToolCall, override any, transform apploop.ToolOutputTransform) (apploop.SettledToolExecution, error) {
+	ctx = domaintoolresult.WithProtectedCaptureV1(ctx, &domaintoolresult.ProtectedCaptureCollectorV1{})
+	ctx = domainprocess.WithCollectorV1(ctx, &domainprocess.CollectorV1{})
 	return apploop.ExecuteAndSettleWithSideEffectIntent(apploop.SideEffectIntentExecutionInput{
 		Context: ctx, Pending: pending, Override: override, Transform: transform,
 		Acquire: func(effectCtx context.Context, _ domainsecurity.TurnSecurityContext) (context.Context, func(), error) {
@@ -274,8 +290,25 @@ func (h *runtimeServerHandler) prepareRuntimeSideEffect(ctx context.Context, pen
 		}
 		hostBinding = hostedSkillProjection(loaded)
 	}
+	var resolveMCP func(string, json.RawMessage) (any, error)
+	if owner, ok := h.mcp.(interface {
+		HostScheduleSideEffectProjectionV1(context.Context, domainmcp.HostContextEnvelope, domainmodel.ToolCall) (map[string]any, bool)
+	}); ok {
+		envelope, envelopeErr := domainmcp.NewHostContextEnvelope(pending.SecurityContext, pending.ExecutionGrant)
+		if envelopeErr == nil {
+			if projection, native := owner.HostScheduleSideEffectProjectionV1(ctx, envelope, pending.Call); native {
+				resolveMCP = func(name string, arguments json.RawMessage) (any, error) {
+					if name != pending.Call.Name || domainsecurity.CanonicalJSONHash(arguments) != pending.ExecutionGrant.ArgsHash {
+						return nil, errors.New("native Host semantic request changed")
+					}
+					return projection, nil
+				}
+			}
+		}
+	}
 	prepared, err := toolsideeffect.Prepare(ctx, pending, issuedAt, toolsideeffect.Dependencies{
 		GoalService: h.runtimeGoalToolService(), HostBinding: hostBinding,
+		ResolveMCP:       resolveMCP,
 		ResolveSkill:     func(name string) (map[string]any, bool) { return toolcatalogapp.SkillByName(catalog, name) },
 		ResolveSkillBody: func(skill map[string]any) (string, error) { return toolcatalogapp.SkillEntryBody(catalog, skill) },
 		ResolveTask: func(request subagentapp.TaskRequest) (any, error) {
@@ -335,16 +368,25 @@ func (h *runtimeServerHandler) executeRuntimeAuthorizedReadOnlyToolBatch(ctx con
 	if len(calls) == 0 {
 		return "", nil, nil
 	}
+	captures := make(map[string]*domaintoolresult.ProtectedCaptureCollectorV1, len(calls))
+	processCaptures := make(map[string]*domainprocess.CollectorV1, len(calls))
+	for _, pending := range calls {
+		if captures[pending.Call.ID] != nil {
+			return "", nil, errors.New("duplicate batch capture identity")
+		}
+		captures[pending.Call.ID] = &domaintoolresult.ProtectedCaptureCollectorV1{}
+		processCaptures[pending.Call.ID] = &domainprocess.CollectorV1{}
+	}
 	var messages []provider.Message
 	receipt, err := h.pendingWork.WithOpenToolBatch(ctx, h.runtimeSubagentState().EffectGate(), calls, func(effectCtx context.Context) error {
 		results := toolcatalogapp.ExecuteBatch(effectCtx, calls, func(ctx context.Context, pending runtimePendingToolCall) (any, bool) {
-			return h.executeRuntimeToolWithEffectAuthority(ctx, pending, nil)
+			return h.executeRuntimeToolWithEffectAuthority(domainprocess.WithCollectorV1(domaintoolresult.WithProtectedCaptureV1(ctx, captures[pending.Call.ID]), processCaptures[pending.Call.ID]), pending, nil)
 		}, func(pending runtimePendingToolCall, cancelErr error) (any, bool) {
 			return runtimeToolCancelledOutput(pending.Call, cancelErr), true
 		})
 		var executeErr error
 		messages, executeErr = apploop.PersistReadOnlyBatchResults(effectCtx, results, func(ctx context.Context, pending runtimePendingToolCall, output any, isError bool) (provider.Message, error) {
-			settled, settleErr := apploop.SettleReadOnlyBatchToolOutputV1(ctx, pending,
+			settled, settleErr := apploop.SettleReadOnlyBatchToolOutputV1(domainprocess.WithCollectorV1(domaintoolresult.WithProtectedCaptureV1(ctx, captures[pending.Call.ID]), processCaptures[pending.Call.ID]), pending,
 				func(effectCtx context.Context, _ domainsecurity.TurnSecurityContext) (context.Context, func(), error) {
 					return apploop.AcquirePendingToolEffect(effectCtx, pending, h.runtimeSubagentState().AcquireContextEffectForAuthority)
 				}, output, isError, h.settleRuntimeToolResultWithEffectAuthority, h.mcp)

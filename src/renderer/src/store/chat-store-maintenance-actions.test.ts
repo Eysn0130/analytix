@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import maintenanceActionsSource from './chat-store-maintenance-actions.ts?raw'
-import type { ChatBlock, NormalizedThread, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
-import type { ChatState, ChatStoreGet, ChatStoreSet, SendMessageOverrides } from './chat-store-types'
+import type { ThreadUsageSnapshot, TurnUsageById, ChatBlock, NormalizedThread, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
+import type { ChatState, ChatStoreGet, ChatStoreSet, SendMessageOverrides, TurnForkSource, TurnForkSnapshot } from './chat-store-types'
 import { readThreadForkRegistry } from '../lib/thread-fork-registry'
 import i18n from '../i18n'
 import { getThreadBinding } from './chat-store-thread-binding'
+import { queuedMessagesForThread, queuedPauseReason } from './chat-store-queue'
 import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
-import { getActiveStreamSnapshotFor, resetActiveStream } from '../thread/streaming/active-stream-store'
+import { clearActiveStream, getActiveStreamSnapshotFor, resetActiveStream } from '../thread/streaming/active-stream-store'
+import { extractPlanTodos } from '../plan/plan-todo-sync'
 
 const registryMock = vi.hoisted(() => ({
   getProvider: vi.fn()
@@ -18,6 +20,12 @@ vi.mock('../agent/registry', () => ({
 
 import { createMaintenanceActions } from './chat-store-maintenance-actions'
 import { buildThreadEventSink } from './chat-store-runtime'
+import { AnalytixRuntimeProvider } from '../agent/analytix-runtime'
+import { createOrdinaryHistoryReplay, isOrdinaryDisplayHistoryBlock } from '../agent/analytix-mapper'
+
+const nativeRequestId = (hex: string) => 'input_' + hex.repeat(64)
+const nativeQuestionSelector = (requestId: string, threadId: string | null) =>
+  ({ threadId, turnId: 'turn-question-owner', itemId: 'item_' + requestId, requestId })
 
 type GoalPatch = {
   objective?: string
@@ -32,6 +40,7 @@ type Harness = {
   drainQueuedMessages: ReturnType<typeof vi.fn>
   get: ChatStoreGet
   provider: {
+    renameThread: ReturnType<typeof vi.fn>
     archiveThread: ReturnType<typeof vi.fn>
     deleteThread: ReturnType<typeof vi.fn>
     forkThread: ReturnType<typeof vi.fn>
@@ -53,6 +62,17 @@ type Harness = {
   state: ChatState
 }
 
+const footerUsage: ThreadUsageSnapshot = {
+  inputTokens: 2, outputTokens: 1, reasoningTokens: 0, cachedTokens: 0, cacheMissTokens: 2,
+  cacheHitRate: null, totalTokens: 3, costUsd: null, costCny: null, priceConfigured: false,
+  tokenEconomySavingsTokens: 0, turns: 1
+}
+const footerLastUsage = { threadId: 'thr_existing', snapshot: footerUsage }
+function footerEntries(turnIds: string[]): TurnUsageById {
+  return Object.fromEntries(turnIds.map((turnId, index) => [turnId, {
+    threadId: 'thr_existing', turnId, firstSeq: index * 3 + 1, lastSeq: index * 3 + 3, snapshot: footerUsage
+  }]))
+}
 function thread(id: string, goal: ThreadGoal | null = null): NormalizedThread {
   return {
     id,
@@ -132,9 +152,10 @@ function buildHarness(options: {
   let state: ChatState
 
   const provider = {
+    renameThread: vi.fn(async (_threadId: string, _title: string) => undefined),
     archiveThread: vi.fn(async () => undefined),
     deleteThread: vi.fn(async () => undefined),
-    forkThread: vi.fn(async (threadId: string, _options?: { turnId?: string }) => ({
+    forkThread: vi.fn(async (threadId: string, _options?: { turnId?: string; endSeq?: number }) => ({
       ...thread('thr_fork'),
       forkedFromThreadId: threadId,
       forkedFromTitle: 'Parent thread',
@@ -188,7 +209,7 @@ function buildHarness(options: {
     state.activeThreadId = created.id
     state.threads = [created, ...state.threads]
   })
-  const refreshThreads = vi.fn(async () => undefined)
+  const refreshThreads = vi.fn(async (_options?: { isCurrent?: () => boolean }) => undefined)
   const selectThread = vi.fn(async () => undefined)
   const drainQueuedMessages = vi.fn(async () => undefined)
   const recoverActiveTurn = vi.fn(async () => false)
@@ -199,18 +220,25 @@ function buildHarness(options: {
   ) => true)
 
   state = {
+    blocks: [],
+    goalStateEpoch: 0,
+    activeGoalActivation: null,
     activeThreadGoal: initialGoal,
     activeThreadTodos: initialTodos,
     activeThreadId,
+    queuedMessages: [],
+    queuedMessagePauses: {},
     createThread,
     error: null,
     drainQueuedMessages,
     recoverActiveTurn,
     refreshThreads,
+    route: 'chat',
     runtimeConnection: 'ready',
     selectThread,
     sendMessage,
     settingsSection: 'general',
+    threadSearchResults: null,
     threads: activeThreadId ? [thread(activeThreadId, initialGoal)] : []
   } as unknown as ChatState
 
@@ -225,11 +253,123 @@ function buildHarness(options: {
     get,
     sseAbortRef
   })
+  state.renameThread = actions.renameThread
+  state.renameActiveThread = actions.renameActiveThread
 
   return { actions, createThread, drainQueuedMessages, get, provider, recoverActiveTurn, refreshThreads, selectThread, sendMessage, sseAbortRef, state }
 }
 
+function sourceForkFixture(): { source: TurnForkSource; snapshot: TurnForkSnapshot; retire: () => void } {
+  let current = true
+  const snapshot: TurnForkSnapshot = { busy: false, latestSeq: 13, title: 'Actual secondary source', blocks: [
+    { kind: 'user', id: 'source-user', text: 'SOURCE_HISTORY_ONLY', meta: { turnId: 'source-turn' } },
+    { kind: 'assistant', id: 'source-final', text: 'SOURCE_ANSWER_ONLY', meta: { turnId: 'source-turn' },
+      generalTerminalProjectionReceipt: { schemaVersion: 1, batchDigest: 'a'.repeat(64), threadId: 'source-thread',
+        turnId: 'source-turn', itemId: 'source-final', firstSeq: 11, lastSeq: 13, status: 'completed' } }
+  ], rewoundTurnIds: {} }
+  return { snapshot, retire: () => { current = false }, source: {
+    threadId: 'source-thread', turnId: 'source-turn', finalItemId: 'source-final', status: 'completed', endSeq: 13,
+    proof: { kind: 'general', receipt: { ...(snapshot.blocks[1] as Extract<ChatBlock, { kind: 'assistant' }>).generalTerminalProjectionReceipt! } },
+    isCurrent: () => current, getSnapshot: () => snapshot
+  } }
+}
+
 describe('chat-store-maintenance-actions goal actions', () => {
+  it('keeps the captured E when the source thread cursor advances', async () => {
+    const { actions, provider } = buildHarness()
+    const { source, snapshot } = sourceForkFixture()
+    snapshot.latestSeq = 18
+    await actions.forkThreadFromTurn('source-turn', source)
+    expect(provider.forkThread).toHaveBeenCalledWith('source-thread', { turnId: 'source-turn', endSeq: 13 })
+  })
+
+  it('uses the explicit secondary source and its full history for fallback lineage', async () => {
+    const { actions, provider, state, selectThread } = buildHarness()
+    const { source } = sourceForkFixture()
+    Object.assign(state, { busy: false, blocks: [
+      { kind: 'user', id: 'main-a', text: 'WRONG_MAIN_A', meta: { turnId: 'main-a' } },
+      { kind: 'user', id: 'main-b', text: 'WRONG_MAIN_B', meta: { turnId: 'main-b' } },
+      { kind: 'user', id: 'main-c', text: 'WRONG_MAIN_C', meta: { turnId: 'main-c' } }
+    ] satisfies ChatBlock[] })
+    provider.forkThread.mockImplementationOnce(async (sourceId: string) => ({ ...thread('secondary-fork'),
+      forkedFromThreadId: sourceId, forkedAt: '2026-06-04T00:03:00.000Z' }))
+    await actions.forkThreadFromTurn('source-turn', source)
+    expect(provider.forkThread).toHaveBeenCalledWith('source-thread', { turnId: 'source-turn', endSeq: 13 })
+    expect(selectThread).toHaveBeenCalledWith('secondary-fork')
+    expect(readThreadForkRegistry().forks['secondary-fork']).toMatchObject({
+      parentThreadId: 'source-thread', parentTitle: 'Actual secondary source', forkedFromMessageCount: 2, forkedFromTurnCount: 1
+    })
+  })
+  it.each(['busy', 'rewound', 'missing-final', 'later-transcript', 'stale-cursor', 'mismatched-receipt', 'same-cursor-new-digest', 'retired'] as const)(
+    'does not send an explicit source fork for %s', async reason => {
+      const { actions, provider } = buildHarness()
+      const { source, snapshot, retire } = sourceForkFixture()
+      if (reason === 'busy') snapshot.busy = true
+      if (reason === 'rewound') snapshot.rewoundTurnIds = { 'source-turn': true }
+      if (reason === 'missing-final') snapshot.blocks = snapshot.blocks.slice(0, 1)
+      if (reason === 'later-transcript') snapshot.blocks.push({ kind: 'system', id: 'later', text: 'Later tool result', meta: { turnId: 'source-turn' } })
+      if (reason === 'stale-cursor') snapshot.latestSeq = 12
+      if (reason === 'mismatched-receipt') {
+        const final = snapshot.blocks[1] as Extract<ChatBlock, { kind: 'assistant' }>
+        final.generalTerminalProjectionReceipt = { ...final.generalTerminalProjectionReceipt!, threadId: 'wrong-thread' }
+      }
+      if (reason === 'same-cursor-new-digest') {
+        const final = snapshot.blocks[1] as Extract<ChatBlock, { kind: 'assistant' }>
+        final.generalTerminalProjectionReceipt = { ...final.generalTerminalProjectionReceipt!, batchDigest: 'b'.repeat(64) }
+      }
+      if (reason === 'retired') retire()
+      await actions.forkThreadFromTurn('source-turn', source)
+      expect(provider.forkThread).not.toHaveBeenCalled()
+    })
+  it.each(['source-retired', 'rewind', 'same-cursor-new-digest', 'main-binding-ABA', 'new-submission'] as const)(
+    'keeps a created fork from navigating after %s during POST', async reason => {
+      const { actions, provider, state, sseAbortRef, refreshThreads, selectThread } = buildHarness()
+      const { source, snapshot, retire } = sourceForkFixture()
+      const response = deferred<NormalizedThread>()
+      provider.forkThread.mockImplementationOnce(() => response.promise)
+      const pending = actions.forkThreadFromTurn('source-turn', source)
+      expect(provider.forkThread).toHaveBeenCalledOnce()
+      if (reason === 'source-retired') retire()
+      if (reason === 'rewind') snapshot.rewoundTurnIds = { 'source-turn': true }
+      if (reason === 'same-cursor-new-digest') {
+        const final = snapshot.blocks[1] as Extract<ChatBlock, { kind: 'assistant' }>
+        final.generalTerminalProjectionReceipt = { ...final.generalTerminalProjectionReceipt!, batchDigest: 'b'.repeat(64) }
+      }
+      if (reason === 'main-binding-ABA') {
+        const binding = getThreadBinding(sseAbortRef)
+        state.activeThreadId = 'main-other'; binding.generation += 1
+        state.activeThreadId = 'thr_existing'; binding.generation += 1
+      }
+      if (reason === 'new-submission') getThreadBinding(sseAbortRef).submissionGeneration += 1
+      response.resolve(thread('created-before-retirement'))
+      await pending
+      expect(provider.forkThread).toHaveBeenCalledOnce()
+      expect(refreshThreads).not.toHaveBeenCalled(); expect(selectThread).not.toHaveBeenCalled()
+      expect(readThreadForkRegistry().forks['created-before-retirement']).toBeUndefined()
+      expect(state.error).toBeNull()
+    })
+  it('does not select a fork after the source retires during the existing refresh', async () => {
+    const { actions, refreshThreads, selectThread } = buildHarness()
+    const { source, retire } = sourceForkFixture()
+    const refreshed = deferred<void>()
+    refreshThreads.mockImplementationOnce(() => refreshed.promise)
+    const pending = actions.forkThreadFromTurn('source-turn', source)
+    await Promise.resolve()
+    expect(refreshThreads).toHaveBeenCalledOnce()
+    retire(); refreshed.resolve(undefined)
+    await pending
+    expect(selectThread).not.toHaveBeenCalled()
+  })
+  it('does not write a stale source error when an already sent fork rejects', async () => {
+    const { actions, provider, state, selectThread } = buildHarness()
+    const { source, retire } = sourceForkFixture()
+    const response = deferred<NormalizedThread>()
+    provider.forkThread.mockImplementationOnce(() => response.promise)
+    const pending = actions.forkThreadFromTurn('source-turn', source)
+    retire(); response.reject(new Error('Synthetic rejected fork'))
+    await pending
+    expect(state.error).toBeNull(); expect(selectThread).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     registryMock.getProvider.mockReset()
     vi.stubGlobal('localStorage', memoryStorage())
@@ -245,6 +385,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     Object.assign(state, {
       activeThreadId: 'thr_existing',
       activeThreadGoal: goal('thr_existing'),
+      turnUsageById: footerEntries(['turn-1']), rewoundTurnIds: { older_removed: true }, lastTurnUsage: footerLastUsage,
       activeThreadTodos: { threadId: 'thr_existing', items: [] },
       blocks: [{ kind: 'assistant', id: 'assistant-1', text: 'old answer' }],
       busy: true,
@@ -252,7 +393,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
       currentTurnUserId: 'user-1',
       liveAssistant: 'partial',
       lastSeq: 42,
-      queuedMessages: [{ id: 'q-1', text: 'queued' }],
+      queuedMessages: [{ threadId: 'thr_existing', id: 'q-1', text: 'queued' }],
       watchTurnCompletion: { thr_existing: true, thr_other: true },
       unreadThreadIds: { thr_existing: true, thr_other: true },
       threads: [
@@ -268,6 +409,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(provider.deleteThread).not.toHaveBeenCalled()
     expect(abort).toHaveBeenCalledTimes(1)
     expect(sseAbortRef.current).toBeNull()
+    expect(state.turnUsageById).toEqual({}); expect(state.rewoundTurnIds).toEqual({}); expect(state.lastTurnUsage).toBeNull()
     expect(state.activeThreadId).toBeNull()
     expect(state.activeThreadGoal).toBeNull()
     expect(state.activeThreadTodos).toBeNull()
@@ -278,7 +420,8 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(state.liveAssistant).toBe('')
     expect('liveReasoning' in state).toBe(false)
     expect(state.lastSeq).toBe(0)
-    expect(state.queuedMessages).toEqual([])
+    expect(state.queuedMessages).toEqual([{ threadId: 'thr_existing', id: 'q-1', text: 'queued' }])
+    expect(queuedMessagesForThread(state)).toEqual([])
     expect(state.threads.find((item) => item.id === 'thr_existing')?.archived).toBe(true)
     expect(state.watchTurnCompletion).toEqual({ thr_other: true })
     expect(state.unreadThreadIds).toEqual({ thr_other: true })
@@ -302,7 +445,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     await actions.forkActiveThread()
 
     expect(provider.forkThread).toHaveBeenCalledWith('thr_existing')
-    expect(refreshThreads).toHaveBeenCalledTimes(1)
+    expect(refreshThreads).toHaveBeenCalledExactlyOnceWith()
     expect(selectThread).toHaveBeenCalledWith('thr_fork')
     expect(refreshThreads.mock.invocationCallOrder[0]).toBeLessThan(
       selectThread.mock.invocationCallOrder[0]
@@ -341,7 +484,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     await actions.forkThreadFromTurn(' turn-1 ')
 
     expect(provider.forkThread).toHaveBeenCalledWith('thr_existing', { turnId: 'turn-1' })
-    expect(refreshThreads).toHaveBeenCalledTimes(1)
+    expect(refreshThreads).toHaveBeenCalledExactlyOnceWith()
     expect(selectThread).toHaveBeenCalledWith('thr_fork_turn')
     expect(readThreadForkRegistry().forks.thr_fork_turn).toEqual({
       parentThreadId: 'thr_existing',
@@ -371,7 +514,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     )
   })
 
-  it('sets a goal on the active thread, syncs snapshots, and starts the goal turn', async () => {
+  it('creates a Goal through lifecycle admission without a second ordinary message', async () => {
     const { actions, provider, refreshThreads, sendMessage, state } = buildHarness()
 
     const result = await actions.setActiveThreadGoal('  ship goal mode  ')
@@ -379,7 +522,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(result).toBe(true)
     expect(provider.setThreadGoal).toHaveBeenCalledWith('thr_existing', {
       objective: 'ship goal mode',
-      status: 'active'
+      operation: 'create'
     })
     expect(state.activeThreadGoal).toMatchObject({
       threadId: 'thr_existing',
@@ -392,13 +535,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
       status: 'active'
     })
     expect(refreshThreads).toHaveBeenCalledTimes(1)
-    expect(sendMessage).toHaveBeenCalledWith(
-      'ship goal mode',
-      'agent',
-      expect.objectContaining({
-        displayText: expect.stringContaining('ship goal mode')
-      })
-    )
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it('starts a research goal through the existing goal action and runtime patch', async () => {
@@ -412,7 +549,6 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(result).toBe(true)
     expect(provider.setThreadGoal).toHaveBeenCalledWith('thr_existing', {
       objective: 'map cache behavior',
-      status: 'active',
       research: {
         enabled: true,
         requirements: ['Compare providers', 'Audit unsupported fallback']
@@ -443,7 +579,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(createThread).toHaveBeenCalledTimes(1)
     expect(provider.setThreadGoal).toHaveBeenCalledWith('thr_created', {
       objective: 'ship goal mode',
-      status: 'active'
+      operation: 'create'
     })
     expect(createThread.mock.invocationCallOrder[0]).toBeLessThan(
       provider.setThreadGoal.mock.invocationCallOrder[0]
@@ -451,13 +587,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(state.activeThreadId).toBe('thr_created')
     expect(state.activeThreadGoal?.threadId).toBe('thr_created')
     expect(state.threads[0]?.goal?.objective).toBe('ship goal mode')
-    expect(sendMessage).toHaveBeenCalledWith(
-      'ship goal mode',
-      'agent',
-      expect.objectContaining({
-        displayText: expect.stringContaining('ship goal mode')
-      })
-    )
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it('does not call goal APIs when a new thread cannot be created', async () => {
@@ -496,6 +626,30 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(refreshThreads).toHaveBeenCalledTimes(1)
   })
 
+  it('uses counted Goal CAS, preserves paused edits and never sends a legacy resume message', async () => {
+    const initialGoal={...goal('thr_existing','finish testing','paused'),id:'goal-exact',revision:7,maxGoalRounds:8,roundsStarted:3}
+    const {actions,provider,state,sendMessage}=buildHarness({initialGoal})
+    expect(await actions.setActiveThreadGoal('Changed objective',{maxGoalRounds:10})).toBe(true)
+    expect(provider.setThreadGoal).toHaveBeenCalledWith('thr_existing',{operation:'edit',ref:{id:'goal-exact',revision:7},objective:'Changed objective',maxGoalRounds:10})
+    expect(state.activeThreadGoal?.status).toBe('paused')
+    Object.assign(state,{activeThreadGoal:initialGoal})
+    expect(await actions.setActiveThreadGoalStatus('active')).toBe(true)
+    expect(provider.setThreadGoal).toHaveBeenLastCalledWith('thr_existing',{operation:'resume',ref:{id:'goal-exact',revision:7}})
+    Object.assign(state,{activeThreadGoal:goal('thr_existing','Legacy objective','paused')})
+    expect(await actions.setActiveThreadGoalStatus('active')).toBe(true)
+    expect(provider.setThreadGoal).toHaveBeenLastCalledWith('thr_existing',{status:'active'})
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('clears a counted Goal using its exact ref and preserves an explicit null fallback', async () => {
+    const initialGoal={...goal('thr_existing'),id:'goal-exact',revision:7,maxGoalRounds:8,roundsStarted:3}
+    const {actions,provider,state}=buildHarness({initialGoal})
+    expect(await actions.clearActiveThreadGoal()).toBe(true)
+    expect(provider.clearThreadGoal).toHaveBeenCalledWith('thr_existing',{id:'goal-exact',revision:7})
+    expect(state.activeThreadGoal).toBeNull()
+    expect(state.activeGoalActivation).toBeNull()
+  })
+
   it('clears the active goal and removes it from the thread snapshot', async () => {
     const initialGoal = goal('thr_existing', 'finish testing', 'active')
     const { actions, provider, refreshThreads, state } = buildHarness({ initialGoal })
@@ -509,28 +663,182 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(refreshThreads).toHaveBeenCalledTimes(1)
   })
 
-  it('updates active todo status and keeps only one item in progress', async () => {
+  it.each(['other-thread', 'same-thread-new-binding'] as const)('does not let a late Goal mutation advance the current epoch after %s', async navigation => {
+    const initialGoal = { ...goal('thr_existing'), id: 'goal-exact', revision: 1, maxGoalRounds: 8, roundsStarted: 1 }
+    const { actions, provider, state, sseAbortRef } = buildHarness({ initialGoal })
+    const committed = deferred<ThreadGoal>()
+    provider.setThreadGoal.mockImplementationOnce(() => committed.promise)
+    const pending = actions.setActiveThreadGoalStatus('paused')
+    expect(provider.setThreadGoal).toHaveBeenCalledOnce()
+    const binding = getThreadBinding(sseAbortRef)
+    state.activeThreadId = 'thread-b'; binding.generation += 1
+    state.goalStateEpoch = 41
+    state.blocks = [{ kind: 'user', id: 'b-user', text: 'Current B history' }]
+    state.activeThreadGoal = goal('thread-b', 'Current B objective')
+    if (navigation === 'same-thread-new-binding') { state.activeThreadId = 'thr_existing'; binding.generation += 1 }
+    const currentBlocks = state.blocks, currentGoal = state.activeThreadGoal
+    committed.resolve({ ...initialGoal, revision: 2, status: 'paused' })
+    expect(await pending).toBe(true)
+    expect(state.goalStateEpoch).toBe(41)
+    expect(state.blocks).toBe(currentBlocks)
+    expect(state.activeThreadGoal).toBe(currentGoal)
+    expect(provider.getThreadDetail).not.toHaveBeenCalled()
+  })
+
+  it('uses the one GoalState authority without coupling a committed mutation to unrelated detail failure', async () => {
+    const { actions, provider, state } = buildHarness()
+    const recorded = { ...goal('thr_existing'), id: 'goal-exact', revision: 1, maxGoalRounds: 8, roundsStarted: 0 }
+    const readState = vi.fn(async () => ({ goal: recorded, activation: { id: 'goal-exact', revision: 1, activation: 'armed' as const }, historyBlocks: [] }))
+    Object.assign(provider, { getThreadGoalState: readState })
+    provider.getThreadDetail.mockRejectedValue(new Error('Unrelated detail unavailable'))
+    expect(await actions.setActiveThreadGoal('ship goal mode')).toBe(true)
+    expect(readState).toHaveBeenCalledExactlyOnceWith('thr_existing')
+    expect(provider.getThreadDetail).not.toHaveBeenCalled()
+    expect(state.activeThreadGoal).toEqual(recorded)
+    expect(state.activeGoalActivation?.activation).toBe('armed')
+  })
+
+  it('starts a pending todo without demoting parallel active items', async () => {
     const initialTodos = todos('thr_existing', [
       ['Read context', 'in_progress'],
-      ['Implement closure', 'pending'],
+      ['Implement closure', 'in_progress'],
       ['Verify', 'pending']
     ])
     const { actions, provider, state } = buildHarness({ initialTodos })
 
-    const result = await actions.setActiveThreadTodoStatus('todo_2', 'in_progress')
+    const result = await actions.setActiveThreadTodoStatus('todo_3', 'in_progress')
 
     expect(result).toBe(true)
-    expect(provider.setThreadTodos).toHaveBeenCalledWith('thr_existing', [
-      expect.objectContaining({ id: 'todo_1', content: 'Read context', status: 'pending' }),
+    expect(provider.setThreadTodos).toHaveBeenCalledExactlyOnceWith('thr_existing', [
+      expect.objectContaining({ id: 'todo_1', content: 'Read context', status: 'in_progress' }),
       expect.objectContaining({ id: 'todo_2', content: 'Implement closure', status: 'in_progress' }),
-      expect.objectContaining({ id: 'todo_3', content: 'Verify', status: 'pending' })
+      expect.objectContaining({ id: 'todo_3', content: 'Verify', status: 'in_progress' })
     ])
-    expect(state.activeThreadTodos?.items.map((item) => [item.content, item.status])).toEqual([
-      ['Read context', 'pending'],
+    expect(state.activeThreadTodos?.items.map((item) => [item.id, item.status])).toEqual([
+      ['todo_1', 'in_progress'],
+      ['todo_2', 'in_progress'],
+      ['todo_3', 'in_progress']
+    ])
+    expect(state.threads[0]?.todos).toBe(state.activeThreadTodos)
+    expect(initialTodos.items.map((item) => item.status)).toEqual([
+      'in_progress', 'in_progress', 'pending'
+    ])
+  })
+
+  it('posts both active statuses when a title-only Plan edit attaches Plan sources', async () => {
+    const initialTodos = todos('thr_existing', [
+      ['Read context', 'in_progress'],
+      ['Implement closure', 'in_progress']
+    ])
+    const { actions, state } = buildHarness({ initialTodos })
+    const runtimeRequest = vi.fn(async (_path: string, _method?: string, body?: string) => {
+      const payload = JSON.parse(body ?? '{}') as { todos: ThreadTodoList['items'] }
+      return {
+        ok: true,
+        status: 200,
+        body: JSON.stringify({ todos: {
+          ...initialTodos,
+          items: payload.todos.map((item) => ({
+            ...item,
+            createdAt: initialTodos.items[0].createdAt,
+            updatedAt: '2026-06-04T00:03:00.000Z'
+          }))
+        } })
+      }
+    })
+    vi.stubGlobal('window', { analytix: { runtime: { runtimeRequest } } })
+    registryMock.getProvider.mockReturnValue(new AnalytixRuntimeProvider())
+    const plan = { id: 'plan_1', relativePath: '.analytix/plan/verify.md' }
+
+    await expect(actions.syncPlanTodosFromMarkdown(
+      plan, '# Revised plan\n- [ ] Read context\n- [ ] Implement closure'
+    )).resolves.toBe(true)
+
+    expect(runtimeRequest).toHaveBeenCalledExactlyOnceWith(
+      '/v1/threads/thr_existing/todos', 'POST', expect.any(String)
+    )
+    const payload = JSON.parse(runtimeRequest.mock.calls[0][2] ?? '{}') as { todos: ThreadTodoList['items'] }
+    expect(payload.todos).toEqual([
+      expect.objectContaining({ id: 'todo_1', content: 'Read context', status: 'in_progress', source: expect.objectContaining({ kind: 'plan', planId: plan.id }) }),
+      expect.objectContaining({ id: 'todo_2', content: 'Implement closure', status: 'in_progress', source: expect.objectContaining({ kind: 'plan', planId: plan.id }) })
+    ])
+    expect(state.activeThreadTodos?.items.map((item) => item.status)).toEqual(['in_progress', 'in_progress'])
+    expect(state.threads[0]?.todos).toBe(state.activeThreadTodos)
+    expect(initialTodos.items.map((item) => item.status)).toEqual(['in_progress', 'in_progress'])
+
+    await expect(actions.syncPlanTodosFromMarkdown(
+      plan, '# Revised plan\n- [x] Read context\n- [ ] Implement closure'
+    )).resolves.toBe(true)
+
+    expect(runtimeRequest).toHaveBeenCalledTimes(2)
+    expect(runtimeRequest).toHaveBeenNthCalledWith(
+      2, '/v1/threads/thr_existing/todos', 'POST', expect.any(String)
+    )
+    const completedPayload = JSON.parse(runtimeRequest.mock.calls[1][2] ?? '{}') as { todos: ThreadTodoList['items'] }
+    expect(completedPayload.todos).toEqual([
+      expect.objectContaining({ id: 'todo_1', content: 'Read context', status: 'completed' }),
+      expect.objectContaining({ id: 'todo_2', content: 'Implement closure', status: 'in_progress' })
+    ])
+    expect(state.activeThreadTodos?.items.map((item) => item.status)).toEqual(['completed', 'in_progress'])
+  })
+
+  it('skips a title-only Plan write when both active todos already have the same Plan source', async () => {
+    const plan = { id: 'plan_1', relativePath: '.analytix/plan/verify.md' }
+    const initialTodos: ThreadTodoList = {
+      threadId: 'thr_existing',
+      updatedAt: '2026-06-04T00:02:00.000Z',
+      items: extractPlanTodos({
+        threadId: 'thr_existing',
+        planId: plan.id,
+        relativePath: plan.relativePath,
+        markdown: '# Original plan\n- [ ] Read context\n- [ ] Implement closure',
+        now: '2026-06-04T00:00:00.000Z'
+      }).map((item) => ({ ...item, status: 'in_progress' }))
+    }
+    const { actions, provider, state } = buildHarness({ initialTodos })
+
+    await expect(actions.syncPlanTodosFromMarkdown(
+      plan, '# Revised plan\n- [ ] Read context\n- [ ] Implement closure'
+    )).resolves.toBe(true)
+
+    expect(provider.setThreadTodos).not.toHaveBeenCalled()
+    expect(state.activeThreadTodos).toBe(initialTodos)
+    expect(state.activeThreadTodos?.items.map((item) => item.status)).toEqual(['in_progress', 'in_progress'])
+  })
+
+  it('retains parallel todo snapshots when a status update is rejected', async () => {
+    const initialTodos = todos('thr_existing', [
+      ['Read context', 'in_progress'],
       ['Implement closure', 'in_progress'],
       ['Verify', 'pending']
     ])
-    expect(state.threads[0]?.todos?.items[1]?.status).toBe('in_progress')
+    const { actions, provider, state } = buildHarness({ initialTodos })
+    state.threads[0].todos = initialTodos
+    const response = deferred<ThreadTodoList>()
+    provider.setThreadTodos.mockReturnValueOnce(response.promise)
+
+    const pending = actions.setActiveThreadTodoStatus('todo_3', 'in_progress')
+
+    expect(provider.setThreadTodos).toHaveBeenCalledExactlyOnceWith('thr_existing', [
+      expect.objectContaining({ id: 'todo_1', content: 'Read context', status: 'in_progress' }),
+      expect.objectContaining({ id: 'todo_2', content: 'Implement closure', status: 'in_progress' }),
+      expect.objectContaining({ id: 'todo_3', content: 'Verify', status: 'in_progress' })
+    ])
+    expect(state.activeThreadTodos).toBe(initialTodos)
+    expect(state.threads[0].todos).toBe(initialTodos)
+    expect(state.error).toBeNull()
+
+    response.reject(new Error('Synthetic Todo update rejected'))
+
+    expect(await pending).toBe(false)
+    expect(state.activeThreadTodos).toBe(initialTodos)
+    expect(state.threads[0].todos).toBe(initialTodos)
+    expect(state.activeThreadTodos?.items.map((item) => [item.id, item.status])).toEqual([
+      ['todo_1', 'in_progress'],
+      ['todo_2', 'in_progress'],
+      ['todo_3', 'pending']
+    ])
+    expect(state.error).toBe(i18n.t('common:runtimeRequestFailed'))
   })
 
   it('clears active todos and syncs the thread snapshot', async () => {
@@ -620,8 +928,10 @@ describe('chat-store-maintenance-actions goal actions', () => {
       lastSeq: 12
     })
     let busyWhenBackendCalled: boolean | null = null
+    let inputStatusWhenBackendCalled: string | undefined
     provider.interruptTurn.mockImplementation(async () => {
       busyWhenBackendCalled = state.busy
+      inputStatusWhenBackendCalled = state.blocks.flatMap(block => block.kind === 'user_input' ? [block.status] : [])[0]
     })
     provider.getThreadDetail.mockResolvedValueOnce({
       blocks: [
@@ -660,6 +970,7 @@ describe('chat-store-maintenance-actions goal actions', () => {
 
     expect(provider.interruptTurn).toHaveBeenCalledWith('thr_existing', 'turn-1', { discard: false })
     expect(busyWhenBackendCalled).toBe(false)
+    expect(inputStatusWhenBackendCalled).toBe('error')
     expect(state.busy).toBe(false)
     expect(state.currentTurnId).toBeNull()
     expect(state.currentTurnUserId).toBeNull()
@@ -673,6 +984,36 @@ describe('chat-store-maintenance-actions goal actions', () => {
     expect(getActiveStreamSnapshotFor('thr_existing', 'turn-1').liveAssistant).toBe('')
     expect(refreshThreads).toHaveBeenCalledTimes(1)
     expect(recoverActiveTurn).not.toHaveBeenCalled()
+  })
+
+  it('preserves display-only history when interrupt replaces the current primary', async () => {
+    const { actions, state } = buildHarness()
+    const provider = new AnalytixRuntimeProvider()
+    registryMock.getProvider.mockReturnValue(provider)
+    vi.spyOn(provider, 'interruptTurn').mockResolvedValue(undefined)
+    const primary = { blocks: [
+      { kind: 'user' as const, id: 'current-user', text: 'Current request', meta: { turnId: 'current-turn' } },
+      { kind: 'compaction' as const, id: 'compact-item', status: 'success' as const, summary: 'Context compacted', meta: { turnId: 'compact-turn' } }
+    ], latestSeq: 4, latestTurnId: 'current-turn', latestUserMessageId: 'current-user', threadStatus: 'aborted' }
+    const replay = createOrdinaryHistoryReplay('thr_existing', 4)
+    const timestamp = '2026-10-08T00:00:00Z'
+    replay.accept([{ kind: 'item_created', seq: 1, timestamp, threadId: 'thr_existing', turnId: 'compressed-turn',
+      itemId: 'compressed-user', item: { id: 'compressed-user', threadId: 'thr_existing', turnId: 'compressed-turn',
+        kind: 'user_message', role: 'user', status: 'completed', createdAt: timestamp, text: 'Authorized old display' } },
+      { kind: 'compaction_completed', seq: 2, timestamp, threadId: 'thr_existing', turnId: 'compact-turn', summary: 'Context compacted' },
+      { kind: 'cursor_advanced', seq: 4, timestamp, threadId: 'thr_existing' }])
+    const displayed = replay.mergeSnapshot(primary.blocks)
+    vi.spyOn(provider, 'getThreadDetail').mockResolvedValue(primary)
+    const restore = vi.spyOn(provider, 'restoreThreadDisplayHistory').mockResolvedValue({ ...primary, blocks: displayed })
+    Object.assign(state, { blocks: displayed, lastSeq: 4, busy: true, currentTurnId: 'current-turn',
+      currentTurnUserId: 'current-user', liveAssistant: 'provisional', queuedMessages: [],
+      turnStartedAtByUserId: {}, turnDurationByUserId: {} })
+    await actions.interrupt()
+    expect(restore).toHaveBeenCalledWith('thr_existing', primary, undefined)
+    expect(state.blocks.find(block => block.id === 'compressed-user')).toMatchObject({ text: 'Authorized old display' })
+    expect(state.blocks.filter(isOrdinaryDisplayHistoryBlock).map(block => block.id)).toEqual(['compressed-user'])
+    expect(state.lastSeq).toBe(4); expect(state.currentTurnId).toBeNull(); expect(state.busy).toBe(false)
+    expect((await provider.getThreadDetail('thr_existing')).blocks.some(isOrdinaryDisplayHistoryBlock)).toBe(false)
   })
 
   it('keeps the draft quarantined and blocks when interrupt reconciliation fails', async () => {
@@ -714,9 +1055,9 @@ describe('chat-store-maintenance-actions goal actions', () => {
     const submit = vi.fn(() => new Promise<void>(resolve => { complete = resolve }))
     const cancel = vi.fn(async () => undefined)
     Object.assign(provider, { submitUserInputResponse: submit, cancelUserInput: cancel })
-    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', id: 'input-1', requestId: 'request-1', questions: [], status: 'pending' }] })
-    const first = actions.resolveUserInput('input-1', { kind: 'submit', answers: [] })
-    await actions.resolveUserInput('input-1', { kind: 'cancel' })
+    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), questions: [], status: 'pending' }] })
+    const first = actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: state.activeThreadId }, { kind: 'submit', answers: [] })
+    await actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: state.activeThreadId }, { kind: 'cancel' })
     expect(submit).toHaveBeenCalledOnce()
     expect(cancel).not.toHaveBeenCalled()
     complete()
@@ -729,8 +1070,8 @@ describe('chat-store-maintenance-actions goal actions', () => {
     const { actions, provider, state } = buildHarness()
     let fail!: (error: Error) => void
     Object.assign(provider, { submitUserInputResponse: vi.fn(() => new Promise<void>((_resolve, reject) => { fail = reject })) })
-    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', id: 'input-1', requestId: 'request-1', questions: [], status: 'pending' }] })
-    const pending = actions.resolveUserInput('input-1', { kind: 'submit', answers: [] })
+    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), questions: [], status: 'pending' }] })
+    const pending = actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: state.activeThreadId }, { kind: 'submit', answers: [] })
     state.blocks = state.blocks.map(block => ({ ...block, status: 'submitted' })) as ChatBlock[]
     fail(new Error('host already resolved'))
     await pending
@@ -743,8 +1084,8 @@ describe('chat-store-maintenance-actions goal actions', () => {
     const { actions, provider, state } = buildHarness()
     let fail!: (error: Error) => void
     Object.assign(provider, { submitUserInputResponse: vi.fn(() => new Promise<void>((_resolve, reject) => { fail = reject })) })
-    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', id: 'input-1', requestId: 'request-1', questions: [], status: 'pending' }] })
-    const pending = actions.resolveUserInput('input-1', { kind: 'submit', answers: [] })
+    Object.assign(state, { busy: false, blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), questions: [], status: 'pending' }] })
+    const pending = actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: state.activeThreadId }, { kind: 'submit', answers: [] })
     Object.assign(state, { activeThreadId: 'thr_other', blocks: [], error: null })
     fail(new Error('old thread HTTP failure'))
     await pending
@@ -780,18 +1121,18 @@ describe('chat-store-maintenance-actions goal actions', () => {
     Object.assign(state, {
       busy: true,
       blocks: [{
-        kind: 'user_input',
-        id: 'input-account',
-        requestId: 'request-account',
+        kind: 'user_input', meta: { turnId: 'turn-question-owner' },
+        id: 'item_' + nativeRequestId('f'),
+        requestId: nativeRequestId('f'),
         questions: [],
         status: 'pending'
       }]
     })
     const answers = [{ id: 'account', label: `银行卡号 ${account}`, value: account }]
 
-    await actions.resolveUserInput('input-account', { kind: 'submit', answers })
+    await actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('f'), requestId: nativeRequestId('f'), threadId: state.activeThreadId }, { kind: 'submit', answers })
 
-    expect(submitUserInputResponse).toHaveBeenCalledWith('request-account', answers)
+    expect(submitUserInputResponse).toHaveBeenCalledWith(nativeRequestId('f'), answers, nativeQuestionSelector(nativeRequestId('f'), state.activeThreadId))
     expect(state.blocks).toEqual([
       expect.objectContaining({
         kind: 'user_input',
@@ -810,15 +1151,15 @@ describe('chat-store-maintenance-actions goal actions', () => {
     Object.assign(state, {
       queuedMessages: [],
       blocks: [{
-        kind: 'user_input',
-        id: 'input-unsupported',
-        requestId: 'request-unsupported',
+        kind: 'user_input', meta: { turnId: 'turn-question-owner' },
+        id: 'item_' + nativeRequestId('b'),
+        requestId: nativeRequestId('b'),
         questions: [],
         status: 'pending'
       }]
     })
 
-    await actions.resolveUserInput('input-unsupported', {
+    await actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('b'), requestId: nativeRequestId('b'), threadId: state.activeThreadId }, {
       kind: 'submit',
       answers: [{ id: 'account', label: account, value: account }]
     })
@@ -877,6 +1218,8 @@ describe('chat-store-maintenance-actions goal actions', () => {
   it('resends unchanged text exactly once after the rewind event precedes the successful HTTP response', async () => {
     const { actions, get, provider, sendMessage, state } = buildHarness()
     const originalText = 'retry this unchanged request'
+    state.turnUsageById = footerEntries(['turn_retained', 'turn_failed'])
+    state.rewoundTurnIds = { previously_removed: true }; state.lastTurnUsage = footerLastUsage
     const retained: ChatBlock = { kind: 'user', id: 'user_retained', text: 'earlier request', meta: { turnId: 'turn_retained' } }
     Object.assign(state, {
       busy: false,
@@ -909,11 +1252,16 @@ describe('chat-store-maintenance-actions goal actions', () => {
     const pending = actions.rewindAndResend('user_failed', originalText)
     expect(provider.rewindThread).toHaveBeenCalledWith('thr_existing', 'turn_failed')
     expect(state.blocks).toEqual([retained])
+    expect(Object.keys(state.turnUsageById)).toEqual(['turn_retained'])
+    expect(state.rewoundTurnIds).toMatchObject({ previously_removed: true, turn_failed: true })
     expect(sendMessage).not.toHaveBeenCalled()
     completeHTTP()
     await pending
 
     expect(provider.rewindThread).toHaveBeenCalledTimes(1)
+    expect(Object.keys(state.turnUsageById)).toEqual(['turn_retained'])
+    expect(state.rewoundTurnIds).toMatchObject({ previously_removed: true, turn_failed: true })
+    expect(state.lastTurnUsage).toBeNull()
     expect(sendMessage).toHaveBeenCalledTimes(1)
     expect(sendMessage).toHaveBeenCalledWith(originalText, undefined, expect.objectContaining({ attachmentIds: [], attachments: [], fileReferences: [] }))
     expect(state.blocks).toEqual([retained])
@@ -1086,7 +1434,7 @@ describe('edit resend attachment continuity and ownership', () => {
     h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation++
     if (navigation === 'A-B-A') { h.state.activeThreadId = 'thr_existing'; getThreadBinding(h.sseAbortRef).generation++ }
     h.state.blocks = [{ kind: 'assistant', id: 'new-selection', text: 'keep' }]
-    h.state.queuedMessages = [{ id: 'new-queue', text: 'keep' }] as ChatState['queuedMessages']
+    h.state.queuedMessages = [{ threadId: h.state.activeThreadId!, id: 'new-queue', text: 'keep' }]
     h.state.error = 'new error'
     pending.resolve(seam === 'metadata' ? publicAttachment() : { ok: true })
     await operation
@@ -1122,6 +1470,13 @@ describe('edit resend attachment continuity and ownership', () => {
     h.state.runtimeConnection = 'offline'; pending.resolve(publicAttachment()); await operation
     expect(h.provider.rewindThread).not.toHaveBeenCalled(); expect(h.sendMessage).not.toHaveBeenCalled()
   })
+
+
+  it.each(['/new-review','plain edited request'])('does not infer a new load from edited history without direct selection: %s', async text => {
+    const h=resendHarness({activeSkillIds:['old-review']});
+    await h.actions.rewindAndResend('user_edit',text);
+    expect(h.sendMessage.mock.calls[0][2]?.requestedSkillIds ?? []).toEqual([]);
+  });
 
   it.each(['false', 'throw'])('restores editable payload after rewind when sending returns %s', async outcome => {
     const h = resendHarness({ attachmentIds: [attachmentId], fileReferences: [{ path: '/workspace/analytix/a.txt', relativePath: 'a.txt', name: 'a.txt', kind: 'file' }] })
@@ -1279,5 +1634,640 @@ describe('edit resend attachment continuity and ownership', () => {
     const rewound = resendHarness(); rewound.provider.rewindThread.mockRejectedValue(new Error('PRIVATE_REWIND'))
     await rewound.actions.rewindAndResend('user_edit', 'edited')
     expect(rewound.sendMessage).not.toHaveBeenCalled(); expect(rewound.state.blocks).toHaveLength(1)
+  })
+})
+
+describe('typed user-input display privacy', () => {
+  beforeEach(() => {
+    registryMock.getProvider.mockReset()
+    vi.stubGlobal('localStorage', memoryStorage())
+  })
+  afterEach(() => vi.unstubAllGlobals())
+  it('keeps private custom text only in the host submission and displays fixed status', async () => {
+    const sentinel = 'PRIVATE_NON_PII_CUSTOM_SENTINEL'
+    vi.stubGlobal('window', { analytix: { logs: { error: vi.fn(async () => undefined) } } })
+    const { actions, provider, state } = buildHarness()
+    const submit = vi.fn(async () => undefined)
+    Object.assign(provider, { submitUserInputResponse: submit })
+    Object.assign(state, { blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('e'), requestId: nativeRequestId('e'),
+      status: 'pending', questions: [
+        { id: nativeRequestId('e') + '_1', header: 'Path', question: 'Choose', multiSelect: true,
+          options: [{ id: nativeRequestId('e') + '_1_option_1', label: 'Fast', description: '' }] },
+        { id: nativeRequestId('e') + '_2', header: 'Detail', question: 'Detail', multiSelect: false, options: [] }
+      ] }] })
+    const answers = [
+      { id: nativeRequestId('e') + '_1', kind: 'answer' as const, optionIds: [nativeRequestId('e') + '_1_option_1'], customText: sentinel },
+      { id: nativeRequestId('e') + '_2', kind: 'skip' as const }
+    ]
+    await actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('e'), requestId: nativeRequestId('e'), threadId: state.activeThreadId }, { kind: 'submit', answers })
+    expect(submit).toHaveBeenCalledWith(nativeRequestId('e'), answers, nativeQuestionSelector(nativeRequestId('e'), state.activeThreadId))
+    expect(state.blocks[0]).toMatchObject({ status: 'submitted', answers: [
+      { id: nativeRequestId('e') + '_1', label: 'Fast', value: `Fast\n${i18n.t('common:userInputSubmitted')}` },
+      { id: nativeRequestId('e') + '_2', label: i18n.t('common:userInputSkipped'), value: '' }
+    ] })
+    expect(JSON.stringify(state.blocks)).not.toContain(sentinel)
+    expect(JSON.stringify(state.blocks)).not.toContain('customText')
+    expect(JSON.stringify(state.blocks)).not.toContain('optionIds')
+  })
+})
+
+
+describe('user-input identity action boundary', () => {
+  it('cancels each of two independently displayed pending requests by its captured pair', async () => {
+    const { actions, provider, state } = buildHarness({ activeThreadId: 'thr_existing' })
+    const cancel = vi.fn(async () => undefined)
+    Object.assign(provider, { cancelUserInput: cancel })
+    Object.assign(state, { busy: false, blocks: [
+      { kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), status: 'pending', questions: [] },
+      { kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('b'), requestId: nativeRequestId('b'), status: 'pending', questions: [] }
+    ] })
+    await actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('b'), requestId: nativeRequestId('b'), threadId: 'thr_existing' }, { kind: 'cancel' })
+    expect(cancel).toHaveBeenNthCalledWith(1, nativeRequestId('b'), nativeQuestionSelector(nativeRequestId('b'), 'thr_existing'))
+    expect(state.blocks).toMatchObject([{ status: 'pending' }, { status: 'cancelled' }])
+    await actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: 'thr_existing' }, { kind: 'cancel' })
+    expect(cancel).toHaveBeenNthCalledWith(2, nativeRequestId('a'), nativeQuestionSelector(nativeRequestId('a'), 'thr_existing'))
+    expect(state.blocks).toMatchObject([{ status: 'cancelled' }, { status: 'cancelled' }])
+  })
+
+  it.each(['submit', 'cancel'] as const)('rejects a displayed %s after the same item changes to a different request', async kind => {
+    const { actions, provider, state } = buildHarness({ activeThreadId: 'thr_existing' })
+    const submit = vi.fn(async () => undefined), cancel = vi.fn(async () => undefined)
+    Object.assign(provider, { submitUserInputResponse: submit, cancelUserInput: cancel })
+    Object.assign(state, { blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('c'), status: 'pending', questions: [] }] })
+    await expect(actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('d'), threadId: 'thr_existing' },
+      kind === 'submit' ? { kind, answers: [{ id: 'q1', label: '', value: 'Synthetic old answer' }] } : { kind })).rejects.toThrow(i18n.t('common:ownedThreadUnavailable'))
+    expect(submit).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled()
+    expect(state.blocks).toMatchObject([{ requestId: nativeRequestId('c'), status: 'pending' }])
+  })
+
+  it.each(['submit', 'cancel'] as const)('rejects a captured %s on a different active thread', async kind => {
+    const { actions, provider, state } = buildHarness({ activeThreadId: 'thr_other' })
+    const submit = vi.fn(async () => undefined), cancel = vi.fn(async () => undefined)
+    Object.assign(provider, { submitUserInputResponse: submit, cancelUserInput: cancel })
+    Object.assign(state, { blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), status: 'pending', questions: [] }] })
+    await actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: 'thr_existing' },
+      kind === 'submit' ? { kind, answers: [{ id: 'q1', label: '', value: 'Synthetic old answer' }] } : { kind })
+    expect(submit).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled()
+    expect(state.blocks).toMatchObject([{ status: 'pending' }])
+  })
+
+  it.each([
+    { itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('b'), threadId: 'thr_existing', turnId: 'turn-question-owner' },
+    { itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: null, turnId: 'turn-question-owner' },
+    { itemId: 'unknown', requestId: nativeRequestId('a'), threadId: 'thr_existing', turnId: 'turn-question-owner' },
+    { itemId: 'item_' + nativeRequestId('a'), requestId: '', threadId: 'thr_existing', turnId: 'turn-question-owner' }
+  ])('rejects an unknown or conflicting displayed target %j', async target => {
+    const { actions, provider, state } = buildHarness({ activeThreadId: 'thr_existing' })
+    const cancel = vi.fn(async () => undefined)
+    Object.assign(provider, { cancelUserInput: cancel })
+    Object.assign(state, { blocks: [
+      { kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), status: 'pending', questions: [] },
+      { kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('b'), requestId: nativeRequestId('b'), status: 'pending', questions: [] }
+    ] })
+    if (target.threadId === null) await actions.resolveUserInput(target, { kind: 'cancel' })
+    else await expect(actions.resolveUserInput(target, { kind: 'cancel' })).rejects.toThrow(i18n.t('common:ownedThreadUnavailable'))
+    expect(cancel).not.toHaveBeenCalled()
+    expect(state.blocks).toMatchObject([{ status: 'pending' }, { status: 'pending' }])
+  })
+
+  it('does not send a late captured cancel after the exact request has already submitted', async () => {
+    const { actions, provider, state } = buildHarness({ activeThreadId: 'thr_existing' })
+    const cancel = vi.fn(async () => undefined)
+    Object.assign(provider, { cancelUserInput: cancel })
+    Object.assign(state, { blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), status: 'submitted', questions: [] }] })
+    await expect(actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: 'thr_existing' }, { kind: 'cancel' })).rejects.toThrow(i18n.t('common:pendingRequestNotResolved'))
+    expect(cancel).not.toHaveBeenCalled()
+    expect(state.blocks).toMatchObject([{ status: 'submitted' }])
+  })
+
+  beforeEach(() => {
+    registryMock.getProvider.mockReset()
+    vi.stubGlobal('localStorage', memoryStorage())
+    vi.stubGlobal('window', { analytix: { logs: { error: vi.fn(async () => undefined) } } })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('does not cancel the first pending request when two displayed requests share an item identity', async () => {
+    const { actions, provider, state } = buildHarness()
+    const cancel = vi.fn(async () => undefined)
+    Object.assign(provider, { cancelUserInput: cancel })
+    Object.assign(state, { busy: false, blocks: [
+      { kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), status: 'pending', questions: [] },
+      { kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('b'), status: 'pending', questions: [] }
+    ] })
+    await expect(actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('b'), threadId: state.activeThreadId }, { kind: 'cancel' })).rejects.toThrow(i18n.t('common:ownedThreadUnavailable'))
+    expect(cancel).not.toHaveBeenCalled()
+    expect(state.blocks.map(block => block.kind === 'user_input' ? block.status : undefined)).toEqual(['pending', 'pending'])
+  })
+})
+
+
+describe('timed user-input action receipts', () => {
+  beforeEach(() => { registryMock.getProvider.mockReset(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => vi.unstubAllGlobals())
+  const timing = { timeoutSeconds: 120, deadlineAt: '2026-10-09T00:00:00.000Z' }
+  it('keeps captured late UUID and target when current runtime turn changes and never publishes raw answers', async () => {
+    const h = buildHarness(), submit = vi.fn(async () => undefined)
+    Object.assign(h.provider, { submitUserInputLateReply: submit })
+    Object.assign(h.state, { busy: true, currentTurnId: 'turn-new', blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), status: 'continued', timedWait: timing, questions: [] }] })
+    const answers = [{ id: nativeRequestId('a') + '_1', kind: 'answer' as const, optionIds: [], customText: 'PRIVATE_SYNTHETIC_LATE_ANSWER' }]
+    const action = { kind: 'late' as const, answers, clientUserMessageId: '67eeac24-98da-4a49-a4ee-1d5b54574999', expectedTurnId: 'turn-captured' }
+    await h.actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: h.state.activeThreadId }, action)
+    expect(submit).toHaveBeenCalledWith(nativeRequestId('a'), answers, { clientUserMessageId: action.clientUserMessageId, expectedTurnId: 'turn-captured' }, nativeQuestionSelector(nativeRequestId('a'), h.state.activeThreadId))
+    expect(h.state.blocks).toMatchObject([{ status: 'continued' }])
+    expect(h.state.blocks).toHaveLength(1); expect(JSON.stringify(h.state.blocks)).not.toContain('PRIVATE_SYNTHETIC_LATE_ANSWER')
+  })
+  it.each(['same', 'switched', 'already-streaming'] as const)('recovers actual idle wake through existing snapshot/SSE only for %s owner', async owner => {
+    const h = buildHarness(); let finish!: () => void
+    const submit = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+    Object.assign(h.provider, { submitUserInputLateReply: submit })
+    Object.assign(h.state, { busy: false, currentTurnId: null, route: 'chat', blocks: [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), status: 'continued', questions: [] }] })
+    const action = { kind: 'late' as const, answers: [], clientUserMessageId: '67eeac24-98da-4a49-a4ee-1d5b54574999', expectedTurnId: 'turn-host-terminal' }
+    const response = h.actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: h.state.activeThreadId }, action)
+    expect(h.state.busy).toBe(false); expect(h.state.currentTurnId).toBeNull()
+    if (owner === 'switched') h.state.activeThreadId = 'other-thread'
+    if (owner === 'already-streaming') { h.state.busy = true; h.state.currentTurnId = 'actual-sse-new-turn' }
+    finish(); await response
+    expect(h.recoverActiveTurn).toHaveBeenCalledTimes(owner === 'same' ? 1 : 0)
+    expect(h.state.blocks).toMatchObject([{ status: 'continued' }]); expect(h.state.blocks).toHaveLength(1)
+  })
+  it.each(['submitted', 'cancelled', 'continued'] as const)('rejects a stale foreground cancel on %s without changing the real status', async status => {
+    const h = buildHarness(), cancel = vi.fn(async () => undefined)
+    Object.assign(h.provider, { cancelUserInput: cancel })
+    h.state.blocks = [{ kind: 'user_input', meta: { turnId: 'turn-question-owner' }, id: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), status, timedWait: timing, questions: [] }]
+    await expect(h.actions.resolveUserInput({ turnId: 'turn-question-owner', itemId: 'item_' + nativeRequestId('a'), requestId: nativeRequestId('a'), threadId: h.state.activeThreadId }, { kind: 'cancel' })).rejects.toThrow()
+    expect(cancel).not.toHaveBeenCalled(); expect(h.state.blocks).toMatchObject([{ status }])
+  })
+})
+
+describe('Question metadata lifecycle at confirmed thread deletion', () => {
+  const requestId = 'input_' + 'a'.repeat(64)
+  const key = (threadId: string) => JSON.stringify({ threadId, turnId: 'turn-synthetic', itemId: 'item_' + requestId, requestId })
+  beforeEach(() => { registryMock.getProvider.mockReset(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => vi.unstubAllGlobals())
+  it.each([false, true])('clears only a confirmed deletion and preserves failure metadata, fails=%s', async fails => {
+    const { actions, state, provider } = buildHarness({ activeThreadId: null })
+    state.userInputDraftInterruptions = { [key('thr_existing')]: { revision: null, unsent: true }, [key('thr_other')]: { revision: null, unsent: true } }
+    if (fails) provider.deleteThread.mockRejectedValueOnce(new Error('Synthetic deletion failure'))
+    await actions.deleteThread('thr_existing')
+    expect(state.deletedUserInputDraftThreadIds?.thr_existing).toBe(fails ? undefined : true)
+    expect(state.userInputDraftInterruptions).toEqual(fails
+      ? { [key('thr_existing')]: { revision: null, unsent: true }, [key('thr_other')]: { revision: null, unsent: true } }
+      : { [key('thr_other')]: { revision: null, unsent: true } })
+  })
+  it('retains warnings on ordinary archive and clears them on the existing deletion fallback', async () => {
+    const { actions, state, provider } = buildHarness({ activeThreadId: null })
+    state.userInputDraftInterruptions = { [key('thr_existing')]: { revision: null, unsent: true } }
+    await actions.archiveThread('thr_existing', true)
+    expect(state.userInputDraftInterruptions).toEqual({ [key('thr_existing')]: { revision: null, unsent: true } })
+    Reflect.deleteProperty(provider, 'archiveThread')
+    await actions.archiveThread('thr_existing', true)
+    expect(provider.deleteThread).toHaveBeenCalledWith('thr_existing')
+    expect(state.deletedUserInputDraftThreadIds?.thr_existing).toBe(true)
+    expect(state.userInputDraftInterruptions).toEqual({})
+  })
+})
+
+
+describe('HTTP-confirmed rewind usage ownership', () => {
+  it('cuts only the captured suffix without SSE and preserves prior tombstones', async () => {
+    const { actions, state, provider, sendMessage } = buildHarness()
+    const retained: ChatBlock = { kind: 'user', id: 'retained-user', text: 'earlier', meta: { turnId: 'retained' } }
+    Object.assign(state, { busy: false, blocks: [retained,
+      { kind: 'user', id: 'target-user', text: 'old', meta: { turnId: 'target' } },
+      { kind: 'user', id: 'later-user', text: 'later', meta: { turnId: 'later' } }],
+      turnUsageById: footerEntries(['retained', 'target', 'later']), rewoundTurnIds: { previous: true }, lastTurnUsage: footerLastUsage })
+    await actions.rewindAndResend('target-user', 'new')
+    expect(provider.rewindThread).toHaveBeenCalledWith('thr_existing', 'target')
+    expect(state.blocks).toEqual([retained]); expect(Object.keys(state.turnUsageById)).toEqual(['retained'])
+    expect(state.rewoundTurnIds).toEqual({ previous: true, target: true, later: true })
+    expect(state.lastTurnUsage).toBeNull(); expect(sendMessage).toHaveBeenCalledOnce()
+  })
+  it('does not manufacture a cut or discard usage when HTTP fails without a durable SSE receipt', async () => {
+    const { actions, state, provider, sendMessage } = buildHarness()
+    const blocks: ChatBlock[] = [{ kind: 'user', id: 'target-user', text: 'old', meta: { turnId: 'target' } }]
+    const entries = footerEntries(['target']), tombstones = { previous: true as const }
+    Object.assign(state, { busy: false, blocks, turnUsageById: entries, rewoundTurnIds: tombstones, lastTurnUsage: footerLastUsage })
+    provider.rewindThread.mockRejectedValueOnce(new Error('Synthetic unavailable reply'))
+    await actions.rewindAndResend('target-user', 'new')
+    expect(state.blocks).toBe(blocks); expect(state.turnUsageById).toBe(entries)
+    expect(state.rewoundTurnIds).toBe(tombstones); expect(state.lastTurnUsage).toBe(footerLastUsage)
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('Question native turn action ownership', () => {
+  beforeEach(() => { registryMock.getProvider.mockReset(); vi.stubGlobal('localStorage', memoryStorage()); vi.stubGlobal('window', { analytix: { logs: { error: vi.fn(async () => undefined) } } }) })
+  afterEach(() => vi.unstubAllGlobals())
+  const requestId = nativeRequestId('a')
+  it.each(['submit', 'cancel', 'late'] as const)('rejects a captured %s when the same physical pair now has another native turn', async kind => {
+    const { actions, provider, state } = buildHarness()
+    const submit = vi.fn(), cancel = vi.fn(), late = vi.fn()
+    Object.assign(provider, { submitUserInputResponse: submit, cancelUserInput: cancel, submitUserInputLateReply: late })
+    state.blocks = [{ kind: 'user_input', id: 'item_' + requestId, requestId, status: kind === 'late' ? 'continued' : 'pending', questions: [], meta: { turnId: 'other-native-turn' } }]
+    const action = kind === 'late' ? { kind, answers: [], clientUserMessageId: '67eeac24-98da-4a49-a4ee-1d5b54574999', expectedTurnId: 'current-steering-turn' }
+      : kind === 'submit' ? { kind, answers: [] } : { kind }
+    await expect(actions.resolveUserInput(nativeQuestionSelector(requestId, state.activeThreadId), action)).rejects.toThrow(i18n.t('common:ownedThreadUnavailable'))
+    expect(submit).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled(); expect(late).not.toHaveBeenCalled()
+  })
+  it.each(['success', 'failure'] as const)('does not write a captured %s response into the same pair on a replacement native turn', async outcome => {
+    const { actions, provider, state } = buildHarness()
+    let finish!: () => void, fail!: (error: Error) => void
+    Object.assign(provider, { submitUserInputResponse: vi.fn(() => new Promise<void>((resolve, reject) => { finish = resolve; fail = reject })) })
+    const block: Extract<ChatBlock, { kind: 'user_input' }> = { kind: 'user_input', id: 'item_' + requestId, requestId, status: 'pending', questions: [], meta: { turnId: 'turn-question-owner' } }
+    state.blocks = [block]
+    const pending = actions.resolveUserInput(nativeQuestionSelector(requestId, state.activeThreadId), { kind: 'submit', answers: [] })
+    const replacement = { ...block, meta: { turnId: 'replacement-native-turn' } }; state.blocks = [replacement]
+    if (outcome === 'success') finish(); else fail(new Error('Synthetic old response'))
+    await pending
+    expect(state.blocks).toEqual([replacement]); expect(state.error).toBeNull()
+    expect(provider.getThreadDetail).not.toHaveBeenCalled()
+  })
+  it.each([null, '', 'legacy-turn'] as const)('does not infer a missing or mismatched native selector from requestId, turn=%s', async turnId => {
+    const { actions, provider, state } = buildHarness(), cancel = vi.fn()
+    Object.assign(provider, { cancelUserInput: cancel })
+    state.blocks = [{ kind: 'user_input', id: 'item_' + requestId, requestId, status: 'pending', questions: [], meta: { turnId: 'turn-question-owner' } }]
+    await expect(actions.resolveUserInput({ ...nativeQuestionSelector(requestId, state.activeThreadId), turnId }, { kind: 'cancel' })).rejects.toThrow(i18n.t('common:ownedThreadUnavailable'))
+    expect(cancel).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('Queue confirmed retirement and Stop owners', () => {
+  beforeEach(() => { registryMock.getProvider.mockReset(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => { clearActiveStream(); vi.unstubAllGlobals() })
+  it.each(['delete', 'archive-delete-fallback'] as const)('retires only the confirmed thread through %s', async route => {
+    const { actions, state, provider } = buildHarness()
+    const other = { threadId: 'thr_other', id: 'same-id', text: 'retain', sending: true }
+    Object.assign(state, { queuedMessages: [{ threadId: 'thr_existing', id: 'same-id', text: 'retire', sending: true }, other],
+      queuedMessagePauses: { thr_existing: 'interrupted', thr_other: 'failed' }, watchTurnCompletion: {}, unreadThreadIds: {} })
+    if (route === 'archive-delete-fallback') { Reflect.deleteProperty(provider, 'archiveThread'); await actions.archiveThread('thr_existing', true) }
+    else await actions.deleteThread('thr_existing')
+    expect(provider.deleteThread).toHaveBeenCalledExactlyOnceWith('thr_existing')
+    expect(state.queuedMessages).toEqual([other])
+    expect(state.queuedMessagePauses).toEqual({ thr_other: 'failed' })
+  })
+
+  it('retains Stop after trusted terminal reconciliation', async () => {
+    const { actions, state, provider, drainQueuedMessages } = buildHarness()
+    const pending = { threadId: 'thr_existing', id: 'after-stop', text: 'later' }
+    Object.assign(state, { busy: true, currentTurnId: 'turn-stop', currentTurnUserId: 'user-stop',
+      queuedMessages: [pending], blocks: [{ kind: 'user', id: 'user-stop', text: 'initial', meta: { turnId: 'turn-stop' } }],
+      lastSeq: 3, turnStartedAtByUserId: {}, turnDurationByUserId: {} })
+    provider.getThreadDetail.mockResolvedValueOnce({ blocks: state.blocks, latestSeq: 4,
+      latestTurnId: 'turn-stop', threadStatus: 'aborted' })
+    await actions.interrupt()
+    expect(queuedPauseReason(state, pending.threadId)).toBe('interrupted')
+    expect(state.queuedMessages).toEqual([pending])
+    expect(drainQueuedMessages).toHaveBeenCalledWith(pending.threadId)
+  })
+})
+
+describe('rename acknowledgement and selection ownership', () => {
+  beforeEach(() => { registryMock.getProvider.mockReset(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => vi.unstubAllGlobals())
+
+  const ownerChanges = ['active', 'generation', 'submission', 'provider', 'route', 'ABA'] as const
+  function seedSearchProjection(h: Harness): NormalizedThread {
+    const other = { ...thread('thr_search_other'), title: 'Other search title' }
+    h.state.threadSearch = 'Synthetic title filter'
+    h.state.threadSearchResults = { query: h.state.threadSearch, threads: [thread('thr_existing'), other] }
+    return other
+  }
+  function expectSearchProjection(h: Harness, title: string, other: NormalizedThread, query = 'Synthetic title filter'): void {
+    expect(h.state.threadSearchResults?.query).toBe(query)
+    expect(h.state.threadSearchResults?.threads[0].title).toBe(title)
+    expect(h.state.threadSearchResults?.threads[1]).toBe(other)
+    expect(h.state.threadSearchResults?.threads).toHaveLength(2)
+  }
+  function replaceOwner(h: Harness, change: typeof ownerChanges[number]): void {
+    const binding = getThreadBinding(h.sseAbortRef)
+    if (change === 'active') h.state.activeThreadId = 'thr_other'
+    if (change === 'generation') binding.generation++
+    if (change === 'submission') binding.submissionGeneration++
+    if (change === 'provider') registryMock.getProvider.mockReturnValue({ ...h.provider, renameThread: vi.fn() })
+    if (change === 'route') h.state.route = 'write'
+    if (change === 'ABA') {
+      h.state.activeThreadId = 'thr_other'; binding.generation++
+      h.state.activeThreadId = 'thr_existing'; binding.generation++
+    }
+    h.state.error = 'New selection error'
+  }
+
+  it('rejects an offline rename after publishing its connection error without sending a request', async () => {
+    const h = buildHarness()
+    h.state.runtimeConnection = 'offline'
+    await expect(h.actions.renameThread('thr_existing', 'New title')).rejects.toThrow(i18n.t('common:runtimeActionNeedsConnection'))
+    expect(h.state.error).toBe(i18n.t('common:runtimeActionNeedsConnection'))
+    expect(h.provider.renameThread).not.toHaveBeenCalled()
+    expect(h.refreshThreads).not.toHaveBeenCalled()
+    expect(h.state.threads[0].title).toBe('thr_existing')
+  })
+
+  it('propagates an active rename POST failure to its caller and retains the original title', async () => {
+    const h = buildHarness()
+    h.provider.renameThread.mockRejectedValueOnce(new Error('Synthetic rename rejected'))
+    await expect(h.actions.renameActiveThread('New title')).rejects.toThrow()
+    expect(h.provider.renameThread).toHaveBeenCalledExactlyOnceWith('thr_existing', 'New title')
+    expect(h.state.error).toBe(i18n.t('common:runtimeRequestFailed'))
+    expect(h.state.threads[0].title).toBe('thr_existing')
+    expect(h.refreshThreads).not.toHaveBeenCalled()
+  })
+
+  it('does not change titles before HTTP acknowledgement and refreshes only after the committed rename', async () => {
+    const h = buildHarness(), response = deferred<void>()
+    const searchOther = seedSearchProjection(h)
+    let refreshWasCurrent: boolean | undefined
+    h.refreshThreads.mockImplementationOnce(async options => { refreshWasCurrent = options?.isCurrent?.() })
+    h.state.threads = [thread('thr_existing'), thread('thr_other')]
+    h.provider.renameThread.mockImplementationOnce(() => response.promise)
+    const pending = h.actions.renameThread(' thr_existing ', ' New title ')
+    expect(h.provider.renameThread).toHaveBeenCalledExactlyOnceWith('thr_existing', 'New title')
+    expect(h.state.threads.map(value => value.title)).toEqual(['thr_existing', 'thr_other'])
+    expectSearchProjection(h, 'thr_existing', searchOther)
+    expect(h.refreshThreads).not.toHaveBeenCalled()
+    response.resolve(undefined)
+    await pending
+    expect(h.state.threads.map(value => value.title)).toEqual(['New title', 'thr_other'])
+    expectSearchProjection(h, 'New title', searchOther)
+    expect(h.state.error).toBeNull()
+    expect(h.refreshThreads).toHaveBeenCalledExactlyOnceWith({ isCurrent: expect.any(Function) })
+    expect(refreshWasCurrent).toBe(true)
+    expect(h.refreshThreads.mock.calls[0][0]?.isCurrent?.()).toBe(true)
+  })
+
+  it.each(['later-rename', 'replacement-binding'] as const)('keeps an acknowledged read guard alive until %s retires it', async retirement => {
+    const h = buildHarness()
+    h.state.threads = [thread('thr_existing'), thread('thr_other')]
+    let readCurrent: (() => boolean) | undefined
+    h.refreshThreads.mockImplementationOnce(async options => { readCurrent = options?.isCurrent })
+    await h.actions.renameThread('thr_existing', 'Committed title')
+    expect(readCurrent?.()).toBe(true)
+    if (retirement === 'later-rename') {
+      const later = deferred<void>()
+      h.provider.renameThread.mockImplementationOnce(() => later.promise)
+      const pending = h.actions.renameThread('thr_other', 'Later intent title')
+      expect(h.provider.renameThread).toHaveBeenLastCalledWith('thr_other', 'Later intent title')
+      expect(readCurrent?.()).toBe(false)
+      expect(h.state.threads[0].title).toBe('Committed title')
+      later.resolve(undefined)
+      await pending
+    } else {
+      getThreadBinding(h.sseAbortRef).generation++
+    }
+    expect(readCurrent?.()).toBe(false)
+    expect(h.state.activeThreadId).toBe('thr_existing')
+  })
+
+  it.each(ownerChanges.flatMap(change => ['ack', 'failure'].map(outcome => ({ change, outcome }))))(
+    'keeps a late $outcome from replacing the new UI owner after $change', async ({ change, outcome }) => {
+      const h = buildHarness(), response = deferred<void>()
+      const searchOther = seedSearchProjection(h)
+      h.provider.renameThread.mockImplementationOnce(() => response.promise)
+      const completed = h.actions.renameThread('thr_existing', 'Acknowledged resource title')
+        .then(() => 'resolved', () => 'rejected')
+      replaceOwner(h, change)
+      h.state.threadSearch = 'New synthetic filter'
+      h.state.threadSearchResults = { query: h.state.threadSearch, threads: [...h.state.threadSearchResults!.threads] }
+      const route = h.state.route
+      if (outcome === 'ack') response.resolve(undefined)
+      else response.reject(new Error(JSON.stringify({ code: 'missing_api_key', message: 'Synthetic old request failure' })))
+      expect(await completed).toBe(outcome === 'ack' ? 'resolved' : 'rejected')
+      expect(h.state.error).toBe('New selection error')
+      expect(h.state.route).toBe(route)
+      expect(h.state.settingsSection).toBe('general')
+      expect(h.refreshThreads).not.toHaveBeenCalled()
+      const expectedTitle = outcome === 'ack' && change !== 'provider' ? 'Acknowledged resource title' : 'thr_existing'
+      expect(h.state.threads[0].title).toBe(expectedTitle)
+      expectSearchProjection(h, expectedTitle, searchOther, 'New synthetic filter')
+    }
+  )
+
+  it.each(['ack', 'failure'] as const)('keeps the newer same-target title when an older rename returns %s', async outcome => {
+    const h = buildHarness(), older = deferred<void>(), newer = deferred<void>()
+    const searchOther = seedSearchProjection(h)
+    h.provider.renameThread.mockImplementationOnce(() => older.promise).mockImplementationOnce(() => newer.promise)
+    const first = h.actions.renameThread('thr_existing', 'Older title').then(() => 'resolved', () => 'rejected')
+    const second = h.actions.renameThread('thr_existing', 'Newer title')
+    newer.resolve(undefined)
+    await second
+    expect(h.state.threads[0].title).toBe('Newer title')
+    expectSearchProjection(h, 'Newer title', searchOther)
+    if (outcome === 'ack') older.resolve(undefined)
+    else older.reject(new Error('Synthetic superseded rename failure'))
+    expect(await first).toBe(outcome === 'ack' ? 'resolved' : 'rejected')
+    expect(h.state.threads[0].title).toBe('Newer title')
+    expectSearchProjection(h, 'Newer title', searchOther)
+    expect(h.state.error).toBeNull()
+    expect(h.refreshThreads).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves an acknowledged rename when its subsequent refresh fails and records the refresh error', async () => {
+    const h = buildHarness()
+    h.refreshThreads.mockRejectedValueOnce(new Error('Synthetic refresh failure after committed rename'))
+    await expect(h.actions.renameThread('thr_existing', 'Committed title')).resolves.toBeUndefined()
+    expect(h.state.threads[0].title).toBe('Committed title')
+    expect(h.state.error).toBe(i18n.t('common:runtimeRequestFailed'))
+    expect(h.provider.renameThread).toHaveBeenCalledOnce()
+  })
+
+  it.each(['ack', 'failure'] as const)('revokes a pending refresh after an ABA selection before refresh %s', async outcome => {
+    const h = buildHarness(), refreshed = deferred<void>()
+    let refreshCurrent: (() => boolean) | undefined
+    h.refreshThreads.mockImplementationOnce(async options => {
+      refreshCurrent = options?.isCurrent
+      await refreshed.promise
+      if (options?.isCurrent && !options.isCurrent()) return
+      h.state.threads = [{ ...thread('thr_existing'), title: 'Stale refresh title' }]
+    })
+    const pending = h.actions.renameThread('thr_existing', 'Committed title')
+    await Promise.resolve()
+    expect(h.state.threads[0].title).toBe('Committed title')
+    expect(refreshCurrent?.()).toBe(true)
+    replaceOwner(h, 'ABA')
+    expect(refreshCurrent?.()).toBe(false)
+    if (outcome === 'ack') refreshed.resolve(undefined)
+    else refreshed.reject(new Error('Synthetic retired refresh failure'))
+    await expect(pending).resolves.toBeUndefined()
+    expect(h.state.threads[0].title).toBe('Committed title')
+    expect(h.state.error).toBe('New selection error')
+  })
+
+  it.each(['post-ack', 'post-failure', 'refresh-failure'] as const)('preserves a newer error on the same binding through %s', async seam => {
+    const h = buildHarness(), response = deferred<void>()
+    let refreshCurrent: (() => boolean) | undefined
+    if (seam === 'refresh-failure') h.refreshThreads.mockImplementationOnce(options => { refreshCurrent = options?.isCurrent; return response.promise })
+    else {
+      h.provider.renameThread.mockImplementationOnce(() => response.promise)
+      if (seam === 'post-ack') h.refreshThreads.mockRejectedValueOnce(new Error('Synthetic refresh must not start after a newer error'))
+    }
+    const completed = h.actions.renameThread('thr_existing', 'Committed resource title').then(() => 'resolved', () => 'rejected')
+    if (seam === 'refresh-failure') {
+      await Promise.resolve()
+      expect(h.state.threads[0].title).toBe('Committed resource title')
+      expect(h.refreshThreads).toHaveBeenCalledOnce()
+      expect(refreshCurrent?.()).toBe(true)
+    }
+    h.state.error = 'New same-binding error'
+    if (seam === 'refresh-failure') expect(refreshCurrent?.()).toBe(false)
+    if (seam === 'post-ack') response.resolve(undefined)
+    else response.reject(new Error(JSON.stringify({ code: 'missing_api_key', message: 'Synthetic old operation failure' })))
+    expect(await completed).toBe(seam === 'post-failure' ? 'rejected' : 'resolved')
+    expect(h.state.error).toBe('New same-binding error')
+    expect(h.state.route).toBe('chat')
+    expect(h.state.settingsSection).toBe('general')
+    expect(h.state.threads[0].title).toBe(seam === 'post-failure' ? 'thr_existing' : 'Committed resource title')
+    if (seam !== 'refresh-failure') expect(h.refreshThreads).not.toHaveBeenCalled()
+  })
+
+  it('keeps a newer offline rename error after reconnecting and receiving an older same-target acknowledgement', async () => {
+    const h = buildHarness(), older = deferred<void>()
+    const offlineMessage = i18n.t('common:runtimeActionNeedsConnection')
+    h.provider.renameThread.mockImplementationOnce(() => older.promise)
+    const pending = h.actions.renameThread('thr_existing', 'Older pending title')
+    h.state.runtimeConnection = 'offline'
+    await expect(h.actions.renameThread('thr_existing', 'Newer offline title')).rejects.toThrow()
+    expect(h.state.error).toBe(offlineMessage)
+    h.state.runtimeConnection = 'ready'
+    older.resolve(undefined)
+    await pending
+    expect(h.state.threads[0].title).toBe('thr_existing')
+    expect(h.state.error).toBe(offlineMessage)
+    expect(h.provider.renameThread).toHaveBeenCalledExactlyOnceWith('thr_existing', 'Older pending title')
+    expect(h.refreshThreads).not.toHaveBeenCalled()
+  })
+})
+
+describe('captured selection receipt for active-thread forks', () => {
+  beforeEach(() => { registryMock.getProvider.mockReset(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it.each(['different-thread', 'retired', 'no-active'] as const)('does not fall back to another active thread for %s receipt', async reason => {
+    const h = buildHarness()
+    h.state.error = 'Existing selection error'
+    if (reason === 'no-active') h.state.activeThreadId = null
+    await h.actions.forkActiveThread({ threadId: reason === 'different-thread' ? 'thr_failed_selection' : 'thr_existing', isCurrent: () => reason !== 'retired' })
+    expect(h.provider.forkThread).not.toHaveBeenCalled()
+    expect(h.refreshThreads).not.toHaveBeenCalled()
+    expect(h.selectThread).not.toHaveBeenCalled()
+    expect(readThreadForkRegistry().forks).toEqual({})
+    expect(h.state.error).toBe('Existing selection error')
+  })
+
+  it('forks and records the exact active thread when its captured selection remains current', async () => {
+    const h = buildHarness()
+    h.state.threads = [{ ...thread('thr_existing'), title: 'Captured parent' }]
+    await h.actions.forkActiveThread({ threadId: 'thr_existing', isCurrent: () => true })
+    expect(h.provider.forkThread).toHaveBeenCalledExactlyOnceWith('thr_existing')
+    expect(h.refreshThreads).toHaveBeenCalledExactlyOnceWith({ isCurrent: expect.any(Function) })
+    expect(h.selectThread).toHaveBeenCalledExactlyOnceWith('thr_fork')
+    expect(readThreadForkRegistry().forks.thr_fork).toMatchObject({ parentThreadId: 'thr_existing', parentTitle: 'Captured parent' })
+  })
+
+  it.each(['receipt-retired', 'ABA'].flatMap(change => ['ack', 'failure'].map(outcome => ({ change, outcome }))))(
+    'ignores a created fork or failure after $change during POST, outcome=$outcome', async ({ change, outcome }) => {
+      const h = buildHarness(), response = deferred<NormalizedThread>()
+      let receiptCurrent = true
+      h.provider.forkThread.mockImplementationOnce(() => response.promise)
+      const pending = h.actions.forkActiveThread({ threadId: 'thr_existing', isCurrent: () => receiptCurrent })
+      expect(h.provider.forkThread).toHaveBeenCalledExactlyOnceWith('thr_existing')
+      if (change === 'receipt-retired') receiptCurrent = false
+      else {
+        const binding = getThreadBinding(h.sseAbortRef)
+        h.state.activeThreadId = 'thr_other'; binding.generation++
+        h.state.activeThreadId = 'thr_existing'; binding.generation++
+      }
+      h.state.error = 'Replacement selection error'
+      if (outcome === 'ack') response.resolve(thread('created-by-retired-selection'))
+      else response.reject(new Error(JSON.stringify({ code: 'missing_api_key', message: 'Synthetic retired fork failure' })))
+      await pending
+      expect(h.refreshThreads).not.toHaveBeenCalled()
+      expect(h.selectThread).not.toHaveBeenCalled()
+      expect(readThreadForkRegistry().forks['created-by-retired-selection']).toBeUndefined()
+      expect(h.state.error).toBe('Replacement selection error')
+      expect(h.state.route).toBe('chat')
+      expect(h.provider.forkThread).toHaveBeenCalledOnce()
+    }
+  )
+
+  it('does not select a created fork when its receipt retires during refresh', async () => {
+    const h = buildHarness(), refreshed = deferred<void>()
+    let receiptCurrent = true
+    let refreshCurrent: (() => boolean) | undefined
+    h.refreshThreads.mockImplementationOnce(async options => {
+      refreshCurrent = options?.isCurrent
+      await refreshed.promise
+      if (options?.isCurrent && !options.isCurrent()) return
+      h.state.threads = [thread('stale-refresh-result')]
+    })
+    const pending = h.actions.forkActiveThread({ threadId: 'thr_existing', isCurrent: () => receiptCurrent })
+    await Promise.resolve()
+    expect(h.refreshThreads).toHaveBeenCalledExactlyOnceWith({ isCurrent: expect.any(Function) })
+    expect(refreshCurrent?.()).toBe(true)
+    receiptCurrent = false
+    const currentThreads = [thread('new-selection-view')]
+    h.state.threads = currentThreads
+    expect(refreshCurrent?.()).toBe(false)
+    refreshed.resolve(undefined)
+    await pending
+    expect(h.state.threads).toBe(currentThreads)
+    expect(h.selectThread).not.toHaveBeenCalled()
+    expect(h.provider.forkThread).toHaveBeenCalledOnce()
+  })
+})
+
+describe('HTTP-acknowledged lifecycle search projection', () => {
+  beforeEach(() => { registryMock.getProvider.mockReset(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('removes the deleted search hit after ACK even when the following refresh fails', async () => {
+    const h = buildHarness({ activeThreadId: 'thr_other' }), response = deferred<void>()
+    const target = thread('thr_existing'), other = { ...thread('thr_other'), title: 'Other search record' }
+    const query = 'Synthetic lifecycle filter'
+    Object.assign(h.state, { threads: [target, other], threadSearch: query,
+      threadSearchResults: { query, threads: [target, other] }, watchTurnCompletion: {}, unreadThreadIds: {} })
+    h.provider.deleteThread.mockImplementationOnce(() => response.promise)
+    h.refreshThreads.mockRejectedValueOnce(new Error('Synthetic refresh failure after delete ACK'))
+    const pending = h.actions.deleteThread(target.id)
+    expect(h.provider.deleteThread).toHaveBeenCalledExactlyOnceWith(target.id)
+    expect(h.state.threadSearchResults?.threads).toEqual([target, other])
+    expect(h.refreshThreads).not.toHaveBeenCalled()
+    response.resolve(undefined)
+    await pending
+    expect(h.refreshThreads).toHaveBeenCalledOnce()
+    expect(h.state.threads).toEqual([other])
+    expect(h.state.threadSearchResults?.query).toBe(query)
+    expect(h.state.threadSearchResults?.threads).toEqual([other])
+    expect(h.state.threadSearchResults?.threads[0]).toBe(other)
+    expect(h.state.threadSearch).toBe(query)
+  })
+
+  it.each([
+    { label: 'archive', initial: false, archived: true },
+    { label: 'restore', initial: true, archived: false }
+  ])('keeps the $label ACK in search results even when the following refresh fails', async ({ initial, archived }) => {
+    const h = buildHarness({ activeThreadId: 'thr_other' }), response = deferred<void>()
+    const target = { ...thread('thr_existing'), archived: initial }
+    const other = { ...thread('thr_other'), title: 'Other search record', archived: false }
+    const query = 'Synthetic lifecycle filter'
+    Object.assign(h.state, { threads: [target, other], threadSearch: query,
+      threadSearchResults: { query, threads: [target, other] }, watchTurnCompletion: {}, unreadThreadIds: {} })
+    h.provider.archiveThread.mockImplementationOnce(() => response.promise)
+    h.refreshThreads.mockRejectedValueOnce(new Error('Synthetic refresh failure after archive state ACK'))
+    const pending = h.actions.archiveThread(target.id, archived)
+    expect(h.provider.archiveThread).toHaveBeenCalledExactlyOnceWith(target.id, archived)
+    expect(h.state.threadSearchResults?.threads[0].archived).toBe(initial)
+    expect(h.refreshThreads).not.toHaveBeenCalled()
+    response.resolve(undefined)
+    await pending
+    expect(h.refreshThreads).toHaveBeenCalledOnce()
+    expect(h.provider.deleteThread).not.toHaveBeenCalled()
+    expect(h.state.threads[0]).toMatchObject({ id: target.id, archived })
+    expect(h.state.threadSearchResults?.query).toBe(query)
+    expect(h.state.threadSearchResults?.threads[0]).toMatchObject({ id: target.id, archived })
+    expect(h.state.threadSearchResults?.threads).toHaveLength(2)
+    expect(h.state.threadSearchResults?.threads[1]).toBe(other)
+    expect(h.state.threadSearch).toBe(query)
   })
 })

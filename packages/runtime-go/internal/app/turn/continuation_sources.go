@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	appmodel "analytix.local/runtime-go/internal/app/model"
+	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	threaddomain "analytix.local/runtime-go/internal/domain/thread"
@@ -26,8 +27,19 @@ func continuationUserHistoryV1(thread map[string]any) (*threaddomain.Continuatio
 		found := false
 		for _, raw := range listAny(turn["items"]) {
 			item, _ := raw.(map[string]any)
+			version, _ := contracts.NumericSeq(item["schemaVersion"])
 			if !domainevent.ValidGeneralCompactionProviderHistoryItemV4(item) {
-				continue
+				if version != 5 && item["summaryKind"] != "conversation" {
+					continue
+				} // Preserve legacy source ancestry.
+				found = true
+				if !domainevent.ValidGeneralCompactionProviderHistoryItemV5(item) {
+					break
+				}
+			}
+			found = true
+			if !appmodel.GeneralCompactionSourceScopeCurrentV1(thread, item) {
+				break
 			}
 			previous, err := threaddomain.ParseTaskContinuationSnapshotV1(item["taskContinuation"])
 			if err == nil && previous.UserHistory != nil && previous.UserHistory.ScopeDigest == scope {

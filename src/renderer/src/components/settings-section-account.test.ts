@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { avatarDisplayUrl } from '../account/hub-avatar'
 import { useHubAccountStore } from '../account/hub-account-store'
-import { SettingsSidebar } from './SettingsSidebar'
+import { SettingsSidebar, settingsCategoryLabelKey } from './SettingsSidebar'
 import { AccountProfileSettingsSection } from './settings-section-account'
 
 const labels: Record<string, string> = {
@@ -69,7 +69,7 @@ describe('AccountProfileSettingsSection', () => {
     expect(avatarDisplayUrl('uploads/avatars/user-1.png')).toBe('')
   })
 
-  it('places the explicit deprecated Hub compatibility entry before General', () => {
+  it('keeps deprecated Hub compatibility out of primary navigation while preserving its route label', () => {
     const html = renderToStaticMarkup(createElement(SettingsSidebar, {
       category: 'account',
       goBack: () => undefined,
@@ -77,8 +77,9 @@ describe('AccountProfileSettingsSection', () => {
       t
     }))
 
-    expect(html.indexOf('Deprecated Hub compatibility')).toBeGreaterThanOrEqual(0)
-    expect(html.indexOf('General')).toBeGreaterThan(html.indexOf('Deprecated Hub compatibility'))
-    expect(html).toContain('bg-ds-subtle')
+    expect(html).not.toContain('Deprecated Hub compatibility')
+    expect(html).toContain('General')
+    expect(html).not.toContain('aria-current="page"')
+    expect(settingsCategoryLabelKey('account')).toBe('deprecatedHubCompatibility')
   })
 })

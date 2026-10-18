@@ -69,10 +69,14 @@ export const SteeringEntrySchema = z.object({
 })
 export type SteeringEntry = z.infer<typeof SteeringEntrySchema>
 
+export const TurnEndReasonSchema = z.object({ kind: z.literal('max-tokens') }).strict()
+export type TurnEndReason = z.infer<typeof TurnEndReasonSchema>
+
 export const TurnSchema = z.object({
   id: z.string().min(1),
   threadId: z.string().min(1),
   status: TurnStatus,
+  endReason: TurnEndReasonSchema.optional(),
   prompt: z.string(),
   model: z.string().optional(),
   reasoningEffort: TurnReasoningEffortSchema.optional(),
@@ -108,11 +112,16 @@ export const TurnSchema = z.object({
    */
   disableUserInput: z.boolean().optional(),
   error: z.string().optional()
+}).superRefine((turn, ctx) => {
+  if (turn.endReason && turn.status !== 'completed') {
+    ctx.addIssue({ code: 'custom', path: ['endReason'], message: 'output cap requires a completed turn' })
+  }
 })
 export type Turn = z.infer<typeof TurnSchema>
 
 export const StartTurnRequest = z.object({
   prompt: z.string().min(1),
+  requestedSkillIds: z.array(z.string().regex(/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/)).max(16).optional(),
   displayText: z.string().optional(),
   /** Raise-only host risk hint. Callers cannot request a general-policy downgrade. */
   riskIntent: z.literal('case').optional(),
@@ -222,7 +231,7 @@ export const CompactRequest = z.object({
 })
 export type CompactRequest = z.infer<typeof CompactRequest>
 
-export const CompactResponse = z.object({
+const LegacyCompactResponse = z.object({
   threadId: z.string().min(1),
   replacedTokens: z.number().int().nonnegative(),
   summary: z.string(),
@@ -230,5 +239,58 @@ export const CompactResponse = z.object({
   sourceDigest: z.string().min(1).optional(),
   digestMarker: z.string().min(1).optional(),
   sourceItemIds: z.array(z.string().min(1)).optional()
+}).strict()
+
+const CompletedGoCompactResponse = LegacyCompactResponse.extend({
+  ok: z.literal(true),
+  turnId: z.string().min(1),
+  itemId: z.string().min(1),
+  eventSeq: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  replacedTokens: z.number().int().positive(),
+  sourceDigest: z.string().min(1),
+  digestMarker: z.string().min(1),
+  sourceItemIds: z.array(z.string().min(1)),
+  schemaVersion: z.literal(2),
+  reasoningExcluded: z.literal(true),
+  reasoningExclusionProof: z.string().regex(/^sha256:[a-f0-9]{64}$/)
+}).strict()
+
+const NoopGoCompactResponse = z.object({
+  ok: z.literal(true),
+  threadId: z.string().min(1),
+  replacedTokens: z.literal(0),
+  pinnedConstraints: z.array(z.string())
+}).strict()
+
+const ConversationCompactResponse = CompletedGoCompactResponse.extend({
+  schemaVersion: z.literal(3),
+  compactionId: z.string().min(1),
+  summaryKind: z.literal('conversation'),
+  summaryDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  checkpointDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  shadowedItemCount: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  tokenCountKind: z.literal('estimated'),
+  tokenEstimatorVersion: z.literal(1),
+  auto: z.boolean(),
+  createdAt: z.string(),
+  finishedAt: z.string(),
+  turn: TurnSchema
+}).strict().superRefine((result, ctx) => {
+  const item = result.turn.items[0]
+  if (result.compactionId !== result.itemId || result.turn.id !== result.turnId || result.turn.threadId !== result.threadId ||
+      result.turn.items.length !== 1 || item?.kind !== 'compaction' || item.schemaVersion !== 5 || item.id !== result.itemId ||
+      item.turnId !== result.turnId || item.threadId !== result.threadId) {
+    ctx.addIssue({ code: 'custom', message: 'compaction response requires its committed summary item' })
+    return
+  }
+  for (const key of ['summary', 'replacedTokens', 'auto', 'pinnedConstraints', 'sourceDigest', 'digestMarker', 'sourceItemIds',
+    'compactionId', 'summaryKind', 'summaryDigest', 'checkpointDigest', 'shadowedItemCount', 'tokenCountKind', 'tokenEstimatorVersion',
+    'createdAt', 'finishedAt', 'reasoningExcluded', 'reasoningExclusionProof'] as const) {
+    if (JSON.stringify(result[key]) !== JSON.stringify(item[key])) ctx.addIssue({ code: 'custom', path: [key], message: 'compaction response facts must match its item' })
+  }
 })
+
+export const CompactResponse = z.union([
+  ConversationCompactResponse, CompletedGoCompactResponse, NoopGoCompactResponse, LegacyCompactResponse
+])
 export type CompactResponse = z.infer<typeof CompactResponse>

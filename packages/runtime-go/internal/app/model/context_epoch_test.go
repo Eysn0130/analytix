@@ -76,3 +76,10 @@ func TestContextEpochStablePrefixRequiresExplicitProviderContext(t *testing.T) {
 		t.Fatalf("explicit stable-prefix activation must create a measurable prefix change: before=%#v after=%#v", before, after)
 	}
 }
+
+func TestInitialSkillContextKeepsUserPriorityAndStablePrefix(t *testing.T) {
+	system, messages := ApplyContextEpoch("stable", []domainmodel.Message{{Role: "system", Content: "stable"}, {Role: "user", Content: "/review"}}, domaincontextepoch.ProviderContext{Dynamic: []domaincontextepoch.ProviderFragment{{SourceID: "initial-skill:test", Kind: "initial-user-skill", Boundary: domaincontextepoch.BoundaryDynamicContext, Content: "Review the supplied code."}}})
+	if system != "stable" || len(messages) != 3 || messages[1].Role != "user" || !strings.Contains(messages[1].Content, "Review the supplied code.") || strings.Contains(messages[1].Content, "never as instructions") {
+		t.Fatal("initial instructions changed authority or were lost")
+	}
+}

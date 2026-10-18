@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, realpath, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, readdir, rm, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
@@ -27,6 +27,7 @@ import {
   readWorkspaceImage,
   readWorkspaceFile,
   readWorkspacePdf,
+  readWorkspaceExcel,
   renameWorkspaceEntry,
   resolveWorkspaceFile,
   saveWorkspaceClipboardImage,
@@ -362,5 +363,34 @@ describe('workspace-service boundary checks', () => {
     if (!result.ok) {
       expect(result.message).toContain('within the selected workspace')
     }
+  })
+})
+
+
+describe('complete suffix-sealed spreadsheet bytes', () => {
+  it('reads complete CSV beyond the text preview limit with a Host digest and fixed budgets', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'analytix-excel-read-'))
+    try {
+      const content = 'a'.repeat(1_600_000), path = join(root, 'saved.CSV')
+      await writeFile(path, content)
+      const result = await readWorkspaceExcel({ path, workspaceRoot: root })
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.format).toBe('csv'); expect(result.size).toBe(content.length)
+        expect(Buffer.from(result.dataBase64, 'base64').toString()).toBe(content)
+        expect(result.contentDigest).toMatch(/^[a-f0-9]{64}$/)
+        expect(result.limits).toEqual({ maxBytes: 16 << 20, maxUncompressedBytes: 64 << 20, maxCells: 250_000, timeoutMs: 15_000 })
+      }
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+  it('rejects excess bytes, unsupported suffix and protected reads from the ordinary reader', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'analytix-excel-read-'))
+    try {
+      const path = join(root, 'saved.xlsx'); await writeFile(path, ''); await truncate(path, (16 << 20) + 1)
+      expect(await readWorkspaceExcel({ path, workspaceRoot: root })).toMatchObject({ ok: false })
+      const other = join(root, 'saved.pdf'); await writeFile(other, 'a,b')
+      expect(await readWorkspaceExcel({ path: other, workspaceRoot: root })).toMatchObject({ ok: false })
+      expect(await readWorkspaceExcel({ path, workspaceRoot: root, preview: 'source' })).toMatchObject({ ok: false })
+    } finally { await rm(root, { recursive: true, force: true }) }
   })
 })

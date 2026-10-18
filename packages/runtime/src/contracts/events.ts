@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { UserInputTimedWaitSchemaV1 } from './approvals.js'
 import {
   ACCEPTED_FINAL_TERMINAL_STATUS_BY_REASON,
   AcceptedFinalDigestSchema,
@@ -7,6 +8,8 @@ import {
   AcceptedFinalPublicAssistantTextTurnItemV3,
   PrivateAcceptedFinalAssistantTextTurnItem,
   OrdinaryResultSlotV1Schema,
+  UserInputQuestionSchema,
+  isHostUserInputQuestionBatch,
   TurnItem
 } from './items.js'
 import {
@@ -15,6 +18,8 @@ import {
   CheckpointRewindRescueRecordSchema
 } from './checkpoints.js'
 import { ThreadGoalSchema, ThreadTodoListSchema } from './threads.js'
+import { GoalActivationSchemaV1 } from './goal.js'
+import { TurnEndReasonSchema, TurnSchema } from './turns.js'
 import { isConsistentCostCoverage, UsageSnapshotSchema } from './usage.js'
 import { RuntimeErrorSeverity } from './errors.js'
 import { ApprovalPolicySchema, SandboxModeSchema } from './policy.js'
@@ -61,8 +66,10 @@ export const RuntimeEventKind = z.enum([
   'user_input_resolved',
   'compaction_started',
   'compaction_completed',
+  'compaction_failed',
   'goal_updated',
   'goal_cleared',
+  'goal_activation_changed',
   'goal_evidence_audit',
   'todos_updated',
   'todos_cleared',
@@ -81,6 +88,9 @@ export const PipelineStage = z.enum([
   'setup',
   'pre_start',
   'post_start',
+  'logical_step_started',
+  'logical_step_assembled',
+  'logical_step_closed',
   'input_received',
   'input_cached',
   'input_routed',
@@ -386,6 +396,7 @@ const AcceptedFinalTerminalEventV1Schema = z.object({
   turnId: z.string().min(1),
   status: z.enum(['completed', 'failed', 'aborted']),
   terminalReason: AcceptedFinalTerminalReasonSchema,
+  endReason: TurnEndReasonSchema.optional(),
   error: z.string().optional(),
   message: z.string().optional(),
   code: z.string().optional(),
@@ -486,6 +497,9 @@ function refineAcceptedFinalDeliveryBatch(
   const usage = batch.events[batch.events.length - 2] as z.infer<typeof AcceptedFinalUsageEventV1Schema>
   const terminal = batch.events[batch.events.length - 1] as z.infer<typeof AcceptedFinalTerminalEventV1Schema>
   const terminalReason = terminal.terminalReason
+  if (terminal.endReason && !['success', 'approval', 'user_input', 'resume', 'background_completion'].includes(terminalReason)) {
+    ctx.addIssue({ code: 'custom', path: ['events', batch.events.length - 1, 'endReason'], message: 'output cap is not a successful candidate terminal' })
+  }
   const expectedStatus = ACCEPTED_FINAL_TERMINAL_STATUS_BY_REASON[terminalReason]
   const requiresErrorItem = acceptedFinalDeliveryRequiresErrorItem(terminalReason)
   const assistantTerminalReason = batch.schemaVersion === 1
@@ -990,6 +1004,7 @@ function isCanonicalGeneralTerminalDiagnostics(diagnostics: Record<string, unkno
   const attemptDetailsPresent = attemptDetailKeys.some((key) => diagnostics[key] !== undefined)
   const attemptSchemaPresent = diagnostics.providerAttemptTelemetrySchema !== undefined
   const attemptValidPresent = diagnostics.providerAttemptTelemetryValid !== undefined
+  if (diagnostics.providerAttemptInventoryComplete !== undefined && (!attemptValidPresent || (diagnostics.providerAttemptTelemetryValid === true && diagnostics.providerAttemptInventoryComplete === false))) return false
   if (attemptSchemaPresent !== attemptValidPresent) return false
   if (!attemptSchemaPresent) {
     if (diagnostics.providerAttemptTelemetryError !== undefined || attemptDetailsPresent) return false
@@ -1084,6 +1099,8 @@ const GeneralTerminalCacheDiagnosticsV1Schema = z.object({
   providerNativeCacheTelemetry: z.boolean().optional(),
   cacheBaselineObserved: z.boolean().optional(),
   providerAttemptTelemetryValid: z.boolean().optional(),
+  // Missing on legacy observations: validity alone never proves inventory coverage.
+  providerAttemptInventoryComplete: z.boolean().optional(),
   contextEpochStateValid: z.boolean().optional(),
   toolSchemaTokens: generalTerminalCanonicalUnsignedV1Schema().optional(),
   toolCount: generalTerminalCanonicalUnsignedV1Schema().optional(),
@@ -1244,6 +1261,7 @@ const GeneralTerminalLifecycleEventV1Schema = z.object({
   itemId: GeneralTerminalPublicIDV1Schema.optional(),
   status: z.enum(['completed', 'failed', 'aborted']),
   terminalReason: AcceptedFinalTerminalReasonSchema,
+  endReason: TurnEndReasonSchema.optional(),
   message: GeneralTerminalExactTextV1Schema.optional(),
   error: GeneralTerminalExactTextV1Schema.optional(),
   code: GeneralTerminalExactTextV1Schema.optional(),
@@ -1254,6 +1272,9 @@ const GeneralTerminalLifecycleEventV1Schema = z.object({
   cancelledPendingGates: generalTerminalCanonicalUnsignedV1Schema().optional()
 }).strict().superRefine((event, ctx) => {
   const expectedStatus = ACCEPTED_FINAL_TERMINAL_STATUS_BY_REASON[event.terminalReason]
+  if (event.endReason && !['success', 'approval', 'user_input', 'resume', 'background_completion'].includes(event.terminalReason)) {
+    ctx.addIssue({ code: 'custom', path: ['endReason'], message: 'output cap is not a successful candidate terminal' })
+  }
   if (event.kind !== `turn_${expectedStatus}` || event.status !== expectedStatus) {
     ctx.addIssue({ code: 'custom', path: ['status'], message: 'general terminal status is mismatched' })
   }
@@ -1420,9 +1441,13 @@ export const TurnLifecycleEvent = RuntimeEventBase.extend({
   severity: RuntimeErrorSeverity.optional(),
   acceptedFinalDigest: AcceptedFinalDigestSchema.optional(),
   terminalReason: AcceptedFinalTerminalReasonSchema.optional(),
+  endReason: TurnEndReasonSchema.optional(),
   discard: z.boolean().optional(),
   cancelled: z.boolean().optional()
 }).superRefine((event, ctx) => {
+  if (event.endReason && (event.kind !== 'turn_completed' || event.status !== 'completed' || !event.terminalReason)) {
+    ctx.addIssue({ code: 'custom', path: ['endReason'], message: 'output cap requires a completed terminal' })
+  }
   const hasAcceptedTerminal = event.acceptedFinalDigest !== undefined || event.terminalReason !== undefined
   if (!hasAcceptedTerminal) return
   if (!event.acceptedFinalDigest || !event.terminalReason || !event.turnId) {
@@ -1434,6 +1459,9 @@ export const TurnLifecycleEvent = RuntimeEventBase.extend({
     return
   }
   const expectedStatus = ACCEPTED_FINAL_TERMINAL_STATUS_BY_REASON[event.terminalReason]
+  if (event.endReason && !['success', 'approval', 'user_input', 'resume', 'background_completion'].includes(event.terminalReason)) {
+    ctx.addIssue({ code: 'custom', path: ['endReason'], message: 'output cap is not a successful candidate terminal' })
+  }
   if (event.kind !== `turn_${expectedStatus}` || event.status !== expectedStatus) {
     ctx.addIssue({ code: 'custom', path: ['status'], message: 'accepted-final terminal status is mismatched' })
   }
@@ -1469,21 +1497,14 @@ export type ApprovalEvent = z.infer<typeof ApprovalEvent>
 export const UserInputEvent = RuntimeEventBase.extend({
   kind: z.enum(['user_input_requested', 'user_input_resolved']),
   inputId: z.string().min(1),
-  status: z.enum(['pending', 'submitted', 'cancelled']),
+  status: z.enum(['pending', 'submitted', 'cancelled', 'continued']),
+  timedWait: UserInputTimedWaitSchemaV1.nullable().optional(),
   prompt: z.string().optional(),
-  questions: z.array(
-    z.object({
-      header: z.string().min(1),
-      id: z.string().min(1),
-      question: z.string().min(1),
-      options: z.array(
-        z.object({
-          label: z.string().min(1),
-          description: z.string()
-        })
-      )
-    })
-  ).optional()
+  questions: z.array(UserInputQuestionSchema).optional()
+}).superRefine((event, ctx) => {
+  if (!isHostUserInputQuestionBatch(event.inputId, event.questions)) {
+    ctx.addIssue({ code: 'custom', path: ['questions'], message: 'question identities are detached from their Core request' })
+  }
 })
 export type UserInputEvent = z.infer<typeof UserInputEvent>
 
@@ -1491,7 +1512,9 @@ export const ToolCallReadyEvent = RuntimeEventBase.extend({
   kind: z.literal('tool_call_ready'),
   toolName: z.string().min(1),
   callId: z.string().min(1),
-  readyCount: z.number().int().positive()
+  readyCount: z.number().int().positive(),
+  /** Preparation observations have no durable tool-call item; preserve the marker on replay. */
+  partial: z.boolean().optional()
 })
 export type ToolCallReadyEvent = z.infer<typeof ToolCallReadyEvent>
 
@@ -1672,8 +1695,8 @@ export const CacheDiagnosticsSchema = z.object({
 })
 export type CacheDiagnostics = z.infer<typeof CacheDiagnosticsSchema>
 
-export const CompactionEvent = RuntimeEventBase.extend({
-  kind: z.enum(['compaction_started', 'compaction_completed']),
+const CompactionEventBase = RuntimeEventBase.extend({
+  kind: z.enum(['compaction_started', 'compaction_completed', 'compaction_failed']),
   summary: z.string().optional(),
   replacedTokens: z.number().int().nonnegative().optional(),
   auto: z.boolean().optional(),
@@ -1681,10 +1704,60 @@ export const CompactionEvent = RuntimeEventBase.extend({
   sourceDigest: z.string().min(1).optional(),
   digestMarker: z.string().min(1).optional(),
   sourceItemIds: z.array(z.string().min(1)).optional(),
-  schemaVersion: z.literal(2).optional(),
+  schemaVersion: z.union([z.literal(2), z.literal(3)]).optional(),
   reasoningExcluded: z.literal(true).optional(),
-  reasoningExclusionProof: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional()
+  reasoningExclusionProof: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  compactionId: z.string().min(1).optional(),
+  summaryKind: z.literal('conversation').optional(),
+  summaryDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  checkpointDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  shadowedItemCount: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  tokenCountKind: z.literal('estimated').optional(),
+  tokenEstimatorVersion: z.literal(1).optional(),
+  createdAt: z.string().datetime().optional(),
+  startedAt: z.string().datetime().optional(),
+  finishedAt: z.string().datetime().optional(),
+  reasonCode: z.literal('summary_unavailable').optional(),
+  turn: TurnSchema.optional()
+}).strict().superRefine((event, ctx) => {
+  if (event.schemaVersion !== 3) {
+    if ([event.compactionId, event.summaryKind, event.summaryDigest, event.checkpointDigest, event.shadowedItemCount,
+      event.tokenCountKind, event.tokenEstimatorVersion, event.turn, event.createdAt, event.startedAt, event.finishedAt, event.reasonCode]
+      .some(value => value !== undefined) || event.kind === 'compaction_failed') {
+      ctx.addIssue({ code: 'custom', message: 'legacy compaction cannot acquire new summary facts' })
+    }
+    return
+  }
+  if (!event.compactionId || event.itemId !== event.compactionId || !event.turnId || typeof event.auto !== 'boolean') {
+    ctx.addIssue({ code: 'custom', message: 'compaction operation identity is required' })
+  }
+  if (event.kind === 'compaction_completed') {
+    const item = event.turn?.items[0]
+    if (!event.turn || event.turn.id !== event.turnId || event.turn.threadId !== event.threadId || event.turn.items.length !== 1 ||
+        item?.kind !== 'compaction' || item.schemaVersion !== 5 || item.id !== event.compactionId ||
+        item.turnId !== event.turnId || item.threadId !== event.threadId) {
+      ctx.addIssue({ code: 'custom', message: 'complete compaction requires its exact committed summary item' })
+      return
+    }
+    for (const key of ['summary', 'replacedTokens', 'auto', 'pinnedConstraints', 'sourceDigest', 'digestMarker', 'sourceItemIds',
+      'compactionId', 'summaryKind', 'summaryDigest', 'checkpointDigest', 'shadowedItemCount', 'tokenCountKind', 'tokenEstimatorVersion',
+      'createdAt', 'finishedAt', 'reasoningExcluded', 'reasoningExclusionProof'] as const) {
+      if (JSON.stringify(event[key]) !== JSON.stringify(item[key])) ctx.addIssue({ code: 'custom', path: [key], message: 'compaction facts must match its committed item' })
+    }
+  } else if ([event.summary, event.turn, event.summaryKind, event.replacedTokens, event.pinnedConstraints, event.sourceDigest,
+    event.digestMarker, event.sourceItemIds, event.summaryDigest, event.checkpointDigest, event.shadowedItemCount,
+    event.tokenCountKind, event.tokenEstimatorVersion, event.reasoningExcluded, event.reasoningExclusionProof, event.createdAt]
+    .some(value => value !== undefined) ||
+    (event.kind === 'compaction_started' ? !event.startedAt || event.finishedAt !== undefined || event.reasonCode !== undefined
+      : event.reasonCode !== 'summary_unavailable' || !event.finishedAt || event.startedAt !== undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'incomplete compaction cannot claim summary facts' })
+  }
 })
+export const CompactionEvent = z.discriminatedUnion('kind', [
+  CompactionEventBase.safeExtend({ kind: z.literal('compaction_started') }),
+  CompactionEventBase.safeExtend({ kind: z.literal('compaction_completed') }),
+  CompactionEventBase.safeExtend({ kind: z.literal('compaction_failed') })
+])
 export type CompactionEvent = z.infer<typeof CompactionEvent>
 
 export const GoalEvent = RuntimeEventBase.extend({
@@ -1693,6 +1766,13 @@ export const GoalEvent = RuntimeEventBase.extend({
   cleared: z.boolean().optional()
 })
 export type GoalEvent = z.infer<typeof GoalEvent>
+
+/** Process-local live state: no durable sequence, body, replay or history. */
+export const GoalActivationChangedEventV1 = z.object({
+  kind: z.literal('goal_activation_changed'), threadId: z.string().trim().min(1),
+  timestamp: z.string().datetime(), activation: GoalActivationSchemaV1.nullable()
+}).strict()
+export type GoalActivationChangedEventV1 = z.infer<typeof GoalActivationChangedEventV1>
 
 export const GoalEvidenceAuditEvent = RuntimeEventBase.extend({
   kind: z.literal('goal_evidence_audit'),
@@ -1756,14 +1836,80 @@ export const UsageEvent = RuntimeEventBase.extend({
 })
 export type UsageEvent = z.infer<typeof UsageEvent>
 
-export const PipelineStageEvent = RuntimeEventBase.extend({
+const LogicalStepIdV1Schema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+const LogicalStepUnsignedV1Schema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+
+export const LogicalStepStartedDetailsV1Schema = z.object({
+  schemaVersion: z.literal(1),
+  logicalStepId: LogicalStepIdV1Schema
+}).strict()
+
+export const LogicalStepClosedDetailsV1Schema = z.object({
+  schemaVersion: z.literal(1),
+  logicalStepId: LogicalStepIdV1Schema,
+  assistantMessageAssembled: z.boolean(),
+  llmMs: LogicalStepUnsignedV1Schema.optional(),
+  ttftMs: LogicalStepUnsignedV1Schema.optional(),
+  decodeMs: LogicalStepUnsignedV1Schema.optional(),
+  decodeTokens: LogicalStepUnsignedV1Schema.optional()
+}).strict().superRefine((details, ctx) => {
+  if ((!details.assistantMessageAssembled &&
+       [details.llmMs, details.ttftMs, details.decodeMs, details.decodeTokens].some(value => value !== undefined)) ||
+      (details.ttftMs !== undefined && (details.llmMs === undefined || details.ttftMs > details.llmMs)) ||
+      ((details.decodeMs === undefined) !== (details.decodeTokens === undefined)) ||
+      (details.decodeMs !== undefined && (details.ttftMs === undefined || details.llmMs === undefined ||
+       details.decodeMs !== details.llmMs - details.ttftMs))) {
+    ctx.addIssue({ code: 'custom', message: 'logical step timing pairing is inconsistent' })
+  }
+})
+
+const ExistingPipelineStageEvent = RuntimeEventBase.extend({
   kind: z.literal('pipeline_stage'),
-  stage: PipelineStage,
+  stage: PipelineStage.exclude(['logical_step_assembled']),
   label: z.string().min(1).optional(),
   attempt: z.number().int().positive().optional(),
   maxAttempt: z.number().int().positive().optional(),
   details: z.record(z.string(), z.unknown()).optional()
+}).superRefine((event, ctx) => {
+  const logical = event.stage === 'logical_step_started' || event.stage === 'logical_step_closed'
+  if (logical) {
+    const started = event.stage === 'logical_step_started'
+    const details = started ? LogicalStepStartedDetailsV1Schema : LogicalStepClosedDetailsV1Schema
+    if (!event.turnId || event.label !== (started ? 'Logical step started' : 'Logical step closed') ||
+        event.itemId !== undefined || event.child !== undefined || event.attempt !== undefined ||
+        event.maxAttempt !== undefined || !details.safeParse(event.details).success) {
+      ctx.addIssue({ code: 'custom', message: 'logical step event is inconsistent' })
+    }
+  } else if (event.details?.logicalStepMetricsVersion !== undefined &&
+             (event.stage !== 'post_start' || event.details.logicalStepMetricsVersion !== 1)) {
+    ctx.addIssue({ code: 'custom', message: 'logical step metrics version is inconsistent' })
+  }
 })
+
+// Assembly has a closed identity-only envelope. Keep the established parsing
+// behavior of other pipeline stages, including legacy replay, unchanged.
+const LogicalStepAssembledEventV1 = RuntimeEventBase.extend({
+  kind: z.literal('pipeline_stage'),
+  timestamp: z.string().datetime({ offset: true }),
+  turnId: z.string().min(1),
+  itemId: z.never().optional(),
+  child: z.never().optional(),
+  attempt: z.never().optional(),
+  maxAttempt: z.never().optional(),
+  stage: z.literal('logical_step_assembled'),
+  label: z.literal('Logical step assembled'),
+  details: z.record(z.string(), z.unknown())
+}).strict().superRefine((event, ctx) => {
+  if (!LogicalStepStartedDetailsV1Schema.safeParse(event.details).success ||
+      ['itemId', 'child', 'attempt', 'maxAttempt'].some(key => Object.prototype.hasOwnProperty.call(event, key))) {
+    ctx.addIssue({ code: 'custom', message: 'logical step assembly event is inconsistent' })
+  }
+})
+
+export const PipelineStageEvent = z.discriminatedUnion('stage', [
+  ExistingPipelineStageEvent,
+  LogicalStepAssembledEventV1
+])
 export type PipelineStageEvent = z.infer<typeof PipelineStageEvent>
 
 export const ErrorEvent = RuntimeEventBase.extend({

@@ -16,7 +16,9 @@ import (
 	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
 	domainmcpname "analytix.local/runtime-go/internal/domain/mcpname"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 type ToolCaller interface {
@@ -56,6 +58,15 @@ func IsToolName(name string) bool {
 }
 
 func ExecuteTool(ctx context.Context, caller ToolCaller, input ToolRunInput) (map[string]any, bool) {
+	if ctx == nil {
+		return map[string]any{"code": "mcp_execution_authority_invalid", "error": "MCP execution context is unavailable", "executed": false}, true
+	}
+	// This effect owns its actual MCP request credentials. Reuse the existing
+	// bounded registry, including the parent Provider values, then retire it.
+	parentSecrets := domainprocess.KnownSecretsV1(ctx)
+	textScopeAvailable := len(parentSecrets) <= 64
+	ctx = domainprocess.WithKnownSecretsV1(ctx, parentSecrets...)
+	defer domainprocess.ClearKnownSecretsV1(ctx)
 	call := input.Call
 	argumentBytes, argumentErr := json.Marshal(input.Arguments)
 	validateContext := domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect
@@ -107,6 +118,13 @@ func ExecuteTool(ctx context.Context, caller ToolCaller, input ToolRunInput) (ma
 		Context: input.SecurityContext, Grant: input.ExecutionGrant, Call: call, Raw: result, At: time.Now().UTC(),
 	})
 	if err != nil {
+		if hasLossless {
+			if disposer, ok := caller.(interface {
+				DiscardHostScheduleReceiptV1(domainmcp.LosslessToolResult)
+			}); ok {
+				disposer.DiscardHostScheduleReceiptV1(lossless)
+			}
+		}
 		if hasLossless && domainmcp.ValidLosslessToolResult(lossless) {
 			if disposer, ok := caller.(interface {
 				DiscardHostFundsAccountFlowEvidenceV1(domainmcp.LosslessToolResult)
@@ -116,6 +134,25 @@ func ExecuteTool(ctx context.Context, caller ToolCaller, input ToolRunInput) (ma
 		}
 		return map[string]any{"code": "mcp_tool_outcome_invalid", "error": "MCP result could not be normalized under the frozen grant", "executed": false}, true
 	}
+	if hasLossless && domaintoolresult.ProtectedScheduleOperationForToolV1(input.ToolName) != "" {
+		if reader, ok := caller.(interface {
+			ConsumeHostScheduleReceiptV1(domainmcp.LosslessToolResult, domainmcp.HostContextEnvelope, domainevidence.ToolOutcome) (domaintoolresult.ProtectedCaptureV1, bool)
+		}); ok {
+			if capture, present := reader.ConsumeHostScheduleReceiptV1(lossless, hostContext, outcome); present {
+				domaintoolresult.CaptureProtectedToolResultV1(ctx, capture)
+			}
+		} else if disposer, ok := caller.(interface {
+			DiscardHostScheduleReceiptV1(domainmcp.LosslessToolResult)
+		}); ok {
+			disposer.DiscardHostScheduleReceiptV1(lossless)
+		}
+		lossless.HostPrivate = nil
+	}
+	if ctx.Err() == nil && textScopeAvailable && len(domainprocess.KnownSecretsV1(ctx)) <= 64 && hasLossless && domainmcp.ValidToolResultObservation(lossless) && !outcome.IsError && outcome.SemanticStatus == "success" &&
+		!toolcatalogapp.MCPToolNeedsAnalytixCaseContext(input.ToolName) &&
+		domaintoolresult.ProtectedScheduleOperationForToolV1(input.ToolName) == "" && lossless.HostPrivate == nil {
+		domaintoolresult.CaptureProtectedToolTextV1(ctx, protectedMCPContentTextV1(lossless, domainprocess.KnownSecretsV1(ctx)...))
+	}
 	output := cloneResult(result)
 	delete(output, domainmcp.HostRawToolResultKey)
 	if hasLossless && domainmcp.ValidLosslessToolResult(lossless) {
@@ -123,6 +160,39 @@ func ExecuteTool(ctx context.Context, caller ToolCaller, input ToolRunInput) (ma
 	}
 	output["toolOutcome"] = domainevidence.ToolOutcomeRecord(outcome)
 	return output, outcome.IsError
+}
+
+// The normalized result's .text is not provenance: structuredContent can
+// contain that key. Select only literal text blocks in the verified raw result.
+func protectedMCPContentTextV1(lossless domainmcp.LosslessToolResult, secrets ...string) *domaintoolresult.ProtectedOutputTextV1 {
+	if !domainmcp.ValidToolResultObservation(lossless) {
+		return nil
+	}
+	var payload struct {
+		Content []map[string]json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(lossless.RawResult, &payload) != nil {
+		return nil
+	}
+	var text strings.Builder
+	for _, item := range payload.Content {
+		var kind, value string
+		if json.Unmarshal(item["type"], &kind) != nil || kind != "text" || json.Unmarshal(item["text"], &value) != nil || value == "" {
+			continue
+		}
+		separator := 0
+		if text.Len() > 0 {
+			separator = 1
+		}
+		if len(value) > domaintoolresult.ProtectedOutputTextScanLimitV1-text.Len()-separator {
+			return &domaintoolresult.ProtectedOutputTextV1{Availability: "unavailable", Reason: "limit"}
+		}
+		if separator != 0 {
+			text.WriteByte('\n')
+		}
+		text.WriteString(value)
+	}
+	return domaintoolresult.ProjectProtectedOutputTextV1(text.String(), secrets...)
 }
 
 func cloneResult(result map[string]any) map[string]any {

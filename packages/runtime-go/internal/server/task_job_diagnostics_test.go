@@ -15,6 +15,7 @@ import (
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 	"analytix.local/runtime-go/internal/jobs"
 	"analytix.local/runtime-go/internal/provider"
 	jobsecuritytest "analytix.local/runtime-go/internal/testsupport/jobsecurity"
@@ -118,7 +119,7 @@ func TestRuntimeTaskJobWaitToolDefaultsToBlockingUntilBackgroundJobCompletes(t *
 	}()
 
 	started := time.Now()
-	output, isError := handler.executeRuntimeTaskJobWait(runtimePendingToolCall{
+	output, isError := handler.executeRuntimeTaskJobWait(context.Background(), runtimePendingToolCall{
 		ThreadID:        threadID,
 		TurnID:          "turn_wait_default",
 		SecurityContext: parent.Context,
@@ -296,6 +297,7 @@ func TestTaskJobSteerContextDigestRaceRejectsCAS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	configureDurableSteeringAuthority(t, store)
 	workspace := workspacetest.New(t)
 	workspaceRealPath, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
@@ -316,9 +318,17 @@ func TestTaskJobSteerContextDigestRaceRejectsCAS(t *testing.T) {
 	}, "", nil); err != nil {
 		t.Fatal(err)
 	}
+	staleDigest := domainsecurity.SHA256Hex([]byte("stale-child-context"))
+	clientID := "8aaf5b45-8b35-4ecb-9f7d-5f813145cd0f"
+	entry := map[string]any{
+		"id": domainsteering.EntryIDV1(turnID, clientID), "clientUserMessageId": clientID,
+		"text": "STEER_CAS_SENTINEL", "admittedAt": time.Now().UTC().Format(time.RFC3339Nano), "delivery": "steer",
+	}
+	if _, err := domainsteering.BindPendingEntryV1(entry, staleDigest); err != nil {
+		t.Fatalf("CAS fixture is not a legal steering admission: %v", err)
+	}
 	if _, err := store.AdmitSteeringEntryForContext(
-		threadID, turnID, turnID, domainsecurity.SHA256Hex([]byte("stale-child-context")),
-		map[string]any{"id": "steer_must_not_persist", "text": "STEER_CAS_SENTINEL"},
+		threadID, turnID, turnID, staleDigest, entry,
 	); !errors.Is(err, errDurableContextDigestMismatch) {
 		t.Fatalf("stale context digest should fail closed: %v", err)
 	}

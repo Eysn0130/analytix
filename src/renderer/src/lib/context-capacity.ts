@@ -1,4 +1,28 @@
 import type { ChatBlock } from '../agent/types'
+import type { ModelProviderModelGroup } from '@shared/analytix-api'
+
+/** Resolve only the selected provider/model; an unknown identity has no capacity reading. */
+export function resolveComposerContextWindow(options: {
+  model: string
+  providerId?: string
+  groups: readonly ModelProviderModelGroup[]
+  runtimeModel?: { id: string; providerId?: string; contextWindowTokens?: number }
+}): number | undefined {
+  const key = (value: string) => value.trim().toLowerCase()
+  const valid = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+  const runtime = options.runtimeModel
+  const providerId = options.providerId?.trim() || runtime?.providerId?.trim()
+  const group = options.groups.find(item => item.providerId === providerId)
+  const profileEntry = (model: string) => Object.entries(group?.modelProfiles ?? {}).find(([id, profile]) =>
+    key(id) === key(model) || profile.aliases?.some(alias => key(alias) === key(model)))
+  const selected = profileEntry(options.model)
+  if (valid(selected?.[1].contextWindowTokens)) return selected[1].contextWindowTokens
+  if (!runtime || !providerId || runtime.providerId?.trim() !== providerId) return undefined
+  const runtimeEntry = profileEntry(runtime.id)
+  const sameModel = key(options.model) === 'auto' || key(options.model) === key(runtime.id) ||
+    selected !== undefined && runtimeEntry !== undefined && key(selected[0]) === key(runtimeEntry[0])
+  return sameModel && valid(runtime.contextWindowTokens) ? runtime.contextWindowTokens : undefined
+}
 
 /**
  * Context-window capacity model for the composer "上下文容量" popover.

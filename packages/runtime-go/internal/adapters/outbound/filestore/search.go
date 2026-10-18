@@ -207,7 +207,7 @@ func FindFiles(request FindFilesRequest) (FindFilesResult, error) {
 	}
 	err := filepath.WalkDir(request.Root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil
+			return walkErr
 		}
 		if entry.IsDir() {
 			if request.ProtectedDir != nil {
@@ -246,10 +246,11 @@ type GlobFilesResult struct {
 	SkippedProtected []string
 	SkippedDirs      []string
 	LimitReached     bool
+	ScanComplete     bool
 }
 
 func GlobFiles(request GlobFilesRequest) (GlobFilesResult, error) {
-	result := GlobFilesResult{}
+	result := GlobFilesResult{ScanComplete: true}
 	if request.Match == nil {
 		return result, nil
 	}
@@ -274,6 +275,7 @@ func GlobFiles(request GlobFilesRequest) (GlobFilesResult, error) {
 			return ctx.Err()
 		}
 		if walkErr != nil {
+			result.ScanComplete = false
 			return nil
 		}
 		if entry.IsDir() {
@@ -302,5 +304,6 @@ func GlobFiles(request GlobFilesRequest) (GlobFilesResult, error) {
 		return nil
 	})
 	result.LimitReached = len(result.Matches) >= limit
+	result.ScanComplete = result.ScanComplete && err == nil && !result.LimitReached && ctx.Err() == nil
 	return result, err
 }

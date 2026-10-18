@@ -61,8 +61,10 @@ type ToolStepInput struct {
 	PrivateProtocolCapsules         []*domainmodel.AnthropicThinkingCapsule
 	ProviderNamespace               domaincontinuation.ProviderContinuationNamespaceV1
 	TerminalRecoveryKind            RuntimeTerminalRecoveryKind
+	OutputCapLogicalSequence        uint64
 	ToolCalls                       []domainmodel.ToolCall
 	ToolSchemas                     []domainmodel.ToolSchema
+	ModelVisibleToolDefinitions     map[string]*domainmodel.ToolDefinitionSnapshotV1
 	ToolScope                       []string
 	SubagentDepth                   int
 	AdvertisedTools                 map[string]bool
@@ -84,6 +86,7 @@ type ToolStepInput struct {
 	HostEntitySelection             HostCaseEntitySelectionV1
 	State                           ToolStepState
 	Driver                          ToolStepDriver
+	ProcessToolReady                func(appmodel.PendingToolCall)
 }
 
 type ToolStepState struct {
@@ -370,6 +373,7 @@ func RunToolStep(ctx context.Context, input ToolStepInput) (ToolStepResult, erro
 					return err
 				}
 				pending.ToolCallItemID = itemID
+				notifyProcessToolReadyV2(input.ProcessToolReady, pending)
 				if partition.protected {
 					protectedReady = true
 				}
@@ -596,6 +600,7 @@ func RunToolStep(ctx context.Context, input ToolStepInput) (ToolStepResult, erro
 			return ToolStepResult{}, err
 		}
 		pending.ToolCallItemID = itemID
+		notifyProcessToolReadyV2(input.ProcessToolReady, pending)
 		if cancelErr := ctx.Err(); cancelErr != nil {
 			releaseAdmission()
 			output := toolcatalogapp.CancelledOutput(call.Name, call.ID, cancelErr)
@@ -908,18 +913,19 @@ func pendingToolCallForStep(input ToolStepInput, call domainmodel.ToolCall, item
 	prompt := strings.TrimSpace(input.Prompt)
 	providerStepExact := prompt != "" && domainsecurity.ValidateLogicalEffect(input.LogicalEffect) == nil
 	return appmodel.PendingToolCall{
-		ThreadID:              input.ThreadID,
-		TurnID:                input.TurnID,
-		ProviderConfig:        input.ProviderConfig,
-		ProviderID:            input.ProviderID,
-		Model:                 input.Model,
-		Effort:                input.Effort,
-		Workspace:             input.Workspace,
-		Prompt:                prompt,
-		LogicalEffect:         input.LogicalEffect,
-		OrdinaryWork:          input.OrdinaryWork,
-		ProviderStepExact:     providerStepExact,
-		CaseSourceUnavailable: input.CaseSourceUnavailable,
+		ModelVisibleToolDefinition: domainmodel.CloneToolDefinitionSnapshotV1(input.ModelVisibleToolDefinitions[call.Name]),
+		ThreadID:                   input.ThreadID,
+		TurnID:                     input.TurnID,
+		ProviderConfig:             input.ProviderConfig,
+		ProviderID:                 input.ProviderID,
+		Model:                      input.Model,
+		Effort:                     input.Effort,
+		Workspace:                  input.Workspace,
+		Prompt:                     prompt,
+		LogicalEffect:              input.LogicalEffect,
+		OrdinaryWork:               input.OrdinaryWork,
+		ProviderStepExact:          providerStepExact,
+		CaseSourceUnavailable:      input.CaseSourceUnavailable,
 		OrdinaryResultInputIsolated: input.OrdinaryResultInputIsolated && providerStepExact &&
 			input.LogicalEffect == domainsecurity.LogicalEffectOrdinary && input.OrdinaryWork,
 		AttachmentIDs:          append([]string(nil), input.AttachmentIDs...),
@@ -939,15 +945,16 @@ func pendingToolCallForStep(input ToolStepInput, call domainmodel.ToolCall, item
 			[]*domainmodel.AnthropicThinkingCapsule(nil),
 			input.PrivateProtocolCapsules...,
 		),
-		PrivateProtocolObserved: len(input.PrivateProtocolCapsules) > 0 || input.AnthropicCapsule != nil,
-		ProviderNamespace:       domaincontinuation.CloneProviderContinuationNamespaceV1(input.ProviderNamespace),
-		TerminalRecoveryKind:    input.TerminalRecoveryKind,
-		Call:                    call,
-		ToolCallItemID:          itemID,
-		ToolScope:               append([]string(nil), input.ToolScope...),
-		SubagentDepth:           input.SubagentDepth,
-		SecurityContext:         input.SecurityContext,
-		ExecutionGrant:          grant,
+		PrivateProtocolObserved:  len(input.PrivateProtocolCapsules) > 0 || input.AnthropicCapsule != nil,
+		ProviderNamespace:        domaincontinuation.CloneProviderContinuationNamespaceV1(input.ProviderNamespace),
+		TerminalRecoveryKind:     input.TerminalRecoveryKind,
+		OutputCapLogicalSequence: input.OutputCapLogicalSequence,
+		Call:                     call,
+		ToolCallItemID:           itemID,
+		ToolScope:                append([]string(nil), input.ToolScope...),
+		SubagentDepth:            input.SubagentDepth,
+		SecurityContext:          input.SecurityContext,
+		ExecutionGrant:           grant,
 	}
 }
 
@@ -957,4 +964,13 @@ func cloneOptionalStepLimit(input *int) *int {
 	}
 	value := *input
 	return &value
+}
+
+func notifyProcessToolReadyV2(callback func(appmodel.PendingToolCall), pending appmodel.PendingToolCall) {
+	if callback == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	pending.ProviderNamespace = domaincontinuation.CloneProviderContinuationNamespaceV1(pending.ProviderNamespace)
+	callback(pending)
 }

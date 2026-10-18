@@ -82,6 +82,12 @@ func (c *HTTPProviderClient) newProviderCallTelemetry(
 		if binding == nil || binding.OuterAttempt == 0 {
 			return nil, errors.New("production provider cache telemetry binding is required")
 		}
+		attribution := binding.PublicAttribution
+		// Prepared routing may change the request. Publish only labels still
+		// matching the approved frozen host intent for this exact attempt.
+		if attribution.Provider != request.ProviderID || attribution.Model != request.Model {
+			attribution = domaincache.ProviderPublicAttributionV1{}
+		}
 		return &providerCallTelemetry{
 			durable: c.telemetryRecorder, handles: make(map[uint32]cachetelemetryport.AttemptHandleV1),
 			registration: cachetelemetryport.AttemptRegistrationInputV1{
@@ -89,8 +95,9 @@ func (c *HTTPProviderClient) newProviderCallTelemetry(
 				UsageSource: binding.UsageSource,
 				ChildRunID:  []byte(binding.ChildRunID), Channel: binding.Channel,
 				LogicalSequence: binding.LogicalSequence, OuterAttempt: binding.OuterAttempt,
-				LaneCallSequence: binding.LaneCallSequence,
-				ProviderFamily:   providerFamily, EndpointFormat: endpointFormat,
+				LaneCallSequence: binding.LaneCallSequence, StepStartedAt: binding.StepStartedAt,
+				PublicAttribution: attribution,
+				ProviderFamily:    providerFamily, EndpointFormat: endpointFormat,
 				Model: []byte(request.Model), Endpoint: []byte(endpoint), WireBody: append([]byte(nil), wireBody...),
 				WireHeaders: append([]byte(nil), wireHeaders...), CredentialScope: credentialScope, ProviderConfig: providerConfigBody,
 			},
@@ -184,6 +191,9 @@ func (call *providerCallTelemetry) settle(
 		Usage:         usage,
 		SettledAt:     settledAt.UTC().Format(time.RFC3339Nano),
 	}
+	if !result.HostTiming.FirstContentAt.IsZero() {
+		observation.FirstTokenAt = result.HostTiming.FirstContentAt.UTC().Format(time.RFC3339Nano)
+	}
 	if call.durable != nil {
 		handle, found := call.handles[shape.Attempt]
 		if !found || handle.Intent.Shape != shape {
@@ -191,7 +201,7 @@ func (call *providerCallTelemetry) settle(
 		}
 		if err := call.durable.SettleAttempt(ctx, cachetelemetryport.AttemptSettlementInputV1{
 			Handle: handle, DispatchState: dispatchState, Status: observation.Status, Usage: observation.Usage,
-			SafeReasonCode: cacheProviderSettlementReasonCode(observation.Status, dispatchState), SettledAt: settledAt,
+			SafeReasonCode: cacheProviderSettlementReasonCode(observation.Status, dispatchState), FirstTokenAt: result.HostTiming.FirstContentAt, SettledAt: settledAt,
 		}); err != nil {
 			return nil, err
 		}
@@ -358,14 +368,18 @@ func cacheProviderUsage(result domainmodel.Result, family domaincache.ProviderFa
 		inputKnown, outputKnown = result.Usage.HasPromptTokens, result.Usage.HasCompletionTokens
 	}
 	usage := domaincache.ProviderUsageV1{
+		NativeCounterPresence: result.Usage.UsagePresenceKnown, OutputTokensFinality: result.Usage.OutputTokensFinality, ReasoningTokensFinality: result.Usage.ReasoningTokensFinality,
 		MessagesInput:   result.Usage.MessagesInput,
 		InputTokens:     cacheTokenCount(result.Usage.PromptTokens, inputKnown),
 		OutputTokens:    cacheTokenCount(result.Usage.CompletionTokens, outputKnown),
 		CacheHitTokens:  cacheTokenCount(result.Usage.CacheHitTokens, result.Usage.HasCacheHit),
 		CacheMissTokens: cacheTokenCount(result.Usage.CacheMissTokens, result.Usage.HasCacheMiss),
-		ReasoningTokens: cacheTokenCount(result.Usage.ReasoningTokens, result.Usage.ReasoningTokens > 0),
+		ReasoningTokens: cacheTokenCount(result.Usage.ReasoningTokens, result.Usage.HasReasoningTokens || (!result.Usage.UsagePresenceKnown && result.Usage.ReasoningTokens > 0)),
 	}
-	if result.Usage.PriceConfigured && inputKnown && outputKnown {
+	if usage.ReasoningTokens.Known && usage.OutputTokens.Known && usage.ReasoningTokens.Value > usage.OutputTokens.Value {
+		return domaincache.ProviderUsageV1{}, errors.New("provider reasoning exceeds output tokens")
+	}
+	if result.Usage.PriceConfigured && inputKnown && outputKnown && result.Usage.OutputTokensFinality != domaincache.ProviderOutputTokensProvisionalV1 {
 		amount := result.Usage.CostUSD
 		if result.Usage.Currency == "CNY" {
 			amount = result.Usage.CostCNY

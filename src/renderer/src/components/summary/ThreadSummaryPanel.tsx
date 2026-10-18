@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -12,18 +13,20 @@ import {
   Laptop,
   Loader2,
   Plus,
+  Pin,
   ReceiptText,
   UsersRound,
   X
 } from '../../design/AnalytixUiIcons'
 import type { GitBranchesResult } from '@shared/git-branches'
+import type { ChildInputSubmitRequestV1 } from '@shared/child-input-contract'
 import type {
   CoreThreadSummaryResponseJson,
   CoreThreadSummarySubagentJson,
   CoreThreadSummaryTaskJson
 } from '../../agent/analytix-contract'
 import { getProvider } from '../../agent/registry'
-import { rendererRuntimeClient } from '../../agent/runtime-client'
+import { ChildInputRejectedError, rendererRuntimeClient } from '../../agent/runtime-client'
 import {
   getSharedActiveCaseContext,
   querySharedCaseOverview,
@@ -216,6 +219,9 @@ export function ThreadSummaryPanel({
   activeThreadId,
   visible = true,
   className = '',
+  titleId,
+  pinPreference = true,
+  onTogglePin,
   onCollapse,
   onInspectChildAgent,
   onSubagentsChange,
@@ -226,6 +232,9 @@ export function ThreadSummaryPanel({
   activeThreadId: string | null
   visible?: boolean
   className?: string
+  titleId?: string
+  pinPreference?: boolean
+  onTogglePin?: () => void
   onCollapse: () => void
   onInspectChildAgent?: (subagents: CoreThreadSummarySubagentJson[], selectedKey: string) => void
   onSubagentsChange?: (threadId: string, subagents: CoreThreadSummarySubagentJson[]) => void
@@ -247,7 +256,15 @@ export function ThreadSummaryPanel({
   const [gitInfo, setGitInfo] = useState<GitBranchesResult | null>(null)
   const caseOverview = useCaseOverviewState(visible)
   const liveRefreshMarkerRef = useRef<ThreadSummarySeqRefreshMarker>({ threadId: null, seq: 0 })
+  const diagnosticInputAttempts = useRef(new Map<string, { request: ChildInputSubmitRequestV1; childThreadId: string; uncertain: boolean }>())
   const activeThreadIdRef = useRef(activeThreadId)
+  const diagnosticViewKey = JSON.stringify([activeThreadId, visible])
+  const diagnosticView = useRef({ key: diagnosticViewKey, epoch: 0 })
+  if (diagnosticView.current.key !== diagnosticViewKey) diagnosticView.current = { key: diagnosticViewKey, epoch: diagnosticView.current.epoch + 1 }
+  const diagnosticActionSeq = useRef(0)
+  const diagnosticMounted = useRef(false)
+  useEffect(() => { diagnosticMounted.current = true; return () => { diagnosticMounted.current = false } }, [])
+  useEffect(() => { setBusyDiagnosticKey(null); setDiagnosticActionError(null) }, [diagnosticViewKey])
   const summaryLoadGenerationRef = useRef(0)
   activeThreadIdRef.current = activeThreadId
   const provider = useMemo(() => getProvider(), [])
@@ -386,10 +403,41 @@ export function ThreadSummaryPanel({
   ): Promise<void> => {
     const jobId = entry.fields.jobId
     const threadId = entry.fields.parentThreadId || activeThreadId
-    if (!threadId || !jobId) return
+    if (!threadId || !jobId || !visible) return
+    const viewEpoch = diagnosticView.current.epoch
+    const actionSeq = ++diagnosticActionSeq.current
+    const isCurrent = (): boolean => diagnosticMounted.current && diagnosticView.current.epoch === viewEpoch && diagnosticActionSeq.current === actionSeq
     setBusyDiagnosticKey(entry.key)
     setDiagnosticActionError(null)
     try {
+      if (action === 'steer') {
+        const key = JSON.stringify([threadId, jobId])
+        const text = payload?.message?.trim() ?? ''
+        let attempt = diagnosticInputAttempts.current.get(key)
+        if (attempt && attempt.request.message !== text) throw new Error('Retry the unconfirmed message before editing it.')
+        if (!attempt) {
+          const caps = await rendererRuntimeClient.inspectChildInput(threadId, jobId, entry.fields.childThreadId)
+          if (!isCurrent()) return
+          if (caps.send === 'disabled' || !caps.runId || !caps.childTurnId || !caps.childThreadId) {
+            throw new Error('Child cannot accept a message right now.')
+          }
+          attempt = { childThreadId: caps.childThreadId, uncertain: false, request: { mode: 'start_or_steer', threadId, jobId, expectedRunId: caps.runId,
+            expectedChildTurnId: caps.childTurnId, message: text, clientMessageId: globalThis.crypto.randomUUID() } }
+          diagnosticInputAttempts.current.set(key, attempt)
+        }
+        try {
+          await rendererRuntimeClient.submitChildInput(attempt.request, attempt.childThreadId)
+        } catch (error) {
+          if (!(error instanceof ChildInputRejectedError)) attempt.uncertain = true
+          if (isCurrent() && error instanceof ChildInputRejectedError && (!attempt.uncertain || error.code === 'input_cancelled')) diagnosticInputAttempts.current.delete(key)
+          if (attempt.uncertain) throw new Error('Child message remains unconfirmed. Retry the original message.')
+          throw error
+        }
+        if (!isCurrent()) { attempt.uncertain = true; return }
+        diagnosticInputAttempts.current.delete(key)
+        await refreshAfterDiagnosticAction(activeThreadId, load)
+        return
+      }
       const baseBody = {
         threadId,
         jobId,
@@ -400,13 +448,7 @@ export function ThreadSummaryPanel({
         ? await rendererRuntimeClient.pauseTaskJob(baseBody)
         : action === 'resume'
           ? await rendererRuntimeClient.resumeTaskJob(baseBody)
-          : action === 'steer'
-            ? await rendererRuntimeClient.steerTaskJob({
-              ...baseBody,
-              message: payload?.message ?? '',
-              clientMessageId: nextRuntimeDiagnosticsClientRequestId()
-            })
-            : action === 'restart'
+          : action === 'restart'
                 ? await rendererRuntimeClient.restartTaskJob(baseBody)
                 : action === 'recover'
                   ? await rendererRuntimeClient.recoverTaskJob({
@@ -423,9 +465,9 @@ export function ThreadSummaryPanel({
       }
       await refreshAfterDiagnosticAction(activeThreadId, load)
     } catch (error) {
-      setDiagnosticActionError(error instanceof Error ? error.message : String(error))
+      if (isCurrent()) setDiagnosticActionError(error instanceof Error ? error.message : String(error))
     } finally {
-      setBusyDiagnosticKey(null)
+      if (isCurrent()) setBusyDiagnosticKey(null)
     }
   }
 
@@ -476,6 +518,7 @@ export function ThreadSummaryPanel({
       runtimeDiagnostics={runtimeDiagnostics}
       diagnosticsFocus={effectiveDiagnosticsFocus}
       className={className}
+      titleId={titleId} pinPreference={pinPreference} onTogglePin={onTogglePin}
       onCollapse={onCollapse}
       onInspectChildAgent={onInspectChildAgent}
       onOpenChanges={onOpenChanges}
@@ -520,6 +563,9 @@ export function ThreadSummaryPanelView({
   environment,
   caseOverview = { status: 'idle', caseId: '', data: null, error: null },
   className = '',
+  titleId,
+  pinPreference = true,
+  onTogglePin,
   onCollapse,
   onCloseOutput,
   onOpenChanges,
@@ -542,6 +588,9 @@ export function ThreadSummaryPanelView({
   environment?: ThreadSummaryEnvironment
   caseOverview?: CaseOverviewState
   className?: string
+  titleId?: string
+  pinPreference?: boolean
+  onTogglePin?: () => void
   onCollapse: () => void
   onOpenChanges?: () => void
   onInspectChildAgent?: (subagents: CoreThreadSummarySubagentJson[], selectedKey: string) => void
@@ -562,6 +611,7 @@ export function ThreadSummaryPanelView({
 }): ReactElement {
   const data = state.data
   const hasCaseOverview = caseOverview.status !== 'idle'
+  const { t } = useTranslation('common')
   const hasEnvironment = Boolean(
     environment?.workspaceRoot ||
     environment?.diffStats ||
@@ -569,9 +619,13 @@ export function ThreadSummaryPanelView({
   )
   const showBlockingLoading = state.status === 'loading' && !hasCaseOverview && !hasEnvironment
   return (
-    <div className={`ds-thread-summary-card relative flex max-h-full min-h-0 w-[300px] flex-col overflow-hidden rounded-3xl border border-ds-border bg-ds-card-strong pt-2 shadow-md ${className}`}>
+    <div className={`ds-thread-summary-card relative flex max-h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-ds-border bg-[var(--ds-card-strong)] pt-2 shadow-md ${className}`}>
       <div className="flex h-10 shrink-0 items-center gap-2 px-4">
-        <div className="min-w-0 flex-1 truncate text-base font-semibold leading-5 text-ds-ink">置顶摘要</div>
+        <div id={titleId} className="min-w-0 flex-1 truncate text-base font-semibold leading-5 text-ds-ink">置顶摘要</div>
+        {onTogglePin ? <button type="button" aria-label={t('rightPanelSummary')} aria-pressed={pinPreference} onClick={onTogglePin}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ds-muted hover:bg-ds-hover hover:text-ds-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25">
+          <Pin className="h-4 w-4" aria-hidden="true" />
+        </button> : null}
         <button
           type="button"
           aria-label="关闭摘要"

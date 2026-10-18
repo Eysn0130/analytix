@@ -1263,7 +1263,7 @@ func newHostEvidenceManagerFixtureWithNativeCurrentness(
 	if withAuthority {
 		options.DatasetAuthority = authority
 	}
-	manager := NewProductionManagerWithOptions(nil, options)
+	manager := newAdmissionTestManagerWithOptions(nil, options)
 	client := &nativeSourceProbeClient{tools: hostFundsRuntimeToolCatalogV1(true, false)}
 	if withAuthority {
 		manager.Connect()

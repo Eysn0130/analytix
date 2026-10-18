@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
 
+	goalapp "analytix.local/runtime-go/internal/app/goal"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	"analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
@@ -293,7 +295,36 @@ func (h ThreadHandlers) HandleFork(w http.ResponseWriter, r *http.Request, threa
 			return
 		}
 	}
+	if request == nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]any{"code": "validation_error", "message": "invalid fork body"})
+		return
+	}
+	// Validate the original number before the ordinary map's float64 rounding.
+	// Only this boundary field is normalized; all other request types stay put.
+	var fields map[string]json.RawMessage
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &fields); err != nil {
+			WriteJSON(w, http.StatusBadRequest, map[string]any{"code": "validation_error", "message": "invalid fork body"})
+			return
+		}
+	}
+	if raw, present := fields["endSeq"]; present {
+		seq, err := decodeForkEndSeqV1(raw)
+		if err != nil {
+			WriteJSON(w, http.StatusBadRequest, map[string]any{"code": "validation_error", "message": "invalid fork boundary"})
+			return
+		}
+		request["endSeq"] = seq
+	}
+	if _, err := threadapp.ParseForkBoundaryV1(request); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]any{"code": "validation_error", "message": "invalid fork boundary"})
+		return
+	}
 	thread, err := h.Service.Fork(threadID, request)
+	if errors.Is(err, threadapp.ErrForkBoundaryUnavailable) {
+		WriteJSON(w, http.StatusConflict, map[string]any{"code": "fork_boundary_unavailable", "message": threadapp.ErrForkBoundaryUnavailable.Error()})
+		return
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		WriteJSON(w, http.StatusNotFound, map[string]any{"code": "not_found", "message": "thread not found"})
 		return
@@ -307,6 +338,22 @@ func (h ThreadHandlers) HandleFork(w http.ResponseWriter, r *http.Request, threa
 		return
 	}
 	WriteJSON(w, http.StatusCreated, thread)
+}
+
+func decodeForkEndSeqV1(raw json.RawMessage) (float64, error) {
+	text := strings.TrimSpace(string(raw))
+	if err := domainjsonstrict.ValidateNumberText(text, 0, 0); err != nil {
+		return 0, threadapp.ErrForkBoundaryInvalid
+	}
+	rational, ok := new(big.Rat).SetString(text)
+	if !ok || !rational.IsInt() || !rational.Num().IsInt64() {
+		return 0, threadapp.ErrForkBoundaryInvalid
+	}
+	seq := rational.Num().Int64()
+	if seq <= 0 || seq > 1<<53-1 {
+		return 0, threadapp.ErrForkBoundaryInvalid
+	}
+	return float64(seq), nil
 }
 
 func (h ThreadHandlers) HandleRewind(w http.ResponseWriter, r *http.Request, threadID string) {
@@ -369,6 +416,21 @@ func (h ThreadHandlers) HandleGoal(w http.ResponseWriter, r *http.Request, threa
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if live, ok := h.Service.(interface {
+			GetGoalStateV1(string) (map[string]any, error)
+		}); ok {
+			state, err := live.GetGoalStateV1(threadID)
+			if errors.Is(err, os.ErrNotExist) {
+				WriteJSON(w, http.StatusNotFound, map[string]any{"code": "not_found", "message": "thread not found"})
+				return
+			}
+			if err != nil {
+				WriteJSON(w, http.StatusInternalServerError, map[string]any{"code": "goal_read_failed", "message": "goal state unavailable"})
+				return
+			}
+			WriteJSON(w, http.StatusOK, state)
+			return
+		}
 		goal, err := h.Service.GetGoal(threadID)
 		if errors.Is(err, os.ErrNotExist) {
 			WriteJSON(w, http.StatusNotFound, map[string]any{"code": "not_found", "message": "thread not found"})
@@ -390,7 +452,29 @@ func (h ThreadHandlers) HandleGoal(w http.ResponseWriter, r *http.Request, threa
 			return
 		}
 		if err != nil {
+			if errors.Is(err, goalapp.ErrGoalRefConflictV1) {
+				WriteJSON(w, http.StatusConflict, map[string]any{"code": "goal_ref_conflict", "message": err.Error()})
+				return
+			}
+			if errors.Is(err, goalapp.ErrGoalCommittedRecoveryV1) || errors.Is(err, goalapp.ErrGoalCommitUnknownV1) {
+				WriteJSON(w, http.StatusInternalServerError, map[string]any{"code": "goal_commit_unconfirmed", "message": "Goal mutation requires authoritative recovery; do not retry automatically"})
+				return
+			}
 			WriteJSON(w, http.StatusBadRequest, map[string]any{"code": "validation_error", "message": err.Error()})
+			return
+		}
+		if live, ok := h.Service.(interface {
+			GetGoalStateV1(string) (map[string]any, error)
+		}); ok {
+			state, err := live.GetGoalStateV1(threadID)
+			if err != nil {
+				WriteJSON(w, http.StatusInternalServerError, map[string]any{"code": "goal_read_failed", "message": "committed goal state unavailable"})
+				return
+			}
+			if contracts.StringField(body, "operation") == "clear" {
+				state["cleared"] = true
+			}
+			WriteJSON(w, http.StatusOK, state)
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]any{"goal": goal})
@@ -401,6 +485,10 @@ func (h ThreadHandlers) HandleGoal(w http.ResponseWriter, r *http.Request, threa
 			return
 		}
 		if err != nil {
+			if errors.Is(err, goalapp.ErrGoalRefConflictV1) {
+				WriteJSON(w, http.StatusConflict, map[string]any{"code": "goal_ref_conflict", "message": err.Error()})
+				return
+			}
 			WriteJSON(w, http.StatusInternalServerError, map[string]any{"code": "internal_error", "message": err.Error()})
 			return
 		}

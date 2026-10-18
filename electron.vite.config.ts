@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { homedir } from 'os'
@@ -21,7 +22,6 @@ const developmentEnvDir = process.env.ANALYTIX_DESKTOP_EXTERNAL_STATE_MODE === '
   ? process.env.ANALYTIX_USER_DATA_DIR
   : undefined
 const FLOW_RUNTIME_ASSET_ROOT = resolve('src/renderer/src/data-analysis/features/flow/runtime/embedded')
-const FLOW_RUNTIME_ROUTE_PREFIX = '/flow-runtime/'
 
 function toPosixPath(value: string): string {
   return value.replace(/\\/g, '/')
@@ -104,7 +104,7 @@ function hubColdBuildGraphPlugin(target: 'main' | 'renderer'): Plugin {
   }
 }
 
-function listFlowRuntimeFiles(root: string): Array<{ absolutePath: string; routePath: string; fileName: string }> {
+function listFlowRuntimeFiles(root: string, prefix='flow-runtime'): Array<{ absolutePath: string; routePath: string; fileName: string }> {
   const result: Array<{ absolutePath: string; routePath: string; fileName: string }> = []
 
   const visit = (dir: string): void => {
@@ -117,8 +117,8 @@ function listFlowRuntimeFiles(root: string): Array<{ absolutePath: string; route
       const relativePath = toPosixPath(relative(root, absolutePath))
       result.push({
         absolutePath,
-        routePath: `${FLOW_RUNTIME_ROUTE_PREFIX}${relativePath}`,
-        fileName: posix.join('flow-runtime', relativePath)
+        routePath: `/${prefix}/${relativePath}`,
+        fileName: posix.join(prefix, relativePath)
       })
     })
   }
@@ -186,6 +186,36 @@ function flowRuntimeAssetsPlugin(): Plugin {
         })
       })
     }
+  }
+}
+
+// Serve the published worker dependency graph unchanged and from this origin.
+export function docxRuntimeAssetsPlugin(assetRoot?:string):Plugin {
+  let catalog:{files:ReturnType<typeof listFlowRuntimeFiles>;workerPaths:Record<string,string>}|undefined
+  const current=()=>{
+    if (catalog) return catalog
+    const require=createRequire(import.meta.url)
+    const root=assetRoot ?? join(require.resolve('@superdoc/docx-engine/package.json'),'..','dist')
+    const files=listFlowRuntimeFiles(root,'superdoc-engine').filter(file=>!/\.d\.(?:ts|cts)$|\.map$/.test(file.fileName))
+    const workerPaths:Record<string,string>={}
+    for (const [role,prefix] of Object.entries({document:'browser-worker-entry-',collaboration:'collaboration-worker-entry-',reviewIndex:'review-index-worker-entry-'})) {
+      const matches=files.filter(file=>posix.dirname(file.fileName)==='superdoc-engine/assets' && file.fileName.startsWith('superdoc-engine/assets/'+prefix) && file.fileName.endsWith('.js'))
+      if (matches.length!==1) throw new Error(`DOCX ${role} worker requires exactly one ${prefix}*.js entry; found ${matches.length}.`)
+      workerPaths[role]=matches[0].fileName
+    }
+    return catalog={files,workerPaths}
+  }
+  return {name:'analytix-docx-runtime-assets',
+    config(){return {define:{__ANALYTIX_DOCX_WORKER_PATHS__:JSON.stringify(current().workerPaths)}}},
+    configureServer(server){
+      const routes=new Map(current().files.map(file=>[file.routePath,file.absolutePath]))
+      server.middlewares.use((req,res,next)=>{
+        const file=routes.get((req.url??'').split('?')[0])
+        if (!file) {next();return}
+        res.setHeader('Content-Type',contentTypeFor(file));res.end(readFileSync(file))
+      })
+    },
+    generateBundle(){for(const file of current().files)this.emitFile({type:'asset',fileName:file.fileName,source:readFileSync(file.absolutePath)})}
   }
 }
 
@@ -350,6 +380,7 @@ export default defineConfig({
     plugins: [
       react(),
       flowRuntimeAssetsPlugin(),
+      docxRuntimeAssetsPlugin(),
       hubColdBuildGraphPlugin('renderer'),
       {
         name: 'analytix-browser-preview-settings',

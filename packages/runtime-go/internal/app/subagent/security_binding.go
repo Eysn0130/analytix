@@ -19,6 +19,7 @@ type JobSecurityUpdater interface {
 }
 
 type JobSecurityAuthorizer struct {
+	HostInputCurrent        func(domainjob.Record) bool
 	Threads                 JobSecurityThreadReader
 	Jobs                    JobSecurityUpdater
 	WorkspaceHasCaseBinding func(string) bool
@@ -60,6 +61,12 @@ func (authorizer JobSecurityAuthorizer) Blocker(record domainjob.Record) string 
 }
 
 func (authorizer JobSecurityAuthorizer) BlockerAt(record domainjob.Record, now time.Time) string {
+	if record.HostChildInput != nil {
+		if domainjob.ValidateHostChildInputRecordV1(record) != nil || authorizer.HostInputCurrent == nil || !authorizer.HostInputCurrent(record) {
+			return "host_child_input_authority_unavailable"
+		}
+		return ""
+	}
 	if strings.TrimSpace(record.ParentThreadID) == "" || strings.TrimSpace(record.ParentTurnID) == "" {
 		return "job_security_binding_missing"
 	}
@@ -98,6 +105,9 @@ func (authorizer JobSecurityAuthorizer) BlockerAt(record domainjob.Record, now t
 // at the durable record time without treating a later admitted turn as the
 // parent execution context.
 func (authorizer JobSecurityAuthorizer) HistoricalBlockerAt(record domainjob.Record, now time.Time) string {
+	if record.HostChildInput != nil {
+		return "host_child_input_has_no_parent_settlement"
+	}
 	if strings.TrimSpace(record.ParentThreadID) == "" || strings.TrimSpace(record.ParentTurnID) == "" || record.SecurityBinding == nil {
 		return "job_security_binding_missing"
 	}

@@ -9,12 +9,15 @@ import workbenchSource from '../Workbench.tsx?raw'
 import sidebarSource from './Sidebar.tsx?raw'
 import sidebarClawDialogSource from './SidebarClawDialog.tsx?raw'
 
-function renderSidebar(activeView: 'chat' | 'write' | 'claw' | 'schedule' = 'chat'): string {
+function renderSidebar(
+  activeView: 'chat' | 'write' | 'claw' | 'schedule' = 'chat',
+  caseProjects: Parameters<typeof Sidebar>[0]['caseProjects'] = []
+): string {
   const noop = vi.fn()
   return renderToStaticMarkup(
 	    createElement(Sidebar, {
 		      threads: [],
-		      caseProjects: [],
+		      caseProjects,
 		      caseProjectIndexStatus: 'ready',
 		      caseProjectThreadsById: {},
 	      caseProjectLoadingById: {},
@@ -23,7 +26,6 @@ function renderSidebar(activeView: 'chat' | 'write' | 'claw' | 'schedule' = 'cha
 	      activeThreadId: null,
       activeView,
       connectPhoneSidebarOpen: false,
-      pluginsActive: false,
       runtimeReady: true,
       threadSearch: '',
 	      showArchivedThreads: false,
@@ -43,12 +45,7 @@ function renderSidebar(activeView: 'chat' | 'write' | 'claw' | 'schedule' = 'cha
       activeDataAnalysis: null,
       onOpenDataAnalysis: noop,
       onOpenSettings: noop,
-      onOpenPlugins: noop,
-      focusModeEnabled: false,
-      onFocusModeChange: noop,
       onToggleConnectPhone: noop,
-      onCodeOpen: noop,
-      onWriteOpen: noop,
       onScheduleOpen: noop
     })
   )
@@ -86,6 +83,18 @@ describe('Sidebar route entries', () => {
     })
   })
 
+  it.each([
+    ['en', 'Toggle focus mode'],
+    ['zh-CN', '切换专注模式']
+  ])('keeps the retired focus control out of the sidebar in %s', async (language, label) => {
+    await i18n.changeLanguage(language)
+    const html = renderSidebar()
+
+    expect(html).not.toContain(label)
+    expect(html).not.toContain('role="switch"')
+    expect(html).toContain(i18n.t('common:newAgent'))
+  })
+
   it('keeps Workflow/Create Loop out of the top-level sidebar entry set', () => {
     const html = renderNavigation()
 
@@ -93,6 +102,26 @@ describe('Sidebar route entries', () => {
     expect(html).toContain('Schedule')
     for (const label of forbiddenTopLevelEntrypointLabels) {
       expect(html, `${label} must not render as a top-level sidebar entry`).not.toContain(label)
+    }
+  })
+
+  it.each(['chat', 'write', 'schedule'] as const)('preserves project navigation and creation entries in %s', (activeView) => {
+    const html = renderSidebar(activeView, [{
+      id: 'synthetic-navigation',
+      name: 'sidebar-navigation',
+      rootPath: '/synthetic/sidebar-navigation',
+      updatedAt: '2026-10-13T00:00:00.000Z',
+      threadCount: 0,
+      runningCount: 0,
+      archivedCount: 0,
+      status: 'ready'
+    }])
+    expect(html).toContain('/synthetic/sidebar-navigation')
+    expect(html).toContain(i18n.t('common:sidebarSearchThreads'))
+    for (const key of ['newAgent', 'sddNewRequirement']) {
+      const visibleLabel = `>${i18n.t(`common:${key}`)}</span>`
+      if (activeView === 'schedule') expect(html).not.toContain(visibleLabel)
+      else expect(html).toContain(visibleLabel)
     }
   })
 

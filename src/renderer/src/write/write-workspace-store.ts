@@ -42,6 +42,12 @@ import {
 export type { WriteActiveFileKind, WritePreviewMode, WriteSaveStatus, WriteWorkspaceState } from './write-workspace-store-types'
 export { writeBasenameFromPath, writeDirnameFromPath, writeJoinPath, writeRelativeToWorkspace } from './write-workspace-store-helpers'
 
+/** Retained text drafts must settle under their original owner before file-preview fallback. */
+export function writeWorkspaceHasUnsettledDraft(state: Pick<WriteWorkspaceState, 'activeFilePath' | 'activeFileKind' | 'saveStatus' | 'pendingSave' | 'reviewActive' | 'pendingAgentReview' | 'reviewRecovery'>): boolean {
+  return !!(state.activeFilePath && state.activeFileKind === 'text' && (state.saveStatus !== 'saved' ||
+    state.pendingSave || state.reviewActive || state.pendingAgentReview || state.reviewRecovery))
+}
+
 const MAX_ANIMATED_EXTERNAL_SYNC_CHARS = 120_000
 
 let fileActionsInFlight = 0
@@ -150,6 +156,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   syncActiveFileFromDisk: async (workspaceRoot, options = {}) => {
     const snapshot = get()
     const force = options.force === true
+    if (options.expectedContent !== undefined && (snapshot.workspaceRoot !== workspaceRoot || snapshot.fileContent !== options.expectedContent)) return false
     if (snapshot.shutdownFrozen || !snapshot.activeFilePath) return false
     if (snapshot.activeFileKind !== 'text') return false
     if (snapshot.pendingSave || (!force && snapshot.fileContent !== lastSavedContent)) return false
@@ -164,7 +171,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     try {
       document = await openTextObject(workspaceRoot, snapshot.activeFilePath)
     } catch (error) {
-      if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath)) {
+      if (pathsEqual(get().activeFilePath ?? '', snapshot.activeFilePath) &&
+        (options.expectedContent === undefined || get().workspaceRoot === workspaceRoot && get().fileContent === options.expectedContent)) {
         set({ fileError: error instanceof Error ? error.message : String(error), saveStatus: 'error' })
       }
       return false
@@ -179,6 +187,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     const nextTruncated = truncated === true
 
     const latest = get()
+    if (options.expectedContent !== undefined && (latest.workspaceRoot !== workspaceRoot || latest.fileContent !== options.expectedContent)) return false
     if (latest.shutdownFrozen || !latest.activeFilePath || !pathsEqual(latest.activeFilePath, resolvedPath)) return false
     if (latest.pendingSave || (!force && latest.fileContent !== lastSavedContent)) return false
     set({ objectSession: document.legacy ? null : { sessionId: document.sessionId, objectId: document.objectId, revision: document.revision }, legacyObjectEditing: document.legacy })

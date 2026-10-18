@@ -1,14 +1,18 @@
 package control
 
 import (
+	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 	"context"
 	"errors"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	appusage "analytix.local/runtime-go/internal/app/usage"
+	domaingoal "analytix.local/runtime-go/internal/domain/goal"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	displayport "analytix.local/runtime-go/internal/ports/userinputdisplay"
 )
 
 const InternalAutoContinuePromptV1 = "Continue the parent task after a host-verified background completion. Use only durable typed lifecycle state."
@@ -37,7 +41,7 @@ type Controller struct {
 
 	mu                    sync.Mutex
 	auxiliary             map[string]*auxiliaryOperation
-	foregroundPreparing   map[string]int
+	foregroundPreparing   map[string]*foregroundPreparation
 	turnCancels           map[turnKey]context.CancelFunc
 	interruptReservations map[turnKey]struct{}
 	cancelReservations    map[turnKey]struct{}
@@ -66,6 +70,9 @@ type ActionResult struct {
 }
 
 type StartTurnRequest struct {
+	RequestedSkillIDs []string
+	// Host-only exact Goal attempt. HTTP decoding never supplies this witness.
+	InternalGoalRound     domaingoal.RoundAdmissionV1 `json:"-"`
 	ThreadID              string
 	Prompt                string
 	DisplayText           string
@@ -116,15 +123,20 @@ func ValidateInternalReservedTurnRequestV1(request StartTurnRequest, fixedPrompt
 }
 
 type SteerTurnRequest struct {
-	ThreadID            string
-	TurnID              string
-	Text                string
-	DisplayText         string
-	RiskIntent          string
-	ClientUserMessageID string
-	ExpectedTurnID      string
-	AttachmentIDs       []string
-	FileReferences      []any
+	UserInputReplyIdentity *domainsteering.UserInputReplyIdentityV1
+	// Only the Host's verified late Question path populates these fields.
+	UserInputID               string
+	UserInputCaptureReceiptID string
+	UserInputCapturedAt       time.Time
+	ThreadID                  string
+	TurnID                    string
+	Text                      string
+	DisplayText               string
+	RiskIntent                string
+	ClientUserMessageID       string
+	ExpectedTurnID            string
+	AttachmentIDs             []string
+	FileReferences            []any
 }
 
 type InterruptTurnRequest struct {
@@ -139,10 +151,29 @@ type ApprovalDecision struct {
 	Reason     string
 }
 
+type UserInputLateReplyV1 struct {
+	ClientUserMessageID string `json:"clientUserMessageId"`
+	ExpectedTurnID      string `json:"expectedTurnId"`
+}
+
 type UserInputResponse struct {
-	InputID   string
-	Answers   []map[string]string
-	Cancelled bool
+	Selector          *displayport.SelectorV1
+	LateReply         *UserInputLateReplyV1
+	Continue          bool
+	InputID           string
+	Answers           []map[string]string
+	StructuredAnswers []UserInputAnswer
+	Cancelled         bool
+}
+
+// An absent selector retains the explicit legacy original-owner command.
+// A supplied selector cannot fall back to that form after a binding mismatch.
+func UserInputResponseMatchesOwnerV1(request UserInputResponse, threadID, turnID, itemID, inputID string) bool {
+	if request.InputID != inputID {
+		return false
+	}
+	return request.Selector == nil || displayport.ValidateSelectorV1(*request.Selector) &&
+		*request.Selector == (displayport.SelectorV1{ThreadID: threadID, TurnID: turnID, ItemID: itemID, RequestID: inputID})
 }
 
 type turnKey struct {
@@ -168,7 +199,7 @@ func NewController(driver Driver) *Controller {
 	return &Controller{
 		driver:                driver,
 		auxiliary:             map[string]*auxiliaryOperation{},
-		foregroundPreparing:   map[string]int{},
+		foregroundPreparing:   map[string]*foregroundPreparation{},
 		turnCancels:           map[turnKey]context.CancelFunc{},
 		interruptReservations: map[turnKey]struct{}{},
 		cancelReservations:    map[turnKey]struct{}{},
@@ -187,6 +218,15 @@ func (c *Controller) SendTurn(ctx context.Context, request StartTurnRequest) (ma
 	}
 	if err := domainmodel.ValidateReasoningEffortV1(request.ReasoningEffort); err != nil {
 		return nil, err
+	}
+	if request.InternalGoalRound != nil {
+		expected := StartTurnRequest{ThreadID: request.InternalGoalRound.ThreadID(), Prompt: request.InternalGoalRound.Prompt(), Async: true, InternalGoalRound: request.InternalGoalRound}
+		if !reflect.DeepEqual(request, expected) && !reflect.DeepEqual(request, NormalizeStartTurnRequest(expected)) {
+			return nil, errors.New("invalid Goal turn carrier")
+		}
+		if err := request.InternalGoalRound.Validate(request.ThreadID, request.Prompt); err != nil {
+			return nil, err
+		}
 	}
 	if request.InternalTurnID != "" || request.InternalAutoContinueJobID != "" || request.InternalAutoContinueParentTurnID != "" {
 		if err := ValidateInternalReservedTurnRequestV1(request, InternalAutoContinuePromptV1, appusage.SourceTurn); err != nil {
@@ -561,6 +601,19 @@ func (c *Controller) ShuttingDown() bool {
 	return c.shuttingDown
 }
 
+// OwnsTerminalClaim observes existing arbitration only. It grants no new
+// terminal authority and is used to keep private settlement restricted to
+// the exact real terminal owner while shutdown admission is closed.
+func (c *Controller) OwnsTerminalClaim(threadID, turnID, contextDigest string) bool {
+	key, valid := normalizedTurnKey(threadID, turnID)
+	if c == nil || !valid || contextDigest == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.candidateTerminals[key] == contextDigest
+}
+
 func (c *Controller) UnregisterTurnCancel(threadID, turnID string) bool {
 	key, ok := normalizedTurnKey(threadID, turnID)
 	if !ok {
@@ -603,6 +656,16 @@ func (c *Controller) CancelThreadTurnsAndWaitExcept(ctx context.Context, threadI
 // workspace transition. Terminal owners that were already admitted remain
 // able to finish, avoiding a writer/terminal lock inversion.
 func (c *Controller) ReserveThreadTransition(threadID string) (func(), error) {
+	return c.reserveThreadTransition(threadID, false)
+}
+
+// ReserveIdleThreadTransition admits a metadata-only transition without
+// cancelling existing work. The idle check and admission fence are atomic.
+func (c *Controller) ReserveIdleThreadTransition(threadID string) (func(), error) {
+	return c.reserveThreadTransition(threadID, true)
+}
+
+func (c *Controller) reserveThreadTransition(threadID string, requireIdle bool) (func(), error) {
 	if c == nil {
 		return nil, ErrThreadTransition
 	}
@@ -614,6 +677,10 @@ func (c *Controller) ReserveThreadTransition(threadID string) (func(), error) {
 	if c.shuttingDown {
 		c.mu.Unlock()
 		return nil, context.Canceled
+	}
+	if requireIdle && !c.goalIdleLockedV1(threadID) {
+		c.mu.Unlock()
+		return nil, ErrThreadTransition
 	}
 	if _, exists := c.threadTransitions[threadID]; exists {
 		c.mu.Unlock()

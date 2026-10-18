@@ -18,6 +18,8 @@ import {
   buildWriteInlineEditCompletionRequest,
   buildWriteInlineEditDraft
 } from '../../write/inline-edit'
+import { requestDocumentInlineCompletion } from '../../write/inline-completion/request'
+import { normalizeWorkspaceRoot } from '../../lib/workspace-path'
 import { toggleWriteInlineFormat, type WriteInlineFormatKind } from '../../write/inline-format'
 import type { WriteBlockType } from '../../write/block-type'
 import { createWriteRecentEdit } from '../../write/recent-edits'
@@ -347,6 +349,12 @@ export function SddDraftEditorView({
   const inlineAgentTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const [inlineAgentValue, setInlineAgentValue] = useState('')
   const [inlineEditInFlight, setInlineEditInFlight] = useState(false)
+  const inlineEditRequest = useRef<{ cancel: () => void } | null>(null)
+  const inlineEditMounted = useRef(true)
+  useEffect(() => {
+    inlineEditMounted.current = true
+    return () => { inlineEditMounted.current = false; inlineEditRequest.current?.cancel() }
+  }, [])
   const [pointerSelecting, setPointerSelecting] = useState(false)
 
   useEffect(() => {
@@ -542,14 +550,19 @@ export function SddDraftEditorView({
 
   const submitInlineEdit = async (prompt: string): Promise<void> => {
     const trimmed = prompt.trim()
-    if (!trimmed || readOnly || inlineEditInFlight) return
+    if (!trimmed || readOnly || inlineEditRequest.current) return
     if (selection.ranges.length !== 1) {
       setOperationStatus('error', t(
         selection.ranges.length > 1 ? 'writeInlineEditMultiSelection' : 'writeInlineEditNoSelection'
       ))
       return
     }
-    if (typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function') {
+    const chat = useChatStore.getState()
+    const threadId = chat.activeThreadId
+    const threadWorkspace = chat.threads.find(thread => thread.id === threadId)?.workspace || chat.workspaceRoot
+    if (!threadId || normalizeWorkspaceRoot(threadWorkspace) !== normalizeWorkspaceRoot(draftWorkspaceRoot) ||
+        typeof window.analytix?.write?.requestWriteInlineCompletion !== 'function' ||
+        typeof window.analytix.write.cancelWriteInlineCompletion !== 'function') {
       setOperationStatus('error', t('writeInlineEditUnavailable'))
       return
     }
@@ -569,11 +582,49 @@ export function SddDraftEditorView({
       recentEdits
     })
 
+    const controller = new AbortController()
+    const originalContent = content
+    const subscriptions: (() => void)[] = []
+    const dispose = (): void => { subscriptions.splice(0).forEach(unsubscribe => unsubscribe()) }
+    const request = { cancel: (): void => {
+      controller.abort(); dispose()
+      if (inlineEditRequest.current === request) {
+        inlineEditRequest.current = null
+        if (inlineEditMounted.current) setInlineEditInFlight(false)
+      }
+    } }
+    const current = (): boolean => {
+      const latest = useSddDraftStore.getState(), chat = useChatStore.getState()
+      const selected = useWriteWorkspaceStore.getState().selection
+      return !controller.signal.aborted && inlineEditMounted.current && inlineEditRequest.current === request &&
+        latest.activeDraft?.id === draftId && latest.activeDraft.workspaceRoot === draftWorkspaceRoot &&
+        (latest.activeDraft.absolutePath ?? latest.activeDraft.relativePath) === editorFilePath &&
+        latest.content === originalContent && latest.operationStatus !== 'upgrading' &&
+        chat.activeThreadId === threadId && normalizeWorkspaceRoot(chat.threads.find(thread => thread.id === threadId)?.workspace || chat.workspaceRoot) === normalizeWorkspaceRoot(draftWorkspaceRoot) &&
+        richHandleRef.current === richHandle && selected.ranges.length === 1 &&
+        selected.ranges[0].from === selection.ranges[0].from && selected.ranges[0].to === selection.ranges[0].to && selected.ranges[0].text === selection.ranges[0].text
+    }
+    inlineEditRequest.current = request
+    const revoke = (): void => { if (!current()) request.cancel() }
+    subscriptions.push(useSddDraftStore.subscribe(revoke), useChatStore.subscribe(revoke), useWriteWorkspaceStore.subscribe(revoke))
+    // The toolbar disables its focused input while pending, so Escape must
+    // also reach this owner when browser focus has moved to the body.
+    const escape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || !current()) return
+      event.preventDefault(); event.stopPropagation(); request.cancel()
+    }
+    window.addEventListener('keydown', escape, true)
+    subscriptions.push(() => window.removeEventListener('keydown', escape, true))
+    if (!current()) { request.cancel(); return }
     setInlineEditInFlight(true)
     try {
-      const result = await window.analytix.write.requestWriteInlineCompletion(
-        buildWriteInlineEditCompletionRequest(draft.request)
+      const result = await requestDocumentInlineCompletion(
+        { ...buildWriteInlineEditCompletionRequest(draft.request), threadId }, controller.signal
       )
+      if (!current()) return
+      // From here application is synchronous; its own content/selection writes
+      // must not revoke the request that has just completed.
+      dispose()
       if (!result.ok) {
         setOperationStatus('error', t('writeInlineEditFailed', { message: result.message }))
         return
@@ -636,11 +687,15 @@ export function SddDraftEditorView({
       setOperationStatus('idle')
       showTopNotice({ tone: 'success', message: t('writeInlineEditApplied') })
     } catch (err) {
-      setOperationStatus('error', t('writeInlineEditFailed', {
+      if (current()) setOperationStatus('error', t('writeInlineEditFailed', {
         message: err instanceof Error ? err.message : String(err)
       }))
     } finally {
-      setInlineEditInFlight(false)
+      dispose()
+      if (inlineEditRequest.current === request) {
+        inlineEditRequest.current = null
+        if (inlineEditMounted.current) setInlineEditInFlight(false)
+      }
     }
   }
 

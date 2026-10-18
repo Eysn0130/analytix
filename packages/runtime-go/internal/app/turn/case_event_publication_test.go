@@ -372,3 +372,66 @@ func TestGenericEventProjectionRejectsAcceptedFinalMarkersBeforePersistence(t *t
 		t.Fatalf("generic projection accepted marker in []map: projected=%#v err=%v", projected, err)
 	}
 }
+
+func TestCaseLogicalStepSanitizerRetainsOnlyClosedStatisticsV1(t *testing.T) {
+	context := acceptedFinalTestContext(t, "thread-logical-case", "turn-logical-case", 2)
+	thread := map[string]any{"id": context.ThreadID, "turns": []any{map[string]any{"id": context.TurnID, "securityContext": turnSecurityContextRecord(context)}}}
+	for _, stage := range []string{"logical_step_started", "logical_step_assembled", "logical_step_closed"} {
+		details := map[string]any{"schemaVersion": float64(1), "logicalStepId": "f13e1680-e522-4d40-bc18-40dde3bb66ea"}
+		if stage == "logical_step_closed" {
+			details["assistantMessageAssembled"] = true
+			details["llmMs"] = float64(0)
+		}
+		event := map[string]any{"kind": "pipeline_stage", "threadId": context.ThreadID, "turnId": context.TurnID, "stage": stage, "details": details, "label": "PRIVATE_LABEL", "modelResponse": "PRIVATE_RESPONSE", "trace": map[string]any{"private": "PRIVATE_REASONING"}}
+		projected, err := SanitizeCaseEventPublication(thread, event)
+		body, _ := json.Marshal(projected)
+		if err != nil || !reflect.DeepEqual(projected["details"], details) || strings.Contains(string(body), "PRIVATE") {
+			t.Fatalf("case numeric statistics lost/leaked: %#v %v", projected, err)
+		}
+		details["privatePath"] = "PRIVATE_PATH"
+		if _, err := SanitizeCaseEventPublication(thread, event); err == nil {
+			t.Fatal("private extra statistics accepted")
+		}
+	}
+	for _, version := range []any{nil, float64(1), float64(2), "1"} {
+		event := map[string]any{"kind": "pipeline_stage", "threadId": context.ThreadID, "turnId": context.TurnID, "stage": "post_start", "details": map[string]any{"logicalStepMetricsVersion": version, "maxModelSteps": float64(3), "private": "PRIVATE_REASONING"}}
+		projected, err := SanitizeCaseEventPublication(thread, event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		details, _ := projected["details"].(map[string]any)
+		if version == float64(1) {
+			if len(details) != 1 || details["logicalStepMetricsVersion"] != float64(1) {
+				t.Fatal("exact version marker lost")
+			}
+		} else if details != nil {
+			t.Fatal("legacy/unknown coverage declared")
+		}
+	}
+	ordinary := map[string]any{"kind": "pipeline_stage", "threadId": context.ThreadID, "turnId": context.TurnID, "stage": "input_cached", "details": map[string]any{"private": "PRIVATE_REASONING"}}
+	projected, err := SanitizeCaseEventPublication(thread, ordinary)
+	if err != nil || projected["details"] != nil {
+		t.Fatal("unrelated pipeline details opened")
+	}
+}
+
+func TestCaseLogicalStepCoverageMarkerRejectsUnknownTurnV1(t *testing.T) {
+	context := acceptedFinalTestContext(t, "case-coverage", "turn-coverage", 2)
+	thread := map[string]any{"id": context.ThreadID, "turns": []any{map[string]any{"id": context.TurnID, "securityContext": turnSecurityContextRecord(context)}}}
+	event := map[string]any{"kind": "pipeline_stage", "threadId": context.ThreadID, "turnId": "unknown-turn", "stage": "post_start", "details": map[string]any{"logicalStepMetricsVersion": float64(1)}}
+	for _, turnID := range []any{nil, "", "unknown-turn"} {
+		event["turnId"] = turnID
+		if _, err := SanitizeCaseEventPublication(thread, event); err == nil {
+			t.Fatal("missing/unknown turn coverage marker accepted")
+		}
+		for _, stage := range []string{"logical_step_started", "logical_step_assembled"} {
+			event["stage"] = stage
+			event["details"] = map[string]any{"schemaVersion": float64(1), "logicalStepId": "f13e1680-e522-4d40-bc18-40dde3bb66ea"}
+			if _, err := SanitizeCaseEventPublication(thread, event); err == nil {
+				t.Fatal("missing/unknown logical turn accepted")
+			}
+		}
+		event["stage"] = "post_start"
+		event["details"] = map[string]any{"logicalStepMetricsVersion": float64(1)}
+	}
+}

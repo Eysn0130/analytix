@@ -130,3 +130,18 @@ func TestRuntimeResultCarriesOrdinaryCandidateRequiresProcessLocalProvenance(t *
 		t.Fatal("tampered ordinary result slot was accepted")
 	}
 }
+
+func TestCompletionOutputCapHonorsMoreSpecificBoundaries(t *testing.T) {
+	for _, result := range []RuntimeAgentLoopResult{
+		{}, {OutputCapLogicalSequence: 1, Paused: true}, {OutputCapLogicalSequence: 1, CaseSourceUnavailable: true},
+		{OutputCapLogicalSequence: 1, TerminalRecoveryKind: RuntimeTerminalRecoveryStepLimit},
+		{OutputCapLogicalSequence: 1, OrdinaryResult: &domainordinaryresult.ResultSlotV1{CandidateOrigin: domainordinaryresult.ResultSlotOriginHostFixedV1}},
+	} {
+		if RuntimeCompletionEndReason(result) != nil {
+			t.Fatal("cap overrode a more specific boundary")
+		}
+	}
+	if RuntimeCompletionEndReason(RuntimeAgentLoopResult{OutputCapLogicalSequence: 1}) == nil {
+		t.Fatal("completed cap lost")
+	}
+}

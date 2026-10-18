@@ -1,12 +1,16 @@
+import type { ProcessPaneRoute } from './presentation/chat/ProtectedProcessPane'
+import { MessageTimeline } from './MessageTimeline'
+import { OwnedSessionStatsPills } from './presentation/chat/TurnUsagePanel'
+import { useThreadUsageState } from '../../hooks/use-thread-usage'
+import type { ConversationUsageV1 } from '../../../../../packages/runtime/src/contracts/usage'
+import { InputBar } from './InputBar'
+import type { SideConversation } from '../../store/chat-store-types'
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MutableRefObject,
   type ReactElement
 } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -14,49 +18,25 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   ArrowUp as ArrowDownToLine,
   ChevronDown,
-  CornerDownLeft,
   Loader2,
   MessageCircleMore,
   Minus,
   MoreHorizontal,
   Plus,
-  StopIcon as Square,
   Trash2,
   Wrench,
   X
 } from '../../design/AnalytixUiIcons'
 import { useChatStore } from '../../store/chat-store'
-import type { ChatBlock, ToolBlock } from '../../agent/types'
-import { splitThink } from '../../thread/projection/thread-turns'
-import { useActiveStreamSnapshot } from '../../thread/streaming/active-stream-store'
-import { GateResponseContext, MessageBubble } from './message-timeline-bubbles'
-import { AssistantMarkdown } from './AssistantMarkdown'
-import { summarizeToolBlock } from './message-timeline-process'
-import { formatChildAgentChip } from './message-timeline-tools'
-import { redactSecretText } from '@shared/secret-redaction'
+
+import { GateResponseContext } from './message-timeline-bubbles'
 
 type Props = {
   className?: string
   rightOffset?: number
   onOpenThreadRequest?: (threadId: string, requestId: string) => void
-}
-
-const SIDE_STICK_TO_BOTTOM_PX = 96
-
-type SideScrollPosition = {
-  scrollTop: number
-  stickToBottom: boolean
-}
-
-type SideChatComposerProps = {
-  value: string
-  onChange: (value: string) => void
-  onSend: () => void
-  onStop?: () => void
-  busy?: boolean
-  disabled?: boolean
-  placeholder: string
-  stopLabel?: string
+  onRetryConnection?: () => void
+  onOpenSettings?: () => void
 }
 
 function formatInheritedTime(value: string, locale: string): string {
@@ -83,249 +63,47 @@ function overlayStyle(rightOffset = 24): CSSProperties {
   }
 }
 
-function SideChatComposer({
-  value,
-  onChange,
-  onSend,
-  onStop,
-  busy = false,
-  disabled = false,
-  placeholder,
-  stopLabel
-}: SideChatComposerProps): ReactElement {
-  const actionDisabled = busy ? !onStop : disabled || value.trim().length === 0
-  const actionLabel = busy ? (stopLabel ?? placeholder) : placeholder
-
-  const runAction = (): void => {
-    if (busy) {
-      onStop?.()
-      return
-    }
-    onSend()
-  }
-
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey) return
-    event.preventDefault()
-    if (!busy && !actionDisabled) onSend()
-  }
-
-  return (
-    <div className="rounded-[10px] border border-ds-border-muted bg-ds-card/80 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.42)] dark:bg-white/[0.045]">
-      <div className="flex items-end gap-1.5">
-        <textarea
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={disabled || busy}
-          rows={1}
-          placeholder={placeholder}
-          className="max-h-24 min-h-[30px] flex-1 resize-none bg-transparent px-1 py-1 text-[13px] leading-5 text-ds-ink outline-none placeholder:text-ds-faint disabled:cursor-not-allowed disabled:opacity-65"
-        />
-        <button
-          type="button"
-          onClick={runAction}
-          disabled={actionDisabled}
-          className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-40"
-          aria-label={actionLabel}
-          title={actionLabel}
-        >
-          {busy ? (
-            <Square className="h-3.5 w-3.5" strokeWidth={1.9} />
-          ) : (
-            <CornerDownLeft className="h-3.5 w-3.5" strokeWidth={1.9} />
-          )}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function SideAssistantBubble({
-  text,
-  streaming,
-  rowId
-}: {
-  text: string
-  streaming: boolean
-  rowId: string
-}): ReactElement | null {
-  if (!text.trim()) return null
-  return (
-    <div className="ds-chat-answer min-w-0 max-w-full text-[13px] leading-5 text-ds-ink">
-      <AssistantMarkdown text={text} streaming={streaming} rowId={rowId} />
-    </div>
-  )
-}
-
-function sideToolChild(block: ToolBlock): Record<string, unknown> | null {
-  const child = block.meta?.child
-  return child && typeof child === 'object' && !Array.isArray(child)
-    ? child as Record<string, unknown>
-    : null
-}
-
-function sideToolDetailPreview(block: ToolBlock): string {
-  const detail = redactSecretText(block.detail ?? '').trim()
-  if (!detail) return ''
-  const compact = detail.replace(/\s+/g, ' ')
-  return compact.length > 240 ? `${compact.slice(0, 239).trimEnd()}...` : compact
-}
-
-function SideToolBubble({ block }: { block: ToolBlock }): ReactElement {
-  const { t } = useTranslation('common')
-  const childChip = formatChildAgentChip(sideToolChild(block), t)
-  const detailPreview = sideToolDetailPreview(block)
-  const summary = summarizeToolBlock(block, t)
-  const toneClass = block.status === 'error'
-    ? 'border-red-200/80 bg-red-50/80 text-red-700 dark:border-red-900/45 dark:bg-red-500/10 dark:text-red-200'
-    : 'border-ds-border-muted bg-ds-card/70 text-ds-muted'
-
-  return (
-    <div className={`rounded-[12px] border px-3 py-2 text-[12px] ${toneClass}`}>
-      <div className="flex min-w-0 items-center gap-2">
-        <Wrench className="h-3 w-3 shrink-0" strokeWidth={1.9} />
-        <span className="min-w-0 flex-1 truncate font-medium" title={summary}>
-          {summary}
-        </span>
-        {block.status === 'running' ? (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin" strokeWidth={1.9} />
-        ) : (
-          <span className="shrink-0 text-[11px] uppercase tracking-wide opacity-70">{block.status}</span>
-        )}
-      </div>
-      {block.filePath || childChip || detailPreview ? (
-        <div className="mt-1.5 flex min-w-0 flex-col gap-1 text-[11.5px] leading-4 opacity-85">
-          {block.filePath ? (
-            <div className="truncate font-mono" title={block.filePath}>{block.filePath}</div>
-          ) : null}
-          {childChip ? (
-            <div className="truncate" title={childChip.title}>
-              {t('toolChildAgent')} {childChip.label}{childChip.detail ? ` · ${childChip.detail}` : ''}
-            </div>
-          ) : null}
-          {detailPreview ? (
-            <div className="line-clamp-2 break-words" title={redactSecretText(block.detail ?? '')}>
-              {detailPreview}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function SideMessageBubble({ block, onOpenOwnerThread }: { block: ChatBlock; onOpenOwnerThread?: (requestId: string) => void }): ReactElement | null {
-  if (block.kind === 'approval' || block.kind === 'user_input') {
-    return <GateResponseContext.Provider value={{ onOpenOwnerThread }}><MessageBubble block={block} /></GateResponseContext.Provider>
-  }
-  if (block.kind === 'user') {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[86%] rounded-[14px] bg-ds-card px-3 py-2 text-[13px] leading-5 text-ds-ink shadow-[0_6px_18px_rgba(20,47,95,0.06)]">
-          <div className="ds-markdown whitespace-pre-wrap break-words">{block.text}</div>
-        </div>
-      </div>
-    )
-  }
-  if (block.kind === 'assistant') {
-    const streaming = block.id === 'live-assistant'
-    const split = splitThink(block.text)
-    return (
-      <SideAssistantBubble
-        text={split.content}
-        streaming={streaming}
-        rowId={block.id}
-      />
-    )
-  }
-  if (block.kind === 'tool') {
-    return <SideToolBubble block={block} />
-  }
-  if (block.kind === 'compaction') {
-    return (
-      <div className="rounded-full border border-ds-border-muted bg-ds-card/60 px-3 py-1.5 text-[12px] text-ds-muted">
-        {block.summary}
-      </div>
-    )
-  }
-  if (block.kind === 'system') {
-    return (
-      <div className="rounded-[12px] border border-ds-border-muted bg-ds-card/55 px-3 py-2 text-[12px] text-ds-muted">
-        {block.text}
-      </div>
-    )
-  }
-  return null
-}
-
-function SideActiveStreamRows({
-  threadId,
-  turnId,
-  scrollRef,
-  stickToBottomRef
-}: {
-  threadId: string
-  turnId: string | null
-  scrollRef: MutableRefObject<HTMLDivElement | null>
-  stickToBottomRef: MutableRefObject<boolean>
-}): ReactElement | null {
-  const activeStream = useActiveStreamSnapshot(threadId, turnId)
-  const scrollFrameRef = useRef<number | null>(null)
-  const assistantText = activeStream.liveAssistantContent
-
-  useLayoutEffect(() => {
-    if (!activeStream.version || !stickToBottomRef.current) return
-    const el = scrollRef.current
-    if (!el) return
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current)
-      scrollFrameRef.current = null
-    }
-    const applyScroll = (): void => {
-      scrollFrameRef.current = null
-      if (!stickToBottomRef.current) return
-      const targetTop = Math.max(0, el.scrollHeight - el.clientHeight)
-      if (Math.abs(el.scrollTop - targetTop) >= 0.5) {
-        el.scrollTop = targetTop
-      }
-    }
-    scrollFrameRef.current = window.requestAnimationFrame(applyScroll)
-    return () => {
-      if (scrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollFrameRef.current)
-        scrollFrameRef.current = null
-      }
-    }
-  }, [activeStream.version, scrollRef, stickToBottomRef])
-
-  if (!activeStream.threadId || !assistantText.trim()) return null
-  const rowIdBase = `side:${threadId}:${turnId ?? activeStream.turnId ?? 'live'}`
-  return (
-    <SideAssistantBubble
-      text={assistantText}
-      streaming
-      rowId={`${rowIdBase}:assistant`}
-    />
-  )
+function SideTranscript({ side, conversationUsage, onOpenOwnerThread, processPaneRoute, runtimeConnection, onRetryConnection, onOpenSettings }: {
+  processPaneRoute: ProcessPaneRoute; side: SideConversation; conversationUsage: ConversationUsageV1 | null
+  runtimeConnection: import('../../agent/types').RuntimeConnectionStatus
+  onOpenOwnerThread?: (requestId: string) => void
+  onRetryConnection: () => void; onOpenSettings: () => void
+}): ReactElement {
+  const latestUser = [...side.blocks].reverse().find(block => block.kind === 'user')
+  return <GateResponseContext.Provider value={{ onOpenOwnerThread }}>
+    <MessageTimeline blocks={side.blocks} live="" activeThreadId={side.threadId}
+      runtimeConnection={runtimeConnection} onRetryConnection={onRetryConnection} onOpenSettings={onOpenSettings}
+      processPaneRoute={processPaneRoute} conversationUsage={conversationUsage} compactCards contentClassName="max-w-none px-0"
+      captureForkOwner={() => {
+        const state = useChatStore.getState(), panel = state.sidePanel, captured = state.sideConversations[side.threadId]
+        if (!captured || panel.activeSideId !== side.threadId || !panel.open || !processPaneRoute.visible) return null
+        const isCurrent = () => {
+          const current = useChatStore.getState()
+          return current.sidePanel === panel && current.sideConversations[side.threadId] === captured &&
+            current.activeThreadId === captured.parentThreadId && !captured.busy
+        }
+        return { isCurrent, getSnapshot: () => isCurrent() ? { blocks: captured.blocks, busy: captured.busy,
+          latestSeq: captured.lastSeq, title: captured.title, rewoundTurnIds: captured.rewoundTurnIds } : null }
+      }}
+      runtimeStateOverride={{ busy: side.busy, currentTurnId: side.turnId,
+        currentTurnUserId: latestUser?.id ?? null, lastTurnUsage: side.lastTurnUsage ?? undefined,
+        turnUsageById: side.turnUsageById ?? {} }} />
+  </GateResponseContext.Provider>
 }
 
 export function SideConversationPanel({
   className,
   rightOffset = 24,
-  onOpenThreadRequest
+  onOpenThreadRequest, onRetryConnection = () => undefined, onOpenSettings = () => undefined
 }: Props): ReactElement | null {
   const { t, i18n } = useTranslation('common')
+  const [processPaneOwnerKey] = useState(() => crypto.randomUUID())
   const [draftInput, setDraftInput] = useState('')
   const [minimized, setMinimized] = useState(false)
   const [switchMenuOpen, setSwitchMenuOpen] = useState(false)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const switchMenuRef = useRef<HTMLDivElement | null>(null)
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
-  const sideScrollRef = useRef<HTMLDivElement | null>(null)
-  const sideStickToBottomRef = useRef(true)
-  const activeSideIdRef = useRef<string | null>(null)
-  const sideScrollPositionsRef = useRef(new Map<string, SideScrollPosition>())
   const prevOpenRef = useRef(false)
 
   const sideData = useChatStore(
@@ -335,6 +113,7 @@ export function SideConversationPanel({
       parentThreadId: s.activeThreadId,
       threads: s.threads,
       runtimeConnection: s.runtimeConnection,
+      usageRefreshKey: s.usageRefreshKey,
       spawnSideConversation: s.spawnSideConversation,
       sendSideMessage: s.sendSideMessage,
       interruptSide: s.interruptSide,
@@ -365,6 +144,14 @@ export function SideConversationPanel({
     : null
   const runningCount = currentSides.reduce((count, side) => count + (side.busy ? 1 : 0), 0)
   const shouldRender = Boolean(sideData.parentThreadId && sideData.panel.open)
+  const processPaneRoute = useMemo<ProcessPaneRoute>(() => ({
+    surface: 'side', ownerKey: processPaneOwnerKey,
+    selectionKey: JSON.stringify([sideData.parentThreadId, activeId]),
+    visible: shouldRender && !minimized && Boolean(activeSide)
+  }), [processPaneOwnerKey, sideData.parentThreadId, activeId, shouldRender, minimized, activeSide])
+  const sideUsage = useThreadUsageState(activeId, processPaneRoute.visible && sideData.runtimeConnection === 'ready',
+    `${sideData.usageRefreshKey}:${activeSide?.busy ? 'running' : 'settled'}:${activeSide?.turnId ?? ''}:${Object.values(activeSide?.turnUsageById ?? {}).map(entry => entry.lastSeq).join(',')}`,
+    `${sideData.runtimeConnection}:${JSON.stringify(Object.keys(activeSide?.rewoundTurnIds ?? {}).sort())}`)
   const showDraft = shouldRender && !activeSide
   const rightStyle = overlayStyle(rightOffset)
 
@@ -378,6 +165,7 @@ export function SideConversationPanel({
   useEffect(() => {
     if (!shouldRender) return
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
         setSwitchMenuOpen(false)
         setMoreMenuOpen(false)
@@ -406,45 +194,6 @@ export function SideConversationPanel({
     return () => window.removeEventListener('pointerdown', onPointerDown)
   }, [switchMenuOpen, moreMenuOpen])
 
-  useEffect(() => {
-    const el = sideScrollRef.current
-    if (!el) return
-    const savePosition = (): void => {
-      const distanceToBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
-      sideStickToBottomRef.current = distanceToBottom <= SIDE_STICK_TO_BOTTOM_PX
-      if (activeId) {
-        sideScrollPositionsRef.current.set(activeId, {
-          scrollTop: el.scrollTop,
-          stickToBottom: sideStickToBottomRef.current
-        })
-      }
-    }
-    el.addEventListener('scroll', savePosition, { passive: true })
-    savePosition()
-    return () => el.removeEventListener('scroll', savePosition)
-  }, [activeId])
-
-  useLayoutEffect(() => {
-    const el = sideScrollRef.current
-    if (!el) return
-    if (activeSideIdRef.current !== activeId) {
-      activeSideIdRef.current = activeId
-      const saved = activeId ? sideScrollPositionsRef.current.get(activeId) : undefined
-      sideStickToBottomRef.current = saved?.stickToBottom ?? true
-      el.scrollTop = saved && !saved.stickToBottom
-        ? Math.min(saved.scrollTop, Math.max(0, el.scrollHeight - el.clientHeight))
-        : Math.max(0, el.scrollHeight - el.clientHeight)
-      return
-    }
-    if (!activeId || !sideStickToBottomRef.current) return
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight)
-  }, [
-    activeId,
-    activeSide?.blocks.length,
-    activeSide?.busy,
-    activeSide?.error,
-    activeSide?.liveAssistant.length
-  ])
 
   if (!shouldRender) return null
 
@@ -642,7 +391,7 @@ export function SideConversationPanel({
       </header>
 
       <div className="flex min-h-[190px] flex-1 flex-col overflow-hidden">
-        <div ref={sideScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-3 py-3">
           {activeSide ? (
             <>
               <div className="text-[11.5px] leading-4 text-ds-faint">
@@ -656,30 +405,8 @@ export function SideConversationPanel({
                   <p>{t('sidePanelEmpty')}</p>
                 </div>
               ) : null}
-              {activeSide.blocks.map((block) => (
-                <SideMessageBubble key={block.id} block={block} onOpenOwnerThread={onOpenThreadRequest ? requestId => onOpenThreadRequest(activeSide.threadId, requestId) : undefined} />
-              ))}
-              {activeSide.liveAssistant ? (
-                <SideMessageBubble
-                  block={{
-                    kind: 'assistant',
-                    id: 'live-assistant',
-                    text: activeSide.liveAssistant
-                  }}
-                />
-              ) : null}
-              <SideActiveStreamRows
-                threadId={activeSide.threadId}
-                turnId={activeSide.turnId}
-                scrollRef={sideScrollRef}
-                stickToBottomRef={sideStickToBottomRef}
-              />
-              {activeSide.busy ? (
-                <div className="flex items-center gap-2 text-[12px] text-ds-faint">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.9} />
-                  <span>{t('sidePanelThinking')}</span>
-                </div>
-              ) : null}
+              <SideTranscript onRetryConnection={onRetryConnection} onOpenSettings={onOpenSettings} processPaneRoute={processPaneRoute} side={activeSide} conversationUsage={sideUsage.conversationUsage} runtimeConnection={sideData.runtimeConnection}
+                onOpenOwnerThread={onOpenThreadRequest ? requestId => onOpenThreadRequest(activeSide.threadId, requestId) : undefined} />
               {activeSide.error ? (
                 <div className="rounded-[12px] border border-red-300/70 bg-red-500/10 px-3 py-2 text-[12px] text-red-700 dark:border-red-800/60 dark:bg-red-950/35 dark:text-red-200">
                   {activeSide.error}
@@ -695,28 +422,27 @@ export function SideConversationPanel({
         </div>
 
         <footer className="shrink-0 border-t border-ds-border-muted px-2.5 pb-2.5 pt-2">
-          {activeSide ? (
-            <SideChatComposer
-              value={activeSide.input}
-              onChange={(value) => sideData.setSideInput(activeSide.threadId, value)}
-              onSend={sendActiveSide}
-              onStop={() => {
-                void sideData.interruptSide(activeSide.threadId)
-              }}
-              busy={activeSide.busy}
-              disabled={sideData.runtimeConnection !== 'ready'}
-              placeholder={t('sidePanelComposerPlaceholder')}
-              stopLabel={t('sidePanelStop')}
-            />
-          ) : (
-            <SideChatComposer
-              value={draftInput}
-              onChange={setDraftInput}
-              onSend={sendDraft}
-              disabled={sideData.runtimeConnection !== 'ready'}
-              placeholder={t('sidePanelComposerPlaceholder')}
-            />
-          )}
+          {activeSide ? <OwnedSessionStatsPills threadId={activeSide.threadId} projection={sideUsage.conversationUsage ? {
+            threadId: activeSide.threadId, billing: sideUsage.conversationUsage.billing, metrics: sideUsage.conversationUsage.metrics
+          } : undefined} /> : null}
+          <InputBar
+            ownerThreadId={activeSide?.threadId ?? null}
+            gateOverride={{ threadId: activeSide?.threadId ?? null,
+              block: activeSide?.blocks.find((block): block is Extract<import('../../agent/types').ChatBlock, { kind: 'approval' | 'user_input' }> =>
+                (block.kind === 'approval' || block.kind === 'user_input') && block.status === 'pending') ?? null,
+              onOpenOwnerThread: activeSide && onOpenThreadRequest ? requestId => onOpenThreadRequest(activeSide.threadId, requestId) : undefined }}
+            variant="compact" hideThreadContextPanels hideModelPicker hideBtwCommand allowBusyFollowUp={false}
+            input={activeSide?.input ?? draftInput}
+            setInput={value => activeSide ? sideData.setSideInput(activeSide.threadId, value) : setDraftInput(value)}
+            mode="agent" setMode={() => undefined}
+            busy={activeSide?.busy ?? false} runtimeReady={sideData.runtimeConnection === 'ready'}
+            hasActiveThread={Boolean(activeSide)} workspaceRootOverride={parentThread?.workspace}
+            composerModel={activeSide?.model ?? ''} composerPickList={[]} onComposerModelChange={() => undefined}
+            queuedMessages={[]} onRemoveQueuedMessage={() => undefined}
+            attachmentUploadEnabled={false} fileReferenceEnabled={false}
+            onSend={activeSide ? sendActiveSide : sendDraft}
+            onInterrupt={() => { if (activeSide) void sideData.interruptSide(activeSide.threadId) }}
+          />
         </footer>
       </div>
     </aside>

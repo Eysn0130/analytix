@@ -26,6 +26,21 @@ func ApplyPatchMutation(thread map[string]any, threadID string, patch map[string
 			return nil, err
 		}
 	}
+	if value, archiveIntent := patch["archived"]; archiveIntent {
+		if err := ValidatePublicPatch(patch); err != nil {
+			return nil, err
+		}
+		status := stringField(thread, "status")
+		turns, _ := thread["turns"].([]any)
+		if (status != "idle" && status != "archived") || threadHasRunningTurn(turns) {
+			return nil, ErrThreadMutationTransition
+		}
+		status = "idle"
+		if value.(bool) {
+			status = "archived"
+		}
+		patch = map[string]any{"status": status}
+	}
 	return ApplyPatch(thread, patch, now), nil
 }
 

@@ -539,7 +539,8 @@ export function ThreadUserMessageNavigationRail({
     </nav>
   )
 
-  if (typeof document === 'undefined') return rail
+  const slot = <div className="timeline-user-message-navigation-slot">{rail}</div>
+  if (typeof document === 'undefined') return slot
   if (!portalTarget) return null
-  return createPortal(rail, portalTarget)
+  return createPortal(slot, portalTarget)
 }

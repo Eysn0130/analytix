@@ -16,7 +16,7 @@ import {
   normalizeClawImRemoteSession,
   readLegacyAgentThreadId
 } from './app-settings-prompts'
-import { normalizeScheduledTask } from './app-settings-schedule'
+import { normalizeClawScheduledTask } from './app-settings-schedule'
 import {
   compactStrings,
   normalizeBoolean,
@@ -167,7 +167,7 @@ export function normalizeClawSettings(input: ClawSettingsPatchV1 | undefined): C
           }
         }),
     tasks: Array.isArray(source.tasks)
-      ? source.tasks.map((task, index) => normalizeScheduledTask(task as Partial<ClawTaskV1>, index, now))
+      ? source.tasks.map((task, index) => normalizeClawScheduledTask(task as Partial<ClawTaskV1>, index, now))
       : []
   }
 }

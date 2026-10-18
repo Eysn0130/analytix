@@ -35,7 +35,7 @@ func (unavailableHostFundsDatasetAuthorityV2) WithCurrentSelectionV2(
 
 func TestOrdinaryConfigurationCannotEnableReservedFundsWithDatasetAuthority(t *testing.T) {
 	spec := hostFundsServerSpecFixtureForVersionV1(t, "0.16.17")
-	manager := NewProductionManagerWithOptions(
+	manager := newAdmissionTestManagerWithOptions(
 		[]ServerSpec{spec},
 		ProductionManagerOptions{DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}},
 	)
@@ -65,7 +65,7 @@ func TestOpaqueHostFundsSpecIsSingleAndExactCatalogOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint exact host funds spec: %v", err)
 	}
-	manager := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{},
 		HostFundsServer:  host,
 	})
@@ -153,7 +153,7 @@ func TestHostFundsSourceReadRequestDoesNotAuthorizeOrDisableAccountFlow(t *testi
 	if err != nil || host.sourceReadRequestedV1() {
 		t.Fatalf("missing source-read request did not remain an independent Host lane: host=%#v err=%v", host, err)
 	}
-	manager := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{},
 		HostFundsServer:  host,
 		AccountFlowExecutor: func(
@@ -188,7 +188,7 @@ func TestHostFundsWrongSourceReadScopeOrProtocolCannotMintGrant(t *testing.T) {
 	if err != nil || host.sourceReadRequestedV1() {
 		t.Fatalf("narrowed source-read scope minted or broke an independent Host binding: host=%#v err=%v", host, err)
 	}
-	manager := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}, HostFundsServer: host,
 	})
 	manager.Connect()
@@ -300,7 +300,7 @@ func TestHostFundsSpecCannotBeDeniedByExternalReservedNamespace(t *testing.T) {
 		ID: "analytix_funds", Transport: "stdio", Command: "/bin/sh",
 		Args: []string{"-c", "exit 99"}, CWD: t.TempDir(), TrustScope: "user",
 	}
-	manager := NewProductionManagerWithOptions([]ServerSpec{external}, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions([]ServerSpec{external}, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}, HostFundsServer: host,
 	})
 	if len(manager.specs) != 1 || manager.specs[0].ID != "analytix_funds" ||
@@ -315,7 +315,7 @@ func TestHostFundsConfigConflictPrefersExactHostAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := NewProductionManagerWithOptions([]ServerSpec{spec}, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions([]ServerSpec{spec}, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{},
 		HostFundsServer:  host,
 	})
