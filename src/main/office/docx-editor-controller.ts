@@ -219,11 +219,19 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
       if (owner.pending===pending && pending.kind==='undo') {
         try {
           const state=await recovery(owner), current=state.current
-          if (!state.pending && current?.canRetryUndo && current.status==='unknown' && current.changeId===pending.changeId &&
+          if (!state.pending && current && current.changeId===pending.changeId &&
             current.undoOperationId===pending.operationId && current.baseRevision===pending.digest && current.revision===owner.view.revision && !owner.view.dirty) {
-            // A fresh Core capability permits a later explicit completion click.
-            // Querying never performs that continuation or declares it committed.
-            delete owner.pending;owner.view.phase='unknown';updateCanUndo(owner)
+            if (current.status==='committed' && current.canUndo) {
+              // Core still has the exact saved change with no undo started.
+              // Release only the local attempt; a later explicit click may undo.
+              delete owner.pending;owner.view.phase='ready';updateCanUndo(owner)
+              return
+            }
+            if (current.status==='unknown' && current.canRetryUndo) {
+              // A fresh Core capability permits a later explicit completion click.
+              // Querying never performs that continuation or declares it committed.
+              delete owner.pending;owner.view.phase='unknown';updateCanUndo(owner)
+            }
           }
         } catch { /* Preserve the unresolved original operation. */ }
       }

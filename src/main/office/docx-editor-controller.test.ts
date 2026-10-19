@@ -13,6 +13,7 @@ async function fixture() {
   let manual:Record<string,unknown>|undefined, approved:Record<string,unknown>|undefined, current:Record<string,unknown>|undefined, receipt:Record<string,unknown>|undefined
   let original=Buffer.from(disk),loseUndo=false,undoConflict=false,undoRefusal=false,foreignRecovery=false
   let interruptUndo=false,failRecoveries=0,failRecoveryAfterWrite=0,recoveryOverride:Record<string,unknown>={}
+  let failUndoBeforeCore:'binding'|'transport'|undefined,failNextList=false
   let beginResponse:{reply:unknown;prepared:boolean}|undefined,canCancel=true
   let loseBegin=false,loseCommit=false,loseCancel=false,loseClose=false,loseOpen=false,conflict=false,externalOnClose:Buffer|undefined
   let sampled:Pick<DocxEditorCapture,'target'|'text'|'instanceId'|'captureId'>|undefined,scope:Record<string,unknown>|undefined
@@ -21,8 +22,14 @@ async function fixture() {
     materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,
     operations:['open-object','close-object','object-status','commit-object','begin-manual-edit','object-recovery','undo-change','cancel-change','capture-selection','selection-read','proposal-read','proposal-accept','proposal-reject']}
   const host=async(request:PluginPackageHostRequest):Promise<PluginPackageHostResponse>=>{
-    if(request.action==='list')return {ok:true,packages:[pkg]}
+    if(request.action==='list'){
+      if(failNextList){failNextList=false;throw Error('binding failed before undo delivery')}
+      return {ok:true,packages:[pkg]}
+    }
     if(request.action!=='invoke')throw Error('unexpected package management')
+    if(request.operation==='undo-change' && failUndoBeforeCore==='transport'){
+      failUndoBeforeCore=undefined;throw Error('transport failed before undo delivery')
+    }
     calls.push(request)
     const input=request.input as Record<string,unknown>
     let output:unknown
@@ -39,6 +46,7 @@ async function fixture() {
     else if(request.operation==='object-recovery'){
       if(failRecoveries>0){failRecoveries--;throw Error('lost recovery reply')}
       output={ok:true,recovery:{current:current?{...current,...recoveryOverride,...(foreignRecovery?{threadId:'other'}:{})}:null,pending:manual||approved?{...(manual?{...manual,version:2,origin:'manual'}:approved),threadId:'thread',revision:'',status:'prepared',canUndo:false,canCancel,canRetryUndo:false,canResume:false,createdAt:'',savedAt:''}:null}}
+      if(failUndoBeforeCore==='binding'){failUndoBeforeCore=undefined;failNextList=true}
     }
     else if(request.operation==='begin-manual-edit'){
       const response=beginResponse;beginResponse=undefined
@@ -73,7 +81,7 @@ async function fixture() {
         if(loseUndo){loseUndo=false;throw Error('lost undo reply')}
         output=collided?{ok:false,code:'conflict',message:'Conflict',receipt}:{ok:true,receipt}
       }
-    } else if(request.operation==='object-status')output={ok:true,receipt}
+    } else if(request.operation==='object-status')output=receipt?.operationId===input.operationId?{ok:true,receipt}:{ok:false,code:'operation_not_found',message:'No journal for this operation'}
     else if(request.operation==='capture-selection'){
       const {text,...authority}=input;scope={...authority,scopeId:'f'.repeat(48),parts:[{kind:'literal',text}]};output={ok:true,scope}
     } else if(request.operation==='selection-read')output={ok:true,scope}
@@ -93,7 +101,7 @@ async function fixture() {
   const editorId=opened.view!.editorId
   const bytes=await makeDoc('Edited')
   const content={encoding:'base64',kind:'docx',byteLength:bytes.length,sha256:hash(bytes),data:bytes.toString('base64')}
-  return {controller,editorId,content,calls,pkg,interruptUndo:()=>{interruptUndo=true},overrideRecovery:(value:Record<string,unknown>)=>{recoveryOverride=value},failFinalRecovery:(count=1)=>{failRecoveryAfterWrite=count},loseUndo:()=>{loseUndo=true},undoConflict:()=>{undoConflict=true},undoRefusal:()=>{undoRefusal=true},foreignRecovery:()=>{foreignRecovery=true},externalEdit:(bytes:Buffer)=>{disk=bytes},beginResponse:(reply:unknown,prepared=false)=>{beginResponse={reply,prepared}},seedPending:()=>{manual={changeId:'e'.repeat(64),baseRevision:hash(disk),saveOperationId:'save_operation',undoOperationId:'undo_operation'}},pending:()=>!!manual,refuseCancel:()=>{canCancel=false},sample:(value:NonNullable<typeof sampled>)=>{sampled=value},disk:()=>disk,loseBegin:()=>{loseBegin=true},loseCommit:()=>{loseCommit=true},loseCancel:()=>{loseCancel=true},loseClose:()=>{loseClose=true},loseOpen:()=>{loseOpen=true},externalOnClose:(bytes:Buffer)=>{externalOnClose=bytes},session:()=>session,conflict:()=>{conflict=true}}
+  return {controller,editorId,content,calls,pkg,failUndoDelivery:(stage:'binding'|'transport')=>{failUndoBeforeCore=stage},interruptUndo:()=>{interruptUndo=true},overrideRecovery:(value:Record<string,unknown>)=>{recoveryOverride=value},failFinalRecovery:(count=1)=>{failRecoveryAfterWrite=count},loseUndo:()=>{loseUndo=true},undoConflict:()=>{undoConflict=true},undoRefusal:()=>{undoRefusal=true},foreignRecovery:()=>{foreignRecovery=true},externalEdit:(bytes:Buffer)=>{disk=bytes},beginResponse:(reply:unknown,prepared=false)=>{beginResponse={reply,prepared}},seedPending:()=>{manual={changeId:'e'.repeat(64),baseRevision:hash(disk),saveOperationId:'save_operation',undoOperationId:'undo_operation'}},pending:()=>!!manual,refuseCancel:()=>{canCancel=false},sample:(value:NonNullable<typeof sampled>)=>{sampled=value},disk:()=>disk,loseBegin:()=>{loseBegin=true},loseCommit:()=>{loseCommit=true},loseCancel:()=>{loseCancel=true},loseClose:()=>{loseClose=true},loseOpen:()=>{loseOpen=true},externalOnClose:(bytes:Buffer)=>{externalOnClose=bytes},session:()=>session,conflict:()=>{conflict=true}}
 }
 describe('ordinary DOCX byte bridge',()=>{
   it('saves real DOCX bytes through the reserved Core operation and reopens the receipt revision',async()=>{
@@ -432,6 +440,66 @@ it.each(['save','undoChange'] as const)('keeps a failed final %s recovery refres
   expect(h.calls.slice(before).map(c=>c.operation)).toEqual(['object-recovery','object-recovery'])
   expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(1)
   expect(h.calls.filter(c=>c.operation==='undo-change')).toHaveLength(action==='undoChange'?1:0)
+})
+
+it.each([
+  {stage:'binding',next:'retry'},
+  {stage:'transport',next:'retry'},
+  {stage:'binding',next:'close'},
+  {stage:'transport',next:'close'},
+] as const)('recovers an undo $stage failure before Core delivery to ready for explicit $next',async({stage,next})=>{
+  const h=await savedManual();h.failUndoDelivery(stage)
+  expect(await h.controller.request({action:'undoChange',editorId:h.editorId,version:0})).toMatchObject({ok:false,error:'unknown',view:{phase:'unknown',dirty:false,canUndo:false,version:0}})
+  expect(h.calls.filter(c=>c.operation==='undo-change')).toHaveLength(0)
+  expect(h.controller.hasUnsettled()).toBe(true)
+  const before=h.calls.length
+  expect(await h.controller.request({action:'status',editorId:h.editorId})).toMatchObject({ok:true,view:{phase:'ready',dirty:false,canUndo:true,version:0,revision:h.content.sha256,content:{data:h.content.data},recovery:{current:{status:'committed',canUndo:true}}}})
+  expect(h.calls.slice(before).map(c=>c.operation)).toEqual(['object-status','object-recovery'])
+  expect(h.calls[before].input).toMatchObject({operationId:'undo_operation'})
+  expect(h.calls.filter(c=>c.operation==='undo-change')).toHaveLength(0)
+  expect(h.calls.filter(c=>c.operation==='commit-object')).toHaveLength(1)
+  expect(h.disk().toString('base64')).toBe(h.content.data)
+  expect(h.controller.hasUnsettled()).toBe(false)
+  if(next==='retry'){
+    expect(await h.controller.request({action:'undoChange',editorId:h.editorId,version:0})).toMatchObject({ok:true,view:{phase:'ready',dirty:false,canUndo:false,version:1,revision:hash(h.original)}})
+    expect(h.calls.filter(c=>c.operation==='undo-change')).toHaveLength(1)
+    expect(h.disk()).toEqual(h.original)
+  }else{
+    expect(await h.controller.request({action:'close',editorId:h.editorId})).toEqual({ok:true,view:null})
+    expect(h.calls.slice(before).map(c=>c.operation)).toEqual(['object-status','object-recovery','object-recovery','close-object'])
+    expect(h.disk().toString('base64')).toBe(h.content.data)
+  }
+})
+
+it.each([
+  {changeId:'9'.repeat(64)},
+  {undoOperationId:'other_undo_operation'},
+  {baseRevision:'9'.repeat(64)},
+  {revision:'9'.repeat(64)},
+  {canUndo:false},
+])('retains an undelivered undo when the committed recovery does not match %j',async mismatch=>{
+  const h=await savedManual();h.failUndoDelivery('transport')
+  await h.controller.request({action:'undoChange',editorId:h.editorId,version:0})
+  h.overrideRecovery(mismatch)
+  const before=h.calls.length
+  expect(await h.controller.request({action:'status',editorId:h.editorId})).toMatchObject({ok:false,view:{phase:'unknown',canUndo:false}})
+  expect(h.calls.slice(before).map(c=>c.operation)).toEqual(['object-status','object-recovery'])
+  expect(await h.controller.request({action:'undoChange',editorId:h.editorId,version:0})).toMatchObject({ok:false,error:'unsaved_changes'})
+  expect(await h.controller.request({action:'close',editorId:h.editorId,discard:true})).toMatchObject({ok:false,error:'unknown'})
+  expect(h.controller.hasUnsettled()).toBe(true)
+  expect(h.calls.filter(c=>c.operation==='undo-change')).toHaveLength(0)
+  expect(h.disk().toString('base64')).toBe(h.content.data)
+})
+
+it('retains an undelivered undo while Core reports another pending change',async()=>{
+  const h=await savedManual();h.failUndoDelivery('binding')
+  await h.controller.request({action:'undoChange',editorId:h.editorId,version:0})
+  h.seedPending()
+  expect(await h.controller.request({action:'status',editorId:h.editorId})).toMatchObject({ok:false,view:{phase:'unknown',canUndo:false}})
+  expect(await h.controller.request({action:'close',editorId:h.editorId,discard:true})).toMatchObject({ok:false,error:'unknown'})
+  expect(h.controller.hasUnsettled()).toBe(true)
+  expect(h.calls.filter(c=>c.operation==='undo-change')).toHaveLength(0)
+  expect(h.disk().toString('base64')).toBe(h.content.data)
 })
 
 it('queries an interrupted undo before exposing only a later explicit completion with the same Core identity',async()=>{
