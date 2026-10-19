@@ -564,7 +564,14 @@ func shutdownNativeQuestionFixture(t *testing.T, toolName string) (*runtimeServe
 	if pending.ExecutionGrant.ReadOnly || pending.ExecutionGrant.ServerIdentity != "host:builtin" {
 		t.Fatal("Question fixture did not use the real native non-readonly policy")
 	}
-	id, err := h.requestRuntimeUserInput(context.Background(), pending)
+	producerCtx, cancelProducer := context.WithCancel(context.Background())
+	defer cancelProducer()
+	producerCtx, owner, err := h.runtimeControl().RegisterTurnCancelOwnedV1(producerCtx, pending.ThreadID, pending.TurnID, cancelProducer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.runtimeControl().ReleaseTurnExecutionOwnerV1(owner)
+	id, err := h.requestRuntimeUserInput(producerCtx, pending)
 	if err != nil {
 		t.Fatal(err)
 	}

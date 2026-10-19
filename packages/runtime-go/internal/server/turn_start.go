@@ -138,7 +138,7 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 	var releaseThreadTransition func()
 	turnCancelRegistered := false
 	turnCancelTransferred := false
-	registeredTurnID := ""
+	var turnOwner *controlapp.TurnExecutionOwnerV1
 	var cancelTurn context.CancelFunc
 	defer func() {
 		// A failed post-append turn is terminally closed while its transition
@@ -155,7 +155,7 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 			releaseThreadTransition()
 		}
 		if turnCancelRegistered && !turnCancelTransferred {
-			h.runtimeControl().UnregisterTurnCancel(threadID, registeredTurnID)
+			h.runtimeControl().ReleaseTurnExecutionOwnerV1(turnOwner)
 			if cancelTurn != nil {
 				cancelTurn()
 			}
@@ -260,12 +260,13 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 		turnContext = context.Background()
 	}
 	turnContext, cancelTurn = context.WithCancel(turnContext)
-	if registerErr := h.runtimeControl().RegisterTurnCancelWithError(threadID, turnID, cancelTurn); registerErr != nil {
+	var registerErr error
+	turnContext, turnOwner, registerErr = h.runtimeControl().RegisterTurnCancelOwnedV1(turnContext, threadID, turnID, cancelTurn)
+	if registerErr != nil {
 		cancelTurn()
 		return nil, registerErr
 	}
 	turnCancelRegistered = true
-	registeredTurnID = turnID
 	if goalAttempt != nil {
 		if err := goalAttempt.BindExecutionCancel(cancelTurn); err != nil {
 			return nil, err
@@ -698,7 +699,7 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 		return nil, err
 	}
 	if err := securityTransition.Commit(); err != nil {
-		h.runtimeControl().UnregisterTurnCancel(threadID, turnID)
+		h.runtimeControl().ReleaseTurnExecutionOwnerV1(turnOwner)
 		turnCancelRegistered = false
 		cancelTurn()
 		return nil, err
@@ -787,7 +788,7 @@ func (h *runtimeServerHandler) startRuntimeTurn(ctx context.Context, threadID st
 					defer childCarrier.cleanup()
 					defer h.finishHostChildInputRunV1(childCarrier)
 				}
-				h.completeRuntimeTurnAsync(turnContext, loopInput, turnNumber, now, finishOperation)
+				h.completeRuntimeTurnAsync(turnContext, loopInput, turnNumber, now, finishOperation, turnOwner)
 			}()
 
 			return nil
@@ -890,13 +891,13 @@ func (h *runtimeServerHandler) completeHostBoundaryTurn(input runtimeAgentLoopIn
 	return map[string]any{"status": "completed"}, nil
 }
 
-func (h *runtimeServerHandler) completeRuntimeTurnAsync(ctx context.Context, input runtimeAgentLoopInput, turnNumber int, startedAt string, finishOperation func()) {
+func (h *runtimeServerHandler) completeRuntimeTurnAsync(ctx context.Context, input runtimeAgentLoopInput, turnNumber int, startedAt string, finishOperation func(), turnOwner *controlapp.TurnExecutionOwnerV1) {
 	var completionErr, recordErr error
 	if h.asyncTurnPhaseObserver != nil {
 		ctx = context.WithValue(ctx, asyncTurnPhaseObserverContextKeyV1{}, h.asyncTurnPhaseObserver)
 	}
 	defer func() {
-		h.runtimeControl().UnregisterTurnCancel(input.ThreadID, input.TurnID)
+		h.runtimeControl().ReleaseTurnExecutionOwnerV1(turnOwner)
 		if finishOperation != nil {
 			finishOperation()
 		}

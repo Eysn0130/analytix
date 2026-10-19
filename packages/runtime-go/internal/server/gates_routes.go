@@ -58,18 +58,19 @@ func (h *runtimeServerHandler) respondRuntimeUserInput(ctx context.Context, requ
 
 func (h *runtimeServerHandler) runtimeGateContinuationDependencies() gatecontinuationapp.Dependencies {
 	return gatecontinuationapp.Dependencies{
-		UserInputConfig:       h.userInputConfig,
-		ScheduleUserInputWait: h.scheduleRuntimeUserInputWait,
-		Store:                 h.store,
-		WorkspaceReader:       filestore.CaseBindingReader{},
-		SecurityAuthority:     h.turnSecurity,
-		Source:                h.mcp,
-		Registry:              h.gates,
-		Manager:               h.gate,
-		Continuations:         h.continuations,
-		AcquireContextEffect:  h.runtimeSubagentState().AcquireContextEffect,
-		AcquireOrdinaryEffect: h.runtimeSubagentState().AcquireOrdinaryContextEffect,
-		ValidateCatalog:       h.validateRuntimePendingCatalog,
+		UserInputConfig:          h.userInputConfig,
+		ScheduleUserInputWait:    h.scheduleRuntimeUserInputWait,
+		CaptureUserInputProducer: h.runtimeControl().CaptureTurnExecutionOwnerV1,
+		Store:                    h.store,
+		WorkspaceReader:          filestore.CaseBindingReader{},
+		SecurityAuthority:        h.turnSecurity,
+		Source:                   h.mcp,
+		Registry:                 h.gates,
+		Manager:                  h.gate,
+		Continuations:            h.continuations,
+		AcquireContextEffect:     h.runtimeSubagentState().AcquireContextEffect,
+		AcquireOrdinaryEffect:    h.runtimeSubagentState().AcquireOrdinaryContextEffect,
+		ValidateCatalog:          h.validateRuntimePendingCatalog,
 		ExecuteAndSettle: func(ctx context.Context, pending runtimePendingToolCall) (apploop.SettledToolExecution, error) {
 			return h.executeAndSettleRuntimeTool(ctx, pending, nil, nil)
 		},
