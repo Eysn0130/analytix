@@ -78,6 +78,10 @@ func TestForkEventBoundaryReplaysProductionQuestionAndReforkV1(t *testing.T) {
 			selector := productionQuestionSelectorV1(t, h, f.request.ThreadID, turnID)
 			wantStatus := domaincontinuation.StatusContinued
 			if mode == "legacy" {
+				// The durable request can be visible before its async producer releases the turn owner.
+				if err := h.runtimeControl().WaitForThreadTurns(ctx, selector.ThreadID); err != nil {
+					t.Fatal(err)
+				}
 				view := readTimedQuestionPrivateDisplay(t, h, selector)
 				if calls.Load() != 1 || view.Status != "pending" || view.TimedWait != nil {
 					t.Fatal("default ordinary Question stopped blocking or gained a deadline")
@@ -85,7 +89,7 @@ func TestForkEventBoundaryReplaysProductionQuestionAndReforkV1(t *testing.T) {
 				answer := "Synthetic ordinary answer"
 				result, err := h.runtimeControl().RespondUserInput(ctx, controlapp.UserInputResponse{InputID: selector.RequestID, StructuredAnswers: []controlapp.UserInputAnswer{{ID: selector.RequestID + "_1", Kind: "answer", OptionIDs: []string{}, CustomText: &answer}}})
 				if err != nil || result.StatusCode != http.StatusOK {
-					t.Fatalf("ordinary Host response failed: status=%d errorType=%T", result.StatusCode, err)
+					t.Fatalf("ordinary Host response failed: status=%d code=%s errorType=%T", result.StatusCode, stringField(result.Body, "code"), err)
 				}
 				wantStatus = domaincontinuation.StatusSubmitted
 			}

@@ -111,7 +111,7 @@ test.each([1,3])('never coerces native numeric/formula cell type %s through text
   const w=worker('123','xlsx',cellType); w.send('edit')
   const captured=w.send('captureSelection')
   expect(captured.selection.cells[0].valueType).toBe(cellType === 1 ? 'number' : 'formula')
-  expect(w.send('replace',{selectionToken:captured.selection.token,expectedChangeSequence:0,text:'变成文本',valueType:'text'})).toMatchObject({ok:false,error:'unsupported-selection'})
+  expect(w.send('replace',{selectionToken:captured.selection.token,expectedChangeSequence:0,text:'变成文本',valueType:'text'})).toMatchObject({ok:false,error:'unsupported-command'})
   expect(w.paragraphs[1]).toBe('123')
   expect(w.model.isModified()).toBe(false)
 })
@@ -152,11 +152,17 @@ test('range comparison is optional for existing frozen operations and unavailabl
 test.each(['docx', 'xlsx'])('unchanged %s text is refused before native mutation or export', kind => {
   const w = worker('same text', kind); w.send('edit')
   const captured = w.send('captureSelection')
-  expect(w.send('replace', {selectionToken: captured.selection.token, expectedChangeSequence: 0, text: 'same text', valueType: 'text'})).toMatchObject({ok: false, error: 'invalid-control-value'})
+  expect(w.send('replace', {selectionToken: captured.selection.token, expectedChangeSequence: 0, text: 'same text', valueType: 'text'})).toMatchObject({ok: false, error: kind==='xlsx'?'unsupported-command':'invalid-control-value'})
   expect(w.ranges[1].setString).not.toHaveBeenCalled()
   expect(w.model.storeToURL).not.toHaveBeenCalled()
   expect(w.model.isModified()).toBe(false)
   expect(w.send('captureSelection')).toMatchObject({ok: true, state: {dirty: false, changeSequence: 0, acknowledgedSequence: 0}})
+  if(kind==='xlsx'){
+    expect(w.send('replace', {selectionToken: captured.selection.token, expectedChangeSequence: 0, text: 'changed text', valueType: 'text'})).toMatchObject({ok:false,error:'unsupported-command'})
+    expect(w.ranges[1].setString).not.toHaveBeenCalled()
+    expect(w.model.isModified()).toBe(false)
+    return
+  }
   // Rejection must not consume the selection handle or invent a change.
   expect(w.send('replace', {selectionToken: captured.selection.token, expectedChangeSequence: 0, text: 'changed text', valueType: 'text'}).ok).toBe(true)
   expect(w.ranges[1].setString).toHaveBeenCalledOnce()
@@ -237,6 +243,14 @@ test.each(['docx', 'xlsx'])('a partially failed %s text mutation cannot be expor
     throw Error('synthetic native failure')
   })
   const failed = w.send('replace', {selectionToken: captured.selection.token, expectedChangeSequence: 0, text: 'requested result', valueType: 'text'})
+  if(kind==='xlsx'){
+    expect(failed).toMatchObject({ok:false,error:'unsupported-command'})
+    expect(w.ranges[1].setString).not.toHaveBeenCalled()
+    expect(w.paragraphs[1]).toBe('original')
+    expect(w.model.isModified()).toBe(false)
+    expect(w.model.storeToURL).not.toHaveBeenCalled()
+    return
+  }
   expect(failed.ok).toBe(false)
   expect(w.send('export')).toMatchObject({ok: false, error: 'typed-mutation-failed'})
   expect(failed.error).toBe('typed-mutation-failed')

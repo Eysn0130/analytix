@@ -6,18 +6,20 @@ import type { CanvasDocument } from '../../../../packages/runtime/src/contracts/
 import { canvasHostResponseSchema } from '../../../../packages/runtime/src/contracts/canvas-host'
 import { canvasPreviewSessions as session } from './canvas-preview-owner'
 import { useNativeReferenceStore } from '../office/native-reference-store'
+import { WorkspaceViewerHeader, WorkspaceViewerIconButton, type WorkspaceViewerControls } from '../components/workbench/WorkspaceViewerHeader'
 import { CanvasReviewPanel } from './CanvasReviewPanel'
 import { decodeCanvasPreview, type CanvasPreview } from './canvas-preview'
 import './canvas-workspace.css'
 
 type Loaded = CanvasPreview & { key: string; url: string; document: CanvasDocument }
 
-export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visible, onOpenObject }: {
+export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visible, onOpenObject, viewerControls }: {
   threadId: string | null
   workspaceRoot: string
   activeTab: WorkspaceTab | null
   visible: boolean
   onOpenObject: (workspace: string, path: string) => void
+  viewerControls?: WorkspaceViewerControls
 }): ReactElement {
   const { t } = useTranslation('canvas')
   const path = activeTab?.path
@@ -134,15 +136,14 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(id) }
   }
   const viewBox = preview?.layout?.viewBox
+  const savedStatus = saved?.objectKey === objectKey ? [t('canvasSaved'), errorKey === key ? t('canvasSavedRefreshFailed') : ''].filter(Boolean).join(' ') : ''
+  const headerStatus = [t('canvasLocalPreview'), savedStatus].filter(Boolean).join(' · ')
   return <section className="canvas-workspace" inert={!visible} aria-label={t('canvasWorkspace')}
     onKeyDown={event => { if (!event.nativeEvent.isComposing && event.key === 'Escape' && selected) { event.preventDefault(); select('') } }}>
-    <header className="canvas-workspace-header">
-      <span className="canvas-workspace-title" title={title}>{title}</span>
-      <span className="text-xs text-ds-muted">{t('canvasLocalPreview')}</span>
-      <button type="button" className="ds-toolbar-icon-button" disabled={!path || !threadId || !inWorkspace} onClick={() => void refresh()} title={t('canvasReload')} aria-label={t('canvasReload')}><RotateCw size={16} /></button>
-      <button type="button" className="ds-toolbar-icon-button" disabled={picking || !threadId || !workspaceRoot} onClick={() => void pick()} title={t('canvasOpen')} aria-label={t('canvasOpen')}><FolderOpen size={16} /></button>
-    </header>
-    {saved?.objectKey === objectKey ? <p className="canvas-saved-receipt">{t('canvasSaved')}{errorKey === key ? ` ${t('canvasSavedRefreshFailed')}` : ''}</p> : null}
+    <WorkspaceViewerHeader title={title} status={headerStatus} viewerControls={visible ? viewerControls : undefined} actions={<>
+      <WorkspaceViewerIconButton label={t('canvasReload')} disabled={!path || !threadId || !inWorkspace} onClick={() => void refresh()}><RotateCw aria-hidden="true" /></WorkspaceViewerIconButton>
+      <WorkspaceViewerIconButton label={t('canvasOpen')} disabled={picking || !threadId || !workspaceRoot} onClick={() => void pick()}><FolderOpen aria-hidden="true" /></WorkspaceViewerIconButton>
+    </>} />
     {!threadId || !workspaceRoot ? <p className="canvas-workspace-message">{t('canvasThreadRequired')}</p>
       : !inWorkspace ? <p className="canvas-workspace-message">{t('canvasWorkspaceMismatch')}</p>
       : errorKey === key ? <p role="alert" className="canvas-workspace-message">{t('canvasPreviewFailed')}</p>
@@ -169,11 +170,17 @@ export function CanvasWorkspacePanel({ threadId, workspaceRoot, activeTab, visib
             {[...preview.scene.facts.nodes, ...preview.scene.facts.edges].map(fact => <option key={fact.id} value={fact.id}>{fact.label || fact.id} · {fact.id}</option>)}
           </select>
           {selected ? <div>
-            <div className="flex items-center justify-between gap-2"><strong>{selected.label || selected.id}</strong><button type="button" className="ds-toolbar-icon-button" onClick={() => void copy()} title={t('canvasCopySelection')} aria-label={t('canvasCopySelection')}><Copy size={15} /></button></div>
+            <div className="canvas-workspace-object-heading">
+              <strong>{selected.label || selected.id}</strong>
+              <WorkspaceViewerIconButton compact label={t('canvasCopySelection')} onClick={() => void copy()}><Copy aria-hidden="true" /></WorkspaceViewerIconButton>
+              <WorkspaceViewerIconButton compact className="canvas-quote-button" label={t('canvasQuote')} disabled={quoting} onClick={() => void quote()}><MessageSquarePlus aria-hidden="true" /></WorkspaceViewerIconButton>
+            </div>
             {selected.assumption ? <p>{t('canvasAssumption')}</p> : null}
-            <button type="button" className="canvas-quote-button" disabled={quoting} onClick={() => void quote()}><MessageSquarePlus size={15} />{t('canvasQuote')}</button>
             {quoteState?.key === key ? <p role={quoteState.ok ? 'status' : 'alert'}>{t(quoteState.ok ? 'canvasQuoteAdded' : 'canvasQuoteFailed')}</p> : null}
-            <pre>{JSON.stringify(selected, null, 2)}</pre>
+            <details key={selected.id} className="canvas-workspace-json">
+              <summary>JSON</summary>
+              <pre>{JSON.stringify(selected, null, 2)}</pre>
+            </details>
             {copyState?.key === key && copyState.id === selected.id ? <p role="status">{t(copyState.ok ? 'canvasCopied' : 'canvasCopyFailed')}</p> : null}
           </div> : <p className="text-xs text-ds-muted">{t('canvasSelectHint')}</p>}
         </details> : null}

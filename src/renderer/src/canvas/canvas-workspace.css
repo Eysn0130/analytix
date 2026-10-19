@@ -1,6 +1,4 @@
 .canvas-workspace { display:flex; flex-direction:column; height:100%; min-height:0; min-width:0; }
-.canvas-workspace-header { display:flex; align-items:center; gap:8px; min-height:44px; padding:0 12px; border-bottom:1px solid var(--ds-border-muted); }
-.canvas-workspace-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
 .canvas-workspace-message { padding:24px; font-size:13px; color:var(--ds-muted); }
 .canvas-workspace-content { flex:1; display:flex; flex-direction:column; min-height:0; }
 .canvas-workspace-visual { flex:1; min-height:160px; overflow:auto; display:grid; place-items:center; }
@@ -12,14 +10,17 @@
 .canvas-workspace-inspector { flex:none; max-height:42%; overflow:auto; padding:8px 12px; border-top:1px solid var(--ds-border-muted); font-size:12px; }
 .canvas-workspace-inspector summary { cursor:pointer; }
 .canvas-workspace-inspector select { display:block; width:100%; margin:8px 0; background:transparent; border:1px solid var(--ds-border-muted); border-radius:5px; padding:5px; }
+.canvas-workspace-object-heading { display:flex; align-items:center; gap:6px; min-width:0; }
+.canvas-workspace-object-heading > strong { flex:1; min-width:0; overflow-wrap:anywhere; }
+.canvas-workspace-json { padding-top:8px; }
+.canvas-workspace-json > summary { color:var(--ds-muted); }
 .canvas-workspace-inspector pre { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.6 ui-monospace,monospace; }
 @media (prefers-reduced-motion:reduce) { .canvas-hit { transition:none; } }
 .canvas-workspace-review { flex:none; max-height:48%; overflow:auto; padding:8px 12px; border-top:1px solid var(--ds-border-muted); font-size:12px; }
 .canvas-review-heading, .canvas-review-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .canvas-review-heading { justify-content:space-between; }
-.canvas-workspace-review button, .canvas-quote-button { border:1px solid var(--ds-border-muted); border-radius:5px; padding:5px 8px; }
-.canvas-quote-button { display:inline-flex; align-items:center; gap:6px; }
-.canvas-workspace-review button:disabled, .canvas-quote-button:disabled { opacity:.5; cursor:not-allowed; }
+.canvas-workspace-review button { border:1px solid var(--ds-border-muted); border-radius:5px; padding:5px 8px; }
+.canvas-workspace-review button:disabled { opacity:.5; cursor:not-allowed; }
 .canvas-review-proposal { padding:8px 0; border-bottom:1px solid var(--ds-border-muted); }
 .canvas-review-diff pre { white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.6 ui-monospace,monospace; }
 .canvas-review-diff del { color:var(--ds-danger); text-decoration:line-through; }
@@ -27,4 +28,3 @@
 .canvas-image-form { display:flex; flex-wrap:wrap; gap:8px; padding:8px 0; }
 .canvas-image-form label { display:flex; flex-direction:column; gap:4px; }
 .canvas-image-form input, .canvas-image-form select { max-width:150px; border:1px solid var(--ds-border-muted); background:transparent; border-radius:4px; padding:4px; }
-.canvas-saved-receipt { padding:6px 12px; font-size:12px; }

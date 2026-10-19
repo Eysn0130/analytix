@@ -2,9 +2,10 @@
 import { act, createElement, Profiler, useContext, useEffect, useRef, useState, type ComponentProps, type ContextType } from 'react'
 import { File as NodeFile } from 'node:buffer'
 import { createRoot, type Root } from 'react-dom/client'
+import { createPortal } from 'react-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WriteRetrievalResult } from '@shared/write-retrieval'
-import type { AppSettingsV1 } from '@shared/app-settings'
+import { defaultAnalytixRuntimeSettings, type AppSettingsV1 } from '@shared/app-settings'
 import type { NormalizedThread, ThreadEventSink } from '../agent/types'
 import type { InputBar } from './chat/InputBar'
 import type { CoreThreadSummaryResponseJson, CoreThreadSummarySubagentJson } from '../agent/analytix-contract'
@@ -74,7 +75,11 @@ vi.mock('./chat/WorkbenchTopBar', async importOriginal => {
 vi.mock('./chat/AssistantMarkdown', () => ({ preloadAssistantMarkdownRenderer: () => null }))
 vi.mock('./chat/ChatFileTreePanel', async importOriginal => { const actual=await importOriginal<typeof import('./chat/ChatFileTreePanel')>();return {ChatFileTreePanel:(props:ComponentProps<typeof actual.ChatFileTreePanel>)=>io.realFileTree?createElement(actual.ChatFileTreePanel,props):null} })
 vi.mock('./chat/SideConversationPanel', () => ({ SideConversationPanel: () => null }))
-vi.mock('./SessionHeader', () => ({ SessionHeader: () => null }))
+vi.mock('./SessionHeader', () => ({
+  SessionHeader: () => null,
+  SessionHeaderTabsSeat: ({ seatRef }: ComponentProps<typeof import('./SessionHeader').SessionHeaderTabsSeat>) =>
+    createElement('div', { ref: seatRef, 'data-analytix-session-header-tabs': '' })
+}))
 vi.mock('./shell/ShellNavigationControls', () => ({ ShellNavigationControls: () => null }))
 vi.mock('./DevPreviewLaunchCard', () => ({ DevPreviewLaunchCard: () => null }))
 vi.mock('./RuntimeBanner', () => ({ RuntimeBanner: () => null }))
@@ -82,7 +87,10 @@ vi.mock('./brand/AnalytixLoadingPage', () => ({ AnalytixLoadingPage: () => null 
 vi.mock('./workbench/RightPanelIslands', async () => {
   const { WorkspaceFilePreviewPanel: ActualPreview } = await import('./WorkspaceFilePreviewPanel')
   const { DocumentWorkspacePanel: ActualDocument } = await import('./workbench/DocumentWorkspacePanel')
-  return ({ ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null,
+  const { WorkspaceViewerHeader } = await import('./workbench/WorkspaceViewerHeader')
+  return ({ TerminalWorkspacePanel: (props: { visible: boolean; focusRequest: number; onCollapse: () => void }) => createElement('div', { id: 'workbench-workspace-terminal' },
+    createElement('div', { className: 'xterm' }, createElement('textarea', { className: 'xterm-helper-textarea', 'data-synthetic-terminal': '', 'data-focus-request': props.focusRequest, hidden: !props.visible })),
+    props.visible ? createPortal(createElement('button', { 'data-workbench-terminal-menu': '', onClick: props.onCollapse }, 'Close all terminals'), document.body) : null), ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null,
     SubagentInspectorPanelIsland: (props: NonNullable<typeof io.inspector>) => {
       io.inspector = props
       useEffect(() => () => { if (io.inspector === props) io.inspector = null }, [props])
@@ -90,7 +98,14 @@ vi.mock('./workbench/RightPanelIslands', async () => {
     }, ThreadSummaryPanelIsland: (props: { titleId?: string; onCollapse: () => void }) => {
       useEffect(() => { io.summaryMounted(); return () => { io.summaryUnmounted() } }, [])
       return createElement('div', null, createElement('h2', { id: props.titleId }, 'Summary'), createElement('button', { 'data-synthetic-summary-close': '', onClick: props.onCollapse }, 'Close'))
-    }, TodoPanel: () => null, WorkspaceFilePreviewPanel: (props: ComponentProps<typeof ActualPreview>) => io.realPreview ? createElement(ActualPreview, props) : null, DocumentWorkspacePanel: (props: ComponentProps<typeof ActualDocument> & NonNullable<typeof io.document>) => { io.document = props; return io.realDocument ? createElement(ActualDocument,props) : null }, preloadRightPanelIsland: () => null }) })
+    }, TodoPanel: () => null, WorkspaceFilePreviewPanel: (props: ComponentProps<typeof ActualPreview>) => io.realPreview ? createElement(ActualPreview, props) : null,
+    DocumentWorkspacePanel: (props: ComponentProps<typeof ActualDocument> & NonNullable<typeof io.document>) => {
+      io.document = props
+      if (io.realDocument) return createElement(ActualDocument, props)
+      return io.realWorkspaceChrome && props.visible && props.viewerControls
+        ? createElement(WorkspaceViewerHeader, { title: props.activeTab?.title ?? 'Document', viewerControls: props.viewerControls })
+        : null
+    }, preloadRightPanelIsland: () => null }) })
 
 vi.mock('./sdd/SddDraftEditorView', () => ({ SddDraftEditorView: (props: { onNext: () => void }) => { io.sddNext = props.onNext; return null } }))
 vi.mock('./workbench/ChatTimelineIsland', async () => {
@@ -231,7 +246,7 @@ beforeEach(async () => {
   useSddDraftStore.setState(initialSdd, true)
   useNativeReferenceStore.setState({ references: [], drafts: {} })
   useNativeOfficeStore.setState(useNativeOfficeStore.getInitialState(),true)
-  io.settings.mockResolvedValue({ workspaceRoot: workspace } as AppSettingsV1)
+  io.settings.mockResolvedValue({ workspaceRoot: workspace, runtime: defaultAnalytixRuntimeSettings() } as AppSettingsV1)
   vi.spyOn(rendererRuntimeClient, 'getSettings').mockImplementation(() => io.settings())
   io.provider.getRuntimeInfo.mockResolvedValue({ capabilities: {
     attachments: { available: true }, model: { id: 'synthetic-model', inputModalities: ['text'], contextWindowTokens: 128000 },
@@ -559,7 +574,8 @@ describe('Workbench Canvas consumer path', () => {
     Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() })
     vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(() => fn(performance.now()), 0))
     vi.stubGlobal('cancelAnimationFrame', clearTimeout)
-    const fresh = { ...thread('brand-first-send'), status: 'idle' as const }
+    const fresh = { ...thread('brand-first-send'), status: 'idle' as const,
+      executionPolicyVersion: 2 as const, approvalPolicy: 'on-request' as const, sandboxMode: 'workspace-write' as const }
     const receipt = deferred<{ turnId: string; userMessageItemId: string }>()
     Object.assign(io.provider, { createThread: vi.fn().mockResolvedValueOnce(fresh) })
     io.provider.listThreads.mockResolvedValue([fresh, thread('a'), thread('b')])
@@ -1672,12 +1688,20 @@ describe('mounted Workbench protected source navigation', () => {
     expect(io.read).toHaveBeenCalledWith(expect.objectContaining({ protectedRead, preview: 'source', line: 2 }))
     expect(element.querySelector('[data-line="2"]')).not.toBeNull()
     expect(element.querySelector('[data-protected-source-preview] img')).toBeNull()
-    const copy = [...element.querySelectorAll<HTMLButtonElement>('.ds-file-viewer-menu-content button')]
-      .find(button => button.textContent === 'filePreviewCopyContent')
+    const source = element.querySelector('[data-protected-source-preview]')!
+    const filename = source.querySelector<HTMLButtonElement>('[data-workspace-viewer-header] button[aria-haspopup="menu"]')!
+    expect(filename).not.toBeNull()
+    await act(async () => filename.click())
+    const menu = document.getElementById(filename.getAttribute('aria-controls')!)!
+    expect(menu).not.toBeNull()
+    expect(menu.getAttribute('role')).toBe('menu')
+    const copy = [...menu.querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.getAttribute('aria-label') === 'filePreviewCopyContent')
     expect(copy).toBeDefined()
     expect(copy!.disabled).toBe(true)
-    expect((element.querySelector('[aria-label="filePreviewOpenEditor"]') as HTMLButtonElement).disabled).toBe(true)
-    const source = element.querySelector('[data-protected-source-preview]')!
+    const openEditor = menu.querySelector<HTMLButtonElement>('[aria-label="filePreviewOpenEditor"]')
+    expect(openEditor).not.toBeNull()
+    expect(openEditor!.disabled).toBe(true)
     for (const name of ['copy', 'cut', 'dragstart']) {
       const event = new Event(name, { bubbles: true, cancelable: true }); source.dispatchEvent(event); expect(event.defaultPrevented).toBe(true)
     }
@@ -1931,7 +1955,7 @@ it.each([
       window.dispatchEvent(new Event('resize'))
     })
     const writes = io.writeFile.mock.calls.length, sends = io.provider.sendUserMessage.mock.calls.length
-    const restore = element.querySelector<HTMLButtonElement>('.workspace-tabs-actions button[aria-pressed="true"]')!
+    const restore = element.querySelector<HTMLButtonElement>('[data-workspace-viewer-header][data-viewer-controls="true"] button[aria-label="workbenchDock"][aria-pressed="true"]')!
     expect(restore).not.toBeNull()
     expect(restore.disabled).toBe(false)
     expect(element.querySelector('#workbench-right-workspace')?.getAttribute('data-auto-overlay')).toBe(collapse ? 'true' : null)
@@ -2430,3 +2454,114 @@ it('extracts initial skill requests from direct input before native context asse
   expect(io.provider.sendUserMessage.mock.calls[0][1]).toContain('/injected-from-file');
   expect(io.provider.sendUserMessage.mock.calls[0][2]).toMatchObject({requestedSkillIds:['review']});
 });
+
+
+it.each([360, 1600])('opens one terminal workspace tab from selector and repeated shortcuts at width %s, and restores close focus', async width => {
+  const viewport = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+  io.realWorkspaceChrome = true
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+  try {
+    await act(async () => window.dispatchEvent(new Event('resize')))
+    await act(async () => useWorkspaceTabsStore.getState().showSelector())
+    const terminalEntry = element.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="terminal"]')!
+    await act(async () => terminalEntry.click())
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, selectorOpen: false, activeTabId: 'tool:terminal' })
+    for (let n = 0; n < 3; n++) {
+      await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+    }
+    expect(useWorkspaceTabsStore.getState().tabs.filter(tab => tab.mode === 'terminal')).toHaveLength(1)
+    expect(element.querySelector('#workbench-terminal-toggle')).toBeNull()
+    expect(element.querySelector('#workbench-terminal-panel')).toBeNull()
+    element.querySelector<HTMLTextAreaElement>('[data-synthetic-terminal]')!.focus()
+    await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'close-tab' })))
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, selectorOpen: true, tabs: [] })
+    expect(document.activeElement?.hasAttribute('data-sidebar-right-guide-entry')).toBe(true)
+    await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, selectorOpen: false, activeTabId: 'tool:terminal' })
+    expect(element.querySelector('#workbench-right-workspace')?.getAttribute('data-auto-overlay')).toBe(width === 360 ? 'true' : null)
+    const closeAll = document.querySelector<HTMLButtonElement>('[data-workbench-terminal-menu]')!
+    closeAll.focus()
+    await act(async () => closeAll.click())
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    expect(useWorkspaceTabsStore.getState().open).toBe(false)
+    expect(document.activeElement?.id).toBe('workbench-workspace-expand')
+  } finally {
+    if (viewport) Object.defineProperty(window, 'innerWidth', viewport)
+    else Reflect.deleteProperty(window, 'innerWidth')
+  }
+})
+
+it.each(['plugins', 'settings'] as const)('suspends terminal presentation on the real %s route and ignores terminal shortcuts until return', async route => {
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true, bubbles: true })))
+  const terminal = element.querySelector<HTMLTextAreaElement>('[data-synthetic-terminal]')!
+  expect(terminal.hidden).toBe(false)
+  expect(useWorkspaceTabsStore.getState().activeTabId).toBe('tool:terminal')
+  const focusRequest = terminal.getAttribute('data-focus-request')
+  const tabs = useWorkspaceTabsStore.getState().tabs
+  await act(async () => useChatStore.setState({ route }))
+  expect(terminal.hidden).toBe(true)
+  expect(document.querySelector('[data-workbench-terminal-menu]')).toBeNull()
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true, bubbles: true })))
+  await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+  expect(useChatStore.getState().route).toBe(route)
+  expect(useWorkspaceTabsStore.getState().tabs).toBe(tabs)
+  expect(terminal.getAttribute('data-focus-request')).toBe(focusRequest)
+  await act(async () => useChatStore.setState({ route: 'chat' }))
+  expect(terminal.hidden).toBe(false)
+  expect(useWorkspaceTabsStore.getState().tabs).toBe(tabs)
+})
+
+it.each(['plugins', 'settings'] as const)('does not open a terminal workspace tab from shortcuts while initially on %s', async route => {
+  await act(async () => useChatStore.setState({ route }))
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true, bubbles: true })))
+  await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+  expect(useChatStore.getState().route).toBe(route)
+  expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: false, activeTabId: null, tabs: [] })
+  expect(document.querySelector('[data-workbench-terminal-menu]')).toBeNull()
+  await act(async () => useChatStore.setState({ route: 'chat' }))
+  expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(0)
+})
+
+it('passes Ctrl+W through the real window capture handler to shell input and preserves Cmd+W and tab-strip close', async () => {
+  io.realWorkspaceChrome = true
+  const openTerminal = async () => act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+  await openTerminal()
+  const input = element.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!
+  const phases: { phase: number; prevented: boolean }[] = []
+  const shellInput = vi.fn()
+  const capture = (event: KeyboardEvent) => {
+    if (event.key === 'w') phases.push({ phase: event.eventPhase, prevented: event.defaultPrevented })
+  }
+  const terminalKey = (event: KeyboardEvent) => {
+    phases.push({ phase: event.eventPhase, prevented: event.defaultPrevented })
+    if (event.ctrlKey && !event.metaKey && !event.defaultPrevented) {
+      shellInput()
+      event.preventDefault()
+    }
+  }
+  window.addEventListener('keydown', capture, true)
+  input.addEventListener('keydown', terminalKey)
+  try {
+    input.focus()
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true })))
+    expect(phases).toEqual([{ phase: Event.CAPTURING_PHASE, prevented: false }, { phase: Event.AT_TARGET, prevented: false }])
+    expect(shellInput).toHaveBeenCalledTimes(1)
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, selectorOpen: false, activeTabId: 'tool:terminal' })
+    expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(1)
+
+    phases.length = 0
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', metaKey: true, bubbles: true, cancelable: true })))
+    expect(phases).toEqual([{ phase: Event.CAPTURING_PHASE, prevented: true }, { phase: Event.AT_TARGET, prevented: true }])
+    expect(shellInput).toHaveBeenCalledTimes(1)
+    expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(0)
+
+    await openTerminal()
+    const tab = element.querySelector<HTMLButtonElement>('.workspace-tab [role="tab"]')!
+    await act(async () => tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true })))
+    expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(0)
+  } finally {
+    window.removeEventListener('keydown', capture, true)
+    input.removeEventListener('keydown', terminalKey)
+  }
+})

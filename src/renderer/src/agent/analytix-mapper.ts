@@ -170,6 +170,8 @@ export function threadFromCore(thread: CoreThreadSummaryJson): NormalizedThread 
     mode: thread.mode,
     workspace: thread.workspace,
     status: thread.status,
+    executionPolicyVersion: thread.executionPolicyVersion === 2 ? 2 : undefined,
+    executionPolicyUncertain: false,
     approvalPolicy: normalizeApprovalPolicy(thread.approvalPolicy),
     sandboxMode: normalizeSandboxMode(thread.sandboxMode),
     archived: thread.status === 'archived',

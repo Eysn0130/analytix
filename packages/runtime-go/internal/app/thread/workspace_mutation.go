@@ -80,7 +80,7 @@ func FreezeThreadMutationScope(thread map[string]any, threadID string, reader tu
 		}
 		return current, nil
 	}
-	if thread["contextEpochState"] != nil {
+	if thread["contextEpochState"] != nil && !hasDefaultEmptyThreadEpoch(thread, threadID) {
 		return domainsecurity.TurnSecurityContext{}, errors.New("thread mutation epoch exists without current security authority")
 	}
 	if at.IsZero() {
@@ -91,6 +91,26 @@ func FreezeThreadMutationScope(thread map[string]any, threadID string, reader tu
 		TurnID:    workspaceMutationTurnID(threadID, observation.WorkspaceRealPath, at),
 		Workspace: workspace, Principal: principal, IssuedAt: at,
 	})
+}
+
+func hasDefaultEmptyThreadEpoch(thread map[string]any, threadID string) bool {
+	turns, ok := thread["turns"].([]any)
+	if !ok || len(turns) != 0 {
+		return false
+	}
+	state, err := domaincontextepoch.ParseState(thread["contextEpochState"])
+	if err != nil || state.ThreadID != threadID {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339Nano, state.AcceptedSnapshot.AcceptedAt)
+	if err != nil {
+		return false
+	}
+	// Restore backfills this exact default before a thread has any turn
+	// authority. Shape alone grants no authority: the caller still freezes
+	// the workspace through the host identity, observation and risk owners.
+	initial, err := contextepochapp.DefaultState(threadID, 1, at)
+	return err == nil && state.StateDigest == initial.StateDigest
 }
 
 func FreezeWorkspaceRebindScopes(thread map[string]any, threadID, targetWorkspace string, reader turnsecurityapp.WorkspaceReader, principal domainidentity.PrincipalV1, at time.Time, authorities ...turnsecurityapp.WorkspaceSecurityAuthority) (WorkspaceRebindScopes, error) {

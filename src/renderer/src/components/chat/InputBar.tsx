@@ -6,6 +6,7 @@ import type { ConversationPresentationPhase } from './ConversationWidthControls'
 import { GateResponseContext, MessageBubble } from './message-timeline-bubbles'
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useId,
   useMemo,
@@ -21,6 +22,7 @@ import {
 import {
   Archive,
   ArrowUp,
+  Download,
   FileEdit,
   FileText,
   Folder,
@@ -41,7 +43,7 @@ import {
   RotateCcw,
   Search,
   SearchCode,
-  SubmitIcon as Send,
+  ShieldCheck,
   Sparkles,
   StopIcon as Square,
   Target,
@@ -54,6 +56,7 @@ import { createPortal } from 'react-dom'
 import { useAnchoredPanel } from './presentation/useAnchoredPanel'
 import panelCss from './presentation/AnchoredPanel.module.css'
 import { ComposerReferenceChip } from './ComposerReferenceChip'
+import { ComposerDropOverlay } from './ComposerDropOverlay'
 import { useTranslation } from 'react-i18next'
 import type { HubAgentPluginListItem, ModelProviderModelGroup } from '@shared/analytix-api'
 import type { AttachmentReference, ChatBlock, ReviewTarget } from '../../agent/types'
@@ -87,6 +90,7 @@ import {
   COMPACT_COMMAND_ALIASES,
   buildResearchPrompt,
   getGoalPanelDraftObjective,
+  getComposerCommandRows,
   getSlashQuery,
   NEW_COMMAND_ALIASES,
   parseBtwCommand,
@@ -100,12 +104,10 @@ import {
   type SlashCommand,
   type SlashCommandId
 } from './floating-composer-commands'
+import { FloatingComposerCommandMenu, composerCommandOptionId } from './FloatingComposerCommandMenu'
 export { buildResearchPrompt, parseBtwCommand, parseCompactCommand, parseGoalCommand, parseNewCommand, parseResearchCommand, parseReviewCommand } from './floating-composer-commands'
-import {
-  formatPercent,
-  useThreadUsageState
-} from '../../hooks/use-thread-usage'
-import { buildContextCapacity, estimateBlockTokens } from '../../lib/context-capacity'
+import { useThreadUsageState } from '../../hooks/use-thread-usage'
+import { buildContextCapacity } from '../../lib/context-capacity'
 import { ContextCapacityPopover } from './ContextCapacityPopover'
 import { GitBranchPicker } from './GitBranchPicker'
 import { WorkspaceProjectPicker } from './WorkspaceProjectPicker'
@@ -146,7 +148,6 @@ export type { ComposerExecutionSettings } from './FloatingComposerExecutionPicke
 const CONTEXT_CAPACITY_RING_SIZE = 14
 const CONTEXT_CAPACITY_RING_STROKE = 2
 const CONTEXT_CAPACITY_RING_RADIUS = 5.5
-const CONTEXT_CAPACITY_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_CAPACITY_RING_RADIUS
 
 type Props = {
   gateOverride?: { threadId?: string | null; block: Extract<ChatBlock, { kind: 'approval' | 'user_input' }> | null; onOpenOwnerThread?: (requestId: string) => void }
@@ -175,6 +176,7 @@ type Props = {
   onComposerModelChange: (modelId: string, providerId?: string) => void
   onComposerReasoningEffortChange?: (effort: ComposerReasoningEffort) => void
   onConfigureProviders?: () => void
+  onReloadComposerModels?: () => Promise<void>
   onOpenPermissionSettings?: () => void
   hideModelPicker?: boolean
   modelPickerMode?: 'select' | 'combobox'
@@ -194,6 +196,8 @@ type Props = {
   webAccessAvailable?: boolean
   executionSettings?: ComposerExecutionSettings | null
   executionSettingsApplying?: boolean
+  executionSettingsLegacy?: boolean
+  executionSettingsUnavailable?: boolean
   changedFiles?: ComposerChangedFile[]
   changedFileStats?: { added: number; removed: number } | null
   skillCommands?: Array<{
@@ -238,11 +242,10 @@ type Props = {
    * Hide the `/btw` slash entry (e.g. inside a side conversation).
    */
   hideBtwCommand?: boolean
-  /** Active model's context window, for the 上下文容量 gauge. */
+  /** Selected model's window metadata, independent of historical input samples. */
   contextWindowTokens?: number
-  /** Tool definitions advertised to the model (built-ins are added on top). */
+  /** Catalog metadata; these counts are not context-token measurements. */
   runtimeToolCount?: number
-  /** Skills in the always-injected catalog. */
   runtimeSkillCount?: number
 }
 
@@ -300,7 +303,6 @@ type ComposerSkillMentionChip = {
   description: string
 }
 
-const EMPTY_CONTEXT_BLOCKS: ChatBlock[] = []
 const EMPTY_MODEL_GROUPS: ModelProviderModelGroup[] = []
 const EMPTY_ATTACHMENTS: AttachmentReference[] = []
 const EMPTY_FILE_REFERENCES: ComposerFileReference[] = []
@@ -339,7 +341,7 @@ function ComposerImageAttachmentPreview({
 
   return (
     <span
-      className="ds-no-drag relative block h-20 w-20 overflow-hidden rounded-lg border border-ds-border-muted bg-ds-card shadow-sm"
+      className="dsh-composer-image ds-no-drag relative block h-16 w-16 overflow-hidden rounded-lg border border-ds-border-muted bg-ds-card"
       title={title}
     >
       <button
@@ -359,7 +361,7 @@ function ComposerImageAttachmentPreview({
         <button
           type="button"
           onClick={() => onRemoveAttachment(attachment.id)}
-          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950 text-white shadow-sm transition hover:bg-zinc-800"
+          className="dsh-composer-image-remove absolute right-1 top-1 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-zinc-950 text-white transition hover:bg-zinc-800"
           aria-label={t('composerRemoveAttachment')}
           title={t('composerRemoveAttachment')}
         >
@@ -572,19 +574,20 @@ export function handleComposerImagePaste({
   const hasPlainText = Boolean(clipboardData.getData?.('text/plain'))
   const hasImageTransfer = imageTransferHasImages(clipboardData)
   if (files.length > 0) {
-    preventDefault()
+    // Leave mixed clipboard text to the editor's native paste transaction and history.
+    if (!hasPlainText) preventDefault()
     if (onPasteClipboardImage) {
       void onPasteClipboardImage({ silentNoImage: false })
-      return true
+      return !hasPlainText
     }
     onPickAttachments?.(files)
-    return true
+    return !hasPlainText
   }
   if (!onPasteClipboardImage) return false
 
-  const shouldPreventDefault = !hasPlainText || hasImageTransfer
+  const shouldPreventDefault = !hasPlainText
   if (shouldPreventDefault) preventDefault()
-  void onPasteClipboardImage({ silentNoImage: !shouldPreventDefault })
+  void onPasteClipboardImage({ silentNoImage: hasPlainText && !hasImageTransfer })
   return shouldPreventDefault
 }
 
@@ -647,6 +650,7 @@ export function InputBar({
   onComposerModelChange,
   onComposerReasoningEffortChange,
   onConfigureProviders,
+  onReloadComposerModels,
   onOpenPermissionSettings,
   hideModelPicker = false,
   modelPickerMode = 'select',
@@ -665,6 +669,8 @@ export function InputBar({
   fileReferences = EMPTY_FILE_REFERENCES,
   executionSettings = null,
   executionSettingsApplying = false,
+  executionSettingsLegacy = false,
+  executionSettingsUnavailable = false,
   changedFiles: suppliedChangedFiles,
   changedFileStats: suppliedChangedFileStats,
   skillCommands = EMPTY_SKILL_COMMANDS,
@@ -689,9 +695,7 @@ export function InputBar({
   reviewChangesDisabled = false,
   onBtwCommand,
   hideBtwCommand = false,
-  contextWindowTokens,
-  runtimeToolCount,
-  runtimeSkillCount
+  contextWindowTokens
 }: Props): ReactElement {
   const { t, i18n } = useTranslation('common')
   const route = useChatStore((s) => s.route)
@@ -810,12 +814,15 @@ export function InputBar({
       : (hasActiveThread || !!effectiveWorkspaceRoot)
   )
   const canChangeModel = canCompose && !busy
-  const canSend = canCompose && !attachmentUploadBusy && attachmentUploads.length === 0 && (
+  const executionPolicyBlocked = executionSettingsApplying || executionSettingsUnavailable
+  const hasComposerPayload = (
     input.trim().length > 0 ||
     documentReferenceCount > 0 ||
+    attachmentUploads.length > 0 ||
     (attachmentUploadEnabled && attachments.length > 0) ||
     (fileReferenceEnabled && fileReferences.length > 0)
   )
+  const canSend = canCompose && !executionPolicyBlocked && !attachmentUploadBusy && attachmentUploads.length === 0 && hasComposerPayload
   const canPickAttachment = canCompose && attachmentUploadEnabled && !attachmentUploadBusy
   const canPickFileReference = canCompose && fileReferenceEnabled && Boolean(effectiveWorkspaceRoot) && Boolean(onOpenFileReferencePicker)
   const canPickLocalFileReference = canCompose && fileReferenceEnabled && Boolean(onPickFileReferences)
@@ -824,10 +831,8 @@ export function InputBar({
   const canTogglePlanMode = canCompose && Boolean(onPlanCommand)
   const canCreateNewThread = runtimeReady && route !== 'claw' && Boolean(effectiveWorkspaceRoot) && Boolean(onNewCommand)
   const canOpenGoalPanel = !secondaryOwner && canCompose && route !== 'claw'
-  const canRunReview = canCompose && route !== 'claw' && Boolean(onReviewCommand)
   const canToggleWorktreeMode = canCompose && route !== 'claw' && Boolean(onToggleWorktreeMode)
   const canOpenComposerMenu = showComposerMenuButton
-    && (canPickFileReference || canPickLocalFileReference || canTogglePlanMode || canCreateNewThread || canOpenGoalPanel || canRunReview || canToggleWorktreeMode)
   const showToolbarStartControls = showComposerMenuButton
   const currentTurnDiffSummary = useMemo(
     () => collectCurrentTurnDiffSummary(currentTurnDiffBlocks, currentTurnId, effectiveWorkspaceRoot),
@@ -850,7 +855,9 @@ export function InputBar({
     compact && modelPickerMode === 'combobox' && !showToolbarStartControls && !hideModelPicker
   const draft = useComposerDraft({ input, canCompose: canEditComposer })
   const composerEditorRef = useRef<ComposerPromptEditorHandle | null>(null)
-  const slashQuery = secondaryOwner ? null : getSlashQuery(input)
+  const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null)
+  const slashOwnerKey = JSON.stringify([activeThreadId, effectiveWorkspaceRoot, input])
+  const slashQuery = secondaryOwner || dismissedSlashKey === slashOwnerKey ? null : getSlashQuery(input)
   const [composerCursor, setComposerCursor] = useState(() => input.length)
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const [agentPlugins, setAgentPlugins] = useState<HubAgentPluginListItem[]>(EMPTY_HUB_AGENT_PLUGINS)
@@ -861,82 +868,33 @@ export function InputBar({
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null)
   const composerMenuId = useId()
   const [composerMenuOpen, setComposerMenuOpen] = useState(false)
+  const composerOwnerRevisionRef = useRef(0)
+  const [composerOwnerRevision, setComposerOwnerRevision] = useState(0)
+  const [composerPicker, setComposerPicker] = useState<'permission' | 'model' | null>(null)
   const [goalPanelOpen, setGoalPanelOpen] = useState(false)
   const [goalRuntimeNowMs, setGoalRuntimeNowMs] = useState(() => Date.now())
   const composerRootRef = useRef<HTMLDivElement | null>(null)
   const composerMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const composerMenuPanelRef = useRef<HTMLDivElement | null>(null)
   const goalPanelRef = useRef<HTMLDivElement | null>(null)
-  const messageTokenCacheRef = useRef<WeakMap<object, number>>(new WeakMap())
-  const contextOwnerKey = JSON.stringify([activeThreadId, composerProviderId ?? '', composerModel])
-  const effectiveContextWindow = typeof contextWindowTokens === 'number' && Number.isFinite(contextWindowTokens)
-    && contextWindowTokens > 0 ? contextWindowTokens : 0
-  const effectiveToolCount = runtimeToolCount ?? 0
-  const effectiveSkillCount = runtimeSkillCount ?? 0
+  const composerOwnerKey = JSON.stringify([activeThreadId, effectiveWorkspaceRoot, composerOwnerRevision])
+  const contextOwnerKey = JSON.stringify([composerOwnerKey, composerProviderId ?? '', composerModel])
   const canShowContextCapacity =
-    !compact && runtimeReady && route === 'chat' && Boolean(activeThreadId) && effectiveContextWindow > 0
-  // buildContextCapacity always returns a value when canShowContextCapacity;
-  // recording replaces the trigger, so it must also retire its portaled panel.
-  const capacityTriggerVisible = canShowContextCapacity && dictation.status !== 'recording'
+    !compact && runtimeReady && route === 'chat' && Boolean(activeThreadId)
+  // Recording replaces the trigger, so it must also retire its portaled panel.
+  const voiceActivity = dictation.status !== 'idle'
+  const capacityTriggerVisible = canShowContextCapacity && !voiceActivity
   const capacityPanel = useAnchoredPanel<HTMLDivElement>({
     enabled: capacityTriggerVisible, ownerKey: contextOwnerKey
   })
   const contextCapacityOpen = capacityPanel.open
-  // Freeze the measured total for the duration of a turn: the runtime can emit
-  // several `usage` events while streaming, and tracking them live makes the
-  // chip jitter (visible flicker). Adopt the latest value only while idle.
-  const liveMeasuredTotal =
-    lastTurnUsage && lastTurnUsage.threadId === activeThreadId
-      ? lastTurnUsage.snapshot.inputTokens
-      : null
-  const measuredTotalRef = useRef<{ owner: string; value: number | null }>({ owner: contextOwnerKey, value: null })
-  if (measuredTotalRef.current.owner !== contextOwnerKey) measuredTotalRef.current = { owner: contextOwnerKey, value: null }
-  if (!busy) measuredTotalRef.current.value = liveMeasuredTotal
-  const measuredContextTotal = busy ? measuredTotalRef.current.value : liveMeasuredTotal
-  // The message estimate only feeds the per-category split (popover) or the
-  // no-measured-total fallback. Never subscribe to `blocks` while streaming with
-  // the popover closed — blocks churn on every delta and re-render the whole
-  // composer. Freeze the last estimate in a ref instead.
-  const needMessageEstimate =
-    canShowContextCapacity && (contextCapacityOpen || measuredContextTotal == null)
-  const subscribeContextBlocks = needMessageEstimate && (contextCapacityOpen || !busy)
-  const contextBlocks = useChatStore((s) => (subscribeContextBlocks ? s.blocks : EMPTY_CONTEXT_BLOCKS))
-  const conversationTokensRef = useRef({ owner: contextOwnerKey, value: 0 })
-  const conversationTokens = useMemo(() => {
-    if (conversationTokensRef.current.owner !== contextOwnerKey) conversationTokensRef.current = { owner: contextOwnerKey, value: 0 }
-    if (!subscribeContextBlocks) return conversationTokensRef.current.value
-    // Cache per block: block identity is preserved for unchanged history across
-    // streaming updates, so only the block that changed is re-estimated.
-    const cache = messageTokenCacheRef.current
-    let sum = 0
-    for (const block of contextBlocks) {
-      let cached = cache.get(block)
-      if (cached === undefined) {
-        cached = estimateBlockTokens(block)
-        cache.set(block, cached)
-      }
-      sum += cached
-    }
-    conversationTokensRef.current.value = sum
-    return sum
-  }, [subscribeContextBlocks, contextBlocks, contextOwnerKey])
-  const contextCapacity = useMemo(() => {
-    if (!canShowContextCapacity) return null
-    return buildContextCapacity({
-      windowTokens: effectiveContextWindow,
-      lastTurnInputTokens: measuredContextTotal,
-      messageTokens: conversationTokens,
-      toolCount: effectiveToolCount,
-      skillCount: effectiveSkillCount
-    })
-  }, [
-    canShowContextCapacity,
-    effectiveContextWindow,
-    measuredContextTotal,
-    conversationTokens,
-    effectiveToolCount,
-    effectiveSkillCount
-  ])
+  const contextCapacity = useMemo(() => buildContextCapacity({
+    windowTokens: contextWindowTokens,
+    model: composerModel,
+    providerId: composerProviderId,
+    threadId: activeThreadId,
+    lastTurnUsage
+  }), [contextWindowTokens, composerModel, composerProviderId, activeThreadId, lastTurnUsage])
   const goalRuntimeStartedAtRef = useRef<number | null>(null)
   const placeholder = !runtimeReady
     ? t('runtimeActionNeedsConnection')
@@ -967,12 +925,33 @@ export function InputBar({
             ? t('composerWorktreeModeHint')
             : null
   const slashCommands = useMemo<SlashCommand[]>(() => {
-    if (secondaryOwner) return []
     const threadActionDisabled = !runtimeReady || busy || !activeThreadId
     const goalActionDisabled = !canOpenGoalPanel
     const disabledSkills = disabledSkillIdSet(disabledSkillIds)
     const commands: SlashCommand[] = []
     if (route !== 'claw') {
+      commands.push(
+        { id: 'file', title: t('slashCommandFileTitle'), description: t('slashCommandFileDescription'),
+          keywords: ['file', 'files', '文件'], icon: <FileText />, disabled: !canPickLocalFileReference && !canPickFileReference },
+        { id: 'feedback', title: t('slashCommandFeedbackTitle'), description: t('slashCommandFeedbackDescription'),
+          keywords: ['feedback', '反馈'], icon: <MessageCircleMore />, disabled: true, disabledReason: t('slashCommandFeedbackUnavailable') },
+        { id: 'permission', title: t('slashCommandPermissionTitle'), description: t('slashCommandPermissionDescription'),
+          keywords: ['permission', 'permissions', 'approval', '权限'], icon: <ShieldCheck />,
+          disabled: !runtimeReady || (!executionSettings && !executionSettingsUnavailable) || !onExecutionSettingsChange || executionSettingsApplying },
+        { id: 'model', title: t('slashCommandModelTitle'), description: t('slashCommandModelDescription'),
+          keywords: ['model', '模型'], icon: <Sparkles />, disabled: hideModelPicker || !canChangeModel },
+        { id: 'export', title: t('slashCommandExportTitle'), description: t('slashCommandExportDescription'),
+          keywords: ['export', 'download', 'logs', '下载', '日志'], icon: <Download />, disabled: true, disabledReason: t('slashCommandExportUnavailable') }
+      )
+      if (fileReferenceEnabled && canPickLocalFileReference) commands.push({ id: 'workspace-files',
+        title: t('composerBrowseWorkspaceFiles'), description: t('slashCommandFileDescription'),
+        keywords: ['workspace', 'files', '工作区'], icon: <Folder />, disabled: !canPickFileReference })
+      if (attachmentUploadEnabled) commands.push({ id: 'attachments', title: t('composerAddImage'),
+        description: t('composerAddImage'), keywords: ['image', 'attachment', 'pdf', '图片', '附件'],
+        icon: attachmentUploadBusy ? <Loader2 className="animate-spin" /> : <ImagePlus />, disabled: !canPickAttachment || !onPickAttachments })
+      if (onToggleWorktreeMode) commands.push({ id: 'worktree', title: t('composerMenuWorktreeMode'),
+        description: t('composerWorktreeModeHint'), keywords: ['worktree', 'parallel', '工作树'],
+        icon: <GitBranch />, disabled: !canToggleWorktreeMode, checked: useWorktreePool })
       commands.push({
         id: 'new',
         title: t('slashCommandNewTitle'),
@@ -996,9 +975,13 @@ export function InputBar({
         title: t('slashCommandPlanTitle'),
         description: t('slashCommandPlanDescription'),
         keywords: ['plan', 'planner', 'planning', '规划', '计划'],
-        icon: <ListTodo className="h-4 w-4" strokeWidth={1.9} />
+        icon: <ListTodo className="h-4 w-4" strokeWidth={1.9} />,
+        disabled: !canTogglePlanMode,
+        checked: mode === 'plan'
       })
     }
+
+    if (secondaryOwner) return commands.filter(command => ['file', 'workspace-files', 'attachments', 'plan', 'model', 'permission', 'worktree'].includes(command.id))
 
     if (route !== 'claw') {
       const dynamicSkillCommands = skillCommands
@@ -1035,6 +1018,12 @@ export function InputBar({
           }
         })
       commands.push(...dynamicSkillCommands)
+      commands.push(...agentPlugins.slice(0, 40).map<SlashCommand>(plugin => ({
+        id: `plugin:${hubPluginMentionId(plugin)}`, kind: 'plugin',
+        title: hubPluginMentionDisplayName(plugin), description: plugin.shortDescription?.trim() || plugin.name,
+        keywords: [hubPluginMentionId(plugin), plugin.name, 'plugin', '插件'],
+        icon: <Plug />, disabled: !runtimeReady
+      })))
 
       commands.push({
         id: 'goal',
@@ -1042,7 +1031,8 @@ export function InputBar({
         description: t('slashCommandGoalDescription'),
         keywords: ['goal', 'objective', 'target', '目标', '任务'],
         icon: <Target className="h-4 w-4" strokeWidth={1.9} />,
-        disabled: goalActionDisabled
+        disabled: goalActionDisabled || activeThreadGoal?.status !== 'complete' && !shouldPauseGoal(activeThreadGoal, activeGoalActivation) && goalRoundLimitExhausted(activeThreadGoal),
+        checked: shouldPauseGoal(activeThreadGoal, activeGoalActivation)
       })
 
       if (onBtwCommand && !hideBtwCommand) {
@@ -1126,18 +1116,25 @@ export function InputBar({
     route,
     runtimeReady,
     skillCommands,
+    agentPlugins,
     disabledSkillIds,
+    canPickLocalFileReference, canPickFileReference, canPickAttachment, canTogglePlanMode, canToggleWorktreeMode,
+    canChangeModel, hideModelPicker, executionSettings, executionSettingsApplying, executionSettingsUnavailable, onExecutionSettingsChange,
+    fileReferenceEnabled, attachmentUploadEnabled, attachmentUploadBusy, onPickAttachments, onToggleWorktreeMode, useWorktreePool,
+    mode, activeThreadGoal, activeGoalActivation,
     t
   ])
 
   const filteredSlashCommands = useMemo(() => {
     if (slashQuery == null) return []
-    if (!slashQuery) return slashCommands
-    return slashCommands.filter((command) => {
-      const haystack = [command.id, command.title, command.description, ...command.keywords]
-      return haystack.some((part) => part.toLowerCase().includes(slashQuery))
-    })
+    return getComposerCommandRows(slashCommands, slashQuery)
   }, [slashCommands, slashQuery])
+  const composerMenuItems = useMemo(() => getComposerCommandRows(slashCommands, ''), [slashCommands])
+  const commandGroupLabels = {
+    add: t('composerCommandSectionAdd'), commands: t('composerCommandSectionCommands'),
+    extensions: t('composerCommandSectionExtensions'), skills: t('composerCommandSectionSkills'),
+    plugins: t('composerCommandSectionPlugins'), worktree: t('composerCommandSectionWorktree')
+  }
 
   const highlightedSlashCommand =
     filteredSlashCommands.length > 0
@@ -1170,6 +1167,25 @@ export function InputBar({
     () => installedHubAgentPlugins(agentPlugins),
     [agentPlugins]
   )
+  const disclosureKeysRef = useRef({ slash: slashOwnerKey, mention: activeAtMentionKey })
+  useLayoutEffect(() => { disclosureKeysRef.current = { slash: slashOwnerKey, mention: activeAtMentionKey } })
+  useEffect(() => {
+    if (secondaryOwner) return
+    return useChatStore.subscribe((next, previous) => {
+      if (next.activeThreadId === previous.activeThreadId && next.workspaceRoot === previous.workspaceRoot && next.threads === previous.threads) return
+      const workspaceFor = (state: typeof next) => normalizeWorkspaceRoot(
+        state.threads.find(thread => thread.id === state.activeThreadId)?.workspace || workspaceRootOverride || state.workspaceRoot)
+      if (next.activeThreadId === previous.activeThreadId && workspaceFor(next) === workspaceFor(previous)) return
+      setComposerOwnerRevision(++composerOwnerRevisionRef.current)
+      setComposerMenuOpen(false)
+      setComposerPicker(null)
+      setGoalPanelOpen(false)
+      setDismissedSlashKey(disclosureKeysRef.current.slash)
+      setDismissedMentionKey(disclosureKeysRef.current.mention)
+      setFileMentionSuggestions([])
+    })
+  }, [secondaryOwner, workspaceRootOverride])
+
   const showAtMentionMenu =
     !secondaryOwner && canCompose &&
     Boolean(activeAtMention) &&
@@ -1373,21 +1389,25 @@ export function InputBar({
     route !== 'claw'
     && runtimeReady
     && canOpenGoalPanel
+    && !executionPolicyBlocked
     && goalPanelDraftObjective.length > 0
+  const primaryActionIsStop = busy && !highlightedSlashCommand && (!allowBusyFollowUp || !hasComposerPayload)
   const busyCanSendFollowup = busy && canSend
-  const primaryActionLabel = busy
-    ? busyCanSendFollowup
-      ? t('composerSteerSend')
-      : t('interrupt')
-    : highlightedSlashCommand
+  const primaryActionLabel = highlightedSlashCommand
     ? t('slashCommandApply')
+    : primaryActionIsStop
+    ? t('interrupt')
+    : busy
+    ? t('composerSteerSend')
     : canSetGoalPanelDraft
       ? t('goalSetCurrentInput')
       : t('send')
-  const primaryActionDisabled = busy
-    ? false
-    : highlightedSlashCommand
+  const primaryActionDisabled = highlightedSlashCommand
     ? highlightedSlashCommand.disabled === true
+    : primaryActionIsStop
+    ? false
+    : busy
+    ? !canSend
     : canSetGoalPanelDraft
       ? false
     : !canSend
@@ -1403,9 +1423,47 @@ export function InputBar({
   const goalMenuChecked = shouldPauseGoal(activeThreadGoal, activeGoalActivation)
   const goalResumeExhausted = !goalMenuChecked && goalRoundLimitExhausted(activeThreadGoal)
 
+  const commandDiscoveryOpen = composerMenuOpen || slashQuery != null
   useEffect(() => {
     setSelectedCommandIndex(0)
   }, [slashQuery])
+
+  useEffect(() => {
+    if (slashQuery == null || !highlightedSlashCommand) return
+    document.getElementById(composerCommandOptionId(`${composerMenuId}-slash`, highlightedSlashCommand.id))
+      ?.scrollIntoView?.({ block: 'nearest' })
+  }, [composerMenuId, highlightedSlashCommand, slashQuery])
+
+  useEffect(() => {
+    if (slashQuery == null) return
+    const dismissOutside = (event: PointerEvent | FocusEvent) => {
+      if (event.target instanceof Node && !composerRootRef.current?.contains(event.target)) setDismissedSlashKey(slashOwnerKey)
+    }
+    document.addEventListener('pointerdown', dismissOutside, true)
+    document.addEventListener('focusin', dismissOutside)
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside, true)
+      document.removeEventListener('focusin', dismissOutside)
+    }
+  }, [slashOwnerKey, slashQuery])
+
+  const previousComposerContext = useRef(JSON.stringify([activeThreadId, effectiveWorkspaceRoot]))
+  useLayoutEffect(() => {
+    const context = JSON.stringify([activeThreadId, effectiveWorkspaceRoot])
+    if (previousComposerContext.current === context) return
+    previousComposerContext.current = context
+    setComposerMenuOpen(false)
+    setComposerPicker(null)
+    setGoalPanelOpen(false)
+    setDismissedSlashKey(slashOwnerKey)
+    setDismissedMentionKey(activeAtMentionKey)
+  }, [activeThreadId, effectiveWorkspaceRoot, slashOwnerKey, activeAtMentionKey])
+
+  useEffect(() => {
+    if (!voiceActivity) return
+    setComposerMenuOpen(false)
+    setComposerPicker(null)
+  }, [voiceActivity])
 
   useEffect(() => {
     setSelectedMentionIndex(0)
@@ -1417,7 +1475,7 @@ export function InputBar({
       setAgentPluginsLoading(false)
       return
     }
-    if (!showAtMentionMenu) {
+    if (!showAtMentionMenu && !commandDiscoveryOpen) {
       setAgentPluginsLoading(false)
       return
     }
@@ -1445,7 +1503,7 @@ export function InputBar({
     return () => {
       cancelled = true
     }
-  }, [route, showAtMentionMenu])
+  }, [route, showAtMentionMenu, commandDiscoveryOpen, composerOwnerKey])
 
   useEffect(() => {
     if (slashQuery != null || goalPanelOpen) setComposerMenuOpen(false)
@@ -1554,7 +1612,38 @@ export function InputBar({
     return () => window.clearInterval(interval)
   }, [busy, activeThreadGoal?.createdAt, activeThreadGoal?.objective, activeThreadGoal?.status])
 
-  const applySlashCommand = (commandId: SlashCommandId): void => {
+  const applySlashCommand = (commandId: SlashCommandId, source: 'slash' | 'menu' = 'slash'): void => {
+    if (composerOwnerRevision !== composerOwnerRevisionRef.current) return
+    const selected = slashCommands.find(command => command.id === commandId)
+    if (!selected || selected.disabled) return
+    setComposerMenuOpen(false)
+    if (source === 'slash') setDismissedSlashKey(slashOwnerKey)
+    if (commandId === 'file' || commandId === 'workspace-files' || commandId === 'attachments') {
+      if (source === 'slash') setInput('')
+      if (commandId === 'attachments') handleAttachmentMenuClick()
+      else if (commandId === 'workspace-files' || !canPickLocalFileReference) handleFileReferenceMenuClick()
+      else handleLocalFileReferenceMenuClick()
+      return
+    }
+    if (commandId === 'permission' || commandId === 'model') {
+      if (source === 'slash') setInput('')
+      setComposerPicker(commandId)
+      return
+    }
+    if (commandId === 'worktree') { handleWorktreeToolbarClick(); return }
+    if (source === 'menu' && commandId === 'plan') { handlePlanToolbarClick(); return }
+    if (source === 'menu' && commandId === 'goal') { handleGoalMenuClick(); return }
+    if (commandId.startsWith('plugin:')) {
+      const plugin = agentPlugins.find(item => hubPluginMentionId(item) === commandId.slice('plugin:'.length))
+      if (!plugin) return
+      const token = formatComposerPluginMentionToken(hubPluginMentionDisplayName(plugin), hubPluginMentionId(plugin))
+      if (source === 'menu') insertTextAtComposerCursor(token)
+      else {
+        setInput(`${token} `)
+        focusComposerAtRawCursorAfterRender(token.length + 1, token.length + 1)
+      }
+      return
+    }
     if (commandId.startsWith('skill:')) {
       const command = slashCommands.find((item) => item.id === commandId)
       if (command?.skillPrompt) {
@@ -1773,6 +1862,7 @@ export function InputBar({
   }
 
   const applyMentionSuggestion = (suggestion: ComposerMentionSuggestion | null): void => {
+    if (composerOwnerRevision !== composerOwnerRevisionRef.current) return
     if (!suggestion) return
     if (suggestion.kind === 'plugin') {
       applyPluginMention(suggestion)
@@ -1801,10 +1891,15 @@ export function InputBar({
 
   const handlePrimaryAction = (intent?: 'queue' | 'steer'): void => {
     if (!busy && attachmentUploadBusy) return
-    if (busy && !busyCanSendFollowup) {
+    if (highlightedSlashCommand) {
+      if (!highlightedSlashCommand.disabled) applySlashCommand(highlightedSlashCommand.id)
+      return
+    }
+    if (primaryActionIsStop) {
       onInterrupt()
       return
     }
+    if (executionPolicyBlocked || (busy && !canSend)) return
     if (busyCanSendFollowup) {
       if (intent) onSend(intent)
       else onSend()
@@ -1812,11 +1907,6 @@ export function InputBar({
     }
     if (secondaryOwner) {
       onSend()
-      return
-    }
-    if (highlightedSlashCommand) {
-      if (highlightedSlashCommand.disabled) return
-      applySlashCommand(highlightedSlashCommand.id)
       return
     }
     if (setGoalFromComposerInput()) {
@@ -1891,6 +1981,11 @@ export function InputBar({
     }
 
     if (!composing && showAtMentionMenu) {
+      if (event.key === 'Tab' && event.shiftKey) {
+        setDismissedMentionKey(activeAtMentionKey)
+        setFileMentionSuggestions([])
+        return
+      }
       if (event.key === 'ArrowDown' && flatMentionSuggestions.length > 0) {
         event.preventDefault()
         setSelectedMentionIndex((current) => (current + 1) % flatMentionSuggestions.length)
@@ -1903,7 +1998,7 @@ export function InputBar({
         )
         return
       }
-      if ((sendByEnter || event.key === 'Tab') && highlightedMention) {
+      if ((sendByEnter || event.key === 'Tab' && !event.shiftKey) && highlightedMention) {
         event.preventDefault()
         applyMentionSuggestion(highlightedMention)
         return
@@ -1917,7 +2012,11 @@ export function InputBar({
     }
 
     if (!composing && slashQuery != null) {
-      if (sendByEnter && highlightedSlashCommand) {
+      if (event.key === 'Tab' && event.shiftKey) {
+        setDismissedSlashKey(slashOwnerKey)
+        return
+      }
+      if ((sendByEnter || event.key === 'Tab') && highlightedSlashCommand) {
         event.preventDefault()
         if (!highlightedSlashCommand.disabled) applySlashCommand(highlightedSlashCommand.id)
         return
@@ -1936,7 +2035,7 @@ export function InputBar({
       }
       if (event.key === 'Escape') {
         event.preventDefault()
-        setInput('')
+        setDismissedSlashKey(slashOwnerKey)
         return
       }
     }
@@ -2035,7 +2134,9 @@ export function InputBar({
     })
   }
 
-  const handleComposerDrop = (event: ReactDragEvent<HTMLDivElement>): void => {
+  const handleComposerDrop = (event: ReactDragEvent<HTMLDivElement> | DragEvent): void => {
+    if (composerOwnerRevision !== composerOwnerRevisionRef.current) return
+    if (!event.dataTransfer) return
     const imageFiles = canPickAttachment ? imageFilesFromTransfer(event.dataTransfer) : []
     const rawFiles = Array.from(event.dataTransfer.files ?? [])
     const isImageLike = (file: File): boolean =>
@@ -2065,6 +2166,14 @@ export function InputBar({
     }
     draft.focusComposer()
   }
+
+  const canAcceptComposerDrop = useCallback((transfer: DataTransfer): boolean => {
+    if (composerOwnerRevision !== composerOwnerRevisionRef.current) return false
+    if (canPickLocalFileReference && Array.from(transfer.types ?? []).includes('Files')) return true
+    return canPickAttachment && (imageTransferHasImages(transfer) ||
+      Array.from(transfer.files ?? []).some(isPdfFile) ||
+      Array.from(transfer.items ?? []).some(item => item.kind === 'file' && item.type === 'application/pdf'))
+  }, [canPickAttachment, canPickLocalFileReference, composerOwnerRevision])
 
   const renderMentionIcon = (suggestion: ComposerMentionSuggestion, active: boolean): ReactElement => {
     const iconFrameClass = `flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-[10px] ${
@@ -2112,28 +2221,6 @@ export function InputBar({
     )
   }
 
-  const composerMenuItems: Array<{
-    id: string
-    label: string
-    icon: ReactElement
-    enabled: boolean
-    onSelect: () => void
-    checked?: boolean
-  }> = [
-    ...(fileReferenceEnabled ? [
-      { id: 'local-files', label: t('composerAddLocalFiles'), icon: <FileText />, enabled: canPickLocalFileReference, onSelect: handleLocalFileReferenceMenuClick },
-      { id: 'workspace-files', label: t('composerBrowseWorkspaceFiles'), icon: <Paperclip />, enabled: canPickFileReference, onSelect: handleFileReferenceMenuClick }
-    ] : []),
-    ...(attachmentUploadEnabled ? [
-      { id: 'attachments', label: t('composerAddImage'), icon: attachmentUploadBusy ? <Loader2 className="animate-spin" /> : <ImagePlus />, enabled: canPickAttachment && Boolean(onPickAttachments), onSelect: handleAttachmentMenuClick }
-    ] : []),
-    { id: 'plan', label: t('composerMenuPlanMode'), icon: <ListTodo />, enabled: canTogglePlanMode, onSelect: handlePlanToolbarClick, checked: mode === 'plan' },
-    { id: 'goal', label: t('composerMenuPursueGoal'), icon: <Target />, enabled: canOpenGoalPanel && (activeThreadGoal?.status === 'complete' || !goalResumeExhausted), onSelect: handleGoalMenuClick, checked: goalMenuChecked },
-    ...(canToggleWorktreeMode ? [
-      { id: 'worktree', label: t('composerMenuWorktreeMode'), icon: <GitBranch />, enabled: canToggleWorktreeMode, onSelect: handleWorktreeToolbarClick, checked: useWorktreePool }
-    ] : [])
-  ]
-
   // Preserve the feedback toast DOM anchor; InputBar owns the actual presentation.
   return (
     <div
@@ -2146,6 +2233,9 @@ export function InputBar({
         ? `dsh-input-bar ds-no-drag pointer-events-auto w-full pb-0 pt-0 ds-floating-composer ${className ?? ''}`
         : `dsh-input-bar ds-no-drag ds-chat-column-inset pointer-events-auto w-full max-w-4xl pb-3 pt-0 ds-floating-composer ${className ?? ''}`}
     >
+      <ComposerDropOverlay enabled={mainChatComposer && canCompose && !voiceActivity && composerGate?.status !== 'pending'}
+        ownerKey={composerOwnerKey} rootRef={composerRootRef} canAccept={canAcceptComposerDrop}
+        onDrop={handleComposerDrop} label={t('composerDropFilesHint')} />
       {mountedQuestions.map(block => <div key={activeThreadId + ':' + block.id + ':' + block.requestId}
         hidden={composerGate?.id !== block.id} inert={composerGate?.id !== block.id}
         data-analytix-gate-composer data-gate-thread-id={activeThreadId}>
@@ -2178,21 +2268,30 @@ export function InputBar({
 
 
 
+          {compact || presentationPhase !== 'hero' ? null : (
+            <div className="dsh-input-accessory ds-composer-context ds-no-drag flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-1">
+              {route === 'chat' ? (
+                <WorkspaceProjectPicker currentWorkspaceRoot={effectiveWorkspaceRoot} />
+              ) : null}
+              <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
+            </div>
+          )}
       <div className="relative">
         {hideThreadContextPanels ? null : <ThreadHandoffProgressModal />}
 
         {composerMenuOpen && slashQuery == null ? (
-          <div
+          <FloatingComposerCommandMenu
             ref={composerMenuPanelRef}
             id={composerMenuId}
-            role="menu"
-            data-composer-menu
-            aria-label={t('composerMenuTitle')}
-            onKeyDown={(event) => {
+            items={composerMenuItems}
+            groupLabels={commandGroupLabels}
+            ariaLabel={t('composerMenuTitle')}
+            emptyLabel={t('slashCommandEmpty')}
+            onSelect={command => applySlashCommand(command.id, 'menu')}
+            onKeyDown={event => {
               if (draft.isComposingEvent(event) || event.defaultPrevented) return
               if (event.key === 'Tab') {
-                const trigger = composerMenuButtonRef.current
-                if (trigger?.isConnected && !trigger.disabled) trigger.focus({ preventScroll: true })
+                composerMenuButtonRef.current?.focus({ preventScroll: true })
                 setComposerMenuOpen(false)
                 return
               }
@@ -2205,77 +2304,21 @@ export function InputBar({
                 (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
               items[next]?.focus({ preventScroll: true })
             }}
-            className="dsh-input-menu"
-          >
-            {composerMenuItems.map(item => (
-              <button key={item.id} type="button" tabIndex={-1}
-                role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
-                aria-checked={item.checked} disabled={!item.enabled}
-                onClick={item.onSelect} className="dsh-input-menu-item ds-no-drag">
-                {item.icon}<span>{item.label}</span>
-                {item.checked === undefined ? null : <span aria-hidden className="dsh-input-menu-check">{item.checked ? '✓' : ''}</span>}
-              </button>
-            ))}
-          </div>
+          />
         ) : null}
 
         {slashQuery != null ? (
-          <div className="ds-card-strong absolute bottom-full left-1/2 z-30 mb-2 w-[calc(100%_-_1rem)] max-w-[760px] -translate-x-1/2 overflow-hidden rounded-[16px] p-1.5 shadow-[0_18px_46px_rgba(20,47,95,0.14)]">
-            <div className="flex h-7 items-center px-2.5 text-[11.5px] font-semibold text-ds-muted">
-              {t('slashCommandMenuTitle')}
-            </div>
-            {filteredSlashCommands.length > 0 ? (
-              <div className="flex max-h-[min(300px,calc(100vh-260px))] flex-col gap-0.5 overflow-y-auto pr-1">
-                {filteredSlashCommands.map((command) => {
-                  const active = highlightedSlashCommand?.id === command.id
-                  return (
-                    <button
-                      key={command.id}
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => applySlashCommand(command.id)}
-                      disabled={command.disabled}
-                      className={`flex min-h-[52px] w-full items-center gap-2.5 rounded-[12px] px-2.5 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${
-                        active && !command.disabled
-                          ? 'bg-ds-hover text-ds-ink shadow-[inset_0_0_0_1px_rgba(20,47,95,0.06)]'
-                          : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink disabled:hover:bg-transparent disabled:hover:text-ds-muted'
-                      }`}
-                    >
-                      <span
-                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] ${
-                          active && !command.disabled ? 'bg-white text-accent shadow-sm dark:bg-ds-card' : 'bg-ds-hover text-ds-muted'
-                        }`}
-                      >
-                        {command.icon}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13.5px] font-semibold leading-5 text-inherit">
-                          {command.title}
-                        </span>
-                        <span className="mt-0.5 block truncate text-[12px] leading-4 text-ds-faint">
-                          {command.description}
-                        </span>
-                      </span>
-                      <span className="hidden min-w-[106px] shrink-0 flex-col items-end gap-1 sm:flex">
-                        {command.scopeLabel ? (
-                          <span className="text-[10.5px] font-semibold leading-none text-ds-muted">
-                            {command.scopeLabel}
-                          </span>
-                        ) : null}
-                        <span className="max-w-[150px] truncate rounded-full border border-ds-border-muted px-2 py-0.5 text-[10.5px] font-semibold leading-4 text-ds-faint">
-                          {command.badge ?? `/${command.id}`}
-                        </span>
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="rounded-[12px] border border-dashed border-ds-border-muted px-3 py-3 text-[12px] text-ds-faint">
-                {t('slashCommandEmpty')}
-              </div>
-            )}
-          </div>
+          <FloatingComposerCommandMenu
+            id={`${composerMenuId}-slash`}
+            role="listbox"
+            items={filteredSlashCommands}
+            selectedIndex={Math.min(selectedCommandIndex, filteredSlashCommands.length - 1)}
+            groupLabels={commandGroupLabels}
+            ariaLabel={t('slashCommandMenuTitle')}
+            emptyLabel={t('slashCommandEmpty')}
+            onHover={setSelectedCommandIndex}
+            onSelect={command => applySlashCommand(command.id)}
+          />
         ) : null}
 
         {showAtMentionMenu ? (
@@ -2421,14 +2464,6 @@ export function InputBar({
           </div>
         ) : null}
 
-          {compact ? null : (
-            <div className="dsh-input-accessory ds-composer-context ds-no-drag flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-1">
-              {route === 'chat' ? (
-                <WorkspaceProjectPicker currentWorkspaceRoot={effectiveWorkspaceRoot} />
-              ) : null}
-              <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
-            </div>
-          )}
         <div
           className={`dsh-input-card ds-no-drag ${
             draft.focused ? 'is-focused' : ''
@@ -2627,7 +2662,7 @@ export function InputBar({
               showToolbarStartControls ? 'justify-between' : 'justify-end'
             }`}
           >
-            {showToolbarStartControls ? (
+            {showToolbarStartControls && !voiceActivity ? (
               <div className="ds-composer-tools flex min-w-0 items-center">
                 {showComposerMenuButton ? (
                   <>
@@ -2647,13 +2682,17 @@ export function InputBar({
                     >
                       <Plus className="h-5 w-5" strokeWidth={1.8} />
                     </button>
-                    {executionSettings && onExecutionSettingsChange ? (
+                    {onExecutionSettingsChange && (executionSettings || executionSettingsUnavailable) ? (
                       <FloatingComposerExecutionPicker
-                        key={activeThreadId ?? effectiveWorkspaceRoot}
+                        key={composerOwnerKey}
+                        open={composerPicker === 'permission'}
+                        onOpenChange={open => setComposerPicker(open ? 'permission' : null)}
                         value={executionSettings}
                         applying={executionSettingsApplying}
-                        onChange={onExecutionSettingsChange}
-                        onOpenPermissionSettings={onOpenPermissionSettings}
+                        legacy={executionSettingsLegacy}
+                        unavailable={executionSettingsUnavailable}
+                        onChange={patch => { if (composerOwnerRevision === composerOwnerRevisionRef.current) onExecutionSettingsChange(patch) }}
+                        onOpenPermissionSettings={onOpenPermissionSettings ? () => { if (composerOwnerRevision === composerOwnerRevisionRef.current) onOpenPermissionSettings() } : undefined}
                       />
                     ) : null}
                     {mode === 'plan' ? (
@@ -2672,81 +2711,43 @@ export function InputBar({
             ) : null}
             <div
               className="ds-composer-trailing flex min-w-0 items-center justify-end"
-              data-stretch={stretchModelPicker || dictation.status === 'recording' || undefined}
+              data-stretch={stretchModelPicker || voiceActivity || undefined}
             >
-              {dictation.status === 'recording' ? (
-                <>
-                  <VoiceRecordingStrip
-                    getLevel={dictation.getLevel}
-                    startedAtMs={dictation.startedAtMs}
+              {voiceActivity ? (
+                <div className="dsh-composer-voice-activity" role="group" aria-label={t('composerVoiceStart')}>
+                  <button type="button" className="dsh-composer-voice-control" onClick={dictation.cancel}
+                    aria-label={t('composerVoiceCancel')} title={t('composerVoiceCancel')}><X aria-hidden="true" /></button>
+                  {dictation.status === 'recording' ? <>
+                    <VoiceRecordingStrip getLevel={dictation.getLevel} startedAtMs={dictation.startedAtMs} />
+                    <button type="button" className="dsh-composer-voice-control" onClick={() => dictation.stop('insert')}
+                      aria-label={t('composerVoiceStop')} title={t('composerVoiceStop')}><Square className="h-3 w-3 fill-current" /></button>
+                  </> : <span className="dsh-composer-voice-pending" role="status"><Loader2 className="h-4 w-4 animate-spin" />{t('composerVoiceTranscribing')}</span>}
+                </div>
+              ) : <>
+                {hideModelPicker ? null : (
+                  <FloatingComposerModelPicker
+                    key={composerOwnerKey}
+                    open={composerPicker === 'model'}
+                    onOpenChange={open => setComposerPicker(open ? 'model' : null)}
+                    compact={compact}
+                    mode={modelPickerMode}
+                    composerModel={composerModel}
+                    composerProviderId={composerProviderId}
+                    composerPickList={composerPickList}
+                    composerModelGroups={composerModelGroups}
+                    composerReasoningEffort={composerReasoningEffort}
+                    canChangeModel={canChangeModel}
+                    stretch={stretchModelPicker}
+                    onComposerModelChange={(model, providerId) => { if (composerOwnerRevision === composerOwnerRevisionRef.current) onComposerModelChange(model, providerId) }}
+                    onComposerReasoningEffortChange={onComposerReasoningEffortChange ? effort => { if (composerOwnerRevision === composerOwnerRevisionRef.current) onComposerReasoningEffortChange(effort) } : undefined}
+                    onConfigureProviders={onConfigureProviders ? () => { if (composerOwnerRevision === composerOwnerRevisionRef.current) onConfigureProviders() } : undefined}
+                    onReloadComposerModels={onReloadComposerModels ? () => composerOwnerRevision === composerOwnerRevisionRef.current ? onReloadComposerModels() : Promise.resolve() : undefined}
                   />
-                  <button
-                    type="button"
-                    onClick={() => dictation.stop('insert')}
-                    className="ds-no-drag flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-ds-border bg-ds-card text-ds-ink shadow-sm transition hover:bg-ds-hover"
-                    aria-label={t('composerVoiceStop')}
-                    title={t('composerVoiceStop')}
-                  >
-                    <Square className="h-3 w-3 fill-current" strokeWidth={2.4} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => dictation.stop('send')}
-                    className="ds-no-drag flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-[0_10px_22px_rgba(20,47,95,0.22)] transition bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
-                    aria-label={t('composerVoiceSend')}
-                    title={t('composerVoiceSend')}
-                  >
-                    <Send className="h-4 w-4" strokeWidth={2.2} />
-                  </button>
-                </>
-              ) : (
-              <>
-              {hideModelPicker ? null : (
-                <FloatingComposerModelPicker
-                  compact={compact}
-                  mode={modelPickerMode}
-                  composerModel={composerModel}
-                  composerProviderId={composerProviderId}
-                  composerPickList={composerPickList}
-                  composerModelGroups={composerModelGroups}
-                  composerReasoningEffort={composerReasoningEffort}
-                  canChangeModel={canChangeModel}
-                  stretch={stretchModelPicker}
-                  onComposerModelChange={onComposerModelChange}
-                  onComposerReasoningEffortChange={onComposerReasoningEffortChange}
-                  onConfigureProviders={onConfigureProviders}
-                />
-              )}
-              {showVoiceDictation ? (
-                <button
-                  type="button"
-                  disabled={dictation.status === 'transcribing' || !canEditComposer}
-                  onClick={dictation.toggle}
-                  className="ds-no-drag flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-60"
-                  aria-label={
-                    dictation.status === 'transcribing'
-                      ? t('composerVoiceTranscribing')
-                      : t('composerVoiceStart')
-                  }
-                  title={
-                    dictation.status === 'transcribing'
-                      ? t('composerVoiceTranscribing')
-                      : t('composerVoiceStart')
-                  }
-                >
-                  {dictation.status === 'transcribing' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.2} />
-                  ) : (
-                    <Mic className="h-4 w-4" strokeWidth={2} />
-                  )}
-                </button>
-              ) : null}
-              {busyCanSendFollowup ? (
-                <button type="button" onClick={() => onInterrupt()} className="ds-composer-secondary-stop ds-no-drag"
-                  aria-label={t('interrupt')} title={t('interrupt')}>
-                  <ComposerPrimaryStopIcon mainChat={mainChatComposer} className="ds-composer-primary-action-icon" />
-                </button>
-              ) : null}
+                )}
+                {showVoiceDictation ? <button type="button" disabled={!canEditComposer} onClick={dictation.toggle}
+                  className="ds-composer-utility-button ds-no-drag flex shrink-0 items-center justify-center rounded-full text-ds-muted hover:bg-ds-hover hover:text-ds-ink disabled:opacity-60"
+                  aria-label={t('composerVoiceStart')} title={t('composerVoiceStart')}><Mic className="h-4 w-4" strokeWidth={2} /></button> : null}
+              </>}
               <button
                 type="button"
                 data-analytix-chat-token-scope={mainChatComposer ? '' : undefined}
@@ -2758,14 +2759,12 @@ export function InputBar({
               >
                 {primaryActionLoading ? (
                   <Loader2 className="ds-composer-primary-action-icon animate-spin" strokeWidth={2.2} />
-                ) : busy && !busyCanSendFollowup ? (
+                ) : primaryActionIsStop ? (
                   <ComposerPrimaryStopIcon mainChat={mainChatComposer} className="ds-composer-primary-action-icon" />
                 ) : (
                   <ComposerPrimarySendIcon mainChat={mainChatComposer} className="ds-composer-primary-action-icon" />
                 )}
               </button>
-              </>
-              )}
             </div>
           </div>
         </div>
@@ -2782,7 +2781,7 @@ export function InputBar({
                     ref={capacityPanel.triggerRef}
                     onClick={() => capacityPanel.setOpen(!contextCapacityOpen)}
                     className={`${dockCss.capacityTrigger} ds-composer-context ds-no-drag`}
-                    aria-label={t('contextCapacityChipAria', { percent: formatPercent(contextCapacity.usedRatio) })}
+                    aria-label={t('contextCapacityChipAria')}
                     aria-haspopup="dialog"
                     aria-expanded={contextCapacityOpen}
                     aria-controls={contextCapacityOpen ? capacityPanel.id : undefined}
@@ -2803,22 +2802,8 @@ export function InputBar({
                         stroke="var(--dsw-alias-border-l3)"
                         strokeWidth={CONTEXT_CAPACITY_RING_STROKE}
                       />
-                      <circle
-                        cx={CONTEXT_CAPACITY_RING_SIZE / 2}
-                        cy={CONTEXT_CAPACITY_RING_SIZE / 2}
-                        r={CONTEXT_CAPACITY_RING_RADIUS}
-                        fill="none"
-                        stroke="var(--dsw-alias-label-tertiary)"
-                        strokeWidth={CONTEXT_CAPACITY_RING_STROKE}
-                        strokeLinecap="round"
-                        strokeDasharray={CONTEXT_CAPACITY_RING_CIRCUMFERENCE}
-                        strokeDashoffset={
-                          CONTEXT_CAPACITY_RING_CIRCUMFERENCE *
-                          (1 - Math.min(1, Math.max(0, contextCapacity.usedRatio)))
-                        }
-                      />
                     </svg>
-                    <span>{formatPercent(contextCapacity.usedRatio)}</span>
+                    <span>{t('contextCapacityChipLabel')}</span>
                   </button>
                   {contextCapacityOpen ? createPortal(
                     <div id={capacityPanel.id} ref={capacityPanel.panelRef}

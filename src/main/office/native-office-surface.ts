@@ -1,4 +1,4 @@
-import { app, MessageChannelMain, session, WebContentsView, type BrowserWindow, type MessagePortMain, type Rectangle, type Session } from 'electron'
+import { app, MessageChannelMain, session, WebContentsView, type BrowserWindow, type Input, type MessagePortMain, type Rectangle, type Session } from 'electron'
 import { logNativeOfficeFailure, type NativeOfficeDiagnosticErrorCode, type NativeOfficeDiagnosticStage } from '../logger'
 import type { NativeOfficeActionMenu, NativeOfficeAppearance, NativeOfficeFormatting, NativeOfficeFormatChoice } from '../../shared/native-office'
 import { nativeWorkspaceCommandFromInput } from '../../shared/native-office'
@@ -44,6 +44,18 @@ export class NativeOfficeSurface {
   private selectionFormatting?: Pick<NativeOfficeFormatting,'rangeLease'|'formatState'>
   private pointerSelection?: Record<string,unknown>
   private selectionManual?: OfficeState['manual']
+  private menuControlDown = false
+  private menuMouseButton?: 'left' | 'right'
+  private menuInputContents?: BrowserWindow['webContents']
+  private canRequestMenu(): boolean {
+    return !this.options.protectedPresent && !this.destroyed && this.ready && this.visible && this.attached &&
+      !!this.current && !this.pending && !this.options.owner.isDestroyed()
+  }
+  private readonly observeMenuInput = (_event: unknown, input: Input): void => {
+    if (input.type === 'keyDown' || input.type === 'keyUp') this.menuControlDown = !this.destroyed && this.ready && this.visible &&
+      this.attached && !this.options.owner.isDestroyed() && input.control === true
+  }
+  private readonly clearMenuInput = (): void => { this.menuControlDown = false; this.menuMouseButton = undefined }
   private acceptPointerSelection(selection:Record<string,unknown>): void {
     const token = typeof selection.token === 'string' ? selection.token : undefined
     const sample = selection.kind === 'text' && isOfficeRangeLease(selection.rangeLease) && isOfficeFormatState(selection.formatState) &&
@@ -177,15 +189,15 @@ export class NativeOfficeSurface {
     if (previous) await contents.removeInsertedCSS(previous)
   }
 
-  hide(): void { this.visible = false; this.dismissPointerActions(); this.visibilityEpoch++; if (!this.destroyed) this.view?.setVisible(false) }
+  hide(): void { this.visible = false; this.clearMenuInput(); this.dismissPointerActions(); this.visibilityEpoch++; if (!this.destroyed) this.view?.setVisible(false) }
 
   async request(input: OfficeRequestInput): Promise<OfficeResult> {
     if (!officeRecord(input) || Object.hasOwn(input, 'channel')) throw failure('office-invalid-request')
     const request = { ...input, channel: this.channel }
     if (!isOfficeRequest(request)) throw failure('office-invalid-request')
     if (this.options.protectedPresent && !['open','local-view','close'].includes(request.command)) throw failure('office-invalid-request')
-    if (!this.editing && !['local-view','open','edit','manual-edit','captureSelection','validateSelection','close'].includes(request.command)) throw failure('office-invalid-request')
-    if (!['captureSelection','validateSelection'].includes(request.command) && !(request.command === 'local-view' && ['read','play-read'].includes(request.action ?? ''))) this.dismissPointerActions()
+    if (!this.editing && !['local-view','open','edit','manual-edit','captureSelection','captureCells','validateSelection','close'].includes(request.command)) throw failure('office-invalid-request')
+    if (!['captureSelection','captureCells','validateSelection'].includes(request.command) && !(request.command === 'local-view' && ['read','play-read'].includes(request.action ?? ''))) this.dismissPointerActions()
     // Snapshot caller-owned bytes before any await or structured-clone dispatch.
     if (request.bytes) request.bytes = new Uint8Array(request.bytes)
     await this.start()
@@ -246,14 +258,39 @@ export class NativeOfficeSurface {
       const contents = this.view.webContents
       if (this.options.protectedPresent) contents.setIgnoreMenuShortcuts(true)
       const requestMenu = () => {
-        if (this.options.protectedPresent) return
+        if (!this.canRequestMenu()) return
         this.dismissPointerActions()
-        if (!this.attached || !this.current || this.options.owner.isDestroyed()) return
         this.options.owner.webContents.send('office:menu-requested', {
-          objectId:this.current.documentId, revision:this.current.version, expectedChangeSequence:this.current.changeSequence
+          objectId:this.current!.documentId, revision:this.current!.version, expectedChangeSequence:this.current!.changeSequence
         })
       }
+      // Electron 41's mouse converter omits modifiers. Observe the two owned
+      // keyboard streams so macOS Control-click also works across internal focus.
+      const ownerContents = this.options.owner.webContents
+      ownerContents.on('before-input-event', this.observeMenuInput)
+      this.options.owner.on('blur', this.clearMenuInput)
+      this.menuInputContents = ownerContents
+      contents.on('before-mouse-event', (event, mouse) => {
+        const contextButton = mouse.button === 'right' || process.platform === 'darwin' && mouse.button === 'left' &&
+          (this.menuControlDown || mouse.modifiers?.some(modifier => modifier === 'control' || modifier === 'ctrl'))
+        if (mouse.type === 'contextMenu') { event.preventDefault(); return }
+        if (mouse.type === 'mouseUp') {
+          if (contextButton || mouse.button === this.menuMouseButton) {
+            event.preventDefault()
+            if (mouse.button === this.menuMouseButton) this.menuMouseButton = undefined
+          }
+          return
+        }
+        if (mouse.type !== 'mouseDown') return
+        if (!contextButton) { this.menuMouseButton = undefined; return }
+        // Keep these events out of Qt, including a left release after Control
+        // is released first. Only the press emits; subsequent context events do not.
+        event.preventDefault()
+        this.menuMouseButton = mouse.button as 'left' | 'right'
+        requestMenu()
+      })
       contents.on('before-input-event', (event, input) => {
+        this.observeMenuInput(event, input)
         if (this.options.protectedPresent && (input.control || input.meta) && ['c','x'].includes(input.key.toLowerCase())) { event.preventDefault(); return }
         if (input.type !== 'keyDown' || input.isAutoRepeat || !this.current) return
         if (!input.isComposing && !input.control && !input.meta && !input.alt &&
@@ -271,7 +308,7 @@ export class NativeOfficeSurface {
       contents.on('will-frame-navigate', event => event.preventDefault())
       contents.on('will-redirect', event => event.preventDefault())
       contents.on('will-attach-webview', event => event.preventDefault())
-      contents.on('context-menu', event => { event.preventDefault(); requestMenu() })
+      contents.on('context-menu', event => event.preventDefault())
       contents.on('will-prevent-unload', event => event.preventDefault())
       contents.on('render-process-gone', () => this.fail('office-engine-closed-unknown'))
       contents.on('destroyed', () => { if (!this.destroyed) this.fail('office-engine-closed-unknown') })
@@ -379,8 +416,9 @@ export class NativeOfficeSurface {
     if (value.type === 'view' && value.view && ((!this.editing && value.view.modified) || !value.view.readOnly && (!this.nativeWritable || this.current.kind !== 'docx' || !!this.options.protectedPresent) ||
       (this.current.kind === 'pptx' ? value.view.page === null : value.view.page !== null))) { this.fail('office-protocol-invalid'); return }
     if (value.selection && value.selection.changeSequence !== this.current.changeSequence) return
+    if (value.type === 'cell-edit-requested' && (this.current.kind !== 'xlsx' || this.current.dirty || this.options.protectedPresent)) return
     if (value.type === 'view') this.acceptPointerView(value.view)
-    else if (value.type === 'selection' && value.selection) this.acceptPointerSelection(value.selection)
+    else if (['selection','cell-edit-requested'].includes(value.type) && value.selection) this.acceptPointerSelection(value.selection)
     else if (value.type !== 'save-requested') this.dismissPointerActions()
     this.emit(value)
   }
@@ -397,8 +435,16 @@ export class NativeOfficeSurface {
   destroy(): void { this.dispose('office-surface-destroyed') }
   private dispose(code: string): void {
     if (this.destroyed) return
-    this.visible = false; this.dismissPointerActions(); this.selectionToken = undefined; this.selectionFormatting = undefined; this.pointerSelection = undefined; this.selectionManual = undefined
     this.destroyed = true; this.ready = false; this.terminalCode = code
+    this.visible = false; this.dismissPointerActions(); this.selectionToken = undefined; this.selectionFormatting = undefined; this.pointerSelection = undefined; this.selectionManual = undefined
+    this.clearMenuInput()
+    // BrowserWindow.webContents is unavailable after its closed event. Detach
+    // from the same emitter captured when the observer was registered.
+    const ownerContents = this.menuInputContents; this.menuInputContents = undefined
+    if (ownerContents) {
+      ownerContents.removeListener('before-input-event', this.observeMenuInput)
+      this.options.owner.removeListener('blur', this.clearMenuInput)
+    }
     this.options.owner.removeListener('closed', this.ownerClosed)
     if (this.readyTimer) clearTimeout(this.readyTimer)
     this.readyReject?.(failure(code)); this.readyResolve = this.readyReject = undefined

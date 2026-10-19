@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import type { NativeOfficeSelection, NativeOfficeView } from '@shared/native-office'
-import { isNativeSelectionEditable, nativeActionReferencesCurrent, nativeOfficeDraftReferencesCurrent, nativeOfficeSavedSelection, nativeReferencesPrompt, validateOfficeReferences, useNativeReferenceStore, type ImageRegionNativeReference, type NativeReference, type OfficeNativeReference } from './native-reference-store'
+import { isNativeSelectionEditable, nativeActionReferencesCurrent, nativeOfficeDraftReferencesCurrent, nativeOfficeSavedSelection, nativeReferencesPrompt, nativeSelectionLabel, nativeSelectionText, validateOfficeReferences, useNativeReferenceStore, type ImageRegionNativeReference, type NativeReference, type OfficeNativeReference } from './native-reference-store'
 
 const view: NativeOfficeView = { objectId: 'a'.repeat(64), revision: 'b'.repeat(64), path: '/synthetic/report.docx', kind: 'docx', status: 'ready', dirty: false, editing: true, changeSequence: 2 }
 const selection: NativeOfficeSelection = { kind: 'text', documentId: view.objectId, version: view.revision, changeSequence: 2, token: 'selection-token', scope: 'session-text-range-at-version-and-change-sequence', text: 'Synthetic text', capture: { capturedCharacters: 14, totalCharacters: 14, unit: 'utf-16', truncated: false, complete: true } }
 const reference: OfficeNativeReference = { id: 'ref', threadId: 'thread', workspace: '/synthetic', path: view.path, objectId: view.objectId, revision: view.revision, selection, label: 'report.docx · 选中文本', text: selection.text, note: '请澄清这句话' }
 
 describe('native annotation references', () => {
+  it('keeps the true whole-column or row range and partial capture in discussion references', () => {
+    const captured:NativeOfficeSelection = {...selection,kind:'cells',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',
+      ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:1048575}],
+      capture:{capturedCharacters:1,totalCharacters:2048,unit:'utf-16',truncated:true,complete:false}}
+    expect(nativeSelectionLabel({...view,path:'/synthetic/book.xlsx'},captured)).toBe('book.xlsx · Sheet1!A1:A1048576（部分捕获）')
+    expect(nativeSelectionText(captured)).toContain('[选区仅部分捕获；范围 Sheet1!A1:A1048576]')
+    const row = {...captured,ranges:[{...captured.ranges[0],endColumn:16383,endRow:0}]}
+    expect(nativeSelectionLabel({...view,path:'/synthetic/book.xlsx'},row)).toContain('Sheet1!A1:XFD1（部分捕获）')
+    expect(isNativeSelectionEditable({...view,kind:'xlsx'},captured)).toBe(false)
+  })
   it('requires a complete current controlled single text target for direct proposals', () => {
     expect(isNativeSelectionEditable(view, selection)).toBe(true)
     expect(isNativeSelectionEditable({ ...view, editing: false }, selection)).toBe(false)
@@ -22,6 +32,7 @@ describe('native annotation references', () => {
     expect(isNativeSelectionEditable(view, { ...cells, cells:[{...cells.cells![0],merged:true}] })).toBe(false)
     expect(isNativeSelectionEditable({...view,kind:'xlsx'}, {...cells,cells:[{...cells.cells![0],valueType:'number',value:1,text:'1',formula:'1'}]})).toBe(true)
     expect(isNativeSelectionEditable({...view,kind:'xlsx'}, {...cells,cells:[{...cells.cells![0],valueType:'formula',value:1,text:'1',formula:'=1'}]})).toBe(true)
+    expect(isNativeSelectionEditable({...view,kind:'xlsx',workbookEditing:{editable:false,reason:'unsupported_workbook'}},cells)).toBe(false)
     const shape = {pageIndex:0,shapeIndex:0,name:'Text',type:'text',text:'Value'}
     const shapes: NativeOfficeSelection = { ...selection, kind:'shapes',scope:'page-and-shape-index-at-version-and-change-sequence',shapes:[shape] }
     expect(isNativeSelectionEditable(view, shapes)).toBe(true)

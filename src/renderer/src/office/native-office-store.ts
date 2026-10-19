@@ -3,6 +3,7 @@ import { pluginPackageHostResponseSchema } from '../../../../packages/runtime/sr
 import type { NativeOfficeView, NativeOfficeRequest, NativeOfficeResponse } from '@shared/native-office'
 import { nativeOfficeCreateInputSchema, nativeOfficeCreationSchema, type NativeOfficeCreateInput, type NativeOfficeCreation } from '../../../../packages/runtime/src/contracts/native-office-editing'
 import type { ToolResultLocalPresentFileRequestV1 } from '../../../../packages/runtime/src/contracts/tool-result-local-display'
+import type { NativeWorkbookSelection, NativeWorkbookManualEdit } from '../../../../packages/runtime/src/contracts/native-office-editing'
 
 type NativeOfficeCreateDocumentInput = Omit<Extract<NativeOfficeRequest, {action:'create'}>, 'action' | 'operationId'>
 export type NativeOfficeCreateAttempt = {
@@ -45,6 +46,41 @@ export function nativeOfficeCreateErrorKey(error: string | undefined): string {
 }
 
 const key = (workspace: string, path: string) => JSON.stringify([workspace, path])
+/** Local input only, never a Core scope or a native mutation authority. */
+export type NativeWorkbookCellDraft = {
+  id:string; workspace:string; path:string; threadId:string; objectId:string; revision:string
+  sheetName:string; cell:NativeWorkbookSelection['cells'][number]
+  type:NativeWorkbookManualEdit['type']; value:string; changed:boolean
+  /** Renderer input intent; absent retained drafts keep their original explicit type. */
+  inputMode?:'auto' | NativeWorkbookManualEdit['type']
+  pending?:boolean; unconfirmed?:boolean; closeRequested?:boolean
+  submitted?:{edit:NativeWorkbookManualEdit;changeId?:string;saveOperationId?:string}
+}
+export const nativeWorkbookDraftKey = (workspace:string,path:string,threadId:string|null) => JSON.stringify([workspace,path,threadId])
+export const nativeWorkbookDraftUnsettled = (draft:NativeWorkbookCellDraft) => draft.changed || !!draft.pending || !!draft.unconfirmed
+export function nativeWorkbookDraftCellMatches(left:NativeWorkbookCellDraft['cell'],right:NativeWorkbookCellDraft['cell']) {
+  return (['sheet','column','row','text','formula','value','valueType','numberFormat','rowVisible','columnVisible','merged'] as const)
+    .every(field=>left[field] === right[field])
+}
+function workspaceViews(engineViews:Record<string,NativeOfficeView>,drafts:Record<string,NativeWorkbookCellDraft>) {
+  return Object.fromEntries(Object.entries(engineViews).map(([identity,view]) => [identity,
+    !view.protectedPresent && view.kind === 'xlsx' && Object.values(drafts).some(d => key(d.workspace,d.path) === identity && nativeWorkbookDraftUnsettled(d))
+      ? {...view,dirty:true} : view]))
+}
+function matchingWorkbookDraftChange(draft:NativeWorkbookCellDraft,view:NativeOfficeView) {
+  if (!draft.submitted || view.protectedPresent || draft.objectId !== view.objectId) return undefined
+  return [view.recovery?.current,view.recovery?.pending].find(change => {
+    if (!change || !('version' in change) || change.version !== 3 || change.origin !== 'manual' || change.threadId !== draft.threadId ||
+      change.baseRevision !== draft.revision || !change.workbook || draft.submitted?.changeId && draft.submitted.changeId !== change.changeId ||
+      draft.submitted?.saveOperationId && draft.submitted.saveOperationId !== change.saveOperationId) return false
+    const index=change.workbook.before.cells.findIndex(cell=>cell.sheet === draft.cell.sheet && cell.column === draft.cell.column && cell.row === draft.cell.row)
+    const before=change.workbook.before.cells[index],after=change.workbook.after.cells[index],edit=draft.submitted!.edit
+    if (!before || !after || change.workbook.before.sheetName !== draft.sheetName || !nativeWorkbookDraftCellMatches(before,draft.cell) || after.valueType !== edit.type) return false
+    // Conservative equality only; no frontend formula parsing or coercion.
+    return edit.type === 'number' ? after.value === edit.value : edit.type === 'text' ? after.text === edit.text
+      : edit.type === 'formula' ? after.formula === edit.formula : after.text === '' && after.formula === '' && after.value === 0
+  })
+}
 const presentCloses = new Map<string,number>()
 /** In-memory identities of explicit discards whose replies may be lost. No file authority. */
 export type NativeOfficeManualDiscardAttempt = {owner: string; objectId: string; threadId: string; changeId: string; baseRevision: string}
@@ -76,7 +112,14 @@ export function nativeOfficeHasUnresolvedChange(view: NativeOfficeView | null, e
 export const useNativeOfficeStore = create<{
   target: NativeOfficeTarget | null
   view: NativeOfficeView | null
+  /** Exact Host snapshots; only views below project local draft dirtiness. */
+  engineViews: Record<string, NativeOfficeView>
   views: Record<string, NativeOfficeView>
+  workbookDrafts: Record<string, NativeWorkbookCellDraft>
+  workbookDraftInputFrozen:boolean
+  workbookDraftComposing:boolean
+  workbookClosing:Record<string,true>
+  setWorkbookDraft:(key:string,draft:NativeWorkbookCellDraft|null,expectedId?:string) => void
   error: string | null
   receiveSequence: number
   proposalInFlight: boolean
@@ -93,8 +136,20 @@ export const useNativeOfficeStore = create<{
   receive: (view: NativeOfficeView | null, error?: string | null) => void
   close: (workspace: string, path: string) => Promise<boolean>
 }>((set, get) => ({
-  target: null, view: null, views: {}, error: null, receiveSequence: 0,
+  target: null, view: null, engineViews:{}, views: {}, workbookDrafts:{}, workbookDraftInputFrozen:false,workbookDraftComposing:false,workbookClosing:{},error: null, receiveSequence: 0,
   proposalInFlight: false, annotationInputFrozen: false, manualDiscardAttempts: {}, manualOwners: {}, creationAttempt: null,
+  setWorkbookDraft:(identity,draft,expectedId) => {
+    set(state => {
+      if (expectedId && state.workbookDrafts[identity]?.id !== expectedId) return {}
+      const previous=state.workbookDrafts[identity]
+      if (draft && (state.workbookDraftInputFrozen || state.workbookClosing[key(draft.workspace,draft.path)]) &&
+        (!previous || previous.id !== draft.id || previous.type !== draft.type || previous.value !== draft.value || previous.inputMode !== draft.inputMode)) return {}
+      const workbookDrafts={...state.workbookDrafts}
+      if (draft) workbookDrafts[identity]=draft
+      else delete workbookDrafts[identity]
+      return {workbookDrafts,views:workspaceViews(state.engineViews,workbookDrafts)}
+    })
+  },
   createDocument: async input => {
     const prior = get().creationAttempt
     if (prior?.phase === 'pending') return undefined
@@ -145,7 +200,7 @@ export const useNativeOfficeStore = create<{
     if (!old?.protectedPresent && old?.workspace === workspace && old.path === path) return true
     if (typeof window !== 'undefined') await window.analytix?.office?.request({ action: 'hide' }).catch(() => undefined)
     if (!isCurrent()) return false
-    set({ target: { workspace, path }, view: get().views[key(workspace, path)] ?? null, error: null })
+    set({ target: { workspace, path }, view: get().engineViews[key(workspace, path)] ?? get().views[key(workspace,path)] ?? null, error: null })
     return true
   },
   selectPresent: async (workspace,path,selector,isCurrent = () => true) => {
@@ -167,9 +222,9 @@ export const useNativeOfficeStore = create<{
         await window.analytix.office.request({action:'hide'}).catch(() => undefined)
       }
       set(state => {
-        const views = {...state.views}
-        if (views[identity] === view) delete views[identity]
-        return {views,...(state.target === owner && owner?.protectedPresent && nativeOfficeTargetKey(owner) === identity ? {target:null,view:null,error:null} : {})}
+        const views = {...state.views},engineViews={...state.engineViews}
+        if (views[identity] === view) {delete views[identity];delete engineViews[identity]}
+        return {views,engineViews,...(state.target === owner && owner?.protectedPresent && nativeOfficeTargetKey(owner) === identity ? {target:null,view:null,error:null} : {})}
       })
       return true
     } finally { const count = presentCloses.get(identity)!-1; if (count) presentCloses.set(identity,count); else presentCloses.delete(identity) }
@@ -188,19 +243,40 @@ export const useNativeOfficeStore = create<{
     if (view && !view.protectedPresent && target && !target.protectedPresent && owner && owner.owner === nativeOfficeTargetKey(target) && (!view.manual || owner.changeId !== view.manual.changeId || owner.generation !== view.manual.generation || owner.baseRevision !== view.revision)) {
       manualOwners = {...manualOwners}; delete manualOwners[view.objectId]
     }
-    return { view, error, manualOwners, receiveSequence:state.receiveSequence + 1, ...(view && target ? { views: {...state.views, [nativeOfficeTargetKey(target)]: view} } : {}) }
+    const engineViews=view && target ? {...state.engineViews,[nativeOfficeTargetKey(target)]:view} : state.engineViews
+    const workbookDrafts={...state.workbookDrafts}
+    if (view) for (const [identity,draft] of Object.entries(workbookDrafts)) {
+      const change=matchingWorkbookDraftChange(draft,view)
+      if (!change) continue
+      if (!draft.pending && draft.unconfirmed && view.status === 'ready' && !view.dirty && !view.saving && change.status === 'committed' && change.revision === view.revision)
+        delete workbookDrafts[identity]
+      else workbookDrafts[identity]={...draft,submitted:{...draft.submitted!,changeId:change.changeId,saveOperationId:change.saveOperationId}}
+    }
+    return { view, error, manualOwners, engineViews, workbookDrafts, views:workspaceViews(engineViews,workbookDrafts), receiveSequence:state.receiveSequence + 1 }
   }),
   close: async (workspace, path) => {
-    const identity = key(workspace, path), view = get().views[identity]
-    if (view) {
-      const result = await window.analytix.office.request({action:'close', objectId:view.objectId})
-      if (!result.ok) { set({error:result.error ?? 'unavailable'}); return false }
+    const identity = key(workspace, path), view = get().engineViews[identity] ?? get().views[identity]
+    if (get().workbookClosing[identity]) return false
+    const drafts=Object.entries(get().workbookDrafts).filter(([,draft]) => key(draft.workspace,draft.path) === identity && nativeWorkbookDraftUnsettled(draft))
+    if (drafts.length) {
+      for (const [draftKey,draft] of drafts) get().setWorkbookDraft(draftKey,{...draft,closeRequested:true},draft.id)
+      return false
     }
-    set(state => {
-      const views = {...state.views}; delete views[identity]
-      const manualOwners = {...state.manualOwners}; if (view) delete manualOwners[view.objectId]
-      return {views, manualOwners, ...(!state.target?.protectedPresent && state.target?.workspace === workspace && state.target.path === path ? {target:null, view:null, error:null} : {})}
-    })
-    return true
+    set(state=>({workbookClosing:{...state.workbookClosing,[identity]:true}}))
+    try {
+      if (view) {
+        const result = await window.analytix.office.request({action:'close', objectId:view.objectId})
+        if (!result.ok) { set({error:result.error ?? 'unavailable'}); return false }
+      }
+      if (Object.values(get().workbookDrafts).some(draft=>key(draft.workspace,draft.path) === identity && nativeWorkbookDraftUnsettled(draft))) return false
+      set(state => {
+        const views = {...state.views},engineViews={...state.engineViews}; delete views[identity];delete engineViews[identity]
+        const workbookDrafts=Object.fromEntries(Object.entries(state.workbookDrafts).filter(([,draft]) => key(draft.workspace,draft.path)!==identity))
+        const manualOwners = {...state.manualOwners}; if (view) delete manualOwners[view.objectId]
+        return {views, engineViews, workbookDrafts, manualOwners, ...(!state.target?.protectedPresent && state.target?.workspace === workspace && state.target.path === path ? {target:null, view:null, error:null} : {})}
+      })
+      return true
+    } catch { set({error:'unavailable'});return false }
+    finally {set(state=>{const workbookClosing={...state.workbookClosing};delete workbookClosing[identity];return {workbookClosing}})}
   }
 }))

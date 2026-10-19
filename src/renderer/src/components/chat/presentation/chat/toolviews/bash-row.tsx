@@ -56,7 +56,12 @@ export function BashRow({ block, processing, visible, resetKey, publicVisible = 
   }, [visible, disclosure.open, capture, privateGeneration])
   const toolName = typeof block.meta?.toolName === 'string' ? block.meta.toolName : undefined
   const state = toolRowState(block), title = publicToolOperationTitle(block, t) ?? t('dshToolFamily.shell')
-  const description = describeProcessBlock(block, t), summary = description.startsWith(title + ' ') ? description.slice(title.length + 1) : description === title ? '' : description
+  // A published command remains the description after failure. Error output
+  // keeps its existing body; protected input is never promoted into this row.
+  const publicCommand = block.toolKind === 'command_execution' && typeof block.meta?.command === 'string' && block.meta.command.trim() !== ''
+  const description = describeProcessBlock(block.status === 'error' && publicCommand
+    ? { ...block, status: 'success', detail: undefined } : block, t)
+  const summary = description.startsWith(title + ' ') ? description.slice(title.length + 1) : description === title ? '' : description
   const detail = getProcessDetail(block, description)
   // Preserve the existing pure action element, including its authorization, label and handler.
   const diagnosticAction = RuntimeDiagnosticsAction({ block, t })

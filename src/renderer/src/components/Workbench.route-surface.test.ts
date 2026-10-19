@@ -240,7 +240,9 @@ describe('Workbench route surface', () => {
     expect(anchorIndex).toBeGreaterThanOrEqual(0)
     expect(composerIndex).toBeGreaterThan(anchorIndex)
     expect(workbenchSource).toContain('data-analytix-return-to-bottom-button')
-    expect(workbenchSource).toContain('bottom-[calc(100%+1.5rem)]')
+    expect(workbenchSource).toContain('bottom-[calc(100%+16px)]')
+    expect(workbenchSource).toContain('h-[34px] w-[34px]')
+    expect(workbenchSource).toContain('dsh-composer-return-to-bottom')
   })
 
   it('keeps shell navigation clear of native titlebar controls', async () => {

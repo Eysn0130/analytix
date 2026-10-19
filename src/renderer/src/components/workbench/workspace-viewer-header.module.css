@@ -1,0 +1,44 @@
+.header { display:flex;flex:none;align-items:center;gap:6px;box-sizing:border-box;height:52px;min-height:52px;min-width:0;padding:8px;border-bottom:1px solid var(--ds-border-muted);background:var(--ds-surface-card);font-size:14px;line-height:20px; }
+.identity { display:flex;flex:1;align-items:center;min-width:0;gap:6px; }
+.title,.titleButton { min-width:0;max-width:100%;height:36px;border-radius:9999px;background:var(--ds-surface-elevated);box-shadow:0 1px 3px rgb(0 0 0 / .05);font-size:14px;line-height:20px; }
+.title { display:block;overflow:hidden;padding:8px 12px;white-space:nowrap;text-overflow:ellipsis; }
+.actions { display:flex;flex:none;align-items:center;gap:6px;min-width:0; }
+.header,.actions,.actionViewport { flex-wrap:nowrap; }
+.actionViewport { display:flex;flex:0 1 auto;align-items:center;gap:6px;min-width:36px;height:36px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none; }
+.actionViewport::-webkit-scrollbar { display:none; }
+.action { display:inline-flex;flex:none;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;width:36px;min-width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--ds-text);cursor:pointer; }
+.action > svg { flex:none;width:20px;height:20px; }
+.action:hover:not(:disabled) { background:var(--ds-surface-hover); }
+.action:active:not(:disabled),.action[aria-pressed=true] { background:var(--ds-surface-subtle); }
+.action:disabled { opacity:.42;cursor:default; }
+.action:focus-visible,.menu :is(button,input,select):focus-visible { outline:2px solid var(--ax-border-focus);outline-offset:-2px; }
+.action[data-tone=commit]:not(:disabled) { background:#167447;color:white; }
+.action[data-tone=commit]:hover:not(:disabled) { background:#105d38; }
+.action[data-compact] { width:32px;min-width:32px;height:32px; }
+.action[data-compact] > svg { width:16px;height:16px; }
+.action[data-shape=pill] { border-radius:9999px; }
+.action[data-shape=pill] > svg { width:16px;height:16px; }
+.action.titleButton { width:auto;flex:0 1 auto;padding:0 8px 0 12px;border-radius:9999px;background:var(--ds-surface-elevated); }
+.titleButton > span { overflow:hidden;min-width:0;white-space:nowrap;text-overflow:ellipsis; }
+.titleButton > svg { width:16px;height:16px; }
+.menuAnchor { display:inline-flex;min-width:0;max-width:100%; }
+.menu { position:fixed;z-index:1100;display:flex;flex-direction:column;gap:2px;width:max-content;min-width:180px;max-width:min(360px,calc(100vw - 24px));padding:6px;overflow:auto;border:1px solid var(--ds-border-muted);border-radius:12px;background:var(--ds-surface-elevated);box-shadow:var(--ax-shadow-popover);font-size:14px;line-height:20px;color:var(--ds-text); }
+.menu > :is(button,label) { display:flex;align-items:center;gap:8px;min-height:36px;padding:6px 10px;border-radius:8px;text-align:left; }
+.menu > button:hover:not(:disabled) { background:var(--ds-surface-hover); }
+.menu button:disabled { opacity:.42; }
+.menu svg { flex:none;width:16px;height:16px; }
+.menu :is(input,select,textarea) { max-width:100%;background:transparent;color:inherit; }
+.status { display:grid;flex:none;place-items:center;width:20px;height:28px;color:var(--ds-text-muted); }
+.status > svg { width:16px;height:16px; }
+.status[role=alert] { color:var(--ds-danger,#b64040); }
+.srOnly { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0; }
+.header :global([data-viewer-session-tabs]) { min-width:0;overflow-x:auto; }
+.header:global(.ds-browser-workspace-toolbar) :global(.ds-browser-history-inline),
+.header:global(.ds-browser-workspace-toolbar) :global(.ds-browser-open-inline) { display:inline-flex; }
+.header:global(.ds-browser-workspace-toolbar) { overflow-x:auto;scrollbar-width:none; }
+.header:global(.ds-browser-workspace-toolbar) > .identity { flex:1 1 80px;min-width:64px; }
+@container (max-width:400px) {
+  /* The page title also labels the address field; preserve input space first. */
+  .header:global(.ds-browser-workspace-toolbar) > .status { display:none; }
+}
+@media (prefers-reduced-motion:reduce) { .action { transition:none; } }

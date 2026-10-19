@@ -128,6 +128,42 @@ const record = (value: unknown): Record<string, unknown> => value && typeof valu
   ? value as Record<string, unknown> : {}
 const list = (value: unknown): Record<string, unknown>[] => Array.isArray(value) ? value.map(record) : []
 
+const finiteReplayDiagnosticPrefix = 'ANALYTIX_FINITE_REPLAY_DIAGNOSTIC '
+const finiteReplayDiagnosticPhases = new Set([
+  'request_start', 'request_end', 'request_cancelled',
+  ...['validate_thread', 'public_preflight', 'highest_seq', 'load_events', 'terminal_groups',
+    'accepted_final_groups', 'project_public', 'response_write'].flatMap(phase => [`${phase}_start`, `${phase}_end`])
+])
+type FiniteReplayDiagnostic = { phase: string; elapsedMs: number; phaseElapsedMs: number; requestCount: number; count: number }
+type RuntimeLifecyclePhase = 'spawn_start' | 'spawn_returned' | 'ready' | 'spawn_error' | 'readiness_timeout' |
+  'sigterm_request' | 'sigkill_request' | 'expected_exit' | 'unexpected_exit' | 'close'
+type RuntimeLifecycleDiagnostic = { generation: number; phase: RuntimeLifecyclePhase; elapsedMs: number;
+  exitCode?: number; signalCode?: number }
+function parseFiniteReplayDiagnostic(line: string): FiniteReplayDiagnostic | undefined {
+  if (!line.startsWith(finiteReplayDiagnosticPrefix)) return
+  try {
+    const value = record(JSON.parse(line.slice(finiteReplayDiagnosticPrefix.length)))
+    const { phase, elapsedMs, phaseElapsedMs, requestCount, count } = value
+    if (Object.keys(value).length !== 5 || typeof phase !== 'string' || !finiteReplayDiagnosticPhases.has(phase) ||
+      ![elapsedMs, phaseElapsedMs, requestCount, count].every(number => Number.isSafeInteger(number) && (number as number) >= 0)) return
+    return { phase, elapsedMs: elapsedMs as number, phaseElapsedMs: phaseElapsedMs as number,
+      requestCount: requestCount as number, count: count as number }
+  } catch { /* Discard unknown stderr; never retain or print its text. */ }
+}
+
+describe('finite replay diagnostic closure', () => {
+  const measurement = { phase: 'load_events_end', elapsedMs: 30, phaseElapsedMs: 20, requestCount: 1, count: 12 }
+  it('retains only the fixed phase and numeric measurements', () => {
+    expect(parseFiniteReplayDiagnostic(finiteReplayDiagnosticPrefix + JSON.stringify(measurement))).toEqual(measurement)
+  })
+  it('discards unknown phases, fields and nonnumeric measurements', () => {
+    for (const value of [{ ...measurement, phase: 'private-path-canary' }, { ...measurement, raw: 'private-content-canary' },
+      { ...measurement, count: 'private-content-canary' }, { ...measurement, elapsedMs: -1 }, { ...measurement, count: 0.5 }]) {
+      expect(parseFiniteReplayDiagnostic(finiteReplayDiagnosticPrefix + JSON.stringify(value))).toBeUndefined()
+    }
+  })
+})
+
 describe('closed CompactResponse production compatibility', () => {
   const legacy = { threadId: 'thread-contract', replacedTokens: 12, summary: 'Prior conversation compacted.',
     pinnedConstraints: ['user: preserve recent turns'], sourceDigest: 'a'.repeat(64),
@@ -216,6 +252,9 @@ it('restores publicly authorized ordinary history after production compaction an
   const receipt: Record<string, unknown> = { sourceInputSha256,
     buildTags: ['analytix_prod'], runtimePids: [], runtimeUrls: [] }
   let acceptancePhase = 'setup', diagnosticCount = 0, workerCrashed = false, acceptanceCompleted = false
+  let runtimeGeneration = 0, replayDiagnosticDroppedCount = 0
+  const runtimeLifecycle: RuntimeLifecycleDiagnostic[] = []
+  const replayPhaseDiagnostics: Array<FiniteReplayDiagnostic & { generation: number; acceptancePhase: string }> = []
   let waitForSseWorkers: (() => Promise<void>) | undefined
   const goDir = `${proc.cwd()}/packages/runtime-go`
   const token = 'isolated-compaction-history-runtime'
@@ -367,7 +406,7 @@ it('restores publicly authorized ordinary history after production compaction an
             compilerCommands.add(line); compilerActions++; lastProgressAt = Date.now()
             receipt.buildCompilerActions = compilerActions
             receipt.buildLastCompilerProgressAt = new Date(lastProgressAt).toISOString()
-            console.info('COMPACTION_HISTORY_BUILD_PROGRESS', JSON.stringify({ pid: build.pid,
+            console.info('COMPACTION_HISTORY_BUILD_PROGRESS', JSON.stringify({ phase: 'compile_progress',
               compilerActions, elapsedMs: lastProgressAt - buildStartedAt }))
           }
           end = progressBuffer.indexOf('\n')
@@ -409,7 +448,11 @@ it('restores publicly authorized ordinary history after production compaction an
           receipt.buildStdoutSha256 = createHash('sha256').update(await fs.readFile(stdoutLog)).digest('hex')
           receipt.buildStderrSha256 = createHash('sha256').update(await fs.readFile(stderrLog)).digest('hex')
         } else receipt.buildOutputClosure = 'unclosed; no final log hash claimed'
-        console.info('COMPACTION_HISTORY_BUILD_RECEIPT', JSON.stringify(receipt))
+        console.info('COMPACTION_HISTORY_BUILD_RECEIPT', JSON.stringify({ phase: 'build',
+          elapsedMs: receipt.buildDurationMs, compilerActions, closedCount: Number(buildClosed),
+          cancellationCount: Number(Boolean(cancelReason)),
+          exitCode: typeof receipt.buildExitCode === 'number' ? receipt.buildExitCode : -1,
+          closeCode: typeof receipt.buildCloseCode === 'number' ? receipt.buildCloseCode : -1 }))
       }
       if (logError) throw new Error('Fixture Go build output could not be retained.')
       if (cancelReason) throw new Error(`Fixture Go build cancelled: ${cancelReason}.`)
@@ -427,33 +470,76 @@ it('restores publicly authorized ordinary history after production compaction an
     }
     acceptanceStartedAt = Date.now()
     receipt.acceptanceStartedAt = new Date(acceptanceStartedAt).toISOString()
-    console.info('COMPACTION_HISTORY_BINARY_RECEIPT', JSON.stringify(receipt))
+    console.info('COMPACTION_HISTORY_BINARY_RECEIPT', JSON.stringify({ phase: 'binary_ready',
+      reusedBuildCount: Number(Boolean(receipt.reusedQualifiedBuild)) }))
     const startRuntime = async (): Promise<string> => {
+      const generation = ++runtimeGeneration, generationStartedAt = Date.now()
+      const lifecycle = (phase: RuntimeLifecyclePhase, code?: unknown, signal?: unknown) => {
+        try {
+          const diagnostic = { generation, phase, elapsedMs: Date.now() - generationStartedAt,
+            ...(phase === 'expected_exit' || phase === 'unexpected_exit' || phase === 'close' ? {
+              exitCode: typeof code === 'number' && Number.isSafeInteger(code) ? code : -1,
+              // Closed numeric categories: none, SIGTERM, SIGKILL, other.
+              signalCode: !signal ? 0 : signal === 'SIGTERM' ? 1 : signal === 'SIGKILL' ? 2 : 3
+            } : {}) }
+          runtimeLifecycle.push(diagnostic)
+          console.info('COMPACTION_HISTORY_RUNTIME_LIFECYCLE', JSON.stringify(diagnostic))
+        } catch { /* Optional observation cannot block readiness, kill or close. */ }
+      }
+      lifecycle('spawn_start')
       const child = spawn(executable, ['--addr', '127.0.0.1:0', '--data-dir', dataDir, '--durable-root', dataDir,
         '--provider-id', 'deepseek', '--model', 'deepseek-chat', '--endpoint-format', 'chat_completions'],
-      { cwd: goDir, env: goTestEnv({ ANALYTIX_RUNTIME_TOKEN: token }), stdio: ['ignore', 'pipe', 'pipe'] })
+      { cwd: goDir, env: goTestEnv({ ANALYTIX_RUNTIME_TOKEN: token, ANALYTIX_FINITE_REPLAY_DIAGNOSTICS: '1' }),
+        stdio: ['ignore', 'pipe', 'pipe'] })
+      lifecycle('spawn_returned')
       ;(receipt.runtimePids as Array<number | undefined>).push(child.pid)
-      let closed = false
+      let closed = false, expectedStop = false
       const close = new Promise<void>(resolve => {
-        child.once('close', () => { closed = true; resolve() })
+        child.once('close', (code, signal) => { lifecycle('close', code, signal); closed = true; resolve() })
       })
       stopRuntime = async () => {
         if (closed) return
+        expectedStop = true
+        lifecycle('sigterm_request')
         child.kill('SIGTERM')
-        const killTimer = setTimeout(() => child.kill('SIGKILL'), 2000)
+        const killTimer = setTimeout(() => { lifecycle('sigkill_request'); child.kill('SIGKILL') }, 2000)
         await close; clearTimeout(killTimer)
       }
       return new Promise<string>((resolve, reject) => {
         let output = '', ready = false
-        const timer = setTimeout(() => reject(new Error('Fixture runtime readiness timed out.')), 30_000)
-        child.stderr.on('data', () => undefined)
-        child.once('error', () => { clearTimeout(timer); reject(new Error('Fixture runtime could not start.')) })
-        child.once('exit', () => { clearTimeout(timer); if (!ready) reject(new Error('Fixture runtime exited before readiness.')) })
+        const timer = setTimeout(() => { lifecycle('readiness_timeout'); reject(new Error('Fixture runtime readiness timed out.')) }, 30_000)
+        let stderrLine = '', discardStderrLine = false
+        child.stderr.on('data', chunk => {
+          const pieces = String(chunk).split('\n')
+          pieces.forEach((piece, index) => {
+            if (!discardStderrLine) stderrLine += piece
+            if (stderrLine.length > 1024) { stderrLine = ''; discardStderrLine = true }
+            if (index === pieces.length - 1) return
+            if (!discardStderrLine) {
+              const diagnostic = parseFiniteReplayDiagnostic(stderrLine)
+              if (diagnostic) {
+                try {
+                  if (replayPhaseDiagnostics.length < 512) {
+                    const observed = { generation, acceptancePhase, ...diagnostic }
+                    replayPhaseDiagnostics.push(observed)
+                    console.info('COMPACTION_HISTORY_REPLAY_PHASE', JSON.stringify(observed))
+                  } else replayDiagnosticDroppedCount++
+                } catch { /* Optional observation cannot escape the stderr listener. */ }
+              }
+            }
+            stderrLine = ''; discardStderrLine = false
+          })
+        })
+        child.once('error', () => { lifecycle('spawn_error'); clearTimeout(timer); reject(new Error('Fixture runtime could not start.')) })
+        child.once('exit', (code, signal) => {
+          lifecycle(expectedStop ? 'expected_exit' : 'unexpected_exit', code, signal)
+          clearTimeout(timer); if (!ready) reject(new Error('Fixture runtime exited before readiness.'))
+        })
         child.stdout.on('data', chunk => {
           output += String(chunk)
           const line = output.split('\n').find(value => value.startsWith('ANALYTIX_RUNTIME_SERVER_READY '))
           if (!line || ready) return
-          ready = true; clearTimeout(timer)
+          ready = true; lifecycle('ready'); clearTimeout(timer)
           const url = String(record(JSON.parse(line.slice('ANALYTIX_RUNTIME_SERVER_READY '.length))).url)
           ;(receipt.runtimeUrls as string[]).push(url)
           resolve(url)
@@ -670,6 +756,7 @@ it('restores publicly authorized ordinary history after production compaction an
     if (originalBridge) Object.defineProperty(window, 'analytix', originalBridge)
     else Reflect.deleteProperty(window, 'analytix')
     receipt.sseDiagnosticCount = diagnosticCount
+    receipt.workerCrashed = workerCrashed
     if (acceptanceCompleted) receipt.acceptancePassed = !workerCrashed
     if (stopRuntime) await stopRuntime()
     await new Promise<void>(resolve => providerServer.close(resolve))
@@ -683,11 +770,25 @@ it('restores publicly authorized ordinary history after production compaction an
     }
     receipt.ownedBuildProcessClosed = buildClosed; receipt.ownedFixtureRootsRemoved = buildClosed
     receipt.qualifiedBinaryRetained = Boolean(receipt.binarySha256 && receipt.binaryInputsReceiptSha256)
+    receipt.runtimeLifecycle = runtimeLifecycle
+    receipt.replayPhaseDiagnostics = replayPhaseDiagnostics
+    receipt.replayDiagnosticDroppedCount = replayDiagnosticDroppedCount
     if (validationReceiptPath) {
       await fs.writeFile(validationReceiptPath,
         JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
     }
-    console.info('COMPACTION_HISTORY_CLEANUP_RECEIPT', JSON.stringify(receipt))
+    console.info('COMPACTION_HISTORY_CLEANUP_RECEIPT', JSON.stringify({ phase: 'cleanup',
+      acceptancePhaseBeforeCleanup: receipt.acceptancePhaseBeforeCleanup,
+      acceptanceDurationMs: receipt.acceptanceDurationMs,
+      completedFixtureTurns: receipt.completedFixtureTurns, fixtureTurnsDurationMs: receipt.fixtureTurnsDurationMs,
+      workerCrashed, sseDiagnosticCount: diagnosticCount, sseWorkersSettledCount: Number(receipt.sseWorkersSettled === true),
+      acceptanceCompletedCount: Number(acceptanceCompleted), acceptancePassedCount: Number(receipt.acceptancePassed === true),
+      runtimeGenerationCount: runtimeGeneration, runtimeLifecycleCount: runtimeLifecycle.length,
+      replayPhaseDiagnosticCount: replayPhaseDiagnostics.length, replayDiagnosticDroppedCount,
+      providerRequestCount: providerRequests.length, ownedRuntimeProcessesExitedCount: Number(receipt.ownedRuntimeProcessesExited === true),
+      providerListenerClosedCount: Number(receipt.providerListenerClosed === true), ownedBuildProcessClosedCount: Number(buildClosed),
+      ownedFixtureRootsRemovedCount: Number(receipt.ownedFixtureRootsRemoved === true),
+      qualifiedBinaryRetainedCount: Number(receipt.qualifiedBinaryRetained === true) }))
     if (acceptanceCompleted) expect(workerCrashed, 'SSE worker crashed before cleanup completed.').toBe(false)
   }
 }, 900_000)

@@ -2,7 +2,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ToolResultLocalDisplayV1 } from '../../../../../../../../packages/runtime/src/contracts/tool-result-local-display'
+import { toolResultLocalDisplaySchemaV1, type ToolResultLocalDisplayV1 } from '../../../../../../../../packages/runtime/src/contracts/tool-result-local-display'
 import { normalizeAppSettings, type AppSettingsV1 } from '@shared/app-settings'
 import i18n from '../../../../../i18n'
 import { ToolResultInspector, type ToolResultInspectorPresentation } from './ToolResultInspector'
@@ -283,7 +283,14 @@ it('formats generic success only as literal text on the selected Result tab with
   await draw(display)
   expect(container.querySelector('[data-tool-text-output]')).toBeNull()
   await click('Result')
-  expect(container.querySelector('[data-tool-text-output]')?.textContent).toBe(body)
+  const output = container.querySelector<HTMLPreElement>('[data-tool-text-output]')!
+  expect(output.textContent).toBe(body)
+  expect(output.style.whiteSpace).toBe('pre-wrap')
+  await click('Wrap strings')
+  expect(output.style.whiteSpace).toBe('pre'); expect(output.style.wordBreak).toBe('normal')
+  expect(output.textContent).toBe(body)
+  await click('Wrap strings')
+  expect(output.style.whiteSpace).toBe('pre-wrap'); expect(output.style.wordBreak).toBe('break-word')
   expect(container.querySelector('[data-tool-text-limit]')?.textContent).toContain('32')
   expect(container.querySelectorAll('[data-json-node],img')).toHaveLength(0)
   expect(container.querySelector('[role="tabpanel"]')?.hasAttribute('data-protected-tool-readonly')).toBe(true)
@@ -291,6 +298,54 @@ it('formats generic success only as literal text on the selected Result tab with
   await click('Summary'); expect(container.querySelector('[data-tool-text-output]')).toBeNull()
   await draw({ ...display, inspect: { ...display.inspect!, outputText: undefined } }); await click('Result')
   expect(container.querySelector('[data-tool-text-output]')).toBeNull()
+})
+
+it('shows the sealed error in embedded Result without a contradictory unavailable placeholder or export action', async () => {
+  const message = 'Original failure\r\n9007199254740993 <img src=x onerror=unsafe()>'
+  const display: ToolResultLocalDisplayV1 = { schemaVersion: 1, snapshotDigest: 'b'.repeat(64), resultItemId: 'item_result_' + 'c'.repeat(64), toolName: 'read',
+    capture: { kind: 'inspect', status: 'failed', body: '', label: '', durationMs: 0, startLine: 0, endLine: 0, totalLines: 0, truncated: false },
+    inspect: { outputError: { availability: 'available', entries: [{ message, classification: 'source_exact_local' }] },
+      inputJSON: '{}', inputTruncated: false, schemaTruncated: false, callEventAt: null, resultEventAt: null, durationMs: null } }
+  expect(toolResultLocalDisplaySchemaV1.safeParse(display).success).toBe(true)
+  await draw(display, 'embedded')
+  expect(container.querySelector('[data-tool-raw-error]')).toBeNull()
+  await click('Result')
+  const error = container.querySelector<HTMLPreElement>('[data-tool-raw-error]')!
+  expect(error.textContent).toBe(message)
+  expect(error.style.whiteSpace).toBe('pre-wrap')
+  await click('Wrap strings')
+  expect(error.style.whiteSpace).toBe('pre'); expect(error.style.wordBreak).toBe('normal')
+  expect(error.textContent).toBe(message)
+  await click('Wrap strings')
+  expect(error.style.whiteSpace).toBe('pre-wrap'); expect(error.style.wordBreak).toBe('break-word')
+  expect(error.closest('[data-protected-tool-readonly]')).not.toBeNull()
+  expect(container.querySelector('[role="tabpanel"]')?.textContent).not.toContain('Unavailable')
+  expect(container.querySelectorAll('img,[data-json-node]')).toHaveLength(0)
+  expect(container.textContent).not.toContain('Copy'); expect(copy).not.toHaveBeenCalled()
+  await click('Payload'); expect(container.querySelector('[data-tool-raw-error]')).toBeNull()
+  await click('Result'); expect(container.querySelectorAll('[data-tool-raw-error]')).toHaveLength(1)
+  await draw({ ...display, inspect: { ...display.inspect!, outputError: { availability: 'unavailable', reason: 'limit' } } }, 'embedded')
+  expect(container.querySelector('[data-tool-raw-error]')).toBeNull()
+  expect(container.querySelector('[data-tool-raw-error-unavailable]')?.textContent).toBe('Local capture is incomplete')
+  expect(container.textContent).not.toContain(message)
+})
+
+it('keeps a typed Result beside its sealed error and distinguishes an actual empty result from missing data', async () => {
+  const display = snapshot()
+  if (display.capture.kind !== 'web_fetch') throw new Error('fixture requires Web')
+  display.capture.web.statusCode = 500; display.capture.web.toolIsError = true
+  delete display.capture.web.inputJSON; delete display.capture.web.schemaJSON
+  display.inspect = { outputError: { availability: 'available', entries: [{ message: 'Original fetch failure', classification: 'credential_redacted' }] },
+    inputJSON: '{}', inputTruncated: false, schemaTruncated: false, callEventAt: null, resultEventAt: null, durationMs: null }
+  expect(toolResultLocalDisplaySchemaV1.safeParse(display).success).toBe(true)
+  await draw(display, 'embedded'); await click('Result')
+  expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain('ACTUAL_RESPONSE')
+  expect(container.querySelector('[data-tool-raw-error]')?.textContent).toBe('Original fetch failure')
+  const empty = snapshot(); empty.capture.body = ''
+  await draw(empty, 'embedded')
+  expect(container.querySelector('[role="tabpanel"]')?.textContent).toBe('No visible output')
+  expect(container.querySelector('[data-tool-raw-error]')).toBeNull()
+  expect(container.querySelector('[role="tabpanel"] pre')).toBeNull()
 })
 
 it('keeps the default overlay width/resize while embedding the same content in the containing pane', async () => {

@@ -240,3 +240,148 @@ func TestArchiveIntentDurableMutationPreservesStateAndChecksBaseline(t *testing.
 		t.Fatalf("archive ignored its stale durable baseline: err=%v", err)
 	}
 }
+
+func TestApplyPatchSealsExplicitCompleteExecutionPolicy(t *testing.T) {
+	for _, version := range []struct {
+		name  string
+		value any
+		want  float64
+	}{
+		{name: "missing", want: 2},
+		{name: "v0", value: float64(0), want: 2},
+		{name: "v1", value: float64(1), want: 2},
+		{name: "v2", value: float64(2), want: 2},
+		{name: "future", value: float64(3), want: 3},
+	} {
+		for _, policy := range []struct {
+			name         string
+			approval     string
+			sandbox      string
+			wantApproval string
+			wantSandbox  string
+		}{
+			{name: "same-legacy-full", approval: "auto", sandbox: "danger-full-access", wantApproval: "auto", wantSandbox: "danger-full-access"},
+			{name: "read-only", approval: "never", sandbox: "read-only", wantApproval: "never", wantSandbox: "read-only"},
+			{name: "custom", approval: "untrusted", sandbox: "external-sandbox", wantApproval: "untrusted", wantSandbox: "external-sandbox"},
+			{name: "canonical", approval: "  suggest ", sandbox: " workspace-write  ", wantApproval: "suggest", wantSandbox: "workspace-write"},
+		} {
+			t.Run(version.name+"/"+policy.name, func(t *testing.T) {
+				thread := map[string]any{
+					"id": "thr_policy", "status": "running", "updatedAt": "before",
+					"approvalPolicy": "auto", "sandboxMode": "danger-full-access",
+					"pendingApprovalIds": []any{"approval_pending"}, "pendingUserInputIds": []any{"input_pending"},
+					"turns": []any{map[string]any{
+						"id": "turn_current", "status": "running", "approvalPolicy": "on-request", "sandboxMode": "workspace-write",
+						"items": []any{map[string]any{"id": "tool_pending", "kind": "tool_call", "status": "running"}},
+					}},
+				}
+				if version.value != nil {
+					thread["executionPolicyVersion"] = version.value
+				}
+				patch := map[string]any{"approvalPolicy": policy.approval, "sandboxMode": policy.sandbox}
+				before, beforePatch := contracts.CloneMap(thread), contracts.CloneMap(patch)
+				if err := ValidatePublicPatch(patch); err != nil {
+					t.Fatalf("explicit valid pair was rejected: %v", err)
+				}
+				next := ApplyPatch(thread, patch, "after")
+				if next["approvalPolicy"] != policy.wantApproval || next["sandboxMode"] != policy.wantSandbox || next["executionPolicyVersion"] != version.want {
+					t.Fatalf("explicit pair did not preserve its canonical selection/version: %#v", next)
+				}
+				if next["updatedAt"] != "after" || next["status"] != "running" || !reflect.DeepEqual(next["turns"], before["turns"]) ||
+					!reflect.DeepEqual(next["pendingApprovalIds"], before["pendingApprovalIds"]) || !reflect.DeepEqual(next["pendingUserInputIds"], before["pendingUserInputIds"]) {
+					t.Fatal("future default metadata changed the running turn or pending work")
+				}
+				if !reflect.DeepEqual(thread, before) || !reflect.DeepEqual(patch, beforePatch) {
+					t.Fatal("explicit policy mutation changed its input records")
+				}
+			})
+		}
+	}
+}
+
+func TestApplyPatchDoesNotSealIncompleteOrInvalidExecutionPolicy(t *testing.T) {
+	for name, patch := range map[string]map[string]any{
+		"empty":               {},
+		"title":               {"title": "loading"},
+		"approval-only":       {"approvalPolicy": "never"},
+		"sandbox-only":        {"sandboxMode": "read-only"},
+		"loading-approval":    {"approvalPolicy": "loading", "sandboxMode": "read-only"},
+		"loading-sandbox":     {"approvalPolicy": "never", "sandboxMode": "loading"},
+		"blank-approval":      {"approvalPolicy": " ", "sandboxMode": "read-only"},
+		"null-sandbox":        {"approvalPolicy": "never", "sandboxMode": nil},
+		"non-string-approval": {"approvalPolicy": true, "sandboxMode": "read-only"},
+		"client-marker-only":  {"executionPolicyVersion": float64(2)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			thread := map[string]any{"id": "thr_policy", "approvalPolicy": "auto", "sandboxMode": "danger-full-access", "updatedAt": "before"}
+			before := contracts.CloneMap(thread)
+			next := ApplyPatch(thread, patch, "after")
+			if _, sealed := next["executionPolicyVersion"]; sealed {
+				t.Fatalf("incomplete/invalid metadata manufactured a policy receipt: %#v", next)
+			}
+			for _, field := range []string{"approvalPolicy", "sandboxMode"} {
+				if value, present := patch[field]; present && !reflect.DeepEqual(next[field], value) {
+					t.Fatalf("direct malformed leaf call substituted a policy default for %s: %#v", field, next[field])
+				}
+			}
+			if !reflect.DeepEqual(thread, before) {
+				t.Fatal("incomplete/invalid direct leaf call changed its input")
+			}
+		})
+	}
+}
+
+func TestValidatePublicPatchRejectsEveryPresentInvalidPolicyField(t *testing.T) {
+	invalid := []any{nil, true, float64(1), []any{}, map[string]any{}, "", "  ", "loading", "unknown"}
+	for _, field := range []string{"approvalPolicy", "sandboxMode"} {
+		for index, value := range invalid {
+			for _, complete := range []bool{false, true} {
+				patch := map[string]any{}
+				if complete {
+					patch["approvalPolicy"], patch["sandboxMode"] = "never", "read-only"
+				}
+				patch[field] = value
+				if err := ValidatePublicPatch(patch); !errors.Is(err, ErrInvalidThreadExecutionPolicy) {
+					t.Fatalf("invalid %s[%d] (complete=%v) escaped the public policy boundary: %v", field, index, complete, err)
+				}
+			}
+		}
+	}
+	for _, patch := range []map[string]any{
+		{"approvalPolicy": "never"}, {"sandboxMode": "read-only"},
+		{"approvalPolicy": " always ", "sandboxMode": " external-sandbox "}, {"title": "loading"},
+	} {
+		if err := ValidatePublicPatch(patch); err != nil {
+			t.Fatalf("valid partial/custom or unrelated metadata was rejected: %v", err)
+		}
+	}
+	for _, marker := range []any{nil, float64(0), float64(1), float64(2), float64(3), "2"} {
+		patch := map[string]any{"executionPolicyVersion": marker, "approvalPolicy": "never", "sandboxMode": "read-only"}
+		if err := ValidatePublicPatch(patch); !errors.Is(err, ErrExecutionPolicyVersionRuntimeOwned) {
+			t.Fatalf("complete pair allowed a client-owned policy marker: %v", err)
+		}
+	}
+}
+
+func TestApplyPatchPreservesFuturePolicyVersionAcrossJSONNumericInputs(t *testing.T) {
+	for name, version := range map[string]any{"int": 3, "int64": int64(3), "json-number": json.Number("3"), "float": float64(3)} {
+		t.Run(name, func(t *testing.T) {
+			thread := map[string]any{"id": "thr_future", "executionPolicyVersion": version, "approvalPolicy": "auto", "sandboxMode": "danger-full-access"}
+			before, err := json.Marshal(thread)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next := ApplyPatch(thread, map[string]any{"approvalPolicy": " untrusted ", "sandboxMode": " read-only "}, "after")
+			if next["executionPolicyVersion"] != float64(3) || next["approvalPolicy"] != "untrusted" || next["sandboxMode"] != "read-only" {
+				t.Fatalf("future numeric policy version was downgraded or canonical pair was lost: %#v", next)
+			}
+			after, err := json.Marshal(thread)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("future version input record changed")
+			}
+		})
+	}
+}

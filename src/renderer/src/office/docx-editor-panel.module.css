@@ -1,13 +1,17 @@
 .panel {display:flex;flex-direction:column;min-height:0;height:100%;background:var(--ds-surface-card);color:var(--ds-text)}
 .panel[hidden] {display:none}
-.toolbar {display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--ds-border-muted);font-size:12px}
-.toolbar button,.review button,.formats button,.formats select {border:1px solid var(--ds-border-muted);border-radius:6px;padding:4px 8px;background:var(--ds-surface-card)}
-.toolbar button:disabled,.review button:disabled {opacity:.45}
-.title {min-width:0;overflow:hidden;text-overflow:ellipsis;margin-right:auto}
+.review button,.formats button,.formats select {border:1px solid var(--ds-border-muted);border-radius:6px;padding:4px 8px;background:var(--ds-surface-card)}
+.review button:disabled {opacity:.45}
+.fileActions {display:contents}
 .editor {flex:1;min-height:0;overflow:auto;position:relative}
 .editor :global(.presentation-editor--viewing .superdoc-text-run) {user-select:text;-webkit-user-select:text}
 .notice,.review {padding:8px 12px;font-size:13px;white-space:pre-wrap}
 .review {max-height:220px;overflow:auto;border-top:1px solid var(--ds-border-muted)}
 .review button {margin-right:8px}
+.comparison {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:8px 0 12px}
+.comparison dt {font-size:12px;color:var(--ds-text-muted);margin-bottom:4px}
+.comparison dd {margin:0;overflow-wrap:anywhere}
+.review .accept {background:var(--ds-success-soft);border-color:var(--ds-success);color:var(--ds-text);font-weight:600}
+@media (max-width:600px) {.comparison {grid-template-columns:minmax(0,1fr)}}
 .formats {position:fixed;display:flex;align-items:center;gap:4px;z-index:80;padding:5px;border:1px solid var(--ds-border-muted);border-radius:9px;background:var(--ds-surface-card);box-shadow:0 4px 16px #0002}
 .formats input {width:28px;height:28px;padding:0;border:0}

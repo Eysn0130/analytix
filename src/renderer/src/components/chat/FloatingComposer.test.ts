@@ -21,7 +21,6 @@ import {
   buildComposerModelMenuGroups,
   composerModelDisplayLabel,
   calculateFloatingMenuPlacement,
-  calculateFloatingSubmenuPlacement,
   composerModelCapabilityKind,
   composerModelIdLooksMultimodal,
   composerModelMenuItemSelected,
@@ -65,6 +64,15 @@ const DEEPSEEK_PROVIDER_GROUP = {
 
 function composerEditorHostHtml(html: string): string {
   return html.match(/<div[^>]*data-composer-prompt-editor="true"[^>]*>/)?.[0] ?? ''
+}
+
+function composerCommandButtonHtml(html: string, commandId: string): string {
+  return html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button =>
+    button.slice(0, button.indexOf('>') + 1).includes(`data-command-id="${commandId}"`)) ?? ''
+}
+
+function composerPrimaryActionButtonHtml(html: string): string {
+  return html.match(/<button\b[^>]*ds-composer-primary-action-button[^>]*>[\s\S]*?<\/button>/)?.[0] ?? ''
 }
 
 describe('InputBar slash commands', () => {
@@ -350,7 +358,7 @@ describe('InputBar model controls', () => {
       viewportWidth: 1000
     })
 
-    expect(placement.left).toBe(712)
+    expect(placement.left).toBe(680)
     expect(placement.top).toBe(633)
   })
 
@@ -363,32 +371,8 @@ describe('InputBar model controls', () => {
       coordinateScale: 0.8
     })
 
-    expect(placement.left).toBe(712)
+    expect(placement.left).toBe(680)
     expect(placement.top).toBe(633)
-  })
-
-  it('places the model submenu beside the active provider row', () => {
-    const placement = calculateFloatingSubmenuPlacement({
-      anchorRect: { top: 650, right: 700, bottom: 686, left: 492 },
-      submenuHeight: 140,
-      viewportHeight: 900,
-      viewportWidth: 1000
-    })
-
-    expect(placement.left).toBe(706)
-    expect(placement.top).toBe(642)
-  })
-
-  it('flips the model submenu left when there is not enough room on the right', () => {
-    const placement = calculateFloatingSubmenuPlacement({
-      anchorRect: { top: 650, right: 920, bottom: 686, left: 712 },
-      submenuHeight: 140,
-      viewportHeight: 900,
-      viewportWidth: 1000
-    })
-
-    expect(placement.left).toBe(474)
-    expect(placement.top).toBe(642)
   })
 
   it('keeps non-text models out of the composer model menu', () => {
@@ -1007,8 +991,9 @@ describe('InputBar capability controls', () => {
       })
     )
 
-    const goalButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/goal')) ?? ''
-    expect(goalButton).toContain('/goal')
+    const goalButton = composerCommandButtonHtml(html, 'goal')
+    expect(goalButton).toContain('role="option"')
+    expect(goalButton).toContain('>Goal</span>')
     expect(goalButton).not.toContain('disabled=""')
   })
 
@@ -1043,8 +1028,9 @@ describe('InputBar capability controls', () => {
       })
     )
 
-    const newButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/new')) ?? ''
-    expect(newButton).toContain('/new')
+    const newButton = composerCommandButtonHtml(html, 'new')
+    expect(newButton).toContain('role="option"')
+    expect(newButton).toContain('>New session</span>')
     expect(newButton).not.toContain('disabled=""')
   })
 
@@ -1079,8 +1065,9 @@ describe('InputBar capability controls', () => {
       })
     )
 
-    const planButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/plan')) ?? ''
-    expect(planButton).toContain('/plan')
+    const planButton = composerCommandButtonHtml(html, 'plan')
+    expect(planButton).toContain('role="option"')
+    expect(planButton).toContain('>Plan</span>')
     expect(planButton).not.toContain('disabled=""')
   })
 
@@ -1121,10 +1108,12 @@ describe('InputBar capability controls', () => {
       })
     )
 
-    expect(html).toContain('Openspec Apply Change')
-    expect(html).toContain('Implement tasks from an OpenSpec change')
-    expect(html).toContain('Project')
-    expect(html).toContain('/skill:openspec-apply-change')
+    const skillButton = composerCommandButtonHtml(html, 'skill:openspec-apply-change')
+    expect(skillButton).toContain('Openspec Apply Change')
+    expect(skillButton).toContain('Implement tasks from an OpenSpec change')
+    expect(skillButton).toContain('class="dsh-composer-command-alias">skill:openspec-apply-change</span>')
+    expect(skillButton).not.toContain('disabled=""')
+    expect(html).not.toContain('data-command-section=')
   })
 
   it('hides disabled Skills from the slash command menu', () => {
@@ -1173,10 +1162,13 @@ describe('InputBar capability controls', () => {
       })
     )
 
+    expect(composerCommandButtonHtml(html, 'skill:test-skill-08')).toBe('')
     expect(html).not.toContain('Test Skill 08')
-    expect(html).not.toContain('/skill:test-skill-08')
-    expect(html).toContain('Test Skill 09')
-    expect(html).toContain('/skill:test-skill-09')
+    const enabledSkillButton = composerCommandButtonHtml(html, 'skill:test-skill-09')
+    expect(enabledSkillButton).toContain('Test Skill 09')
+    expect(enabledSkillButton).toContain('class="dsh-composer-command-alias">skill:test-skill-09</span>')
+    expect(enabledSkillButton).not.toContain('disabled=""')
+    expect(html).not.toContain('data-command-section=')
   })
 
   it('enables local Claw input when a WeChat channel is already mapped to a local thread', () => {
@@ -1317,9 +1309,11 @@ describe('InputBar capability controls', () => {
     )
 
     expect(html).toContain('deepseek-v4-pro')
-    expect(html).toContain('Send follow-up without stopping')
-    expect(html).toContain('aria-label="Stop"')
-    expect(html).toContain('ds-composer-secondary-stop')
+    const primaryAction = composerPrimaryActionButtonHtml(html)
+    expect(primaryAction).toContain('aria-label="Send follow-up without stopping"')
+    expect(primaryAction).not.toContain('disabled=""')
+    expect(html).not.toContain('aria-label="Stop"')
+    expect(html).not.toContain('ds-composer-secondary-stop')
     expect(composerEditorHostHtml(html)).not.toContain('aria-disabled="true"')
     expect(html).not.toContain('Queue message')
     expect(html.match(/ds-composer-primary-action-button/g)?.length).toBe(1)
@@ -1357,7 +1351,7 @@ describe('InputBar capability controls', () => {
     expect(composerEditorHostHtml(html)).not.toContain('aria-disabled="true"')
   })
 
-  it('offers a follow-up and an independent stop when only attachments are present', () => {
+  it('offers only the primary follow-up when attachments form the busy draft', () => {
     const html = renderToStaticMarkup(
       createElement(InputBar, {
         input: '',
@@ -1382,9 +1376,13 @@ describe('InputBar capability controls', () => {
       })
     )
 
-    expect(html).toContain('Stop')
     expect(html).toContain('shot.png')
-    expect(html).toContain('Send follow-up without stopping')
+    const primaryAction = composerPrimaryActionButtonHtml(html)
+    expect(primaryAction).toContain('aria-label="Send follow-up without stopping"')
+    expect(primaryAction).not.toContain('disabled=""')
+    expect(html.match(/ds-composer-primary-action-button/g)).toHaveLength(1)
+    expect(html).not.toContain('aria-label="Stop"')
+    expect(html).not.toContain('ds-composer-secondary-stop')
   })
 
   it('renders the model control chip without an empty default option', () => {
@@ -1562,7 +1560,7 @@ describe('InputBar capability controls', () => {
     expect(html).toContain('aria-label="Permissions"')
     expect(html).toContain('Permissions: Full access')
     expect(html).toContain('>Full access<')
-    expect(html).toContain('data-analytix-icon="SettingsCog"')
+    expect(html).toContain('ds-execution-trigger-icon')
   })
 
   it('renders the standalone permission picker with the current mode label', () => {
@@ -1583,8 +1581,9 @@ describe('InputBar capability controls', () => {
   })
 
   it.each([
-    ['request approval', { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' }, 'Request approval'],
-    ['full access, ask first', { approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access' }, 'Full access, ask first'],
+    ['read only', { approvalPolicy: 'never', sandboxMode: 'read-only' }, 'Read only'],
+    ['workspace write', { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' }, 'Workspace write'],
+    ['legacy ask first', { approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access' }, 'Custom'],
     ['full access', { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }, 'Full access'],
     ['custom', { approvalPolicy: 'on-request', sandboxMode: 'read-only' }, 'Custom']
   ] as const)('renders %s as the visible permission label', (_name, value, label) => {

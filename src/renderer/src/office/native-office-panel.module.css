@@ -9,16 +9,20 @@
   container: native-office / inline-size;
 }
 
-.toolbar {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  height: 52px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--ds-border-muted);
-}
+.toolbar { flex: none; min-width: 0; }
+.toolbarActions { display: flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; max-width: max(36px, calc(100cqw - 140px)); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.toolbarActions::-webkit-scrollbar { display: none; }
+.fileActions { display: inline-flex; flex: none; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.workbookActions { display: flex; flex: none; align-items: center; gap: 6px; }
+.notesAnchor { display: inline-flex; flex: none; }
+.feedback { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 28px; color: var(--ds-text-muted); }
+.feedback > svg { width: 16px; height: 16px; }
+.feedback[role='alert'] { color: var(--ds-danger, #b64040); }
+.feedback:focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: 2px; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.notesPopover { position: fixed; z-index: 1100; width: 340px; max-width: calc(100vw - 24px); padding: 10px; overflow: auto; border: 1px solid var(--ds-border-muted); border-radius: 12px; background: var(--ds-surface-elevated); box-shadow: var(--ax-shadow-popover); color: var(--ds-text); font-size: 14px; }
+.notesPopover :is(button, input):focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -2px; }
+.notesPopover .annotation { padding: 0; border: 0; }
 
 .iconButton {
   display: inline-flex;
@@ -39,10 +43,8 @@
 .iconButton:disabled { opacity: .42; cursor: default; }
 .iconButton:focus-visible,
 .annotation :is(button, input):focus-visible,
-.fileActions :is(button, select):focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -2px; }
+.notesPopover :is(button, select):focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -2px; }
 
-.status { flex: none; font-size: 12px; line-height: 18px; color: var(--ds-text-muted); }
-.fileActions { display: flex; flex: 1; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
 .filePicker { position: relative; display: inline-flex; flex: none; min-width: 0; }
 .filePicker select { min-width: 0; height: 36px; font-size: 14px; line-height: 20px; }
 .filePickerIcon { display: none; }
@@ -72,11 +74,6 @@
 .state p { max-width: 26em; margin: 0; }
 .stateIcon { width: 28px; height: 28px; color: var(--ds-text-faint); }
 
-@container native-office (max-width: 360px) {
-  .toolbar { padding-inline: 8px; }
-  .fileActions > [data-native-office-download] { display: none; }
-}
-
 .tooltipBubble[role='tooltip'] { font-size: 14px; line-height: 18px; }
 
 
@@ -89,10 +86,8 @@
 .viewButton:disabled { opacity: .42; cursor: default; }
 .viewButton:focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -2px; }
 @container native-office (max-width: 520px) {
-  .status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .viewButton { width: 36px; max-width: 36px; justify-content: center; padding: 0; }
-  .viewButton > :is(span, output),
-  .fileActions > [data-native-office-file-status] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .viewButton > :is(span, output) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .viewButton > svg { display: none; }
   .viewButton > .viewIcon { display: block; width: 20px; height: 20px; }
   .filePicker { width: 36px; height: 36px; border-radius: 8px; }
@@ -101,28 +96,11 @@
   .filePicker:hover { background: var(--ds-surface-hover); }
 }
 
-/* The native guest observes its viewport. Selection, notes and failures must
-   not grow DOCX chrome and revoke the nearby menu's pointer lease. */
-.toolbarContents { display: contents; }
-.docxToolbar { box-sizing: border-box; height: 52px; padding-block: 2px; display: block; }
-.docxControls { display: flex; align-items: center; gap: 6px; height: 32px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
-.docxControls::-webkit-scrollbar { display: none; }
-.docxControls :is(.iconButton, .viewButton, .filePicker) { height: 32px; }
-.docxControls .iconButton { width: 32px; }
-.docxControls .filePicker select { height: 32px; }
-.docxFeedback { height: 14px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; line-height: 14px; color: var(--ds-text-muted); }
-.docxFeedback[role='alert'] { color: var(--ds-text); }
-.noteEntry { display: flex; flex: none; align-items: center; gap: 6px; }
+/* Notes live outside flow so selection cannot resize the native viewport. */
+.noteEntry { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .noteInput { width: 144px; min-width: 96px; height: 28px; border: 1px solid var(--ds-border-muted); border-radius: 6px; padding: 0 6px; background: transparent; color: var(--ds-text); font-size: 12px; }
 .noteAction { display: inline-flex; flex: none; align-items: center; gap: 4px; min-height: 28px; border: 0; border-radius: 6px; padding: 0 6px; background: transparent; color: var(--ds-text-muted); font-size: 12px; white-space: nowrap; }
 .noteAction > svg { width: 14px; height: 14px; }
 .noteAction:hover:not(:disabled) { background: var(--ds-surface-hover); }
 .noteAction:disabled { opacity: .42; }
 .noteAction:focus-visible, .noteInput:focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -2px; }
-
-.docxControls .filePickerIcon { margin-block: 6px; }
-
-/* Text actions need their intrinsic width in the 32px DOCX control row. */
-.docxControls .docxTextButton { width: auto; max-width: none; padding-inline: 8px; white-space: nowrap; }
-.docxControls .fileActions { --ax-toolbar-button-size: 32px; flex: none; }
-.docxControls .fileActions > [data-native-office-file-status] { position: static; width: auto; max-width: none; height: auto; overflow: visible; clip-path: none; flex: none; white-space: nowrap; }

@@ -3,7 +3,10 @@ import {
   createSideActions,
   teardownAllSideSubscriptions
 } from './chat-store-side-actions'
-import { DEFAULT_ANALYTIX_MODEL } from '@shared/app-settings'
+import { DEFAULT_ANALYTIX_MODEL, defaultAnalytixRuntimeSettings, type AppSettingsV1 } from '@shared/app-settings'
+import { AnalytixRuntimeProvider } from '../agent/analytix-runtime'
+import { rendererRuntimeClient } from '../agent/runtime-client'
+import { getThreadBinding } from './chat-store-thread-binding'
 import { dispatchAnalytixRuntimeEvent } from '../agent/analytix-mapper'
 import { isStrictPublicRuntimeSseIpcPayload, projectPublicRuntimeSseBlock } from '@shared/public-runtime-sse'
 import { PublicRuntimeEventFilter } from '@shared/public-runtime-content'
@@ -31,6 +34,7 @@ type Harness = {
   provider: FakeProvider
   actions: ReturnType<typeof createSideActions>
   setProvider: (provider: AgentProvider) => void
+  threadBindingOwner: { current: AbortController | null }
 }
 
 type ThreadDetailResponse = Awaited<ReturnType<AgentProvider['getThreadDetail']>>
@@ -94,7 +98,7 @@ class FakeProvider implements AgentProvider {
   async sendUserMessage(
     threadId: string,
     text: string,
-    options?: { model?: string; reasoningEffort?: string }
+    options?: Parameters<AgentProvider['sendUserMessage']>[2]
   ) {
     const mocked = await this.sendMock(threadId, text, options)
     if (mocked && typeof mocked === 'object') {
@@ -308,7 +312,9 @@ function buildHarness(overrides: Partial<ChatState> = {}, translate: Parameters<
   const get: Harness['get'] = () => state
   const provider = new FakeProvider()
   let currentProvider: AgentProvider = provider
+  const threadBindingOwner = { current: null as AbortController | null }
   const actions = createSideActions({
+    threadBindingOwner,
     set,
     get,
     getProvider: () => currentProvider,
@@ -316,7 +322,7 @@ function buildHarness(overrides: Partial<ChatState> = {}, translate: Parameters<
     formatRuntimeError: (e) => (e instanceof Error ? e.message : String(e ?? '')),
     shouldOpenSettingsForError: () => false
   })
-  return { state, set, get, provider, actions, setProvider: next => { currentProvider = next } }
+  return { state, set, get, provider, actions, threadBindingOwner, setProvider: next => { currentProvider = next } }
 }
 
 function acceptedFinalSideProjectionBatch(
@@ -629,6 +635,66 @@ describe('chat-store-side-actions', () => {
         reasoningEffort: 'low'
       })
     )
+  })
+
+  it('keeps the side draft and current main turn when the exact side policy is unknown', async () => {
+    const { actions, state, provider } = buildHarness()
+    const id = (await actions.spawnSideConversation())!
+    actions.setSideInput(id, 'Retain the side draft')
+    state.threads.push({ ...provider.threadRecords.get(id)!, id, executionPolicyUncertain: true })
+    state.busy = true; state.currentTurnId = 'main-frozen-turn'
+    const mainBlocks = state.blocks, sideBlocks = state.sideConversations[id]!.blocks
+    expect(await actions.sendSideMessage(id, 'Retain the side draft')).toBe(false)
+    expect(provider.sendMock).not.toHaveBeenCalled()
+    expect(state.sideConversations[id]).toMatchObject({ input: 'Retain the side draft', busy: false,
+      error: 'common:composerExecutionPolicyUnavailable' })
+    expect(state.sideConversations[id]!.blocks).toBe(sideBlocks)
+    expect(state.busy).toBe(true); expect(state.currentTurnId).toBe('main-frozen-turn'); expect(state.blocks).toBe(mainBlocks)
+  })
+
+  it('does not block a known side policy because a different thread is unknown', async () => {
+    const { actions, state, provider } = buildHarness()
+    const id = (await actions.spawnSideConversation())!
+    state.threads = state.threads.map(thread => ({ ...thread, executionPolicyUncertain: true }))
+    expect(await actions.sendSideMessage(id, 'Known side remains usable')).toBe(true)
+    expect(provider.sendMock).toHaveBeenCalledOnce()
+  })
+
+  it('blocks the pending side owner while keeping unrelated policy mutations isolated', async () => {
+    const h = buildHarness()
+    const id = (await h.actions.spawnSideConversation())!
+    h.actions.setSideInput(id, 'Retain the pending side draft')
+    const binding = getThreadBinding(h.threadBindingOwner)
+    binding.threadPolicyPending.add(id)
+    expect(await h.actions.sendSideMessage(id, 'Retain the pending side draft')).toBe(false)
+    expect(h.provider.sendMock).not.toHaveBeenCalled()
+    expect(h.state.sideConversations[id]).toMatchObject({ input: 'Retain the pending side draft', busy: false })
+    binding.threadPolicyPending.delete(id); binding.threadPolicyPending.add('unrelated-thread')
+    expect(await h.actions.sendSideMessage(id, 'Known side remains usable')).toBe(true)
+  })
+
+  it.each(['metadata', 'pending', 'uncertain'] as const)('fences the actual side POST when policy becomes %s during runtime settings I/O', async outcome => {
+    const h = buildHarness()
+    const id = (await h.actions.spawnSideConversation())!
+    h.actions.setSideInput(id, 'Retain the side draft')
+    h.actions.setSideModel(id, 'auto')
+    h.setProvider(new AnalytixRuntimeProvider())
+    const settings = deferred<AppSettingsV1>()
+    const getSettings = vi.spyOn(rendererRuntimeClient, 'getSettings').mockReturnValueOnce(settings.promise)
+    const request = vi.spyOn(rendererRuntimeClient, 'runtimeRequest').mockResolvedValue({ ok: true, status: 202,
+      body: JSON.stringify({ threadId: id, turnId: 'unexpected-turn' }) })
+    try {
+      const send = h.actions.sendSideMessage(id, 'Retain the side draft')
+      expect(getSettings).toHaveBeenCalledOnce()
+      const binding = getThreadBinding(h.threadBindingOwner)
+      if (outcome === 'metadata') binding.threadMetadataGenerationById.set(id, 1)
+      if (outcome === 'pending') binding.threadPolicyPending.add(id)
+      if (outcome === 'uncertain') h.state.threads.push({ ...h.provider.threadRecords.get(id)!, id, executionPolicyUncertain: true })
+      settings.resolve({ runtime: defaultAnalytixRuntimeSettings() } as AppSettingsV1)
+      expect(await send).toBe(false)
+      expect(request).not.toHaveBeenCalled()
+      expect(h.state.sideConversations[id]).toMatchObject({ input: 'Retain the side draft', busy: false, blocks: [] })
+    } finally { getSettings.mockRestore(); request.mockRestore() }
   })
 
   it('does not send or create optimistic state without secure client message IDs', async () => {

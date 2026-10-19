@@ -1,6 +1,6 @@
-import { logNativeOfficeFailure, logNativeOfficeManualBeginFailure, type NativeOfficeManualBeginFailureState, type NativeOfficeDiagnosticStage, type NativeOfficeDiagnosticErrorCode } from '../logger'
+import { logNativeOfficeFailure, logNativeOfficeManualBeginFailure, logNativeOfficeSaveFailure, type NativeOfficeSaveFailureState, type NativeOfficeManualBeginFailureState, type NativeOfficeDiagnosticStage, type NativeOfficeDiagnosticErrorCode } from '../logger'
 import { isOfficeResult, isOfficePreviewView, type OfficePreviewView, type OfficeRequestInput } from './office-protocol'
-import { nativeOfficeCreateInputSchema, type NativeOfficeCreation, type NativeOfficeManualAuthority, nativeOfficeCommitInputSchema, nativeOfficeSelectionResponseSchema, nativeOfficeSelectionScopeSchema, type NativeOfficeSelectionResponse } from '../../../packages/runtime/src/contracts/native-office-editing'
+import { nativeOfficeCreateInputSchema, type NativeOfficeCreation, type NativeOfficeManualAuthority, nativeWorkbookCandidateSchema, type NativeWorkbookCandidate, nativeOfficeCommitInputSchema, nativeOfficeSelectionResponseSchema, nativeOfficeSelectionScopeSchema, type NativeOfficeSelectionResponse } from '../../../packages/runtime/src/contracts/native-office-editing'
 import { createHash, randomUUID, randomBytes } from 'node:crypto'
 import type { PresentOfficeSnapshot } from '../ipc/tool-result-local-display-ipc'
 import { extname, isAbsolute, resolve } from 'node:path'
@@ -22,7 +22,7 @@ export const MAX_NATIVE_OFFICE_BYTES = 16 * 1024 * 1024
 const MAX_BASE64_LENGTH = Math.ceil(MAX_NATIVE_OFFICE_BYTES / 3) * 4
 const packageIds = { docx: 'analytix-documents', xlsx: 'analytix-spreadsheets', pptx: 'analytix-presentations' } as const
 const operations = ['open-object', 'close-object'] as const
-type HostOperation = typeof operations[number] | 'create-object' | 'begin-manual-edit' | 'commit-object' | 'object-status' | 'capture-selection' | 'selection-read' | 'proposal-read' | 'proposal-accept' | 'proposal-reject' | 'selection-revoke' | 'object-recovery' | 'undo-change' | 'cancel-change' | 'resume-change' | 'annotation-read' | 'annotation-write'
+type HostOperation = typeof operations[number] | 'create-object' | 'begin-manual-edit' | 'plan-workbook-manual' | 'prepare-workbook-manual' | 'commit-object' | 'object-status' | 'capture-selection' | 'selection-read' | 'proposal-read' | 'proposal-accept' | 'proposal-reject' | 'selection-revoke' | 'object-recovery' | 'undo-change' | 'cancel-change' | 'resume-change' | 'annotation-read' | 'annotation-write'
 const token = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const sequence = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -31,10 +31,14 @@ const engineStateSchema = z.object({
   changeSequence: sequence, acknowledgedSequence: sequence, dirty: z.boolean(), manual: nativeOfficeManualStateSchema.optional()
 }).strict().refine(s => s.acknowledgedSequence <= s.changeSequence && s.dirty === (s.changeSequence !== s.acknowledgedSequence))
 type EngineState = z.infer<typeof engineStateSchema>
+type HostResponseDiagnostic = Pick<NativeOfficeManualBeginFailureState, 'schemaAccepted' | 'outerCode' | 'innerCode'> &
+  Partial<Pick<NativeOfficeSaveFailureState, 'outerSchemaAccepted' | 'innerSchemaAccepted' | 'receiptPresent' | 'receiptStatus'>>
+type SaveDiagnostic = NativeOfficeSaveFailureState & Pick<NativeOfficeManualBeginFailureState, 'schemaAccepted'>
 const eventBase = { documentId: digest, version: digest, operationId: token }
 const engineEventSchema = z.discriminatedUnion('type', [
   z.object({ ...eventBase, type: z.literal('changed'), state: engineStateSchema }).strict(),
   z.object({ ...eventBase, type: z.literal('selection'), selection: nativeOfficeSelectionSchema }).strict(),
+  z.object({ ...eventBase, type: z.literal('cell-edit-requested'), intent:z.enum(['f2','double-click']), selection: nativeOfficeSelectionSchema }).strict(),
   z.object({ ...eventBase, type: z.literal('save-requested') }).strict(),
   z.object({ ...eventBase, type: z.literal('view'), view: z.custom<OfficePreviewView>(value => isOfficePreviewView(value)).nullable() }).strict()
 ])
@@ -58,6 +62,16 @@ export interface NativeOfficeControllerOptions {
   freezeAnnotationInput?: (frozen: boolean) => Promise<boolean>
 }
 
+type WorkbookManualRequest = Extract<ReturnType<typeof nativeOfficeRequestSchema.parse>, {action:'editWorkbookCell'}>
+type WorkbookManualAttempt = {
+  request: WorkbookManualRequest; operationId: string; input: Record<string, unknown>
+  selectionToken: string; workbook: NonNullable<ReturnType<typeof nativeTypedWorkbookSelection>>
+  bounds: {sheet:number;startColumn:number;endColumn:number;startRow:number;endRow:number}
+  sessionId: string; openOperationId: string; generationId: string
+}
+type PendingSave = { operationId: string; revision: string; digest: string } & (
+  { origin:'native-export'; sequence:number } | { origin:'core-workbook' }
+)
 type Active = {
   view: NativeOfficeView; workspace: string; requestedPath: string; sessionId: string
   bounds: NativeOfficeBounds; appearance?: NativeOfficeAppearance; binding: PluginPackageView; surface: NativeOfficeSurface; openOperationId: string
@@ -72,9 +86,11 @@ type Active = {
   appliedProposals: Set<string>
   revokedScopes: Set<string>
   decisionOperations: Map<string, string>
-  pendingSave?: { operationId: string; sequence: number; revision: string; digest: string }
+  pendingSave?: PendingSave
+  pendingWorkbookPrepare?: WorkbookManualAttempt
+  pendingWorkbookDecision?: {scopeId:string;proposalId:string;operationId:string}
   threadId?: string
-  approvedChange?: { changeId: string; threadId: string; saveOperationId: string; baseRevision: string }
+  approvedChange?: { changeId: string; threadId: string; saveOperationId: string; baseRevision: string; workbookManual?:true }
   manualAuthority?: NativeOfficeManualAuthority
   manualFreeze?: NativeOfficeFreezeAck
   manualExportAttempted?: boolean
@@ -94,6 +110,18 @@ function fail(code: NativeOfficeError, transient = false): never { throw new Off
 function diagnosticError(code: NativeOfficeError): NativeOfficeDiagnosticErrorCode {
   return code === 'native_input_unavailable' || code === 'composition_pending' || code === 'presentation_unsupported' || code === 'presentation_failed' || code === 'presentation_start_timeout' ? 'engine_unavailable' : code
 }
+function saveDiagnostic(phase: NativeOfficeSaveFailureState['phase']): SaveDiagnostic {
+  return {phase, schemaAccepted:null, outerSchemaAccepted:null, innerSchemaAccepted:null, outerCode:null, innerCode:null, receiptPresent:null, receiptStatus:null}
+}
+function recordSaveFailure(document: Pick<Active, 'view'>, error: unknown, state: NativeOfficeSaveFailureState): void {
+  if (document.view.kind !== 'xlsx' || document.view.protectedPresent) return
+  // Observability must never change the operation's result, including refusal.
+  try {
+    const { phase, outerSchemaAccepted, innerSchemaAccepted, outerCode, innerCode, receiptPresent, receiptStatus } = state
+    logNativeOfficeSaveFailure(error instanceof OfficeFailure ? diagnosticError(error.code) : 'unexpected',
+      { phase, outerSchemaAccepted, innerSchemaAccepted, outerCode, innerCode, receiptPresent, receiptStatus })
+  } catch { /* Preserve the original failure. */ }
+}
 function hash(bytes: Uint8Array): string { return createHash('sha256').update(bytes).digest('hex') }
 function decodeContent(content: string): Uint8Array {
   if (content.length === 0 || content.length > MAX_BASE64_LENGTH) fail('invalid_response')
@@ -106,6 +134,17 @@ function withoutChannel(value: unknown): unknown {
   const copy = { ...value } as Record<string, unknown>
   delete copy.channel
   return copy
+}
+
+function workbookDiscussionText(selection: Extract<NativeOfficeSelection,{kind:'cells'}>): string {
+  const column = (value:number) => {
+    let label = ''
+    for (value++; value; value = Math.floor((value-1)/26)) label = String.fromCharCode(65+(value-1)%26)+label
+    return label
+  }
+  const ranges = selection.ranges.map(r => `${JSON.stringify(r.sheetName)}!${column(r.startColumn)}${r.startRow+1}:${column(r.endColumn)}${r.endRow+1}`).join('; ')
+  const complete = !!selection.capture?.complete && !selection.capture.truncated
+  return `Workbook selection: ${ranges}\nCapture: ${complete ? 'complete' : 'partial; values below are not the entire selection; do not infer whole-range totals'}; captured cells: ${selection.cells?.length ?? 0}; maximum 256. Read-only discussion reference; no write authority.\n${selection.text}`
 }
 
 /** Core-bound native sessions. At most two retained surfaces, only one visible. */
@@ -197,7 +236,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     return binding
   }
 
-  async function invokeOutput(document: { binding: PluginPackageView; view: Pick<NativeOfficeView, 'kind'> }, operation: HostOperation, input: Record<string, unknown>, manualBegin?: NativeOfficeManualBeginFailureState): Promise<unknown> {
+  async function invokeOutput(document: { binding: PluginPackageView; view: Pick<NativeOfficeView, 'kind'> }, operation: HostOperation, input: Record<string, unknown>, diagnostic?: HostResponseDiagnostic): Promise<unknown> {
     // Relist only the same generation. This never enables or installs a plugin.
     document.binding = await listBinding(document.view.kind, document.binding)
     if (!document.binding.operations.includes(operation)) fail('package_unavailable')
@@ -209,17 +248,27 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         contributionId: 'workspace-editor', operation, input })
     } catch { fail('unavailable') }
     const outer = pluginPackageHostResponseSchema.safeParse(raw)
-    if (manualBegin) {
-      manualBegin.schemaAccepted = outer.success
-      if (outer.success && !outer.data.ok) manualBegin.outerCode = outer.data.code
+    if (diagnostic) {
+      diagnostic.schemaAccepted = outer.success
+      if ('outerSchemaAccepted' in diagnostic) diagnostic.outerSchemaAccepted = outer.success
+      if (outer.success && !outer.data.ok) diagnostic.outerCode = outer.data.code
     }
     if (!outer.success) fail('invalid_response')
     if (!outer.data.ok) fail('package_unavailable')
     if (!('output' in outer.data)) fail('invalid_response')
     return outer.data.output
   }
-  async function invoke(document: { binding: PluginPackageView; view: Pick<NativeOfficeView, 'kind'> }, operation: HostOperation, input: Record<string, unknown>): Promise<ObjectEditingResponse> {
-    const inner = objectEditingResponseSchema.safeParse(await invokeOutput(document, operation, input))
+  async function invoke(document: { binding: PluginPackageView; view: Pick<NativeOfficeView, 'kind'> }, operation: HostOperation, input: Record<string, unknown>, diagnostic?: HostResponseDiagnostic): Promise<ObjectEditingResponse> {
+    const inner = objectEditingResponseSchema.safeParse(await invokeOutput(document, operation, input, diagnostic))
+    if (diagnostic) {
+      diagnostic.schemaAccepted = inner.success
+      diagnostic.innerSchemaAccepted = inner.success
+      if (inner.success) {
+        if (!inner.data.ok) diagnostic.innerCode = inner.data.code
+        diagnostic.receiptPresent = 'receipt' in inner.data && !!inner.data.receipt
+        diagnostic.receiptStatus = 'receipt' in inner.data && inner.data.receipt ? inner.data.receipt.status : null
+      }
+    }
     if (!inner.success) fail('invalid_response')
     return inner.data
   }
@@ -231,7 +280,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       if (result.success && !result.data.ok) manualBegin.innerCode = result.data.code
     }
     if (!result.success) fail('invalid_response')
-    if (!result.data.ok) fail(result.data.code === 'forbidden' ? 'forbidden' : result.data.code === 'conflict' ? 'conflict' : result.data.code === 'scope_invalid' ? 'stale_selection' : 'unavailable')
+    if (!result.data.ok) fail(result.data.code === 'forbidden' ? 'forbidden' : result.data.code === 'conflict' ? 'conflict' : result.data.code === 'scope_invalid' ? 'stale_selection' :
+      ['plan-workbook-manual','prepare-workbook-manual'].includes(operation) && ['not_text','too_large','proposal_invalid','invalid_request'].includes(result.data.code) ? 'unsupported_selection' : 'unavailable')
     return result.data
   }
 
@@ -493,8 +543,12 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       return
     }
     if (event.type === 'save-requested') { if (document.view.editing) void serialize(() => save(document)); return }
-    if (event.type !== 'selection') return
-    try { acceptSelection(document, event.selection); publish() }
+    if (event.type !== 'selection' && event.type !== 'cell-edit-requested') return
+    try {
+      const selection = event.type === 'cell-edit-requested' && document.view.kind === 'xlsx' && event.selection.kind === 'cells' && event.selection.token
+        ? {...event.selection,editIntent:{kind:event.intent,id:event.selection.token}} : event.selection
+      acceptSelection(document, selection); publish()
+    }
     catch { invalidatePreview(document, 'invalid_response') }
   }
 
@@ -559,7 +613,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         diagnosticStage = 'controller_surface_create'
         surface = await options.createSurface(event => { if (document && document.surface === surface) onEvent(document, event) })
         if (disposed || epoch !== visibilityEpoch || !visible) fail('unavailable')
-        document = { view: { objectId: opened.objectId, path: opened.path, kind, revision: opened.revision, dirty: false, status: 'loading' },
+        document = { view: { objectId: opened.objectId, path: opened.path, kind, revision: opened.revision, dirty: false, status: 'loading', ...(kind === 'xlsx' ? {workbookEditing:result.workbookEditing ?? {editable:false,reason:'unsupported_workbook' as const}} : {}) },
           workspace: request.workspace, requestedPath: request.path, sessionId: opened.sessionId,
           bounds:request.bounds, appearance:request.appearance, binding: holder.binding, selections:new Map(), appliedProposals:new Set(), revokedScopes:new Set(), decisionOperations:new Map(), surface, openOperationId: newOperationId(), ready: false, failed: false }
         documents.set(document.view.objectId, document)
@@ -737,6 +791,123 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     document.view.status = 'ready'; delete document.view.error; publish()
   }
 
+  async function recoverWorkbookPreparation(document: Active, threadId: string, error: unknown): Promise<never> {
+    // Preparation may already own a durable approval, but it has not submitted
+    // bytes. A failed commit instead retains its exact pending operation.
+    if (!document.pendingSave && !document.pendingRecovery) {
+      const owner = {sessionId:document.sessionId,openOperationId:document.openOperationId,surface:document.surface,
+        generationId:document.binding.generationId,threadId:document.threadId}
+      const attempt = document.pendingWorkbookPrepare, decision = document.pendingWorkbookDecision, approved = document.approvedChange
+      const key = decision ? `${decision.scopeId}:${decision.proposalId}:true` : undefined
+      const decisionOperation = key ? document.decisionOperations.get(key) : undefined
+      const oldCurrent = document.view.recovery?.current
+      const oldReceipt = oldCurrent ? {changeId:oldCurrent.changeId,saveOperationId:oldCurrent.saveOperationId,
+        baseRevision:oldCurrent.baseRevision,threadId:oldCurrent.threadId} : null
+      document.view.saving = false
+      let recovered = false
+      try { await recover(document, threadId); recovered = true } catch { /* Keep the original uncertain preparation. */ }
+      const recovery = document.view.recovery, current = recovery?.current
+      const sameOldReceipt = !!current && !!oldReceipt && current.changeId === oldReceipt.changeId &&
+        current.saveOperationId === oldReceipt.saveOperationId && current.baseRevision === oldReceipt.baseRevision &&
+        current.threadId === oldReceipt.threadId
+      const currentDecision = !!current && !!decision && 'proposalId' in current && current.proposalId === decision.proposalId
+      // Only explicit pre-commit refusals qualify. An unavailable/malformed
+      // response cannot establish whether preparation became durable.
+      const refused = error instanceof OfficeFailure && ['forbidden','conflict','unsupported_selection','stale_selection'].includes(error.code)
+      const sameOwner = !disposed && !document.closed && !document.failed && document.ready && !document.closePending &&
+        documents.get(document.view.objectId) === document && document.sessionId === owner.sessionId &&
+        document.openOperationId === owner.openOperationId && document.surface === owner.surface &&
+        document.binding.generationId === owner.generationId && owner.threadId === threadId && document.threadId === threadId
+      if (refused && recovered && recovery?.pending === null && (!current || sameOldReceipt && !currentDecision) &&
+        sameOwner && !approved && document.approvedChange === approved && !document.pendingSave && !document.pendingRecovery &&
+        document.pendingWorkbookPrepare === attempt && document.pendingWorkbookDecision === decision &&
+        (!decision || decisionOperation === decision.operationId && !!key && document.decisionOperations.get(key) === decisionOperation)) {
+        // A previous receipt (including an undo back to the same base) is not
+        // evidence that this attempt was persisted. Clear only these exact
+        // failed local owners; never erase an approval or another decision key.
+        if (attempt) delete document.pendingWorkbookPrepare
+        if (decision && key) {
+          delete document.pendingWorkbookDecision
+          document.decisionOperations.delete(key)
+        }
+      }
+      publish()
+    }
+    if (error instanceof OfficeFailure && error.code === 'unavailable') fail('unknown')
+    throw error
+  }
+
+  async function editWorkbookCell(document: Active, request: WorkbookManualRequest) {
+    if (document.view.kind !== 'xlsx' || document.protectedSnapshot || document.threadId !== request.threadId ||
+      !document.view.workbookEditing?.editable) fail('unsupported_selection')
+    if (document.pendingSave || document.pendingRecovery || document.pendingManualCancel) fail('unknown')
+    if (document.pendingWorkbookDecision) fail('unsaved_changes')
+    if (document.view.dirty || document.manualAuthority) fail('unsaved_changes')
+    let attempt = document.pendingWorkbookPrepare
+    if (attempt && JSON.stringify(attempt.request) !== JSON.stringify(request)) fail('unsaved_changes')
+    if (!attempt) {
+      if (document.approvedChange) fail('unsaved_changes')
+      const selected = document.view.selection
+      const original = selected && nativeTypedWorkbookSelection(selected)
+      if (!selected || selected.token !== request.selectionToken || !original || original.cells.length !== 1 ||
+        selected.changeSequence !== request.expectedChangeSequence || selected.version !== request.revision) fail('stale_selection')
+      await recover(document,request.threadId)
+      if (document.view.recovery?.pending) fail('unsaved_changes')
+      const cell = original.cells[0], writeTarget = {sheet:cell.sheet,column:cell.column,row:cell.row}
+      const input = {sessionId:document.sessionId,threadId:request.threadId,baseRevision:request.revision,
+        writeTarget:{...writeTarget,sheetName:original.sheetName},edit:request.edit}
+      // Core's parser owns the dependency scope. Native capture still fences
+      // the original single target and supplies the real bounded before state.
+      const plan = await invokeSelection(document,'plan-workbook-manual',input)
+      if (!('dependencyBounds' in plan) || plan.dependencyBounds.sheet !== writeTarget.sheet) fail('invalid_response')
+      await engine(document,{command:'edit',operationId:newOperationId(),documentId:document.view.objectId,version:request.revision})
+      const current = document.view.selection, target = current && nativeTypedWorkbookSelection(current)
+      if (!current?.token || !target || JSON.stringify(target) !== JSON.stringify(original)) fail('stale_selection')
+      const captured = await engine(document,{command:'captureCells',operationId:newOperationId(),documentId:document.view.objectId,
+        version:request.revision,selectionToken:current.token,expectedChangeSequence:request.expectedChangeSequence,bounds:plan.dependencyBounds})
+      if (!captured?.workbook) fail('invalid_response')
+      const operationId = newOperationId()
+      attempt = {request:structuredClone(request),operationId,
+        input:{...input,operationId,selectionToken:current.token,changeSequence:request.expectedChangeSequence,workbook:structuredClone(captured.workbook)},
+        selectionToken:current.token,workbook:structuredClone(captured.workbook),bounds:structuredClone(plan.dependencyBounds),
+        sessionId:document.sessionId,openOperationId:document.openOperationId,generationId:document.binding.generationId}
+      document.pendingWorkbookPrepare = attempt
+    }
+    const retained = attempt
+    const owns = () => !disposed && !document.closed && !document.failed && document.ready && !document.closePending &&
+      documents.get(document.view.objectId) === document && document.pendingWorkbookPrepare === retained &&
+      document.sessionId === retained.sessionId && document.openOperationId === retained.openOperationId &&
+      document.binding.generationId === retained.generationId && document.threadId === request.threadId &&
+      document.view.revision === request.revision && document.view.changeSequence === request.expectedChangeSequence &&
+      !document.view.dirty && document.view.selection?.token === retained.selectionToken
+    if (!owns()) fail('stale_selection')
+    document.view.saving = true; document.view.canUndo = false; publish()
+    try {
+      const prepared = await invokeSelection(document,'prepare-workbook-manual',structuredClone(retained.input))
+      if (!owns()) fail('stale_selection')
+      if (!('workbookManual' in prepared)) fail('invalid_response')
+      const manual = prepared.workbookManual
+      if (manual.baseRevision !== request.revision || JSON.stringify(manual.workbook.before) !== JSON.stringify(retained.workbook) ||
+        document.approvedChange && (document.approvedChange.changeId !== manual.changeId || document.approvedChange.saveOperationId !== manual.saveOperationId)) fail('invalid_response')
+      const approved = {changeId:manual.changeId,threadId:request.threadId,baseRevision:manual.baseRevision,saveOperationId:manual.saveOperationId,workbookManual:true as const}
+      document.approvedChange = approved
+      delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
+      // Preparation can run callbacks while awaiting Core. Recheck the genuine
+      // native token/generation and every captured before cell immediately
+      // before submitting the separately generated Core candidate.
+      const verified = await engine(document,{command:'captureCells',operationId:newOperationId(),documentId:document.view.objectId,
+        version:request.revision,selectionToken:retained.selectionToken,expectedChangeSequence:request.expectedChangeSequence,bounds:retained.bounds})
+      if (!owns() || !verified?.workbook || JSON.stringify(verified.workbook) !== JSON.stringify(retained.workbook)) fail('stale_selection')
+      await submitWorkbookCandidate(document, approved, manual.candidate, owns)
+      const committed = document.view.recovery?.current
+      if (!committed || !('version' in committed) || committed.version !== 3 || committed.origin !== 'manual' ||
+        committed.changeId !== manual.changeId || committed.status !== 'committed' || committed.baseRevision !== request.revision ||
+        committed.revision !== document.view.revision || committed.revision === request.revision || document.view.dirty || document.pendingSave || document.pendingRecovery) fail('unknown')
+    } catch (error) {
+      return recoverWorkbookPreparation(document, request.threadId, error)
+    }
+  }
+
   async function freezeManual(document: Active): Promise<NativeOfficeFreezeAck> {
     const manual = document.manualAuthority, current = document.view.manual
     if (!manual || !current || current.changeId !== manual.changeId || current.baseRevision !== manual.baseRevision || current.baseRevision !== document.view.revision) fail('invalid_response')
@@ -764,7 +935,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const releaseFreeze = await holdAnnotationFreeze()
     try {
       await flushAnnotation(document)
-      if (document.pendingSave || document.pendingRecovery || document.pendingManualBegin) fail('unknown')
+      if (document.pendingSave || document.pendingRecovery || document.pendingManualBegin || document.pendingWorkbookPrepare || document.pendingWorkbookDecision) fail('unknown')
       if (document.manualAuthority) {
         if (!discard && !document.pendingManualCancel) {
           if (document.view.dirty) fail('unsaved_changes')
@@ -811,23 +982,89 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       publish()
     } finally { await releaseFreeze() }
   }
-  async function settleSave(document: Active, result: ObjectEditingResponse) {
+  async function submitWorkbookCandidate(document: Active, approved: NonNullable<Active['approvedChange']>, value: NativeWorkbookCandidate | undefined, current: () => boolean) {
+    const diagnostic = saveDiagnostic('prepare')
+    try {
+      const parsed = nativeWorkbookCandidateSchema.safeParse(value)
+      if (!parsed.success) fail('invalid_response')
+      const candidate = parsed.data
+      if (document.view.kind !== 'xlsx' || document.protectedSnapshot || document.approvedChange !== approved ||
+        candidate.changeId !== approved.changeId || candidate.saveOperationId !== approved.saveOperationId ||
+        candidate.baseRevision !== approved.baseRevision || candidate.baseRevision !== document.view.revision ||
+        approved.threadId !== document.threadId) fail('invalid_response')
+      const bytes = decodeContent(candidate.content.data), candidateDigest = hash(bytes)
+      if (candidate.content.byteLength !== bytes.byteLength || candidate.content.sha256 !== candidateDigest) fail('invalid_response')
+      if (document.pendingSave || document.pendingRecovery) fail('unknown')
+      document.binding = await listBinding(document.view.kind, document.binding)
+      if (!current()) fail('stale_selection')
+      if (!document.binding.operations.includes('commit-object') || !document.binding.operations.includes('object-status')) fail('package_unavailable')
+      const input = nativeOfficeCommitInputSchema.parse({sessionId:document.sessionId,operationId:approved.saveOperationId,
+        threadId:approved.threadId,changeId:approved.changeId,baseRevision:candidate.baseRevision,content:candidate.content})
+      // This exact decoded/hash-checked content is the only commit input. No
+      // native exporter or implicit byte replacement participates in this lane.
+      document.pendingSave = {origin:'core-workbook',operationId:approved.saveOperationId,revision:candidate.baseRevision,digest:candidateDigest}
+      delete document.pendingWorkbookPrepare
+      delete document.pendingWorkbookDecision
+      document.view.saving = true; document.view.canUndo = false; publish()
+      diagnostic.phase = 'commit'
+      let result: ObjectEditingResponse
+      try { result = await invoke(document, 'commit-object', input, diagnostic) }
+      catch { setError(document, 'unknown'); fail('unknown') }
+      if (!result.ok && !result.receipt) {
+        delete document.pendingSave; document.view.saving = false
+        try { await recover(document, approved.threadId) } catch { /* Keep the approved transaction available for cancellation. */ }
+        setError(document, result.code === 'conflict' ? 'conflict' : 'save_failed')
+        fail(result.code === 'conflict' ? 'conflict' : 'save_failed')
+      }
+      await settleSave(document, result, diagnostic)
+    } catch (error) {
+      recordSaveFailure(document, error, diagnostic)
+      throw error
+    }
+  }
+
+  async function settleSave(document: Active, result: ObjectEditingResponse, diagnostic?: SaveDiagnostic) {
     const pending = document.pendingSave
     if (!pending || !('receipt' in result) || !result.receipt) fail('unknown')
     const receipt = result.receipt
     if (receipt.operationId !== pending.operationId) fail('invalid_response')
     if (receipt.status === 'unknown' || receipt.status === 'pending') fail('unknown')
     if (receipt.status === 'committed' && receipt.revision !== pending.digest) fail('invalid_response')
-    if (receipt.status === 'committed') {
+    const reloadWorkbook = receipt.status === 'committed' && document.view.kind === 'xlsx'
+    if (receipt.status === 'committed' && !reloadWorkbook) {
       delete document.view.scope; delete document.view.proposals; delete document.view.localReviews; document.selections.clear()
     }
+    if (reloadWorkbook) {
+      // The exported workbook belongs to a private candidate, while the visible
+      // model still shows the base. A receipt cannot make that old view current.
+      // Retain the exact operation across ACK/reload failure; recovery rereads
+      // Core bytes and rebuilds the readonly surface before publishing ready.
+      document.pendingRecovery = {operationId:pending.operationId,revision:receipt.revision,committed:true}
+      document.view.saving = true; document.view.status = 'loading'; document.view.canUndo = false
+      publish()
+    }
+    if (pending.origin === 'core-workbook') {
+      // A Core candidate has no native exported artifact to acknowledge. The
+      // visible readonly model remains at the base until exact Core readback.
+      if (reloadWorkbook) {
+        if (diagnostic) diagnostic.phase = 'recovery'
+        await finishRecovery(document)
+        return
+      }
+      delete document.pendingSave; document.view.saving = false
+      if (receipt.status === 'conflict') { setError(document, 'conflict'); fail('conflict') }
+      fail('unknown')
+    }
+    const receiptPhase = diagnostic?.phase
+    if (diagnostic) diagnostic.phase = 'ack'
     try {
       await engine(document, {command:'ack', documentId:document.view.objectId, version:pending.revision,
         operationId:newOperationId(), exportOperationId:pending.operationId, exportedSequence:pending.sequence,
         status:receipt.status === 'committed' ? 'committed' : 'conflict',
         ...(receipt.status === 'committed' ? {persistedVersion:receipt.revision} : {})})
     } catch (error) {
-      if (receipt.status !== 'committed' || !document.manualAuthority) throw error
+      if (receipt.status !== 'committed' || !(reloadWorkbook || document.manualAuthority || document.approvedChange?.workbookManual)) throw error
+      if (diagnostic) { recordSaveFailure(document,error,diagnostic); diagnostic.phase = 'recovery' }
       // The exact Core receipt already proves this artifact was committed. A
       // missing native ACK (including failed virtual-input synchronization)
       // retires that sink; it never licenses another commit or a fabricated ACK.
@@ -838,16 +1075,29 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       await finishRecovery(document)
       return
     }
+    if (reloadWorkbook) {
+      if (diagnostic) diagnostic.phase = 'recovery'
+      await finishRecovery(document)
+      return
+    }
+    if (diagnostic && receiptPhase) diagnostic.phase = receiptPhase
     document.pendingSave = undefined; document.view.saving = false
     if (receipt.status === 'conflict') { setError(document, 'conflict'); fail('conflict') }
     delete document.approvedChange; delete document.manualAuthority; delete document.pendingManualBegin
     delete document.manualFreeze; delete document.manualExportAttempted; delete document.pendingManualCancel
+    if (diagnostic) diagnostic.phase = 'recovery'
     await recover(document, document.threadId)
     document.view.status = 'ready'; delete document.view.error; publish()
   }
   async function save(document: Active) {
+    const diagnostic = document.view.kind === 'xlsx' ? saveDiagnostic('prepare') : undefined
+    try { await saveAttempt(document,diagnostic) }
+    catch (error) { if (diagnostic) recordSaveFailure(document,error,diagnostic); throw error }
+  }
+  async function saveAttempt(document: Active, diagnostic?: SaveDiagnostic) {
     if (document.closePending) fail('unavailable')
     if (document.pendingRecovery) {
+      if (diagnostic) diagnostic.phase = 'recovery'
       const pending = document.pendingRecovery
       try { await finishRecovery(document) } catch (error) {
         try {
@@ -869,8 +1119,9 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     }
     if (!document.view.editing) fail('invalid_request')
     if (document.pendingSave) {
+      if (diagnostic) diagnostic.phase = 'query'
       try {
-        await settleSave(document, await invoke(document, 'object-status', {sessionId:document.sessionId, operationId:document.pendingSave.operationId}))
+        await settleSave(document, await invoke(document, 'object-status', {sessionId:document.sessionId, operationId:document.pendingSave.operationId},diagnostic),diagnostic)
       } catch (error) {
         // The journal may not exist yet even though Core retained the candidate.
         // Discover explicit recovery actions without retrying the file write.
@@ -881,6 +1132,13 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     }
     if (document.pendingManualCancel) {
       await cancelChange(document,document.pendingManualCancel.threadId,document.pendingManualCancel.changeId)
+      return
+    }
+    if (document.view.kind === 'xlsx') {
+      // Workbook saves enter only through an explicit Core candidate response.
+      // Query/recovery above may continue an existing commit; this branch never
+      // recreates bytes from an approved review or falls back to native export.
+      if (document.approvedChange || document.pendingWorkbookPrepare || document.pendingWorkbookDecision || document.view.dirty) fail('unsaved_changes')
       return
     }
     const manual = document.manualAuthority
@@ -906,6 +1164,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       }
     }
     if (manual) document.manualExportAttempted = true
+    if (diagnostic) diagnostic.phase = 'export'
     const exported = await engine(document, {command:'export', operationId, documentId:document.view.objectId, version:revision,
       ...(manual ? {changeId:manual.changeId,freezeAck} : {})})
     if (freezeAck && exported?.exportedSequence !== freezeAck.sequence) fail('invalid_response')
@@ -913,18 +1172,21 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const bytes = exported.bytes, digest = hash(bytes)
     const input = nativeOfficeCommitInputSchema.parse({sessionId:document.sessionId, operationId, threadId:approved.threadId, changeId:approved.changeId, baseRevision:revision,
       content:{encoding:'base64', kind:document.view.kind, byteLength:bytes.byteLength, sha256:digest, data:Buffer.from(bytes).toString('base64')}})
-    document.pendingSave = {operationId, sequence:exported.exportedSequence, revision, digest}
+    document.pendingSave = {origin:'native-export',operationId, sequence:exported.exportedSequence, revision, digest}
     document.view.saving = true; publish()
     // Never retry a commit after an uncertain result; subsequent saves query this operation.
     let result: ObjectEditingResponse
-    try { result = await invoke(document, 'commit-object', input) } catch { setError(document, 'unknown'); fail('unknown') }
+    if (diagnostic) diagnostic.phase = 'commit'
+    try { result = await invoke(document, 'commit-object', input,diagnostic) } catch { setError(document, 'unknown'); fail('unknown') }
     if (!result.ok && !result.receipt) {
+      if (diagnostic) diagnostic.phase = 'ack'
       await engine(document, {command:'ack', operationId:newOperationId(), documentId:document.view.objectId, version:revision,
         exportOperationId:operationId, exportedSequence:exported.exportedSequence, status:'failed'})
       document.pendingSave = undefined; document.view.saving = false
+      if (diagnostic) diagnostic.phase = 'commit'
       setError(document, result.code === 'conflict' ? 'conflict' : 'save_failed'); fail(result.code === 'conflict' ? 'conflict' : 'save_failed')
     }
-    await settleSave(document, result)
+    await settleSave(document, result,diagnostic)
   }
 
   async function finishRecovery(document: Active) {
@@ -941,7 +1203,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const current = reopened.document, currentBytes = decodeContent(current.content)
     if (current.objectId !== document.view.objectId || current.sessionId !== document.sessionId || current.path !== document.view.path || current.revision !== hash(currentBytes)) fail('invalid_response')
     if (current.revision !== pending.revision) {
-      delete document.pendingRecovery; delete document.pendingSave; delete document.approvedChange
+      delete document.pendingRecovery; delete document.pendingSave; delete document.approvedChange; delete document.pendingWorkbookPrepare; delete document.pendingWorkbookDecision
       document.view.saving = false; document.view.canUndo = false; document.view.editing = false
       delete document.view.manual; delete document.manualAuthority; delete document.pendingManualBegin
       delete document.manualFreeze; delete document.manualExportAttempted; delete document.pendingManualCancel
@@ -960,7 +1222,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       const surface = await options.createSurface(event => { if (document.surface === surface) onEvent(document, event) })
       document.surface = surface; document.failed = false; document.surfaceRetired = false
       document.view = {...document.view, revision:pending.revision, changeSequence:0, acknowledgedSequence:0,
-        dirty:false, editing:false, canUndo:false, saving:true, status:'loading', selection:undefined, scope:undefined, proposals:undefined, localReviews:undefined}
+        dirty:false, editing:false, canUndo:false, saving:true, status:'loading', selection:undefined,
+        ...(document.view.kind === 'xlsx' ? {} : {scope:undefined,proposals:undefined,localReviews:undefined})}
       document.openOperationId = newOperationId()
       delete document.view.playback; document.playbackAttempted = false
       document.playbackStopUnknown = false
@@ -969,10 +1232,12 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       document.ready = true
       if (active === document && visible) await surface.attach(document.bounds, document.appearance)
     } catch { setError(document, 'unknown'); fail('unknown') }
-    delete document.pendingRecovery; delete document.pendingSave; delete document.approvedChange
+    await recover(document, document.threadId)
+    delete document.pendingRecovery; delete document.pendingSave; delete document.approvedChange; delete document.pendingWorkbookPrepare; delete document.pendingWorkbookDecision
     document.selections.clear(); document.decisionOperations.clear()
+    delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
     document.view.saving = false; document.view.status = 'ready'; delete document.view.error
-    await recover(document, document.threadId); publish()
+    publish()
   }
   async function acceptRecoveryReceipt(document: Active, result: ObjectEditingResponse, committing = false) {
     const pending = document.pendingRecovery!
@@ -999,6 +1264,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
   }
   async function recover(document: Active, threadId?: string) {
     if (document.threadId !== threadId) {
+      if (document.view.kind === 'xlsx' && (document.pendingWorkbookPrepare || document.pendingWorkbookDecision || document.approvedChange || document.view.recovery?.pending)) fail('unsaved_changes')
       if (document.pendingManualBegin) fail('unknown')
       if (document.manualAuthority) fail('unsaved_changes')
       await flushAnnotation(document)
@@ -1060,8 +1326,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const pending = document.view.recovery?.pending
     const retry = document.pendingManualCancel?.changeId === changeId && document.pendingManualCancel.threadId === threadId
     if ((!pending || pending.changeId !== changeId || !pending.canCancel) && !retry) fail('unknown')
-    if (document.manualAuthority) {
-      if (document.manualAuthority.changeId !== changeId) fail('invalid_request')
+    if (document.manualAuthority || document.view.kind === 'xlsx') {
+      if (document.manualAuthority && document.manualAuthority.changeId !== changeId) fail('invalid_request')
       // Retire the discarded input sink before cancelling its Core authority.
       // Retain the exact cancellation identity across a lost reply; Core's
       // cancelled record is idempotent, while pending=null alone proves nothing.
@@ -1083,7 +1349,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       throw error
     }
     if (!result.ok || !('recovery' in result) || result.recovery.pending?.changeId === changeId) fail('invalid_response')
-    delete document.pendingSave; delete document.approvedChange; delete document.manualAuthority; delete document.pendingManualBegin
+    delete document.pendingSave; delete document.approvedChange; delete document.manualAuthority; delete document.pendingManualBegin; delete document.pendingWorkbookPrepare; delete document.pendingWorkbookDecision
     delete document.manualFreeze; delete document.manualExportAttempted; delete document.pendingManualCancel
     delete document.view.manual; document.view.editing = false
     document.view.saving = false
@@ -1148,8 +1414,10 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     }catch {document.failed=true;document.ready=false;setError(document,'unknown')}
   }
   async function reference(document: Active, request: Extract<ReturnType<typeof nativeOfficeRequestSchema.parse>, {action:'reference'}>) {
+    if (request.editable && document.view.kind === 'xlsx' && !document.view.workbookEditing?.editable) fail('unsupported_selection')
     if (document.threadId !== request.threadId) await recover(document, request.threadId)
     if (document.pendingSave || document.pendingRecovery || document.pendingManualCancel) fail('unknown')
+    if (document.view.kind === 'xlsx' && (document.pendingWorkbookPrepare || document.pendingWorkbookDecision || document.approvedChange || document.view.recovery?.pending)) fail('unsaved_changes')
     if (document.view.dirty && !request.saveFirst) fail('unsaved_changes')
     if (document.manualAuthority) {
       // Native input can precede its dirty event. Let the bound worker drain
@@ -1180,11 +1448,12 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     }
     const selection = document.selections.get(request.selectionToken)
     if (!selection || selection.version !== document.view.revision || selection.changeSequence !== document.view.changeSequence) fail('stale_selection')
-    const text = selection.kind === 'shapes' ? selection.shapes.map(s => s.text).join('\n') : selection.kind === 'unavailable' ? '' : selection.text
+    const text = selection.kind === 'shapes' ? selection.shapes.map(s => s.text).join('\n') : selection.kind === 'unavailable' ? '' : selection.kind === 'cells' && !request.editable ? workbookDiscussionText(selection) : selection.text
     const single = selection.kind === 'text' || (selection.kind === 'shapes' && selection.shapes.length === 1) || (selection.kind === 'cells' && selection.cells?.length === 1 && selection.ranges.length === 1 && selection.ranges[0].startRow === selection.ranges[0].endRow && selection.ranges[0].startColumn === selection.ranges[0].endColumn)
     const textCell = selection.kind !== 'cells' || selection.cells?.every(cell =>
       (cell.valueType === 'text' || cell.valueType === 'empty') && !cell.merged)
-    const workbook = selection.kind === 'cells' && !(single && selection.cells?.[0]?.valueType === 'text') ? nativeTypedWorkbookSelection(selection) : null
+    const workbook = selection.kind === 'cells' ? nativeTypedWorkbookSelection(selection) : null
+    if (request.editable && document.view.kind === 'xlsx' && !workbook) fail('unsupported_selection')
     const presentation = nativeTypedPresentationSelection(selection)
     if (request.editable && (!document.view.editing || (!presentation && !workbook && (!single || !selection.capture?.complete || !text || !textCell)))) fail('unsupported_selection')
     const result = await invokeSelection(document, 'capture-selection', {sessionId:document.sessionId, threadId:request.threadId, selectionToken:request.selectionToken, changeSequence:selection.changeSequence, baseRevision:selection.version, text, editable:request.editable,...(request.editable && workbook ? {workbook} : {}),...(request.editable && presentation ? {presentation} : {})})
@@ -1226,39 +1495,70 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (document.appliedProposals.has(proposalId)) return
     if (accept && (!document.view.editing || scope.baseRevision !== document.view.revision || scope.changeSequence !== document.view.changeSequence)) fail('stale_selection')
     if (accept && (document.view.dirty || document.pendingSave || document.pendingRecovery)) fail('unsaved_changes')
+    const workbookAccept = accept && document.view.kind === 'xlsx'
+    if (workbookAccept && !scope.workbook) fail('unsupported_selection')
+    if (workbookAccept && (document.pendingWorkbookPrepare || document.approvedChange)) fail('unsaved_changes')
+    if (workbookAccept && document.view.recovery?.pending?.revision) fail('unknown')
+    const pendingDecision = document.pendingWorkbookDecision
+    if (workbookAccept && pendingDecision && (pendingDecision.scopeId !== scopeId || pendingDecision.proposalId !== proposalId)) fail('unsaved_changes')
+    const owner = {sessionId:document.sessionId,openOperationId:document.openOperationId,surface:document.surface,generationId:document.binding.generationId}
+    const ownsWorkbookScope = () => !disposed && !document.closed && !document.failed && document.ready && !document.closePending &&
+      documents.get(document.view.objectId) === document && document.sessionId === owner.sessionId && document.surface === owner.surface &&
+      document.openOperationId === owner.openOperationId && document.binding.generationId === owner.generationId &&
+      document.view.scope === scope && document.threadId === scope.threadId && document.view.revision === scope.baseRevision &&
+      document.view.changeSequence === scope.changeSequence && !document.view.dirty
     const decisionKey = `${scopeId}:${proposalId}:${accept}`
     let operationId = document.decisionOperations.get(decisionKey)
     if (!operationId) {
+      if (workbookAccept && pendingDecision) fail('unknown')
       if (document.decisionOperations.size >= 32) fail('capacity')
       operationId = newOperationId(); document.decisionOperations.set(decisionKey, operationId)
     }
-    const result = await invokeSelection(document, accept ? 'proposal-accept' : 'proposal-reject', {sessionId:document.sessionId,scopeId,proposalId,operationId,
-      ...(accept ? {selectionToken:scope.selectionToken,changeSequence:scope.changeSequence,baseRevision:scope.baseRevision} : {})})
-    if (accept) {
-      if (!result.ok || !('replacement' in result)) fail('invalid_response')
-      const replacement = result.replacement
-      if (replacement.operationId !== operationId || replacement.proposalId !== proposalId || replacement.selectionToken !== scope.selectionToken || replacement.changeSequence !== scope.changeSequence || replacement.baseRevision !== scope.baseRevision) fail('invalid_response')
-      if (!replacement.workbook && !replacement.presentation && replacement.text.length > 4096) fail('unsupported_selection')
-      document.approvedChange = {changeId:replacement.changeId,threadId:scope.threadId,saveOperationId:replacement.saveOperationId,baseRevision:scope.baseRevision}
-      document.view.canUndo = false
-      if (replacement.presentation) {
-        if (scope.workbook || !scope.presentation || JSON.stringify(replacement.presentation.before) !== JSON.stringify(scope.presentation)) fail('invalid_response')
-        try { await engine(document,{command:'replacePresentation',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,presentation:replacement.presentation}) }
-        catch (error) { if (error instanceof OfficeFailure && error.transient) throw error; await restoreFailedWorkbook(document); fail('save_failed') }
-      } else if (replacement.workbook) {
-        if (scope.presentation || !scope.workbook || JSON.stringify(replacement.workbook.before) !== JSON.stringify(scope.workbook)) fail('invalid_response')
-        try { await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,workbook:replacement.workbook}) }
-        catch (error) { if (error instanceof OfficeFailure && error.transient) throw error; await restoreFailedWorkbook(document); fail('save_failed') }
-      } else {
-        if (scope.workbook) fail('invalid_response')
-      await engine(document, {command:'replace',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,text:replacement.text,valueType:'text'})
+    if (workbookAccept && pendingDecision && pendingDecision.operationId !== operationId) fail('unknown')
+    if (workbookAccept && !pendingDecision) document.pendingWorkbookDecision = {scopeId,proposalId,operationId}
+    if (workbookAccept) { document.view.saving = true; document.view.canUndo = false; publish() }
+    try {
+      const result = await invokeSelection(document, accept ? 'proposal-accept' : 'proposal-reject', {sessionId:document.sessionId,scopeId,proposalId,operationId,
+        ...(accept ? {selectionToken:scope.selectionToken,changeSequence:scope.changeSequence,baseRevision:scope.baseRevision} : {})})
+      if (accept) {
+        if (!result.ok || !('replacement' in result)) fail('invalid_response')
+        const replacement = result.replacement
+        if (replacement.operationId !== operationId || replacement.proposalId !== proposalId || replacement.selectionToken !== scope.selectionToken || replacement.changeSequence !== scope.changeSequence || replacement.baseRevision !== scope.baseRevision) fail('invalid_response')
+        if (workbookAccept) {
+          if (!ownsWorkbookScope()) fail('stale_selection')
+          if (!replacement.workbook || replacement.presentation || !scope.workbook ||
+            JSON.stringify(replacement.workbook.before) !== JSON.stringify(scope.workbook)) fail('invalid_response')
+          const approved = {changeId:replacement.changeId,threadId:scope.threadId,saveOperationId:replacement.saveOperationId,baseRevision:scope.baseRevision}
+          document.approvedChange = approved
+          await submitWorkbookCandidate(document, approved, replacement.candidate, ownsWorkbookScope)
+          document.appliedProposals.add(proposalId)
+          document.view.appliedProposals = [...document.appliedProposals].slice(-16)
+          publish()
+          return
+        }
+        if (!replacement.workbook && !replacement.presentation && replacement.text.length > 4096) fail('unsupported_selection')
+        document.approvedChange = {changeId:replacement.changeId,threadId:scope.threadId,saveOperationId:replacement.saveOperationId,baseRevision:scope.baseRevision}
+        document.view.canUndo = false
+        if (replacement.presentation) {
+          if (scope.workbook || !scope.presentation || JSON.stringify(replacement.presentation.before) !== JSON.stringify(scope.presentation)) fail('invalid_response')
+          try { await engine(document,{command:'replacePresentation',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,presentation:replacement.presentation}) }
+          catch (error) { if (error instanceof OfficeFailure && error.transient) throw error; await restoreFailedWorkbook(document); fail('save_failed') }
+        } else if (replacement.workbook) {
+          fail('invalid_response')
+        } else {
+          if (scope.workbook) fail('invalid_response')
+          await engine(document, {command:'replace',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,text:replacement.text,valueType:'text'})
+        }
+        document.appliedProposals.add(proposalId)
+        document.view.appliedProposals = [...document.appliedProposals].slice(-16)
+        await save(document)
+        return
       }
-      document.appliedProposals.add(proposalId)
-      document.view.appliedProposals = [...document.appliedProposals].slice(-16)
-      await save(document)
-      return
+      await proposals(document,scopeId)
+    } catch (error) {
+      if (workbookAccept) return recoverWorkbookPreparation(document, scope.threadId, error)
+      throw error
     }
-    await proposals(document,scopeId)
   }
 
   return {
@@ -1393,7 +1693,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         // A lost cancellation reply retains only its recovery owner. The
         // retired native sink cannot admit input or references while Core's
         // idempotent cancellation is still awaiting confirmation.
-        if (active?.pendingManualCancel && ['beginManualEdit','format','reference','captureSelection','annotate'].includes(request.action)) {
+        if (active?.pendingManualCancel && ['beginManualEdit','editWorkbookCell','format','reference','captureSelection','annotate'].includes(request.action)) {
           if (request.action === 'beginManualEdit') logNativeOfficeManualBeginFailure('unknown',manualBeginFailureState(active))
           fail('unknown')
         }
@@ -1444,6 +1744,11 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         }
         if (request.action === 'bounds') { if (visible && epoch === visibilityEpoch) { document.bounds = request.bounds; document.appearance = request.appearance; if (!document.pendingRecovery) await document.surface.attach(request.bounds, request.appearance); await guardPresent(document) } return }
         if (isPlaying(document) || document.view.playback?.phase === 'error') fail('unavailable')
+        // A poll or decision can queue behind a save that retires its scope.
+        // Refuse that old request before the state-error path: it must not mark
+        // the successfully reopened view as failed or disable its saved undo.
+        if ((request.action === 'proposals' || request.action === 'acceptProposal' || request.action === 'rejectProposal') &&
+          request.scopeId !== document.view.scope?.scopeId) fail('stale_selection')
         try {
           document.binding = await listBinding(document.view.kind, document.binding)
           if (request.action === 'proposals') { await proposals(document,request.scopeId); return }
@@ -1459,6 +1764,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
           }
           if ('objectId' in request && (request.objectId !== document.view.objectId || !('revision' in request) || request.revision !== document.view.revision || request.expectedChangeSequence !== (document.view.changeSequence ?? 0))) fail('stale_selection')
           if (request.action === 'beginManualEdit') { await beginManualEdit(document,request.threadId); return }
+          if (request.action === 'editWorkbookCell') { await editWorkbookCell(document,request); return }
           if (request.action === 'format') { await formatManual(document,request); return }
           if (request.action === 'discardManualEdit') {
             if (document.view.kind !== 'docx' || request.threadId !== document.threadId) fail('invalid_request')

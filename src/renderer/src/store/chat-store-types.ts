@@ -11,6 +11,7 @@ import type {
 	  ReviewTarget,
   ThreadGoal,
   ThreadGoalStatus,
+  ThreadExecutionPolicy,
   ThreadTodoList,
   ThreadTodoStatus,
   ThreadUsageSnapshot,
@@ -373,6 +374,7 @@ export type ChatState = {
   interrupt: (options?: { discard?: boolean }) => Promise<void>
   renameActiveThread: (title: string) => Promise<void>
   renameThread: (threadId: string, title: string) => Promise<void>
+  updateThreadExecutionPolicy: (threadId: string, policy: ThreadExecutionPolicy) => Promise<boolean>
   archiveThread: (threadId: string, archived: boolean) => Promise<void>
   compactActiveThread: (reason?: string) => Promise<void>
   forkActiveThread: (expected?: ThreadSelectionReceipt) => Promise<void>

@@ -102,14 +102,35 @@ function ConversationRecordDetailsSeat({ record, requestVersion, onClose, onReti
 
 export type ConversationViewMode = 'conversation' | 'records' | 'trajectory'
 
+/* Resident tab presentation adapted from DeepSeek Harness 687f282e8625c6b8d11ff58211a90524be2e4317,
+ * ConversationSession.tsx. Existing Analytix owners retain every view transition. */
 export function ConversationRecordsToolbar({ mode, onModeChange, pending }: {
   mode: ConversationViewMode; onModeChange: (mode: ConversationViewMode) => void; pending?: 'missing' | 'ambiguous'
 }) {
   const { t } = useTranslation('common')
-  return <div className={css.toolbar}>
-    <button type="button" aria-pressed={mode === 'conversation'} onClick={() => onModeChange('conversation')}>{t('dshRecords.conversation')}</button>
-    <button type="button" aria-pressed={mode === 'records'} onClick={() => onModeChange('records')}>{t('dshRecords.records')}</button>
-    <button type="button" aria-pressed={mode === 'trajectory'} onClick={() => onModeChange('trajectory')}>{t('dshTrajectory.title')}</button>
+  const tabs = [
+    { mode: 'conversation', label: t('dshRecords.conversation') },
+    { mode: 'records', label: t('dshRecords.records') },
+    { mode: 'trajectory', label: t('dshTrajectory.title') }
+  ] as const
+  return <div className={css.navigation}>
+    <div className={css.tabs} role="tablist" aria-label={t('dshRecords.conversation')} data-conversation-tabs=""
+      onKeyDown={event => {
+        if (event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+        const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+        const current = buttons.indexOf(event.target as HTMLButtonElement)
+        if (current < 0) return
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+          : (current + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length
+        event.preventDefault()
+        buttons[next].focus({ preventScroll: true })
+        buttons[next].click()
+      }}>
+      {tabs.map(tab => <button key={tab.mode} type="button" role="tab" className={css.tab}
+        aria-selected={mode === tab.mode} tabIndex={mode === tab.mode ? 0 : -1}
+        onClick={() => onModeChange(tab.mode)}>{tab.label}</button>)}
+    </div>
     {pending ? <span role="status">{t('dshRecords.' + pending)}</span> : null}
   </div>
 }

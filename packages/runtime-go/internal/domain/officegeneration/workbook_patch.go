@@ -126,6 +126,12 @@ func ParseWorkbookPatch(body []byte) (WorkbookPatch, error) {
 			if !ok {
 				return p, workbookInvalid
 			}
+			if m["type"] == "empty" {
+				if !workbookPatchKeys(m, "rowOffset columnOffset type", "") {
+					return p, workbookInvalid
+				}
+				continue
+			}
 			field := map[string]string{"number": "value", "formula": "formula", "text": "text"}[fmt.Sprint(m["type"])]
 			if field == "" || !workbookPatchKeys(m, "rowOffset columnOffset type "+field, "") || m[field] == nil {
 				return p, workbookInvalid
@@ -256,7 +262,7 @@ func ApplyWorkbookPatch(s WorkbookSelection, p WorkbookPatch) (WorkbookSelection
 	after.Cells = append([]WorkbookSelectedCell{}, s.Cells...)
 	edits := p.Cells
 	if p.Kind != "range" {
-		if len(s.Cells) != 1 {
+		if (p.Kind != "number" && p.Kind != "formula") || len(s.Cells) != 1 {
 			return s, workbookInvalid
 		}
 		edits = []WorkbookCellEdit{{Type: p.Kind, Value: p.Value, Formula: p.Formula}}
@@ -291,11 +297,18 @@ func ApplyWorkbookPatch(s WorkbookSelection, p WorkbookPatch) (WorkbookSelection
 			c.Text = ""
 			c.Value = 0
 		case "text":
-			if e.Text == nil || e.Value != nil || e.Formula != "" || (c.ValueType != "empty" && c.ValueType != "text") {
+			if e.Text == nil || e.Value != nil || e.Formula != "" {
 				return s, workbookInvalid
 			}
 			c.Text = *e.Text
 			c.Formula = c.Text
+			c.Value = 0
+		case "empty":
+			if e.Text != nil || e.Value != nil || e.Formula != "" {
+				return s, workbookInvalid
+			}
+			c.Text = ""
+			c.Formula = ""
 			c.Value = 0
 		default:
 			return s, workbookInvalid

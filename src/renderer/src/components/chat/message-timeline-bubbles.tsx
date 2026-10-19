@@ -36,6 +36,7 @@ import { openWorkspacePathInEditor } from '../../lib/open-workspace-path'
 import { normalizeWorkspaceRoot } from '../../lib/workspace-path'
 import { useValidatedFileReference } from '../../lib/file-reference-validation'
 import { previewWorkspaceFile } from '../../lib/workspace-file-preview'
+import { confirmDialog } from '../../lib/confirm-dialog'
 import { AssistantMarkdown } from './AssistantMarkdown'
 import { observeTerminalDOMCommit } from '../../thread/tracing/thread-performance-trace'
 import { AcceptedSlotDisplay, acceptedFinalHasLocalDisplaySlots } from './AcceptedSlotDisplay'
@@ -205,12 +206,54 @@ function UserMessageInlineReference({ kind, title, display, path, ownerKey, work
   kind: 'file' | 'folder' | 'skill'; title: string; display: string; path?: string
   ownerKey: string; workspaceRoot: string; threadId: string | null; slash?: boolean; icon?: ReactNode
 }): ReactElement {
+  const { t } = useTranslation('common')
+  const opening = useRef<{ retire: () => void } | null>(null)
+  useLayoutEffect(() => () => { opening.current?.retire() }, [path, ownerKey, workspaceRoot, threadId])
   const target = useMemo(() => path && !Array.from(path).some(character => {
     const code = character.charCodeAt(0)
     return code <= 0x1f || code === 0x7f
   }) &&
     !/^[\\/]{2}/u.test(path) && (!/^[a-z][a-z\d+.-]*:/iu.test(path) || /^[a-z]:[\\/]/iu.test(path)) ? { path } : null, [path])
   const validation = useValidatedFileReference(target, workspaceRoot)
+  const open = async () => {
+    if (!target || opening.current) return
+    let unsubscribe: () => void = () => undefined
+    const attempt = { retire: () => {
+      unsubscribe()
+      if (opening.current === attempt) opening.current = null
+    } }
+    opening.current = attempt
+    const ownsReference = () => {
+      const state = useChatStore.getState()
+      return opening.current === attempt && threadId !== null && state.activeThreadId === threadId
+        && userReferenceOwner(state, threadId).key === ownerKey
+    }
+    // Retire even an A→B→A transition batched before this leaf rerenders.
+    unsubscribe = useChatStore.subscribe((state, previous) => {
+      if (state.activeThreadId !== previous.activeThreadId || userReferenceOwner(state, threadId).key !== ownerKey) {
+        attempt.retire()
+      }
+    })
+    try {
+      while (ownsReference()) {
+        // Click/retry revalidates this original source; a cached render-time
+        // resolution cannot establish that a moved or removed file still opens.
+        try {
+          const resolved = await window.analytix?.files?.resolve({ path: target.path, workspaceRoot })
+          if (!ownsReference()) return
+          if (resolved?.ok) {
+            previewWorkspaceFile({ path: resolved.path, workspaceRoot })
+            return
+          }
+        } catch { if (!ownsReference()) return }
+        if (!ownsReference() || !await confirmDialog(t('filePreviewFailed'), title, {
+          confirmLabel: t('protectedToolRetry'), cancelLabel: t('close')
+        })) return
+      }
+    } finally {
+      attempt.retire()
+    }
+  }
   const contents = <>{icon ?? (kind === 'file' ? <DshBrowseOutlineRegular className={userStyles.referenceIcon} />
     : kind === 'folder' ? <UserMessageFolderIcon /> : null)}{display}</>
   const className = `${userStyles.referenceChip}${slash ? ` ${userStyles.slashChip}` : ''}`
@@ -221,7 +264,7 @@ function UserMessageInlineReference({ kind, title, display, path, ownerKey, work
       if (event.detail > 1 || (event.detail !== 0 && event.currentTarget.ownerDocument.getSelection()?.isCollapsed === false)) return
       const state = useChatStore.getState()
       if (!threadId || state.activeThreadId !== threadId || userReferenceOwner(state, threadId).key !== ownerKey) return
-      previewWorkspaceFile({ path: validation.path, workspaceRoot })
+      void open()
     }}>{contents}</button>
 }
 

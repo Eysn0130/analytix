@@ -61,7 +61,7 @@ func (a *Adapter) invokeRecovery(ctx context.Context, call adapterport.Call, inp
 		}
 		// An empty projection for another authorized thread is not settlement
 		// evidence for the active change.
-		if current := recovered.Current; current != nil && current.Version == 2 && current.Origin == "manual" && current.ThreadID == thread && (current.Status == "committed" || current.Status == "undone") {
+		if current := recovered.Current; current != nil && (current.Version == 2 && a.kind == "docx" || current.Version == 3 && a.kind == "xlsx") && current.Origin == "manual" && current.ThreadID == thread && (current.Status == "committed" || current.Status == "undone") {
 			if session := a.sessions[id]; session != nil && session.manualBaseRevision == current.BaseRevision {
 				a.releaseManualCapture(id, current.ChangeID)
 			}
@@ -128,7 +128,7 @@ func nativeMutationPurpose(state fileport.NativeRecovery, thread, change, revisi
 	if matched == nil || !revisionPattern.MatchString(matched.BaseRevision) {
 		return nativeLeaseNone, nil, fileport.ErrOperationMismatch
 	}
-	if matched.Version == 2 && matched.Origin == "manual" {
+	if (matched.Version == 2 || matched.Version == 3) && matched.Origin == "manual" {
 		if matched.SaveOperationID != "native_save_"+change || matched.UndoOperationID != "native_undo_"+change ||
 			(replayStatus == "committed" && matched.BaseRevision != revision) ||
 			(replayStatus == "undone" && matched.Status != "undone" && matched.Revision != revision) {
@@ -152,9 +152,10 @@ func (a *Adapter) captureNativeMutation(ctx context.Context, id, thread, change,
 		return nil, editingapp.ErrProjection
 	}
 	// A live strict lease already has the original Agent admission. Preserve
-	// that path without rediscovering its persisted purpose. A manual lease
-	// never enters this branch and must still prove its exact durable change.
-	if session.release != nil && session.leasePurpose == nativeLeaseStrict && a.capture != nil {
+	// that path without rediscovering its persisted purpose. XLSX also has a
+	// typed manual variant, so even a strict lease must match its durable change:
+	// another thread's pending manual record may be absent from its projection.
+	if session.release != nil && session.leasePurpose == nativeLeaseStrict && a.capture != nil && a.kind != "xlsx" {
 		return func() {}, nil
 	}
 	state, err := service.NativeRecovery(ctx, id, thread)
@@ -167,8 +168,10 @@ func (a *Adapter) captureNativeMutation(ctx context.Context, id, thread, change,
 	}
 	capture := a.capture
 	if purpose == nativeLeaseManual {
-		if a.kind != "docx" {
-			return nil, fileport.ErrOperationMismatch
+		if record.Version != 2 || a.kind != "docx" {
+			if record.Version != 3 || a.kind != "xlsx" {
+				return nil, fileport.ErrOperationMismatch
+			}
 		}
 		// Undo's input base is the saved revision, not the original manual base.
 		// Bind it to the trusted save journal even after an idempotent Undo has

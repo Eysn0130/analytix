@@ -1932,3 +1932,72 @@ and unchanged accepted dispatch→ACK→observer ordering. Static reviewer findi
 were repaired. No tests, types, lint, builds, GUI/native or Provider acceptance ran
 in this writer window. No pixel-equivalence, whole DSH parity, admission PASS,
 canonical integration, commit, push, release or publication is claimed.
+
+## DSH composer family candidate — 2026-10-19 UTC
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`. Source: DeepSeek
+Harness commit `687f282e8625c6b8d11ff58211a90524be2e4317`. The selected
+objects below were read from that fixed Git commit, independently of the
+research checkout's current HEAD. Root MIT license blob
+`c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785` is unchanged; the complete
+Copyright (c) 2026 DeepSeek notice remains in `THIRD_PARTY_NOTICES.md`.
+The selected package paths carry no nearer license exception. Reviewer:
+coordinating composer owner, with separate menu, picker and header-seat
+source reviews. This bounded intake does not repin unrelated upstream sources.
+
+| Exact source under `packages/client/` | Git blob | Selected destination/adaptation |
+| --- | --- | --- |
+| `ui-input-trigger/src/client/MenuView.tsx` | `da6dccdbadace7d5f0b03349562db90c1c9588a8` | `FloatingComposerCommandMenu.tsx`: shared row presentation; existing Analytix command/focus owners |
+| `ui-input-trigger/src/client/MenuView.module.css` | `fff3fc78816d9e00bc96f8e6e985944f49ce99f5` | Composer hunks in `styles/base-shell.css`: full-width menu, compact row/group/alias geometry |
+| `ui-input-trigger/src/client/controller.ts` | `d2f1b444c1a0d8b4735475fd83c627d7277eafc4` | `InputBar.tsx`: dismiss the current trigger without clearing its draft, Tab completion and Shift+Tab exit; existing Analytix IME, focus, draft revision and owner fences retained; no upstream controller or store imported |
+| `ui-commands/src/client/presentation.ts` | `32d03930b23df9a8255be0a37b5d280995c3eb42` | `floating-composer-commands.ts`: empty-query sections; explicit unavailable capabilities |
+| `ui-primitives/src/rank-by-name.ts` | `2f7bdd880fda69011b250bacc94ad068e189d89c` | Same command model: stable nonempty-query ranking |
+| `ui-primitives/src/Menu.module.css` | `a6d6714783d8e46c17f19b6bb5dee26e6693ee3c` | Existing picker stylesheet: compact menu geometry |
+| `ui-primitives/src/PermissionIcon.tsx` | `ee480c8c2dae100e7cb448945e023fecfe5d3fe4` | `FloatingComposerExecutionPicker.tsx`: selected regular shield/check, workspace-write and full-access SVG artwork; each glyph is bound to the actual Analytix policy combination rather than an upstream preset label |
+| `ui-primitives/src/icons/index.tsx` | `d22cbdd06d50289f15154996564b250b2af4163a` | `FloatingComposerModelPicker.tsx`: selected two-path IconDataOutlineRegular artwork; existing selected `DshToolIcons.tsx` Check and ChevronDown leaves reused by `FloatingComposerCommandMenu.tsx` and `Workbench.tsx`; no whole icon catalog imported |
+| `ui-model-selection/src/client/ModelSelect.tsx` | `c497bcbe77e50ff23963aa8410837707b4473f14` | `FloatingComposerModelPicker.tsx`: same-card panes over existing provider/model callbacks |
+| `ui-model-selection/src/client/ModelSelect.module.css` | `f4f42cb9cc787b1e39df86e77ea2d0d19df7e16a` | Existing `model-picker.css`: search/check/pane geometry |
+| `ui-permission-presets/src/client/PermissionSelect.tsx` | `0281c41a2476d25fab510d9ccbe500188d7911ab` | `FloatingComposerExecutionPicker.tsx`: existing authority-facing callback, truthful Analytix policy labels |
+| `ui-permission-presets/src/client/PermissionSelect.module.css` | `a3add30afbe9a18e533a611efdf49f2f8456f09d` | Same picker stylesheet: trigger/icon/check geometry |
+| `ui-conversation/src/client/skeleton/InputBar.tsx` | `ef95796577c6f53c0280a3e8c39c4a8eb10ec5eb` | `InputBar.tsx`: ordinary busy draft uses the single Send action, empty draft uses Stop, and recording/transcription activity replaces standard toolbar controls while retaining the existing primary action; Analytix queue/steer delivery callbacks remain authoritative |
+| `ui-conversation/src/client/skeleton/InputBar.module.css` | `123a0fcbeab8afb525d94f30a182d0a931b16e5f` | Existing composer presentation in `InputBar.tsx` and `styles/base-shell.css`: compact control geometry and activity expansion; the existing dock remains in its original owner |
+| `ui-conversation/src/client/skeleton/ConversationContent.tsx` | `218082ae3155f5f1040c82ca26b17378fbecb175` | `InputBar.tsx`: initial-only workspace/Git accessory; existing workspace owner retained |
+| `ui-conversation/src/client/skeleton/ConversationSession.tsx` | `f1179cf32b614f0b4343446465f2b1836bb3f044` | `SessionHeader.tsx`: resident tabs presentation seat; MessageTimeline retains view/record/scroll state |
+| `ui-conversation/src/client/skeleton/ConversationRoot.module.css` | `070cb94a75fb5e15743866a9de1697174cab2bb5` | Existing `ConversationRecords.module.css`: header tab strip geometry |
+| `ui-chat/src/client/chat/ChatView.module.css` | `6696330f0a39085815da0200ca0887835ddeb29e` | `Workbench.tsx` and composer hunks in `styles/base-shell.css`: selected 34px return-to-bottom circle, surface, stroke and hover; existing Analytix scroll-follow and measured composer anchor retained |
+| `ui-attachment/src/DropOverlay.tsx` | `52b6264eddde5cbfc74dd66a36a470d16db19228` | `ComposerDropOverlay.tsx`: body-portal invitation and selected accepted-upload SVG illustration, with per-instance clip identity; disabled illustration and upload receipt model not imported |
+| `ui-attachment/src/DropOverlay.module.css` | `84e7e250bc781c2d6622ef7ad32db8cf9e41a2b2` | `ComposerDropOverlay.module.css`: non-intercepting full-viewport mask, reduced-motion fade, centered 115px by 84px illustration and title geometry, adapted to local tokens |
+| `ui-attachment/src/client/drop-events.ts` | `2f3da69372b2d09ec492c642f7ea027cb3ee509a` | `ComposerDropOverlay.tsx`: nested file-drag depth and document-listener cleanup, adapted to existing owner/revision fences and exactly one intake; this leaf does not read native paths or manufacture receipts |
+| `ui-conversation/src/client/skeleton/ContextMeter.module.css` | `9d94b96e766424bcfe0e5c2e540101b3eb8b2490` | `reference-only` in this batch: `InputBarDock.module.css` and the existing context model are unchanged; PR66's selected-window metadata, historical request sample and unknown/unmeasured readings remain distinct |
+
+| Exact source under `packages/experimental/` | Git blob | Selected destination/adaptation |
+| --- | --- | --- |
+| `client-ui-voice-input/src/client/VoiceInput.tsx` | `7b60ca9b7e2eaaf147bf38e5e267e768f169037d` | `InputBar.tsx`: Cancel, recording Stop-to-insert and transcription activity presentation; `use-voice-dictation.ts` extracts its own existing recorder cleanup into a real cancellation operation and retires stale permission/transcript results; upstream recording, preparation and transcription framework not imported |
+| `client-ui-voice-input/src/client/VoiceInput.module.css` | `715007b36ad587093f6d427d9811e32e31b94553` | `VoiceRecordingStrip.tsx` and composer hunks in `styles/base-shell.css`: 34px activity row, 32px round controls, 24px waveform and secondary activity text; existing Analytix canvas algorithm, elapsed timer and `stop('send')` API retained |
+
+No DSH runtime, Session store, trigger service, slot framework, editor, upload
+receipt, permission executor or brand asset is imported. Analytix keeps its
+ProseMirror history, private draft/revision fences, actual upload/reference
+identities, queue/steer semantics and protected-local boundaries. Menu entries
+without a real feedback/export owner remain disabled with a reason. Permission
+presentation must not claim restricted Bash execution or a uniform external
+plugin OS sandbox. The unchanged context dock is a reference comparison, not a
+new ContextMeter port or a source of inferred occupancy percentages.
+
+Bounded candidate verification used an initial 25-file affected regression scope,
+followed by the six repaired or extended suites (512 assertions, all passing).
+The other 19 suites retained their passing initial result. Full web and node type
+checks, initial candidate-path ESLint and the repaired-path lint all passed. The
+real component browser fixture supplied six screenshots covering light hero and
+command menus, dark permission/model menus and a 390px model pane; browser Escape
+also retained the slash draft. Fixtures used synthetic thread/settings callbacks,
+without Electron, a live Provider or mutable user state. Original user-supplied
+DSH image pixels were not available to this writer, so source-based geometry
+review and these screenshots do not establish pixel equivalence.
+
+Thread policy confirmation remains a cross-layer gap: the renderer requires an
+actual version-2 PATCH/readback and refuses an unconfirmed legacy same-pair
+response. The Core patch owner does not yet seal explicit complete-pair choices;
+no Go source, public schema or migration rule was changed in this candidate.
+Combined native acceptance, DSH parity, whole-product, packaging and release
+acceptance are not claimed.

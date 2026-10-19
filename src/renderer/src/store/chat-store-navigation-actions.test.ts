@@ -27,6 +27,7 @@ vi.mock('../account/local-provider-readiness', async (importOriginal) => ({
 }))
 
 import { createNavigationActions } from './chat-store-navigation-actions'
+import { createMaintenanceActions } from './chat-store-maintenance-actions'
 
 function thread(overrides: Partial<NormalizedThread> & Pick<NormalizedThread, 'id' | 'workspace'>): NormalizedThread {
   return {
@@ -1473,6 +1474,49 @@ describe('receipt-scoped navigation refresh', () => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
   })
+  it.each(['before', 'during'] as const)('retires a list started %s A policy mutation without replacing its confirmed pair', async order => {
+    const original: NormalizedThread = { ...thread({ id: 'policy-a', workspace: '/synthetic/policy' }),
+      executionPolicyVersion: 2, approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }
+    const updated: NormalizedThread = { ...original, approvalPolicy: 'never', sandboxMode: 'read-only' }
+    const listing = deferredReceipt<NormalizedThread[]>(), patch = deferredReceipt<NormalizedThread>()
+    const provider = { listThreads: vi.fn(() => listing.promise), updateThreadExecutionPolicy: vi.fn(() => patch.promise) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ activeThreadId: original.id, threads: [original] })
+    const maintenance = createMaintenanceActions({ set: partial => {
+      Object.assign(harness.state, typeof partial === 'function' ? partial(harness.state) : partial)
+    }, get: () => harness.state, sseAbortRef: harness.sseAbortRef })
+    const pendingRead = order === 'before' ? harness.actions.refreshThreads() : null
+    const pendingMutation = maintenance.updateThreadExecutionPolicy(original.id, { approvalPolicy: 'never', sandboxMode: 'read-only' })
+    const duringRead = order === 'during' ? harness.actions.refreshThreads() : null
+    patch.resolve(updated); expect(await pendingMutation).toBe(true)
+    listing.resolve([original]); await (pendingRead ?? duringRead)
+    expect(harness.state.threads[0]).toMatchObject({ approvalPolicy: 'never', sandboxMode: 'read-only' })
+    expect(harness.state.activeThreadId).toBe(original.id)
+    expect(harness.state.error).toBeNull()
+  })
+
+  it('releases the case-project loading seat when A policy mutation retires its stale inventory', async () => {
+    const original: NormalizedThread = { ...thread({ id: 'policy-a', workspace: '/synthetic/policy' }),
+      executionPolicyVersion: 2, approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }
+    const listing = deferredReceipt<NormalizedThread[]>(), patch = deferredReceipt<NormalizedThread>()
+    const provider = { listCaseProjectThreads: vi.fn(() => listing.promise), updateThreadExecutionPolicy: vi.fn(() => patch.promise) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const harness = buildHarness({ activeThreadId: original.id, threads: [original] })
+    const maintenance = createMaintenanceActions({ set: partial => {
+      Object.assign(harness.state, typeof partial === 'function' ? partial(harness.state) : partial)
+    }, get: () => harness.state, sseAbortRef: harness.sseAbortRef })
+    const pendingRead = harness.actions.loadCaseProjectThreads('policy-project', { force: true })
+    expect(harness.state.caseProjectLoadingById['policy-project']).toBe(true)
+    const pendingMutation = maintenance.updateThreadExecutionPolicy(original.id, { approvalPolicy: 'never', sandboxMode: 'read-only' })
+    patch.resolve({ ...original, approvalPolicy: 'never', sandboxMode: 'read-only' })
+    expect(await pendingMutation).toBe(true)
+    listing.resolve([original]); await pendingRead
+    expect(harness.state.caseProjectLoadingById['policy-project']).toBe(false)
+    expect(harness.state.caseProjectErrorsById['policy-project']).toBeNull()
+    expect(harness.state.caseProjectThreadsById['policy-project']).toBeUndefined()
+    expect(harness.state.threads[0]).toMatchObject({ approvalPolicy: 'never', sandboxMode: 'read-only' })
+  })
+
   it.each([true, false])('checks ownership after write-workspace I/O (current=%s)', async currentAfterRead => {
     let current = true
     const settings = deferredReceipt<Awaited<ReturnType<typeof rendererRuntimeClient.getSettings>>>()

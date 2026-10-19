@@ -83,6 +83,17 @@ function tabStripLayout(viewportWidth = 240, scale = 1) {
 }
 
 describe('manual workspace tabs', () => {
+  it('delegates fullscreen and collapse visuals to an integrated viewer while retaining add and tab close', async () => {
+    const state = useWorkspaceTabsStore.getState(), collapse = vi.fn(), focus = vi.fn()
+    await act(async () => root.render(createElement(WorkspaceTabs, { tabs: state.tabs, activeTabId: state.activeTabId,
+      selectorOpen: false, focused: false, viewerControlsInHeader: true, onSelect, onClose, onReorder: state.reorderTab,
+      onAdd: state.showSelector, onCollapse: collapse, onToggleFocus: focus })))
+    expect(container.querySelector('.workspace-tabs-actions')?.querySelectorAll('button')).toHaveLength(1)
+    expect(container.querySelector('#workbench-workspace-collapse')).toBeNull()
+    await act(async () => container.querySelector<HTMLButtonElement>('.workspace-tab-close')!.click())
+    expect(onClose).toHaveBeenCalledWith(a.id)
+    expect(collapse).not.toHaveBeenCalled(); expect(focus).not.toHaveBeenCalled()
+  })
   it('shows task identity in the existing strip and omits the unavailable terminal from Schedule tools', async () => {
     const taskTab: WorkspaceTab = { id: 'schedule-task:"task"', kind: 'tool', mode: 'schedule-task', title: 'Current task', scheduleTaskId: 'task' }
     await act(async () => useWorkspaceTabsStore.getState().openTab(taskTab))
@@ -280,7 +291,7 @@ describe('manual workspace tabs', () => {
     expect(useWorkspaceTabsStore.getState().tabs).toEqual([a,b])
     expect(useWorkspaceTabsStore.getState().tabs[1].dirty).toBe(true)
   })
-  it('terminal selector dispatches one action and creates no right-side terminal tab', async () => {
+  it('terminal selector dispatches one action to the workspace owner', async () => {
     const onOpen = vi.fn()
     await act(async () => root.render(createElement(WorkspaceToolSelector, { onOpen, filesEnabled: true, sideChatEnabled: false, planEnabled: false })))
     const button = container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="terminal"]')!

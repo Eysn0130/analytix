@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import {beforeEach,afterEach,expect,it,vi} from 'vitest'
-import {useNativeOfficeStore,nativeOfficeTargetKey,nativeOfficeManualPhase,nativeOfficeHasUnresolvedChange,readNativeOfficeCreateReadiness,nativeOfficeCreateErrorKey} from './native-office-store'
+import {useNativeOfficeStore,nativeOfficeTargetKey,nativeOfficeManualPhase,nativeOfficeHasUnresolvedChange,readNativeOfficeCreateReadiness,nativeOfficeCreateErrorKey,nativeWorkbookDraftKey,type NativeWorkbookCellDraft} from './native-office-store'
 import type {NativeOfficeView,NativeOfficeRequest} from '@shared/native-office'
 const selector={threadId:'thread-a',turnId:'turn-a',callId:'call_host_'+'a'.repeat(64),resultItemId:'item_result_'+'b'.repeat(64),viewId:'11111111-1111-4111-8111-111111111111',snapshotDigest:'c'.repeat(64),index:0}
 const view:NativeOfficeView={objectId:'d'.repeat(64),path:'/workspace/report.docx',kind:'docx',revision:'e'.repeat(64),dirty:false,status:'ready'}
 let request:ReturnType<typeof vi.fn>
-beforeEach(()=>{request=vi.fn(async()=>({ok:true,view:null}));Object.defineProperty(window,'analytix',{configurable:true,value:{office:{request}}});useNativeOfficeStore.setState({target:null,view:null,views:{},error:null,creationAttempt:null,manualOwners:{}})})
+beforeEach(()=>{request=vi.fn(async()=>({ok:true,view:null}));Object.defineProperty(window,'analytix',{configurable:true,value:{office:{request}}});useNativeOfficeStore.setState({target:null,view:null,engineViews:{},views:{},workbookDrafts:{},workbookClosing:{},workbookDraftInputFrozen:false,workbookDraftComposing:false,error:null,creationAttempt:null,manualOwners:{}})})
 afterEach(()=>{Reflect.deleteProperty(window,'analytix');vi.restoreAllMocks()})
 it('keeps same-file ordinary and Present views isolated by complete source selector',async()=>{
   const store=useNativeOfficeStore.getState();await store.select('/workspace',view.path);store.receive(view)
@@ -189,3 +189,93 @@ it.each([
   ['invalid_request','workspaceWordInvalidRequest'],['capacity','workspaceWordCapacity'],
   ['forbidden','nativeOfficeForbidden'],['conflict','workspaceWordNameConflict'],['engine_unavailable','workspaceWordCreateFailed']
 ])('maps creation error %s without blanket filename advice', (error,key)=>{expect(nativeOfficeCreateErrorKey(error)).toBe(key)})
+
+const bookCell:NativeWorkbookCellDraft['cell']={sheet:0,column:0,row:0,text:'12',value:12,formula:'12',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
+const book:NativeOfficeView={...view,path:'/workspace/book.xlsx',kind:'xlsx',workbookEditing:{editable:true}}
+const bookDraftKey=nativeWorkbookDraftKey('/workspace',book.path,'thread-a')
+function workbookDraft(overrides:Partial<NativeWorkbookCellDraft>={}):NativeWorkbookCellDraft {
+  return {id:'local-draft',workspace:'/workspace',path:book.path,threadId:'thread-a',objectId:book.objectId,revision:book.revision,
+    sheetName:'Sheet1',cell:bookCell,type:'text',value:'001',changed:true,...overrides}
+}
+it.each(['frozen','closing'] as const)('workbook input mode intent is retained and cannot change while %s',state=>{
+  const store=useNativeOfficeStore.getState(),draft=workbookDraft({inputMode:'auto'})
+  store.setWorkbookDraft(bookDraftKey,draft)
+  useNativeOfficeStore.setState(state === 'frozen' ? {workbookDraftInputFrozen:true} : {workbookClosing:{[nativeOfficeTargetKey({workspace:'/workspace',path:book.path})]:true}})
+  store.setWorkbookDraft(bookDraftKey,{...draft,inputMode:'text'},draft.id)
+  expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toBe(draft)
+  useNativeOfficeStore.setState({workbookDraftInputFrozen:false,workbookClosing:{}})
+  store.setWorkbookDraft(bookDraftKey,{...draft,inputMode:'text'},draft.id)
+  expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toMatchObject({inputMode:'text',type:'text',value:'001'})
+})
+type WorkbookChange=Extract<NonNullable<NonNullable<NativeOfficeView['recovery']>['current']>,{version:3}>
+function workbookChange(overrides:Partial<WorkbookChange>={}):WorkbookChange {
+  const bounds={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}
+  return {version:3,origin:'manual',changeId:'f'.repeat(64),threadId:'thread-a',baseRevision:book.revision,revision:'a'.repeat(64),status:'committed',
+    workbook:{before:{...bounds,cells:[bookCell]},after:{...bounds,cells:[{...bookCell,valueType:'text',text:'001',formula:'001',value:0}]},results:['001']},
+    saveOperationId:'save-operation',undoOperationId:'undo-operation',canUndo:true,canCancel:false,canRetryUndo:false,canResume:false,createdAt:'',savedAt:'',...overrides}
+}
+it('projects local workbook dirtiness into existing workspace views without changing native authority',async()=>{
+  const store=useNativeOfficeStore.getState();await store.select('/workspace',book.path);store.receive(book)
+  store.setWorkbookDraft(bookDraftKey,workbookDraft())
+  const identity=nativeOfficeTargetKey({workspace:'/workspace',path:book.path})
+  expect(useNativeOfficeStore.getState().views[identity].dirty).toBe(true)
+  expect(useNativeOfficeStore.getState().engineViews[identity]).toBe(book)
+  expect(useNativeOfficeStore.getState().view?.dirty).toBe(false)
+  await store.select('/workspace',view.path);store.receive(view);await store.select('/workspace',book.path)
+  expect(useNativeOfficeStore.getState().view).toBe(book)
+  expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey].value).toBe('001')
+  expect(useNativeOfficeStore.getState().views[identity].dirty).toBe(true)
+})
+it('vetoes tab close before IPC until the retained workbook draft is explicitly discarded or saved',async()=>{
+  const store=useNativeOfficeStore.getState();await store.select('/workspace',book.path);store.receive(book)
+  store.setWorkbookDraft(bookDraftKey,workbookDraft());request.mockClear()
+  expect(await store.close('/workspace',book.path)).toBe(false)
+  expect(request).not.toHaveBeenCalled()
+  const retained=useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]
+  expect(retained).toMatchObject({value:'001',closeRequested:true})
+  store.setWorkbookDraft(bookDraftKey,{...retained,closeRequested:false},retained.id)
+  expect(await store.close('/workspace',book.path)).toBe(false)
+  expect(request).not.toHaveBeenCalled()
+  store.setWorkbookDraft(bookDraftKey,null,retained.id)
+  expect(await store.close('/workspace',book.path)).toBe(true)
+  expect(request).toHaveBeenCalledExactlyOnceWith({action:'close',objectId:book.objectId})
+  expect(useNativeOfficeStore.getState().target).toBeNull()
+})
+it.each([true,false])('fences first input during a pending native close and releases the fence after result %s',async ok=>{
+  const store=useNativeOfficeStore.getState();await store.select('/workspace',book.path);store.receive(book)
+  let finish!:(result:{ok:boolean;view:null})=>void
+  request.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+  const closing=store.close('/workspace',book.path)
+  store.setWorkbookDraft(bookDraftKey,workbookDraft())
+  expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toBeUndefined()
+  expect(await store.close('/workspace',book.path)).toBe(false)
+  finish({ok,view:null});expect(await closing).toBe(ok)
+  expect(useNativeOfficeStore.getState().workbookClosing).toEqual({})
+  if (!ok) {
+    store.setWorkbookDraft(bookDraftKey,workbookDraft())
+    expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey].value).toBe('001')
+  }
+})
+it('keeps an unconfirmed draft until a query proves its exact target, base, thread, operation and typed value',async()=>{
+  const store=useNativeOfficeStore.getState();await store.select('/workspace',book.path);store.receive(book)
+  const draft=workbookDraft({unconfirmed:true,submitted:{edit:{type:'text',text:'001'},changeId:'f'.repeat(64),saveOperationId:'save-operation'}})
+  store.setWorkbookDraft(bookDraftKey,draft)
+  const expected=workbookChange()
+  expected.workbook!.before.cells=[Object.fromEntries(Object.entries(bookCell).reverse()) as typeof bookCell]
+  const wrongChanges=[workbookChange({threadId:'other-thread'}),workbookChange({baseRevision:'b'.repeat(64)}),
+    workbookChange({changeId:'b'.repeat(64)}),workbookChange({saveOperationId:'other-operation'}),
+    workbookChange({workbook:{...expected.workbook!,before:{...expected.workbook!.before,cells:[{...bookCell,column:1}]}}}),
+    workbookChange({workbook:{...expected.workbook!,after:{...expected.workbook!.after,cells:[{...bookCell,valueType:'text',text:'other',formula:'other',value:0}]}}})]
+  for (const change of wrongChanges) {
+    store.receive({...book,revision:change.revision,recovery:{current:change,pending:null}})
+    expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toEqual(draft)
+  }
+  for (const phase of [{status:'loading' as const,saving:true},{status:'loading' as const,saving:false},{status:'error' as const,saving:false}]) {
+    store.receive({...book,...phase,revision:expected.revision,recovery:{current:expected,pending:null}})
+    expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toEqual(draft)
+  }
+  store.receive({...book,revision:expected.revision,recovery:{current:expected,pending:null}})
+  expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toBeUndefined()
+  expect(useNativeOfficeStore.getState().views[nativeOfficeTargetKey({workspace:'/workspace',path:book.path})].dirty).toBe(false)
+  expect(request.mock.calls.every(([input])=>input.action === 'hide')).toBe(true)
+})

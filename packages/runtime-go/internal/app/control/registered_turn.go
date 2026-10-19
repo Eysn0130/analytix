@@ -15,12 +15,13 @@ func (c *Controller) RunRegisteredTurn(ctx context.Context, threadID, turnID str
 	}
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if err := c.RegisterTurnCancelWithError(threadID, turnID, cancel); err != nil {
+	turnCtx, owner, err := c.RegisterTurnCancelOwnedV1(turnCtx, threadID, turnID, cancel)
+	if err != nil {
 		if errors.Is(err, ErrRuntimeShuttingDown) {
 			return ActionResult{StatusCode: 503, Body: map[string]any{"code": "runtime_shutting_down", "message": "runtime is shutting down"}}
 		}
 		return ActionResult{StatusCode: 409, Body: map[string]any{"code": "turn_execution_conflict", "message": "turn execution is already active"}}
 	}
-	defer c.UnregisterTurnCancel(threadID, turnID)
+	defer c.ReleaseTurnExecutionOwnerV1(owner)
 	return run(turnCtx)
 }

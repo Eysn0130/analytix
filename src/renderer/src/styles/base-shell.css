@@ -2253,40 +2253,6 @@ pre {
   contain: layout paint;
 }
 
-.ds-terminal-panel-shell {
-  position: relative;
-  z-index: 30;
-  min-height: 0;
-  width: 100%;
-  flex-shrink: 0;
-  overflow: visible;
-  will-change: height, opacity;
-}
-
-.ds-terminal-panel-shell[data-open='false'] {
-  pointer-events: none;
-}
-
-.ds-terminal-panel-shell[data-resizing='true'] {
-  cursor: row-resize;
-}
-
-.ds-terminal-panel-clip {
-  position: absolute;
-  inset: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.ds-terminal-panel-content {
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  min-height: 0;
-  background: transparent;
-  contain: layout paint;
-}
-
 .ds-workbench-resize-handle {
   position: absolute;
   display: flex;
@@ -6211,22 +6177,47 @@ pre {
 }
 
 .dsh-input-bar, .dsh-input-bar * { -webkit-app-region: no-drag; }
+/* Selected command menu geometry adapted from DeepSeek Harness 687f282e8625c6b8d11ff58211a90524be2e4317.
+   Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md. */
 .dsh-input-bar .dsh-input-menu {
-  position: absolute; bottom: 48px; left: 4px; z-index: 40;
-  width: max-content; min-width: 192px; max-width: min(292px, calc(100vw - 28px));
-  padding: 6px; border-radius: 12px; background: var(--ds-surface-elevated);
-  color: var(--ds-text-muted); box-shadow: var(--ax-shadow-popover);
+  --dsw-specific-menu: rgba(248, 249, 250, .94);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  --dsw-elevation-prominent: 0 0 0 .5px var(--dsw-elevation-stroke-color), 0 3px 8px rgba(0, 0, 0, .04), 0 0 20px rgba(0, 0, 0, .05);
+  --dsw-alias-menu-icon: var(--dsw-alias-label-tertiary);
+  position: absolute; bottom: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+  display: flex; flex-direction: column; box-sizing: border-box; min-width: 0;
+  max-height: min(400px, calc(100dvh - 180px)); overflow: hidden;
+  padding: 4px; border: 0; border-radius: 12px; background: var(--dsw-specific-menu);
+  color: var(--dsw-alias-label-primary); box-shadow: var(--dsw-elevation-prominent); backdrop-filter: blur(40px) saturate(150%);
   font-size: 13px; line-height: 20px;
 }
-.dsh-input-menu-item {
-  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px;
-  padding: 4px 8px; border-radius: 6px; text-align: left;
-}
-.dsh-input-menu-item > svg { flex: none; width: 14px; height: 14px; stroke-width: 1.9; }
-.dsh-input-menu-item > span:first-of-type { flex: 1; min-width: 0; }
-.dsh-input-menu-item:hover:not(:disabled), .dsh-input-menu-item:focus-visible { background: var(--ds-surface-hover); color: var(--ds-text); }
-.dsh-input-menu-item:disabled { cursor: not-allowed; opacity: .45; }
-.dsh-input-menu-check { flex: none; width: 16px; color: var(--ds-text); text-align: center; }
+[data-theme='dark'] .dsh-input-bar .dsh-input-menu { --dsw-specific-menu: rgba(48, 49, 54, .94); }
+.dsh-composer-return-to-bottom { --dsw-elevation-stroke-color: var(--dsw-alias-border-l3); padding: 0; border: 0; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-button-floating-fill, var(--ds-surface-elevated)); box-shadow: var(--dsw-elevation-panel); }
+.dsh-composer-return-to-bottom:hover { background: var(--dsw-alias-button-floating-hover, var(--ds-surface-hover)); }
+.dsh-composer-command-viewport { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.dsh-composer-command-section { flex: none; min-height: 23px; padding: 5px 8px 2px; color: var(--dsw-alias-label-tertiary); font-size: 11px; font-weight: 500; line-height: 16px; }
+.dsh-composer-command-section:not(:first-child) { margin-top: 3px; }
+.dsh-composer-command-item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 34px; padding: 6px 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; text-align: left; }
+.dsh-composer-command-item[data-active], .dsh-composer-command-item:hover:not(:disabled), .dsh-composer-command-item:focus-visible { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-composer-command-item:focus-visible { outline: 1px solid var(--dsw-focus-ring-color); outline-offset: -1px; }
+.dsh-composer-command-item:disabled { cursor: not-allowed; opacity: .45; }
+.dsh-composer-command-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--dsw-alias-menu-icon); }
+.dsh-composer-command-icon svg { width: 14px; height: 14px; }
+.dsh-composer-command-title { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-composer-command-alias { flex: none; max-width: 20%; overflow: hidden; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-composer-command-description { flex: 1; min-width: 0; overflow: hidden; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-composer-command-check { flex: none; width: 14px; height: 14px; }
+.dsh-composer-command-empty { padding: 8px; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.dsh-composer-voice-activity { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; min-height: 34px; }
+.dsh-composer-voice-control { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); }
+.dsh-composer-voice-control:hover { color: var(--dsw-alias-label-primary); }
+.dsh-composer-voice-control svg { width: 16px; height: 16px; }
+.dsh-composer-voice-pending { display: inline-flex; flex: 1; align-items: center; justify-content: center; gap: 8px; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.dsh-composer-image-remove { opacity: 0; }
+.dsh-composer-image:hover .dsh-composer-image-remove,
+.dsh-composer-image:focus-within .dsh-composer-image-remove { opacity: 1; }
+@media (pointer: coarse) { .dsh-composer-image-remove { opacity: 1; } }
+
 .dsh-conversation-hero {
   display: flex; flex-direction: column; align-items: center;
   gap: 12px; padding: 0 24px 8px; color: var(--ds-text); text-align: center;

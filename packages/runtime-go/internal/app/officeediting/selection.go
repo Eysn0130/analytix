@@ -247,12 +247,12 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			if session.manualChangeID != "" {
 				return failure(fileport.ErrConflict)
 			}
-			if recovery, ok := a.service.(NativeRecoveryService); ok && a.kind == "docx" {
+			if recovery, ok := a.service.(NativeRecoveryService); ok && (a.kind == "docx" || a.kind == "xlsx") {
 				state, err := recovery.NativeRecovery(ctx, sessionID, thread)
 				if err != nil {
 					return failure(err)
 				}
-				if state.Pending != nil && state.Pending.Version == 2 {
+				if state.Pending != nil && (state.Pending.Version == 2 && a.kind == "docx" || state.Pending.Version == 3 && a.kind == "xlsx") {
 					return failure(fileport.ErrConflict)
 				}
 			}
@@ -421,13 +421,14 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		encoded, _ := json.Marshal(input)
 		hash := sha256.Sum256(append([]byte(call.Operation), encoded...))
 		digest := hex.EncodeToString(hash[:])
-		if previous, exists := scope.operations[op]; exists && previous != digest {
+		previous, replay := scope.operations[op]
+		if replay && previous != digest {
 			return failure(fileport.ErrOperationMismatch)
 		}
 		if proposal.Status != "proposed" && (proposal.decisionDigest != digest || proposal.decisionOperation != op) {
 			return failure(editingapp.ErrProposal)
 		}
-		if len(scope.operations) >= editingapp.MaxProposalOperations {
+		if !replay && len(scope.operations) >= editingapp.MaxProposalOperations {
 			return failure(editingapp.ErrCapacity)
 		}
 		if call.Operation == "proposal-reject" {
@@ -464,11 +465,19 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		if !ok {
 			return failure(ErrUnavailable)
 		}
+		if proposal.Review != nil {
+			if _, ok := a.service.(nativeWorkbookCandidateService); a.kind != "xlsx" || !ok {
+				return failure(ErrUnavailable)
+			}
+		}
 		changeHash := sha256.Sum256([]byte("analytix.native-change/v1\x00" + session.document.ObjectID + "\x00" + scope.ThreadID + "\x00" + id + "\x00" + op))
 		changeID := hex.EncodeToString(changeHash[:])
 		prepared, err := recovery.PrepareNativeChange(ctx, sessionID, fileport.NativeChangeDraft{ChangeID: changeID, ThreadID: scope.ThreadID, ProposalID: id, BaseRevision: revision, BeforeText: beforeText, AfterText: replacement, Workbook: proposal.Review, Presentation: proposal.PresentationReview})
 		if err != nil {
 			return failure(err)
+		}
+		if proposal.Review != nil && (prepared.ChangeID != changeID || prepared.ThreadID != scope.ThreadID || prepared.BaseRevision != revision || prepared.SaveOperationID != "native_save_"+changeID || prepared.Status != "prepared") {
+			return failure(fileport.ErrOperationMismatch)
 		}
 		proposal.Status = "approved"
 		proposal.decisionDigest = digest
@@ -477,6 +486,13 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		result := map[string]any{"proposalId": id, "operationId": op, "changeId": prepared.ChangeID, "saveOperationId": prepared.SaveOperationID, "text": replacement, "selectionToken": token, "changeSequence": sequence, "baseRevision": revision}
 		if proposal.Review != nil {
 			result["workbook"] = proposal.Review
+			candidate, err := a.preparedWorkbookCandidate(ctx, sessionID, scope.ThreadID, prepared.ChangeID, prepared.SaveOperationID, revision)
+			if err != nil {
+				// The user's approval and durable preparation already happened.
+				// Retain the decision operation for an exact live retry or cancel.
+				return failure(err)
+			}
+			result["candidate"] = candidate
 		}
 		if proposal.PresentationReview != nil {
 			result["presentation"] = proposal.PresentationReview

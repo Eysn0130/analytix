@@ -9,7 +9,7 @@ import { getProvider } from '../../agent/registry'
 import { dispatchAnalytixRuntimeEvent } from '../../agent/analytix-mapper'
 import { InputBar } from './InputBar'
 import { Dialog } from '../../data-analysis/components/overlay/Dialog'
-import * as capacityEstimates from '../../lib/context-capacity'
+import * as capacityModel from '../../lib/context-capacity'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
 import { normalizeAppSettings, defaultModelProviderSettings, defaultAnalytixRuntimeSettings, normalizeAppBehaviorSettings,
   defaultKeyboardShortcuts, defaultWriteSettings, defaultClawSettings, defaultScheduleSettings, type AppSettingsV1 } from '@shared/app-settings'
@@ -261,14 +261,17 @@ describe('ordinary composer keyboard submission and busy follow-ups', () => {
     { attachments: [{ id: 'attachment', name: 'fixture.png', mimeType: 'image/png' }] },
     { documentReferenceCount: 1 },
     { fileReferences: [{ relativePath: 'fixture.txt', path: '/workspace/fixture/fixture.txt', name: 'fixture.txt' }] }
-  ])('submits supported reference-only busy follow-ups without interrupting: %j', async references => {
+  ])('uses one primary action for reference-only follow-ups and empty Stop: %j', async references => {
     const onSend = vi.fn(), onInterrupt = vi.fn()
     await act(async () => root.render(floatingElement(true, false, { ...references, onSend, onInterrupt })))
     await key(editor(), 'Enter'); expect(onSend).toHaveBeenCalledOnce(); expect(onInterrupt).not.toHaveBeenCalled()
     const send = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('common:composerSteerSend')}"]`)!
-    const stop = host.querySelector<HTMLButtonElement>('.ds-composer-secondary-stop')!
-    expectConversationGlyph(send, 'send'); expectConversationGlyph(stop, 'stop')
+    expect(host.querySelector('.ds-composer-secondary-stop')).toBeNull()
+    expectConversationGlyph(send, 'send')
     await act(async () => send.click()); expect(onSend).toHaveBeenCalledTimes(2); expect(onInterrupt).not.toHaveBeenCalled()
+    await act(async () => root.render(floatingElement(true, false, { onSend, onInterrupt })))
+    const stop = host.querySelector<HTMLButtonElement>('.ds-composer-primary-action-button')!
+    expectConversationGlyph(stop, 'stop')
     await act(async () => stop.click()); expect(onInterrupt).toHaveBeenCalledOnce(); expect(onSend).toHaveBeenCalledTimes(2)
   })
   it.each(['compact', 'secondary', 'claw'] as const)('keeps the existing primary glyph outside the main chat composer: %s', async owner => {
@@ -280,6 +283,25 @@ describe('ordinary composer keyboard submission and busy follow-ups', () => {
     const primary = host.querySelector<HTMLButtonElement>('.ds-composer-primary-action-button')!
     expect(primary.hasAttribute('data-analytix-chat-token-scope')).toBe(false)
     expect(primary.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 24 24')
+  })
+  it.each(['executionSettingsApplying', 'executionSettingsUnavailable'] as const)('keeps a blocked draft as Send and preserves empty Stop during %s', async policyState => {
+    const onSend = vi.fn(), onInterrupt = vi.fn()
+    await act(async () => root.render(floatingElement(true, false, { input: 'Retained draft', [policyState]: true, onSend, onInterrupt })))
+    const send = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('common:composerSteerSend')}"]`)!
+    expect(send).not.toBeNull()
+    expect(send.disabled).toBe(true)
+    expect(host.querySelector(`button[aria-label="${i18n.t('common:interrupt')}"]`)).toBeNull()
+    await key(editor(), 'Enter')
+    await act(async () => send.click())
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onInterrupt).not.toHaveBeenCalled()
+    expect(editor().textContent).toBe('Retained draft')
+    await act(async () => root.render(floatingElement(true, false, { [policyState]: true, onSend, onInterrupt })))
+    const stop = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('common:interrupt')}"]`)!
+    expect(stop.disabled).toBe(false)
+    await act(async () => stop.click())
+    expect(onInterrupt).toHaveBeenCalledOnce()
+    expect(onSend).not.toHaveBeenCalled()
   })
   it('selects a busy slash command before submitting and ignores held Enter', async () => {
     const onSend = vi.fn(), onInterrupt = vi.fn(), onNewCommand = vi.fn()
@@ -373,8 +395,7 @@ describe('actual floating Goal lifecycle controls', () => {
   const goal = { threadId: 'menu-fixture', id: 'goal-a', revision: 2, objective: 'Actual counted objective',
     status: 'active' as const, maxGoalRounds: 8, roundsStarted: 3, tokensUsed: 0, timeUsedSeconds: 0,
     createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:01:00Z' }
-  const goalMenu = () => [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
-    .find(button => button.textContent!.includes(i18n.t('common:composerMenuPursueGoal')))!
+  const goalMenu = () => menu()!.querySelector<HTMLButtonElement>('[data-command-id="goal"]')!
   it.each(['armed', 'disarmed', 'unknown', 'mismatched', 'legacy'] as const)('uses actual %s activation consistently in menu, row and panel', async state => {
     const action = vi.fn(async (_status: ThreadGoalStatus) => true)
     const current = state === 'legacy' ? { ...goal, id: undefined, revision: undefined, maxGoalRounds: undefined, roundsStarted: undefined } : goal
@@ -877,7 +898,7 @@ it('opens a selected settled full Review readonly, paginates, closes and reopens
 })
 
 
-it('keeps measured context capacity while missing whole-log accounting supplies no legacy Footer substitute', async () => {
+it('keeps context observations independent while missing whole-log accounting supplies no legacy Footer substitute', async () => {
   const usage: ThreadUsageSnapshot = { inputTokens: 100, outputTokens: 900, totalTokens: 1000,
     reasoningTokens: 0, cachedTokens: 50, cacheMissTokens: 50, cacheHitRate: 0.5,
     costUsd: null, costCny: null, priceConfigured: false, tokenEconomySavingsTokens: 0, turns: 1 }
@@ -886,27 +907,28 @@ it('keeps measured context capacity while missing whole-log accounting supplies 
     root.render(createElement(InputBar, { ...floatingElement().props, contextWindowTokens: 1000, runtimeToolCount: 0, runtimeSkillCount: 0 }))
   })
   const capacity = host.querySelector<HTMLButtonElement>('button.ds-composer-context')!
-  expect(capacity).not.toBeNull(); expect(capacity.getAttribute('aria-label')).toContain('10%')
-  expect(capacity.textContent).toBe('10%')
+  expect(capacity).not.toBeNull()
+  expect(capacity.textContent).toBe(i18n.t('common:contextCapacityChipLabel'))
+  expect(capacity.getAttribute('aria-label')).not.toContain('%')
   const ring = capacity.querySelector('svg')!
   expect(ring.getAttribute('width')).toBe('14')
   expect(ring.getAttribute('height')).toBe('14')
   expect(ring.getAttribute('viewBox')).toBe('0 0 14 14')
   const circles = ring.querySelectorAll('circle')
-  expect(circles).toHaveLength(2)
+  expect(circles).toHaveLength(1)
   for (const circle of circles) {
     expect(circle.getAttribute('r')).toBe('5.5')
     expect(circle.getAttribute('stroke-width')).toBe('2')
   }
   expect(circles[0].getAttribute('stroke')).toBe('var(--dsw-alias-border-l3)')
-  expect(circles[1].getAttribute('stroke')).toBe('var(--dsw-alias-label-tertiary)')
+  expect(circles[0].hasAttribute('stroke-dasharray')).toBe(false)
   const dock=host.querySelector('[data-composer-stats-dock]')!
   expect(dock.contains(capacity)).toBe(true)
   expect(capacity.closest('.ds-composer-toolbar')).toBeNull()
   expect(dock.querySelector('.ds-composer-footer-hint')).toBeNull()
   expect(host.querySelector('.ds-composer-footer-hint')).toBeNull()
   expect(host.querySelector('.ds-composer-footer')).toBeNull()
-  expect(capacity.getAttribute('aria-label')).toBe(i18n.t('common:contextCapacityChipAria', { percent: '10%' }))
+  expect(capacity.getAttribute('aria-label')).toBe(i18n.t('common:contextCapacityChipAria'))
   await act(async () => capacity.click())
   expect(capacity.getAttribute('aria-expanded')).toBe('true')
   expect(host.querySelector('.ds-composer-footer-left')).toBeNull()
@@ -1001,36 +1023,81 @@ describe('real InputBar anchored capacity panel', () => {
     expect(panel()).toBeNull()
   })
 
-  it('composer closure hides unknown capacity immediately and never revives its old panel', async () => {
+  it('keeps unknown window metadata visible without inventing a fallback and closes on a model switch', async () => {
     await act(async () => root.render(floatingElement(false, false, capacityProps)))
     await act(async () => ring().click())
     expect(panel()).not.toBeNull()
     await act(async () => root.render(floatingElement(false, false, { ...capacityProps, contextWindowTokens: undefined })))
-    expect(ring()).toBeNull(); expect(panel()).toBeNull()
-    await act(async () => root.render(floatingElement(false, false, capacityProps)))
-    expect(ring()).not.toBeNull(); expect(panel()).toBeNull()
-    await act(async () => ring().click())
+    expect(ring()).not.toBeNull()
+    expect(panel()!.querySelector('[data-context-reading="selected-window"]')!.textContent)
+      .toContain(i18n.t('common:contextCapacityUnknown'))
+    expect(panel()!.textContent).not.toContain('%')
     await act(async () => root.render(floatingElement(false, false, { ...capacityProps, composerModel: 'another-model' })))
     expect(panel()).toBeNull()
   })
-  it('composer closure drops the previous busy owner measured numerator', async () => {
+
+  it.each([false, true])('separates old sample identity from a new model/provider window while busy=%s', async busy => {
     await act(async () => {
-      useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: { ...usage, inputTokens: 5000, totalTokens: 5900 } } })
-      root.render(floatingElement(false, false, { ...capacityProps, contextWindowTokens: 10000 }))
+      useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: {
+        ...usage, inputTokens: 5000, totalTokens: 5900, model: 'old-model', providerId: 'old-provider'
+      } } })
+      root.render(floatingElement(busy, false, { ...capacityProps, composerModel: 'old-model', composerProviderId: 'old-provider' }))
     })
-    expect(ring().textContent).toBe('50%')
+    await act(async () => ring().click())
+    expect(panel()!.querySelector('[data-context-reading="last-request"]')!.textContent).toContain('5.0k tokens')
+    for (const selection of [
+      { composerModel: 'new-model', composerProviderId: 'old-provider', contextWindowTokens: 20000 },
+      { composerModel: 'new-model', composerProviderId: 'new-provider', contextWindowTokens: 40000 }
+    ]) {
+      await act(async () => root.render(floatingElement(busy, false, { ...capacityProps, ...selection })))
+      expect(panel()).toBeNull()
+      await act(async () => ring().click())
+      const selected = panel()!.querySelector('[data-context-reading="selected-window"]')!
+      const sample = panel()!.querySelector('[data-context-reading="last-request"]')!
+      expect(selected.textContent).toContain(selection.composerProviderId + ' · ' + selection.composerModel)
+      expect(selected.textContent).toContain(selection.contextWindowTokens === 20000 ? '20.0k tokens' : '40.0k tokens')
+      expect(sample.textContent).toContain('old-provider · old-model')
+      expect(sample.textContent).toContain('5.0k tokens')
+      expect(panel()!.textContent).not.toContain('%')
+      expect(ring().textContent).toBe(i18n.t('common:contextCapacityChipLabel'))
+    }
+  })
+
+  it('drops another thread sample without fabricating zero occupancy while busy', async () => {
+    await act(async () => {
+      useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: { ...usage, inputTokens: 5000 } } })
+      root.render(floatingElement(false, false, capacityProps))
+    })
     await act(async () => {
       useChatStore.setState({ activeThreadId: 'another-busy-thread', blocks: [] })
-      root.render(floatingElement(true, false, { ...capacityProps, contextWindowTokens: 10000 }))
+      root.render(floatingElement(true, false, capacityProps))
     })
-    expect(ring().textContent).not.toBe('50%')
+    await act(async () => ring().click())
+    const sample = panel()!.querySelector('[data-context-reading="last-request"]')!
+    expect(sample.textContent).toContain(i18n.t('common:contextCapacityUnknown'))
+    expect(sample.textContent).not.toContain('5.0k')
+    expect(sample.textContent).not.toContain('0 tokens')
+    expect(panel()!.textContent).not.toContain('%')
+  })
+
+  it('keeps missing sample identity and defaulted zero unknown in the actual composer', async () => {
+    await act(async () => {
+      useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: { ...usage, inputTokens: 0 } } })
+      root.render(floatingElement(false, false, { ...capacityProps, composerModel: 'selected-model', composerProviderId: 'selected-provider' }))
+    })
+    await act(async () => ring().click())
+    const sample = panel()!.querySelector('[data-context-reading="last-request"]')!
+    expect(sample.textContent).toContain(i18n.t('common:contextCapacityUnknown'))
+    expect(sample.textContent).not.toContain('selected-model')
+    expect(sample.textContent).not.toContain('selected-provider')
+    expect(sample.textContent).not.toContain('0 tokens')
   })
   it('retires the panel when recording replaces the real trigger and does not reopen when it returns', async () => {
     // Replace only the voice I/O leaf after retiring its real hook instance.
     // InputBar, its owner subscription and anchored panel remain real.
     await act(async () => root.render(null))
     const voice: ReturnType<typeof voiceDictation.useVoiceDictation> = { status: 'idle', error: null,
-      startedAtMs: Date.now(), start: vi.fn(), stop: vi.fn(), toggle: vi.fn(), getLevel: () => 0 }
+      startedAtMs: Date.now(), start: vi.fn(), stop: vi.fn(), cancel: vi.fn(), toggle: vi.fn(), getLevel: () => 0 }
     vi.spyOn(voiceDictation, 'useVoiceDictation').mockImplementation(() => ({ ...voice }))
     await act(async () => root.render(floatingElement(false, false, capacityProps)))
     await act(async () => ring().click())
@@ -1043,20 +1110,24 @@ describe('real InputBar anchored capacity panel', () => {
     expect(ring()).not.toBeNull(); expect(panel()).toBeNull()
   })
 
-  it('does not estimate streaming blocks while closed and resumes estimation only while open', async () => {
+  it('does not derive context composition from streaming blocks or catalog counts while closed or open', async () => {
     await act(async () => {
       useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: usage }, busy: false })
-      root.render(floatingElement(false, false, capacityProps))
+      root.render(floatingElement(true, false, capacityProps))
     })
-    await act(async () => root.render(floatingElement(true, false, capacityProps)))
-    const estimate = vi.spyOn(capacityEstimates, 'estimateBlockTokens')
+    const build = vi.spyOn(capacityModel, 'buildContextCapacity')
     await act(async () => useChatStore.setState({ blocks: [{ kind: 'assistant', id: 'capacity-a', text: 'Synthetic first delta' }] }))
-    expect(estimate).not.toHaveBeenCalled()
+    expect(build).not.toHaveBeenCalled()
     await act(async () => ring().click())
-    expect(estimate).toHaveBeenCalled()
-    await key(ring(), 'Escape'); estimate.mockClear()
-    await act(async () => useChatStore.setState({ blocks: [{ kind: 'assistant', id: 'capacity-b', text: 'Synthetic later delta' }] }))
-    expect(estimate).not.toHaveBeenCalled()
+    build.mockClear()
+    await act(async () => {
+      useChatStore.setState({ blocks: [{ kind: 'assistant', id: 'capacity-b', text: 'Synthetic later delta' }] })
+      root.render(floatingElement(true, false, { ...capacityProps, runtimeToolCount: 1000, runtimeSkillCount: 1000 }))
+    })
+    expect(build).not.toHaveBeenCalled()
+    expect([...panel()!.querySelectorAll('[data-context-category]')].every(row =>
+      row.textContent?.includes(i18n.t('common:contextCapacityUnmeasured')))).toBe(true)
+    expect(panel()!.textContent).not.toContain('%')
   })
 })
 
@@ -1096,8 +1167,8 @@ it('lays out whole-session activity, usage and capacity as independent dock entr
   expect(host.querySelector('.ds-composer-footer')).toBeNull()
   expect(dock.querySelector('.ds-composer-footer-hint')).toBeNull()
   await act(async()=>root.render(createElement(InputBar,{...floatingElement().props,key:'stats-only'})))
-  expect([...host.querySelector('[data-composer-stats-dock]')!.children].map(entry=>entry.getAttribute('data-composer-stat'))).toEqual(['activity','usage'])
-  expect(host.querySelector('button.ds-composer-context')).toBeNull()
+  expect([...host.querySelector('[data-composer-stats-dock]')!.children].map(entry=>entry.getAttribute('data-composer-stat'))).toEqual(['activity','usage',null])
+  expect(host.querySelector('button.ds-composer-context')).not.toBeNull()
   await act(async()=>root.render(floatingElement(false,false,{contextWindowTokens:1000,presentationPhase:'hero'})))
   expect(host.querySelector('[data-composer-stats-dock] button.ds-composer-context')).not.toBeNull()
   expect(host.querySelector('[data-composer-stat]')).toBeNull()

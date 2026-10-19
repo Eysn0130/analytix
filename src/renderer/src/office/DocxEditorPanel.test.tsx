@@ -19,16 +19,24 @@ const sd={ui:{viewport:{getRect:state.geometry,observe:(callback:()=>void)=>{sta
 vi.mock('@superdoc/react',()=>({SuperDocEditor:(props:{onReady:(event:unknown)=>void})=>{
   state.ready(props);const onReady=useRef(props.onReady);useEffect(()=>{onReady.current({superdoc:sd})},[]);return createElement('div',{'data-testid':'upstream-editor'})
 }}))
-vi.mock('../components/write/WriteInlineAgent',()=>({WriteInlineAgent:(props:{action:{left:number;width:number;anchorTop:number;anchorBottom:number};value:string;textareaRef:{current:HTMLTextAreaElement|null};onValueChange:(value:string)=>void;onApplyEdit:(value:string)=>void;onQuoteSelection:()=>void})=>createElement('div',{'data-floating-agent':'','data-left':props.action.left,'data-width':props.action.width,'data-top':props.action.anchorTop,'data-bottom':props.action.anchorBottom},
+vi.mock('../components/write/WriteInlineAgent',()=>({WriteInlineAgent:(props:{action:{left:number;width:number;anchorTop:number;anchorBottom:number};value:string;textareaRef:{current:HTMLTextAreaElement|null};onValueChange:(value:string)=>void;onApplyEdit:(value:string)=>void;onQuoteSelection:()=>void;quickActions:{id:string;label:string;prompt:string;mode:string}[];onQuickAction:(action:{id:string;label:string;prompt:string;mode:string})=>void})=>createElement('div',{'data-floating-agent':'','data-left':props.action.left,'data-width':props.action.width,'data-top':props.action.anchorTop,'data-bottom':props.action.anchorBottom},
   createElement('textarea',{ref:props.textareaRef,value:props.value,onChange:()=>{},onInput:(event:{currentTarget:HTMLTextAreaElement})=>props.onValueChange(event.currentTarget.value)}),
-  createElement('button',{onClick:()=>props.onApplyEdit(props.value||'Polish')},'Request suggestion'),createElement('button',{onClick:props.onQuoteSelection},'Quote'))}))
+  createElement('button',{onClick:()=>props.onApplyEdit(props.value||'Polish')},'Request suggestion'),createElement('button',{onClick:props.onQuoteSelection},'Quote'),
+  ...props.quickActions.map(action=>createElement('button',{key:action.id,onClick:()=>props.onQuickAction(action)},action.label)))}))
 const base:DocxEditorView={editorId:'00000000-0000-4000-8000-000000000001',workspace:'/workspace',path:'/workspace/report.docx',threadId:'thread',objectId:'a'.repeat(64),revision:'b'.repeat(64),
   version:0,phase:'ready',dirty:false,content:{encoding:'base64',kind:'docx',byteLength:4,sha256:'b'.repeat(64),data:'UEsDBA=='},proposals:[],reviews:[]}
 let root:Root,container:HTMLDivElement
 const submit=vi.fn(),prepare=vi.fn(()=>true)
-async function render(view:DocxEditorView,visible=true){useDocxEditorStore.setState({views:{[view.editorId]:view}});await act(async()=>root.render(createElement(DocxEditorPanel,{view,visible,onSubmitPrompt:submit,onPrepareDraft:prepare})))}
+async function render(view:DocxEditorView,visible=true,fileActions?:Parameters<typeof DocxEditorPanel>[0]['fileActions']){useDocxEditorStore.setState({views:{[view.editorId]:view}});await act(async()=>root.render(createElement(DocxEditorPanel,{view,visible,onSubmitPrompt:submit,onPrepareDraft:prepare,fileActions})))}
 async function flush(){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,25))})}
-async function click(label:string){const button=[...container.querySelectorAll('button')].find(b=>b.textContent===label)!;expect(button).toBeTruthy();await act(async()=>button.click());await flush()}
+function namedButton(label:string){return [...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.getAttribute('aria-label')===label||b.textContent===label)}
+async function click(label:string){
+  let button=namedButton(label)
+  if(!button&&['放弃工作副本','撤销已保存修改','完成已保存撤销'].includes(label)){
+    await act(async()=>namedButton('更多 Word 操作')!.click());button=namedButton(label)
+  }
+  expect(button).toBeTruthy();await act(async()=>button!.click());await flush()
+}
 beforeEach(()=>{
   vi.stubGlobal('innerWidth',1280)
   vi.stubGlobal('__ANALYTIX_DOCX_WORKER_PATHS__',workerPaths)
@@ -59,6 +67,17 @@ it('uses the upstream format command and records one local version',async()=>{
   await act(async()=>bold.click())
   expect(state.restore).toHaveBeenCalledWith(capture)
   expect(state.execute).toHaveBeenCalledWith('bold',undefined)
+  expect(state.request).toHaveBeenCalledWith({action:'changed',editorId:base.editorId,version:1})
+})
+it('restores the captured SDK range after a font control takes focus before formatting',async()=>{
+  const view={...base,phase:'editing' as const}
+  state.request.mockResolvedValue({ok:true,view})
+  await render(view);await act(async()=>state.observe?.(selected))
+  const font=container.querySelector<HTMLSelectElement>('[aria-label="字体"]')!
+  await act(async()=>{font.focus();state.observe?.({status:'ready',empty:true,quotedText:''})})
+  state.restore.mockImplementation(()=>{setTimeout(()=>state.observe?.(selected),0);return {ok:true}})
+  await act(async()=>{font.value='Arial';font.dispatchEvent(new Event('change',{bubbles:true}))});await flush()
+  expect(state.execute).toHaveBeenCalledWith('font-family','Arial')
   expect(state.request).toHaveBeenCalledWith({action:'changed',editorId:base.editorId,version:1})
 })
 it('does not send a late capture to another document',async()=>{
@@ -108,7 +127,7 @@ it('queries a lost applied ACK without applying the replacement twice',async()=>
   await render({...view,version:1,phase:'editing',dirty:true})
   await click('查询结果')
   expect(state.replace).toHaveBeenCalledTimes(1)
-  expect([...container.querySelectorAll('button')].find(b=>b.textContent==='保存')?.disabled).toBe(false)
+  expect(namedButton('保存')?.disabled).toBe(false)
 })
 it('invalidates an exported snapshot when a queued upstream mutation arrives during Save',async()=>{
   const view={...base,phase:'editing' as const,dirty:true}
@@ -426,4 +445,151 @@ it('retires a timed-out restore and cannot dispatch from its late ready snapshot
     await act(async()=>state.observe?.(selected))
     expect(state.request).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled();expect(state.replace).not.toHaveBeenCalled()
   } finally {vi.useRealTimers()}
+})
+
+it('offers concise editing through the same captured Core scope and shows both review texts',async()=>{
+  const proposalId='e'.repeat(48),view={...base,scope,proposals:[{proposalId,status:'proposed' as const,parts:[]}],reviews:[{proposalId,beforeText:'Original',afterText:'Shorter'}]}
+  state.request.mockResolvedValue({ok:true,view})
+  await render(view);await act(async()=>state.observe?.(selected));await click('精简')
+  expect(submit).toHaveBeenCalledWith('精简选中内容，保留关键事实与原意。',[expect.objectContaining({kind:'docx',editable:true,scopeId:scope.scopeId})])
+  expect([...container.querySelectorAll('dd')].map(value=>value.textContent)).toEqual(['Original','Shorter'])
+  expect(container.querySelector('button[class*="accept"]')?.textContent).toBe('应用并保存')
+  expect(state.replace).not.toHaveBeenCalled()
+})
+
+it.each(['unknown','forbidden','conflict'] as const)('keeps the applied draft after save %s and never repeats its replacement',async failure=>{
+  const proposalId='e'.repeat(48),review={...base,scope,proposals:[{proposalId,status:'proposed' as const,parts:[]}],reviews:[{proposalId,beforeText:'Original',afterText:'Replacement'}]}
+  const applied={...review,version:1,phase:'editing' as const,dirty:true}
+  const unresolved={...applied,phase:failure==='unknown'?'unknown' as const:failure==='conflict'?'conflict' as const:'editing' as const}
+  const committed={...base,version:1,revision:'c'.repeat(64),content:{...base.content,sha256:'c'.repeat(64),data:'UEsDBAc=',byteLength:5}}
+  let saves=0
+  state.request.mockImplementation(async input=>input.action==='decide'?{ok:true,view:{...review,phase:'applying',dirty:true},replacement:'Replacement'}:
+    input.action==='applied'?{ok:true,view:applied}:input.action==='save'?++saves===1?{ok:false,error:failure,view:unresolved}:{ok:true,view:committed}:
+    input.action==='status'?{ok:true,view:committed}:{ok:true,view:review})
+  await render(review);await act(async()=>state.observe?.(selected));await click('应用并保存')
+  await render(unresolved)
+  expect(state.replace).toHaveBeenCalledTimes(1)
+  expect(container.querySelector('[role="status"]')?.textContent).not.toBe('已保存')
+  expect([...container.querySelectorAll('button')].find(b=>b.textContent==='应用并保存')?.disabled).toBe(true)
+  if(failure==='unknown') {
+    await click('查询结果')
+    expect(saves).toBe(1)
+    expect(state.request).toHaveBeenCalledWith({action:'status',editorId:base.editorId})
+    await render(committed)
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('已保存')
+  } else if(failure==='forbidden') {
+    await click('保存');expect(saves).toBe(2)
+  } else {
+    await click('保存');expect(saves).toBe(1)
+  }
+  expect(state.replace).toHaveBeenCalledTimes(1)
+})
+
+const openExternal=vi.fn()
+const fileActions:NonNullable<Parameters<typeof DocxEditorPanel>[0]['fileActions']>=beforeOpen=>createElement('button',{onClick:()=>beforeOpen(openExternal)},'Open external')
+it.each(['取消','打开已保存版本'] as const)('requires an explicit dirty open choice and %s never writes',async choice=>{
+  openExternal.mockClear()
+  await render({...base,phase:'editing',dirty:true},true,fileActions);await click('Open external')
+  expect(container.querySelector('[role="dialog"]')).toBeTruthy();expect(openExternal).not.toHaveBeenCalled()
+  await click(choice)
+  expect(openExternal).toHaveBeenCalledTimes(choice==='取消'?0:1)
+  expect(state.request).not.toHaveBeenCalled();expect(state.export).not.toHaveBeenCalled()
+})
+it.each(['committed','unknown','conflict'] as const)('save and open waits for a confirmed %s receipt',async outcome=>{
+  openExternal.mockClear()
+  const dirty={...base,phase:'editing' as const,dirty:true}
+  state.request.mockResolvedValue(outcome==='committed'?{ok:true,view:base}:{ok:false,error:outcome,view:{...dirty,phase:outcome}})
+  await render(dirty,true,fileActions);await click('Open external');await click('保存并打开')
+  expect(state.request).toHaveBeenCalledWith(expect.objectContaining({action:'save'}))
+  expect(openExternal).toHaveBeenCalledTimes(outcome==='committed'?1:0)
+  if(outcome!=='committed')expect(container.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBeTruthy()
+})
+it.each([true,false])('completes a deferred save and open after status confirmation only while intent is current=%s',async visible=>{
+  openExternal.mockClear()
+  const dirty={...base,phase:'editing' as const,dirty:true},pending={...dirty,phase:'unknown' as const}
+  state.request.mockImplementation(async input=>input.action==='save'?{ok:false,error:'unknown',view:pending}:{ok:true,view:base})
+  await render(dirty,true,fileActions);await click('Open external');await click('保存并打开')
+  expect(openExternal).not.toHaveBeenCalled()
+  await render(pending,true,fileActions)
+  if(!visible)await render(pending,false,fileActions)
+  if(visible)await click('查询结果')
+  else {await render(pending,true,fileActions);await click('查询结果')}
+  expect(openExternal).toHaveBeenCalledTimes(visible?1:0)
+  expect(state.request.mock.calls.filter(([input])=>input.action==='save')).toHaveLength(1)
+  expect(container.querySelector('[role="dialog"]')).toBeNull()
+})
+it('opens a clean document immediately and retires a deferred open after its owner is hidden',async()=>{
+  openExternal.mockClear()
+  await render(base,true,fileActions);await click('Open external')
+  expect(openExternal).toHaveBeenCalledTimes(1);expect(container.querySelector('[role="dialog"]')).toBeNull()
+  await render({...base,phase:'editing',dirty:true},true,fileActions);await click('Open external')
+  await render({...base,phase:'editing',dirty:true},false,fileActions)
+  expect(container.querySelector('[role="dialog"]')).toBeNull();expect(openExternal).toHaveBeenCalledTimes(1)
+})
+it('keeps SDK local undo separate from receipt-backed saved undo and reloads confirmed Core bytes',async()=>{
+  const saved={...base,canUndo:true},restored={...base,version:1,revision:'c'.repeat(64),canUndo:false,content:{...base.content,sha256:'c'.repeat(64),data:'UEsDBAc=',byteLength:5}}
+  state.request.mockResolvedValue({ok:true,view:restored})
+  await render(saved)
+  const source=(state.ready.mock.calls.at(-1)![0] as {document:File}).document
+  expect(namedButton('撤销工作副本编辑')?.disabled).toBe(true)
+  await click('撤销已保存修改')
+  expect(state.request).toHaveBeenCalledWith({action:'undoChange',editorId:base.editorId,version:0})
+  expect(state.execute).not.toHaveBeenCalled()
+  const next=(state.ready.mock.calls.at(-1)![0] as {document:File}).document
+  expect(next).not.toBe(source);expect([...new Uint8Array(await next.arrayBuffer())]).toEqual([80,75,3,4,7])
+})
+it('refreshes the retained SDK document after a confirmed saved undo finishes while hidden',async()=>{
+  const saved={...base,canUndo:true},restored={...base,version:1,revision:'c'.repeat(64),canUndo:false,content:{...base.content,sha256:'c'.repeat(64),data:'UEsDBAc=',byteLength:5}}
+  let finish!:(value:unknown)=>void
+  state.request.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+  await render(saved);await click('撤销已保存修改')
+  await render(saved,false)
+  await act(async()=>finish({ok:true,view:restored}));await flush()
+  await render(restored)
+  const source=(state.ready.mock.calls.at(-1)![0] as {document:File}).document
+  expect([...new Uint8Array(await source.arrayBuffer())]).toEqual([80,75,3,4,7])
+  expect(state.request.mock.calls.filter(([input])=>input.action==='undoChange')).toHaveLength(1)
+})
+it('reloads a confirmed undo after status even when the pending view already carries the restored revision',async()=>{
+  const saved={...base,canUndo:true},restored={...base,version:1,revision:'c'.repeat(64),canUndo:false,content:{...base.content,sha256:'c'.repeat(64),data:'UEsDBAc=',byteLength:5}}
+  state.request.mockImplementation(async input=>input.action==='undoChange'?{ok:false,error:'unknown',view:{...restored,phase:'unknown'}}:{ok:true,view:restored})
+  await render(saved);await click('撤销已保存修改')
+  await render({...restored,phase:'unknown'});await click('查询结果')
+  const source=(state.ready.mock.calls.at(-1)![0] as {document:File}).document
+  expect([...new Uint8Array(await source.arrayBuffer())]).toEqual([80,75,3,4,7])
+  expect(state.request.mock.calls.filter(([input])=>input.action==='undoChange')).toHaveLength(1)
+})
+
+
+it('uses one icon operation row and keeps destructive and saved undo actions in an identity-scoped menu',async()=>{
+  await render({...base,canUndo:true})
+  const header=container.querySelector('[data-workspace-viewer-header]')!
+  expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+  expect(header.textContent).toContain('report.docx')
+  for(const button of header.querySelectorAll<HTMLButtonElement>('button')){
+    expect(button.getAttribute('aria-label')).toBeTruthy()
+    expect(button.querySelector('svg')).not.toBeNull()
+    expect(button.textContent).toBe('')
+  }
+  expect(namedButton('保存')!.disabled).toBe(true)
+  expect(namedButton('放弃工作副本')).toBeUndefined()
+  await click('更多 Word 操作')
+  expect(namedButton('放弃工作副本')).toBeDefined()
+  expect(namedButton('撤销已保存修改')!.disabled).toBe(false)
+  expect(state.request).not.toHaveBeenCalled()
+  await render({...base,editorId:'00000000-0000-4000-8000-000000000002',path:'/workspace/other.docx'})
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  expect(state.request).not.toHaveBeenCalled()
+})
+
+it('does not announce a saved receipt while editing a clean working copy or after a failed save',async()=>{
+  const editing={...base,phase:'editing' as const}
+  await render(editing)
+  expect(container.querySelector('[data-workspace-viewer-header]')?.textContent).toContain('工作副本编辑中')
+  state.request.mockResolvedValue({ok:false,error:'forbidden',view:editing})
+  await click('保存')
+  const header=container.querySelector('[data-workspace-viewer-header]')!
+  expect(state.request).toHaveBeenCalledWith(expect.objectContaining({action:'save',editorId:base.editorId}))
+  expect(header.querySelector('[role="alert"]')?.textContent).toBeTruthy()
+  expect(header.textContent).not.toContain('已保存')
 })

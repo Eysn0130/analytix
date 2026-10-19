@@ -516,6 +516,8 @@ export type UserInputWaitControls = {
   unsubscribe: () => void
 }
 
+export type ThreadExecutionPolicy = { approvalPolicy: ApprovalPolicy; sandboxMode: SandboxMode }
+
 export type NormalizedThread = {
   id: string
   title: string
@@ -525,6 +527,9 @@ export type NormalizedThread = {
   mode: string
   workspace?: string
   status?: string
+  executionPolicyVersion?: 2
+  /** Renderer-only unknown mutation outcome; never serialized to Core. */
+  executionPolicyUncertain?: boolean
   approvalPolicy?: ApprovalPolicy
   sandboxMode?: SandboxMode
   archived?: boolean
@@ -1222,6 +1227,7 @@ export interface AgentProvider {
       model?: string
       providerId?: string
       reasoningEffort?: SharedModelReasoningEffort
+      executionPolicy?: ThreadExecutionPolicy
       riskIntent?: 'case'
       displayText?: string
       requestedSkillIds?: string[]
@@ -1317,6 +1323,7 @@ export interface AgentProvider {
   interruptTurn(threadId: string, turnId: string, options?: { discard?: boolean }): Promise<void>
   renameThread(threadId: string, title: string): Promise<void>
   updateThreadWorkspace?(threadId: string, workspace: string): Promise<void>
+  updateThreadExecutionPolicy?(threadId: string, policy: ThreadExecutionPolicy): Promise<NormalizedThread>
   promoteSideThread?(threadId: string): Promise<void>
   archiveThread?(threadId: string, archived: boolean): Promise<void>
   deleteThread(threadId: string): Promise<void>

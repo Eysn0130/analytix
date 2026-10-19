@@ -3,7 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NativeOfficePanel } from './NativeOfficePanel'
-import { useNativeOfficeStore, nativeOfficeTargetKey } from './native-office-store'
+import { useNativeOfficeStore, nativeOfficeTargetKey, nativeWorkbookDraftKey, type NativeWorkbookCellDraft } from './native-office-store'
 import { useNativeReferenceStore } from './native-reference-store'
 import type { NativeOfficeActionMenu, NativeOfficeFormat, NativeOfficeMenuTarget, NativeOfficeRequest, NativeOfficeView, NativeOfficeSelection, NativeOfficePlayback } from '@shared/native-office'
 import { nativeOfficeActionChoiceSchema, nativeOfficeActionMenuSchema } from '@shared/native-office'
@@ -44,14 +44,158 @@ beforeEach(() => {
   request = vi.fn(async (_input: NativeOfficeRequest) => ({ ok: true, view }))
   unsubscribe = vi.fn<() => void>()
   Object.defineProperty(window, 'analytix', { configurable: true, value: { office: { request, onChange: () => unsubscribe } } })
-  useNativeOfficeStore.setState({ target: null, view, error: null, proposalInFlight:false, annotationInputFrozen:false, manualDiscardAttempts:{}, manualOwners:{} })
+  useNativeOfficeStore.setState({ target: null, view, error: null, engineViews:{}, views:{}, workbookDrafts:{}, workbookClosing:{},
+    workbookDraftInputFrozen:false, workbookDraftComposing:false, receiveSequence:0, creationAttempt:null,
+    proposalInFlight:false, annotationInputFrozen:false, manualDiscardAttempts:{}, manualOwners:{} })
   useNativeReferenceStore.setState({ references: [], drafts: {} })
   container = document.createElement('div'); container.className = 'ds-right-sidebar-pane'; document.body.append(container)
   root = createRoot(container)
 })
+
+describe('bounded workbook manual controls',()=>{
+  const editableCell:NativeWorkbookCellDraft['cell']={sheet:0,column:0,row:0,text:'1',value:1,formula:'1',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
+  const cells:Extract<NativeOfficeSelection,{kind:'cells'}> = {kind:'cells',documentId:view.objectId,version:view.revision,changeSequence:0,
+    token:'workbook-selection',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',
+    capture:{capturedCharacters:1,totalCharacters:1,unit:'utf-16',complete:true,truncated:false},
+    ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],
+    cells:[editableCell]}
+  const workbook:NativeOfficeView = {...view,path:'/synthetic/book.xlsx',kind:'xlsx',workbookEditing:{editable:true},selection:cells}
+  async function renderWorkbook(next:NativeOfficeView = workbook,path=next.path,props:Partial<Parameters<typeof NativeOfficePanel>[0]>={}) {
+    request.mockImplementation(async()=>({ok:true,view:next}))
+    await act(async()=>{
+      const target={workspace:'/synthetic',path},identity=nativeOfficeTargetKey(target)
+      useNativeOfficeStore.setState(state=>({target,view:next,error:null,engineViews:{...state.engineViews,[identity]:next},views:{...state.views,[identity]:next}}))
+      root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread',...props}))
+    })
+  }
+  async function fillCell(value:string) {
+    const input=container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!
+    await act(async()=>{
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value)
+      input.dispatchEvent(new Event('input',{bubbles:true}))
+    })
+  }
+  it('keeps native preview readonly while F2 focuses the bounded explicit cell input',async()=>{
+    await renderWorkbook()
+    const surface=container.querySelector('[aria-label="nativeOfficeEditor"]')!
+    await act(async()=>surface.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true})))
+    expect(document.activeElement).toBe(container.querySelector('[data-workbook-cell-input]'))
+    expect(request.mock.calls.some(([input])=>['beginManualEdit','editWorkbookCell'].includes(input.action))).toBe(false)
+    await fillCell('2');await clickNamed('保存')
+    expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toEqual([[{
+      action:'editWorkbookCell',objectId:view.objectId,revision:view.revision,expectedChangeSequence:0,
+      threadId:'thread',selectionToken:cells.token,edit:{type:'number',value:2}
+    }]])
+    expect(request.mock.calls.some(([input])=>['beginManualEdit','reference','acceptProposal'].includes(input.action))).toBe(false)
+  })
+  it('queries an uncertain manual result instead of resubmitting the edit',async()=>{
+    await renderWorkbook()
+    request.mockImplementation(async(input:NativeOfficeRequest)=>{
+      if(input.action==='editWorkbookCell') throw new Error('transport unavailable')
+      return {ok:true,view:workbook}
+    })
+    await fillCell('2');await clickNamed('保存')
+    expect(useNativeOfficeStore.getState().error).toBe('unknown')
+    expect(namedButton('保存').disabled).toBe(true)
+    await clickNamed('查询结果')
+    expect(request.mock.calls.filter(([input])=>input.action==='saveStatus')).toEqual([[{action:'saveStatus',objectId:view.objectId}]])
+    expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toHaveLength(1)
+  })
+  it.each(['saving','loading','unknown'] as const)('keeps Agent before/after visible and blocks proposal actions and Undo while %s',async phase=>{
+    const proposalId='c'.repeat(48)
+    const scope:NonNullable<NativeOfficeView['scope']>={scopeId:'d'.repeat(48),threadId:'thread',selectionToken:cells.token!,
+      baseRevision:workbook.revision,changeSequence:0,editable:true,parts:[],workbook:{...cells.ranges[0],cells:[editableCell]}}
+    const proposal:NonNullable<NativeOfficeView['proposals']>[number]={proposalId,status:'proposed',parts:[{kind:'literal',text:'2'}],workbook:{kind:'number',value:2}}
+    const review:NonNullable<NativeOfficeView['localReviews']>[number]={proposalId,beforeText:'Sheet1!A1: 1',afterText:'Sheet1!A1: 2'}
+    const ready:NativeOfficeView={...workbook,editing:true,scope,proposals:[proposal],localReviews:[review],canUndo:true}
+    const onSubmitPrompt=vi.fn()
+    await renderWorkbook(ready,ready.path,{onSubmitPrompt})
+    const next:NativeOfficeView={...ready,...(phase==='saving'?{saving:true}:phase==='loading'?{status:'loading' as const}:{error:'unknown' as const})}
+    await act(async()=>useNativeOfficeStore.setState({view:next,error:phase==='unknown'?'unknown':null}))
+    expect(container.querySelector('del[aria-label="修改前"]')?.textContent).toBe(review.beforeText)
+    expect(container.querySelector('ins[aria-label="修改后"]')?.textContent).toBe(review.afterText)
+    for(const label of ['应用修改','拒绝','nativeOfficeRegenerate','撤销修改']) expect(namedButton(label).disabled).toBe(true)
+    await clickNamed('应用修改');await clickNamed('拒绝');await clickNamed('nativeOfficeRegenerate');await clickNamed('撤销修改')
+    expect(request.mock.calls.some(([input])=>['acceptProposal','rejectProposal','undoChange'].includes(input.action))).toBe(false)
+    expect(onSubmitPrompt).not.toHaveBeenCalled()
+    await act(async()=>useNativeOfficeStore.setState({view:{...next,appliedProposals:[proposalId]}}))
+    const pending=container.querySelector('[aria-label="原生修改提案"]')!
+    expect(pending.textContent).toContain('正在更新，结果待确认')
+    expect(pending.textContent).not.toContain('已更新');expect(pending.textContent).not.toContain('修改已处理')
+    expect(pending.querySelector('del')?.textContent).toBe(review.beforeText)
+    await act(async()=>useNativeOfficeStore.setState({view:ready,error:null}))
+    expect(namedButton('应用修改').disabled).toBe(false);expect(namedButton('拒绝').disabled).toBe(false)
+    expect(namedButton('nativeOfficeRegenerate').disabled).toBe(false);expect(namedButton('撤销修改').disabled).toBe(false)
+  })
+  it('passes the workspace target path into retained drafts and exposes explicit close choices',async()=>{
+    await renderWorkbook(workbook,'book.xlsx');await fillCell('2')
+    const key=nativeWorkbookDraftKey('/synthetic','book.xlsx','thread')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toMatchObject({workspace:'/synthetic',path:'book.xlsx',threadId:'thread',value:'2'})
+    expect(useNativeOfficeStore.getState().workbookDrafts[nativeWorkbookDraftKey('',workbook.path,'thread')]).toBeUndefined()
+    let closed=true
+    await act(async()=>{closed=await useNativeOfficeStore.getState().close('/synthetic','book.xlsx')})
+    expect(closed).toBe(false);expect(container.textContent).toContain('保留会取消关闭')
+    await clickNamed('单元格编辑选项');await clickNamed('保留草稿')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toMatchObject({value:'2',closeRequested:false})
+    expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('2')
+    await act(async()=>{closed=await useNativeOfficeStore.getState().close('/synthetic','book.xlsx')})
+    expect(closed).toBe(false);await clickNamed('单元格编辑选项');await clickNamed('放弃草稿')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toBeUndefined()
+    expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('1')
+    expect(request.mock.calls.some(([input])=>['editWorkbookCell','close'].includes(input.action))).toBe(false)
+  })
+  it('offers renderer-owned workbook input modes through the existing non-pointer native menu',async()=>{
+    let menuRequested!:(target:NativeOfficeMenuTarget)=>void,choose!:(choice:{actionId:string|null})=>void
+    window.analytix.office.onMenuRequested=handler=>{menuRequested=handler;return()=>{}}
+    const menu=vi.fn((_input:NativeOfficeActionMenu)=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}))
+    window.analytix.office.showActionMenu=menu
+    await renderWorkbook();await fillCell('002')
+    await act(async()=>menuRequested({objectId:workbook.objectId,revision:workbook.revision,expectedChangeSequence:0}))
+    expect(menu).toHaveBeenCalledOnce()
+    const offered=menu.mock.calls[0][0] as NativeOfficeActionMenu
+    expect(nativeOfficeActionMenuSchema.safeParse(offered).success).toBe(true)
+    expect(offered.pointer).toBeUndefined();expect(offered.formatting).toBeUndefined()
+    expect(offered.actions.filter(action=>action.id.startsWith('workbook-input-')).map(({id,enabled})=>({id,enabled}))).toEqual([
+      'auto','text','number','formula','empty'
+    ].map(mode=>({id:`workbook-input-${mode}`,enabled:true})))
+    await act(async()=>choose({actionId:'workbook-input-text'}))
+    const draft=useNativeOfficeStore.getState().workbookDrafts[nativeWorkbookDraftKey('/synthetic',workbook.path,'thread')]
+    expect(draft).toMatchObject({inputMode:'text',value:'002'})
+    expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('002')
+    expect(request.mock.calls.some(([input])=>['editWorkbookCell','save','format','beginManualEdit'].includes(input.action))).toBe(false)
+  })
+  it.each(['input','selection','hide'] as const)('rejects a delayed native workbook mode choice after %s changes',async change=>{
+    let menuRequested!:(target:NativeOfficeMenuTarget)=>void,choose!:(choice:{actionId:string|null})=>void
+    window.analytix.office.onMenuRequested=handler=>{menuRequested=handler;return()=>{}}
+    window.analytix.office.showActionMenu=vi.fn((_input:NativeOfficeActionMenu)=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}))
+    await renderWorkbook();await fillCell('002')
+    await act(async()=>menuRequested({objectId:workbook.objectId,revision:workbook.revision,expectedChangeSequence:0}))
+    expect(choose).toBeDefined()
+    if(change==='input')await fillCell('003')
+    else if(change==='selection')await renderWorkbook({...workbook,selection:{...cells,token:'new-cell-token'}})
+    else await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:false,threadId:'thread'})))
+    await act(async()=>choose({actionId:'workbook-input-text'}))
+    const draft=useNativeOfficeStore.getState().workbookDrafts[nativeWorkbookDraftKey('/synthetic',workbook.path,'thread')]
+    expect(draft.value).toBe(change==='input'?'003':'002')
+    expect(draft.inputMode??'auto').toBe('auto')
+    expect(request.mock.calls.some(([input])=>['editWorkbookCell','save','format','beginManualEdit'].includes(input.action))).toBe(false)
+  })
+  it('routes typed workbook recovery cancellation through the existing cancelChange owner',async()=>{
+    const selected={...cells.ranges[0],cells:[editableCell]}
+    const pending = {version:3 as const,origin:'manual' as const,changeId:'d'.repeat(64),threadId:'thread',baseRevision:view.revision,revision:'',
+      status:'prepared' as const,workbook:{before:selected,after:selected,results:['1']},saveOperationId:'save-operation',undoOperationId:'undo-operation',
+      canUndo:false,canCancel:true,canRetryUndo:false,canResume:true,createdAt:'',savedAt:''}
+    await renderWorkbook({...workbook,recovery:{pending,current:null}})
+    await clickNamed('取消未保存的修改')
+    expect(request.mock.calls.filter(([input])=>input.action==='cancelChange')).toEqual([[{action:'cancelChange',objectId:view.objectId,
+      revision:view.revision,expectedChangeSequence:0,threadId:'thread',changeId:pending.changeId}]])
+    expect(request.mock.calls.some(([input])=>input.action==='discardManualEdit')).toBe(false)
+  })
+})
 afterEach(async () => {
   await act(async () => root?.unmount()); root = null
-  container.remove(); useNativeOfficeStore.setState({ target: null, view: null, error: null })
+  container.remove(); useNativeOfficeStore.setState({ target: null, view: null, error: null, engineViews:{}, views:{}, workbookDrafts:{},
+    workbookClosing:{}, workbookDraftInputFrozen:false, workbookDraftComposing:false })
   Reflect.deleteProperty(window, 'analytix'); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
@@ -125,6 +269,10 @@ describe('native preview dock geometry', () => {
     await render(true)
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('nativeOfficeOperationFailed')
     const retry = container.querySelector<HTMLButtonElement>('[aria-label="nativeOfficeRetry"]')!
+    expect(container.querySelectorAll('[aria-label="nativeOfficeRetry"]')).toHaveLength(1)
+    expect(container.querySelector('[data-workspace-viewer-header]')!.contains(retry)).toBe(true)
+    expect(container.querySelector('[data-native-office-state]')!.contains(retry)).toBe(false)
+    expect(retry.querySelector('svg')).not.toBeNull();expect(retry.textContent).toBe('')
     await act(async () => retry.click())
     expect(request.mock.calls.filter(call => call[0].action === 'open')).toHaveLength(2)
     expect(container.querySelector('[role="alert"]')).toBeNull()
@@ -222,15 +370,15 @@ async function renderAnnotation(next: NativeOfficeView, props: Partial<Parameter
   await act(async () => root!.render(createElement(NativeOfficePanel, {visible:true,threadId:'thread',...props})))
 }
 function namedButton(label: string): HTMLButtonElement {
-  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === label || button.textContent === label)!
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === label || button.textContent === label)!
 }
 async function clickNamed(label: string) { await act(async () => namedButton(label).click()) }
 async function openNotes() {
-  if (namedButton('编辑标注备注')) await clickNamed('编辑标注备注')
+  if (namedButton('编辑标注备注')?.getAttribute('aria-expanded') === 'false') await clickNamed('编辑标注备注')
 }
 async function fillNote(value: string) {
   await openNotes()
-  const input = container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')!
+  const input = document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input,value)
     input.dispatchEvent(new Event('input',{bubbles:true}))
@@ -282,12 +430,12 @@ describe('native document annotation workflow', () => {
     expect(request.mock.calls.find(([r])=>r.action==='reference')?.[0]).toMatchObject({selectionToken:fresh.token,editable:false})
     expect(useNativeReferenceStore.getState().references[0]).toMatchObject({selection:{token:fresh.token}})
     expect(namedButton('nativeActionMore')).toBeDefined()
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
   })
   it('rejects a pointer intent for a stale token and a choice after the live native selection changes',async()=>{
     let menuRequested!:(target:any)=>void,choose!:(choice:{actionId:string|null})=>void
     window.analytix.office.onMenuRequested=handler=>{menuRequested=handler;return ()=>{}}
-    const menu=vi.fn(()=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}));window.analytix.office.showActionMenu=menu
+    const menu=vi.fn((_input:NativeOfficeActionMenu)=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}));window.analytix.office.showActionMenu=menu
     await renderAnnotation(annotationView)
     const target={objectId:view.objectId,revision:view.revision,expectedChangeSequence:0,pointer:{interactionId:'interaction_id',selectionToken:'wrong_token'}}
     await act(async()=>menuRequested(target));expect(menu).not.toHaveBeenCalled()
@@ -436,10 +584,10 @@ describe('native document annotation workflow', () => {
     await act(async () => root!.render(createElement(NativeOfficePanel,{visible:false,threadId:'thread'})))
     await act(async () => root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'})))
     await openNotes()
-    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
+    expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
     await act(async () => useNativeOfficeStore.getState().receive({...annotationView,revision:'c'.repeat(64),selection:undefined}))
     await openNotes()
-    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
+    expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
     expect(namedButton('加入对话').disabled).toBe(true)
   })
   it('does not add an annotation after its scope request finishes on another tab', async () => {
@@ -479,7 +627,7 @@ it('retains the bounded selection and note when native blur reports an empty cap
   await openNotes()
   await fillNote('保留这条备注')
   await act(async () => useNativeOfficeStore.getState().receive({...annotationView,selection:{kind:'unavailable',documentId:view.objectId,version:view.revision,changeSequence:0,scope:'engine selection interface unavailable in this view'}}))
-  expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('保留这条备注')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('保留这条备注')
   await clickNamed('加入对话')
   expect(useNativeReferenceStore.getState().references[0]).toMatchObject({note:'保留这条备注',selection:annotationSelection,editable:false})
 })
@@ -606,7 +754,7 @@ it('offers explicit resume only for the owning thread and capability, while quer
 function persistedAnnotation(note:string, threadId='thread'): NonNullable<NativeOfficeView['annotation']> {
   return {objectId:view.objectId,threadId,note,draftRevision:'c'.repeat(64),sourceRevision:view.revision,updatedAt:'2026-09-15T00:00:00Z'}
 }
-function noteInput() { return container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')! }
+function noteInput() { return document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')! }
 const annotationDraftKey=JSON.stringify(['thread','/synthetic',view.path])
 describe('persisted native annotation races',()=>{
   it('restores only note text without selection, token, editable scope or automatic save',async()=>{
@@ -1003,7 +1151,8 @@ describe('native PPT playback in the existing view toolbar', () => {
     expect(request.mock.calls.some(([input]) => input.action === 'viewControl' && input.control === 'set-zoom')).toBe(false)
     expect(namedButton('标注文档').disabled).toBe(true)
     expect(namedButton('撤销修改').disabled).toBe(true)
-    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')!.disabled).toBe(true)
+    await openNotes()
+    expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')!.disabled).toBe(true)
     expect(useNativeOfficeStore.getState().view).toMatchObject({editing:true,selection,canUndo:true})
     expect(request.mock.calls.some(([input]) => ['annotate','reference','annotationSave','undoChange','save'].includes(input.action))).toBe(false)
   })
@@ -1079,7 +1228,11 @@ describe('native PPT playback in the existing view toolbar', () => {
     await act(async () => useNativeOfficeStore.setState({view:{...f.current,status:'error',error:'presentation_failed'},error:null}))
     expect(container.querySelector('[data-native-playback-state][role="alert"]')!.textContent).toContain('请重新打开预览')
     expect(namedButton('刷新放映状态')).toBeUndefined()
-    expect(namedButton('nativeOfficeRetry')).toBeDefined()
+    const retry=namedButton('nativeOfficeRetry')
+    expect(retry).toBeDefined()
+    expect(container.querySelectorAll('[aria-label="nativeOfficeRetry"]')).toHaveLength(1)
+    expect(container.querySelector('[data-workspace-viewer-header]')!.contains(retry)).toBe(true)
+    expect(container.querySelector('[data-native-office-state]')!.querySelector('button')).toBeNull()
     request.mockClear()
     await clickNamed('nativeOfficeRetry')
     expect(request.mock.calls.some(([input]) => input.action === 'open')).toBe(true)
@@ -1133,7 +1286,7 @@ describe('native PPT playback in the existing view toolbar', () => {
     await f.choose('view-play-current')
     expect(playbackCalls().at(-1)).toMatchObject({control:'play-current',playbackGeneration:2})
     expect(namedButton('标注文档')).toBeUndefined()
-    expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
     expect(request.mock.calls.some(([input]) => ['open','captureSelection','annotationSave','reference','proposals','annotate'].includes(input.action))).toBe(false)
     expect(useNativeReferenceStore.getState().drafts).toEqual(notes)
   })
@@ -1149,7 +1302,7 @@ it('opens Present Office by selector alone and preserves ordinary notes without 
   expect(request.mock.calls.some(([input]) => input.action === 'hide')).toBe(false)
   expect(request.mock.calls.find(([input]) => input.action === 'openPresent')?.[0]).toEqual({action:'openPresent',protectedPresent,bounds:rect,appearance})
   expect(request.mock.calls.some(([input]) => ['open','captureSelection','annotationSave','reference','proposals','annotate'].includes(input.action))).toBe(false)
-  expect(container.querySelector('[aria-label="标注文档"]')).toBeNull();expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
+  expect(container.querySelector('[aria-label="标注文档"]')).toBeNull();expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
   expect(namedButton('nativeOfficeManualEdit')).toBeUndefined();expect(namedButton('nativeOfficeManualDiscard')).toBeUndefined();expect(namedButton('nativeOfficeSaveAndReference')).toBeUndefined()
   expect(container.querySelector('[aria-label="预览视图"]')).not.toBeNull();expect(useNativeReferenceStore.getState().drafts).toEqual(notes)
 })
@@ -1553,7 +1706,7 @@ describe('proposal decision phases and manual recovery records',()=>{
     await act(async()=>useNativeOfficeStore.setState({error:'conflict'}))
     expect(namedButton('nativeOfficeManualSave').disabled).toBe(true)
     expect(namedButton('nativeOfficeManualDiscard').disabled).toBe(true)
-    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('Synthetic draft retained across conflict')
+    expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('Synthetic draft retained across conflict')
     expect(useNativeOfficeStore.getState().view?.dirty).toBe(true)
     expect(request.mock.calls.some(([input])=>['save','undoChange','discardManualEdit'].includes(input.action))).toBe(false)
   })
@@ -1733,8 +1886,8 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     const viewport = surface.parentElement!, host = viewport.parentElement!
     const toolbar = host.querySelector<HTMLElement>('[role="toolbar"]')!
     expect([...host.children]).toEqual([toolbar,viewport])
-    expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     const next = nativeFormatView(0,'selection_after_drag')
     if (next.selection?.kind !== 'text') throw new Error('Expected text capture')
     next.selection.capture = {capturedCharacters:19,totalCharacters:truncated ? 38 : 19,unit:'utf-16',complete:!truncated,truncated}
@@ -1756,19 +1909,22 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     expect(surface.parentElement).toBe(viewport)
     expect(viewport.parentElement).toBe(host)
     expect([...host.children]).toEqual([toolbar,viewport])
-    expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     const feedback = container.querySelector('[data-native-docx-feedback]')!
     expect(toolbar.contains(feedback)).toBe(true)
+    expect(feedback.querySelector('svg')).not.toBeNull()
     expect(feedback.textContent?.includes('已捕获')).toBe(truncated)
     await harness.choose({actionId:'quote'})
     expect(request.mock.calls.find(([input]) => input.action === 'reference')?.[0]).toMatchObject({selectionToken:'selection_after_drag',editable:false})
     expect(useNativeReferenceStore.getState().references[0]).toMatchObject({editable:false,selection:{token:'selection_after_drag',capture:{truncated}}})
     await openNotes()
-    expect(toolbar.querySelector('[aria-label="标注备注"]')).not.toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).not.toBeNull()
+    expect(toolbar.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).not.toBeNull()
     expect([...host.children]).toEqual([toolbar,viewport])
     await clickNamed('关闭标注备注')
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     expect([...host.children]).toEqual([toolbar,viewport])
   })
 
@@ -1785,7 +1941,7 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     try {
       await act(async () => { harness.publish(next); harness.menuRequested(harness.target(next)) })
       expect(harness.menu.mock.calls[0][0].actions.find(action => action.id === actionId)?.enabled).toBe(true)
-      expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+      expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
       await harness.choose({actionId})
       if (actionId === 'copy') {
         expect(writeText).toHaveBeenCalledExactlyOnceWith(annotationSelection.text)
@@ -1795,8 +1951,8 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
         expect(onPrepareDraft).toHaveBeenCalledExactlyOnceWith('请根据所选内容提出修改建议。',[expect.objectContaining({editable:true,selection:{...next.selection}})])
         expect(onSubmitPrompt).not.toHaveBeenCalled()
       }
-      expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
-      expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+      expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
+      expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     } finally {
       if (clipboardDescriptor) Object.defineProperty(navigator,'clipboard',clipboardDescriptor)
       else Reflect.deleteProperty(navigator,'clipboard')
@@ -1817,7 +1973,7 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     expect([...host.children]).toEqual([toolbar,viewport])
     expect(surface.parentElement).toBe(viewport)
     expect(namedButton('查询结果').disabled).toBe(false)
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     expect(request.mock.calls.some(([input]) => input.action === 'saveStatus')).toBe(false)
     await clickNamed('查询结果')
     expect(request.mock.calls.filter(([input]) => input.action === 'saveStatus')).toEqual([[{action:'saveStatus',objectId:view.objectId}]])
@@ -1842,6 +1998,118 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     expect(request.mock.calls.filter(([value]) => value.action === 'annotationSave')).toHaveLength(saves + (editing ? 1 : 0))
     expect(request.mock.calls.some(([value]) => ['annotate','reference','save','saveStatus'].includes(value.action))).toBe(false)
     expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).not.toBeNull()
   })
 
+})
+
+
+describe('shared Office viewer presentation', () => {
+  it.each(['docx','xlsx','pptx'] as const)('keeps %s operations in one icon header and opens notes outside document flow', async kind => {
+    const next = {...annotationView,kind,path:`/synthetic/report.${kind}`}
+    await renderAnnotation(next)
+    const header = container.querySelector('[data-workspace-viewer-header]')!
+    const surface = container.querySelector('[aria-label="nativeOfficeEditor"]')!
+    const viewport = surface.parentElement!, host = viewport.parentElement!
+    const children = [...host.children]
+    expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+    expect(header.textContent).toContain(`report.${kind}`)
+    for (const button of header.querySelectorAll<HTMLButtonElement>('button:not([data-native-view-controls])')) {
+      expect(button.getAttribute('aria-label')).toBeTruthy()
+      expect(button.querySelector('svg')).not.toBeNull()
+      expect(button.textContent).toBe('')
+    }
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
+    expect(request.mock.calls.some(([input]) => input.action === 'annotationSave')).toBe(false)
+    await act(async()=>namedButton('编辑标注备注').focus())
+    await openNotes()
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).not.toBeNull()
+    expect(document.activeElement).toBe(document.querySelector('[aria-label="标注备注"]'))
+    expect([...host.children]).toEqual(children)
+    expect(surface.parentElement).toBe(viewport)
+    await clickNamed('关闭标注备注')
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
+    expect([...host.children]).toEqual(children)
+    expect(document.activeElement).toBe(namedButton('编辑标注备注'))
+    expect(request.mock.calls.some(([input]) => input.action === 'annotationSave')).toBe(false)
+  })
+})
+
+
+it('deactivates retained Native viewer controls and notes while hidden, then restores one control owner',async()=>{
+  const viewerControls={focused:false,onToggleFocus:vi.fn(),onCollapse:vi.fn()}
+  await renderAnnotation(annotationView,{viewerControls})
+  const surface=container.querySelector('[aria-label="nativeOfficeEditor"]')!
+  expect(document.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(1)
+  await openNotes()
+  expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).not.toBeNull()
+  await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:false,threadId:'thread',viewerControls})))
+  expect(container.querySelector('[aria-label="nativeOfficeEditor"]')).toBe(surface)
+  expect(document.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(0)
+  expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
+  expect(viewerControls.onToggleFocus).not.toHaveBeenCalled();expect(viewerControls.onCollapse).not.toHaveBeenCalled()
+  await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread',viewerControls})))
+  expect(container.querySelector('[aria-label="nativeOfficeEditor"]')).toBe(surface)
+  expect(document.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(1)
+  expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
+})
+
+
+it.each([
+  {kind:'xlsx',failure:'unknown',label:'查询结果',action:'saveStatus'},
+  {kind:'xlsx',failure:'save_failed',label:'查询结果',action:'saveStatus'},
+  {kind:'pptx',failure:'unknown',label:'查询结果',action:'saveStatus'},
+  {kind:'pptx',failure:'save_failed',label:'重试',action:'save'}
+] as const)('keeps $kind $failure recovery in the existing icon header',async({kind,failure,label,action})=>{
+  const failed={...annotationView,kind,path:`/synthetic/report.${kind}`,dirty:true,saving:failure==='unknown',error:failure}
+  await renderAnnotation(failed)
+  await act(async()=>useNativeOfficeStore.setState({view:failed,error:failure}))
+  const header=container.querySelector('[data-workspace-viewer-header]')!
+  const surface=container.querySelector('[aria-label="nativeOfficeEditor"]')!
+  const host=surface.parentElement!.parentElement!
+  const recovery=namedButton(label)
+  expect(recovery).toBeDefined();expect(header.contains(recovery)).toBe(true)
+  expect(recovery.querySelector('svg')).not.toBeNull();expect(recovery.textContent).toBe('')
+  expect(recovery.disabled).toBe(false)
+  expect(header.querySelector('[role="alert"]')?.textContent).toContain(failure==='unknown'?'修改结果尚未确认':'更新未完成')
+  expect([...host.children].some(element=>element.getAttribute('role')==='alert')).toBe(false)
+  expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+  await clickNamed(label)
+  const recoveryRequests=request.mock.calls.map(([input])=>input).filter(input=>input.action==='saveStatus'||input.action==='save')
+  expect(recoveryRequests).toEqual([action==='saveStatus'?{action:'saveStatus',objectId:view.objectId}:{action:'save',objectId:view.objectId,revision:view.revision,expectedChangeSequence:0}])
+})
+
+it('places supplied file commands to the right of the filename without creating another operation row',async()=>{
+  const openFile=vi.fn(),download=vi.fn()
+  await renderAnnotation(annotationView,{
+    titleControl:createElement('button',{'data-file-title':true,onClick:openFile},'report.docx'),
+    fileActions:createElement('button',{'data-native-office-download':true,'aria-label':'下载',onClick:download},createElement('svg',{'aria-hidden':true}))
+  })
+  const header=container.querySelector('[data-workspace-viewer-header]')!
+  const title=header.querySelector<HTMLButtonElement>('[data-file-title]')!
+  const command=header.querySelector<HTMLButtonElement>('[data-native-office-download]')!
+  expect(title.parentElement!.contains(command)).toBe(false)
+  expect(header.contains(command)).toBe(true)
+  expect(title.compareDocumentPosition(command)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+  await act(async()=>{title.click();command.click()})
+  expect(openFile).toHaveBeenCalledOnce();expect(download).toHaveBeenCalledOnce()
+})
+
+
+it('keeps protected Present reopen in the single header and preserves its selector request',async()=>{
+  const protectedPresent={threadId:'thread-a',turnId:'turn-a',callId:'call_host_'+'a'.repeat(64),resultItemId:'item_result_'+'b'.repeat(64),viewId:'11111111-1111-4111-8111-111111111111',snapshotDigest:'c'.repeat(64),index:0}
+  const preview={...view,protectedPresent}
+  useNativeOfficeStore.setState({target:{workspace:'/synthetic',path:view.path,protectedPresent},view:preview,error:null})
+  request.mockImplementation(async()=>({ok:true,view:preview}))
+  await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:true,presentSelector:protectedPresent})))
+  await act(async()=>useNativeOfficeStore.setState({view:{...preview,status:'error',error:'engine_unavailable'},error:'engine_unavailable'}))
+  const retry=namedButton('nativeOfficeRetry')
+  expect(retry).toBeDefined()
+  expect(container.querySelectorAll('[aria-label="nativeOfficeRetry"]')).toHaveLength(1)
+  expect(container.querySelector('[data-workspace-viewer-header]')!.contains(retry)).toBe(true)
+  expect(container.querySelector('[data-native-office-state]')!.querySelector('button')).toBeNull()
+  request.mockClear();await clickNamed('nativeOfficeRetry')
+  expect(request.mock.calls.filter(([input])=>input.action==='openPresent')).toEqual([[{action:'openPresent',protectedPresent,bounds:rect,appearance}]])
+  expect(request.mock.calls.some(([input])=>['open','save','editWorkbookCell','format'].includes(input.action))).toBe(false)
 })

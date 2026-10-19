@@ -448,6 +448,66 @@ describe('user inline references on the actual message path', () => {
     } finally { window.removeEventListener(WORKSPACE_FILE_PREVIEW_EVENT, previews) }
   })
 
+  it('retries a failed open through the original file and workspace with one pending dialog', async () => {
+    let answer!: (retry: boolean) => void
+    const dialog = vi.fn(() => new Promise<boolean>(resolve => { answer = resolve }))
+    const resolve = vi.fn().mockResolvedValueOnce({ ok: true, path: `${workspace}/fixture.txt` })
+      .mockRejectedValueOnce(new Error('File moved'))
+      .mockResolvedValueOnce({ ok: true, path: `${workspace}/recovered.txt` })
+    Object.assign(window, { analytix: { files: { resolve }, app: { confirmDialog: dialog } } })
+    const previews = vi.fn(); window.addEventListener(WORKSPACE_FILE_PREVIEW_EVENT, previews)
+    try {
+      await render({ ...block, text: '@fixture.txt' })
+      await act(async () => { reference('@fixture.txt').click(); reference('@fixture.txt').click() })
+      expect(resolve).toHaveBeenCalledTimes(2)
+      expect(previews).not.toHaveBeenCalled()
+      expect(dialog).toHaveBeenCalledExactlyOnceWith({ message: i18n.t('common:filePreviewFailed'), detail: '@fixture.txt',
+        confirmLabel: i18n.t('common:protectedToolRetry'), cancelLabel: i18n.t('common:close') })
+      await act(async () => answer(true))
+      expect(resolve).toHaveBeenCalledTimes(3)
+      expect(resolve).toHaveBeenLastCalledWith({ path: 'fixture.txt', workspaceRoot: workspace })
+      expect((previews.mock.calls[0]![0] as CustomEvent).detail).toEqual({ path: `${workspace}/recovered.txt`, workspaceRoot: workspace })
+    } finally { window.removeEventListener(WORKSPACE_FILE_PREVIEW_EVENT, previews) }
+  })
+
+  it('closes a failed file open without retrying or navigating', async () => {
+    const resolve = vi.fn().mockResolvedValueOnce({ ok: true, path: `${workspace}/fixture.txt` })
+      .mockResolvedValue({ ok: false, message: 'Unavailable' })
+    const dialog = vi.fn(async () => false)
+    Object.assign(window, { analytix: { files: { resolve }, app: { confirmDialog: dialog } } })
+    const previews = vi.fn(); window.addEventListener(WORKSPACE_FILE_PREVIEW_EVENT, previews)
+    try {
+      await render({ ...block, text: '@fixture.txt' })
+      await act(async () => reference('@fixture.txt').click())
+      expect(dialog).toHaveBeenCalledOnce(); expect(resolve).toHaveBeenCalledTimes(2)
+      expect(previews).not.toHaveBeenCalled()
+    } finally { window.removeEventListener(WORKSPACE_FILE_PREVIEW_EVENT, previews) }
+  })
+
+  it.each(['thread-cycle', 'workspace', 'unmount'] as const)('retires an old Retry after %s', async transition => {
+    let answer!: (retry: boolean) => void
+    const dialog = vi.fn(() => new Promise<boolean>(resolve => { answer = resolve }))
+    const resolve = vi.fn().mockResolvedValueOnce({ ok: true, path: `${workspace}/fixture.txt` })
+      .mockResolvedValue({ ok: false, message: 'Unavailable' })
+    Object.assign(window, { analytix: { files: { resolve }, app: { confirmDialog: dialog } } })
+    const previews = vi.fn(); window.addEventListener(WORKSPACE_FILE_PREVIEW_EVENT, previews)
+    try {
+      await render({ ...block, text: '@fixture.txt' })
+      await act(async () => reference('@fixture.txt').click())
+      await act(async () => {
+        if (transition === 'thread-cycle') {
+          useChatStore.setState({ activeThreadId: 'other-thread' })
+          useChatStore.setState({ activeThreadId: threadId })
+        } else if (transition === 'workspace') useChatStore.setState({ threads: [], workspaceRoot: '/synthetic/other' })
+        else root.render(null)
+      })
+      const calls = resolve.mock.calls.length
+      await act(async () => answer(true))
+      expect(resolve).toHaveBeenCalledTimes(calls)
+      expect(previews).not.toHaveBeenCalled()
+    } finally { window.removeEventListener(WORKSPACE_FILE_PREVIEW_EVENT, previews) }
+  })
+
   it('decorates slash skills from this message only and resolves an exact local skill ID', async () => {
     const listSkills = vi.fn(async () => ({ ok: true, skills: [
       { id: 'audit', name: 'Misleading display name', root: `${workspace}/.agents/skills/audit`, entryPath: `${workspace}/.agents/skills/audit/SKILL.md`, scope: 'project', legacy: false },

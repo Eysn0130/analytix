@@ -10,14 +10,16 @@ import i18n from '../i18n'
  * which does not have that problem; `window.confirm` remains only as a
  * fallback for non-Electron contexts such as tests.
  */
-export async function confirmDialog(message: string, detail?: string): Promise<boolean> {
+export async function confirmDialog(message: string, detail?: string, labels?: {
+  confirmLabel: string; cancelLabel: string
+}): Promise<boolean> {
   if (typeof window !== 'undefined' && typeof window.analytix?.app?.confirmDialog === 'function') {
     try {
       return await window.analytix.app.confirmDialog({
         message,
         detail,
-        confirmLabel: i18n.t('common:confirm'),
-        cancelLabel: i18n.t('common:cancel')
+        confirmLabel: labels?.confirmLabel ?? i18n.t('common:confirm'),
+        cancelLabel: labels?.cancelLabel ?? i18n.t('common:cancel')
       })
     } catch {
       /* fall through to window.confirm */

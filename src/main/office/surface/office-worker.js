@@ -26,9 +26,10 @@ Module.zetajs.then(zeta => {
   let playback = {generation:0, sequence:0, phase:'idle', slideIndex:null, slideCount:null};
   let handleSequence = 0, suppressChanges = false, mutating = false;
   const handles = new Map();
+  let workbookCandidate;
   let lastSelectionIdentity = null, currentTextSelection = null;
   function endTextSelection() { currentTextSelection = null; lastSelectionIdentity = null; }
-  function clearHandles() { handles.clear(); endTextSelection(); }
+  function clearHandles() { handles.clear(); endTextSelection(); endWorkbookSelection(); }
   function confirmSelection() {
     const value = selection();
     const handle = handles.get(value.token);
@@ -117,8 +118,18 @@ Module.zetajs.then(zeta => {
   }
   function rememberWorkbook(target, text, kind, ranges, cells) {
     const token=remember(target,text,kind);
-    if (ranges.length===1) handles.get(token).workbook=JSON.parse(JSON.stringify({...ranges[0],cells}));
+    if (ranges.length===1) {
+      handles.get(token).workbook=JSON.parse(JSON.stringify({...ranges[0],cells}));
+      handles.get(token).workbookGeneration=active.workbookSelectionGeneration;
+    }
     return token;
+  }
+  function endWorkbookSelection() {
+    if(active?.kind==='xlsx'&&active.workbookSelectionIdentity!==null){active.workbookSelectionIdentity=null;active.workbookSelectionGeneration++;}
+  }
+  function observeWorkbookSelection(addresses) {
+    const identity=JSON.stringify(addresses.map(a=>[a.Sheet,a.StartColumn,a.StartRow,a.EndColumn,a.EndRow]));
+    if(active.workbookSelectionIdentity!==identity){active.workbookSelectionIdentity=identity;active.workbookSelectionGeneration++;}
   }
   const formulaKey = value => {
     let out='',quoted=false;const source=String(value).replace(/^=/,'');
@@ -128,10 +139,72 @@ Module.zetajs.then(zeta => {
     let out='=',quoted=false;const source=formulaKey(value);
     for(let i=0;i<source.length;i++){let c=source[i];if(c==='"'){if(quoted&&source[i+1]==='"'){out+='""';i++;continue;}quoted=!quoted;}if(!quoted&&c===',')c=';';out+=c;}return out;
   };
-  function workbookCell(sheet, before) {
+  function workbookFormulaResultType(cell) {
+    // FormulaResultType2 uses FormulaResult VALUE=1 / STRING=2 / ERROR=4.
+    // Legacy FormulaResultType instead uses CellContentType VALUE=1 / TEXT=2.
+    // https://api.libreoffice.org/docs/idl/ref/servicecom_1_1sun_1_1star_1_1sheet_1_1SheetCell.html
+    for(const property of ['FormulaResultType2','FormulaResultType']) {
+      let value;
+      try {value=cell.getPropertyValue(property);}catch {continue;}
+      if(value===undefined||value===null)continue;
+      const result=typeof value==='number'?value:value?.value;
+      // An explicit error/unknown result never falls back to a different claim.
+      return result===1?'number':result===2?'text':undefined;
+    }
+  }
+  function workbookCell(sheet, before, display = false) {
     const cell=sheet.getCellByPosition(before.column,before.row), nativeType=cell.getType();
     const type=typeof nativeType==='number'?nativeType:nativeType.value;
-    return {sheet:before.sheet,column:before.column,row:before.row,text:cell.getString(),formula:cell.getFormula(),value:cell.getValue(),valueType:['empty','number','text','formula'][type],numberFormat:Number(cell.getPropertyValue('NumberFormat')),rowVisible:sheet.getRows().getByIndex(before.row).getPropertyValue('IsVisible'),columnVisible:sheet.getColumns().getByIndex(before.column).getPropertyValue('IsVisible'),merged:cell.getIsMerged()};
+    if (![0,1,2,3].includes(type)) throw Error('unsupported-selection');
+    let valueError;
+    if (type === 3) {
+      try { const error=cell.getError(); if(Number.isSafeInteger(error)&&error>=0)valueError=error!==0; } catch { /* An unavailable cached formula result is never numeric evidence. */ }
+      if (!display && valueError !== false) throw Error('unsupported-selection');
+    }
+    const result={sheet:before.sheet,column:before.column,row:before.row,text:cell.getString(),formula:cell.getFormula(),value:cell.getValue(),valueType:['empty','number','text','formula'][type],numberFormat:Number(cell.getPropertyValue('NumberFormat')),rowVisible:sheet.getRows().getByIndex(before.row).getPropertyValue('IsVisible'),columnVisible:sheet.getColumns().getByIndex(before.column).getPropertyValue('IsVisible'),merged:cell.getIsMerged()};
+    if(display&&valueError!==undefined)result.valueError=valueError;
+    if(display&&type===3){const resultType=workbookFormulaResultType(cell);if(resultType!==undefined)result.formulaResultType=resultType;}
+    return result;
+  }
+  function workbookBounds(bounds) {
+    const keys=['sheet','startColumn','startRow','endColumn','endRow'];
+    return bounds&&Object.keys(bounds).length===keys.length&&keys.every(k=>Number.isSafeInteger(bounds[k])&&bounds[k]>=0)&&
+      bounds.sheet<20&&bounds.endColumn<1024&&bounds.endRow<100000&&bounds.startColumn<=bounds.endColumn&&bounds.startRow<=bounds.endRow&&
+      (bounds.endColumn-bounds.startColumn+1)*(bounds.endRow-bounds.startRow+1)<=256;
+  }
+  function currentWorkbookTarget(handle, target) {
+    const saved=handle?.workbook;
+    if(!saved||saved.cells.length!==1||!target||Object.keys(target).sort().join(',')!=='column,row,sheet'||
+        target.sheet!==saved.sheet||target.column!==saved.startColumn||target.row!==saved.startRow||saved.endColumn!==target.column||saved.endRow!==target.row)return false;
+    try {
+      const selected=controller.getSelection();
+      let addresses;
+      if(selected.getRangeAddresses)addresses=selected.getRangeAddresses();
+      else if(selected.getRangeAddress)addresses=[selected.getRangeAddress()];
+      else {const a=selected.getCellAddress();addresses=[{Sheet:a.Sheet,StartColumn:a.Column,EndColumn:a.Column,StartRow:a.Row,EndRow:a.Row}];}
+      observeWorkbookSelection(addresses);
+      const a=addresses[0];
+      return handle.workbookGeneration===active.workbookSelectionGeneration&&addresses.length===1&&a.Sheet===target.sheet&&a.StartColumn===target.column&&a.EndColumn===target.column&&a.StartRow===target.row&&a.EndRow===target.row;
+    }catch{endWorkbookSelection();return false;}
+  }
+  function captureCells(r) {
+    if(!exactFields(r,[...requestFields,'selectionToken','expectedChangeSequence','bounds'])||active.kind!=='xlsx'||!workbookBounds(r.bounds))throw Error('invalid-request');
+    if(active.mutationFailed)throw Error('typed-mutation-failed');
+    const handle=handles.get(r.selectionToken),bounds=r.bounds;
+    if(!handle||handle.version!==active.version||handle.sequence!==active.sequence||r.expectedChangeSequence!==active.sequence)throw Error('stale-selection');
+    const target={sheet:handle.workbook?.sheet,column:handle.workbook?.startColumn,row:handle.workbook?.startRow};
+    if(!currentWorkbookTarget(handle,target))throw Error('stale-selection');
+    if(bounds.sheet!==target.sheet||target.column<bounds.startColumn||target.column>bounds.endColumn||target.row<bounds.startRow||target.row>bounds.endRow)throw Error('unsupported-selection');
+    const sheet=model.getSheets().getByIndex(bounds.sheet),cells=[];
+    for(let row=bounds.startRow;row<=bounds.endRow;row++)for(let column=bounds.startColumn;column<=bounds.endColumn;column++){
+      const cell=workbookCell(sheet,{sheet:bounds.sheet,column,row});
+      if(!Number.isFinite(cell.value)||cell.text.length>4096||cell.formula.length>4096||!Number.isSafeInteger(cell.numberFormat)||cell.numberFormat<0||cell.rowVisible!==true||cell.columnVisible!==true||cell.merged!==false)throw Error('unsupported-selection');
+      cells.push(cell);
+    }
+    const workbook={sheet:bounds.sheet,sheetName:sheet.getName(),startColumn:bounds.startColumn,endColumn:bounds.endColumn,startRow:bounds.startRow,endRow:bounds.endRow,cells};
+    if(workbook.sheetName!==handle.workbook.sheetName)throw Error('stale-selection');
+    handle.readWorkbook=JSON.parse(JSON.stringify(workbook));
+    return workbook;
   }
   function workbookFormulaReferences(expression, scope, budget) {
     let input=formulaKey(expression), refs=[];
@@ -152,41 +225,118 @@ Module.zetajs.then(zeta => {
     const visit=(i,depth)=>{if(depth>64||state[i]===1)throw Error('invalid-control-value');if(state[i]===2)return depths[i];state[i]=1;let height=1;for(const j of graph[i])if(scope.cells[j].valueType==='formula')height=Math.max(height,visit(j,depth+1)+1);if(height>64)throw Error('invalid-control-value');state[i]=2;depths[i]=height;return height;};
     for(let i=0;i<graph.length;i++)visit(i,1);
   }
+  function workbookFormatDefinition(nativeModel,key) {
+    if(!Number.isSafeInteger(key)||key<0)throw Error('unsupported-format-fidelity');
+    const format=nativeModel.getNumberFormats().getByKey(key),code=format.getPropertyValue('FormatString'),locale=format.getPropertyValue('Locale');
+    if(typeof code!=='string'||!locale||!['Language','Country','Variant'].every(k=>typeof locale[k]==='string'))throw Error('unsupported-format-fidelity');
+    return {code,locale:{Language:locale.Language,Country:locale.Country,Variant:locale.Variant}};
+  }
+  function sameWorkbookFormat(a,b) {
+    return a.code===b.code&&['Language','Country','Variant'].every(k=>a.locale[k]===b.locale[k]);
+  }
+  function closeWorkbookCandidateModel(candidate) {
+    if(!candidate?.nativeModel)return;
+    try {candidate.nativeModel.close(true);candidate.nativeModel=null;}
+    catch {if(active)active.mutationFailed=true;throw Error('typed-mutation-failed');}
+  }
   function replaceWorkbook(r) {
-    const handle=targetFor(r), review=r.workbook, saved=handle.workbook;
+    const handle=targetFor(r), review=r.workbook, manual=r.writeTarget!==undefined, saved=manual?handle.readWorkbook:handle.workbook;
+    const authority=r.candidate;
+    if(!exactFields(authority,['changeId','saveOperationId','baseRevision'])||!digest(authority.changeId)||!nativeOperation(authority.saveOperationId)||authority.baseRevision!==r.version)throw Error('invalid-request');
+    if(workbookCandidate||active.pendingExport)throw Error('export-awaiting-ack');
     if(active.kind!=='xlsx'||!saved||!review||!review.before||!review.after)throw Error('unsupported-selection');
+    if(manual&&!currentWorkbookTarget(handle,r.writeTarget))throw Error('stale-selection');
     const before=review.before,after=review.after,keys=['sheet','sheetName','startColumn','startRow','endColumn','endRow'];
     if(!keys.every(k=>before[k]===saved[k]&&after[k]===saved[k])||before.cells.length!==saved.cells.length||after.cells.length!==saved.cells.length||saved.cells.length===0||saved.cells.length>256)throw Error('stale-selection');
     const width=before.endColumn-before.startColumn+1,height=before.endRow-before.startRow+1;
     if(width<1||height<1||width*height!==saved.cells.length)throw Error('unsupported-selection');
-    const sheet=model.getSheets().getByIndex(before.sheet), targets=[];
+    const visibleModel=model,visibleController=controller,sheet=visibleModel.getSheets().getByIndex(before.sheet);
     if(sheet.getName()!==before.sheetName)throw Error('stale-selection');
     for(let i=0;i<before.cells.length;i++){
       const b=before.cells[i],a=after.cells[i],old=saved.cells[i],current=workbookCell(sheet,b);
       if(!Object.keys(current).every(k=>current[k]===b[k]&&b[k]===old[k]))throw Error('stale-selection');
       if(b.column!==before.startColumn+i%width||b.row!==before.startRow+Math.floor(i/width)||!b.rowVisible||!b.columnVisible||b.merged||a.sheet!==b.sheet||a.row!==b.row||a.column!==b.column||a.numberFormat!==b.numberFormat||!a.rowVisible||!a.columnVisible||a.merged)throw Error('unsupported-selection');
       if(!['empty','text','number','formula'].includes(a.valueType)||!Number.isFinite(a.value)||typeof a.text!=='string'||a.text.length>4096||typeof a.formula!=='string'||a.formula.length>4096)throw Error('invalid-control-value');
-      if(a.valueType==='text'&&!['empty','text'].includes(b.valueType)||a.valueType==='empty'&&b.valueType!=='empty')throw Error('invalid-control-value');
+      if(manual&&(b.sheet!==r.writeTarget.sheet||b.column!==r.writeTarget.column||b.row!==r.writeTarget.row)&&!Object.keys(b).every(k=>a[k]===b[k]))throw Error('unsupported-selection');
+      if(a.valueType==='empty'&&(a.text!==''||a.formula!==''||a.value!==0))throw Error('invalid-control-value');
       if(a.valueType==='formula'&&(!a.formula.startsWith('=')||a.formula.length>1025))throw Error('invalid-control-value');
-      targets.push(sheet.getCellByPosition(b.column,b.row));
     }
     validateWorkbookFormulas(after);
+    const candidate={owner:active,documentId:active.documentId,baseVersion:active.version,baseSequence:active.sequence,sequence:null,mutationOperationId:r.operationId,selectionToken:r.selectionToken,changeId:authority.changeId,saveOperationId:authority.saveOperationId,nativeModel:null,status:'preparing'};
+    workbookCandidate=candidate;
     try {
       mutate(()=>{
-        for(let i=0;i<targets.length;i++){
-          const c=after.cells[i],old=before.cells[i];
-          if(c.valueType===old.valueType&&(c.valueType==='formula'?formulaKey(c.formula)===formulaKey(old.formula):c.valueType==='number'?c.value===old.value:c.text===old.text))continue;
-          if(c.valueType==='number')targets[i].setValue(c.value);
-          else if(c.valueType==='formula')targets[i].setFormula(nativeFormula(c.formula));
-          else targets[i].setString(c.text);
-        }
-        model.calculateAll();
-        for(let i=0;i<targets.length;i++){
-          const c=after.cells[i],actual=workbookCell(sheet,c);
-          if(actual.valueType!==c.valueType||actual.numberFormat!==c.numberFormat||actual.merged||!actual.rowVisible||!actual.columnVisible||c.valueType==='number'&&actual.value!==c.value||c.valueType==='text'&&actual.text!==c.text||c.valueType==='formula'&&(formulaKey(actual.formula)!==formulaKey(c.formula)||targets[i].getError()!==0))throw Error('typed-mutation-failed');
+        let stage='candidate-load';
+        const verificationFailure=Error('typed-mutation-failed');
+        const verifyOwner=()=>{
+          if(workbookCandidate!==candidate||candidate.owner!==active||candidate.documentId!==active.documentId||candidate.baseVersion!==active.version||candidate.baseSequence!==active.sequence||model!==visibleModel||controller!==visibleController||visibleModel.isReadonly()!==true||targetFor(r)!==handle||handles.get(r.selectionToken)!==handle||handle.version!==candidate.baseVersion||handle.sequence!==candidate.baseSequence||manual&&!currentWorkbookTarget(handle,r.writeTarget))throw verificationFailure;
+        };
+        try {
+          const loaded=desktop.loadComponentFromURL('file:///tmp/analytix-office/workbook-candidate.xlsx','_blank',0,
+            [prop('MacroExecutionMode',NEVER_EXECUTE),prop('UpdateDocMode',0),prop('ReadOnly',false),prop('Hidden',true),prop('LockEditDoc',true),prop('LockSave',true),prop('LockExport',true),prop('PickListEntry',false)]);
+          // A model is owned only after native identity proves it is distinct.
+          // A borrowed/unknown wrapper must never close the visible document.
+          if(!loaded||zeta.sameUnoObject(loaded,visibleModel)!==false)throw verificationFailure;
+          candidate.nativeModel=loaded;
+          if(candidate.nativeModel.isReadonly()!==false)throw verificationFailure;
+          stage='candidate-snapshot';
+          const candidateSheet=candidate.nativeModel.getSheets().getByIndex(before.sheet),targets=[],localBefore=[],formats=[],changed=[];
+          if(candidateSheet.getName()!==before.sheetName)throw verificationFailure;
+          for(let i=0;i<before.cells.length;i++){
+            const b=before.cells[i],current=workbookCell(candidateSheet,b);
+            if(!Object.keys(current).every(k=>k==='numberFormat'||current[k]===b[k]))throw verificationFailure;
+            // Format keys belong to one model. Only definitions cross this boundary.
+            const visibleFormat=workbookFormatDefinition(visibleModel,b.numberFormat),localFormat=workbookFormatDefinition(candidate.nativeModel,current.numberFormat);
+            if(!sameWorkbookFormat(visibleFormat,localFormat))throw verificationFailure;
+            localBefore.push(current);formats.push(localFormat);targets.push(candidateSheet.getCellByPosition(b.column,b.row));
+          }
+          for(let i=0;i<targets.length;i++){
+            const c=after.cells[i],old=localBefore[i];
+            if(c.valueType===old.valueType&&(c.valueType==='formula'?formulaKey(c.formula)===formulaKey(old.formula):c.valueType==='number'?c.value===old.value:c.text===old.text))continue;
+            stage='verify-owner';verifyOwner();
+            if(c.valueType==='number'){stage='write-number';targets[i].setValue(c.value);}
+            else if(c.valueType==='formula'){stage='write-formula';targets[i].setFormula(nativeFormula(c.formula));}
+            else {stage='write-text';targets[i].setString(c.text);}
+            changed.push(i);
+          }
+          stage='calculate';candidate.nativeModel.calculateAll();
+          stage='verify-owner';verifyOwner();
+          for(const i of changed){
+            const old=localBefore[i];
+            stage='restore-number-format';
+            const nativeType=targets[i].getPropertySetInfo().getPropertyByName('NumberFormat').Type;
+            targets[i].setPropertyValue('NumberFormat',new zeta.Any(nativeType,old.numberFormat));
+          }
+          for(let i=0;i<targets.length;i++){
+            const c=after.cells[i];
+            stage='readback';const actual=workbookCell(candidateSheet,c);
+            stage='verify-type';if(actual.valueType!==c.valueType)throw verificationFailure;
+            stage='verify-format';if(actual.numberFormat!==localBefore[i].numberFormat)throw verificationFailure;
+            stage='verify-format-definition';if(!sameWorkbookFormat(workbookFormatDefinition(candidate.nativeModel,actual.numberFormat),formats[i]))throw verificationFailure;
+            stage='verify-merged';if(actual.merged)throw verificationFailure;
+            stage='verify-row-visible';if(!actual.rowVisible)throw verificationFailure;
+            stage='verify-column-visible';if(!actual.columnVisible)throw verificationFailure;
+            stage='verify-number';if(c.valueType==='number'&&actual.value!==c.value)throw verificationFailure;
+            stage='verify-text';if(c.valueType==='text'&&actual.text!==c.text)throw verificationFailure;
+            if(c.valueType==='formula'){
+              stage='verify-formula';if(formulaKey(actual.formula)!==formulaKey(c.formula))throw verificationFailure;
+              stage='verify-formula-error';if(targets[i].getError()!==0)throw verificationFailure;
+            }
+          }
+          stage='verify-owner';
+          verifyOwner();
+        }catch(error){
+          // Fixed, content-free diagnostics only; reporting cannot change the
+          // existing poison/rejection behavior or expose native exception text.
+          try {
+            const causeClass=error===verificationFailure?'verification-mismatch':error?.name==='TypeError'?'TypeError':error?.name==='RangeError'?'RangeError':error?.name==='RuntimeError'?'RuntimeError':'native-exception';
+            console.warn('ANALYTIX_WORKBOOK_MUTATION_DIAGNOSTIC '+stage+':'+causeClass);
+          }catch { /* Preserve the original failure. */ }
+          throw error;
         }
       });
-    }catch {active.mutationFailed=true;clearHandles();throw Error('typed-mutation-failed');}
+      candidate.sequence=active.sequence;candidate.status='prepared';
+    }catch {candidate.status='failed';active.mutationFailed=true;clearHandles();try {closeWorkbookCandidateModel(candidate);}catch { /* The poisoned owner retains any unclosed model for close. */ }throw Error('typed-mutation-failed');}
   }
 function validPresentationSelection(s) {
   const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
@@ -321,6 +471,7 @@ function validPresentationReview(r) {
         if (selected.getRangeAddresses) addresses = selected.getRangeAddresses();
         else if (selected.getRangeAddress) addresses = [selected.getRangeAddress()];
         else { const a = selected.getCellAddress(); addresses = [{Sheet:a.Sheet, StartColumn:a.Column, EndColumn:a.Column, StartRow:a.Row, EndRow:a.Row}]; }
+        observeWorkbookSelection(addresses);
         const ranges = addresses.slice(0, 64).map(a => ({sheet:a.Sheet, sheetName:model.getSheets().getByIndex(a.Sheet).getName(), startColumn:a.StartColumn, startRow:a.StartRow, endColumn:a.EndColumn, endRow:a.EndRow}));
         const cells = [], rawTexts = []; let complete = addresses.length <= 64, totalCells = 0;
         for (const a of addresses) totalCells += (a.EndColumn-a.StartColumn+1)*(a.EndRow-a.StartRow+1);
@@ -328,13 +479,10 @@ function validPresentationReview(r) {
           const sheet = model.getSheets().getByIndex(a.Sheet);
           for (let row = a.StartRow; row <= a.EndRow && cells.length < 256; row++) {
             for (let column = a.StartColumn; column <= a.EndColumn && cells.length < 256; column++) {
-              const cell = sheet.getCellByPosition(column, row);
-              const nativeType = cell.getType();
-              const type = typeof nativeType === 'number' ? nativeType : nativeType.value;
-              if (![0,1,2,3].includes(type)) throw Error('unsupported-selection');
-              rawTexts.push(cell.getString());
-              if (cell.getFormula().length > 4096) complete = false;
-              cells.push({sheet:a.Sheet, column, row, text:boundedText(cell.getString()), formula:boundedText(cell.getFormula()), value:cell.getValue(), valueType:['empty','number','text','formula'][type], numberFormat:Number(cell.getPropertyValue('NumberFormat')), rowVisible:sheet.getRows().getByIndex(row).getPropertyValue('IsVisible'), columnVisible:sheet.getColumns().getByIndex(column).getPropertyValue('IsVisible'), merged:cell.getIsMerged()});
+              const cell = workbookCell(sheet,{sheet:a.Sheet,column,row},true);
+              rawTexts.push(cell.text);
+              if (cell.formula.length > 4096) complete = false;
+              cells.push({...cell,text:boundedText(cell.text),formula:boundedText(cell.formula)});
             }
           }
         }
@@ -366,6 +514,7 @@ function validPresentationReview(r) {
       return {...base, kind:'shapes', scope:'page-and-shape-index-at-version-and-change-sequence', shapes, capture:captured(text, !selected.getCount || selected.getCount() <= 64), ...(token?{token}:{}),...(presentation?{presentation}:{})};
     } catch {
       endTextSelection();
+      endWorkbookSelection();
       return {...base, kind:'unavailable', scope:'engine selection interface unavailable in this view'};
     }
   }
@@ -866,6 +1015,8 @@ function validPresentationReview(r) {
   function close() {
     cancelFreeze();
     privateBusy = undefined;
+    closeWorkbookCandidateModel(workbookCandidate);
+    workbookCandidate=undefined;
     clearPlaybackTimer();
     if (presentation) { presentation.end(); presentation = undefined; }
     if (model) {
@@ -1024,7 +1175,7 @@ function validPresentationReview(r) {
         try { configurePreviewStage(); } catch { /* Optional stage styling must not block read-only preview. */ }
         try { loadNativeModel(r.kind,true); }
         catch (error) { close(); throw error; }
-        active = {documentId:r.documentId, version:r.version, kind:r.kind, openOperationId:r.operationId, sequence:0, acknowledged:0, editing:false, viewFit:r.kind !== 'xlsx',nativeWritable:false,manualGeneration:0,manualChanges:new Set(),manualOperations:new Set()};
+        active = {documentId:r.documentId, version:r.version, kind:r.kind, openOperationId:r.operationId, sequence:0, acknowledged:0, editing:false, viewFit:r.kind !== 'xlsx',nativeWritable:false,manualGeneration:0,manualChanges:new Set(),manualOperations:new Set(),workbookSelectionIdentity:null,workbookSelectionGeneration:0};
         attachModelListeners();
   }
   zeta.mainPort.onmessage = async ({data:r}) => {
@@ -1096,6 +1247,7 @@ function validPresentationReview(r) {
         }
       } else if (r.command === 'edit') {
         if (active.mutationFailed) throw Error('typed-mutation-failed');
+        if (active.kind==='xlsx'&&workbookCandidate)throw Error('export-awaiting-ack');
         if (active.sequence !== active.acknowledged) throw Error('unsaved-changes');
         if (active.manual || (model.isReadonly() !== true && !(active.kind === 'docx' && active.nativeWritable && model.isReadonly() === false))) throw Error('unsupported-command');
         requireDocxSizeFidelity();
@@ -1104,6 +1256,7 @@ function validPresentationReview(r) {
         active.editing = true;
         reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'replace') {
+        if(active.kind==='xlsx')throw Error('unsupported-command');
         const handle = targetFor(r);
         if (!['text','cell','shape'].includes(handle.kind) || typeof r.text !== 'string' || r.text.length > 4096) throw Error('unsupported-selection');
         if (r.valueType !== 'text') throw Error('invalid-control-value');
@@ -1121,7 +1274,7 @@ function validPresentationReview(r) {
       } else if (r.command === 'replacePresentation') {
         replacePresentation(r);reply({ok:true,state:state(),selection:selection()});
       } else if (r.command === 'replaceCells') {
-        replaceWorkbook(r);reply({ok:true,state:state(),selection:selection()});
+        replaceWorkbook(r);reply({ok:true,state:state()});
       } else if (r.command === 'export') {
         requireEditing();
         if (active.pendingExport) throw Error('export-awaiting-ack');
@@ -1136,23 +1289,29 @@ function validPresentationReview(r) {
         } else if (r.changeId !== undefined || r.freezeAck !== undefined) throw Error('unsupported-command');
         requireDocxSizeFidelity();
         const sequence = active.sequence;
+        const candidate=active.kind==='xlsx'?workbookCandidate:null;
+        if(active.kind==='xlsx'&&(!candidate||candidate.owner!==active||candidate.documentId!==active.documentId||candidate.baseVersion!==active.version||candidate.baseSequence+1!==sequence||candidate.sequence!==sequence||candidate.status!=='prepared'||!candidate.nativeModel||r.operationId!==candidate.saveOperationId))throw Error('ack-mismatch');
         // The surface closes body input for controlled AI edits; manual export
         // additionally requires the exact frozen proof above. Synchronous
         // filter/layout notifications are not another user or AI edit.
         suppressChanges = true;
-        try { model.storeToURL('file:///tmp/analytix-office/output.' + active.kind, [prop('FilterName', filters[active.kind]), prop('Overwrite', true)]); }
-        finally { suppressChanges = false; }
+        if(candidate)candidate.status='exporting';
+        try { (candidate?candidate.nativeModel:model).storeToURL('file:///tmp/analytix-office/output.' + active.kind, [prop('FilterName', filters[active.kind]), prop('Overwrite', true)]); }
+        catch(error){if(candidate){candidate.status='failed';active.mutationFailed=true;throw Error('typed-mutation-failed');}throw error;}
+        finally {try {if(candidate)closeWorkbookCandidateModel(candidate);}finally {suppressChanges=false;}}
+        if(candidate)candidate.status='exported';
         active.pendingExport = {operationId:r.operationId, sequence};
         reply({ok:true, state:state(), exportedSequence:sequence});
       } else if (r.command === 'ack') {
         requireEditing();
         const pending = active.pendingExport;
         if (!pending || pending.operationId !== r.exportOperationId || pending.sequence !== r.exportedSequence || !['committed','conflict','failed'].includes(r.status)) throw Error('ack-mismatch');
+        if(active.kind==='xlsx'&&(!workbookCandidate||workbookCandidate.owner!==active||workbookCandidate.status!=='exported'||workbookCandidate.saveOperationId!==r.exportOperationId||workbookCandidate.sequence!==pending.sequence))throw Error('ack-mismatch');
         if (r.status === 'committed') {
           if (typeof r.persistedVersion !== 'string' || !/^[a-f0-9]{64}$/.test(r.persistedVersion)) throw Error('ack-mismatch');
           if (active.manual && pending.sequence !== active.sequence) throw Error('ack-mismatch');
           active.version = r.persistedVersion; active.acknowledged = pending.sequence; clearHandles();
-          if (active.sequence === active.acknowledged) { suppressChanges = true; try { model.setModified(false); } finally { suppressChanges = false; } }
+          if (active.kind!=='xlsx'&&active.sequence === active.acknowledged) { suppressChanges = true; try { model.setModified(false); } finally { suppressChanges = false; } }
           if (active.manual) {
             delete active.manual; delete active.manualAuthority; delete active.manualOpenOperationId; delete active.freezeAck;
             active.editing = false;
@@ -1162,10 +1321,13 @@ function validPresentationReview(r) {
           }
         }
         delete active.pendingExport;
-        reply({ok:true, state:state(), selection:selection()});
+        if(active.kind==='xlsx'){closeWorkbookCandidateModel(workbookCandidate);workbookCandidate=undefined;reply({ok:true,state:state()});}
+        else reply({ok:true, state:state(), selection:selection()});
       } else if (r.command === 'captureSelection') {
         if (active.manual && !active.manual.frozen) drainNativeInput();
         reply({ok:true, state:state(), selection:selection()});
+      } else if (r.command === 'captureCells') {
+        reply({ok:true,state:state(),workbook:captureCells(r)});
       } else if (r.command === 'validateSelection') {
         validateSelection(r); reply({ok:true, state:state()});
       } else if (r.command === 'close') {

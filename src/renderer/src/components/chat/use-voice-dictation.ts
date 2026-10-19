@@ -53,6 +53,8 @@ export function useVoiceDictation({
   startedAtMs: number
   start: () => void
   stop: (intent?: VoiceDictationIntent) => void
+  /** Discard the current recording and retire any pending permission or transcript. */
+  cancel: () => void
   toggle: () => void
   /** Current microphone level (0..1) for waveform rendering. Safe to call every frame. */
   getLevel: () => number
@@ -104,6 +106,19 @@ export function useVoiceDictation({
     return Math.min(1, Math.sqrt(sumSquares / data.length) * 3)
   }, [])
 
+  const cancel = useCallback((): void => {
+    operationRef.current += 1
+    const recorder = recorderRef.current
+    if (recorder) { recorder.onstop = null; recorder.ondataavailable = null }
+    releaseStream()
+    if (recorder?.state === 'recording') recorder.stop()
+    if (mountedRef.current) {
+      setStatus('idle')
+      setError(null)
+      setStartedAtMs(0)
+    }
+  }, [releaseStream])
+
   useLayoutEffect(() => {
     mountedRef.current = true
     operationRef.current += 1
@@ -112,13 +127,9 @@ export function useVoiceDictation({
     setStartedAtMs(0)
     return () => {
       mountedRef.current = false
-      operationRef.current += 1
-      const recorder = recorderRef.current
-      if (recorder) { recorder.onstop = null; recorder.ondataavailable = null }
-      releaseStream()
-      if (recorder?.state === 'recording') recorder.stop()
+      cancel()
     }
-  }, [ownerKey, releaseStream])
+  }, [ownerKey, cancel])
 
   const transcribeBlob = useCallback(async (blob: Blob, durationMs: number, intent: VoiceDictationIntent, isCurrent: () => boolean): Promise<void> => {
     try {
@@ -230,7 +241,7 @@ export function useVoiceDictation({
     }
   }, [start, status, stop])
 
-  return { status, error, startedAtMs, start, stop, toggle, getLevel }
+  return { status, error, startedAtMs, start, stop, cancel, toggle, getLevel }
 }
 
 /**

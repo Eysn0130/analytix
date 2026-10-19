@@ -1,12 +1,16 @@
 import type { ToolResultLocalPresentFileRequestV1 } from '../../../../packages/runtime/src/contracts/tool-result-local-display'
 import type { ResolvedWriteQuickAction } from '../write/quick-actions'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { FileText, RotateCcw, Undo2, Quote, Pencil, ChevronDown, ScanEye, Play, Pause, Square } from '../design/AnalytixUiIcons'
+import { FileText, RotateCcw, Undo2, Quote, Pencil, ChevronDown, ScanEye, Play, Pause, Square, Save, Trash2, MessageSquare, Info } from '../design/AnalytixUiIcons'
 import { nativeOfficeActionChoiceSchema, nativeOfficeFormatSchema, nativeOfficeFormatStateSchema, nativeOfficeRangeLeaseSchema, type NativeOfficeActionMenu, type NativeOfficeFormat, type NativeOfficeFormatState, type NativeOfficeRangeLease, type NativeOfficeMenuTarget, type NativeOfficeRequest, type NativeOfficeResponse, type NativeOfficeSelection, type NativeOfficeView } from '@shared/native-office'
 import { useNativeOfficeStore, nativeOfficeTargetKey, nativeOfficeTargetMatches, nativeOfficeManualPhase, nativeOfficeHasUnresolvedChange, type NativeOfficeManualDiscardAttempt, type NativeOfficeTarget } from './native-office-store'
 import { nativeSelectionActions } from './native-selection-actions'
+import { WorkbookCellEditor, type WorkbookCellContextActions } from './WorkbookCellEditor'
 import { Tooltip } from '../components/chat/presentation/Tooltip'
+import { useAnchoredPanel } from '../components/chat/presentation/useAnchoredPanel'
+import { WorkspaceViewerHeader, WorkspaceViewerIconButton, type WorkspaceViewerControls } from '../components/workbench/WorkspaceViewerHeader'
 import styles from './native-office-panel.module.css'
 
 import { useNativeReferenceStore, nativeSelectionLabel, nativeSelectionText, isNativeSelectionEditable, nativeOfficeDraftReferencesCurrent, nativeOfficeSavedSelection, type NativeReference } from './native-reference-store'
@@ -79,7 +83,7 @@ function finishManualDiscard(attempt: NativeOfficeManualDiscardAttempt): void {
   })
 }
 
-export function NativeOfficePanel({ visible: requestedVisible, presentSelector, onFocusConversation, onSubmitPrompt, onPrepareDraft, threadId = null, quickActions = [], fileActions }: { visible: boolean; presentSelector?: ToolResultLocalPresentFileRequestV1; fileActions?: ReactNode; quickActions?: ResolvedWriteQuickAction[]; threadId?: string | null; onFocusConversation?: () => void; onSubmitPrompt?: (prompt: string, references: NativeReference[]) => void; onPrepareDraft?: (prompt: string, references: NativeReference[]) => boolean; setInput?: (value: string) => void }) {
+export function NativeOfficePanel({ visible: requestedVisible, presentSelector, onFocusConversation, onSubmitPrompt, onPrepareDraft, threadId = null, quickActions = [], fileActions, titleControl, viewerControls }: { visible: boolean; viewerControls?: WorkspaceViewerControls; presentSelector?: ToolResultLocalPresentFileRequestV1; fileActions?: ReactNode; titleControl?: ReactNode; quickActions?: ResolvedWriteQuickAction[]; threadId?: string | null; onFocusConversation?: () => void; onSubmitPrompt?: (prompt: string, references: NativeReference[]) => void; onPrepareDraft?: (prompt: string, references: NativeReference[]) => boolean; setInput?: (value: string) => void }) {
   const { t } = useTranslation('common')
   const target = useNativeOfficeStore((s) => s.target)
   const view = useNativeOfficeStore((s) => s.view)
@@ -97,9 +101,15 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
   const docxAnnotation = !readonlyPresent && view?.kind === 'docx'
   const annotationAvailable = view?.status === 'ready' || !!view?.editing
   const annotationControlOwner = JSON.stringify([draftKey, targetIdentity, view?.objectId, view?.revision])
-  const [notesOwner, setNotesOwner] = useState<string | null>(null)
-  const notesOpen = docxAnnotation && visible && notesOwner === annotationControlOwner
-  useEffect(() => { setNotesOwner(null) }, [annotationControlOwner, visible])
+  const notesPanel = useAnchoredPanel<HTMLSpanElement>({ enabled: visible && !loading && targetMatches && !readonlyPresent, ownerKey: annotationControlOwner })
+  const notesOpen = notesPanel.open
+  useEffect(() => {
+    if (notesOpen && document.activeElement === notesPanel.triggerRef.current) {
+      notesPanel.panelRef.current?.querySelector<HTMLElement>('input:not(:disabled),button:not(:disabled)')?.focus()
+    }
+  }, [notesOpen,notesPanel.panelRef,notesPanel.triggerRef])
+  const [workbookToolbarTarget,setWorkbookToolbarTarget] = useState<HTMLSpanElement | null>(null)
+  const [workbookContextActions,setWorkbookContextActions] = useState<WorkbookCellContextActions | null>(null)
   const draft = useNativeReferenceStore(state => readonlyPresent ? undefined : state.drafts[draftKey])
   const note = draft?.note ?? ''
   const setNote = (value: string) => {
@@ -191,12 +201,20 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     const epoch = generation.current, context = menuContext.current
     const live = useNativeOfficeStore.getState(), selected = live.target
     const unresolved = nativeOfficeHasUnresolvedChange(live.view,live.error)
+    if (request.action === 'undoChange' && live.view?.kind === 'xlsx' && (live.view.status !== 'ready' || live.view.saving || unresolved)) return undefined
     const formatting = request.action === 'format' ? currentFormatContext(live,currentThread.current) : null
     if (request.action === 'format' && (!shown.current || !formatting || !acceptResult ||
       request.objectId !== formatting.objectId || request.revision !== formatting.revision || request.changeId !== formatting.changeId ||
       request.expectedChangeSequence !== formatting.expectedChangeSequence || !rangeLeaseMatches(request.rangeLease,formatting.rangeLease) ||
       !nativeOfficeFormatSchema.safeParse(request.format).success)) return undefined
     const discard = request.action === 'discardManualEdit' ? request : null
+    if (request.action === 'editWorkbookCell' && (!shown.current || !selected || selected.protectedPresent ||
+      !nativeOfficeTargetMatches(selected,live.view) || live.view?.kind !== 'xlsx' || live.view.status !== 'ready' ||
+      !live.view.workbookEditing?.editable || live.view.dirty || live.view.saving || unresolved ||
+      request.threadId !== currentThread.current || request.objectId !== live.view.objectId || request.revision !== live.view.revision ||
+      request.expectedChangeSequence !== (live.view.changeSequence ?? 0) || live.view.selection?.kind !== 'cells' ||
+      request.selectionToken !== live.view.selection.token || live.view.selection.documentId !== live.view.objectId ||
+      live.view.selection.version !== live.view.revision || live.view.selection.changeSequence !== (live.view.changeSequence ?? 0))) return undefined
     const discardAllowed = !!(discard && shown.current && selected && nativeOfficeTargetMatches(selected,live.view) &&
       !selected.protectedPresent && live.view?.kind === 'docx' && live.view.status !== 'loading' && !live.view.saving &&
       discard.threadId === currentThread.current && discard.objectId === live.view.objectId &&
@@ -205,7 +223,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
         canRetryManualDiscard(live.view,nativeOfficeTargetKey(selected),discard.threadId,discard.changeId,live.manualDiscardAttempts[discard.objectId])))
     if (discard && !discardAllowed) return undefined
     if (unresolved && !discardAllowed &&
-      ['beginManualEdit','format','discardManualEdit','save','reference','acceptProposal','rejectProposal'].includes(request.action)) return undefined
+      ['beginManualEdit','editWorkbookCell','format','discardManualEdit','save','reference','acceptProposal','rejectProposal'].includes(request.action)) return undefined
     if (live.view?.manual?.frozen && ['beginManualEdit','format','reference'].includes(request.action)) return undefined
     if (live.view?.saving && ['discardManualEdit','cancelChange','resumeChange'].includes(request.action)) return undefined
     if (request.action === 'resumeChange') {
@@ -218,8 +236,8 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     if (selected?.protectedPresent && !['openPresent','bounds','hide','status','viewControl','close'].includes(request.action)) return undefined
     const phase = useNativeOfficeStore.getState().view?.playback?.phase
     if ((phase === 'running' || phase === 'paused') &&
-      ['annotate','beginManualEdit','format','discardManualEdit','undoChange','cancelChange','resumeChange','save','annotationSave','annotationRetry','reference','acceptProposal','rejectProposal'].includes(request.action)) return undefined
-    const guardedAction = ['annotate','beginManualEdit','format','discardManualEdit','undoChange','cancelChange','resumeChange','save','saveStatus','reference','acceptProposal','rejectProposal'].includes(request.action)
+      ['annotate','beginManualEdit','editWorkbookCell','format','discardManualEdit','undoChange','cancelChange','resumeChange','save','annotationSave','annotationRetry','reference','acceptProposal','rejectProposal'].includes(request.action)) return undefined
+    const guardedAction = ['annotate','beginManualEdit','editWorkbookCell','format','discardManualEdit','undoChange','cancelChange','resumeChange','save','saveStatus','reference','acceptProposal','rejectProposal'].includes(request.action)
     if (guardedAction && actionInFlight.current) return undefined
     if (guardedAction) actionInFlight.current = true
     if (formatting) formatInFlight.current = formatting
@@ -274,7 +292,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     } catch {
       if (instanceOwner.current && epoch === generation.current && (!formatting || shown.current &&
         formatContextMatches(currentFormatContext(useNativeOfficeStore.getState(),currentThread.current),formatting)))
-        useNativeOfficeStore.setState({ error: cancellation ? 'unknown' : 'unavailable' })
+        useNativeOfficeStore.setState({ error: cancellation || request.action === 'editWorkbookCell' ? 'unknown' : 'unavailable' })
     }
     finally {
       if (guardedAction) actionInFlight.current = false
@@ -561,6 +579,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
   }
   const manualPhase = nativeOfficeManualPhase(view)
   const manualUncertain = nativeOfficeHasUnresolvedChange(view,error)
+  const workbookTransitioning = view?.kind === 'xlsx' && (view.status !== 'ready' || !!view.saving || manualUncertain)
   const manualCurrent = manualSessionCurrent(view)
   const manualSettled = [view?.recovery?.pending,view?.recovery?.current].some(change => change?.changeId === view?.manual?.changeId && !!change && ['committed','undone'].includes(change.status))
   const manualCanSave = !!threadId && manualCurrent && !view?.saving && !manualUncertain && !manualSettled
@@ -704,7 +723,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     return quote(true,t('nativeOfficeRegeneratePrompt'),false,selection)
   }
   const errors: Record<string, string> = {forbidden:t('nativeOfficeForbidden'), conflict:'文件已在外部修改；草稿保留，请核对版本。', unknown:'修改结果尚未确认，请查询本次更新状态。', unsaved_changes:'文档更新尚未完成，请稍后重试。', stale_selection:'选区已过期，请重新选择。', unsupported_selection:'此选区暂不支持该操作。', package_changed:'插件版本已变化；草稿保留。', capacity:'已有两个原生文档，请先完成更新并关闭一个。', save_failed:'更新未完成，可重试；工作副本保留。', native_input_unavailable:t('nativeOfficeManualUnavailable'), composition_pending:t('nativeOfficeCompositionPending')}
-  const canRequestEdit = !!(!readonlyPresent && !playbackActive && threadId && view?.status === 'ready' && !view.saving && !view.dirty && !view.manual?.frozen && selection && selectionMatches && isNativeSelectionEditable({...view,editing:true},selection))
+  const canRequestEdit = !!(!readonlyPresent && !playbackActive && !workbookTransitioning && threadId && view?.status === 'ready' && !view.saving && !view.dirty && !view.manual?.frozen && selection && selectionMatches && isNativeSelectionEditable({...view,editing:true},selection))
   const formatSelection = async (context: NativeFormatContext, format: NativeOfficeFormat) => {
     const state = useNativeOfficeStore.getState()
     if (!visible || !shown.current || !instanceOwner.current || currentThread.current !== context.threadId || currentTarget.current !== context.target ||
@@ -728,10 +747,11 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     })
   }
   const selectionActions = (selected = selection, actionBusy = busy || playbackActive) => {
-    const current = useNativeOfficeStore.getState().view
+    const state = useNativeOfficeStore.getState(), current = state.view
+    const workbookUncertain = current?.kind === 'xlsx' && nativeOfficeHasUnresolvedChange(current,state.error)
     const selectedMatches = !!(selected && current && selected.documentId === current.objectId && selected.version === current.revision && selected.changeSequence === (current.changeSequence ?? 0))
     const selectedHasContent = selectedMatches && !!selected && !!(nativeSelectionText(selected).trim() || selected.kind === 'shapes' && selected.presentation)
-    const editable = !!(!readonlyPresent && !playbackActive && threadId && current?.status === 'ready' && !current.saving && !current.dirty && !current.manual?.frozen && selected && selectedMatches && isNativeSelectionEditable({...current,editing:true},selected))
+    const editable = !!(!readonlyPresent && !playbackActive && !workbookUncertain && threadId && current?.status === 'ready' && !current.saving && !current.dirty && !current.manual?.frozen && selected && selectedMatches && isNativeSelectionEditable({...current,editing:true},selected))
     const actions = nativeSelectionActions({quickActions,hasSelection:selectedHasContent,editable,busy:actionBusy,canSubmit:!!onSubmitPrompt,
       labels:{copy:t('nativeActionCopy'),quote:t('nativeActionQuote')},
       copy:async () => {
@@ -739,7 +759,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
         catch { if (shown.current) useNativeOfficeStore.setState({error:'unavailable'}) }
       },
       quote:() => quote(false,undefined,false,selected),task:action => quote(action.mode === 'edit',action.prompt,false,selected)})
-    if (current?.dirty || current?.saving || current?.manual?.frozen) for (const action of actions) if (action.kind !== 'local') action.enabled = false
+    if (current?.dirty || current?.saving || current?.manual?.frozen || workbookUncertain) for (const action of actions) if (action.kind !== 'local') action.enabled = false
     actions.splice(2,0,{id:'request-modify',label:'请求修改',kind:'proposal',enabled:!!(editable && onPrepareDraft && !actionBusy),run:() => quote(true,undefined,true,selected)})
     return actions
   }
@@ -766,8 +786,16 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     const selected = pointer ? fresh?.selection : selection
     if (pointer && (fresh?.kind !== 'docx' || fresh.protectedPresent || fresh.objectId !== requested.objectId || fresh.revision !== requested.revision ||
       (fresh.changeSequence ?? 0) !== requested.expectedChangeSequence || selected?.token !== pointer.selectionToken || selected.kind !== 'text' || !selected.text.trim())) return
-    if (!pointer && !hasSelection) return
-    const offered = pointer ? selectionActions(selected,actionInFlight.current || quoteInFlight.current || livePlayback) : actions
+    const workbookContext = !pointer && requested && fresh?.kind === 'xlsx' && fresh.status === 'ready' && !fresh.saving &&
+      !nativeOfficeHasUnresolvedChange(fresh,state.error) &&
+      workbookContextActions?.objectId === fresh.objectId && workbookContextActions.revision === fresh.revision &&
+      workbookContextActions.changeSequence === (fresh.changeSequence ?? 0) && fresh.selection?.kind === 'cells' &&
+      fresh.selection.documentId === fresh.objectId && fresh.selection.version === fresh.revision &&
+      fresh.selection.changeSequence === (fresh.changeSequence ?? 0) && workbookContextActions.selectionToken === fresh.selection.token
+      ? workbookContextActions : null
+    if (!pointer && !hasSelection && !workbookContext?.actions.length) return
+    const offered = pointer ? selectionActions(selected,actionInFlight.current || quoteInFlight.current || livePlayback)
+      : [...actions,...(workbookContext?.actions ?? [])]
     const formatContext = pointer ? currentFormatContext(state,threadId) : null
     const formatting: NativeFormatMenu | undefined = formatContext ? {changeId:formatContext.changeId,rangeLease:formatContext.rangeLease,
       formatState:formatContext.formatState,labels:{fontFamily:t('nativeOfficeFormatFontFamily'),fontSize:t('nativeOfficeFormatFontSize'),
@@ -811,11 +839,11 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     void menuHandler.current(pending.request)
   }, [formatQueueVersion,visible,target,threadId,view])
 
-  // DOCX selection belongs to the native nearby menu. Keep notes and failure
-  // feedback inside the existing fixed toolbar so a capture cannot resize it.
+  // Selection commands keep their native nearby menu. Header feedback and the
+  // explicitly opened notes panel never change the native viewport geometry.
   const selectionWarning = selection?.capture?.truncated
     ? `已捕获 ${selection.capture.capturedCharacters} / ${selection.capture.totalCharacters} UTF-16 单元；引用不包含完整选区。` : ''
-  const operationNotice = (error || view?.error || view?.saving || manualUncertain) && view && (docxAnnotation || view.editing || view.saving || nativeActionError)
+  const operationNotice = (error || view?.error || view?.saving || manualUncertain) && view && (docxAnnotation || view.editing || view.saving || nativeActionError || view.kind === 'xlsx')
     ? errors[error ?? view.error ?? 'unknown'] ?? t('nativeOfficeOperationFailed') : ''
   const noteNotice = view?.annotationSaving ? '正在保存备注…' : view?.annotationError || draft?.dirty ? '备注尚未保存'
     : savedAnnotation?.note ? `备注已保存${savedAnnotation.sourceRevision !== view?.revision ? '；文件版本已变化，请重新选择。' : ''}` : ''
@@ -823,21 +851,89 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     : note ? '选区已过期，请重新选择；备注已保留。' : view?.editing ? '请在文档中选择文本、单元格或文本框，再添加标注。' : '点击“标注”，再选择需要讨论或修改的内容。'
   const docxNotice = [operationNotice, selectionWarning, noteNotice, added ? '标注已加入对话，尚未发送。' : selectionNotice].filter(Boolean).join(' ')
 
+  const nativeStatus = loading ? t('nativeOfficeStatus_loading') : view?.saving || view?.kind === 'xlsx' && manualUncertain ? '更新结果待确认' : view?.dirty ? '更新待完成' : manualPhase === 'active' ? t('nativeOfficeManualActive') : manualPhase === 'frozen' ? t('nativeOfficeManualFrozen') : view?.canUndo ? '已更新' : view?.editing ? '标注中' : error ? t('nativeOfficeOperationFailed') : '预览'
+  const docxStatus = [nativeStatus,docxNotice].filter(Boolean).join(' · ')
+  const nativeFeedback = [nativeStatus,operationNotice].filter(Boolean).join(' · ')
+  const recoveryAction = !!(view && operationNotice && (view.editing || view.saving || nativeActionError || !docxAnnotation && view.kind === 'xlsx') &&
+    (view.saving || manualUncertain || (error ?? view.error) === 'save_failed'))
+  const queryRecovery = !!(manualUncertain || view?.saving || view?.manual || !docxAnnotation && view?.kind === 'xlsx')
+  const playbackStatusAlert = !!(playbackNotice || playback?.phase === 'unsupported' || playback?.phase === 'error' || playbackFailure?.owner === controlDocumentOwner)
+  const playbackStatus = [playbackNotice ?? (playback?.phase === 'unsupported' ? presentationErrors.presentation_unsupported : playback?.phase === 'error' ? presentationErrors.presentation_failed : playbackActive ? `${playback.phase === 'paused' ? '已暂停' : '放映中'} · ${playback.slideIndex === null || playback.slideIndex < 0 ? '—' : playback.slideIndex + 1} / ${playback.slideCount}` : playback ? '放映未开始' : '放映状态未确认'),
+    !playbackNotice && playbackFailure?.owner === controlDocumentOwner ? presentationErrors[playbackFailure.error] ?? presentationErrors.unavailable : '',operationNotice].filter(Boolean).join(' ')
+
+  const previewStateVisible = !!(loading || playbackNeedsReopen || presentationError === 'presentation_start_timeout' ||
+    error && !nativeActionError && !error.startsWith('presentation_') && !view?.editing && !view?.saving)
+
   return <div className={styles.host} aria-busy={!!loading} onKeyDown={event => {
     if (event.nativeEvent.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return
     if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')) return
+    if (event.key === 'F2' && !event.shiftKey && view?.kind === 'xlsx') {
+      const input = event.currentTarget.querySelector<HTMLInputElement>('[data-workbook-cell-input]:not(:disabled)')
+      if (input) { event.preventDefault(); input.focus(); input.select() }
+      return
+    }
     if (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey) { event.preventDefault(); void menuHandler.current() }
   }}>
-    <div className={`${styles.toolbar} ${docxAnnotation ? styles.docxToolbar : ''}`} role="toolbar" aria-label="文档操作">
-      <div className={docxAnnotation ? styles.docxControls : styles.toolbarContents}>
-      {docxAnnotation && operationNotice && (view.editing || view.saving || nativeActionError) && (view.saving || manualUncertain || (error ?? view.error) === 'save_failed') ? <button
-        className={styles.noteAction} disabled={busy || playbackActive || !visible || !targetMatches}
-        onClick={() => targetRequest && void invoke(manualUncertain || view.saving || view.manual ? {action:'saveStatus',objectId:view.objectId} : {action:'save',...targetRequest})}>{manualUncertain || view.saving || view.manual ? '查询结果' : '重试'}</button> : null}
-      {!readonlyPresent && <Tooltip bubbleClassName={styles.tooltipBubble} label="标注" side="bottom" portal><button type="button" className={styles.iconButton} disabled={busy || playbackActive || loading || !targetRequest || !targetMatches || view?.status !== 'ready' || !!view?.editing} aria-label="标注文档" aria-pressed={!!view?.editing} onClick={() => targetRequest && void invoke({action:'annotate', ...targetRequest})}><Pencil /></button></Tooltip>}
-      {docxAnnotation ? <>
-        <button type="button" className={styles.viewButton} aria-label={t('nativeActionMore')}
-          disabled={busy || playbackActive || !annotationAvailable || !hasSelection} onClick={() => void menuHandler.current()}><ChevronDown className={styles.viewIcon} aria-hidden="true" /><span>{t('nativeActionMore')}</span></button>
-        {notesOpen ? <div className={styles.noteEntry} data-native-docx-notes>
+    <div className={styles.toolbar} role="toolbar" aria-label="文档操作">
+      <WorkspaceViewerHeader title={(target?.path || view?.path || '').split('/').at(-1) || 'Office'}
+        titleControl={titleControl} viewerControls={visible ? viewerControls : undefined} actions={<span className={styles.toolbarActions}>
+        <Tooltip bubbleClassName={styles.tooltipBubble} label={docxAnnotation ? docxStatus : view?.kind === 'pptx' ? playbackStatus : nativeFeedback} side="bottom" portal>
+          <span className={styles.feedback} data-native-docx-feedback={docxAnnotation || undefined}
+            data-native-playback-state={visible && targetMatches && view?.kind === 'pptx' || undefined}
+            role={operationNotice || view?.kind === 'pptx' && playbackStatusAlert ? 'alert' : 'status'}
+            title={docxAnnotation ? docxStatus : view?.kind === 'pptx' ? playbackStatus : nativeFeedback} tabIndex={0}>
+            <Info aria-hidden="true" /><span className={styles.srOnly}>{docxAnnotation ? docxStatus : view?.kind === 'pptx' ? playbackStatus : nativeFeedback}</span>
+          </span>
+        </Tooltip>
+        {previewStateVisible && previewError && target ? <WorkspaceViewerIconButton label={t('nativeOfficeRetry')}
+          onClick={() => void invoke(target.protectedPresent ? {action:'openPresent',protectedPresent:target.protectedPresent,bounds:bounds()} : {action:'open',workspace:target.workspace,path:target.path,threadId,bounds:bounds()})}><RotateCcw aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        {recoveryAction && view ? <WorkspaceViewerIconButton
+          label={queryRecovery ? '查询结果' : '重试'} disabled={busy || playbackActive || !visible || !targetMatches}
+          onClick={() => targetRequest && void invoke(queryRecovery ? {action:'saveStatus',objectId:view.objectId} : {action:'save',...targetRequest})}><RotateCcw aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        {!readonlyPresent ? <>
+          <WorkspaceViewerIconButton label="标注文档" disabled={busy || playbackActive || loading || !targetRequest || !targetMatches || view?.status !== 'ready' || !!view?.editing}
+            aria-pressed={!!view?.editing} onClick={() => targetRequest && void invoke({action:'annotate', ...targetRequest})}><Pencil aria-hidden="true" /></WorkspaceViewerIconButton>
+          <WorkspaceViewerIconButton label={t('nativeActionMore')} disabled={busy || playbackActive || !annotationAvailable || !hasSelection}
+            onClick={() => void menuHandler.current()}><ChevronDown aria-hidden="true" /></WorkspaceViewerIconButton>
+          <span ref={notesPanel.rootRef} className={styles.notesAnchor}>
+            <WorkspaceViewerIconButton ref={notesPanel.triggerRef} label="编辑标注备注" aria-haspopup="dialog" aria-controls={notesPanel.id}
+              aria-expanded={notesOpen} disabled={!visible || loading || !targetMatches} onClick={() => notesPanel.setOpen(!notesOpen)}><MessageSquare aria-hidden="true" /></WorkspaceViewerIconButton>
+          </span>
+        </> : null}
+        {!readonlyPresent && view?.kind === 'docx' ? <>
+          <WorkspaceViewerIconButton label={t('nativeOfficeManualEdit')} aria-pressed={manualPhase === 'active'}
+            disabled={busy || loading || !visible || !target || !threadId || !targetMatches || manualPhase !== 'preview' || !!view.dirty || !!view.saving || !!view.recovery?.pending || manualUncertain}
+            onClick={() => void beginManualEdit()}><Pencil aria-hidden="true" /></WorkspaceViewerIconButton>
+          {view.manual ? <WorkspaceViewerIconButton label={t('nativeOfficeManualSave')} tone="commit" disabled={busy || loading || !visible || !target || !targetMatches || !manualCanSave}
+            onClick={() => void manualAction('save')}><Save aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+          {view.manual ? <WorkspaceViewerIconButton label={t('nativeOfficeManualDiscard')} disabled={busy || loading || !visible || !target || !targetMatches || !manualCanDiscard}
+            onClick={() => void manualAction('discardManualEdit')}><Trash2 aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        </> : null}
+        {!readonlyPresent && view?.canUndo ? <WorkspaceViewerIconButton label={view.recovery?.current?.canRetryUndo ? '完成撤销' : '撤销修改'} disabled={busy || playbackActive || view.saving || view.dirty || workbookTransitioning}
+          onClick={() => targetRequest && threadId && void invoke({action:'undoChange', ...targetRequest, threadId})}><Undo2 aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        <Tooltip bubbleClassName={styles.tooltipBubble} label="预览视图" side="bottom" portal>
+          <button ref={viewButton} type="button" className={styles.viewButton} data-native-view-controls
+            aria-label="预览视图" aria-haspopup="menu" disabled={!controlReady || controlsBusy} onClick={() => void openViewMenu()}>
+            {playbackActive ? <Play className={styles.viewIcon} aria-hidden="true" /> : <ScanEye className={styles.viewIcon} aria-hidden="true" />}
+            {view?.kind === 'pptx' ? playbackActive ? <output data-native-playback-slide aria-label="放映幻灯片与总张数">{playback.slideIndex === null || playback.slideIndex < 0 ? '—' : playback.slideIndex + 1} / {playback.slideCount}</output> : <output data-native-preview-page aria-label="当前页与总页数">{previewView?.page && previewView.pages ? `${previewView.page} / ${previewView.pages}` : '—'}</output> : null}
+            <span data-native-preview-zoom>{playbackActive ? playback.phase === 'paused' ? '已暂停' : '放映中' : previewView ? previewView.fit ? t('writeImageFitShort') : `${previewView.zoom}%` : '视图不可用'}</span><ChevronDown aria-hidden="true" />
+          </button>
+        </Tooltip>
+        {playbackActive ? <>
+          <WorkspaceViewerIconButton label={playback.phase === 'paused' ? '继续放映' : '暂停放映'} disabled={!controlReady || controlsBusy}
+            onClick={() => void controlView(playback.phase === 'paused' ? 'play-resume' : 'play-pause')}>{playback.phase === 'paused' ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}</WorkspaceViewerIconButton>
+          <WorkspaceViewerIconButton label="结束放映" disabled={!controlReady || controlsBusy}
+            onClick={() => { void controlView('play-end'); setViewFocusReturn({owner:controlDocumentOwner,epoch:generation.current}) }}><Square aria-hidden="true" /></WorkspaceViewerIconButton>
+        </> : null}
+        {visible && targetMatches && view?.kind === 'pptx' && playbackNeedsRefresh ? <WorkspaceViewerIconButton label="刷新放映状态" disabled={!controlReady || controlsBusy}
+          onClick={() => void controlView('play-read')}><RotateCcw aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        <span ref={setWorkbookToolbarTarget} className={styles.workbookActions} />
+        {fileActions ? <span className={styles.fileActions}>{fileActions}</span> : null}
+      </span>} />
+    </div>
+    {notesOpen && view ? createPortal(<div ref={notesPanel.panelRef} id={notesPanel.id} role="dialog" aria-label="文档标注"
+      className={styles.notesPopover} style={notesPanel.style}>
+      {docxAnnotation ? <div className={styles.noteEntry} data-native-docx-notes>
           {hasSelection && selection || note ? <>
             <input aria-label="标注备注" placeholder="备注（可选）" disabled={!annotationAvailable || annotationInputFrozen || playbackActive} maxLength={4096}
               className={styles.noteInput} value={note} onChange={event => { setNote(event.target.value); setAdded(false) }} />
@@ -849,41 +945,8 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
               disabled={!annotationAvailable || !action.enabled} onClick={() => void action.run()}>{action.label}</button>)}
           </> : null}
           {view.annotationError || draft?.dirty ? <button type="button" className={styles.noteAction} disabled={!annotationAvailable || annotationInputFrozen || playbackActive} onClick={() => setNote(note)}>重试</button> : null}
-          <button type="button" className={styles.noteAction} aria-label="关闭标注备注" onClick={() => setNotesOwner(null)}>关闭备注</button>
-        </div> : <button type="button" className={styles.viewButton} aria-label="编辑标注备注" aria-expanded="false"
-          disabled={!visible || loading || !targetMatches} onClick={() => setNotesOwner(annotationControlOwner)}>备注</button>}
-      </> : null}
-      {!readonlyPresent && view?.kind === 'docx' ? <>
-        <button type="button" className={`${styles.viewButton} ${styles.docxTextButton}`} aria-label={t('nativeOfficeManualEdit')} aria-pressed={manualPhase === 'active'}
-          disabled={busy || loading || !visible || !target || !threadId || !targetMatches || manualPhase !== 'preview' || !!view.dirty || !!view.saving || !!view.recovery?.pending || manualUncertain}
-          onClick={() => void beginManualEdit()}>{t('nativeOfficeManualEdit')}</button>
-        {view.manual ? <button type="button" className={`${styles.viewButton} ${styles.docxTextButton}`} disabled={busy || loading || !visible || !target || !targetMatches || !manualCanSave}
-          onClick={() => void manualAction('save')}>{t('nativeOfficeManualSave')}</button> : null}
-        {view.manual ? <button type="button" className={`${styles.viewButton} ${styles.docxTextButton}`} disabled={busy || loading || !visible || !target || !targetMatches || !manualCanDiscard}
-          onClick={() => void manualAction('discardManualEdit')}>{t('nativeOfficeManualDiscard')}</button> : null}
-      </> : null}
-      {!readonlyPresent && view?.canUndo ? <Tooltip bubbleClassName={styles.tooltipBubble} label={view.recovery?.current?.canRetryUndo ? '完成撤销' : '撤销'} side="bottom" portal><button type="button" className={styles.iconButton} disabled={busy || playbackActive || view.saving || view.dirty} aria-label={view.recovery?.current?.canRetryUndo ? '完成撤销' : '撤销修改'} onClick={() => targetRequest && threadId && void invoke({action:'undoChange', ...targetRequest, threadId})}><Undo2 /></button></Tooltip> : null}
-      <span className={styles.status} role="status">{loading ? t('nativeOfficeStatus_loading') : view?.saving ? '更新结果待确认' : view?.dirty ? '更新待完成' : manualPhase === 'active' ? t('nativeOfficeManualActive') : manualPhase === 'frozen' ? t('nativeOfficeManualFrozen') : view?.canUndo ? '已更新' : view?.editing ? '标注中' : error ? t('nativeOfficeOperationFailed') : '预览'}</span>
-      <button ref={viewButton} type="button" className={styles.viewButton} data-native-view-controls
-        aria-label="预览视图" aria-haspopup="menu" disabled={!controlReady || controlsBusy} onClick={() => void openViewMenu()}>
-        {playbackActive ? <Play className={styles.viewIcon} aria-hidden="true" /> : <ScanEye className={styles.viewIcon} aria-hidden="true" />}
-        {view?.kind === 'pptx' ? playbackActive ? <output data-native-playback-slide aria-label="放映幻灯片与总张数">{playback.slideIndex === null || playback.slideIndex < 0 ? '—' : playback.slideIndex + 1} / {playback.slideCount}</output> : <output data-native-preview-page aria-label="当前页与总页数">{previewView?.page && previewView.pages ? `${previewView.page} / ${previewView.pages}` : '—'}</output> : null}
-        <span data-native-preview-zoom>{playbackActive ? playback.phase === 'paused' ? '已暂停' : '放映中' : previewView ? previewView.fit ? t('writeImageFitShort') : `${previewView.zoom}%` : '视图不可用'}</span><ChevronDown aria-hidden="true" />
-      </button>
-      {playbackActive ? <>
-        <Tooltip bubbleClassName={styles.tooltipBubble} label={playback.phase === 'paused' ? '继续放映' : '暂停放映'} side="bottom" portal><button type="button" className={styles.iconButton} disabled={!controlReady || controlsBusy} aria-label={playback.phase === 'paused' ? '继续放映' : '暂停放映'} onClick={() => void controlView(playback.phase === 'paused' ? 'play-resume' : 'play-pause')}>{playback.phase === 'paused' ? <Play /> : <Pause />}</button></Tooltip>
-        <Tooltip bubbleClassName={styles.tooltipBubble} label="结束放映" side="bottom" portal><button type="button" className={styles.iconButton} disabled={!controlReady || controlsBusy} aria-label="结束放映" onClick={() => { void controlView('play-end'); setViewFocusReturn({owner:controlDocumentOwner,epoch:generation.current}) }}><Square /></button></Tooltip>
-      </> : null}
-      <div className={styles.fileActions}>{fileActions}</div>
-      </div>
-      {docxAnnotation ? <div className={styles.docxFeedback} data-native-docx-feedback role={operationNotice ? 'alert' : 'status'} title={docxNotice}>{docxNotice}</div> : null}
-    </div>
-    {visible && targetMatches && view?.kind === 'pptx' ? <div data-native-playback-state role={playbackNotice || playback?.phase === 'unsupported' || playback?.phase === 'error' || playbackFailure?.owner === controlDocumentOwner ? 'alert' : 'status'} className="shrink-0 px-2 text-xs text-ds-muted">
-      {playbackNotice ?? (playback?.phase === 'unsupported' ? presentationErrors.presentation_unsupported : playback?.phase === 'error' ? presentationErrors.presentation_failed : playbackActive ? `${playback.phase === 'paused' ? '已暂停' : '放映中'} · ${playback.slideIndex === null || playback.slideIndex < 0 ? '—' : playback.slideIndex + 1} / ${playback.slideCount}` : playback ? '放映未开始' : '放映状态未确认')}
-      {!playbackNotice && playbackFailure?.owner === controlDocumentOwner ? <span> {presentationErrors[playbackFailure.error] ?? presentationErrors.unavailable}</span> : null}
-      {playbackNeedsRefresh ? <button type="button" disabled={!controlReady || controlsBusy} aria-label="刷新放映状态" onClick={() => void controlView('play-read')}>刷新放映状态</button> : null}
-    </div> : null}
-    {!readonlyPresent && !docxAnnotation && (view?.status === 'ready' || view?.editing) ? <div className={styles.annotation} aria-label="文档标注">
+          <button type="button" className={styles.noteAction} aria-label="关闭标注备注" onClick={() => { notesPanel.setOpen(false); notesPanel.triggerRef.current?.focus({preventScroll:true}) }}>关闭备注</button>
+        </div> : <div className={styles.annotation} aria-label="文档标注">
       {hasSelection && selection || note ? <>
         <p className="truncate text-xs">{hasSelection && selection ? nativeSelectionLabel(view, selection) : '选区已过期，请重新选择；备注已保留。'}</p>
         <p className="text-[11px] text-ds-muted">{canRequestEdit ? '可让 AI 提出局部修改，接受后应用。' : '仅供讨论，此选区不支持直接应用修改。'}</p>
@@ -897,12 +960,12 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
         <div className="flex flex-wrap gap-2">{actions.filter(action => action.id !== 'quote').slice(0,4).map(action => <button key={action.id} className="text-xs text-ds-muted" disabled={!action.enabled} onClick={() => void action.run()}>{action.label}</button>)}<button className="text-xs text-ds-muted" disabled={busy || playbackActive || !hasSelection} onClick={() => void menuHandler.current()}>{t('nativeActionMore')}</button></div>
         {added ? <p role="status" className="text-[11px] text-ds-muted">标注已加入对话，尚未发送。</p> : null}
       </> : <p className="text-xs text-ds-muted">{view.editing ? '请在文档中选择文本、单元格或文本框，再添加标注。' : '点击“标注”，再选择需要讨论或修改的内容。'}</p>}
-    </div> : null}
-    {!docxAnnotation && selection?.capture?.truncated ? <p className="shrink-0 px-2 text-xs text-ds-muted">已捕获 {selection.capture.capturedCharacters} / {selection.capture.totalCharacters} UTF-16 单元；引用不包含完整选区。</p> : null}
-    {!docxAnnotation && (error || view?.error || view?.saving || manualUncertain) && view && (view.editing || view.saving || nativeActionError) ? <div role="alert" className="flex shrink-0 items-center gap-2 px-2 text-xs">
-      <p>{errors[error ?? view.error ?? 'unknown'] ?? t('nativeOfficeOperationFailed')}</p>
-      {view.saving || manualUncertain || (error ?? view.error) === 'save_failed' ? <button disabled={busy || playbackActive || !visible || !targetMatches} className="shrink-0 text-xs" onClick={() => targetRequest && void invoke(manualUncertain || view.saving || view.manual ? {action:'saveStatus',objectId:view.objectId} : {action:'save',...targetRequest})}>{manualUncertain || view.saving || view.manual ? '查询结果' : '重试'}</button> : null}
-    </div> : null}
+    </div>}
+      {!docxAnnotation ? <button type="button" className={styles.noteAction} aria-label="关闭标注备注" onClick={() => { notesPanel.setOpen(false); notesPanel.triggerRef.current?.focus({preventScroll:true}) }}>关闭备注</button> : null}
+      {selectionWarning ? <p role="status" className="text-xs text-ds-muted">{selectionWarning}</p> : null}
+    </div>,document.body) : null}
+    {!readonlyPresent && targetMatches && view?.kind === 'xlsx' ? <WorkbookCellEditor view={view} threadId={threadId} workspace={target?.workspace} path={target?.path}
+      active={visible && !loading && !!target} busy={busy || manualUncertain} onRequest={invoke} toolbarTarget={workbookToolbarTarget} onContextActionsChange={setWorkbookContextActions} /> : null}
     {!readonlyPresent && view?.scope?.threadId === threadId && view?.proposals?.length ? <div className="max-h-36 shrink-0 overflow-auto border-b border-ds-border px-2 py-1" aria-label="原生修改提案">
       {view.proposals.map(proposal => { const review = view.localReviews?.find(item => item.proposalId === proposal.proposalId); return <div key={proposal.proposalId} className="py-1 text-xs">
         <div className="my-1 overflow-hidden rounded border border-ds-border-muted font-mono text-xs">
@@ -912,10 +975,10 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
           <del aria-label="修改前" className="block whitespace-pre-wrap bg-red-50 px-2 py-1 text-red-800 no-underline dark:bg-red-950/30 dark:text-red-200">{review?.beforeText ?? '原文暂不可核实，请重新选择。'}</del>
           <ins aria-label="修改后" className="block whitespace-pre-wrap bg-emerald-50 px-2 py-1 text-emerald-800 no-underline dark:bg-emerald-950/30 dark:text-emerald-200">{review?.afterText ?? '修改内容暂不可核实。'}</ins>
         </div>
-        {view.appliedProposals?.includes(proposal.proposalId) ? <span>{view.saving || view.dirty ? '正在更新，结果待确认' : view.canUndo ? '已更新' : '修改已处理'}</span> : proposal.status === 'approved' ? <span>{t('nativeOfficeProposalApproved')}</span> : <div className="flex gap-3">
+        {view.appliedProposals?.includes(proposal.proposalId) ? <span>{view.saving || view.dirty || workbookTransitioning ? '正在更新，结果待确认' : view.canUndo ? '已更新' : '修改已处理'}</span> : proposal.status === 'approved' ? <span>{t('nativeOfficeProposalApproved')}</span> : <div className="flex gap-3">
           {proposal.status === 'rejected' ? <span>已拒绝</span> : <>
-          <button disabled={busy || playbackActive || view.dirty || view.saving || !review || !targetRequest || !view.scope?.editable || view.scope.baseRevision !== view.revision || view.scope.changeSequence !== (view.changeSequence ?? 0)} onClick={() => void decideProposal(proposal.proposalId,true)}>应用修改</button>
-          <button disabled={busy || playbackActive || view.dirty || view.saving} onClick={() => void decideProposal(proposal.proposalId,false)}>拒绝</button></>}
+          <button disabled={busy || playbackActive || view.dirty || view.saving || workbookTransitioning || !review || !targetRequest || !view.scope?.editable || view.scope.baseRevision !== view.revision || view.scope.changeSequence !== (view.changeSequence ?? 0)} onClick={() => void decideProposal(proposal.proposalId,true)}>应用修改</button>
+          <button disabled={busy || playbackActive || view.dirty || view.saving || workbookTransitioning} onClick={() => void decideProposal(proposal.proposalId,false)}>拒绝</button></>}
           {onSubmitPrompt ? <button disabled={busy || !canRequestEdit || !proposalSelectionCurrent(view)} onClick={() => void regenerateProposal(proposal.proposalId)}>{t('nativeOfficeRegenerate')}</button> : null}
         </div>}
       </div>})}
@@ -923,7 +986,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     {!readonlyPresent && view?.recovery && [view.recovery.pending, view.recovery.current].filter(change => change?.threadId === threadId).map(change => change && <details key={change.changeId} className="max-h-40 shrink-0 overflow-auto border-b border-ds-border-muted px-2 py-1 text-xs">
       <summary>{change.status === 'committed' ? '已保存的修改' : change.status === 'undone' ? '已撤销的修改' : change.status === 'prepared' ? 'origin' in change && change.origin === 'manual' ? t('nativeOfficeManualDraft') : '已批准，尚未确认保存' : change.status === 'conflict' ? '文件已变化，保留修改记录' : '修改结果待确认'}</summary>
       {change.canResume ? <button disabled={busy || playbackActive || view.saving} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'resumeChange',...targetRequest,threadId,changeId:change.changeId})}>继续保存此修改</button> : null}
-      {change.canCancel ? <button disabled={busy || playbackActive || view.saving} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'origin' in change && change.origin === 'manual' ? 'discardManualEdit' : 'cancelChange',...targetRequest,threadId,changeId:change.changeId})}>取消未保存的修改</button> : null}
+      {change.canCancel ? <button disabled={busy || playbackActive || view.saving} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'origin' in change && change.origin === 'manual' && change.version === 2 ? 'discardManualEdit' : 'cancelChange',...targetRequest,threadId,changeId:change.changeId})}>取消未保存的修改</button> : null}
       {change.status === 'unknown' ? <button disabled={busy} className="my-1" onClick={() => void invoke({action:'saveStatus',objectId:view.objectId})}>核实结果</button> : null}
       {'origin' in change ? <p>{t('nativeOfficeManualRecord')}</p> : <>
         <del aria-label="已记录的修改前" className="block whitespace-pre-wrap no-underline">{change.beforeText}</del>
@@ -932,10 +995,9 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     </details>)}
     <div className={styles.viewport}>
     <div ref={surface} className={styles.surface} aria-label={t('nativeOfficeEditor')} />
-    {loading || playbackNeedsReopen || presentationError === 'presentation_start_timeout' || (error && !nativeActionError && !error.startsWith('presentation_') && !view?.editing && !view?.saving) ? <div className={styles.state} data-native-office-state role={previewError || playbackNeedsReopen ? 'alert' : 'status'}>
+    {previewStateVisible ? <div className={styles.state} data-native-office-state role={previewError || playbackNeedsReopen ? 'alert' : 'status'}>
       <FileText className={styles.stateIcon} aria-hidden="true" />
       <p>{previewError ? errors[previewError] ?? (previewError.startsWith('presentation_') ? presentationErrors[previewError] : undefined) ?? t('nativeOfficeOperationFailed') : t('nativeOfficeStatus_loading')}</p>
-      {previewError && target ? <Tooltip bubbleClassName={styles.tooltipBubble} label={t('nativeOfficeRetry')} side="bottom" portal><button type="button" className={styles.iconButton} aria-label={t('nativeOfficeRetry')} onClick={() => void invoke(target.protectedPresent ? {action:'openPresent',protectedPresent:target.protectedPresent,bounds:bounds()} : {action:'open',workspace:target.workspace,path:target.path,threadId,bounds:bounds()})}><RotateCcw /></button></Tooltip> : null}
     </div> : null}
     </div>
   </div>

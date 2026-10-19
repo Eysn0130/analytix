@@ -121,7 +121,7 @@ export const REQUIRED_PRODUCT_LICENSE_SHA256 =
 // presentation leaves. Keep this expected digest independent of
 // the artifact being inspected; missing or changed notice bytes still fail.
 export const REQUIRED_THIRD_PARTY_NOTICE_SHA256 =
-  '9df4be499c356a6c80b2ced6921b3de5ef53ff6dac40db1ce606fe2a234f37a2'
+  'f8bffbdd3070628059fb87636aa7ed9a6465b3eed5a8d69fbbcbe36bc9ffd40f'
 
 const CLAIM_CEILING = 'Exact mandatory artifact legal admission only; Analytix licensing is Apache-2.0, while signing, notarization, publication, and release authorization remain separate'
 
