@@ -9,6 +9,7 @@ import (
 )
 
 var ErrExecutionPolicyVersionRuntimeOwned = errors.New("executionPolicyVersion is runtime-owned")
+var ErrInvalidThreadExecutionPolicy = errors.New("thread execution policy fields must be valid policy strings")
 var ErrContextEpochStateRuntimeOwned = errors.New("contextEpochState is runtime-owned")
 var ErrThreadStatusRuntimeOwned = errors.New("thread status is runtime-owned")
 var ErrInvalidThreadArchiveIntent = errors.New("archived must be the sole boolean thread patch field")
@@ -92,6 +93,22 @@ func ApplyPatch(thread map[string]any, patch map[string]any, now string) map[str
 			next[key] = contracts.CloneValue(value)
 		}
 	}
+	approvalPolicy, approvalIsString := patch["approvalPolicy"].(string)
+	sandboxMode, sandboxIsString := patch["sandboxMode"].(string)
+	approvalPolicy = NormalizeApprovalPolicy(approvalPolicy)
+	sandboxMode = NormalizeSandboxMode(sandboxMode)
+	if approvalIsString && sandboxIsString && approvalPolicy != "" && sandboxMode != "" {
+		// The complete explicit pair records a choice even when its values match
+		// a legacy default. Partial metadata cannot establish that distinction.
+		next["approvalPolicy"] = approvalPolicy
+		next["sandboxMode"] = sandboxMode
+		// CloneMap follows the durable JSON numeric representation. Preserve a
+		// future version rather than interpreting this write as a downgrade.
+		version, _ := next["executionPolicyVersion"].(float64)
+		if version <= float64(executionpolicy.CurrentVersion) {
+			next["executionPolicyVersion"] = float64(executionpolicy.CurrentVersion)
+		}
+	}
 	if value, ok := patch["title"]; ok {
 		if title, isString := value.(string); isString {
 			next["title"] = projectOrdinaryThreadText(title)
@@ -123,6 +140,18 @@ func ValidatePublicPatch(patch map[string]any) error {
 	}
 	if _, exists := patch["contextEpochState"]; exists {
 		return ErrContextEpochStateRuntimeOwned
+	}
+	if value, exists := patch["approvalPolicy"]; exists {
+		policy, validString := value.(string)
+		if !validString || NormalizeApprovalPolicy(policy) == "" {
+			return ErrInvalidThreadExecutionPolicy
+		}
+	}
+	if value, exists := patch["sandboxMode"]; exists {
+		mode, validString := value.(string)
+		if !validString || NormalizeSandboxMode(mode) == "" {
+			return ErrInvalidThreadExecutionPolicy
+		}
 	}
 	if value, exists := patch["archived"]; exists {
 		if _, valid := value.(bool); !valid || len(patch) != 1 {
