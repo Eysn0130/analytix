@@ -51,7 +51,7 @@ afterEach(async () => { for (const s of live.splice(0)) s.destroy(); for (const 
 const bounds = { x: 0, y: 0, width: 800, height: 600 }
 async function setup(protectedPresent?: boolean) {
   const f = await fixture(); cleanup.push(f.cleanup)
-  const owner = Object.assign(new EventEmitter(), { isDestroyed: (): boolean => false, webContents: { getZoomFactor: (): number => 1, send: vi.fn() }, contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } })
+  const owner = Object.assign(new EventEmitter(), { isDestroyed: (): boolean => false, webContents: Object.assign(new EventEmitter(), { getZoomFactor: (): number => 1, send: vi.fn() }), contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } })
   const events: any[] = [], surface = new NativeOfficeSurface({ ...f, owner: owner as any, protectedPresent, onEvent: e => events.push(e) }); live.push(surface)
   await surface.attach(bounds)
   return { surface, owner, events, view: mock.views.at(-1), session: mock.sessions.at(-1), peer: mock.peers.at(-1) }
@@ -61,23 +61,168 @@ const state = (sequence = 0, acknowledged = 0, version = 'version-1') => ({ docu
 const selection = (sequence = 0, version = 'version-1') => ({ documentId: 'document', version, changeSequence: sequence, kind: 'text', scope: 'current-view-text-only', text: '' })
 async function sent(peer: any) { await vi.waitFor(() => expect(peer.peer.messages.length).toBeGreaterThan(0)); return peer.peer.messages.at(-1) }
 function cleanReply(peer: any, r: any, payload: any) { const { bytes, kind, status, persistedVersion, expectedChangeSequence, discard, action, zoom, ...base } = r; peer.postMessage({ ...base, type: 'result', ok: true, ...payload }) }
-async function openSurface(s: any) {
-  const p = s.surface.request({ ...input('open'), kind: 'docx', bytes: new Uint8Array([1, 2, 3]) })
-  const r = await sent(s.peer); cleanReply(s.peer, r, { state: state(), selection: selection() }); await p
+async function openSurface(s: any, kind: 'docx' | 'xlsx' | 'pptx' = 'docx') {
+  const p = s.surface.request({ ...input('open'), kind, bytes: new Uint8Array([1, 2, 3]) })
+  const initialSelection = kind === 'docx' ? selection() : {documentId:'document',version:'version-1',changeSequence:0,kind:'unavailable',scope:'current-view-unavailable'}
+  const r = await sent(s.peer); cleanReply(s.peer, r, { state: {...state(),kind}, selection:initialSelection }); await p
   s.peer.peer.messages.length = 0
   return r
 }
-test('routes native right click and Shift+F10 to the same versioned menu intent without engine mutation', async () => {
-  const s=await setup(); await openSurface(s)
+test.each(['docx','xlsx','pptx'] as const)('routes native %s right press and keyboard to one versioned menu intent without engine mutation', async kind => {
+  const s=await setup(); await openSurface(s,kind)
   const preventDefault=vi.fn()
-  s.view.webContents.emit('context-menu',{preventDefault})
+  const mouse=(type:string)=>s.view.webContents.emit('before-mouse-event',{preventDefault},{type,button:'right',x:55,y:66})
+  mouse('mouseDown');mouse('mouseMove');mouse('contextMenu')
+  s.view.webContents.emit('context-menu',{preventDefault});mouse('mouseUp')
+  expect(preventDefault).toHaveBeenCalledTimes(4)
+  expect(s.owner.webContents.send).toHaveBeenCalledTimes(1)
   expect(s.owner.webContents.send).toHaveBeenLastCalledWith('office:menu-requested',{objectId:'document',revision:'version-1',expectedChangeSequence:0})
+  mouse('mouseDown');mouse('mouseUp')
+  expect(s.owner.webContents.send).toHaveBeenCalledTimes(2)
   const count=s.owner.webContents.send.mock.calls.length
-  s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'F10',shift:true,isComposing:true})
+  for(const extra of [{isComposing:true},{isAutoRepeat:true},{control:true},{meta:true},{alt:true}])
+    s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'F10',shift:true,...extra})
   expect(s.owner.webContents.send).toHaveBeenCalledTimes(count)
   s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'F10',shift:true})
   expect(s.owner.webContents.send).toHaveBeenCalledTimes(count+1)
+  s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'ContextMenu'})
+  expect(s.owner.webContents.send).toHaveBeenCalledTimes(count+2)
+  s.view.webContents.emit('context-menu',{preventDefault});mouse('contextMenu')
+  expect(s.owner.webContents.send).toHaveBeenCalledTimes(count+2)
   expect(s.peer.peer.messages).toHaveLength(0)
+})
+
+test('opens the next right-press menu even if a previous release did not return to the surface',async()=>{
+  const s=await setup();await openSurface(s)
+  const preventDefault=vi.fn()
+  for(const type of ['mouseDown','contextMenu','mouseDown','mouseUp'])
+    s.view.webContents.emit('before-mouse-event',{preventDefault},{type,button:'right',x:0,y:0})
+  expect(preventDefault).toHaveBeenCalledTimes(4)
+  expect(s.owner.webContents.send).toHaveBeenCalledTimes(2)
+  expect(s.peer.peer.messages).toHaveLength(0)
+})
+
+test('keeps plain left and middle input out of menu routing while suppressing secondary context events',async()=>{
+  const s=await setup();await openSurface(s)
+  for(const button of ['left','middle'])for(const type of ['mouseDown','mouseUp','mouseMove']){
+    const preventDefault=vi.fn()
+    s.view.webContents.emit('before-mouse-event',{preventDefault},{type,button,x:0,y:0})
+    expect(preventDefault).not.toHaveBeenCalled()
+  }
+  const preventDefault=vi.fn()
+  s.view.webContents.emit('before-mouse-event',{preventDefault},{type:'contextMenu',button:'right',x:0,y:0})
+  s.view.webContents.emit('context-menu',{preventDefault})
+  expect(preventDefault).toHaveBeenCalledTimes(2)
+  expect(s.owner.webContents.send).not.toHaveBeenCalled();expect(s.peer.peer.messages).toHaveLength(0)
+})
+
+test.each(['native','owner'] as const)('observes macOS Control in %s contents even when mouse modifiers are absent, and consumes its matching release',async source=>{
+  const s=await setup();await openSurface(s)
+  const platform=Object.getOwnPropertyDescriptor(process,'platform')!
+  try{
+    Object.defineProperty(process,'platform',{value:'darwin'})
+    const keyboard=source==='native'?s.view.webContents:s.owner.webContents
+    keyboard.emit('before-input-event',{preventDefault:vi.fn()},{type:'keyDown',key:'Control',control:true})
+    const down=vi.fn(),up=vi.fn()
+    s.view.webContents.emit('before-mouse-event',{preventDefault:down},{type:'mouseDown',button:'left',x:0,y:0})
+    keyboard.emit('before-input-event',{preventDefault:vi.fn()},{type:'keyUp',key:'Control',control:false})
+    s.view.webContents.emit('before-mouse-event',{preventDefault:up},{type:'mouseUp',button:'left',x:0,y:0})
+    expect(down).toHaveBeenCalledOnce();expect(up).toHaveBeenCalledOnce()
+    expect(s.owner.webContents.send).toHaveBeenCalledExactlyOnceWith('office:menu-requested',{objectId:'document',revision:'version-1',expectedChangeSequence:0})
+    const plain=vi.fn()
+    s.view.webContents.emit('before-mouse-event',{preventDefault:plain},{type:'mouseDown',button:'left',x:0,y:0})
+    expect(plain).not.toHaveBeenCalled();expect(s.owner.webContents.send).toHaveBeenCalledOnce()
+    expect(s.peer.peer.messages).toHaveLength(0)
+  }finally{Object.defineProperty(process,'platform',platform)}
+})
+
+test.each(['protected','pending'] as const)('consumes macOS Control-click while %s without opening a menu or mutating the engine',async stage=>{
+  const s=await setup(stage==='protected');await openSurface(s)
+  const platform=Object.getOwnPropertyDescriptor(process,'platform')!
+  const closing=stage==='pending'?s.surface.request({...input('close'),expectedChangeSequence:0,discard:false}):undefined
+  const request=closing?await sent(s.peer):undefined
+  const before=s.peer.peer.messages.length
+  try{
+    Object.defineProperty(process,'platform',{value:'darwin'})
+    s.owner.webContents.emit('before-input-event',{preventDefault:vi.fn()},{type:'keyDown',key:'Control',control:true})
+    const preventDefault=vi.fn()
+    for(const type of ['mouseDown','mouseUp'])s.view.webContents.emit('before-mouse-event',{preventDefault},{type,button:'left',x:0,y:0})
+    expect(preventDefault).toHaveBeenCalledTimes(2)
+    expect(s.owner.webContents.send).not.toHaveBeenCalled();expect(s.peer.peer.messages).toHaveLength(before)
+  }finally{
+    Object.defineProperty(process,'platform',platform)
+    if(closing){cleanReply(s.peer,request,{});await closing}
+  }
+})
+
+test('clears macOS Control on window blur or hide, ignores hidden keys, and removes owner observers on dispose',async()=>{
+  const s=await setup();await openSurface(s)
+  const platform=Object.getOwnPropertyDescriptor(process,'platform')!
+  const control=()=>s.owner.webContents.emit('before-input-event',{preventDefault:vi.fn()},{type:'keyDown',key:'Control',control:true})
+  const left=()=>s.view.webContents.emit('before-mouse-event',{preventDefault:vi.fn()},{type:'mouseDown',button:'left',x:0,y:0})
+  try{
+    Object.defineProperty(process,'platform',{value:'darwin'})
+    control();s.owner.emit('blur');left();expect(s.owner.webContents.send).not.toHaveBeenCalled()
+    control();s.surface.hide();control();await s.surface.attach(bounds);left()
+    expect(s.owner.webContents.send).not.toHaveBeenCalled()
+    expect(s.owner.webContents.listenerCount('before-input-event')).toBe(1)
+    s.surface.destroy()
+    expect(s.owner.webContents.listenerCount('before-input-event')).toBe(0)
+    expect(s.owner.listenerCount('blur')).toBe(0)
+    expect(s.peer.peer.messages).toHaveLength(0)
+  }finally{Object.defineProperty(process,'platform',platform)}
+})
+
+test('does not treat Control-left as a menu on non-macOS platforms',async()=>{
+  const s=await setup();await openSurface(s)
+  const platform=Object.getOwnPropertyDescriptor(process,'platform')!
+  try{
+    Object.defineProperty(process,'platform',{value:'linux'})
+    s.owner.webContents.emit('before-input-event',{preventDefault:vi.fn()},{type:'keyDown',key:'Control',control:true})
+    const preventDefault=vi.fn()
+    s.view.webContents.emit('before-mouse-event',{preventDefault},{type:'mouseDown',button:'left',x:0,y:0})
+    expect(preventDefault).not.toHaveBeenCalled();expect(s.owner.webContents.send).not.toHaveBeenCalled()
+  }finally{Object.defineProperty(process,'platform',platform)}
+})
+
+test('blocks mouse and keyboard menus without a current document, while hidden or closing, and after disposal',async()=>{
+  const s=await setup()
+  const route=()=>{
+    const preventDefault=vi.fn()
+    for(const type of ['mouseDown','mouseUp'])s.view.webContents.emit('before-mouse-event',{preventDefault},{type,button:'right',x:0,y:0})
+    s.view.webContents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'ContextMenu'})
+  }
+  route();expect(s.owner.webContents.send).not.toHaveBeenCalled()
+  await openSurface(s);s.surface.hide();route();expect(s.owner.webContents.send).not.toHaveBeenCalled()
+  await s.surface.attach(bounds)
+  const close=s.surface.request({...input('close'),expectedChangeSequence:0,discard:false})
+  const rejected=expect(close).rejects.toThrow('unsaved-changes'),r=await sent(s.peer)
+  const before=s.peer.peer.messages.length;route()
+  expect(s.owner.webContents.send).not.toHaveBeenCalled();expect(s.peer.peer.messages).toHaveLength(before)
+  const {expectedChangeSequence,discard,...base}=r
+  s.peer.postMessage({...base,type:'result',ok:false,error:'unsaved-changes'});await rejected
+  route();expect(s.owner.webContents.send).toHaveBeenCalledTimes(2)
+  s.owner.webContents.send.mockClear();s.owner.isDestroyed=()=>true;route()
+  expect(s.owner.webContents.send).not.toHaveBeenCalled()
+  s.owner.isDestroyed=()=>false;s.surface.destroy();route()
+  expect(s.owner.webContents.send).not.toHaveBeenCalled()
+})
+
+test('does not route mouse or keyboard menus before the native document surface is ready',async()=>{
+  const f=await fixture();cleanup.push(f.cleanup)
+  const owner=Object.assign(new EventEmitter(),{isDestroyed:()=>false,webContents:Object.assign(new EventEmitter(),{getZoomFactor:()=>1,send:vi.fn()}),contentView:{addChildView:vi.fn(),removeChildView:vi.fn()}})
+  let finishLoad!:()=>void
+  mock.loadURL.mockImplementationOnce(()=>new Promise<void>(resolve=>{finishLoad=resolve}))
+  const surface=new NativeOfficeSurface({...f,owner:owner as any,onEvent(){}});live.push(surface)
+  const attaching=surface.attach(bounds)
+  await vi.waitFor(()=>expect(finishLoad).toBeTypeOf('function'))
+  const contents=mock.views.at(-1).webContents,preventDefault=vi.fn()
+  for(const type of ['mouseDown','mouseUp'])contents.emit('before-mouse-event',{preventDefault},{type,button:'right',x:0,y:0})
+  contents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'ContextMenu'})
+  expect(owner.webContents.send).not.toHaveBeenCalled()
+  expect(preventDefault).toHaveBeenCalledTimes(2)
+  finishLoad();await attaching
+  expect(mock.peers.at(-1).peer.messages).toHaveLength(0)
 })
 test('source-only sandbox view rejects network, navigation, permissions, popup and download', async () => {
   const s = await setup(), prefs = s.view.options.webPreferences
@@ -168,7 +313,7 @@ test('conditional close refusal preserves the session for a subsequent authorize
 })
 test('hide while startup is pending cannot be undone by a late attach', async () => {
   const f = await fixture(); cleanup.push(f.cleanup)
-  const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: { getZoomFactor: (): number => 1, send: vi.fn() }, contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } })
+  const owner = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: Object.assign(new EventEmitter(), { getZoomFactor: (): number => 1, send: vi.fn() }), contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } })
   const surface = new NativeOfficeSurface({ ...f, owner: owner as any, onEvent() {} }); live.push(surface)
   const attaching = surface.attach(bounds); surface.hide(); await attaching
   expect(owner.contentView.addChildView).not.toHaveBeenCalled()
@@ -243,7 +388,7 @@ test('packaged surface accepts only an internal Core token and rechecks it befor
   const resources='/Applications/analytix.app/Contents/Resources'
   const transport=vi.fn(async(_path:string,body:string)=>({ok:true,status:200,body:JSON.stringify({ok:true,requestId:JSON.parse(body).requestId,root:resources+'/office-private',qualificationDigest:'a'.repeat(64)})}))
   const token=await createOfficePrivateAdmissionProvider(transport,resources)()
-  const owner=Object.assign(new EventEmitter(),{isDestroyed:()=>false,webContents:{getZoomFactor:()=>1},contentView:{addChildView:vi.fn(),removeChildView:vi.fn()}})
+  const owner=Object.assign(new EventEmitter(),{isDestroyed:()=>false,webContents:Object.assign(new EventEmitter(),{getZoomFactor:()=>1}),contentView:{addChildView:vi.fn(),removeChildView:vi.fn()}})
   mock.packaged=true
   expect(()=>new NativeOfficeSurface({owner:owner as any,privateAdmission:{...token} as any,onEvent(){}})).toThrow('office-source-experiment-only')
   const surface=new NativeOfficeSurface({owner:owner as any,privateAdmission:token,onEvent(){}});live.push(surface)
@@ -301,7 +446,11 @@ test('installs protected transfers before any bytes and rejects selection or mut
   for (const key of ['c','x']) contents.emit('before-input-event',{preventDefault},{type:'keyDown',key,meta:true,isAutoRepeat:true})
   expect(preventDefault).toHaveBeenCalledTimes(2)
   await openSurface(s)
-  contents.emit('context-menu',{preventDefault});expect(s.owner.webContents.send).not.toHaveBeenCalled()
+  for(const type of ['mouseDown','mouseUp'])contents.emit('before-mouse-event',{preventDefault},{type,button:'right',x:0,y:0})
+  contents.emit('context-menu',{preventDefault})
+  contents.emit('before-input-event',{preventDefault},{type:'keyDown',key:'ContextMenu'})
+  expect(preventDefault).toHaveBeenCalledTimes(6)
+  expect(s.owner.webContents.send).not.toHaveBeenCalled()
   for (const command of ['captureSelection','edit','export']) await expect(s.surface.request(input(command,'protected-'+command))).rejects.toThrow('office-invalid-request')
   expect(s.peer.peer.messages).toHaveLength(0)
   const {runInNewContext} = await import('node:vm'), listeners = new Map<string, (event:any) => void>()
