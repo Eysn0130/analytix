@@ -121,6 +121,20 @@ func (r *repositoryStub) PatchThreadIfBaseline(threadID string, patch map[string
 	return r.thread, nil
 }
 
+type policyPatchRepository struct {
+	*repositoryStub
+	beforePatch func()
+	baselines   []string
+}
+
+func (r *policyPatchRepository) PatchThreadIfBaseline(threadID string, patch map[string]any, expectedDigest string) (map[string]any, error) {
+	r.baselines = append(r.baselines, expectedDigest)
+	if r.beforePatch != nil {
+		r.beforePatch()
+	}
+	return r.repositoryStub.PatchThreadIfBaseline(threadID, patch, expectedDigest)
+}
+
 func (r *repositoryStub) CommitWorkspaceMutation(request WorkspaceMutationCommitRequest) (map[string]any, error) {
 	thread, err := ApplyWorkspaceMutationCommit(r.thread, request)
 	if err != nil {
@@ -643,6 +657,245 @@ func TestServicePatchDeleteForkRecordEvents(t *testing.T) {
 		if event["title"] != nil {
 			t.Fatalf("thread lifecycle event exposed canonical title: %#v", event)
 		}
+	}
+}
+
+func executionPolicyServiceRepository(t *testing.T, version any, status string) *repositoryStub {
+	t.Helper()
+	at := time.Date(2026, 7, 12, 5, 0, 0, 0, time.UTC)
+	current := threadServiceGeneralContextV2(t, domainsecurity.TurnSecurityContextInput{
+		ThreadID: "thr_policy", TurnID: "turn_policy", WorkspaceRealPath: "/workspace", ContextEpoch: 1, IssuedAt: at,
+	})
+	epochState, err := contextepochapp.BootstrapState("thr_policy", 1, []domaincontextepoch.SourceEntry{contextepochapp.SecurityBindingEntry(current)}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnStatus := "completed"
+	if status == "running" {
+		turnStatus = "running"
+	}
+	thread := map[string]any{
+		"id": "thr_policy", "title": "Policy", "workspace": "/workspace", "status": status,
+		"approvalPolicy": "auto", "sandboxMode": "danger-full-access",
+		"securityState": turnsecurityapp.PublicRecord(current), "contextEpochState": contextepochapp.PublicState(epochState),
+		"turns": []any{map[string]any{
+			"id": "turn_policy", "threadId": "thr_policy", "status": turnStatus,
+			"approvalPolicy": "auto", "sandboxMode": "danger-full-access",
+			"securityContext": turnsecurityapp.PublicRecord(current), "items": []any{},
+		}},
+	}
+	if version != nil {
+		thread["executionPolicyVersion"] = version
+	}
+	return &repositoryStub{thread: thread}
+}
+
+func TestServicePatchExplicitExecutionPolicySealsCurrentSemantics(t *testing.T) {
+	policies := []struct {
+		name     string
+		approval string
+		sandbox  string
+	}{
+		{name: "same legacy pair", approval: "auto", sandbox: "danger-full-access"},
+		{name: "custom pair", approval: "untrusted", sandbox: "read-only"},
+	}
+	versions := []struct {
+		name     string
+		value    any
+		expected float64
+	}{
+		{name: "absent", expected: 2},
+		{name: "zero", value: float64(0), expected: 2},
+		{name: "previous", value: float64(1), expected: 2},
+		{name: "current", value: float64(2), expected: 2},
+		{name: "future", value: float64(3), expected: 3},
+	}
+	for _, policy := range policies {
+		for _, version := range versions {
+			t.Run(policy.name+"/"+version.name, func(t *testing.T) {
+				repo := executionPolicyServiceRepository(t, version.value, "idle")
+				service := newMutationService(repo)
+				result, err := service.Patch(context.Background(), "thr_policy", map[string]any{
+					"approvalPolicy": policy.approval, "sandboxMode": policy.sandbox,
+				})
+				if err != nil {
+					t.Fatalf("explicit policy patch: %v", err)
+				}
+				for _, snapshot := range []map[string]any{result, repo.thread} {
+					if snapshot["executionPolicyVersion"] != version.expected || snapshot["approvalPolicy"] != policy.approval || snapshot["sandboxMode"] != policy.sandbox {
+						t.Fatalf("policy readback did not retain the explicit pair and marker: %#v", snapshot)
+					}
+				}
+				if !repo.patched || len(repo.events) != 1 || repo.events[0]["kind"] != "thread_updated" {
+					t.Fatalf("policy mutation did not persist and emit once: patched=%v events=%#v", repo.patched, repo.events)
+				}
+			})
+		}
+	}
+}
+
+func TestServicePatchRejectsInvalidPresentExecutionPolicyBeforeWriting(t *testing.T) {
+	patches := []map[string]any{
+		{"approvalPolicy": nil, "sandboxMode": "workspace-write"},
+		{"approvalPolicy": float64(1), "sandboxMode": "workspace-write"},
+		{"approvalPolicy": "unknown", "sandboxMode": "workspace-write"},
+		{"approvalPolicy": " ", "sandboxMode": "workspace-write"},
+		{"approvalPolicy": "on-request", "sandboxMode": nil},
+		{"approvalPolicy": "on-request", "sandboxMode": false},
+		{"approvalPolicy": "on-request", "sandboxMode": "unknown"},
+		{"approvalPolicy": "on-request", "sandboxMode": " "},
+		{"approvalPolicy": "unknown"},
+		{"sandboxMode": "unknown"},
+	}
+	for index, patch := range patches {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			repo := executionPolicyServiceRepository(t, nil, "idle")
+			before, err := json.Marshal(repo.thread)
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := newMutationService(repo)
+			writerEntered := false
+			service.beginMetadataRead = func(context.Context, string, string, string, string) (func(), error) {
+				writerEntered = true
+				return func() {}, nil
+			}
+			result, err := service.Patch(context.Background(), "thr_policy", patch)
+			if !errors.Is(err, ErrInvalidThreadExecutionPolicy) || result != nil {
+				t.Fatalf("invalid present policy was not rejected: result=%#v err=%v", result, err)
+			}
+			after, marshalErr := json.Marshal(repo.thread)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if writerEntered || repo.patched || len(repo.events) != 0 || string(before) != string(after) {
+				t.Fatalf("invalid policy reached mutation: writer=%v patched=%v events=%#v", writerEntered, repo.patched, repo.events)
+			}
+		})
+	}
+}
+
+func TestServicePatchPartialPolicyAndTitleDoNotSeal(t *testing.T) {
+	patches := []map[string]any{
+		{"approvalPolicy": "on-request"},
+		{"sandboxMode": "read-only"},
+		{"title": "Retitled"},
+	}
+	for _, version := range []any{nil, float64(0), float64(1), float64(3)} {
+		for index, patch := range patches {
+			t.Run(fmt.Sprintf("version=%v/patch=%d", version, index), func(t *testing.T) {
+				repo := executionPolicyServiceRepository(t, version, "idle")
+				previousVersion, versionPresent := repo.thread["executionPolicyVersion"]
+				result, err := newMutationService(repo).Patch(context.Background(), "thr_policy", patch)
+				if err != nil {
+					t.Fatalf("partial metadata patch: %v", err)
+				}
+				for _, snapshot := range []map[string]any{result, repo.thread} {
+					actual, present := snapshot["executionPolicyVersion"]
+					if present != versionPresent || actual != previousVersion {
+						t.Fatalf("partial metadata patch changed the policy marker: %#v", snapshot)
+					}
+					for key, value := range patch {
+						if snapshot[key] != value {
+							t.Fatalf("partial patch was not retained: %#v", snapshot)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestServicePatchExecutionPolicyLeavesRunningTurnAndPendingCallFrozen(t *testing.T) {
+	repo := executionPolicyServiceRepository(t, nil, "running")
+	turns := repo.thread["turns"].([]any)
+	turn := turns[0].(map[string]any)
+	turn["items"] = []any{map[string]any{
+		"id": "item_pending_policy", "kind": "approval", "status": "pending", "approvalId": "appr_policy", "toolCallId": "call_policy",
+	}}
+	before, err := json.Marshal(turns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := newMutationService(repo).Patch(context.Background(), "thr_policy", map[string]any{
+		"approvalPolicy": "never", "sandboxMode": "read-only",
+	})
+	if err != nil {
+		t.Fatalf("next-turn metadata patch: %v", err)
+	}
+	after, err := json.Marshal(repo.thread["turns"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) || repo.thread["status"] != "running" {
+		t.Fatalf("metadata patch changed the running turn or pending call: %#v", repo.thread)
+	}
+	if result["executionPolicyVersion"] != float64(2) || repo.thread["approvalPolicy"] != "never" || repo.thread["sandboxMode"] != "read-only" {
+		t.Fatalf("next-turn policy metadata was not persisted: %#v", repo.thread)
+	}
+	if len(repo.events) != 1 || repo.events[0]["status"] != "running" {
+		t.Fatalf("metadata update altered lifecycle reporting: %#v", repo.events)
+	}
+}
+
+func TestServicePatchExecutionPolicyRetriesCASWithinMetadataWriter(t *testing.T) {
+	repo := &policyPatchRepository{repositoryStub: executionPolicyServiceRepository(t, nil, "idle")}
+	service := newMutationService(repo)
+	writerHeld, writerReleased := false, false
+	service.beginMetadataRead = func(context.Context, string, string, string, string) (func(), error) {
+		writerHeld = true
+		return func() { writerHeld = false; writerReleased = true }, nil
+	}
+	repo.beforePatch = func() {
+		if !writerHeld {
+			t.Fatal("policy CAS ran outside the metadata writer")
+		}
+		if len(repo.baselines) == 1 {
+			repo.thread["title"] = "Concurrent title"
+			repo.thread["executionPolicyVersion"] = float64(3)
+		}
+	}
+	result, err := service.Patch(context.Background(), "thr_policy", map[string]any{
+		"approvalPolicy": "on-request", "sandboxMode": "workspace-write",
+	})
+	if err != nil {
+		t.Fatalf("policy CAS retry: %v", err)
+	}
+	if len(repo.baselines) != 2 || repo.baselines[0] == "" || repo.baselines[0] == repo.baselines[1] {
+		t.Fatalf("policy CAS did not retry from a fresh baseline: %#v", repo.baselines)
+	}
+	if !writerReleased || writerHeld || len(repo.events) != 1 {
+		t.Fatalf("policy writer did not release or emitted twice: released=%v held=%v events=%#v", writerReleased, writerHeld, repo.events)
+	}
+	if result["title"] != "Concurrent title" || repo.thread["executionPolicyVersion"] != float64(3) ||
+		repo.thread["approvalPolicy"] != "on-request" || repo.thread["sandboxMode"] != "workspace-write" {
+		t.Fatalf("policy retry overwrote newer metadata: %#v", repo.thread)
+	}
+}
+
+func TestServicePatchExecutionPolicyDoesNotWriteWhenMetadataWriterRefuses(t *testing.T) {
+	repo := executionPolicyServiceRepository(t, nil, "idle")
+	service := newMutationService(repo)
+	refusal := errors.New("synthetic metadata writer refusal")
+	service.beginMetadataRead = func(context.Context, string, string, string, string) (func(), error) {
+		return nil, refusal
+	}
+	before, err := json.Marshal(repo.thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Patch(context.Background(), "thr_policy", map[string]any{
+		"approvalPolicy": "on-request", "sandboxMode": "workspace-write",
+	})
+	if !errors.Is(err, ErrThreadMutationTransition) || !errors.Is(err, refusal) || result != nil {
+		t.Fatalf("metadata writer refusal was not retained: result=%#v err=%v", result, err)
+	}
+	after, marshalErr := json.Marshal(repo.thread)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if repo.patched || len(repo.events) != 0 || string(before) != string(after) {
+		t.Fatalf("policy patch crossed a refused metadata writer: %#v", repo.thread)
 	}
 }
 
