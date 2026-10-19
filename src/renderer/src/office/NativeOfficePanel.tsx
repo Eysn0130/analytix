@@ -891,7 +891,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
       </div>
       {docxAnnotation ? <div className={styles.docxFeedback} data-native-docx-feedback role={operationNotice ? 'alert' : 'status'} title={docxNotice}>{docxNotice}</div> : null}
     </div>
-    {!readonlyPresent && targetMatches && view?.kind === 'xlsx' ? <WorkbookCellEditor view={view} threadId={threadId}
+    {!readonlyPresent && targetMatches && view?.kind === 'xlsx' ? <WorkbookCellEditor view={view} threadId={threadId} workspace={target?.workspace} path={target?.path}
       active={visible && !loading && !!target} busy={busy || manualUncertain} onRequest={invoke} /> : null}
     {visible && targetMatches && view?.kind === 'pptx' ? <div data-native-playback-state role={playbackNotice || playback?.phase === 'unsupported' || playback?.phase === 'error' || playbackFailure?.owner === controlDocumentOwner ? 'alert' : 'status'} className="shrink-0 px-2 text-xs text-ds-muted">
       {playbackNotice ?? (playback?.phase === 'unsupported' ? presentationErrors.presentation_unsupported : playback?.phase === 'error' ? presentationErrors.presentation_failed : playbackActive ? `${playback.phase === 'paused' ? '已暂停' : '放映中'} · ${playback.slideIndex === null || playback.slideIndex < 0 ? '—' : playback.slideIndex + 1} / ${playback.slideCount}` : playback ? '放映未开始' : '放映状态未确认')}

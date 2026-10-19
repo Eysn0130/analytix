@@ -137,12 +137,12 @@ func TestNativeEditingAdmissionRejectsUnverifiedXMLAndRelationships(t *testing.T
 	for name, change := range map[string]struct {
 		part, old, new string
 	}{
-		"defined_name":            {"xl/workbook.xml", "</workbook>", `<definedNames><definedName name="UserRange">Sheet1!$A$1</definedName></definedNames></workbook>`},
-		"shared_formula":          {"xl/worksheets/sheet1.xml", "<f>", `<f t="shared" si="0">`},
-		"rich_text":               {"xl/sharedStrings.xml", "<si><t>", `<si><r><t>`},
-		"foreign_element":         {"xl/worksheets/sheet1.xml", "</worksheet>", `<x:feature xmlns:x="urn:unknown"/></worksheet>`},
-		"external_relationship":   {"xl/_rels/workbook.xml.rels", "</Relationships>", `<Relationship Id="foreign" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="https://example.invalid/sheet.xml" TargetMode="External"/></Relationships>`},
-		"unknown_theme_extension": {"xl/theme/theme1.xml", "</a:theme>", `<a:extLst/></a:theme>`},
+		"defined_name":             {"xl/workbook.xml", "</workbook>", `<definedNames><definedName name="UserRange">Sheet1!$A$1</definedName></definedNames></workbook>`},
+		"shared_formula":           {"xl/worksheets/sheet1.xml", "<f>", `<f t="shared" si="0">`},
+		"rich_text":                {"xl/sharedStrings.xml", "<si><t>", `<si><r><t>`},
+		"foreign_element":          {"xl/worksheets/sheet1.xml", "</worksheet>", `<x:feature xmlns:x="urn:unknown"/></worksheet>`},
+		"unsupported_relationship": {"xl/_rels/workbook.xml.rels", "</Relationships>", `<Relationship Id="foreign" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/unknownFeature" Target="worksheets/sheet1.xml"/></Relationships>`},
+		"unknown_theme_extension":  {"xl/theme/theme1.xml", "</a:theme>", `<a:extLst/></a:theme>`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			bad := scopeRewrite(t, body, change.part, func(s string) string {
@@ -217,6 +217,153 @@ func TestNativeEditingVerifierPreservesExplicitPrintSettings(t *testing.T) {
 	bad := scopeRewrite(t, after, "xl/worksheets/sheet1.xml", func(s string) string { return strings.Replace(s, `left="0.5"`, `left="0.8"`, 1) })
 	if VerifyPatchedPackage(ctx, before, bad, review) == nil {
 		t.Fatal("export changed user print margins")
+	}
+}
+
+func TestNativeEditingVerifierRejectsAddedNondefaultPrintSettings(t *testing.T) {
+	ctx := context.Background()
+	before, after := scopePackage(t, 1, false), scopePackage(t, 4, false)
+	selected := office.WorkbookSelection{SheetName: "Sheet1", Cells: []office.WorkbookSelectedCell{{ValueType: "number", Value: 1, Text: "1", Formula: "1", RowVisible: true, ColumnVisible: true}}}
+	v := 4.0
+	review, err := ValidatePatch(ctx, selected, office.WorkbookPatch{Kind: "number", Value: &v})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSettings := func(body []byte, setting string) []byte {
+		return scopeRewrite(t, body, "xl/worksheets/sheet1.xml", func(s string) string {
+			return strings.Replace(s, "</worksheet>", setting+"</worksheet>", 1)
+		})
+	}
+	for name, setting := range map[string]string{
+		"margin":          `<pageMargins left="0.8" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`,
+		"orientation":     `<pageSetup orientation="landscape"/>`,
+		"scale":           `<pageSetup scale="50"/>`,
+		"unknown_default": `<pageSetup paperSize="9"/>`,
+		"headings":        `<printOptions headings="1"/>`,
+		"footer":          `<headerFooter><oddFooter>Added footer</oddFooter></headerFooter>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := withSettings(after, setting)
+			if err := ValidateNativeEditingPackage(ctx, candidate); err != nil {
+				t.Fatal("fixture must reach outside-scope preservation check", err)
+			}
+			if VerifyPatchedPackage(ctx, before, candidate, review) == nil {
+				t.Fatal("single-cell edit added a nondefault print setting")
+			}
+		})
+	}
+	for name, setting := range map[string]string{
+		"margins":       `<pageMargins left="0.7000000000" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`,
+		"page_setup":    `<pageSetup scale="100" firstPageNumber="1" fitToWidth="1" fitToHeight="1" pageOrder="downThenOver" orientation="default" usePrinterDefaults="1" blackAndWhite="0" draft="false" cellComments="none" useFirstPageNumber="0" errors="displayed" horizontalDpi="600" verticalDpi="600" copies="1"/>`,
+		"print_options": `<printOptions headings="false" gridLines="0" gridLinesSet="1" horizontalCentered="0" verticalCentered="false"/>`,
+		"empty_headers": `<headerFooter differentOddEven="0" differentFirst="false" scaleWithDoc="1" alignWithMargins="true"><oddHeader></oddHeader><oddFooter></oddFooter></headerFooter>`,
+	} {
+		t.Run("default_"+name, func(t *testing.T) {
+			if err := VerifyPatchedPackage(ctx, before, withSettings(after, setting), review); err != nil {
+				t.Fatal("equivalent explicit native defaults rejected", err)
+			}
+			if err := VerifyPatchedPackage(ctx, withSettings(before, setting), after, review); err != nil {
+				t.Fatal("omission of equivalent defaults rejected", err)
+			}
+		})
+	}
+}
+
+func admissionCalcProps(t *testing.T, body []byte, attributes string) []byte {
+	t.Helper()
+	return scopeRewrite(t, body, "xl/workbook.xml", func(s string) string {
+		start := strings.Index(s, "<calcPr")
+		if start < 0 {
+			t.Fatal("missing calculation property fixture")
+		}
+		openingEnd := strings.Index(s[start:], ">")
+		if openingEnd < 0 {
+			t.Fatal("unclosed calculation property fixture")
+		}
+		end := start + openingEnd + 1
+		if s[end-2] != '/' {
+			closing := strings.Index(s[end:], "</calcPr>")
+			if closing < 0 {
+				t.Fatal("missing calculation property end element")
+			}
+			end += closing + len("</calcPr>")
+		}
+		replacement := ""
+		if attributes != "" {
+			replacement = "<calcPr " + attributes + "/>"
+		}
+		return s[:start] + replacement + s[end:]
+	})
+}
+
+func TestNativeEditingVerifierPreservesCalculationSettings(t *testing.T) {
+	ctx := context.Background()
+	before, after := scopePackage(t, 1, false), scopePackage(t, 4, false)
+	selected := office.WorkbookSelection{SheetName: "Sheet1", Cells: []office.WorkbookSelectedCell{{ValueType: "number", Value: 1, Text: "1", Formula: "1", RowVisible: true, ColumnVisible: true}}}
+	v := 4.0
+	review, err := ValidatePatch(ctx, selected, office.WorkbookPatch{Kind: "number", Value: &v})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, attributes := range map[string]string{
+		"manual": `calcMode="manual"`, "full_on_load": `fullCalcOnLoad="true"`,
+		"force_full": `forceFullCalc="1"`, "on_save": `calcOnSave="false"`,
+		"completed": `calcCompleted="false"`, "concurrent": `concurrentCalc="false"`,
+		"unknown_concurrency_default": `concurrentManualCount="2"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := admissionCalcProps(t, after, attributes)
+			if err := ValidateNativeEditingPackage(ctx, candidate); err != nil {
+				t.Fatal("calculation fixture must reach preservation check", err)
+			}
+			if VerifyPatchedPackage(ctx, before, candidate, review) == nil {
+				t.Fatal("single-cell edit changed a calculation setting")
+			}
+		})
+	}
+	defaults := `calcId="999999" calcMode="auto" refMode="A1" fullCalcOnLoad="false" forceFullCalc="0" calcCompleted="true" calcOnSave="1" concurrentCalc="true" iterate="false" iterateCount="100" iterateDelta="0.001"`
+	if err := VerifyPatchedPackage(ctx, before, admissionCalcProps(t, after, defaults), review); err != nil {
+		t.Fatal("equivalent explicit calculation defaults or changed engine calcId rejected", err)
+	}
+	if err := VerifyPatchedPackage(ctx, admissionCalcProps(t, before, defaults), admissionCalcProps(t, after, ""), review); err != nil {
+		t.Fatal("omission of equivalent calculation defaults rejected", err)
+	}
+}
+
+func TestNativeEditingVerifierAllowsUnchangedOutsideBooleanAndErrorCells(t *testing.T) {
+	ctx := context.Background()
+	withFlags := func(body []byte) []byte {
+		return scopeRewrite(t, body, "xl/worksheets/sheet1.xml", func(s string) string {
+			return strings.Replace(s, "</sheetData>", `<row r="6"><c r="D6" t="b"><v>1</v></c></row><row r="7"><c r="D7" t="e"><v>#N/A</v></c></row></sheetData>`, 1)
+		})
+	}
+	before, after := withFlags(scopePackage(t, 1, false)), withFlags(scopePackage(t, 4, false))
+	selected := office.WorkbookSelection{SheetName: "Sheet1", Cells: []office.WorkbookSelectedCell{{ValueType: "number", Value: 1, Text: "1", Formula: "1", RowVisible: true, ColumnVisible: true}}}
+	v := 4.0
+	review, err := ValidatePatch(ctx, selected, office.WorkbookPatch{Kind: "number", Value: &v})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifySelectionPackage(ctx, before, selected); err != nil {
+		t.Fatal("unrelated boolean/error cells made numeric target read-only", err)
+	}
+	if err := VerifyPatchedPackage(ctx, before, after, review); err != nil {
+		t.Fatal("unchanged outside boolean/error values rejected", err)
+	}
+	for _, change := range [][2]string{{`<v>1</v></c></row><row r="7">`, `<v>0</v></c></row><row r="7">`}, {"#N/A", "#VALUE!"}} {
+		bad := scopeRewrite(t, after, "xl/worksheets/sheet1.xml", func(s string) string {
+			if !strings.Contains(s, change[0]) {
+				t.Fatal("outside typed fixture missing")
+			}
+			return strings.Replace(s, change[0], change[1], 1)
+		})
+		if VerifyPatchedPackage(ctx, before, bad, review) == nil {
+			t.Fatal("outside boolean/error value changed during numeric edit")
+		}
+	}
+	unsupportedTarget := office.WorkbookSelection{SheetName: "Sheet1", StartColumn: 3, EndColumn: 3, StartRow: 5, EndRow: 5, Cells: []office.WorkbookSelectedCell{{Column: 3, Row: 5, ValueType: "boolean", Text: "TRUE", RowVisible: true, ColumnVisible: true}}}
+	if VerifySelectionPackage(ctx, before, unsupportedTarget) == nil {
+		t.Fatal("outside-value admission widened typed target types")
 	}
 }
 

@@ -24,6 +24,9 @@ func (s *ObjectEditingFiles) nativeWorkbookEditingBytes(input editing.NativeWork
 	if digestAtomicText(state.Content) != input.BaseRevision {
 		return nil, editing.ErrConflict
 	}
+	if err = s.validateNativeObject(state.Content); err != nil {
+		return nil, err
+	}
 	return state.Content, nil
 }
 

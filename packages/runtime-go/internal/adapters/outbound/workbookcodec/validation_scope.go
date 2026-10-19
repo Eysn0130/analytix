@@ -43,9 +43,11 @@ func NativeEditingReadOnlyReason(err error) string {
 	return ""
 }
 
-// ValidateNativeEditingPackage admits only the small XLSX feature profile whose
-// cells, styles, rows, columns, merges and panes VerifyPatchedPackage compares.
-// This is an editing gate, not a reader: unsupported packages remain readable.
+// ValidateNativeEditingPackage admits the bounded XLSX editing feature profile.
+// The filestore entry points must first run their existing InspectOfficePackage
+// structural preflight on these OPC bytes; this gate does not repeat ZIP/XML,
+// content-type or relationship safety validation. Unsupported features remain
+// readable, and workbookPhysical independently enforces the editing cell budget.
 func ValidateNativeEditingPackage(ctx context.Context, body []byte) (err error) {
 	defer func() {
 		if recover() != nil {
@@ -62,7 +64,6 @@ func ValidateNativeEditingPackage(ctx context.Context, body []byte) (err error) 
 	if err != nil {
 		return err
 	}
-	referenced := map[string]bool{}
 	for name, entry := range entries {
 		kind := workbookAdmissionPart(name)
 		if kind == "" {
@@ -74,11 +75,11 @@ func ValidateNativeEditingPackage(ctx context.Context, body []byte) (err error) 
 		}
 		switch kind {
 		case "relationships":
-			if e = workbookAdmissionRelationships(ctx, raw, name, entries, referenced); e != nil {
+			if e = workbookAdmissionRelationships(raw); e != nil {
 				return e
 			}
 		case "content-types":
-			if e = workbookAdmissionContentTypes(ctx, raw, entries); e != nil {
+			if e = workbookAdmissionContentTypes(raw); e != nil {
 				return e
 			}
 		case "workbook", "worksheet", "styles", "strings":
@@ -91,18 +92,10 @@ func ValidateNativeEditingPackage(ctx context.Context, body []byte) (err error) 
 			}
 		}
 	}
-	for _, required := range []string{"[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/_rels/workbook.xml.rels", "xl/styles.xml"} {
-		if entries[required] == nil {
-			return patchInvalid
-		}
-	}
 	sheetParts := 0
 	themes := 0
 	for name := range entries {
 		kind := workbookAdmissionPart(name)
-		if kind != "content-types" && kind != "relationships" && !referenced[name] {
-			return workbookAdmissionError("unsupported_package_part")
-		}
 		if kind == "worksheet" {
 			sheetParts++
 		}
@@ -183,95 +176,36 @@ func workbookPackageEntries(body []byte) (map[string]*zip.File, error) {
 	return entries, nil
 }
 
-func workbookAdmissionRelationships(ctx context.Context, raw []byte, name string, entries map[string]*zip.File, referenced map[string]bool) error {
-	// Decode attributes explicitly; namespace-qualified feature elements and
-	// external targets are outside this editing profile even when unreferenced.
-	d := xml.NewDecoder(bytes.NewReader(raw))
-	ids := map[string]bool{}
-	root, depth := false, 0
-	for {
-		if ctx == nil || ctx.Err() != nil {
-			return patchInvalid
-		}
-		t, e := d.Token()
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
-			return patchInvalid
-		}
-		switch n := t.(type) {
-		case xml.StartElement:
-			depth++
-			if n.Name.Space != "http://schemas.openxmlformats.org/package/2006/relationships" {
-				return workbookAdmissionError("unsupported_relationship")
-			}
-			if depth == 1 && n.Name.Local == "Relationships" && !root {
-				for _, a := range n.Attr {
-					if a.Name.Space != "xmlns" && (a.Name.Space != "" || a.Name.Local != "xmlns") {
-						return workbookAdmissionError("unsupported_relationship")
-					}
-				}
-				root = true
-				continue
-			}
-			if depth != 2 || n.Name.Local != "Relationship" {
-				return workbookAdmissionError("unsupported_relationship")
-			}
-			attrs := map[string]string{}
-			for _, a := range n.Attr {
-				if a.Name.Space != "" || !strings.Contains(" Id Target TargetMode Type ", " "+a.Name.Local+" ") || attrs[a.Name.Local] != "" {
-					return workbookAdmissionError("unsupported_relationship")
-				}
-				attrs[a.Name.Local] = a.Value
-			}
-			id, target, typ := attrs["Id"], attrs["Target"], attrs["Type"]
-			if id == "" || ids[id] || target == "" || attrs["TargetMode"] != "" || strings.ContainsAny(target, "?#\\") {
-				return workbookAdmissionError("unsupported_relationship")
-			}
-			ids[id] = true
-			base := ""
-			if name == "xl/_rels/workbook.xml.rels" {
-				base = "xl"
-			}
-			resolved := path.Clean(path.Join(base, target))
-			if strings.HasPrefix(target, "/") {
-				resolved = strings.TrimPrefix(path.Clean(target), "/")
-			}
-			part := workbookAdmissionPart(resolved)
-			allowed := map[string]string{
-				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet":           "worksheet",
-				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles":              "styles",
-				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme":               "theme",
-				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings":       "strings",
-				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument":      "workbook",
-				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties": "metadata",
-				"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties":   "metadata",
-			}
-			if entries[resolved] == nil || part == "" || allowed[typ] != part || base == "xl" && (part == "workbook" || part == "metadata") || base == "" && part != "workbook" && part != "metadata" {
-				return workbookAdmissionError("unsupported_relationship")
-			}
-			if part == "metadata" && (strings.HasSuffix(typ, "/extended-properties") && resolved != "docProps/app.xml" || strings.HasSuffix(typ, "/core-properties") && resolved != "docProps/core.xml") {
-				return workbookAdmissionError("unsupported_relationship")
-			}
-			referenced[resolved] = true
-		case xml.EndElement:
-			depth--
-		case xml.CharData:
-			if strings.TrimSpace(string(n)) != "" {
-				return patchInvalid
-			}
-		case xml.Directive:
-			return patchInvalid
-		}
+// OPC target resolution, IDs and external-link safety are owned by the existing
+// filestore preflight. Only relationship feature kinds are restricted here.
+func workbookAdmissionRelationships(raw []byte) error {
+	var rels struct {
+		Items []struct {
+			Type string `xml:"Type,attr"`
+		} `xml:"Relationship"`
 	}
-	if !root || depth != 0 {
+	if xml.Unmarshal(raw, &rels) != nil {
 		return patchInvalid
+	}
+	for _, r := range rels.Items {
+		switch r.Type {
+		case "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet",
+			"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
+			"http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme",
+			"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings",
+			"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument",
+			"http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties",
+			"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties":
+		default:
+			return workbookAdmissionError("unsupported_relationship")
+		}
 	}
 	return nil
 }
 
 func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
+	// This is the finite editable feature allowlist, not an OOXML schema. The
+	// filestore preflight owns root counts, duplicate attributes and XML safety.
 	profiles := map[string]map[string]string{
 		"workbook": {
 			"workbook": "", "workbook/fileVersion": "appName lastEdited lowestEdited rupBuild codeName",
@@ -338,7 +272,6 @@ func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
 	}
 	d := xml.NewDecoder(bytes.NewReader(raw))
 	stack := []string{}
-	root := false
 	for {
 		if ctx == nil || ctx.Err() != nil {
 			return patchInvalid
@@ -352,10 +285,9 @@ func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
 		}
 		switch n := t.(type) {
 		case xml.StartElement:
-			if n.Name.Space != "http://schemas.openxmlformats.org/spreadsheetml/2006/main" || len(stack) == 0 && root {
+			if n.Name.Space != "http://schemas.openxmlformats.org/spreadsheetml/2006/main" {
 				return reason
 			}
-			root = true
 			stack = append(stack, n.Name.Local)
 			p := strings.Join(stack, "/")
 			allowed, ok := profile[p]
@@ -365,12 +297,7 @@ func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
 				}
 				return reason
 			}
-			attrs := map[xml.Name]bool{}
 			for _, a := range n.Attr {
-				if attrs[a.Name] {
-					return patchInvalid
-				}
-				attrs[a.Name] = true
 				if a.Name.Space == "xmlns" || a.Name.Space == "" && a.Name.Local == "xmlns" {
 					continue
 				}
@@ -398,16 +325,7 @@ func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
 			}
 		case xml.EndElement:
 			stack = stack[:len(stack)-1]
-		case xml.CharData:
-			if strings.TrimSpace(string(n)) != "" && (len(stack) == 0 || !strings.Contains(" t v f oddHeader oddFooter evenHeader evenFooter firstHeader firstFooter ", " "+stack[len(stack)-1]+" ")) {
-				return patchInvalid
-			}
-		case xml.Directive:
-			return patchInvalid
 		}
-	}
-	if !root || len(stack) != 0 {
-		return patchInvalid
 	}
 	return nil
 }
@@ -447,7 +365,7 @@ func workbookAdmissionAttributeUnsupported(p, name, value string) bool {
 	case p == "worksheet/sheetFormatPr" && (name == "outlineLevelRow" || name == "outlineLevelCol"), p == "worksheet/rowBreaks", p == "worksheet/colBreaks":
 		return value != "0"
 	case p == "worksheet/sheetData/row/c" && name == "t":
-		return value != "n" && value != "s" && value != "inlineStr" && value != "str"
+		return value != "n" && value != "s" && value != "inlineStr" && value != "str" && value != "b" && value != "e"
 	case p == "worksheet/sheetData/row/c/f" && name == "t":
 		return value != "normal"
 	case p == "styleSheet/cellStyles" && name == "count":
@@ -480,7 +398,7 @@ func workbookAdmissionAncillaryXML(ctx context.Context, raw []byte, part string)
 		elements = "theme themeElements clrScheme dk1 lt1 dk2 lt2 accent1 accent2 accent3 accent4 accent5 accent6 hlink folHlink sysClr srgbClr schemeClr prstClr scrgbClr hslClr fontScheme majorFont minorFont latin ea cs font fmtScheme fillStyleLst bgFillStyleLst solidFill noFill gradFill gsLst gs lin path fillToRect tileRect lnStyleLst ln prstDash custDash ds round bevel miter headEnd tailEnd effectStyleLst effectStyle effectLst effectDag outerShdw innerShdw glow softEdge reflection blur scene3d camera lightRig rot sp3d bevelT bevelB contourClr extrusionClr objectDefaults extraClrSchemeLst tint shade satMod satOff lumMod lumOff alpha alphaMod alphaOff hue hueMod hueOff comp inv gray gamma invGamma red redMod redOff green greenMod greenOff blue blueMod blueOff"
 	}
 	d := xml.NewDecoder(bytes.NewReader(raw))
-	depth, seen := 0, false
+	seen := false
 	for {
 		if ctx == nil || ctx.Err() != nil {
 			return patchInvalid
@@ -494,110 +412,37 @@ func workbookAdmissionAncillaryXML(ctx context.Context, raw []byte, part string)
 		}
 		switch n := t.(type) {
 		case xml.StartElement:
-			if depth == 0 && (seen || n.Name.Local != root) || !strings.Contains(" "+namespaces+" ", " "+n.Name.Space+" ") || !strings.Contains(" "+elements+" ", " "+n.Name.Local+" ") {
+			if !seen && n.Name.Local != root || !strings.Contains(" "+namespaces+" ", " "+n.Name.Space+" ") || !strings.Contains(" "+elements+" ", " "+n.Name.Local+" ") {
 				return workbookAdmissionError("unsupported_xml_feature")
 			}
 			seen = true
-			depth++
-			for _, a := range n.Attr {
-				if a.Name.Space == "xmlns" || a.Name.Space == "" && a.Name.Local == "xmlns" || a.Name.Space == "http://www.w3.org/2001/XMLSchema-instance" && a.Name.Local == "type" {
-					continue
-				}
-				if a.Name.Space != "" || !strings.Contains(" name script typeface panose pitchFamily charset val lastClr r g b hue sat lum ang scaled pos flip rotWithShape type w cap cmpd algn lim len dist dir blurRad sx sy kx ky al stA stAng stH stV lat lon rev zoom fov rig prst z extrusionH contourW prstMaterial baseType size l t b ", " "+a.Name.Local+" ") {
-					return workbookAdmissionError("unsupported_xml_feature")
-				}
-			}
-		case xml.EndElement:
-			depth--
-		case xml.Directive:
-			return patchInvalid
 		}
-	}
-	if !seen || depth != 0 {
-		return patchInvalid
 	}
 	return nil
 }
 
-func workbookAdmissionContentTypes(ctx context.Context, raw []byte, entries map[string]*zip.File) error {
-	d := xml.NewDecoder(bytes.NewReader(raw))
-	depth, seen := 0, false
-	for {
-		if ctx == nil || ctx.Err() != nil {
-			return patchInvalid
-		}
-		t, e := d.Token()
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
-			return patchInvalid
-		}
-		switch n := t.(type) {
-		case xml.StartElement:
-			depth++
-			if n.Name.Space != "http://schemas.openxmlformats.org/package/2006/content-types" || depth == 1 && (seen || n.Name.Local != "Types") || depth == 2 && n.Name.Local != "Default" && n.Name.Local != "Override" || depth > 2 {
-				return workbookAdmissionError("unsupported_package_part")
-			}
-			seen = true
-			for _, a := range n.Attr {
-				if a.Name.Space == "xmlns" || a.Name.Space == "" && a.Name.Local == "xmlns" {
-					continue
-				}
-				if a.Name.Space != "" || depth == 1 || a.Name.Local != "ContentType" && (n.Name.Local == "Default" && a.Name.Local != "Extension" || n.Name.Local == "Override" && a.Name.Local != "PartName") {
-					return workbookAdmissionError("unsupported_package_part")
-				}
-			}
-		case xml.EndElement:
-			depth--
-		case xml.CharData:
-			if strings.TrimSpace(string(n)) != "" {
-				return patchInvalid
-			}
-		case xml.Directive:
-			return patchInvalid
-		}
-	}
-	if !seen || depth != 0 {
-		return patchInvalid
-	}
+// The preflight already validates declarations against archive entries. These
+// are only the passive content types supported by this editing feature profile.
+func workbookAdmissionContentTypes(raw []byte) error {
 	var types struct {
-		XMLName  xml.Name
-		Defaults []struct {
-			Extension string `xml:"Extension,attr"`
-			Type      string `xml:"ContentType,attr"`
-		} `xml:"Default"`
-		Overrides []struct {
-			Part string `xml:"PartName,attr"`
+		Items []struct {
 			Type string `xml:"ContentType,attr"`
-		} `xml:"Override"`
+		} `xml:",any"`
 	}
-	if xml.Unmarshal(raw, &types) != nil || types.XMLName.Local != "Types" || types.XMLName.Space != "http://schemas.openxmlformats.org/package/2006/content-types" {
+	if xml.Unmarshal(raw, &types) != nil {
 		return patchInvalid
 	}
-	for _, item := range types.Defaults {
-		if item.Extension != "xml" || item.Type != "application/xml" {
-			if item.Extension != "rels" || item.Type != "application/vnd.openxmlformats-package.relationships+xml" {
-				return workbookAdmissionError("unsupported_package_part")
-			}
-		}
-	}
-	allowed := map[string]string{
-		"workbook":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
-		"worksheet": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
-		"styles":    "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
-		"strings":   "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
-		"theme":     "application/vnd.openxmlformats-officedocument.theme+xml",
-	}
-	for _, item := range types.Overrides {
-		name := strings.TrimPrefix(item.Part, "/")
-		want := allowed[workbookAdmissionPart(name)]
-		if name == "docProps/core.xml" {
-			want = "application/vnd.openxmlformats-package.core-properties+xml"
-		} else if name == "docProps/app.xml" {
-			want = "application/vnd.openxmlformats-officedocument.extended-properties+xml"
-		}
-		if entries[name] == nil || want == "" || item.Type != want {
+	for _, item := range types.Items {
+		switch item.Type {
+		case "application/xml", "application/vnd.openxmlformats-package.relationships+xml",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
+			"application/vnd.openxmlformats-officedocument.theme+xml",
+			"application/vnd.openxmlformats-package.core-properties+xml",
+			"application/vnd.openxmlformats-officedocument.extended-properties+xml":
+		default:
 			return workbookAdmissionError("unsupported_package_part")
 		}
 	}
@@ -883,11 +728,29 @@ func workbookSameExplicitSettings(before, after map[string]string) bool {
 		"pageMargins/left": "0.7", "pageMargins/right": "0.7", "pageMargins/top": "0.75", "pageMargins/bottom": "0.75", "pageMargins/header": "0.3", "pageMargins/footer": "0.3",
 		"pageSetup/scale": "100", "pageSetup/firstPageNumber": "1", "pageSetup/fitToWidth": "1", "pageSetup/fitToHeight": "1", "pageSetup/pageOrder": "downThenOver", "pageSetup/orientation": "default", "pageSetup/usePrinterDefaults": "true", "pageSetup/blackAndWhite": "false", "pageSetup/draft": "false", "pageSetup/cellComments": "none", "pageSetup/useFirstPageNumber": "false", "pageSetup/errors": "displayed", "pageSetup/horizontalDpi": "600", "pageSetup/verticalDpi": "600", "pageSetup/copies": "1",
 		"headerFooter/differentOddEven": "false", "headerFooter/differentFirst": "false", "headerFooter/scaleWithDoc": "true", "headerFooter/alignWithMargins": "true",
+		"oddHeader/text": "", "oddFooter/text": "", "evenHeader/text": "", "evenFooter/text": "", "firstHeader/text": "", "firstFooter/text": "",
 	}
-	for key, left := range before {
-		right, exists := after[key]
-		if !exists {
-			right = defaults[key]
+	keys := map[string]bool{}
+	for key := range before {
+		keys[key] = true
+	}
+	for key := range after {
+		keys[key] = true
+	}
+	for key := range keys {
+		left, leftExists := before[key]
+		right, rightExists := after[key]
+		if !leftExists || !rightExists {
+			value, known := defaults[key]
+			if !known {
+				return false
+			}
+			if !leftExists {
+				left = value
+			}
+			if !rightExists {
+				right = value
+			}
 		}
 		if left == right {
 			continue
@@ -904,11 +767,6 @@ func workbookSameExplicitSettings(before, after map[string]string) bool {
 		a, e1 := strconv.ParseFloat(left, 64)
 		b, e2 := strconv.ParseFloat(right, 64)
 		if e1 != nil || e2 != nil || math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || math.IsInf(b, 0) || math.Abs(a-b) > 1e-9*math.Max(1, math.Max(math.Abs(a), math.Abs(b))) {
-			return false
-		}
-	}
-	for key, value := range after {
-		if strings.HasSuffix(key, "/text") && value != before[key] {
 			return false
 		}
 	}
@@ -974,7 +832,83 @@ func workbookThemeFonts(ctx context.Context, body []byte) (map[string]string, er
 	return fonts, nil
 }
 
+func workbookCalculationSettings(ctx context.Context, f *excelize.File, body []byte) (map[string]string, error) {
+	props, err := f.GetCalcProps()
+	if err != nil {
+		return nil, patchInvalid
+	}
+	entries, err := workbookPackageEntries(body)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := workbookXML(ctx, entries["xl/workbook.xml"])
+	if err != nil {
+		return nil, err
+	}
+	var book struct {
+		CalcPr struct {
+			Attributes []xml.Attr `xml:",any,attr"`
+		} `xml:"calcPr"`
+	}
+	if xml.Unmarshal(raw, &book) != nil {
+		return nil, patchInvalid
+	}
+	present := map[string]bool{}
+	for _, a := range book.CalcPr.Attributes {
+		present[a.Name.Local] = true
+	}
+	values := map[string]string{}
+	putBool := func(name string, value *bool) {
+		if value != nil {
+			values[name] = strconv.FormatBool(*value)
+		}
+	}
+	putUint := func(name string, value *uint) {
+		if value != nil {
+			values[name] = strconv.FormatUint(uint64(*value), 10)
+		}
+	}
+	putBool("fullCalcOnLoad", props.FullCalcOnLoad)
+	putBool("forceFullCalc", props.ForceFullCalc)
+	putBool("calcCompleted", props.CalcCompleted)
+	putBool("calcOnSave", props.CalcOnSave)
+	putBool("concurrentCalc", props.ConcurrentCalc)
+	putBool("iterate", props.Iterate)
+	putUint("concurrentManualCount", props.ConcurrentManualCount)
+	putUint("iterateCount", props.IterateCount)
+	if props.CalcMode != nil {
+		values["calcMode"] = *props.CalcMode
+	}
+	if props.RefMode != nil {
+		values["refMode"] = *props.RefMode
+	}
+	if props.IterateDelta != nil {
+		values["iterateDelta"] = strconv.FormatFloat(*props.IterateDelta, 'g', -1, 64)
+	}
+	// GetCalcProps exposes parsed typed values but not attribute presence. Fill
+	// absent OOXML properties from their known defaults, including true booleans.
+	for name, value := range map[string]string{
+		"calcMode": "auto", "refMode": "A1", "fullCalcOnLoad": "false", "forceFullCalc": "false",
+		"calcCompleted": "true", "calcOnSave": "true", "concurrentCalc": "true", "iterate": "false", "iterateCount": "100", "iterateDelta": "0.001",
+	} {
+		if !present[name] {
+			values[name] = value
+		}
+	}
+	if !present["concurrentManualCount"] {
+		delete(values, "concurrentManualCount") // No fixed default: do not invent one.
+	}
+	// calcId identifies the writing engine's calculation version; it is not a
+	// user calculation setting and may change during the verified native export.
+	return values, nil
+}
+
 func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.File, original, candidate []byte, scope office.WorkbookSelection) error {
+	calcBefore, e1 := workbookCalculationSettings(ctx, before, original)
+	calcAfter, e2 := workbookCalculationSettings(ctx, after, candidate)
+	if e1 != nil || e2 != nil || !reflect.DeepEqual(calcBefore, calcAfter) {
+		return patchInvalid
+	}
 	fontsBefore, e1 := workbookThemeFonts(ctx, original)
 	fontsAfter, e2 := workbookThemeFonts(ctx, candidate)
 	if e1 != nil || e2 != nil || len(fontsBefore) != 0 && !reflect.DeepEqual(fontsBefore, fontsAfter) {

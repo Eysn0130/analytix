@@ -3,7 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NativeOfficePanel } from './NativeOfficePanel'
-import { useNativeOfficeStore, nativeOfficeTargetKey } from './native-office-store'
+import { useNativeOfficeStore, nativeOfficeTargetKey, nativeWorkbookDraftKey } from './native-office-store'
 import { useNativeReferenceStore } from './native-reference-store'
 import type { NativeOfficeActionMenu, NativeOfficeFormat, NativeOfficeMenuTarget, NativeOfficeRequest, NativeOfficeView, NativeOfficeSelection, NativeOfficePlayback } from '@shared/native-office'
 import { nativeOfficeActionChoiceSchema, nativeOfficeActionMenuSchema } from '@shared/native-office'
@@ -44,7 +44,9 @@ beforeEach(() => {
   request = vi.fn(async (_input: NativeOfficeRequest) => ({ ok: true, view }))
   unsubscribe = vi.fn<() => void>()
   Object.defineProperty(window, 'analytix', { configurable: true, value: { office: { request, onChange: () => unsubscribe } } })
-  useNativeOfficeStore.setState({ target: null, view, error: null, proposalInFlight:false, annotationInputFrozen:false, manualDiscardAttempts:{}, manualOwners:{} })
+  useNativeOfficeStore.setState({ target: null, view, error: null, engineViews:{}, views:{}, workbookDrafts:{}, workbookClosing:{},
+    workbookDraftInputFrozen:false, workbookDraftComposing:false, receiveSequence:0, creationAttempt:null,
+    proposalInFlight:false, annotationInputFrozen:false, manualDiscardAttempts:{}, manualOwners:{} })
   useNativeReferenceStore.setState({ references: [], drafts: {} })
   container = document.createElement('div'); container.className = 'ds-right-sidebar-pane'; document.body.append(container)
   root = createRoot(container)
@@ -57,10 +59,13 @@ describe('bounded workbook manual controls',()=>{
     ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],
     cells:[{sheet:0,column:0,row:0,text:'1',value:1,formula:'1',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}]}
   const workbook:NativeOfficeView = {...view,path:'/synthetic/book.xlsx',kind:'xlsx',workbookEditing:{editable:true},selection:cells}
-  async function renderWorkbook(next:NativeOfficeView = workbook) {
+  async function renderWorkbook(next:NativeOfficeView = workbook,path=next.path) {
     request.mockImplementation(async()=>({ok:true,view:next}))
-    useNativeOfficeStore.setState({target:{workspace:'/synthetic',path:next.path},view:next,error:null})
-    await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'})))
+    await act(async()=>{
+      const target={workspace:'/synthetic',path},identity=nativeOfficeTargetKey(target)
+      useNativeOfficeStore.setState(state=>({target,view:next,error:null,engineViews:{...state.engineViews,[identity]:next},views:{...state.views,[identity]:next}}))
+      root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'}))
+    })
   }
   async function fillCell(value:string) {
     const input=container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!
@@ -95,6 +100,23 @@ describe('bounded workbook manual controls',()=>{
     expect(request.mock.calls.filter(([input])=>input.action==='saveStatus')).toEqual([[{action:'saveStatus',objectId:view.objectId}]])
     expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toHaveLength(1)
   })
+  it('passes the workspace target path into retained drafts and exposes explicit close choices',async()=>{
+    await renderWorkbook(workbook,'book.xlsx');await fillCell('2')
+    const key=nativeWorkbookDraftKey('/synthetic','book.xlsx','thread')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toMatchObject({workspace:'/synthetic',path:'book.xlsx',threadId:'thread',value:'2'})
+    expect(useNativeOfficeStore.getState().workbookDrafts[nativeWorkbookDraftKey('',workbook.path,'thread')]).toBeUndefined()
+    let closed=true
+    await act(async()=>{closed=await useNativeOfficeStore.getState().close('/synthetic','book.xlsx')})
+    expect(closed).toBe(false);expect(container.textContent).toContain('保留会取消关闭')
+    await clickNamed('保留草稿')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toMatchObject({value:'2',closeRequested:false})
+    expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('2')
+    await act(async()=>{closed=await useNativeOfficeStore.getState().close('/synthetic','book.xlsx')})
+    expect(closed).toBe(false);await clickNamed('放弃草稿')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toBeUndefined()
+    expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('1')
+    expect(request.mock.calls.some(([input])=>['editWorkbookCell','close'].includes(input.action))).toBe(false)
+  })
   it('routes typed workbook recovery cancellation through the existing cancelChange owner',async()=>{
     const selected={...cells.ranges[0],cells:cells.cells!}
     const pending = {version:3 as const,origin:'manual' as const,changeId:'d'.repeat(64),threadId:'thread',baseRevision:view.revision,revision:'',
@@ -109,7 +131,8 @@ describe('bounded workbook manual controls',()=>{
 })
 afterEach(async () => {
   await act(async () => root?.unmount()); root = null
-  container.remove(); useNativeOfficeStore.setState({ target: null, view: null, error: null })
+  container.remove(); useNativeOfficeStore.setState({ target: null, view: null, error: null, engineViews:{}, views:{}, workbookDrafts:{},
+    workbookClosing:{}, workbookDraftInputFrozen:false, workbookDraftComposing:false })
   Reflect.deleteProperty(window, 'analytix'); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
