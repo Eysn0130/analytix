@@ -46,7 +46,7 @@ export class NativeOfficeSurface {
   private selectionManual?: OfficeState['manual']
   private menuControlDown = false
   private menuMouseButton?: 'left' | 'right'
-  private menuInputObserved = false
+  private menuInputContents?: BrowserWindow['webContents']
   private canRequestMenu(): boolean {
     return !this.options.protectedPresent && !this.destroyed && this.ready && this.visible && this.attached &&
       !!this.current && !this.pending && !this.options.owner.isDestroyed()
@@ -266,9 +266,10 @@ export class NativeOfficeSurface {
       }
       // Electron 41's mouse converter omits modifiers. Observe the two owned
       // keyboard streams so macOS Control-click also works across internal focus.
-      this.options.owner.webContents.on('before-input-event', this.observeMenuInput)
+      const ownerContents = this.options.owner.webContents
+      ownerContents.on('before-input-event', this.observeMenuInput)
       this.options.owner.on('blur', this.clearMenuInput)
-      this.menuInputObserved = true
+      this.menuInputContents = ownerContents
       contents.on('before-mouse-event', (event, mouse) => {
         const contextButton = mouse.button === 'right' || process.platform === 'darwin' && mouse.button === 'left' &&
           (this.menuControlDown || mouse.modifiers?.some(modifier => modifier === 'control' || modifier === 'ctrl'))
@@ -434,14 +435,16 @@ export class NativeOfficeSurface {
   destroy(): void { this.dispose('office-surface-destroyed') }
   private dispose(code: string): void {
     if (this.destroyed) return
+    this.destroyed = true; this.ready = false; this.terminalCode = code
     this.visible = false; this.dismissPointerActions(); this.selectionToken = undefined; this.selectionFormatting = undefined; this.pointerSelection = undefined; this.selectionManual = undefined
     this.clearMenuInput()
-    if (this.menuInputObserved) {
-      this.options.owner.webContents.removeListener('before-input-event', this.observeMenuInput)
+    // BrowserWindow.webContents is unavailable after its closed event. Detach
+    // from the same emitter captured when the observer was registered.
+    const ownerContents = this.menuInputContents; this.menuInputContents = undefined
+    if (ownerContents) {
+      ownerContents.removeListener('before-input-event', this.observeMenuInput)
       this.options.owner.removeListener('blur', this.clearMenuInput)
-      this.menuInputObserved = false
     }
-    this.destroyed = true; this.ready = false; this.terminalCode = code
     this.options.owner.removeListener('closed', this.ownerClosed)
     if (this.readyTimer) clearTimeout(this.readyTimer)
     this.readyReject?.(failure(code)); this.readyResolve = this.readyReject = undefined

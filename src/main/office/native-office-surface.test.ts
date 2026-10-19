@@ -325,6 +325,74 @@ test('owner closure terminates a pending preview operation', async () => {
   await sent(s.peer); s.owner.emit('closed'); await rejected
   expect(s.view.webContents.dead).toBe(true)
 })
+test.each(['alive','already-dead'] as const)('quit-safe native surface handles owner closure with a %s child without rereading destroyed owner contents',async child=>{
+  const s=await setup();await openSurface(s)
+  const observedContents=s.owner.webContents,descriptor=Object.getOwnPropertyDescriptor(s.owner,'webContents')!,isDestroyed=s.owner.isDestroyed
+  const readClosedContents=vi.fn(()=>{throw new TypeError('Object has been destroyed')})
+  const portClose=vi.spyOn(s.peer.peer,'close'),rejections=vi.fn()
+  const capturing=s.surface.request(input('captureSelection')).catch(error=>{rejections(error);throw error})
+  const rejected=expect(capturing).rejects.toThrow('office-surface-destroyed');void rejected.catch(()=>{})
+  await sent(s.peer)
+  const assetURL=s.view.webContents.url,guard=s.session.webRequest.onBeforeRequest.mock.calls[0][0],callback=vi.fn()
+  if(child==='already-dead')s.view.webContents.dead=true
+  s.owner.isDestroyed=()=>true
+  Object.defineProperty(s.owner,'webContents',{configurable:true,get:readClosedContents})
+  try{
+    expect(()=>s.owner.emit('closed')).not.toThrow();await rejected
+    expect(readClosedContents).not.toHaveBeenCalled()
+    expect(observedContents.listenerCount('before-input-event')).toBe(0)
+    expect(s.owner.listenerCount('blur')).toBe(0);expect(s.owner.listenerCount('closed')).toBe(0)
+    expect(rejections).toHaveBeenCalledOnce();expect(portClose).toHaveBeenCalledOnce();expect(s.peer.peer.closed).toBe(true)
+    expect(s.view.webContents.close).toHaveBeenCalledTimes(child==='alive'?1:0)
+    expect(s.owner.contentView.removeChildView).not.toHaveBeenCalled()
+    expect(s.session.closeAllConnections).toHaveBeenCalledOnce();expect(s.session.clearStorageData).toHaveBeenCalledOnce()
+    guard({url:assetURL,method:'GET'},callback);expect(callback).toHaveBeenLastCalledWith({cancel:true})
+    s.surface.destroy();s.owner.emit('closed')
+    expect(readClosedContents).not.toHaveBeenCalled();expect(rejections).toHaveBeenCalledOnce();expect(portClose).toHaveBeenCalledOnce()
+    expect(s.view.webContents.close).toHaveBeenCalledTimes(child==='alive'?1:0)
+    expect(s.session.closeAllConnections).toHaveBeenCalledOnce();expect(s.session.clearStorageData).toHaveBeenCalledOnce()
+    expect(s.events.filter(event=>event.type==='fatal')).toEqual([]);expect(logNativeOfficeFailure).not.toHaveBeenCalled()
+  }finally{
+    // The unfixed source throws before latching disposal. Restore the live
+    // fixture getter so a baseline assertion failure cannot strand resources.
+    Object.defineProperty(s.owner,'webContents',descriptor);s.owner.isDestroyed=isDestroyed
+    s.surface.destroy();await rejected.catch(()=>{});portClose.mockRestore()
+  }
+})
+test.each(['owner-observer','port','child'] as const)('quit-safe native surface cleans up exactly once after synchronous %s close reentry',async source=>{
+  const s=await setup();await openSurface(s)
+  const observedContents=s.owner.webContents,assetURL=s.view.webContents.url
+  const reenter=vi.fn(()=>{s.surface.destroy();s.owner.emit('closed')})
+  const removed=(name:string)=>{if(name==='before-input-event')reenter()}
+  if(source==='owner-observer')observedContents.on('removeListener',removed)
+  const originalPortClose=s.peer.peer.close.bind(s.peer.peer),portClose=vi.spyOn(s.peer.peer,'close')
+  portClose.mockImplementation(()=>{if(source==='port')reenter();originalPortClose()})
+  const originalChildClose=s.view.webContents.close.getMockImplementation()!
+  if(source==='child')s.view.webContents.close.mockImplementation(()=>{reenter();originalChildClose()})
+  const rejections=vi.fn(),capturing=s.surface.request(input('captureSelection')).catch(error=>{rejections(error);throw error})
+  const rejected=expect(capturing).rejects.toThrow('office-surface-destroyed');void rejected.catch(()=>{})
+  await sent(s.peer)
+  try{
+    expect(()=>s.surface.destroy()).not.toThrow();await rejected
+    expect(reenter).toHaveBeenCalledOnce();expect(rejections).toHaveBeenCalledOnce()
+    expect(portClose).toHaveBeenCalledOnce();expect(s.peer.peer.closed).toBe(true)
+    expect(s.view.webContents.close).toHaveBeenCalledExactlyOnceWith({waitForBeforeUnload:false})
+    expect(s.owner.contentView.removeChildView).toHaveBeenCalledExactlyOnceWith(s.view)
+    expect(observedContents.listenerCount('before-input-event')).toBe(0)
+    expect(s.owner.listenerCount('blur')).toBe(0);expect(s.owner.listenerCount('closed')).toBe(0)
+    expect(s.session.closeAllConnections).toHaveBeenCalledOnce();expect(s.session.clearStorageData).toHaveBeenCalledOnce()
+    const guard=s.session.webRequest.onBeforeRequest.mock.calls[0][0],callback=vi.fn()
+    guard({url:assetURL,method:'GET'},callback);expect(callback).toHaveBeenLastCalledWith({cancel:true})
+    s.surface.destroy();s.owner.emit('closed')
+    expect(reenter).toHaveBeenCalledOnce();expect(portClose).toHaveBeenCalledOnce();expect(rejections).toHaveBeenCalledOnce()
+    expect(s.view.webContents.close).toHaveBeenCalledOnce()
+    expect(s.session.closeAllConnections).toHaveBeenCalledOnce();expect(s.session.clearStorageData).toHaveBeenCalledOnce()
+    expect(s.events.filter(event=>event.type==='fatal')).toEqual([]);expect(logNativeOfficeFailure).not.toHaveBeenCalled()
+  }finally{
+    observedContents.removeListener('removeListener',removed)
+    s.surface.destroy();await rejected.catch(()=>{});portClose.mockRestore()
+  }
+})
 
 test('preview bounds follow the main window zoom without scaling native input coordinates', async () => {
   const s = await setup()
