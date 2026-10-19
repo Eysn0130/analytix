@@ -3,7 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NativeOfficePanel } from './NativeOfficePanel'
-import { useNativeOfficeStore, nativeOfficeTargetKey, nativeWorkbookDraftKey } from './native-office-store'
+import { useNativeOfficeStore, nativeOfficeTargetKey, nativeWorkbookDraftKey, type NativeWorkbookCellDraft } from './native-office-store'
 import { useNativeReferenceStore } from './native-reference-store'
 import type { NativeOfficeActionMenu, NativeOfficeFormat, NativeOfficeMenuTarget, NativeOfficeRequest, NativeOfficeView, NativeOfficeSelection, NativeOfficePlayback } from '@shared/native-office'
 import { nativeOfficeActionChoiceSchema, nativeOfficeActionMenuSchema } from '@shared/native-office'
@@ -53,11 +53,12 @@ beforeEach(() => {
 })
 
 describe('bounded workbook manual controls',()=>{
+  const editableCell:NativeWorkbookCellDraft['cell']={sheet:0,column:0,row:0,text:'1',value:1,formula:'1',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
   const cells:Extract<NativeOfficeSelection,{kind:'cells'}> = {kind:'cells',documentId:view.objectId,version:view.revision,changeSequence:0,
     token:'workbook-selection',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',
     capture:{capturedCharacters:1,totalCharacters:1,unit:'utf-16',complete:true,truncated:false},
     ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],
-    cells:[{sheet:0,column:0,row:0,text:'1',value:1,formula:'1',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}]}
+    cells:[editableCell]}
   const workbook:NativeOfficeView = {...view,path:'/synthetic/book.xlsx',kind:'xlsx',workbookEditing:{editable:true},selection:cells}
   async function renderWorkbook(next:NativeOfficeView = workbook,path=next.path) {
     request.mockImplementation(async()=>({ok:true,view:next}))
@@ -118,7 +119,7 @@ describe('bounded workbook manual controls',()=>{
     expect(request.mock.calls.some(([input])=>['editWorkbookCell','close'].includes(input.action))).toBe(false)
   })
   it('routes typed workbook recovery cancellation through the existing cancelChange owner',async()=>{
-    const selected={...cells.ranges[0],cells:cells.cells!}
+    const selected={...cells.ranges[0],cells:[editableCell]}
     const pending = {version:3 as const,origin:'manual' as const,changeId:'d'.repeat(64),threadId:'thread',baseRevision:view.revision,revision:'',
       status:'prepared' as const,workbook:{before:selected,after:selected,results:['1']},saveOperationId:'save-operation',undoOperationId:'undo-operation',
       canUndo:false,canCancel:true,canRetryUndo:false,canResume:true,createdAt:'',savedAt:''}
