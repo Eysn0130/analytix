@@ -1372,6 +1372,9 @@ export function Workbench(): ReactElement {
         event.target.closest('[data-composer-menu],[data-composer-execution-menu],[data-session-actions-menu],[data-markdown-table-menu],[data-thread-summary-surface],[role="dialog"][aria-modal="true"]')) return
       if (event.defaultPrevented || event.repeat || event.isComposing) return
       const workspaceCommand = nativeWorkspaceCommandFromInput({key:event.key,control:event.ctrlKey,meta:event.metaKey,shift:event.shiftKey,alt:event.altKey,isComposing:event.isComposing})
+      // Let shell input consume Ctrl+W before this capture listener closes a tab.
+      if (workspaceCommand === 'close-tab' && event.ctrlKey && !event.metaKey && event.target instanceof Element &&
+        event.target.closest('#workbench-workspace-terminal .xterm')) return
       // Tab buttons own close-and-focus restoration; skip the desktop fallback.
       if (workspaceCommand === 'close-tab' && event.target instanceof Element &&
         event.target.closest('[role="tab"]') && rightTabsPaneRef.current?.contains(event.target)) return

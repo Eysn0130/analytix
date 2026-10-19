@@ -83,8 +83,8 @@ vi.mock('./brand/AnalytixLoadingPage', () => ({ AnalytixLoadingPage: () => null 
 vi.mock('./workbench/RightPanelIslands', async () => {
   const { WorkspaceFilePreviewPanel: ActualPreview } = await import('./WorkspaceFilePreviewPanel')
   const { DocumentWorkspacePanel: ActualDocument } = await import('./workbench/DocumentWorkspacePanel')
-  return ({ TerminalWorkspacePanel: (props: { visible: boolean; focusRequest: number; onCollapse: () => void }) => createElement('div', null,
-    createElement('textarea', { 'data-synthetic-terminal': '', 'data-focus-request': props.focusRequest, hidden: !props.visible }),
+  return ({ TerminalWorkspacePanel: (props: { visible: boolean; focusRequest: number; onCollapse: () => void }) => createElement('div', { id: 'workbench-workspace-terminal' },
+    createElement('div', { className: 'xterm' }, createElement('textarea', { className: 'xterm-helper-textarea', 'data-synthetic-terminal': '', 'data-focus-request': props.focusRequest, hidden: !props.visible })),
     props.visible ? createPortal(createElement('button', { 'data-workbench-terminal-menu': '', onClick: props.onCollapse }, 'Close all terminals'), document.body) : null), ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null,
     SubagentInspectorPanelIsland: (props: NonNullable<typeof io.inspector>) => {
       io.inspector = props
@@ -2500,4 +2500,47 @@ it.each(['plugins', 'settings'] as const)('does not open a terminal workspace ta
   expect(document.querySelector('[data-workbench-terminal-menu]')).toBeNull()
   await act(async () => useChatStore.setState({ route: 'chat' }))
   expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(0)
+})
+
+it('passes Ctrl+W through the real window capture handler to shell input and preserves Cmd+W and tab-strip close', async () => {
+  io.realWorkspaceChrome = true
+  const openTerminal = async () => act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+  await openTerminal()
+  const input = element.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!
+  const phases: { phase: number; prevented: boolean }[] = []
+  const shellInput = vi.fn()
+  const capture = (event: KeyboardEvent) => {
+    if (event.key === 'w') phases.push({ phase: event.eventPhase, prevented: event.defaultPrevented })
+  }
+  const terminalKey = (event: KeyboardEvent) => {
+    phases.push({ phase: event.eventPhase, prevented: event.defaultPrevented })
+    if (event.ctrlKey && !event.metaKey && !event.defaultPrevented) {
+      shellInput()
+      event.preventDefault()
+    }
+  }
+  window.addEventListener('keydown', capture, true)
+  input.addEventListener('keydown', terminalKey)
+  try {
+    input.focus()
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true })))
+    expect(phases).toEqual([{ phase: Event.CAPTURING_PHASE, prevented: false }, { phase: Event.AT_TARGET, prevented: false }])
+    expect(shellInput).toHaveBeenCalledTimes(1)
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, selectorOpen: false, activeTabId: 'tool:terminal' })
+    expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(1)
+
+    phases.length = 0
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', metaKey: true, bubbles: true, cancelable: true })))
+    expect(phases).toEqual([{ phase: Event.CAPTURING_PHASE, prevented: true }, { phase: Event.AT_TARGET, prevented: true }])
+    expect(shellInput).toHaveBeenCalledTimes(1)
+    expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(0)
+
+    await openTerminal()
+    const tab = element.querySelector<HTMLButtonElement>('.workspace-tab [role="tab"]')!
+    await act(async () => tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true })))
+    expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(0)
+  } finally {
+    window.removeEventListener('keydown', capture, true)
+    input.removeEventListener('keydown', terminalKey)
+  }
 })
