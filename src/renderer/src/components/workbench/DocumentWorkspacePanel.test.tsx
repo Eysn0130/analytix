@@ -10,12 +10,13 @@ import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
 import { useWorkspaceTabsStore, type WorkspaceTab } from '../../store/workspace-tabs-store'
 import type { NativeOfficeRequest, NativeOfficeResponse } from '@shared/native-office'
 import type { WorkspaceFileSaveAsResult } from '@shared/workspace-file'
-const leaves=vi.hoisted(()=>({preview:vi.fn(),review:vi.fn(),beginReview:vi.fn(()=>true)}))
+import type { DocxEditorView } from '@shared/docx-editor'
+const leaves=vi.hoisted(()=>({preview:vi.fn(),review:vi.fn(),beginReview:vi.fn(()=>true),beforeOpen:vi.fn((open:()=>void)=>open()),exportCurrent:vi.fn()}))
 vi.mock('react-i18next',async importOriginal=>({
   ...await importOriginal<typeof import('react-i18next')>(),
   useTranslation:()=>({t:(key:string)=>key})
 }))
-vi.mock('../../office/DocxEditorPanel',()=>({DocxEditorPanel:({visible}:{visible:boolean})=>createElement('div',{'data-testid':'docx-panel','data-visible':String(visible)})}))
+vi.mock('../../office/DocxEditorPanel',()=>({DocxEditorPanel:({visible,fileActions}:{visible:boolean;fileActions?:(beforeOpen:(open:()=>void)=>void,exportCurrent:()=>void)=>ReactNode})=>createElement('div',{'data-testid':'docx-panel','data-visible':String(visible)},fileActions?.(leaves.beforeOpen,leaves.exportCurrent))}))
 vi.mock('../../office/NativeOfficePanel',()=>({NativeOfficePanel:({fileActions,visible,onPrepareDraft}:{fileActions:ReactNode;visible:boolean;onPrepareDraft?:(value:string,references:never[])=>boolean})=>createElement('div',{'data-testid':'native-panel','data-visible':String(visible),role:'toolbar'},fileActions,createElement('button',{'data-testid':'request-modify',onClick:()=>onPrepareDraft?.('Suggest a change',[])},'Request Modify'))}))
 vi.mock('../WorkspaceFilePreviewPanel',()=>({WorkspaceFilePreviewPanel:(props:unknown)=>{leaves.preview(props);return createElement('div',{'data-testid':'file-preview'})}}))
 vi.mock('../write/WriteConflictReview',()=>({WriteConflictReview:()=>createElement('div',{'data-testid':'conflict-recovery'})}))
@@ -28,7 +29,7 @@ beforeEach(()=>{
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.clearAllMocks()
   useChatStore.setState({route:'chat',activeThreadId:'current-main'})
   useDocxEditorStore.setState(useDocxEditorStore.getInitialState(),true)
-  saveAs.mockResolvedValue({ok:true,path:'/synthetic/saved.xlsx'});leaves.beginReview.mockReturnValue(true)
+  saveAs.mockResolvedValue({ok:true,path:'/synthetic/saved.xlsx'});leaves.beginReview.mockReturnValue(true);leaves.beforeOpen.mockImplementation(open=>open())
   Object.defineProperty(window,'analytix',{configurable:true,value:{workspace:{openEditorPath},files:{saveAs},office:{request:vi.fn(async()=>({ok:true,view:null}))}}})
   useNativeOfficeStore.setState({...useNativeOfficeStore.getInitialState(),target:{workspace:'/synthetic',path}},true)
   useWriteWorkspaceStore.setState({...useWriteWorkspaceStore.getInitialState(),workspaceRoot:'/synthetic',activeFilePath:null,activeFileKind:null,saveStatus:'saved',pendingSave:null,reviewActive:false,pendingAgentReview:null,reviewRecovery:null},true)
@@ -40,6 +41,8 @@ async function render(activeTab?:WorkspaceTab,visible=true){await act(async()=>r
 async function select(action:string){const element=container.querySelector<HTMLSelectElement>('[aria-label="打开"]')!;await act(async()=>{element.value=action;element.dispatchEvent(new Event('change',{bubbles:true}))})}
 function button(label:string){return [...container.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.textContent===label)!}
 const tab=(name:string):WorkspaceTab=>({id:'retained:'+name,kind:'document',mode:'documents',title:name,path:'/synthetic/'+name,workspaceRoot:'/synthetic'})
+const wordView=(name='report.docx'):DocxEditorView=>({editorId:'00000000-0000-4000-8000-000000000001',workspace:'/synthetic',path:'/synthetic/'+name,threadId:'current-main',objectId:'a'.repeat(64),revision:'b'.repeat(64),version:0,phase:'ready',dirty:false,
+  content:{encoding:'base64',kind:'docx',byteLength:4,sha256:'b'.repeat(64),data:'UEsDBA=='},proposals:[],reviews:[]})
 
 it('keeps one native toolbar, actual file menu actions, files and Escape focus',async()=>{
   await render();expect(container.querySelector('.document-workspace-header')).toBeNull();expect(container.querySelectorAll('[role="toolbar"]')).toHaveLength(1)
@@ -150,6 +153,35 @@ it('routes ordinary DOCX through its dedicated owner without native selection or
   expect(container.querySelector('[data-testid="native-panel"]')).toBeNull()
   expect(saveAs).not.toHaveBeenCalled()
   selectDocx.mockRestore();selectNative.mockRestore()
+})
+
+it('shares Word default-app, folder and file browser actions while exporting its current working copy',async()=>{
+  vi.spyOn(useDocxEditorStore.getState(),'select').mockResolvedValue(true)
+  const view=wordView();useDocxEditorStore.setState({views:{[view.editorId]:view}})
+  await render(tab('report.docx'))
+  expect(container.querySelectorAll('[aria-label="打开"]')).toHaveLength(1)
+  await select('system');expect(openEditorPath).toHaveBeenLastCalledWith({workspaceRoot:view.workspace,path:view.path,editorId:'system'})
+  await select('file-manager');expect(openEditorPath).toHaveBeenLastCalledWith({workspaceRoot:view.workspace,path:view.path,editorId:'file-manager'})
+  expect(leaves.beforeOpen).toHaveBeenCalledTimes(2)
+  await select('download');await act(async()=>container.querySelector<HTMLButtonElement>('[data-native-office-download]')!.click())
+  expect(leaves.exportCurrent).toHaveBeenCalledTimes(2);expect(saveAs).not.toHaveBeenCalled()
+  await select('browse');expect(container.querySelector('[data-testid="file-browser"]')).not.toBeNull()
+  await act(async()=>container.querySelector('section')!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})))
+  expect(container.querySelector('[data-testid="file-browser"]')).toBeNull();expect(document.activeElement).toBe(container.querySelector('[aria-label="打开"]'))
+  await render(tab('report.xlsx'))
+  expect(container.querySelectorAll('[aria-label="打开"]')).toHaveLength(1)
+  expect(container.querySelector('[data-testid="docx-panel"]')?.getAttribute('data-visible')).toBe('false')
+})
+
+it('defers the Word opener to its guard and rejects its captured action after switching files',async()=>{
+  vi.spyOn(useDocxEditorStore.getState(),'select').mockResolvedValue(true)
+  const view=wordView();useDocxEditorStore.setState({views:{[view.editorId]:view}})
+  let deferred:(()=>void)|undefined
+  leaves.beforeOpen.mockImplementation(open=>{deferred=open})
+  await render(tab('report.docx'));await select('system')
+  expect(deferred).toBeTypeOf('function');expect(openEditorPath).not.toHaveBeenCalled()
+  await render(tab('report.xlsx'));await act(async()=>deferred?.())
+  expect(openEditorPath).not.toHaveBeenCalled()
 })
 
 it('local Word shows loading, a target-specific error and retry without a thread or text preview',async()=>{

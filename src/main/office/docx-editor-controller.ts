@@ -9,12 +9,13 @@ type Recovery = z.infer<typeof nativeOfficeRecoverySchema>
 type Owner = { view:DocxEditorView; binding:PluginPackageView; sessionId:string;
   manual?:NativeOfficeManualAuthority; begin?:{operationId:string;baseRevision:string};
   approved?:{changeId:string;saveOperationId:string;baseRevision:string;expectedBytes?:Uint8Array};
-  pending?:{operationId:string;digest:string}; recovery?:Recovery;
+  pending?:{operationId:string;changeId:string;digest:string;kind:'save'|'undo'}; recovery?:Recovery; refreshing?:boolean;
   closing?:{sessionId:string;attempted:boolean}; reopening?:{stage:'closing'|'opening';expectedRevision:string};
   capture?:{instanceId:string;captureId:string;target:string;text:string}; decision?:{proposalId:string;operationId:string}; cancel?:string }
 const digest = (bytes:Buffer) => createHash('sha256').update(bytes).digest('hex')
 class Failure extends Error { constructor(readonly code:NonNullable<DocxEditorResponse['error']>) { super(code) } }
 class BeginRefusal extends Failure {}
+class UndoRefusal extends Failure {}
 const fail = (code:NonNullable<DocxEditorResponse['error']>):never => { throw new Failure(code) }
 const rangeProjection=z.object({preview:z.object({text:z.string(),truncated:z.boolean()}),
   target:z.object({kind:z.literal('selection'),start:z.unknown(),end:z.unknown()}).passthrough()}).passthrough()
@@ -89,8 +90,10 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
     // the exact begin identity for replay.
     if (!result.ok && operation==='begin-manual-edit' && !result.receipt &&
       (result.code==='conflict' || result.code==='forbidden')) throw new BeginRefusal(result.code)
+    if (!result.ok && operation==='undo-change' && !result.receipt &&
+      (result.code==='conflict' || result.code==='forbidden')) throw new UndoRefusal(result.code)
     if (!result.ok && operation==='close-object' && result.code==='session_invalid' && closingRetry && input.sessionId===closingRetry) return result
-    if (!result.ok && !(['commit-object','object-status'].includes(operation) && result.receipt)) return fail(result.code === 'forbidden' ? 'forbidden' : result.code === 'conflict' ? 'conflict' : 'unavailable')
+    if (!result.ok && !(['commit-object','object-status','undo-change'].includes(operation) && result.receipt)) return fail(result.code === 'forbidden' ? 'forbidden' : result.code === 'conflict' ? 'conflict' : 'unavailable')
     return result
   }
   async function read(owner:Owner, expected?:string) {
@@ -109,11 +112,33 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
     Object.assign(owner.view,{path:doc.path,objectId:doc.objectId,revision:doc.revision,
       content:{encoding:'base64',kind:'docx',byteLength:bytes.length,sha256:doc.revision,data:doc.content}})
   }
+  function updateCanUndo(owner:Owner) {
+    const state=owner.recovery,current=state?.current
+    owner.view.canUndo=!!(current && (current.canUndo || current.canRetryUndo) && current.revision===owner.view.revision &&
+      !state?.pending && (owner.view.phase==='ready' || owner.view.phase==='unknown' && current.canRetryUndo) &&
+      !owner.view.dirty && !owner.manual && !owner.begin && !owner.approved && !owner.pending && !owner.refreshing && !owner.reopening && !owner.closing)
+  }
   async function recovery(owner:Owner) {
+    owner.view.canUndo=false
     const result = await invoke(owner,'object-recovery',{sessionId:owner.sessionId,threadId:owner.view.threadId})
     if (!('recovery' in result)) return fail('unavailable')
+    if ([result.recovery.current,result.recovery.pending].some(change=>change && change.threadId!==owner.view.threadId)) return fail('unavailable')
     owner.recovery = result.recovery
+    owner.view.recovery=result.recovery
+    updateCanUndo(owner)
     return result.recovery
+  }
+  async function finishRefresh(owner:Owner) {
+    owner.refreshing=true;owner.view.phase='unknown';owner.view.canUndo=false
+    try {
+      const state=await recovery(owner)
+      if (state.pending || state.current?.status==='unknown' || owner.pending || owner.manual || owner.begin || owner.approved || owner.cancel || owner.reopening || owner.closing) return fail('unknown')
+      if (state.current && (state.current.status==='conflict' || ['committed','undone'].includes(state.current.status) && state.current.revision!==owner.view.revision)) return fail('conflict')
+    } catch(error) {
+      if (error instanceof Failure && error.code==='conflict') {delete owner.refreshing;owner.view.phase='conflict';throw error}
+      return fail('unknown')
+    }
+    delete owner.refreshing;owner.view.phase='ready';updateCanUndo(owner)
   }
   async function closeHandle(owner:Owner) {
     const closing=owner.closing ??= {sessionId:owner.sessionId,attempted:false}
@@ -144,21 +169,66 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
     if (!pending || !('receipt' in result) || !result.receipt || result.receipt.operationId !== pending.operationId) return fail('unknown')
     const receipt = result.receipt
     if (receipt.status === 'unknown' || receipt.status === 'pending') return fail('unknown')
-    if (receipt.status === 'conflict') { delete owner.pending; owner.view.phase='conflict'; return fail('conflict') }
+    if (receipt.status === 'conflict') { delete owner.pending; owner.view.phase='conflict'; owner.view.canUndo=false; return fail('conflict') }
     if (receipt.status !== 'committed' || receipt.revision !== pending.digest) return fail('unknown')
     // Even an exact receipt is historical; only a fresh Core read establishes Saved.
     try {await read(owner,receipt.revision)}
     catch(error) {
       if (error instanceof Failure && error.code==='conflict') {
         delete owner.pending;delete owner.manual;delete owner.begin;delete owner.approved;delete owner.decision
-        owner.view.phase='conflict';owner.view.dirty=true
+        owner.view.phase='conflict';owner.view.dirty=pending.kind==='save';owner.view.canUndo=false
       }
       throw error
     }
     delete owner.pending; delete owner.manual; delete owner.begin; delete owner.approved; delete owner.decision
+    if (pending.kind==='undo') owner.view.version++
     owner.view.dirty=false; owner.view.phase='ready'; delete owner.view.scope
     owner.view.proposals=[]; owner.view.reviews=[]; delete owner.capture
+    owner.refreshing=true
     await reopen(owner)
+    await finishRefresh(owner)
+  }
+  async function undoChange(owner:Owner) {
+    const retry=owner.view.phase==='unknown' && owner.view.canUndo && owner.recovery?.current?.canRetryUndo
+    if (owner.view.phase!=='ready' && !retry || owner.view.dirty || owner.pending || owner.manual || owner.begin || owner.approved || owner.cancel || owner.refreshing) return fail('unsaved_changes')
+    const state=await recovery(owner), change=state.current
+    if (state.pending) return fail('unknown')
+    if (!change || !owner.view.canUndo) return fail(change?.status==='conflict'?'conflict':'invalid_request')
+    // Only Core supplies the original bytes, change identity and undo operation.
+    // Retain this operation before delivery; status can never replay the write.
+    owner.pending={kind:'undo',operationId:change.undoOperationId,changeId:change.changeId,digest:change.baseRevision}
+    owner.view.phase='unknown';owner.view.canUndo=false
+    try {
+      await settle(owner,await invoke(owner,'undo-change',{sessionId:owner.sessionId,threadId:owner.view.threadId,
+        changeId:change.changeId,baseRevision:owner.view.revision}))
+    } catch(error) {
+      if (error instanceof UndoRefusal) {
+        delete owner.pending
+        owner.view.phase=error.code==='conflict'?'conflict':retry?'unknown':'ready'
+        owner.view.canUndo=error.code!=='conflict' && !!(change.canUndo || change.canRetryUndo)
+        throw error
+      }
+      if (owner.pending) return fail('unknown')
+      throw error
+    }
+  }
+  async function queryPending(owner:Owner) {
+    const pending=owner.pending!
+    try {await settle(owner,await invoke(owner,'object-status',{sessionId:owner.sessionId,operationId:pending.operationId}))}
+    catch(error) {
+      if (owner.pending===pending && pending.kind==='undo') {
+        try {
+          const state=await recovery(owner), current=state.current
+          if (!state.pending && current?.canRetryUndo && current.status==='unknown' && current.changeId===pending.changeId &&
+            current.undoOperationId===pending.operationId && current.baseRevision===pending.digest && current.revision===owner.view.revision && !owner.view.dirty) {
+            // A fresh Core capability permits a later explicit completion click.
+            // Querying never performs that continuation or declares it committed.
+            delete owner.pending;owner.view.phase='unknown';updateCanUndo(owner)
+          }
+        } catch { /* Preserve the unresolved original operation. */ }
+      }
+      throw error
+    }
   }
   async function close(owner:Owner, discard:boolean) {
     if (owner.reopening) {
@@ -204,15 +274,17 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
         owners.set(owner.view.editorId,owner)
         const state=await recovery(owner)
         if (state.pending) { owner.view.phase='unknown'; owner.view.dirty=true }
+        else if (state.current?.status==='unknown') {owner.view.phase='unknown';updateCanUndo(owner)}
         return {ok:true,view:snapshot(owner)}
       }
       if (!owner) return fail('unavailable')
-      if ((owner.reopening || owner.closing) && !['status','close'].includes(request.action)) return fail('unknown')
+      if ((owner.reopening || owner.closing || owner.refreshing) && !['status','close'].includes(request.action)) return fail('unknown')
       if ('version' in request && request.action !== 'changed' && request.version !== owner.view.version &&
         !(request.action==='applied' && owner.approved && owner.view.phase==='editing' && request.version+1===owner.view.version)) return fail('stale_selection')
-      if (frozen && ['begin','changed','capture','decide'].includes(request.action)) return fail('unavailable')
+      if (frozen && ['begin','changed','capture','decide','undoChange'].includes(request.action)) return fail('unavailable')
       if (request.action === 'begin') {
         if (owner.cancel) return fail('unknown')
+        if (owner.view.phase==='unknown' && !owner.begin) return fail('unknown')
         if (owner.pending || owner.approved || owner.view.phase==='conflict') return fail('unsaved_changes')
         if (!owner.manual) {
           if (!owner.begin) { await reopen(owner); owner.begin={operationId:randomUUID(),baseRevision:owner.view.revision} }
@@ -225,7 +297,7 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
             owner.view.phase='unknown'; return fail('unknown')
           }
         }
-        owner.view.phase='editing'
+        owner.view.phase='editing';owner.view.canUndo=false
       } else if (request.action === 'changed') {
         if (!owner.manual || owner.pending || owner.view.phase!=='editing' || request.version <= owner.view.version) return fail('stale_selection')
         owner.view.version=request.version; owner.view.dirty=true
@@ -238,8 +310,10 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
         if (owner.approved && (!owner.approved.expectedBytes || !await verifyDocxReplacement(owner.approved.expectedBytes,bytes))) return fail('forbidden')
         const input=nativeOfficeCommitInputSchema.parse({sessionId:owner.sessionId,threadId:owner.view.threadId,
           operationId:authority.saveOperationId,changeId:authority.changeId,baseRevision:authority.baseRevision,content:request.content})
-        owner.pending={operationId:authority.saveOperationId,digest:hash}; owner.view.phase='unknown'
+        owner.pending={kind:'save',operationId:authority.saveOperationId,changeId:authority.changeId,digest:hash}; owner.view.phase='unknown';owner.view.canUndo=false
         await settle(owner,await invoke(owner,'commit-object',input))
+      } else if (request.action === 'undoChange') {
+        await undoChange(owner)
       } else if (request.action === 'applied') {
         if (!owner.approved || !owner.capture ||
           owner.capture.instanceId!==request.instanceId || owner.capture.captureId!==request.captureId) return fail('stale_selection')
@@ -247,13 +321,14 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
         if (owner.view.phase!=='applying') return fail('stale_selection')
         owner.view.version++; owner.view.phase='editing'
       } else if (request.action === 'status') {
-        if (owner.reopening) {await reopen(owner);return {ok:true,view:snapshot(owner)}}
+        if (owner.reopening) {await reopen(owner);await finishRefresh(owner);return {ok:true,view:snapshot(owner)}}
         if (owner.closing) {await closeHandle(owner);owners.delete(owner.view.editorId);return {ok:true,view:null}}
+        if (owner.refreshing) {await finishRefresh(owner);return {ok:true,view:snapshot(owner)}}
         if (owner.cancel) {await close(owner,true);return {ok:true,view:null}}
         if (owner.approved && !owner.pending) return {ok:true,view:snapshot(owner)}
-        if (owner.pending) await settle(owner,await invoke(owner,'object-status',{sessionId:owner.sessionId,operationId:owner.pending.operationId}))
+        if (owner.pending) await queryPending(owner)
         else if (owner.begin && !owner.manual) return await run({action:'begin',editorId:owner.view.editorId,version:owner.view.version})
-        else { const state=await recovery(owner); if (state.pending) return fail('unknown') }
+        else { const state=await recovery(owner); if (state.pending || state.current?.status==='unknown') return fail('unknown') }
       } else if (request.action === 'close') { await close(owner,request.discard); return {ok:true,view:null} }
       else if (request.action === 'revoke') {
         if (owner.pending || owner.approved || owner.manual) return fail('unsaved_changes')
@@ -300,7 +375,7 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
           if (r.proposalId!==request.proposalId || r.operationId!==owner.decision.operationId || r.selectionToken!==scope.selectionToken ||
             r.baseRevision!==owner.view.revision || r.changeSequence!==owner.view.version || r.workbook || r.presentation) return fail('stale_selection')
           owner.approved={changeId:r.changeId,saveOperationId:r.saveOperationId,baseRevision:r.baseRevision}
-          owner.view.phase='applying'; owner.view.dirty=true
+          owner.view.phase='applying'; owner.view.dirty=true;owner.view.canUndo=false
           owner.approved.expectedBytes=await replacedDocx(owner.view,JSON.parse(capture.target),r.text,capture.text)
           return {ok:true,view:snapshot(owner),replacement:r.text}
         }
@@ -309,15 +384,15 @@ export function createDocxEditorController(packageHost:(request:PluginPackageHos
       return {ok:true,view:snapshot(owner)}
     } catch(error) {
       const code=error instanceof Failure?error.code:owner?.pending || owner?.closing || owner?.reopening?'unknown':'unavailable'
-      if (owner && code==='conflict') owner.view.phase='conflict'
+      if (owner && code==='conflict') {owner.view.phase='conflict';delete owner.refreshing}
       return {ok:false,view:snapshot(owner),error:code}
     }
   }
   return {
     request(raw:unknown):Promise<DocxEditorResponse> { const next=tail.then(()=>run(raw)); tail=next.catch(()=>undefined); return next },
     views:()=>[...owners.values()].map(o=>snapshot(o)!),
-    hasUnsettled:()=>[...owners.values()].some(o=>o.view.dirty || o.manual || o.begin || o.pending || o.approved || o.closing || o.reopening),
+    hasUnsettled:()=>[...owners.values()].some(o=>o.view.dirty || o.view.phase==='unknown' || o.manual || o.begin || o.pending || o.approved || o.closing || o.reopening || o.refreshing),
     freeze:(value:boolean)=>{frozen=value},
-    async destroy() { await tail; for (const owner of owners.values()) { if (owner.view.dirty || owner.pending || owner.closing || owner.reopening) continue; await close(owner,false) } }
+    async destroy() { await tail; for (const owner of owners.values()) { if (owner.view.dirty || owner.view.phase==='unknown' || owner.pending || owner.closing || owner.reopening || owner.refreshing) continue; await close(owner,false) } }
   }
 }
