@@ -26,14 +26,21 @@ function receipt(type:'number'|'text'='text',value='001'):NativeOfficeView {
     workbook:{before:{...selection.ranges[0],cells:[editableCell]},after:{...selection.ranges[0],cells:[{...editableCell,text:value,formula:value,valueType:type,value:type==='number'?Number(value):0}]},results:[value]},
     saveOperationId:'save-operation',undoOperationId:'undo-operation',canUndo:true,canCancel:false,canRetryUndo:false,canResume:false,createdAt:'',savedAt:''}}}
 }
-let root:Root|null, container:HTMLDivElement
+let root:Root|null, container:HTMLDivElement, toolbarTarget:HTMLDivElement
 let request:ReturnType<typeof vi.fn<(input:NativeOfficeRequest)=>Promise<NativeOfficeResponse | undefined>>>
-async function render(next:NativeOfficeView = view,active = true,context:{workspace?:string;path?:string;threadId?:string}={}) {
+async function render(next:NativeOfficeView = view,active = true,context:{workspace?:string;path?:string;threadId?:string;toolbar?:boolean|null}={}) {
   await act(async()=>root!.render(createElement(WorkbookCellEditor,{view:next,threadId:context.threadId??threadId,
-    workspace:context.workspace??workspace,path:context.path??next.path,active,busy:false,onRequest:request})))
+    workspace:context.workspace??workspace,path:context.path??next.path,active,busy:false,onRequest:request,toolbarTarget:context.toolbar === null ? null : context.toolbar === false ? undefined : toolbarTarget})))
 }
 const input = () => container.querySelector<HTMLInputElement>('[aria-label="单元格值或公式"]')!
-const button = (label:string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.textContent===label)!
+const button = (label:string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.getAttribute('aria-label')===label || item.textContent===label)!
+async function openOptions() {
+  if (!document.querySelector('[aria-label="单元格输入类型"]')) await act(async()=>button('单元格编辑选项').click())
+}
+async function clickButton(label:string) {
+  if (!button(label)) await openOptions()
+  await act(async()=>button(label).click())
+}
 async function fill(value:string) {
   await act(async()=>{
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input(),value)
@@ -41,8 +48,9 @@ async function fill(value:string) {
   })
 }
 async function choose(type:string) {
+  await openOptions()
   await act(async()=>{
-    const select = container.querySelector<HTMLSelectElement>('[aria-label="单元格输入类型"]')!
+    const select = document.querySelector<HTMLSelectElement>('[aria-label="单元格输入类型"]')!
     select.value=type;select.dispatchEvent(new Event('change',{bubbles:true}))
   })
 }
@@ -64,16 +72,62 @@ beforeEach(()=>{
   useNativeOfficeStore.setState({target:{workspace,path:view.path},view,error:null,engineViews:{[targetKey]:view},views:{[targetKey]:view},
     workbookDrafts:{},workbookClosing:{},workbookDraftInputFrozen:false,workbookDraftComposing:false,receiveSequence:0,
     proposalInFlight:false,annotationInputFrozen:false,manualDiscardAttempts:{},manualOwners:{},creationAttempt:null})
-  container=document.createElement('div');document.body.append(container);root=createRoot(container)
+  container=document.createElement('div');toolbarTarget=document.createElement('div');toolbarTarget.dataset.testViewerActions='';document.body.append(toolbarTarget,container);root=createRoot(container)
 })
 afterEach(async()=>{
-  await act(async()=>root?.unmount());root=null;container.remove()
+  await act(async()=>root?.unmount());root=null;container.remove();toolbarTarget.remove()
   useNativeOfficeStore.setState({target:null,view:null,error:null,engineViews:{},views:{},workbookDrafts:{},workbookClosing:{},
     workbookDraftInputFrozen:false,workbookDraftComposing:false})
   vi.unstubAllGlobals()
 })
 
 describe('typed workbook cell drafts',()=>{
+  it('portals actions into the existing viewer row and keeps the formula row for content only',async()=>{
+    await render()
+    expect(toolbarTarget.contains(button('保存'))).toBe(true)
+    expect(toolbarTarget.contains(button('单元格编辑选项'))).toBe(true)
+    expect(container.querySelectorAll('button,select')).toHaveLength(0)
+    expect(container.querySelector('[aria-label="工作簿选区"]')?.textContent).toBe('Sheet1!A1')
+    expect(button('保存').disabled).toBe(true)
+    expect(button('保存').getAttribute('data-tone')).toBeNull()
+    await fill('13')
+    expect(button('保存').disabled).toBe(false)
+    expect(button('保存').getAttribute('data-tone')).toBe('commit')
+    await fill('not a number')
+    expect(button('保存').disabled).toBe(true)
+    expect(button('保存').getAttribute('data-tone')).toBeNull()
+    expect(document.querySelector('[aria-label="单元格输入类型"]')).toBeNull()
+    await openOptions()
+    expect(document.querySelector('[role="menu"] [aria-label="单元格输入类型"]')).not.toBeNull()
+    expect(document.querySelector<HTMLSelectElement>('[aria-label="单元格输入类型"]')?.value).toBe('number')
+    expect(request).not.toHaveBeenCalled()
+  })
+  it('uses the same content row for reachable standalone fallback actions',async()=>{
+    await render(view,true,{toolbar:false})
+    expect(container.contains(button('保存'))).toBe(true)
+    expect(container.contains(button('单元格编辑选项'))).toBe(true)
+    expect(container.querySelector('[data-workbook-cell-editor]')?.children).toHaveLength(1)
+    await choose('text');await fill('literal')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({type:'text',value:'literal'})
+    await clickButton('放弃草稿')
+    expect(input().value).toBe('12')
+  })
+  it('waits for the parent toolbar slot without inserting actions into the formula row',async()=>{
+    await render(view,true,{toolbar:null})
+    expect(container.querySelectorAll('button,select')).toHaveLength(0)
+    expect(button('保存')).toBeUndefined()
+    await fill('13')
+    await act(async()=>{await useNativeOfficeStore.getState().close(workspace,view.path)})
+    expect(document.querySelector('[role="dialog"][aria-label="单元格编辑状态"]')).toBeNull()
+    await render()
+    expect(toolbarTarget.contains(button('保存'))).toBe(true)
+    expect(container.querySelectorAll('button,select')).toHaveLength(0)
+    expect(input().value).toBe('13')
+    const feedback=document.querySelector<HTMLElement>('[role="dialog"][aria-label="单元格编辑状态"]')
+    expect(feedback?.textContent).toContain('保留会取消关闭')
+    expect(feedback?.style.visibility).not.toBe('hidden')
+    expect(request).not.toHaveBeenCalled()
+  })
   it('keeps text literal and only parses a finite number after explicit type choice',()=>{
     expect(workbookDraftEdit('text','001')).toEqual({type:'text',text:'001'})
     expect(workbookDraftEdit('text','')).toBeNull()
@@ -90,9 +144,9 @@ describe('typed workbook cell drafts',()=>{
     expect(request).not.toHaveBeenCalled();expect(button('保存').disabled).toBe(false)
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({type:'text',value:'001',changed:true})
     expect(useNativeOfficeStore.getState().views[targetKey].dirty).toBe(true)
-    await act(async()=>button('保留草稿').click())
+    await clickButton('保留草稿')
     expect(input().value).toBe('001');expect(button('保存').disabled).toBe(false)
-    await act(async()=>button('放弃草稿').click())
+    await clickButton('放弃草稿')
     expect(input().value).toBe('12');expect(button('保存').disabled).toBe(true);expect(request).not.toHaveBeenCalled()
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBeUndefined()
     expect(useNativeOfficeStore.getState().views[targetKey].dirty).toBe(false)
@@ -104,7 +158,7 @@ describe('typed workbook cell drafts',()=>{
   it('requires the explicit clear type for an empty text input',async()=>{
     await render();await choose('text');await fill('')
     expect(button('保存').disabled).toBe(true)
-    expect(container.textContent).toContain('空文本请明确选择清空类型。')
+    expect(document.body.textContent).toContain('空文本请明确选择清空类型。')
     expect(request).not.toHaveBeenCalled()
     await choose('empty');await act(async()=>button('保存').click())
     expect(request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({action:'editWorkbookCell',edit:{type:'empty'}}))
@@ -114,15 +168,29 @@ describe('typed workbook cell drafts',()=>{
     await render();await choose('text');await fill('001');await act(async()=>button('保存').click())
     expect(request).toHaveBeenCalledExactlyOnceWith({action:'editWorkbookCell',objectId:view.objectId,revision:view.revision,
       expectedChangeSequence:0,threadId:'thread',selectionToken:selection.token,edit:{type:'text',text:'001'}})
-    expect(container.textContent).toContain('已保存')
+    expect(document.body.textContent).toContain('已保存')
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBeUndefined()
   })
   it('does not call an unreceipted success saved',async()=>{
     await render();await fill('13');await act(async()=>button('保存').click())
-    expect(container.textContent).not.toContain('已保存')
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('保存结果尚未确认')
+    expect(document.body.textContent).not.toContain('已保存')
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('保存结果尚未确认')
+    expect(document.querySelector('[role="dialog"][aria-label="单元格编辑状态"]')?.textContent).toContain('保存结果尚未确认')
     expect(button('保存').disabled).toBe(true)
+    expect(button('保存').getAttribute('data-tone')).toBeNull()
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({value:'13',unconfirmed:true,pending:false})
+  })
+  it('keeps pending state reachable in the viewer row without claiming a receipt',async()=>{
+    let finish!:(response:NativeOfficeResponse)=>void
+    request.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+    await render();await fill('13');await act(async()=>button('保存').click())
+    expect(button('保存中…').disabled).toBe(true)
+    expect(button('保存中…').getAttribute('data-tone')).toBeNull()
+    expect(toolbarTarget.querySelector('[role="status"]')?.textContent).toContain('等待文件回执')
+    expect(document.body.textContent).not.toContain('已保存')
+    await act(async()=>finish({ok:true,view:receipt('number','13')}))
+    expect(toolbarTarget.querySelector('[role="status"]')?.textContent).toContain('Sheet1!A1 已保存')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBeUndefined()
   })
   it('renews the native token for the same cell without erasing input and saves with the latest token',async()=>{
     request.mockResolvedValue({ok:true,view:receipt('number','13')})
@@ -143,7 +211,7 @@ describe('typed workbook cell drafts',()=>{
       : {...view,revision:'c'.repeat(64),selection:{...selection,version:'c'.repeat(64)}}
     await render(next)
     expect(input().value).toBe('13');expect(button('保存').disabled).toBe(true)
-    expect(container.textContent).toContain('当前会话、选区或版本已变化，文字已保留')
+    expect(document.body.textContent).toContain('当前会话、选区或版本已变化，文字已保留')
     expect(container.querySelector('[aria-label="工作簿选区"]')?.textContent).toBe('Sheet1!A1')
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toEqual(original)
     expect(request).not.toHaveBeenCalled()
@@ -159,7 +227,7 @@ describe('typed workbook cell drafts',()=>{
     expect(input().value).toBe('13');expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]?.pending).toBe(true)
     await act(async()=>finish({ok:true,view:receipt('number','13')}))
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBeUndefined()
-    expect(container.textContent).toContain('Sheet1!A1 已保存')
+    expect(document.body.textContent).toContain('Sheet1!A1 已保存')
     expect(input().value).toBe('12')
   })
   it('retains the exact draft across unmount and remount',async()=>{
@@ -169,7 +237,8 @@ describe('typed workbook cell drafts',()=>{
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toEqual(original)
     root=createRoot(container);await render()
     expect(input().value).toBe('retained words')
-    expect(container.querySelector<HTMLSelectElement>('[aria-label="单元格输入类型"]')!.value).toBe('text')
+    await openOptions()
+    expect(document.querySelector<HTMLSelectElement>('[aria-label="单元格输入类型"]')!.value).toBe('text')
     expect(button('保存').disabled).toBe(false)
     expect(request).not.toHaveBeenCalled()
   })
@@ -191,9 +260,9 @@ describe('typed workbook cell drafts',()=>{
     expect(input().value).toBe('13');expect(button('保存').disabled).toBe(true)
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toEqual(original)
     expect(useNativeOfficeStore.getState().workbookDrafts[otherKey]).toBeUndefined()
-    await act(async()=>button('保留草稿').click())
+    await clickButton('保留草稿')
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({id:original.id,threadId,value:'13'})
-    await act(async()=>button('放弃草稿').click())
+    await clickButton('放弃草稿')
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBeUndefined()
     expect(input().value).toBe('12')
     await fill('14')
@@ -211,21 +280,21 @@ describe('typed workbook cell drafts',()=>{
     await act(async()=>finish({ok:true,view:receipt('number','13')}))
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBeUndefined()
     expect(useNativeOfficeStore.getState().workbookDrafts[otherKey]).toMatchObject({value:'21',changed:true})
-    expect(input().value).toBe('21');expect(container.textContent).not.toContain('已保存')
+    expect(input().value).toBe('21');expect(document.body.textContent).not.toContain('已保存')
   })
   it('offers explicit keep or discard after a close request without silently clearing input',async()=>{
     await render();await fill('13')
     let closed=true
     await act(async()=>{closed=await useNativeOfficeStore.getState().close(workspace,view.path)})
     expect(closed).toBe(false)
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('保留会取消关闭')
-    await act(async()=>button('保留草稿').click())
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('保留会取消关闭')
+    await clickButton('保留草稿')
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({value:'13',closeRequested:false})
     expect(input().value).toBe('13');expect(request).not.toHaveBeenCalled()
     await act(async()=>{closed=await useNativeOfficeStore.getState().close(workspace,view.path)})
     expect(closed).toBe(false)
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('保留会取消关闭')
-    await act(async()=>button('放弃草稿').click())
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('保留会取消关闭')
+    await clickButton('放弃草稿')
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBeUndefined()
     expect(input().value).toBe('12');expect(request).not.toHaveBeenCalled()
   })
@@ -241,7 +310,7 @@ describe('typed workbook cell drafts',()=>{
     await render({...view,selection:{...selection,editIntent:{kind:'f2',id:'edit-intent-1'}}})
     expect(document.activeElement).toBe(input());expect(request).not.toHaveBeenCalled()
     await render({...view,workbookEditing:{editable:false,reason:'unsupported_workbook'}})
-    expect(input().disabled).toBe(true);expect(container.textContent).toContain('只读预览')
+    expect(input().disabled).toBe(true);expect(document.body.textContent).toContain('只读预览')
   })
 })
 
@@ -256,7 +325,7 @@ describe('retained workbook draft shutdown guard',()=>{
       expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({value:'13',changed:true})
       expect(isWriteShutdownFrozen()).toBe(false);expect(beginShutdown).not.toHaveBeenCalled();expect(request).not.toHaveBeenCalled()
       if (!root) root=createRoot(container)
-      await render();await act(async()=>button('放弃草稿').click())
+      await render();await clickButton('放弃草稿')
       expect(await shutdown(handler,readyId,'prepare')).toEqual({result:'ready'})
       expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBeUndefined()
       expect(beginShutdown).toHaveBeenCalledOnce();expect(request).not.toHaveBeenCalled()

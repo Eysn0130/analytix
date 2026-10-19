@@ -109,11 +109,11 @@ describe('bounded workbook manual controls',()=>{
     let closed=true
     await act(async()=>{closed=await useNativeOfficeStore.getState().close('/synthetic','book.xlsx')})
     expect(closed).toBe(false);expect(container.textContent).toContain('保留会取消关闭')
-    await clickNamed('保留草稿')
+    await clickNamed('单元格编辑选项');await clickNamed('保留草稿')
     expect(useNativeOfficeStore.getState().workbookDrafts[key]).toMatchObject({value:'2',closeRequested:false})
     expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('2')
     await act(async()=>{closed=await useNativeOfficeStore.getState().close('/synthetic','book.xlsx')})
-    expect(closed).toBe(false);await clickNamed('放弃草稿')
+    expect(closed).toBe(false);await clickNamed('单元格编辑选项');await clickNamed('放弃草稿')
     expect(useNativeOfficeStore.getState().workbookDrafts[key]).toBeUndefined()
     expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('1')
     expect(request.mock.calls.some(([input])=>['editWorkbookCell','close'].includes(input.action))).toBe(false)
@@ -304,15 +304,15 @@ async function renderAnnotation(next: NativeOfficeView, props: Partial<Parameter
   await act(async () => root!.render(createElement(NativeOfficePanel, {visible:true,threadId:'thread',...props})))
 }
 function namedButton(label: string): HTMLButtonElement {
-  return [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === label || button.textContent === label)!
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === label || button.textContent === label)!
 }
 async function clickNamed(label: string) { await act(async () => namedButton(label).click()) }
 async function openNotes() {
-  if (namedButton('编辑标注备注')) await clickNamed('编辑标注备注')
+  if (namedButton('编辑标注备注')?.getAttribute('aria-expanded') === 'false') await clickNamed('编辑标注备注')
 }
 async function fillNote(value: string) {
   await openNotes()
-  const input = container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')!
+  const input = document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input,value)
     input.dispatchEvent(new Event('input',{bubbles:true}))
@@ -364,7 +364,7 @@ describe('native document annotation workflow', () => {
     expect(request.mock.calls.find(([r])=>r.action==='reference')?.[0]).toMatchObject({selectionToken:fresh.token,editable:false})
     expect(useNativeReferenceStore.getState().references[0]).toMatchObject({selection:{token:fresh.token}})
     expect(namedButton('nativeActionMore')).toBeDefined()
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
   })
   it('rejects a pointer intent for a stale token and a choice after the live native selection changes',async()=>{
     let menuRequested!:(target:any)=>void,choose!:(choice:{actionId:string|null})=>void
@@ -518,10 +518,10 @@ describe('native document annotation workflow', () => {
     await act(async () => root!.render(createElement(NativeOfficePanel,{visible:false,threadId:'thread'})))
     await act(async () => root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'})))
     await openNotes()
-    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
+    expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
     await act(async () => useNativeOfficeStore.getState().receive({...annotationView,revision:'c'.repeat(64),selection:undefined}))
     await openNotes()
-    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
+    expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('不要丢失这条备注')
     expect(namedButton('加入对话').disabled).toBe(true)
   })
   it('does not add an annotation after its scope request finishes on another tab', async () => {
@@ -561,7 +561,7 @@ it('retains the bounded selection and note when native blur reports an empty cap
   await openNotes()
   await fillNote('保留这条备注')
   await act(async () => useNativeOfficeStore.getState().receive({...annotationView,selection:{kind:'unavailable',documentId:view.objectId,version:view.revision,changeSequence:0,scope:'engine selection interface unavailable in this view'}}))
-  expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('保留这条备注')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('保留这条备注')
   await clickNamed('加入对话')
   expect(useNativeReferenceStore.getState().references[0]).toMatchObject({note:'保留这条备注',selection:annotationSelection,editable:false})
 })
@@ -688,7 +688,7 @@ it('offers explicit resume only for the owning thread and capability, while quer
 function persistedAnnotation(note:string, threadId='thread'): NonNullable<NativeOfficeView['annotation']> {
   return {objectId:view.objectId,threadId,note,draftRevision:'c'.repeat(64),sourceRevision:view.revision,updatedAt:'2026-09-15T00:00:00Z'}
 }
-function noteInput() { return container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')! }
+function noteInput() { return document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')! }
 const annotationDraftKey=JSON.stringify(['thread','/synthetic',view.path])
 describe('persisted native annotation races',()=>{
   it('restores only note text without selection, token, editable scope or automatic save',async()=>{
@@ -1085,7 +1085,8 @@ describe('native PPT playback in the existing view toolbar', () => {
     expect(request.mock.calls.some(([input]) => input.action === 'viewControl' && input.control === 'set-zoom')).toBe(false)
     expect(namedButton('标注文档').disabled).toBe(true)
     expect(namedButton('撤销修改').disabled).toBe(true)
-    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')!.disabled).toBe(true)
+    await openNotes()
+    expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')!.disabled).toBe(true)
     expect(useNativeOfficeStore.getState().view).toMatchObject({editing:true,selection,canUndo:true})
     expect(request.mock.calls.some(([input]) => ['annotate','reference','annotationSave','undoChange','save'].includes(input.action))).toBe(false)
   })
@@ -1215,7 +1216,7 @@ describe('native PPT playback in the existing view toolbar', () => {
     await f.choose('view-play-current')
     expect(playbackCalls().at(-1)).toMatchObject({control:'play-current',playbackGeneration:2})
     expect(namedButton('标注文档')).toBeUndefined()
-    expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
     expect(request.mock.calls.some(([input]) => ['open','captureSelection','annotationSave','reference','proposals','annotate'].includes(input.action))).toBe(false)
     expect(useNativeReferenceStore.getState().drafts).toEqual(notes)
   })
@@ -1231,7 +1232,7 @@ it('opens Present Office by selector alone and preserves ordinary notes without 
   expect(request.mock.calls.some(([input]) => input.action === 'hide')).toBe(false)
   expect(request.mock.calls.find(([input]) => input.action === 'openPresent')?.[0]).toEqual({action:'openPresent',protectedPresent,bounds:rect,appearance})
   expect(request.mock.calls.some(([input]) => ['open','captureSelection','annotationSave','reference','proposals','annotate'].includes(input.action))).toBe(false)
-  expect(container.querySelector('[aria-label="标注文档"]')).toBeNull();expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
+  expect(container.querySelector('[aria-label="标注文档"]')).toBeNull();expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
   expect(namedButton('nativeOfficeManualEdit')).toBeUndefined();expect(namedButton('nativeOfficeManualDiscard')).toBeUndefined();expect(namedButton('nativeOfficeSaveAndReference')).toBeUndefined()
   expect(container.querySelector('[aria-label="预览视图"]')).not.toBeNull();expect(useNativeReferenceStore.getState().drafts).toEqual(notes)
 })
@@ -1635,7 +1636,7 @@ describe('proposal decision phases and manual recovery records',()=>{
     await act(async()=>useNativeOfficeStore.setState({error:'conflict'}))
     expect(namedButton('nativeOfficeManualSave').disabled).toBe(true)
     expect(namedButton('nativeOfficeManualDiscard').disabled).toBe(true)
-    expect(container.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('Synthetic draft retained across conflict')
+    expect(document.querySelector<HTMLInputElement>('[aria-label="标注备注"]')?.value).toBe('Synthetic draft retained across conflict')
     expect(useNativeOfficeStore.getState().view?.dirty).toBe(true)
     expect(request.mock.calls.some(([input])=>['save','undoChange','discardManualEdit'].includes(input.action))).toBe(false)
   })
@@ -1815,8 +1816,8 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     const viewport = surface.parentElement!, host = viewport.parentElement!
     const toolbar = host.querySelector<HTMLElement>('[role="toolbar"]')!
     expect([...host.children]).toEqual([toolbar,viewport])
-    expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     const next = nativeFormatView(0,'selection_after_drag')
     if (next.selection?.kind !== 'text') throw new Error('Expected text capture')
     next.selection.capture = {capturedCharacters:19,totalCharacters:truncated ? 38 : 19,unit:'utf-16',complete:!truncated,truncated}
@@ -1838,19 +1839,22 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     expect(surface.parentElement).toBe(viewport)
     expect(viewport.parentElement).toBe(host)
     expect([...host.children]).toEqual([toolbar,viewport])
-    expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     const feedback = container.querySelector('[data-native-docx-feedback]')!
     expect(toolbar.contains(feedback)).toBe(true)
+    expect(feedback.querySelector('svg')).not.toBeNull()
     expect(feedback.textContent?.includes('已捕获')).toBe(truncated)
     await harness.choose({actionId:'quote'})
     expect(request.mock.calls.find(([input]) => input.action === 'reference')?.[0]).toMatchObject({selectionToken:'selection_after_drag',editable:false})
     expect(useNativeReferenceStore.getState().references[0]).toMatchObject({editable:false,selection:{token:'selection_after_drag',capture:{truncated}}})
     await openNotes()
-    expect(toolbar.querySelector('[aria-label="标注备注"]')).not.toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).not.toBeNull()
+    expect(toolbar.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).not.toBeNull()
     expect([...host.children]).toEqual([toolbar,viewport])
     await clickNamed('关闭标注备注')
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     expect([...host.children]).toEqual([toolbar,viewport])
   })
 
@@ -1867,7 +1871,7 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     try {
       await act(async () => { harness.publish(next); harness.menuRequested(harness.target(next)) })
       expect(harness.menu.mock.calls[0][0].actions.find(action => action.id === actionId)?.enabled).toBe(true)
-      expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+      expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
       await harness.choose({actionId})
       if (actionId === 'copy') {
         expect(writeText).toHaveBeenCalledExactlyOnceWith(annotationSelection.text)
@@ -1877,8 +1881,8 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
         expect(onPrepareDraft).toHaveBeenCalledExactlyOnceWith('请根据所选内容提出修改建议。',[expect.objectContaining({editable:true,selection:{...next.selection}})])
         expect(onSubmitPrompt).not.toHaveBeenCalled()
       }
-      expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
-      expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+      expect(document.querySelector('[aria-label="文档标注"]')).toBeNull()
+      expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     } finally {
       if (clipboardDescriptor) Object.defineProperty(navigator,'clipboard',clipboardDescriptor)
       else Reflect.deleteProperty(navigator,'clipboard')
@@ -1899,7 +1903,7 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     expect([...host.children]).toEqual([toolbar,viewport])
     expect(surface.parentElement).toBe(viewport)
     expect(namedButton('查询结果').disabled).toBe(false)
-    expect(container.querySelector('[aria-label="标注备注"]')).toBeNull()
+    expect(document.querySelector('[aria-label="标注备注"]')).toBeNull()
     expect(request.mock.calls.some(([input]) => input.action === 'saveStatus')).toBe(false)
     await clickNamed('查询结果')
     expect(request.mock.calls.filter(([input]) => input.action === 'saveStatus')).toEqual([[{action:'saveStatus',objectId:view.objectId}]])
@@ -1924,6 +1928,58 @@ describe('DOCX selection keeps the native viewport geometry owner stable', () =>
     expect(request.mock.calls.filter(([value]) => value.action === 'annotationSave')).toHaveLength(saves + (editing ? 1 : 0))
     expect(request.mock.calls.some(([value]) => ['annotate','reference','save','saveStatus'].includes(value.action))).toBe(false)
     expect(container.querySelector('[aria-label="文档标注"]')).toBeNull()
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).not.toBeNull()
   })
 
+})
+
+
+describe('shared Office viewer presentation', () => {
+  it.each(['docx','xlsx','pptx'] as const)('keeps %s operations in one icon header and opens notes outside document flow', async kind => {
+    const next = {...annotationView,kind,path:`/synthetic/report.${kind}`}
+    await renderAnnotation(next)
+    const header = container.querySelector('[data-workspace-viewer-header]')!
+    const surface = container.querySelector('[aria-label="nativeOfficeEditor"]')!
+    const viewport = surface.parentElement!, host = viewport.parentElement!
+    const children = [...host.children]
+    expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+    expect(header.textContent).toContain(`report.${kind}`)
+    for (const button of header.querySelectorAll<HTMLButtonElement>('button:not([data-native-view-controls])')) {
+      expect(button.getAttribute('aria-label')).toBeTruthy()
+      expect(button.querySelector('svg')).not.toBeNull()
+      expect(button.textContent).toBe('')
+    }
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
+    expect(request.mock.calls.some(([input]) => input.action === 'annotationSave')).toBe(false)
+    await act(async()=>namedButton('编辑标注备注').focus())
+    await openNotes()
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).not.toBeNull()
+    expect(document.activeElement).toBe(document.querySelector('[aria-label="标注备注"]'))
+    expect([...host.children]).toEqual(children)
+    expect(surface.parentElement).toBe(viewport)
+    await clickNamed('关闭标注备注')
+    expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
+    expect([...host.children]).toEqual(children)
+    expect(document.activeElement).toBe(namedButton('编辑标注备注'))
+    expect(request.mock.calls.some(([input]) => input.action === 'annotationSave')).toBe(false)
+  })
+})
+
+
+it('deactivates retained Native viewer controls and notes while hidden, then restores one control owner',async()=>{
+  const viewerControls={focused:false,onToggleFocus:vi.fn(),onCollapse:vi.fn()}
+  await renderAnnotation(annotationView,{viewerControls})
+  const surface=container.querySelector('[aria-label="nativeOfficeEditor"]')!
+  expect(document.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(1)
+  await openNotes()
+  expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).not.toBeNull()
+  await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:false,threadId:'thread',viewerControls})))
+  expect(container.querySelector('[aria-label="nativeOfficeEditor"]')).toBe(surface)
+  expect(document.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(0)
+  expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
+  expect(viewerControls.onToggleFocus).not.toHaveBeenCalled();expect(viewerControls.onCollapse).not.toHaveBeenCalled()
+  await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread',viewerControls})))
+  expect(container.querySelector('[aria-label="nativeOfficeEditor"]')).toBe(surface)
+  expect(document.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(1)
+  expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
 })

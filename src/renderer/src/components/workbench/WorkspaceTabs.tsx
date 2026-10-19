@@ -103,10 +103,11 @@ function SortableWorkspaceTab({ tab, active, focusable, onFocus, onSelect, onClo
   )
 }
 
-export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSelect, onClose, onReorder, onAdd, onToggleFocus, onCollapse }: {
+export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSelect, onClose, onReorder, onAdd, onToggleFocus, onCollapse, viewerControlsInHeader = false }: {
   tabs: WorkspaceTab[]; activeTabId: string | null; selectorOpen: boolean; focused: boolean
   onSelect: (id: string) => void; onClose: (id: string) => void | Promise<void>; onReorder: (id: string, index: number) => void
   onAdd: () => void; onToggleFocus: () => void; onCollapse: () => void
+  viewerControlsInHeader?: boolean
 }): ReactElement {
   const { t } = useTranslation('common')
   const [focusedId, setFocusedId] = useState<string | null>(activeTabId)
@@ -187,13 +188,13 @@ export function WorkspaceTabs({ tabs, activeTabId, selectorOpen, focused, onSele
       </DndContext>
       <div className="workspace-tabs-actions">
         <button ref={addRef} type="button" onClick={onAdd} aria-label={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} title={t('workspaceAddTab', { defaultValue: '打开工具或文件' })} aria-pressed={selectorOpen}><Plus size={20} /></button>
-        <button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')}
+        {!viewerControlsInHeader ? <><button type="button" onClick={onToggleFocus} aria-label={t(focused ? 'workbenchDock' : 'workbenchFocus')}
           title={t(focused ? 'workbenchDock' : 'workbenchFocus')} aria-pressed={focused}>
           {focused ? <ExitFullscreenGlyph /> : <FullscreenGlyph />}
         </button>
         <button id="workbench-workspace-collapse" type="button" onClick={() => onCollapse()} aria-label={t('workbenchCollapse')}
           title={`${t('workbenchCollapse')} (${workspaceShortcutLabels.workspace})`} aria-keyshortcuts="Control+Shift+B Meta+Shift+B"
-          aria-controls="workbench-right-workspace" aria-expanded={true}><WorkspacePanelIcon /></button>
+          aria-controls="workbench-right-workspace" aria-expanded={true}><WorkspacePanelIcon /></button></> : null}
       </div>
     </header>
   )

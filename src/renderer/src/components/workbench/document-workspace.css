@@ -14,3 +14,7 @@
 }
 
 .document-workspace-download { width: 36px; min-width: 36px; height: 36px; border-radius: 8px; }
+
+.document-workspace-status { display:grid;place-items:center;flex:none;width:20px;height:28px;color:var(--ds-text-muted); }
+.document-workspace-status > svg { width:16px;height:16px; }
+.document-workspace-status[role=alert] { color:var(--ds-danger,#b64040); }

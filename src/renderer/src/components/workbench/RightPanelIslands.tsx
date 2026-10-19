@@ -153,11 +153,15 @@ export function DevBrowserPanelIsland({
   preferredUrl,
   className,
   onCollapse,
+  visible,
+  viewerControls,
   onSubmitPrompt
 }: {
   preferredUrl?: string | null
   className?: string
   onCollapse: () => void
+  visible?: boolean
+  viewerControls?: ComponentProps<typeof DevBrowserPanel>['viewerControls']
   onSubmitPrompt?: ComponentProps<typeof DevBrowserPanel>['onSubmitPrompt']
 }): ReactElement {
   const detectedUrls = useDevPreviewUrls(extractLatestTurnDevPreviewUrls)
@@ -167,6 +171,8 @@ export function DevBrowserPanelIsland({
       preferredUrl={preferredUrl}
       className={className}
       onCollapse={onCollapse}
+      visible={visible}
+      viewerControls={viewerControls}
       onSubmitPrompt={onSubmitPrompt}
     />
   )

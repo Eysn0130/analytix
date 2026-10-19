@@ -33,6 +33,21 @@ async function show(path: string, explicit = false) {
   await act(async () => root.render(createElement(WorkspaceObjectPreviewPanel, { workspaceRoot: '/project', target: { workspaceRoot: '/project', path }, className: 'h-full max-h-full w-full', onClose: () => {} })))
 }
 describe('Canvas reuses the existing object file route', () => {
+  it.each(['plugins', 'settings'] as const)('does not present a retained file menu or controls on %s', async route => {
+    await show('/project/notes.md')
+    await act(async () => useChatStore.setState({ route }))
+    expect(file.mock.calls.at(-1)?.[0]).toMatchObject({ visible: false, viewerControls: undefined })
+    await act(async () => useChatStore.setState({ route: 'chat' }))
+    expect(file.mock.calls.at(-1)?.[0].visible).toBe(true)
+  })
+  it.each(['notes.md', 'flow.canvas'])('forwards the existing workspace controls to %s without new layout state', async path => {
+    await show('/project/' + path)
+    const viewerControls = { focused: true, onToggleFocus: vi.fn(), onCollapse: vi.fn() }
+    await act(async () => root.render(createElement(WorkspaceObjectPreviewPanel, { workspaceRoot: '/project',
+      target: { workspaceRoot: '/project', path: '/project/' + path }, viewerControls, onClose: () => {} })))
+    const leaf = path.endsWith('.canvas') ? canvas : file
+    expect(leaf.mock.calls.at(-1)?.[0].viewerControls).toBe(viewerControls)
+  })
   it('routes .canvas using current thread and project without introducing a workspace mode', async () => {
     await show('/project/flow.canvas')
     expect(canvas).toHaveBeenCalled()

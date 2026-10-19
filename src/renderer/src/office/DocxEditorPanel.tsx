@@ -10,6 +10,8 @@ import type { DocxEditorRequest,DocxEditorView } from '@shared/docx-editor'
 import { WriteInlineAgent } from '../components/write/WriteInlineAgent'
 import { inlineAgentPosition } from '../components/write/write-workspace-view-utils'
 import { Dialog } from '../data-analysis/components/overlay/Dialog'
+import { Download, Pencil, RotateCcw, Save, Trash2, Undo2 } from '../design/AnalytixUiIcons'
+import { WorkspaceViewerHeader, WorkspaceViewerIconButton, WorkspaceViewerMenu, type WorkspaceViewerControls } from '../components/workbench/WorkspaceViewerHeader'
 import styles from './docx-editor-panel.module.css'
 
 const ownerKey=(view:DocxEditorView)=>JSON.stringify([view.editorId,view.threadId,view.workspace,view.path,view.objectId])
@@ -31,10 +33,11 @@ const success=(result:unknown)=>result===true || !!result && typeof result==='ob
 const messages:Record<string,string>={unknown:'操作结果尚未确认，请查询本次操作。',conflict:'文件已在外部修改，工作副本保留。',
   unsaved_changes:'请先保存或放弃当前工作副本。',stale_selection:'选区已变化，请重新选择。',unavailable:'文档暂不可用，请重试。',forbidden:'当前权限不允许此操作。'}
 /** Upstream owns layout, selection, formatting and local history; Core owns saves. */
-export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft,fileActions}: {
+export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft,fileActions,viewerControls}: {
   view:DocxEditorView;visible:boolean;onSubmitPrompt:(value:string,references?:NativeReference[])=>void;
   onPrepareDraft?:(value:string,references:NativeReference[])=>boolean
   fileActions?:(beforeOpen:(open:()=>void)=>void,exportCurrent:()=>void)=>ReactNode
+  viewerControls?:WorkspaceViewerControls
 }) {
   const [workerUrls]=useState(()=>{
     if (typeof __ANALYTIX_DOCX_WORKER_PATHS__==='undefined') throw new Error('DOCX worker paths were not supplied by the renderer build.')
@@ -360,24 +363,33 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft,file
   }
   const inlineAction=selection?inlineAgentPosition({anchorRect:selection},{bounds:selection.bounds}):null
   return <section className={styles.panel} hidden={!visible} inert={!visible} aria-label="Word 文档">
-    <header className={styles.toolbar}>
-      <strong className={styles.title}>{view.path.split('/').at(-1)}</strong>
-      <span role="status">{view.phase==='unknown'?'结果待确认':view.phase==='conflict'?'文件冲突':view.dirty?'未保存':'已保存'}</span>
-      <button disabled={!ready||working||view.phase!=='ready'} onClick={()=>void exclusive(async()=>{await request({action:'begin',editorId:view.editorId,version:localVersion.current})})}>编辑</button>
-      <button disabled={!ready||working||applyFailed||view.phase!=='editing'} onClick={()=>void exclusive(async()=>{await save()})}>保存</button>
-      <button disabled={working||view.phase!=='unknown'&&view.phase!=='applying'&&!applyFailed} onClick={()=>void exclusive(status)}>查询结果</button>
-      {fileActions?<div inert={!ready||working}>{fileActions(beforeOpen,()=>void exclusive(exportCurrent))}</div>:
-        <button disabled={!ready||working} onClick={()=>void exclusive(exportCurrent)}>另存为</button>}
-      <button disabled={working} onClick={()=>void exclusive(async()=>{
-        const tabId=useWorkspaceTabsStore.getState().activeTabId
-        const result=await request({action:'close',editorId:view.editorId,discard:true})
-        if (result.ok) await reopenTab(tabId)
-      })}>放弃工作副本</button>
-      <button title="仅更改工作副本，保存后才写入文件。" disabled={!ready||working||view.phase!=='editing'||!!view.scope||applyFailed} onClick={()=>void exclusive(async()=>{
-        const sd=instance.current;if(sd?.ui.commands.get('undo')?.getState().enabled){await sd.ui.commands.executeAsync('undo');localVersion.current++;await request({action:'changed',editorId:view.editorId,version:localVersion.current})}
-      })}>撤销工作副本编辑</button>
-      <button title="恢复保存前的内容并保存文件。" disabled={!ready||working||!view.canUndo||view.dirty||view.phase!=='ready'&&!(view.phase==='unknown'&&view.recovery?.current?.canRetryUndo)} onClick={()=>void exclusive(undoSaved)}>{view.phase==='unknown'&&view.recovery?.current?.canRetryUndo?'完成已保存撤销':'撤销已保存修改'}</button>
-    </header>
+    <WorkspaceViewerHeader title={view.path.split('/').at(-1) ?? 'Word'} viewerControls={visible ? viewerControls : undefined}
+      titleControl={fileActions ? <span className={styles.fileActions} inert={!ready||working}>{fileActions(beforeOpen,()=>void exclusive(exportCurrent))}</span> : undefined}
+      status={error || (applyFailed || view.phase==='unknown'?'结果待确认':view.phase==='conflict'?'文件冲突':view.phase==='applying'?'更新中':view.dirty?'未保存':view.phase==='editing'?'工作副本编辑中':'已保存')}
+      statusRole={error || applyFailed || view.phase==='unknown'||view.phase==='conflict'?'alert':'status'}
+      actions={<>
+        <WorkspaceViewerIconButton label="编辑" disabled={!ready||working||view.phase!=='ready'}
+          onClick={()=>void exclusive(async()=>{await request({action:'begin',editorId:view.editorId,version:localVersion.current})})}><Pencil aria-hidden="true" /></WorkspaceViewerIconButton>
+        <WorkspaceViewerIconButton label="保存" tone="commit" disabled={!ready||working||applyFailed||view.phase!=='editing'}
+          onClick={()=>void exclusive(async()=>{await save()})}><Save aria-hidden="true" /></WorkspaceViewerIconButton>
+        {view.phase==='unknown'||view.phase==='applying'||applyFailed ? <WorkspaceViewerIconButton label="查询结果" disabled={working}
+          onClick={()=>void exclusive(status)}><RotateCcw aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        <WorkspaceViewerIconButton label="撤销工作副本编辑" title="仅更改工作副本，保存后才写入文件。"
+          disabled={!ready||working||view.phase!=='editing'||!!view.scope||applyFailed} onClick={()=>void exclusive(async()=>{
+            const sd=instance.current;if(sd?.ui.commands.get('undo')?.getState().enabled){await sd.ui.commands.executeAsync('undo');localVersion.current++;await request({action:'changed',editorId:view.editorId,version:localVersion.current})}
+          })}><Undo2 aria-hidden="true" /></WorkspaceViewerIconButton>
+        {!fileActions ? <WorkspaceViewerIconButton label="另存为" disabled={!ready||working} onClick={()=>void exclusive(exportCurrent)}><Download aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        <WorkspaceViewerMenu label="更多 Word 操作" ownerKey={ownerKey(view)} enabled={visible}>
+          <button type="button" role="menuitem" disabled={working} onClick={()=>void exclusive(async()=>{
+            const tabId=useWorkspaceTabsStore.getState().activeTabId
+            const result=await request({action:'close',editorId:view.editorId,discard:true})
+            if (result.ok) await reopenTab(tabId)
+          })}><Trash2 aria-hidden="true" />放弃工作副本</button>
+          <button type="button" role="menuitem" title="恢复保存前的内容并保存文件。"
+            disabled={working||!ready||!view.canUndo||view.dirty||view.phase!=='ready'&&!(view.phase==='unknown'&&view.recovery?.current?.canRetryUndo)}
+            onClick={()=>void exclusive(undoSaved)}><Undo2 aria-hidden="true" />{view.phase==='unknown'&&view.recovery?.current?.canRetryUndo?'完成已保存撤销':'撤销已保存修改'}</button>
+        </WorkspaceViewerMenu>
+      </>} />
     {error&&!pendingOpen?<p role="alert" className={styles.notice}>{error}</p>:null}
     <div ref={editorHost} className={styles.editor} aria-busy={working} inert={working}
       onPointerDownCapture={resumeDocumentSelection} onFocusCapture={resumeDocumentSelection} onKeyDownCapture={resumeDocumentSelection}>

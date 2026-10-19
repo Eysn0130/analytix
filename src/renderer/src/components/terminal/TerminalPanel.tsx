@@ -19,6 +19,12 @@ import {
   TERMINAL_DEFAULT_COLS,
   TERMINAL_DEFAULT_ROWS
 } from '@shared/terminal'
+import {
+  WorkspaceViewerHeader,
+  WorkspaceViewerIconButton,
+  WorkspaceViewerMenu,
+  type WorkspaceViewerControls
+} from '../workbench/WorkspaceViewerHeader'
 import { TerminalOutputScheduler } from './terminal-output-scheduler'
 
 type Props = {
@@ -28,6 +34,7 @@ type Props = {
   focusRequest?: number
   /** Hidden workspace tabs retain their sessions and output. */
   interactive?: boolean
+  viewerControls?: WorkspaceViewerControls
 }
 
 type TerminalTab = {
@@ -179,7 +186,7 @@ function resolveTerminalTheme(container: HTMLElement | null) {
   }
 }
 
-export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focusRequest = 0, interactive = true }: Props): ReactElement {
+export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focusRequest = 0, interactive = true, viewerControls }: Props): ReactElement {
   const { t } = useTranslation('common')
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -528,9 +535,12 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focus
     <aside
       className={`ds-no-drag ds-surface-strong flex min-h-0 flex-col overflow-hidden text-ds-ink ${className}`}
     >
-      <div className="flex h-11 shrink-0 items-center border-b border-ds-border-muted bg-ds-card/92 text-ds-ink backdrop-blur-xl">
-        <div
-          className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto px-3 pt-2"
+      <WorkspaceViewerHeader
+        title={t('terminalPanelTitle')}
+        viewerControls={interactive ? viewerControls : undefined}
+        titleControl={<div
+          className="flex min-w-0 flex-1 items-center gap-1"
+          data-viewer-session-tabs
           role="tablist"
           aria-label={t('terminalPanelTitle')}
           onPointerDownCapture={openActiveTabContextMenuOnSecondaryPointer}
@@ -541,9 +551,9 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focus
             return (
               <div
                 key={tab.id}
-                className={`group flex h-8 max-w-[220px] shrink-0 items-center rounded-t-[10px] text-[13px] font-medium transition ${
+                className={`group flex h-9 max-w-[220px] shrink-0 items-center rounded-full text-[13px] font-medium transition ${
                   active
-                    ? 'ds-surface-strong border border-b-transparent border-ds-border-muted text-ds-ink shadow-sm'
+                    ? 'ds-surface-strong border border-ds-border-muted text-ds-ink shadow-sm'
                     : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
                 }`}
                 onContextMenu={(event) => openTabContextMenu(event, tab.id)}
@@ -580,63 +590,69 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focus
                     onContextMenu={(event) => openTabContextMenu(event, tab.id)}
                     className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left"
                   >
-                    <TerminalSquare className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+                    <TerminalSquare aria-hidden="true" className="h-4 w-4 shrink-0" strokeWidth={1.8} />
                     <span className="truncate">{getTabTitle(tab)}</span>
                   </button>
                 )}
                 {tabs.length > 1 ? (
-                  <button
-                    type="button"
-                    aria-label={t('terminalCloseTab')}
-                    title={t('terminalCloseTab')}
+                  <WorkspaceViewerIconButton
+                    compact
+                    label={t('terminalCloseTab')}
                     onClick={(event) => {
                       event.stopPropagation()
                       handleCloseTab(tab.id)
                     }}
-                    className="mr-2 rounded-full p-0.5 text-ds-faint opacity-0 transition hover:bg-ds-hover hover:text-ds-ink group-hover:opacity-100"
+                    className="mr-0.5 text-ds-faint opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
                   >
-                    <X className="h-3.5 w-3.5" strokeWidth={1.8} />
-                  </button>
+                    <X aria-hidden="true" strokeWidth={1.8} />
+                  </WorkspaceViewerIconButton>
                 ) : null}
               </div>
             )
           })}
-          <button
-            type="button"
+        </div>}
+        actions={<>
+          <WorkspaceViewerIconButton
+            label={t('terminalNewTab')}
             onClick={handleNewTab}
             disabled={tabs.length >= MAX_RENDERER_TABS}
-            className="mb-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label={t('terminalNewTab')}
-            title={t('terminalNewTab')}
           >
-            <Plus className="h-4 w-4" strokeWidth={1.8} />
-          </button>
-        </div>
-        <div className="flex shrink-0 items-center gap-1 px-3">
-          <button
-            type="button"
+            <Plus aria-hidden="true" strokeWidth={1.8} />
+          </WorkspaceViewerIconButton>
+          <WorkspaceViewerIconButton
+            label={t('terminalRestart')}
             onClick={() => void handleRestart()}
-            className="rounded-full p-1.5 text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
-            aria-label={t('terminalRestart')}
-            title={t('terminalRestart')}
+            disabled={!activeTab}
           >
-            <RotateCw className="h-4 w-4" strokeWidth={1.75} />
-          </button>
-        </div>
-        {interactive && contextMenu ? (
-          createPortal(
-            <TerminalTabContextMenu
-              state={contextMenu}
-              tabCount={tabs.length}
-              onRename={() => startRenameTab(contextMenu.tabId)}
-              onCloseOthers={() => handleCloseOtherTabs(contextMenu.tabId)}
-              onCloseAll={handleCloseAllTabs}
-              t={t}
-            />,
-            document.body
-          )
-        ) : null}
-      </div>
+            <RotateCw aria-hidden="true" strokeWidth={1.75} />
+          </WorkspaceViewerIconButton>
+          <WorkspaceViewerMenu label={t('terminalTabMenuTitle')} ownerKey={activeTabId}
+            enabled={interactive && Boolean(activeTab)}>
+            <div data-workbench-terminal-menu className="flex min-w-0 flex-col gap-0.5">
+              <TerminalTabMenuActions
+                tabCount={tabs.length}
+                onRename={() => activeTab && startRenameTab(activeTab.id)}
+                onCloseOthers={() => activeTab && handleCloseOtherTabs(activeTab.id)}
+                onCloseAll={handleCloseAllTabs}
+                t={t}
+              />
+            </div>
+          </WorkspaceViewerMenu>
+        </>}
+      />
+      {interactive && contextMenu ? (
+        createPortal(
+          <TerminalTabContextMenu
+            state={contextMenu}
+            tabCount={tabs.length}
+            onRename={() => startRenameTab(contextMenu.tabId)}
+            onCloseOthers={() => handleCloseOtherTabs(contextMenu.tabId)}
+            onCloseAll={handleCloseAllTabs}
+            t={t}
+          />,
+          document.body
+        )
+      ) : null}
 
       <div className="ds-surface-strong relative min-h-0 flex-1 overflow-hidden px-3 py-3">
         <div ref={containerRef} className="h-full w-full" key={activeTab?.id} />
@@ -645,25 +661,27 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focus
             <div>
               <div className="text-[13px] font-semibold text-red-400">{t('terminalUnavailable')}</div>
               <div className="mt-2 max-w-sm text-[12px] leading-5 text-zinc-400">{error}</div>
-              <button
-                type="button"
+              <WorkspaceViewerIconButton
+                label={t('terminalRestart')}
                 onClick={() => void handleRestart()}
-                className="mt-4 rounded-full bg-ds-subtle px-3 py-1.5 text-[12px] font-semibold text-ds-ink transition hover:bg-ds-hover"
+                className="mt-4 !w-auto px-3 text-[12px] font-semibold"
               >
-                {t('terminalRestart')}
-              </button>
+                <RotateCw aria-hidden="true" strokeWidth={1.75} />
+                <span>{t('terminalRestart')}</span>
+              </WorkspaceViewerIconButton>
             </div>
           </div>
         ) : null}
         {exited && !error ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-            <button
-              type="button"
+            <WorkspaceViewerIconButton
+              label={t('terminalRestart')}
               onClick={() => void handleRestart()}
-              className="pointer-events-auto rounded-full bg-ds-subtle px-3 py-1.5 text-[12px] font-semibold text-ds-ink shadow-lg backdrop-blur transition hover:bg-ds-hover"
+              className="pointer-events-auto !h-auto !w-auto px-3 py-1.5 text-[12px] font-semibold shadow-lg backdrop-blur"
             >
-              {t('terminalExitMessage')}
-            </button>
+              <RotateCw aria-hidden="true" strokeWidth={1.75} />
+              <span>{t('terminalExitMessage')}</span>
+            </WorkspaceViewerIconButton>
           </div>
         ) : null}
       </div>
@@ -686,10 +704,6 @@ function TerminalTabContextMenu({
   onCloseAll: () => void
   t: (key: string, options?: Record<string, unknown>) => string
 }): ReactElement {
-  const run = (action: () => void): void => {
-    action()
-  }
-
   return (
     <div
       role="menu"
@@ -700,25 +714,39 @@ function TerminalTabContextMenu({
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
+      <TerminalTabMenuActions tabCount={tabCount} onRename={onRename} onCloseOthers={onCloseOthers} onCloseAll={onCloseAll} t={t} />
+    </div>
+  )
+}
+
+function TerminalTabMenuActions({ tabCount, onRename, onCloseOthers, onCloseAll, t }: {
+  tabCount: number
+  onRename: () => void
+  onCloseOthers: () => void
+  onCloseAll: () => void
+  t: (key: string, options?: Record<string, unknown>) => string
+}): ReactElement {
+  return (
+    <>
       <TerminalTabContextMenuItem
-        icon={<PencilLine className="h-3.5 w-3.5" strokeWidth={1.9} />}
+        icon={<PencilLine aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />}
         label={t('terminalRenameTab')}
-        onClick={() => run(onRename)}
+        onClick={onRename}
       />
       <div className="my-1 h-px bg-ds-border-muted" />
       <TerminalTabContextMenuItem
-        icon={<PanelRightClose className="h-3.5 w-3.5" strokeWidth={1.9} />}
+        icon={<PanelRightClose aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />}
         label={t('terminalCloseOtherTabs')}
         disabled={tabCount <= 1}
-        onClick={() => run(onCloseOthers)}
+        onClick={onCloseOthers}
       />
       <TerminalTabContextMenuItem
-        icon={<PanelsTopLeft className="h-3.5 w-3.5" strokeWidth={1.9} />}
+        icon={<PanelsTopLeft aria-hidden="true" className="h-4 w-4" strokeWidth={1.9} />}
         label={t('terminalCloseAllTabs')}
         danger
-        onClick={() => run(onCloseAll)}
+        onClick={onCloseAll}
       />
-    </div>
+    </>
   )
 }
 
@@ -736,19 +764,19 @@ function TerminalTabContextMenuItem({
   onClick: () => void
 }): ReactElement {
   return (
-    <button
-      type="button"
+    <WorkspaceViewerIconButton
       role="menuitem"
+      label={label}
       disabled={disabled}
       onClick={onClick}
-      className={`flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`!w-full !justify-start px-2 text-left ${
         danger
-          ? 'text-red-600 hover:bg-red-500/10 dark:text-red-300'
-          : 'text-ds-ink hover:bg-[var(--ds-sidebar-row-hover)]'
+          ? '!text-red-600 hover:!bg-red-500/10 dark:!text-red-300'
+          : ''
       }`}
     >
       <span className="shrink-0 text-current">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-    </button>
+    </WorkspaceViewerIconButton>
   )
 }

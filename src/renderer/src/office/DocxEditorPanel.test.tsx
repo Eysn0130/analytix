@@ -29,7 +29,14 @@ let root:Root,container:HTMLDivElement
 const submit=vi.fn(),prepare=vi.fn(()=>true)
 async function render(view:DocxEditorView,visible=true,fileActions?:Parameters<typeof DocxEditorPanel>[0]['fileActions']){useDocxEditorStore.setState({views:{[view.editorId]:view}});await act(async()=>root.render(createElement(DocxEditorPanel,{view,visible,onSubmitPrompt:submit,onPrepareDraft:prepare,fileActions})))}
 async function flush(){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,25))})}
-async function click(label:string){const button=[...container.querySelectorAll('button')].find(b=>b.textContent===label)!;expect(button).toBeTruthy();await act(async()=>button.click());await flush()}
+function namedButton(label:string){return [...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.getAttribute('aria-label')===label||b.textContent===label)}
+async function click(label:string){
+  let button=namedButton(label)
+  if(!button&&['放弃工作副本','撤销已保存修改','完成已保存撤销'].includes(label)){
+    await act(async()=>namedButton('更多 Word 操作')!.click());button=namedButton(label)
+  }
+  expect(button).toBeTruthy();await act(async()=>button!.click());await flush()
+}
 beforeEach(()=>{
   vi.stubGlobal('innerWidth',1280)
   vi.stubGlobal('__ANALYTIX_DOCX_WORKER_PATHS__',workerPaths)
@@ -120,7 +127,7 @@ it('queries a lost applied ACK without applying the replacement twice',async()=>
   await render({...view,version:1,phase:'editing',dirty:true})
   await click('查询结果')
   expect(state.replace).toHaveBeenCalledTimes(1)
-  expect([...container.querySelectorAll('button')].find(b=>b.textContent==='保存')?.disabled).toBe(false)
+  expect(namedButton('保存')?.disabled).toBe(false)
 })
 it('invalidates an exported snapshot when a queued upstream mutation arrives during Save',async()=>{
   const view={...base,phase:'editing' as const,dirty:true}
@@ -524,7 +531,7 @@ it('keeps SDK local undo separate from receipt-backed saved undo and reloads con
   state.request.mockResolvedValue({ok:true,view:restored})
   await render(saved)
   const source=(state.ready.mock.calls.at(-1)![0] as {document:File}).document
-  expect([...container.querySelectorAll('button')].find(b=>b.textContent==='撤销工作副本编辑')?.disabled).toBe(true)
+  expect(namedButton('撤销工作副本编辑')?.disabled).toBe(true)
   await click('撤销已保存修改')
   expect(state.request).toHaveBeenCalledWith({action:'undoChange',editorId:base.editorId,version:0})
   expect(state.execute).not.toHaveBeenCalled()
@@ -551,4 +558,38 @@ it('reloads a confirmed undo after status even when the pending view already car
   const source=(state.ready.mock.calls.at(-1)![0] as {document:File}).document
   expect([...new Uint8Array(await source.arrayBuffer())]).toEqual([80,75,3,4,7])
   expect(state.request.mock.calls.filter(([input])=>input.action==='undoChange')).toHaveLength(1)
+})
+
+
+it('uses one icon operation row and keeps destructive and saved undo actions in an identity-scoped menu',async()=>{
+  await render({...base,canUndo:true})
+  const header=container.querySelector('[data-workspace-viewer-header]')!
+  expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+  expect(header.textContent).toContain('report.docx')
+  for(const button of header.querySelectorAll<HTMLButtonElement>('button')){
+    expect(button.getAttribute('aria-label')).toBeTruthy()
+    expect(button.querySelector('svg')).not.toBeNull()
+    expect(button.textContent).toBe('')
+  }
+  expect(namedButton('保存')!.disabled).toBe(true)
+  expect(namedButton('放弃工作副本')).toBeUndefined()
+  await click('更多 Word 操作')
+  expect(namedButton('放弃工作副本')).toBeDefined()
+  expect(namedButton('撤销已保存修改')!.disabled).toBe(false)
+  expect(state.request).not.toHaveBeenCalled()
+  await render({...base,editorId:'00000000-0000-4000-8000-000000000002',path:'/workspace/other.docx'})
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  expect(state.request).not.toHaveBeenCalled()
+})
+
+it('does not announce a saved receipt while editing a clean working copy or after a failed save',async()=>{
+  const editing={...base,phase:'editing' as const}
+  await render(editing)
+  expect(container.querySelector('[data-workspace-viewer-header]')?.textContent).toContain('工作副本编辑中')
+  state.request.mockResolvedValue({ok:false,error:'forbidden',view:editing})
+  await click('保存')
+  const header=container.querySelector('[data-workspace-viewer-header]')!
+  expect(state.request).toHaveBeenCalledWith(expect.objectContaining({action:'save',editorId:base.editorId}))
+  expect(header.querySelector('[role="alert"]')?.textContent).toBeTruthy()
+  expect(header.textContent).not.toContain('已保存')
 })
