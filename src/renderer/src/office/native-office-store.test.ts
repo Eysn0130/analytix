@@ -190,7 +190,7 @@ it.each([
   ['forbidden','nativeOfficeForbidden'],['conflict','workspaceWordNameConflict'],['engine_unavailable','workspaceWordCreateFailed']
 ])('maps creation error %s without blanket filename advice', (error,key)=>{expect(nativeOfficeCreateErrorKey(error)).toBe(key)})
 
-const bookCell={sheet:0,column:0,row:0,text:'12',value:12,formula:'12',valueType:'number' as const,numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
+const bookCell:NativeWorkbookCellDraft['cell']={sheet:0,column:0,row:0,text:'12',value:12,formula:'12',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
 const book:NativeOfficeView={...view,path:'/workspace/book.xlsx',kind:'xlsx',workbookEditing:{editable:true}}
 const bookDraftKey=nativeWorkbookDraftKey('/workspace',book.path,'thread-a')
 function workbookDraft(overrides:Partial<NativeWorkbookCellDraft>={}):NativeWorkbookCellDraft {

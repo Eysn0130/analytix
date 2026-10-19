@@ -11,10 +11,11 @@ const {beginShutdown,releaseShutdown}=vi.hoisted(()=>({beginShutdown:vi.fn(),rel
 vi.mock('../write/write-workspace-store',()=>({useWriteWorkspaceStore:{getState:()=>({beginShutdown})}}))
 
 type Cells = Extract<NativeOfficeSelection,{kind:'cells'}>
+const editableCell:NativeWorkbookCellDraft['cell']={sheet:0,column:0,row:0,text:'12',value:12,formula:'12',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
 const selection:Cells = {kind:'cells',documentId:'a'.repeat(64),version:'b'.repeat(64),changeSequence:0,token:'cell-selection-1',
   scope:'sheet-range-address-at-version-and-change-sequence',text:'12',capture:{capturedCharacters:2,totalCharacters:2,unit:'utf-16',complete:true,truncated:false},
   ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],
-  cells:[{sheet:0,column:0,row:0,text:'12',value:12,formula:'12',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}]}
+  cells:[editableCell]}
 const view:NativeOfficeView = {objectId:selection.documentId,path:'/synthetic/book.xlsx',kind:'xlsx',revision:selection.version,
   dirty:false,status:'ready',changeSequence:0,editing:true,workbookEditing:{editable:true},selection}
 const workspace='/synthetic',threadId='thread',draftKey=nativeWorkbookDraftKey(workspace,view.path,threadId)
@@ -22,7 +23,7 @@ const targetKey=nativeOfficeTargetKey({workspace,path:view.path})
 function receipt(type:'number'|'text'='text',value='001'):NativeOfficeView {
   return {...view,revision:'c'.repeat(64),selection:undefined,recovery:{pending:null,current:{version:3,origin:'manual',changeId:'d'.repeat(64),
     threadId:'thread',baseRevision:view.revision,revision:'c'.repeat(64),status:'committed',
-    workbook:{before:{...selection.ranges[0],cells:selection.cells!},after:{...selection.ranges[0],cells:[{...selection.cells![0],text:value,formula:value,valueType:type,value:type==='number'?Number(value):0}]},results:[value]},
+    workbook:{before:{...selection.ranges[0],cells:[editableCell]},after:{...selection.ranges[0],cells:[{...editableCell,text:value,formula:value,valueType:type,value:type==='number'?Number(value):0}]},results:[value]},
     saveOperationId:'save-operation',undoOperationId:'undo-operation',canUndo:true,canCancel:false,canRetryUndo:false,canResume:false,createdAt:'',savedAt:''}}}
 }
 let root:Root|null, container:HTMLDivElement
@@ -283,7 +284,7 @@ describe('retained workbook draft shutdown guard',()=>{
   it('rejects first input and a new draft racing an already frozen clean shutdown',async()=>{
     const handler=createWriteShutdownHandler(),requestId='workbook-first-input-frozen'
     const candidate:NativeWorkbookCellDraft={id:'draft-after-freeze',workspace,path:view.path,threadId,objectId:view.objectId,
-      revision:view.revision,sheetName:'Sheet1',cell:structuredClone(selection.cells![0]),type:'text',value:'forbidden',changed:true}
+      revision:view.revision,sheetName:'Sheet1',cell:structuredClone(editableCell),type:'text',value:'forbidden',changed:true}
     try {
       await render()
       let result!:Awaited<ReturnType<typeof handler>>
