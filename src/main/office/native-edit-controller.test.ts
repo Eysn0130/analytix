@@ -30,6 +30,8 @@ function setup(typed = false, presentation = false) {
   const selectionCalls:string[]=[]
   let scope:any, loseDecision=false, acceptedOperation:string|undefined, replacementText='proposed'
   let candidateOverride:((candidate:any)=>any)|undefined, duringAccept:(()=>void)|undefined
+  let preApprovalFailure:'conflict'|'lost'|undefined, recoveryReadFailure=false, recoveryCurrent:any
+  let duringRecovery:(()=>void)|undefined
   const decisionInputs:Record<string,unknown>[]=[]
   let openGate:Promise<void>|undefined, releaseOpen:(()=>void)|undefined
   const pkg:PluginPackageView={packageId:presentation?'analytix-presentations':typed?'analytix-spreadsheets':'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','commit-object','object-status','capture-selection','selection-read','proposal-read','proposal-accept','proposal-reject','selection-revoke','object-recovery','undo-change','cancel-change','resume-change']}
@@ -51,8 +53,10 @@ function setup(typed = false, presentation = false) {
       if(r.operation==='selection-read'){selectionCalls.push(r.operation);return {ok:true,output:selectionReadError?{ok:false,code:'scope_invalid',message:'stale'}:{ok:true,scope:{...scope,...scopeOverride}}}}
       if(r.operation==='proposal-read')return {ok:true,output:{ok:true,proposals:[{proposalId,status:'proposed',parts:[{kind:'literal',text:'proposed'}]}],localReviews:[{proposalId,beforeText:'selected raw field',afterText:'proposed raw field'}]}}
       if(r.operation==='object-recovery'){
+        if(decisionInputs.length&&recoveryReadFailure)throw Error('recovery reply lost')
+        if(decisionInputs.length)duringRecovery?.()
         const owned=persisted && (persisted.threadId===r.input.threadId || foreignRecovery) ? structuredClone(persisted) : null
-        return {ok:true,output:{ok:true,recovery:{current:owned?.revision&&!pendingCandidate?owned:null,pending:owned&&(!owned.revision||pendingCandidate)?owned:null}}}
+        return {ok:true,output:{ok:true,recovery:{current:owned?.revision&&!pendingCandidate?owned:recoveryCurrent??null,pending:owned&&(!owned.revision||pendingCandidate)?owned:null}}}
       }
       if(r.operation==='cancel-change'){
         cancelCalls++
@@ -64,6 +68,11 @@ function setup(typed = false, presentation = false) {
       if(r.operation==='selection-revoke'){revoked++;return {ok:true,output:{ok:true,revoked:true}}}
       if(r.operation==='proposal-accept'){
         decisionInputs.push(structuredClone(r.input))
+        if(preApprovalFailure){
+          const failure=preApprovalFailure;preApprovalFailure=undefined
+          if(failure==='lost')throw Error('accept reply lost before approval was discovered')
+          return {ok:true,output:{ok:false,code:'conflict',message:'Original changed before approval.'}}
+        }
         if(rejectNoop)return {ok:true,output:{ok:false,code:'proposal_invalid',message:'The proposal does not change the selected text.'}}
         if(acceptedOperation)expect(r.input.operationId).toBe(acceptedOperation)
         acceptedOperation=r.input.operationId as string
@@ -154,7 +163,9 @@ function setup(typed = false, presentation = false) {
   let controller=createController()
   const change=()=>{current={...current,changeSequence:current.changeSequence+1,dirty:true};onEvent({type:'changed',operationId:opened,documentId:objectId,version:current.version,state:{...current}})}
   const target=()=>({objectId,revision:current.version,expectedChangeSequence:current.changeSequence})
-  return {openRequest,trace,views,decisionInputs,candidateOverride:(value:(candidate:any)=>any)=>{candidateOverride=value},duringAccept:(value:()=>void)=>{duringAccept=value},changeReadbackAfterCommit:()=>{changeReadback=true},busyTyped:(value:boolean)=>{busyTyped=value},scopeOverride:(value:Record<string,unknown>)=>{scopeOverride=value},refuseSelectionRead:()=>{selectionReadError=true},selectionCalls,rejectFidelity:()=>{rejectFidelity=true},rejectText:()=>{rejectText=true},rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:(value=true)=>{failTyped=value},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
+  return {openRequest,trace,views,decisionInputs,
+    refuseBeforeApproval:(value:'conflict'|'lost'='conflict')=>{preApprovalFailure=value},failRecovery:()=>{recoveryReadFailure=true},seedRecoveryCurrent:(value:any)=>{recoveryCurrent=value},duringRecovery:(value:()=>void)=>{duringRecovery=value},
+    candidateOverride:(value:(candidate:any)=>any)=>{candidateOverride=value},duringAccept:(value:()=>void)=>{duringAccept=value},changeReadbackAfterCommit:()=>{changeReadback=true},busyTyped:(value:boolean)=>{busyTyped=value},scopeOverride:(value:Record<string,unknown>)=>{scopeOverride=value},refuseSelectionRead:()=>{selectionReadError=true},selectionCalls,rejectFidelity:()=>{rejectFidelity=true},rejectText:()=>{rejectText=true},rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:(value=true)=>{failTyped=value},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
 }
 test('native annotation preparation is explicit; persisted receipt advances revision, close unknown object never closes active',async()=>{
   const h=setup();expect((await h.controller.request(open)).ok).toBe(true)
@@ -612,6 +623,49 @@ test.each(['reply-lost','candidate-failed'] as const)('typed Agent retries the s
  expect(h.decisionInputs).toHaveLength(2);expect(h.decisionInputs[1]).toEqual(h.decisionInputs[0])
  expect(h.getCommitCalls()).toBe(1)
  expect(h.requests.some(r=>['replaceCells','export','ack'].includes(r.command))).toBe(false)
+})
+const previousWorkbookChange=(proposalId='7'.repeat(48),undone=false)=>({changeId:'8'.repeat(64),threadId,proposalId,
+ baseRevision:undone?revision:'6'.repeat(64),revision,status:undone?'undone':'committed',beforeText:'previous',afterText:'previous edit',
+ saveOperationId:'save_previous_0001',undoOperationId:'undo_previous_0001',canUndo:false,canCancel:false,canRetryUndo:false,canResume:false,createdAt:'',savedAt:''})
+test.each(['no-current','old-current','old-undone-current'] as const)('typed Agent releases its rejected decision after conflict with %s so discard can close',async(kind)=>{
+ const h=setup(true);h.refuseBeforeApproval()
+ if(kind!=='no-current')h.seedRecoveryCurrent(previousWorkbookChange(undefined,kind==='old-undone-current'))
+ expect(await applyProposal(h)).toMatchObject({ok:false,error:'conflict',view:{revision,saving:false}})
+ expect(h.getPrepared()).toBeUndefined();expect(h.controller.getView()?.recovery?.pending).toBeNull()
+ expect(await h.controller.request({action:'close',objectId,discard:true})).toEqual({ok:true,view:null})
+ expect(h.decisionInputs).toHaveLength(1);expect(h.getCommitCalls()).toBe(0);expect(h.getCancelCalls()).toBe(0)
+})
+test.each(['no-current','old-current','old-undone-current'] as const)('typed Agent can reference again after conflict with %s using a new decision operation',async(kind)=>{
+ const h=setup(true);h.refuseBeforeApproval()
+ if(kind!=='no-current')h.seedRecoveryCurrent(previousWorkbookChange(undefined,kind==='old-undone-current'))
+ expect(await applyProposal(h)).toMatchObject({ok:false,error:'conflict'})
+ expect(await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:true})).toMatchObject({ok:true})
+ expect(await h.controller.request({action:'acceptProposal',...h.target(),scopeId:h.scopeId,proposalId:h.proposalId})).toMatchObject({ok:true,view:{revision:hash(edited),canUndo:true}})
+ expect(h.decisionInputs).toHaveLength(2);expect(h.decisionInputs[1].operationId).not.toBe(h.decisionInputs[0].operationId)
+ expect(h.getCommitCalls()).toBe(1)
+ expect(h.requests.some(r=>['replaceCells','export','ack'].includes(r.command))).toBe(false)
+})
+test.each(['query-failed','reply-unknown','matching-current'] as const)('typed Agent retains its decision after %s rather than treating missing evidence as no approval',async(kind)=>{
+ const h=setup(true);h.refuseBeforeApproval(kind==='reply-unknown'?'lost':'conflict')
+ if(kind==='query-failed')h.failRecovery()
+ if(kind==='matching-current')h.seedRecoveryCurrent(previousWorkbookChange(h.proposalId))
+ const result=await applyProposal(h)
+ expect(result).toMatchObject({ok:false,error:kind==='reply-unknown'?'unknown':'conflict',view:{revision,saving:false}})
+ expect(await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:true})).toMatchObject({ok:false,error:'unsaved_changes'})
+ expect(await h.controller.request({action:'close',objectId,discard:true})).toMatchObject({ok:false,error:'unknown'})
+ expect(h.decisionInputs).toHaveLength(1);expect(h.getCommitCalls()).toBe(0)
+})
+test('typed Agent does not release a decision after its document owner is disposed during recovery',async()=>{
+ const h=setup(true);h.refuseBeforeApproval()
+ const decisionKey=`${h.scopeId}:${h.proposalId}:true`,deleted=vi.spyOn(Map.prototype,'delete')
+ let shutdown:Promise<void>|undefined
+ h.duringRecovery(()=>{shutdown=h.controller.destroy()})
+ try{
+  expect(await applyProposal(h)).toMatchObject({ok:false,error:'conflict'})
+  expect(deleted.mock.calls.some(([key])=>key===decisionKey)).toBe(false)
+  await shutdown
+ }finally{deleted.mockRestore()}
+ expect(h.decisionInputs).toHaveLength(1);expect(h.getCommitCalls()).toBe(0)
 })
 test('typed Agent rejects a changed native sequence while Core prepares the candidate',async()=>{
  const h=setup(true);h.duringAccept(()=>h.change())

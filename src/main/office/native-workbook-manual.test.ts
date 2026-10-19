@@ -18,21 +18,23 @@ const after={...before,cells:[...before.cells.slice(0,2),{...cell(2,0),text:'3',
 const workbook={before,after,results:['1','2','3']}
 const bounds={x:0,y:0,width:600,height:400}
 type Fault='prepare-lost'|'candidate-failed'|'candidate-hash'|'candidate-length'|'candidate-change'|'candidate-save'|'candidate-base'|'candidate-kind'|
+  'prepare-rejected'|'prepare-rejected-old-current'|'prepare-rejected-undone-current'|'prepare-rejected-new-current'|'prepare-rejected-query-failed'|'prepare-lost-empty'|'candidate-hash-current'|
   'late-capture-changed'|'late-selection-changed'|'commit-unknown'|'commit-lost-committed'|'commit-rejected'|'commit-outer'|
   'commit-invalid-outer'|'commit-invalid-inner'|'commit-conflict'|'readback-conflict'|'reload-failed'
 function harness(fault?:Fault,eligible=true,innerCode:'invalid_request'|'not_text'|'too_large'|'persistence_failure'='invalid_request') {
   const calls:NativeOfficeEngineRequest[]=[],hostCalls:PluginPackageHostRequest[]=[]
   let sequence=0,version=base,persistedBytes=original,saved=false,counter=0,prepared=false,destroyed=0,created=0,reloadFailed=false,captures=0,prepareAttempts=0
   let partial=false,scope:Record<string,unknown>|undefined
+  let preparedWorkbook=workbook
   const selection=()=>({documentId:objectId,version,changeSequence:sequence,token:'selected_cell_token',kind:'cells',scope:'sheet-range-address-at-version-and-change-sequence',text:'0',
     ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:partial?0:2,endRow:partial?1048575:2}],cells:[cell(partial?0:2,0)],capture:{capturedCharacters:1,totalCharacters:1,truncated:partial,unit:'utf-16',complete:!partial}})
-  const change=()=>({version:3,origin:'manual',changeId,threadId:'thread_main',baseRevision:base,revision:saved?next:'',status:saved?'committed':'prepared',workbook,
+  const change=()=>({version:3,origin:'manual',changeId,threadId:'thread_main',baseRevision:base,revision:saved?next:'',status:saved?'committed':'prepared',workbook:preparedWorkbook,
     saveOperationId:'save_manual_cell',undoOperationId:'undo_manual_cell',canUndo:saved,canCancel:!saved,canRetryUndo:false,canResume:false,createdAt:'',savedAt:''})
   const candidate=():unknown=>{
     const value:NativeWorkbookCandidate={changeId,saveOperationId:'save_manual_cell',baseRevision:base,
       content:{encoding:'base64',kind:'xlsx',byteLength:candidateBytes.byteLength,sha256:next,data:Buffer.from(candidateBytes).toString('base64')}}
     switch(fault){
-      case 'candidate-hash':return {...value,content:{...value.content,sha256:'f'.repeat(64)}}
+      case 'candidate-hash':case 'candidate-hash-current':return {...value,content:{...value.content,sha256:'f'.repeat(64)}}
       case 'candidate-length':return {...value,content:{...value.content,byteLength:candidateBytes.byteLength+1}}
       case 'candidate-change':return {...value,changeId:'f'.repeat(64)}
       case 'candidate-save':return {...value,saveOperationId:'save_another_cell'}
@@ -67,16 +69,39 @@ function harness(fault?:Fault,eligible=true,innerCode:'invalid_request'|'not_tex
       let output:unknown
       switch(r.operation){
         case 'open-object':output={ok:true,document:{objectId,sessionId,path:'/workspace/simple.xlsx',revision:digest(persistedBytes),content:Buffer.from(persistedBytes).toString('base64')},workbookEditing:{editable:eligible,...(!eligible?{reason:'unsupported_workbook'}:{})}};break
-        case 'object-recovery':output={ok:true,recovery:{current:saved?change():null,pending:prepared&&!saved?change():null}};break
+        case 'object-recovery':
+          if(prepareAttempts>0&&fault==='prepare-rejected-query-failed')throw Error('lost recovery reply')
+          if(!saved&&['prepare-rejected-old-current','prepare-rejected-undone-current'].includes(fault??'')){
+            const undone=fault==='prepare-rejected-undone-current'
+            output={ok:true,recovery:{current:{...change(),changeId:'8'.repeat(64),baseRevision:undone?base:'9'.repeat(64),revision:base,status:undone?'undone':'committed',
+              saveOperationId:'save_previous_cell',undoOperationId:'undo_previous_cell',canUndo:!undone,canCancel:false},pending:null}};break
+          }
+          if(prepareAttempts>0&&fault==='prepare-rejected-new-current'){
+            output={ok:true,recovery:{current:{...change(),changeId:'8'.repeat(64),revision:'',status:'unknown',canUndo:false,canCancel:false},pending:null}};break
+          }
+          // A fault response for this attempt must not be mistaken for proof
+          // that its durable approval is absent, even when pending is null.
+          if(prepareAttempts>0&&fault==='candidate-hash-current'){
+            output={ok:true,recovery:{current:{...change(),revision:next,status:'committed',canUndo:true,canCancel:false},pending:null}};break
+          }
+          output={ok:true,recovery:{current:saved?change():null,pending:prepared&&!saved?change():null}};break
         case 'capture-selection':{const {text,...input}=r.input;scope={...input,scopeId:'f'.repeat(48),parts:[{kind:'literal',text}]};output={ok:true,scope};break}
         case 'selection-read':output={ok:true,scope};break
         case 'proposal-read':output={ok:true,proposals:[],localReviews:[]};break
         case 'plan-workbook-manual':output={ok:true,dependencyBounds:{sheet:0,startColumn:0,endColumn:0,startRow:0,endRow:2}};break
         case 'prepare-workbook-manual':
           prepared=true;prepareAttempts++
+          if(prepareAttempts===1&&['prepare-rejected','prepare-rejected-old-current','prepare-rejected-undone-current','prepare-rejected-new-current','prepare-rejected-query-failed'].includes(fault??'')){
+            prepared=false;output={ok:false,code:'conflict',message:'Preparation was explicitly rejected.'};break
+          }
+          if(fault==='prepare-lost-empty'&&prepareAttempts===1){prepared=false;throw Error('lost prepare reply with no discovered reservation')}
           if(fault==='prepare-lost'&&prepareAttempts===1)throw Error('lost prepare reply')
           if(fault==='candidate-failed'&&prepareAttempts===1){output={ok:false,code:'persistence_failure',message:'PRIVATE_CANDIDATE_MESSAGE_CANARY'};break}
-          output={ok:true,workbookManual:{version:3,origin:'manual',changeId,baseRevision:base,saveOperationId:'save_manual_cell',undoOperationId:'undo_manual_cell',workbook,candidate:candidate()}};break
+          if((r.input.edit as {type:string}).type==='number'){
+            const value=(r.input.edit as {value:number}).value
+            preparedWorkbook={before,after:{...before,cells:[...before.cells.slice(0,2),cell(2,value)]},results:['1','2',String(value)]}
+          }
+          output={ok:true,workbookManual:{version:3,origin:'manual',changeId,baseRevision:base,saveOperationId:'save_manual_cell',undoOperationId:'undo_manual_cell',workbook:preparedWorkbook,candidate:candidate()}};break
         case 'commit-object':
           if(fault==='commit-unknown')throw Error('lost reply')
           if(fault==='commit-outer')return {ok:false,code:'adapter_unavailable',message:'PRIVATE_COMMIT_MESSAGE_CANARY'}
@@ -96,7 +121,8 @@ function harness(fault?:Fault,eligible=true,innerCode:'invalid_request'|'not_tex
     }})
   const open=()=>controller.request({action:'open',workspace:'/workspace',path:'simple.xlsx',threadId:'thread_main',bounds})
   const edit=()=>controller.request({action:'editWorkbookCell',objectId,revision:base,expectedChangeSequence:0,threadId:'thread_main',selectionToken:'selected_cell_token',edit:{type:'formula',formula:'=SUM(A1:A2)'}})
-  return {controller,calls,hostCalls,open,edit,setPartial:()=>{partial=true},get destroyed(){return destroyed},get created(){return created}}
+  const differentEdit=()=>controller.request({action:'editWorkbookCell',objectId,revision:base,expectedChangeSequence:0,threadId:'thread_main',selectionToken:'selected_cell_token',edit:{type:'number',value:42}})
+  return {controller,calls,hostCalls,open,edit,differentEdit,setPartial:()=>{partial=true},get destroyed(){return destroyed},get created(){return created}}
 }
 describe('protected local workbook manual controller',()=>{
   it('revalidates the original native target and commits the exact Core candidate before readonly reopen',async()=>{
@@ -182,6 +208,33 @@ describe('protected local workbook manual controller',()=>{
     expect(changed.ok).toBe(false)
     expect(h.hostCalls.filter(r=>r.action==='invoke'&&r.operation==='prepare-workbook-manual')).toHaveLength(1)
     expect(h.hostCalls.some(r=>r.action==='invoke'&&r.operation==='commit-object')).toBe(false)
+  })
+  it.each(['prepare-rejected','prepare-rejected-old-current','prepare-rejected-undone-current'] as const)('releases %s only after successful recovery proves no new reservation so discard can close',async fault=>{
+    const h=harness(fault);await h.open()
+    expect(await h.edit()).toMatchObject({ok:false,error:'conflict',view:{revision:base,saving:false}})
+    expect(h.controller.getView()?.recovery?.pending).toBeNull()
+    expect(await h.controller.request({action:'close',objectId,discard:true})).toEqual({ok:true,view:null})
+    expect(h.hostCalls.filter(r=>r.action==='invoke'&&r.operation==='prepare-workbook-manual')).toHaveLength(1)
+    expect(h.hostCalls.some(r=>r.action==='invoke'&&['commit-object','cancel-change'].includes(r.operation))).toBe(false)
+  })
+  it.each(['prepare-rejected','prepare-rejected-old-current','prepare-rejected-undone-current'] as const)('allows a different new edit after %s with no retained reservation',async fault=>{
+    const h=harness(fault);await h.open();expect((await h.edit()).error).toBe('conflict')
+    expect(await h.differentEdit()).toMatchObject({ok:true,view:{revision:next,status:'ready',saving:false}})
+    const preparations=h.hostCalls.filter(r=>r.action==='invoke'&&r.operation==='prepare-workbook-manual')
+    expect(preparations).toHaveLength(2)
+    const inputs=preparations.flatMap(r=>r.action==='invoke'?[r.input]:[])
+    expect(inputs[1].operationId).not.toBe(inputs[0].operationId)
+    expect(inputs[1].edit).toEqual({type:'number',value:42})
+    expect(h.hostCalls.filter(r=>r.action==='invoke'&&r.operation==='commit-object')).toHaveLength(1)
+  })
+  it.each(['prepare-rejected-query-failed','prepare-lost-empty','prepare-rejected-new-current','candidate-hash-current'] as const)('retains %s when recovery cannot prove this attempt absent',async fault=>{
+    const h=harness(fault);await h.open();expect((await h.edit()).ok).toBe(false)
+    expect(h.controller.getView()).toMatchObject({revision:base,saving:false})
+    expect(await h.controller.request({action:'close',objectId,discard:true})).toMatchObject({ok:false,error:'unknown'})
+    expect((await h.differentEdit()).ok).toBe(false)
+    expect(h.hostCalls.filter(r=>r.action==='invoke'&&r.operation==='prepare-workbook-manual')).toHaveLength(1)
+    expect(h.hostCalls.some(r=>r.action==='invoke'&&['commit-object','cancel-change'].includes(r.operation))).toBe(false)
+    expect(h.calls.some(r=>['replaceCells','export','ack'].includes(r.command))).toBe(false)
   })
   it.each(['invalid_request','not_text','too_large','persistence_failure'] as const)('retains Core %s diagnostics while preserving save_failed and the original revision',async code=>{
     vi.mocked(logNativeOfficeSaveFailure).mockClear()

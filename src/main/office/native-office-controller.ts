@@ -795,8 +795,42 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     // Preparation may already own a durable approval, but it has not submitted
     // bytes. A failed commit instead retains its exact pending operation.
     if (!document.pendingSave && !document.pendingRecovery) {
+      const owner = {sessionId:document.sessionId,openOperationId:document.openOperationId,surface:document.surface,
+        generationId:document.binding.generationId,threadId:document.threadId}
+      const attempt = document.pendingWorkbookPrepare, decision = document.pendingWorkbookDecision, approved = document.approvedChange
+      const key = decision ? `${decision.scopeId}:${decision.proposalId}:true` : undefined
+      const decisionOperation = key ? document.decisionOperations.get(key) : undefined
+      const oldCurrent = document.view.recovery?.current
+      const oldReceipt = oldCurrent ? {changeId:oldCurrent.changeId,saveOperationId:oldCurrent.saveOperationId,
+        baseRevision:oldCurrent.baseRevision,threadId:oldCurrent.threadId} : null
       document.view.saving = false
-      try { await recover(document, threadId) } catch { /* Keep the original uncertain preparation. */ }
+      let recovered = false
+      try { await recover(document, threadId); recovered = true } catch { /* Keep the original uncertain preparation. */ }
+      const recovery = document.view.recovery, current = recovery?.current
+      const sameOldReceipt = !!current && !!oldReceipt && current.changeId === oldReceipt.changeId &&
+        current.saveOperationId === oldReceipt.saveOperationId && current.baseRevision === oldReceipt.baseRevision &&
+        current.threadId === oldReceipt.threadId
+      const currentDecision = !!current && !!decision && 'proposalId' in current && current.proposalId === decision.proposalId
+      // Only explicit pre-commit refusals qualify. An unavailable/malformed
+      // response cannot establish whether preparation became durable.
+      const refused = error instanceof OfficeFailure && ['forbidden','conflict','unsupported_selection','stale_selection'].includes(error.code)
+      const sameOwner = !disposed && !document.closed && !document.failed && document.ready && !document.closePending &&
+        documents.get(document.view.objectId) === document && document.sessionId === owner.sessionId &&
+        document.openOperationId === owner.openOperationId && document.surface === owner.surface &&
+        document.binding.generationId === owner.generationId && owner.threadId === threadId && document.threadId === threadId
+      if (refused && recovered && recovery?.pending === null && (!current || sameOldReceipt && !currentDecision) &&
+        sameOwner && !approved && document.approvedChange === approved && !document.pendingSave && !document.pendingRecovery &&
+        document.pendingWorkbookPrepare === attempt && document.pendingWorkbookDecision === decision &&
+        (!decision || decisionOperation === decision.operationId && !!key && document.decisionOperations.get(key) === decisionOperation)) {
+        // A previous receipt (including an undo back to the same base) is not
+        // evidence that this attempt was persisted. Clear only these exact
+        // failed local owners; never erase an approval or another decision key.
+        if (attempt) delete document.pendingWorkbookPrepare
+        if (decision && key) {
+          delete document.pendingWorkbookDecision
+          document.decisionOperations.delete(key)
+        }
+      }
       publish()
     }
     if (error instanceof OfficeFailure && error.code === 'unavailable') fail('unknown')
