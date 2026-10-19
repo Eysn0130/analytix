@@ -73,7 +73,10 @@ function MountedDialog({
   return (
     <div
       className={`ui-dialog-mask${maskClassName ? ` ${maskClassName}` : ""}`}
-      onMouseDown={onClose}
+      onMouseDown={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
       role="presentation"
     >
       <section

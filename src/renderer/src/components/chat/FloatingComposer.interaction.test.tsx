@@ -8,6 +8,7 @@ import { buildThreadEventSink } from '../../store/chat-store-runtime'
 import { getProvider } from '../../agent/registry'
 import { dispatchAnalytixRuntimeEvent } from '../../agent/analytix-mapper'
 import { InputBar } from './InputBar'
+import { Dialog } from '../../data-analysis/components/overlay/Dialog'
 import * as capacityEstimates from '../../lib/context-capacity'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
 import { normalizeAppSettings, defaultModelProviderSettings, defaultAnalytixRuntimeSettings, normalizeAppBehaviorSettings,
@@ -88,6 +89,116 @@ describe('ordinary composer keyboard submission and busy follow-ups', () => {
     else Reflect.deleteProperty(Range.prototype, name)
   }))
   const editor = () => host.querySelector<HTMLElement>('[data-composer-prompt-editor] .ProseMirror')!
+  describe('composer autofocus and restored settings focus', () => {
+    let frames: Map<number, FrameRequestCallback>, nextFrame: number
+    const draft = 'Synthetic retained composer draft'
+    const focusComposer = () => floatingElement(false, false, {
+      input: draft, runtimeReady: false, hasActiveThread: false, voiceDictationEnabled: false
+    })
+    const flushFrame = async () => {
+      const pending = [...frames.values()]
+      frames.clear()
+      await act(async () => { for (const callback of pending) callback(0) })
+    }
+    beforeEach(async () => {
+      // Dispose the outer fixture before replacing its timer-backed rAF implementation.
+      await act(async () => root.render(null))
+      frames = new Map(); nextFrame = 0
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.set(++nextFrame, callback)
+        return nextFrame
+      })
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
+      useChatStore.setState({ activeThreadId: null, activeThreadGoal: null, route: 'chat' })
+    })
+    function SettingsFocusFixture() {
+      const route = useChatStore(state => state.route)
+      return createElement('div', null,
+        createElement('div', { inert: route === 'settings', 'data-settings-background': '' },
+          createElement('button', { 'data-settings-opener': '',
+            onClick: () => useChatStore.getState().openSettings() }, 'Settings'),
+          focusComposer()),
+        route === 'settings' ? createElement(Dialog, {
+          open: true, title: 'Settings', closeAriaLabel: 'Close settings',
+          onClose: () => useChatStore.getState().setRoute('chat'),
+          children: createElement('p', null, 'Synthetic settings content')
+        }) : null)
+    }
+    it.each(['Escape', 'close', 'backdrop'] as const)('keeps the focused Settings opener after %s and all queued focus frames', async method => {
+      await act(async () => root.render(createElement(SettingsFocusFixture)))
+      await flushFrame(); await flushFrame()
+      const opener = host.querySelector<HTMLButtonElement>('[data-settings-opener]')!
+      opener.focus()
+      expect(document.activeElement).toBe(opener)
+      await act(async () => opener.click())
+      const close = host.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]')!
+      expect(document.activeElement).toBe(close)
+      expect(host.querySelector('[data-settings-background]')?.hasAttribute('inert')).toBe(true)
+      if (method === 'Escape') await key(close, 'Escape')
+      else if (method === 'close') await act(async () => close.click())
+      else {
+        const mask = host.querySelector<HTMLElement>('.ui-dialog-mask')!
+        const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
+        await act(async () => { mask.dispatchEvent(press) })
+        // jsdom does not perform the browser's native mousedown focus default.
+        expect(press.defaultPrevented).toBe(true)
+      }
+      // The real modal's microtask restores its opener before the InputBar rAF runs.
+      expect(document.activeElement).toBe(opener)
+      await flushFrame(); await flushFrame()
+      expect(useChatStore.getState().route).toBe('chat')
+      expect(host.querySelector('[role="dialog"]')).toBeNull()
+      expect(host.querySelector('[data-settings-background]')?.hasAttribute('inert')).toBe(false)
+      expect(document.activeElement).toBe(opener)
+      expect(editor().textContent).toBe(draft)
+    })
+    it('preserves native mousedown behavior inside the dialog without closing settings', async () => {
+      await act(async () => root.render(createElement(SettingsFocusFixture)))
+      await flushFrame(); await flushFrame()
+      const opener = host.querySelector<HTMLButtonElement>('[data-settings-opener]')!
+      await act(async () => { opener.focus(); opener.click() })
+      const close = host.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]')!
+      const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
+      await act(async () => { close.dispatchEvent(press) })
+      expect(press.defaultPrevented).toBe(false)
+      expect(useChatStore.getState().route).toBe('settings')
+      expect(host.querySelector('[role="dialog"]')).not.toBeNull()
+      expect(document.activeElement).toBe(close)
+      expect(editor().textContent).toBe(draft)
+    })
+    it('preserves a button that takes focus after composer autofocus has been queued', async () => {
+      await act(async () => root.render(createElement('div', null,
+        createElement('button', { 'data-other-action': '' }, 'Another action'), focusComposer())))
+      expect(frames.size).toBeGreaterThan(0)
+      const otherAction = host.querySelector<HTMLButtonElement>('[data-other-action]')!
+      otherAction.focus()
+      expect(document.activeElement).toBe(otherAction)
+      await flushFrame(); await flushFrame()
+      expect(document.activeElement).toBe(otherAction)
+      expect(editor().textContent).toBe(draft)
+    })
+    it('preserves the composer menu trigger focused after autofocus has been queued', async () => {
+      await act(async () => root.render(floatingElement(false, false, {
+        input: draft, runtimeReady: true, hasActiveThread: false, voiceDictationEnabled: false
+      })))
+      expect(frames.size).toBeGreaterThan(0)
+      const menuTrigger = trigger()
+      expect(menuTrigger.disabled).toBe(false)
+      menuTrigger.focus()
+      expect(document.activeElement).toBe(menuTrigger)
+      await flushFrame(); await flushFrame()
+      expect(document.activeElement).toBe(menuTrigger)
+      expect(editor().textContent).toBe(draft)
+    })
+    it('still focuses the composer when no external control owns focus', async () => {
+      expect(document.activeElement).toBe(document.body)
+      await act(async () => root.render(focusComposer()))
+      await flushFrame(); await flushFrame()
+      expect(document.activeElement).toBe(editor())
+      expect(editor().textContent).toBe(draft)
+    })
+  })
+
   const expectConversationGlyph = (button: HTMLButtonElement, kind: 'send' | 'stop') => {
     const svg = button.querySelector('svg')!
     expect(svg.getAttribute('viewBox')).toBe('0 0 16 16')
