@@ -24,6 +24,22 @@ const draw = async (blocks: ToolBlock[]) => {
 beforeEach(async () => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); await i18n.changeLanguage('en'); previous = useChatStore.getState(); useChatStore.setState({ workspaceRoot: '' }); container = document.createElement('div'); document.body.append(container); root = createRoot(container) })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useChatStore.setState(previous); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 describe('keyed typed tool route and action boundaries', () => {
+  it('retains an already public Bash command on failure and keeps the error in its expandable body', async () => {
+    const block: ToolBlock = { ...tool('bash'), toolKind: 'command_execution', status: 'error',
+      detail: 'Published failure line\nPublished failure detail', meta: { toolName: 'bash', command: 'npm run focused-check' } }
+    await draw([block])
+    const header = container.querySelector<HTMLElement>('[data-sample="bash"]')!
+    expect(header.textContent).toContain('npm run focused-check')
+    expect(header.textContent).not.toContain('Published failure line')
+    expect(header.dataset.state).toBe('error')
+    await act(async () => header.click())
+    expect(container.textContent).toContain('Published failure line\nPublished failure detail')
+  })
+  it('retains the real failure line when a shell route has no command-execution kind', async () => {
+    await draw([{ ...tool('bash'), status: 'error', detail: 'Published failure line\nMore detail',
+      meta: { toolName: 'bash', command: 'Unusable command hint' } }])
+    expect(container.querySelector('[data-sample="bash"]')?.textContent).toContain('Published failure line')
+  })
   it.each([
     ['terminal_open', 'commands'], ['terminal_read', 'commands'], ['terminal_list', 'commands'],
     ['terminal_signal', 'commands'], ['terminal_close', 'commands'], ['subagent_wait', 'subagents'],

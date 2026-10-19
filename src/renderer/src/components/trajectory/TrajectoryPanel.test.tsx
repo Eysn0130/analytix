@@ -340,7 +340,7 @@ describe('independent trajectory working surface', () => {
     ]
     expect(keys).toHaveLength(30)
     for (const key of [...keys, 'retry', 'error', 'retrySource', 'phase', 'attempt', 'maxAttempt', 'retryDelay', 'code', 'steps', 'messages', 'hiddenRecords', 'moreToolNames',
-      'emptyRecords', 'noTimingWithSequence', 'noTimelineEntries',
+      'emptyRecords', 'noTimingWithSequence', 'noTimelineEntries', 'latest', 'olderUnavailable', 'olderWindow',
       ...['provider_retry', 'transport_reconnect'].map(source => `retrySourceValue.${source}`),
       ...['scheduled', 'started', 'cancelled', 'setup', 'highest_seq', 'replay', 'live'].map(phase => `phaseValue.${phase}`),
       ...['ready', 'running', 'completed', 'failed', 'blocked', 'cancelled', 'unknown', 'recorded'].map(status => `state.${status}`)]) {
