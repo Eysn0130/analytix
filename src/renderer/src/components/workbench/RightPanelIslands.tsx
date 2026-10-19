@@ -1,8 +1,11 @@
 import type { ComponentProps, ReactElement } from 'react'
-import { lazy } from 'react'
+import { lazy, useEffect, useState } from 'react'
 import { extractLatestTurnDevPreviewUrls } from '../../lib/dev-preview-detection'
 import { useChatStore } from '../../store/chat-store'
 import { useChatTimelinePanelState, useDevPreviewUrls } from './ChatTimelineIsland'
+
+const loadTerminalPanel = () => import('../terminal/TerminalPanel').then(module => ({ default: module.TerminalPanel }))
+const TerminalPanel = lazy(loadTerminalPanel)
 
 const loadDocumentWorkspacePanel = () => import('./DocumentWorkspacePanel').then((module) => ({ default: module.DocumentWorkspacePanel }))
 export const DocumentWorkspacePanel = lazy(loadDocumentWorkspacePanel)
@@ -48,11 +51,26 @@ export const TodoPanel = lazy(loadTodoPanel)
 export const ThreadSummaryPanelIsland = lazy(loadThreadSummaryPanel)
 export const SubagentInspectorPanelIsland = lazy(loadSubagentInspectorPanel)
 
+/** Closing the workspace tab hides this view; only explicit session actions dispose PTYs. */
+export function TerminalWorkspacePanel({ opened, visible, ...props }: ComponentProps<typeof TerminalPanel> & {
+  opened: boolean; visible: boolean
+}): ReactElement | null {
+  const presented = opened && visible
+  const [retained, setRetained] = useState(presented)
+  useEffect(() => { if (presented) setRetained(true) }, [presented])
+  return presented || retained ? (
+    <div id="workbench-workspace-terminal" className="h-full min-h-0" hidden={!visible} inert={!visible}>
+      <TerminalPanel {...props} interactive={visible} className="h-full w-full" />
+    </div>
+  ) : null
+}
+
 export type RightPanelIslandPreloadTarget =
   | 'documents'
   | 'files'
   | 'todo'
   | 'changes'
+  | 'terminal'
   | 'browser'
   | 'file'
   | 'plan'
@@ -65,6 +83,9 @@ export function preloadRightPanelIsland(
   target: RightPanelIslandPreloadTarget | null | undefined
 ): void {
   switch (target) {
+    case 'terminal':
+      void loadTerminalPanel()
+      break
     case 'schedule-task':
       void loadScheduleTaskDetail()
       break

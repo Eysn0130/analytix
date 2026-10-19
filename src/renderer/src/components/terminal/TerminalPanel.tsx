@@ -20,15 +20,13 @@ import {
   TERMINAL_DEFAULT_ROWS
 } from '@shared/terminal'
 import { TerminalOutputScheduler } from './terminal-output-scheduler'
-import { PanelCollapseButton } from '../workbench/PanelCollapseButton'
 
 type Props = {
   className?: string
   workspaceRoot: string
   onCollapse: () => void
-  /** Fixed pixel height for the bottom-drawer layout. */
-  height?: number
-  /** A retained drawer can be hidden by the viewport budget without losing its tabs. */
+  focusRequest?: number
+  /** Hidden workspace tabs retain their sessions and output. */
   interactive?: boolean
 }
 
@@ -59,6 +57,7 @@ const TERMINAL_FONT_SIZE = 13
 const TERMINAL_SCROLLBACK = 5000
 const FIT_DEBOUNCE_MS = 80
 const INITIAL_TAB_ID = 'main'
+const createTerminalTab = (index: number): TerminalTab => ({ id: `tab-${crypto.randomUUID()}`, index })
 const MAX_RENDERER_TABS = 8
 
 const DARK_THEME = {
@@ -180,7 +179,7 @@ function resolveTerminalTheme(container: HTMLElement | null) {
   }
 }
 
-export function TerminalPanel({ className = '', workspaceRoot, onCollapse, height, interactive = true }: Props): ReactElement {
+export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focusRequest = 0, interactive = true }: Props): ReactElement {
   const { t } = useTranslation('common')
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -254,7 +253,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
     // The container may still be settling (lazy Suspense); defer the first
     // fit to the next frame so clientWidth is correct.
     requestAnimationFrame(() => {
-      if (!isCurrentAttach()) return
+      if (!isCurrentAttach() || !interactiveRef.current) return
       try {
         fit.fit()
       } catch {
@@ -285,7 +284,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
     const triggerFit = (): void => {
       if (resizeTimer) clearTimeout(resizeTimer)
       resizeTimer = setTimeout(() => {
-        if (!isCurrentAttach()) return
+        if (!isCurrentAttach() || !interactiveRef.current) return
         try {
           fit.fit()
         } catch {
@@ -296,6 +295,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
     const resizeObserver = new ResizeObserver(triggerFit)
     resizeObserver.observe(container)
     const onDimensionChange = (dim: { cols: number; rows: number }): void => {
+      if (!isCurrentAttach() || !interactiveRef.current) return
       void window.analytix.terminal.resize({
         sessionId,
         cols: dim.cols,
@@ -303,6 +303,17 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
       })
     }
     const fitDisposable = term.onResize(onDimensionChange)
+
+    // Stash disposers on the instance for teardown.
+    ;(term as Terminal & { __dispose?: () => void }).__dispose = () => {
+      offData()
+      offExit()
+      outputScheduler.dispose()
+      disposable.dispose()
+      fitDisposable.dispose()
+      resizeObserver.disconnect()
+      if (resizeTimer) clearTimeout(resizeTimer)
+    }
 
     // Create (or re-attach to) the PTY session. On re-attach the main process
     // replays the ring buffer before new output arrives.
@@ -321,7 +332,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
       // After a successful (re)attach, reflect the latest fit so the PTY
       // matches the visible grid.
       const dims = fit.proposeDimensions()
-      if (dims) {
+      if (dims && interactiveRef.current) {
         void window.analytix.terminal.resize({
           sessionId,
           cols: dims.cols,
@@ -333,32 +344,33 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
       if (!isCurrentAttach()) return
       setError(e instanceof Error ? e.message : String(e))
     }
-
-    // Stash disposers on the instance for teardown.
-    ;(term as Terminal & { __dispose?: () => void }).__dispose = () => {
-      offData()
-      offExit()
-      outputScheduler.dispose()
-      disposable.dispose()
-      fitDisposable.dispose()
-      resizeObserver.disconnect()
-      if (resizeTimer) clearTimeout(resizeTimer)
-    }
   }, [workspaceRoot])
 
   useEffect(() => {
-    if (!interactive) setContextMenu(null)
-  }, [interactive])
+    if (!interactive) { setContextMenu(null); return }
+    if (!tabs.length) {
+      const tab = createTerminalTab(1)
+      setTabs([tab])
+      setActiveTabId(tab.id)
+      return
+    }
+    const frame = requestAnimationFrame(() => {
+      if (!interactiveRef.current) return
+      try { fitRef.current?.fit() } catch { /* Wait for a measurable workspace. */ }
+      termRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [interactive, focusRequest, tabs.length, activeTabId])
 
   useEffect(() => {
     aliveRef.current = true
-    if (activeTab) void attachTerminal(activeTab.id)
+    if (activeTabId) void attachTerminal(activeTabId)
     return () => {
       aliveRef.current = false
       attachTokenRef.current += 1
       disposeRenderer()
     }
-  }, [activeTab, attachTerminal, disposeRenderer])
+  }, [activeTabId, attachTerminal, disposeRenderer])
 
   // React to system/app theme changes so the terminal follows light/dark.
   useEffect(() => {
@@ -397,11 +409,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
 
   const handleNewTab = useCallback(() => {
     if (tabs.length >= MAX_RENDERER_TABS) return
-    const nextIndex = tabs.length + 1
-    const tab: TerminalTab = {
-      id: `tab-${Date.now().toString(36)}-${nextIndex}`,
-      index: nextIndex
-    }
+    const tab = createTerminalTab(tabs.length + 1)
     setTabs((current) => [...current, tab])
     setActiveTabId(tab.id)
   }, [tabs.length])
@@ -486,25 +494,29 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
     if (renamingTabId && renamingTabId !== tabId) cancelRenameTab()
   }, [cancelRenameTab, renamingTabId, tabs])
 
-  const handleCloseAllTabs = useCallback(() => {
-    for (const tab of tabs) {
-      void window.analytix.terminal.dispose(tab.id)
-    }
+  const handleCloseAllTabs = useCallback(async () => {
+    const closingIds = new Set(tabs.map(tab => tab.id))
+    // Retire these identities before IPC settles. New shells get fresh IDs,
+    // and a late disposal must not clear or collapse a newer user selection.
+    attachTokenRef.current += 1
     setContextMenu(null)
     cancelRenameTab()
-    setTabs([{ id: INITIAL_TAB_ID, index: 1 }])
-    setActiveTabId(INITIAL_TAB_ID)
+    setTabs(current => current.filter(tab => !closingIds.has(tab.id)))
+    setActiveTabId(current => closingIds.has(current) ? '' : current)
     onCollapse()
+    await Promise.allSettled([...closingIds].map(sessionId => window.analytix.terminal.dispose(sessionId)))
   }, [cancelRenameTab, onCollapse, tabs])
 
   const handleRestart = useCallback(async () => {
     if (!activeTab) return
+    const attachToken = attachTokenRef.current
     // Dispose the old shell then re-attach so a fresh one spawns.
     try {
       await window.analytix.terminal.dispose(activeTab.id)
     } catch {
       /* ignore */
     }
+    if (!aliveRef.current || attachTokenRef.current !== attachToken) return
     setError(null)
     setExited(false)
     disposeRenderer()
@@ -514,8 +526,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
 
   return (
     <aside
-      className={`ds-no-drag ds-surface-strong flex min-h-0 flex-col overflow-hidden border-t border-ds-border-muted text-ds-ink shadow-[var(--ax-shadow-panel)] ${className}`}
-      style={height ? { height } : undefined}
+      className={`ds-no-drag ds-surface-strong flex min-h-0 flex-col overflow-hidden text-ds-ink ${className}`}
     >
       <div className="flex h-11 shrink-0 items-center border-b border-ds-border-muted bg-ds-card/92 text-ds-ink backdrop-blur-xl">
         <div
@@ -611,12 +622,6 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
           >
             <RotateCw className="h-4 w-4" strokeWidth={1.75} />
           </button>
-          <PanelCollapseButton
-            onClick={onCollapse}
-            direction="bottom"
-            ariaLabel={t('rightPanelCollapse')}
-            title={t('rightPanelCollapse')}
-          />
         </div>
         {interactive && contextMenu ? (
           createPortal(
@@ -633,7 +638,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
         ) : null}
       </div>
 
-      <div className="ds-surface-strong relative min-h-0 flex-1 overflow-hidden px-5 py-4">
+      <div className="ds-surface-strong relative min-h-0 flex-1 overflow-hidden px-3 py-3">
         <div ref={containerRef} className="h-full w-full" key={activeTab?.id} />
         {error ? (
           <div className="absolute inset-0 flex items-center justify-center p-6 text-center">

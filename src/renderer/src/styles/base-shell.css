@@ -2253,40 +2253,6 @@ pre {
   contain: layout paint;
 }
 
-.ds-terminal-panel-shell {
-  position: relative;
-  z-index: 30;
-  min-height: 0;
-  width: 100%;
-  flex-shrink: 0;
-  overflow: visible;
-  will-change: height, opacity;
-}
-
-.ds-terminal-panel-shell[data-open='false'] {
-  pointer-events: none;
-}
-
-.ds-terminal-panel-shell[data-resizing='true'] {
-  cursor: row-resize;
-}
-
-.ds-terminal-panel-clip {
-  position: absolute;
-  inset: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.ds-terminal-panel-content {
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  min-height: 0;
-  background: transparent;
-  contain: layout paint;
-}
-
 .ds-workbench-resize-handle {
   position: absolute;
   display: flex;

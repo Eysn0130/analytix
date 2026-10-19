@@ -774,18 +774,16 @@ describe('WorkbenchTopBar layout controls', () => {
 
   it('leaves dock collapse to its header and retains one reopen entry when closed', () => {
     const html = renderToStaticMarkup(createElement(WorkbenchTopBar, {
-      workspaceOpen: true, onToggleWorkspace: () => {},
-      terminalOpen: false, onToggleTerminal: () => {}
+      workspaceOpen: true, onToggleWorkspace: () => {}
     }))
 
     expect(html).not.toContain('切换置顶摘要')
-    expect(html.match(/<button /g)).toHaveLength(1)
+    expect(html).not.toContain('<button ')
     expect(html).not.toContain('aria-controls="workbench-right-workspace"')
     const closed = renderToStaticMarkup(createElement(WorkbenchTopBar, {
-      workspaceOpen: false, onToggleWorkspace: () => {},
-      terminalOpen: false, onToggleTerminal: () => {}
+      workspaceOpen: false, onToggleWorkspace: () => {}
     }))
-    expect(closed.match(/<button /g)).toHaveLength(2)
+    expect(closed.match(/<button /g)).toHaveLength(1)
     expect(closed).toMatch(/aria-expanded="false"[^>]*aria-controls="workbench-right-workspace"/)
   })
 })
