@@ -55,9 +55,10 @@ export const SubagentInspectorPanelIsland = lazy(loadSubagentInspectorPanel)
 export function TerminalWorkspacePanel({ opened, visible, ...props }: ComponentProps<typeof TerminalPanel> & {
   opened: boolean; visible: boolean
 }): ReactElement | null {
-  const [retained, setRetained] = useState(opened)
-  useEffect(() => { if (opened) setRetained(true) }, [opened])
-  return opened || retained ? (
+  const presented = opened && visible
+  const [retained, setRetained] = useState(presented)
+  useEffect(() => { if (presented) setRetained(true) }, [presented])
+  return presented || retained ? (
     <div id="workbench-workspace-terminal" className="h-full min-h-0" hidden={!visible} inert={!visible}>
       <TerminalPanel {...props} interactive={visible} className="h-full w-full" />
     </div>

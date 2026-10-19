@@ -83,8 +83,8 @@ vi.mock('./brand/AnalytixLoadingPage', () => ({ AnalytixLoadingPage: () => null 
 vi.mock('./workbench/RightPanelIslands', async () => {
   const { WorkspaceFilePreviewPanel: ActualPreview } = await import('./WorkspaceFilePreviewPanel')
   const { DocumentWorkspacePanel: ActualDocument } = await import('./workbench/DocumentWorkspacePanel')
-  return ({ TerminalWorkspacePanel: (props: { visible: boolean; onCollapse: () => void }) => createElement('div', null,
-    createElement('textarea', { 'data-synthetic-terminal': '', hidden: !props.visible }),
+  return ({ TerminalWorkspacePanel: (props: { visible: boolean; focusRequest: number; onCollapse: () => void }) => createElement('div', null,
+    createElement('textarea', { 'data-synthetic-terminal': '', 'data-focus-request': props.focusRequest, hidden: !props.visible }),
     props.visible ? createPortal(createElement('button', { 'data-workbench-terminal-menu': '', onClick: props.onCollapse }, 'Close all terminals'), document.body) : null), ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null,
     SubagentInspectorPanelIsland: (props: NonNullable<typeof io.inspector>) => {
       io.inspector = props
@@ -2469,4 +2469,35 @@ it.each([360, 1600])('opens one terminal workspace tab from selector and repeate
     if (viewport) Object.defineProperty(window, 'innerWidth', viewport)
     else Reflect.deleteProperty(window, 'innerWidth')
   }
+})
+
+it.each(['plugins', 'settings'] as const)('suspends terminal presentation on the real %s route and ignores terminal shortcuts until return', async route => {
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true, bubbles: true })))
+  const terminal = element.querySelector<HTMLTextAreaElement>('[data-synthetic-terminal]')!
+  expect(terminal.hidden).toBe(false)
+  expect(useWorkspaceTabsStore.getState().activeTabId).toBe('tool:terminal')
+  const focusRequest = terminal.getAttribute('data-focus-request')
+  const tabs = useWorkspaceTabsStore.getState().tabs
+  await act(async () => useChatStore.setState({ route }))
+  expect(terminal.hidden).toBe(true)
+  expect(document.querySelector('[data-workbench-terminal-menu]')).toBeNull()
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true, bubbles: true })))
+  await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+  expect(useChatStore.getState().route).toBe(route)
+  expect(useWorkspaceTabsStore.getState().tabs).toBe(tabs)
+  expect(terminal.getAttribute('data-focus-request')).toBe(focusRequest)
+  await act(async () => useChatStore.setState({ route: 'chat' }))
+  expect(terminal.hidden).toBe(false)
+  expect(useWorkspaceTabsStore.getState().tabs).toBe(tabs)
+})
+
+it.each(['plugins', 'settings'] as const)('does not open a terminal workspace tab from shortcuts while initially on %s', async route => {
+  await act(async () => useChatStore.setState({ route }))
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true, bubbles: true })))
+  await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+  expect(useChatStore.getState().route).toBe(route)
+  expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: false, activeTabId: null, tabs: [] })
+  expect(document.querySelector('[data-workbench-terminal-menu]')).toBeNull()
+  await act(async () => useChatStore.setState({ route: 'chat' }))
+  expect(useWorkspaceTabsStore.getState().tabs).toHaveLength(0)
 })

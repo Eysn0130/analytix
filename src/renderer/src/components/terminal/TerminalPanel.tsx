@@ -57,6 +57,7 @@ const TERMINAL_FONT_SIZE = 13
 const TERMINAL_SCROLLBACK = 5000
 const FIT_DEBOUNCE_MS = 80
 const INITIAL_TAB_ID = 'main'
+const createTerminalTab = (index: number): TerminalTab => ({ id: `tab-${crypto.randomUUID()}`, index })
 const MAX_RENDERER_TABS = 8
 
 const DARK_THEME = {
@@ -294,6 +295,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focus
     const resizeObserver = new ResizeObserver(triggerFit)
     resizeObserver.observe(container)
     const onDimensionChange = (dim: { cols: number; rows: number }): void => {
+      if (!isCurrentAttach() || !interactiveRef.current) return
       void window.analytix.terminal.resize({
         sessionId,
         cols: dim.cols,
@@ -346,7 +348,12 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focus
 
   useEffect(() => {
     if (!interactive) { setContextMenu(null); return }
-    if (!tabs.length) { setTabs([{ id: INITIAL_TAB_ID, index: 1 }]); setActiveTabId(INITIAL_TAB_ID); return }
+    if (!tabs.length) {
+      const tab = createTerminalTab(1)
+      setTabs([tab])
+      setActiveTabId(tab.id)
+      return
+    }
     const frame = requestAnimationFrame(() => {
       if (!interactiveRef.current) return
       try { fitRef.current?.fit() } catch { /* Wait for a measurable workspace. */ }
@@ -402,11 +409,7 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focus
 
   const handleNewTab = useCallback(() => {
     if (tabs.length >= MAX_RENDERER_TABS) return
-    const nextIndex = tabs.length + 1
-    const tab: TerminalTab = {
-      id: `tab-${Date.now().toString(36)}-${nextIndex}`,
-      index: nextIndex
-    }
+    const tab = createTerminalTab(tabs.length + 1)
     setTabs((current) => [...current, tab])
     setActiveTabId(tab.id)
   }, [tabs.length])
@@ -492,22 +495,28 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, focus
   }, [cancelRenameTab, renamingTabId, tabs])
 
   const handleCloseAllTabs = useCallback(async () => {
-    await Promise.allSettled(tabs.map(tab => window.analytix.terminal.dispose(tab.id)))
+    const closingIds = new Set(tabs.map(tab => tab.id))
+    // Retire these identities before IPC settles. New shells get fresh IDs,
+    // and a late disposal must not clear or collapse a newer user selection.
+    attachTokenRef.current += 1
     setContextMenu(null)
     cancelRenameTab()
-    setTabs([])
-    setActiveTabId('')
+    setTabs(current => current.filter(tab => !closingIds.has(tab.id)))
+    setActiveTabId(current => closingIds.has(current) ? '' : current)
     onCollapse()
+    await Promise.allSettled([...closingIds].map(sessionId => window.analytix.terminal.dispose(sessionId)))
   }, [cancelRenameTab, onCollapse, tabs])
 
   const handleRestart = useCallback(async () => {
     if (!activeTab) return
+    const attachToken = attachTokenRef.current
     // Dispose the old shell then re-attach so a fresh one spawns.
     try {
       await window.analytix.terminal.dispose(activeTab.id)
     } catch {
       /* ignore */
     }
+    if (!aliveRef.current || attachTokenRef.current !== attachToken) return
     setError(null)
     setExited(false)
     disposeRenderer()

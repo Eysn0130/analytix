@@ -1271,7 +1271,10 @@ export function Workbench(): ReactElement {
 
   const chatStageStyle = { '--ax-conversation-composer-height': `${composerHeight}px` } as CSSProperties
   const [terminalFocusRequest, setTerminalFocusRequest] = useState(0)
+  const workspaceRoutePresented = route !== 'plugins' && route !== 'settings'
   const openTerminalWorkspace = (): void => {
+    // These routes retain Workbench in the tree without presenting its workspace.
+    if (!workspaceRoutePresented) return
     setRightPanelMode('terminal')
     setTerminalFocusRequest(request => request + 1)
   }
@@ -3444,6 +3447,7 @@ export function Workbench(): ReactElement {
   const renderRightPanel = (): ReactElement | null => {
     if (!rightPanelDockedVisible && !rightPanelMotion.isMounted && !rightPanelRetained && !documentsMounted) return null
     const panelMode = rightPanelDockedVisible ? currentDockedRightPanelMode : rightPanelRenderMode
+    const terminalPresented = workspaceRoutePresented && rightPanelDockedVisible && !workspaceSelectorOpen && panelMode === 'terminal'
 
     return (
       <aside
@@ -3526,7 +3530,7 @@ export function Workbench(): ReactElement {
                 </div>
               ) : null}
               <TerminalWorkspacePanel opened={workspaceTabs.some(tab => tab.mode === 'terminal')}
-                visible={rightPanelDockedVisible && !workspaceSelectorOpen && panelMode === 'terminal'}
+                visible={terminalPresented}
                 workspaceRoot={workspaceRoot} focusRequest={terminalFocusRequest} onCollapse={closeRightPanel} />
               {workspaceTabs.some((tab) => tab.mode === 'browser') ? (
                 <div className="h-full min-h-0" hidden={panelMode !== 'browser'} inert={panelMode !== 'browser' || !rightPanelVisible}>
