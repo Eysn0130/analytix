@@ -196,3 +196,66 @@ func (s *Service) PrepareNativeManual(ctx context.Context, id string, draft file
 	}
 	return result, err
 }
+
+func (s *Service) NativeWorkbookEditing(ctx context.Context, id, base string) error {
+	if s == nil {
+		return ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return err
+	}
+	files, ok := s.files.(fileport.NativeWorkbookManualFiles)
+	if !ok {
+		return ErrUnavailable
+	}
+	err = files.NativeWorkbookEditing(ctx, fileport.NativeWorkbookEditingInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, BaseRevision: base})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return ErrUnavailable
+	}
+	return err
+}
+
+func (s *Service) ValidateNativeWorkbookManual(ctx context.Context, id, base string, selected office.WorkbookSelection, target office.WorkbookWriteTarget, edit office.WorkbookManualEdit) (*office.WorkbookReview, error) {
+	if s == nil {
+		return nil, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	files, ok := s.files.(fileport.NativeWorkbookManualFiles)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	result, err := files.ValidateNativeWorkbookManual(ctx, fileport.NativeWorkbookManualValidationInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, BaseRevision: base, Selection: selected, WriteTarget: target, Edit: edit})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return nil, ErrUnavailable
+	}
+	return result, err
+}
+
+func (s *Service) PrepareNativeWorkbookManual(ctx context.Context, id string, draft fileport.NativeWorkbookManualDraft) (fileport.NativeChangeStatus, error) {
+	if s == nil {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return fileport.NativeChangeStatus{}, err
+	}
+	files, ok := s.files.(fileport.NativeWorkbookManualFiles)
+	if !ok {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	result, err := files.PrepareNativeWorkbookManual(ctx, fileport.NativeWorkbookManualInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, Draft: draft})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	return result, err
+}

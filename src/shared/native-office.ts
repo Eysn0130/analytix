@@ -1,4 +1,4 @@
-import { nativePresentationSelectionSchema, nativeWorkbookSelectionSchema, nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema, nativeOfficeAnnotationSchema, nativeOfficeAnnotationNoteSchema, nativeOfficeCreateInputSchema, nativeOfficeCreationSchema, nativeOfficeManualAuthoritySchema } from '../../packages/runtime/src/contracts/native-office-editing'
+import { nativePresentationSelectionSchema, nativeWorkbookSelectionSchema, nativeWorkbookManualEditSchema, nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema, nativeOfficeAnnotationSchema, nativeOfficeAnnotationNoteSchema, nativeOfficeCreateInputSchema, nativeOfficeCreationSchema, nativeOfficeManualAuthoritySchema } from '../../packages/runtime/src/contracts/native-office-editing'
 import { z } from 'zod'
 import { toolResultLocalPresentFileRequestSchemaV1 } from '../../packages/runtime/src/contracts/tool-result-local-display'
 
@@ -111,6 +111,7 @@ export const nativeOfficeRequestSchema = z.discriminatedUnion('action', [
   viewControlSchema,
   z.object({ action: z.literal('create'), ...nativeOfficeCreateInputSchema.shape, bounds: nativeOfficeBoundsSchema, appearance: nativeOfficeAppearanceSchema.optional() }).strict(),
   z.object({ action: z.literal('beginManualEdit'), ...editingTarget, threadId }).strict(),
+  z.object({ action: z.literal('editWorkbookCell'), ...editingTarget, threadId, selectionToken, edit:nativeWorkbookManualEditSchema }).strict(),
   z.object({ action: z.literal('format'), ...editingTarget, changeId: digest, rangeLease: nativeOfficeRangeLeaseSchema, format: nativeOfficeFormatSchema }).strict(),
   z.object({ action: z.literal('discardManualEdit'), ...editingTarget, threadId, changeId: digest }).strict(),
 
@@ -138,7 +139,7 @@ const capture = z.object({ capturedCharacters: index, totalCharacters: index, tr
 const selectionBase = { documentId: digest, version: digest, changeSequence: index, token: selectionToken.optional(), capture: capture.optional() }
 export const nativeOfficeSelectionSchema = z.discriminatedUnion('kind', [
   z.object({ ...selectionBase, kind: z.literal('text'), rangeLease: nativeOfficeRangeLeaseSchema.optional(), formatState: nativeOfficeFormatStateSchema.optional(), scope: z.enum(['current-view-text-only; no verified structural offset or durable anchor', 'session-text-range-at-version-and-change-sequence']), text: z.string().max(4096) }).strict().refine(value => (!value.rangeLease && !value.formatState) || !!value.rangeLease && !!value.formatState && value.rangeLease.token === value.token && value.rangeLease.sequence === value.changeSequence),
-  z.object({ ...selectionBase, kind: z.literal('cells'), scope: z.literal('sheet-range-address-at-version-and-change-sequence'), text: z.string().max(4096), cells: z.array(z.object({ sheet: index, column: index, row: index, text: z.string().max(4096), formula: z.string().max(4096), value: z.number().finite(), valueType: z.enum(['empty', 'text', 'number', 'formula']), numberFormat: index, rowVisible: z.boolean(), columnVisible: z.boolean(), merged: z.boolean() }).strict()).max(256).optional(), ranges: z.array(z.object({
+  z.object({ ...selectionBase, kind: z.literal('cells'), editIntent:z.object({kind:z.enum(['f2','double-click']),id:selectionToken}).strict().optional(), scope: z.literal('sheet-range-address-at-version-and-change-sequence'), text: z.string().max(4096), cells: z.array(z.object({ sheet: index, column: index, row: index, text: z.string().max(4096), formula: z.string().max(4096), value: z.number().finite(), valueType: z.enum(['empty', 'text', 'number', 'formula']), valueError:z.boolean().optional(), formulaResultType:z.enum(['number','text']).optional(), numberFormat: index, rowVisible: z.boolean(), columnVisible: z.boolean(), merged: z.boolean() }).strict()).max(256).optional(), ranges: z.array(z.object({
     sheet: index, sheetName: z.string().max(4096), startColumn: index, startRow: index, endColumn: index, endRow: index
   }).strict().refine(value => value.endColumn >= value.startColumn && value.endRow >= value.startRow)).max(64) }).strict(),
   z.object({ ...selectionBase, kind: z.literal('shapes'), presentation: nativePresentationSelectionSchema.optional(), scope: z.literal('page-and-shape-index-at-version-and-change-sequence'), shapes: z.array(z.object({
@@ -155,6 +156,7 @@ export const nativeOfficeViewSchema = z.object({
   objectId: digest, path: localPath, kind: nativeOfficeKindSchema, revision: digest,
   dirty: z.boolean(), status: z.enum(['ready', 'error', 'loading']),
   protectedPresent: toolResultLocalPresentFileRequestSchemaV1.optional(),
+  workbookEditing:z.object({editable:z.boolean(),reason:z.literal('unsupported_workbook').optional()}).strict().optional(),
   previewView: nativeOfficePreviewViewSchema.optional(),
   playback: nativeOfficePlaybackSchema.optional(),
   scope: nativeOfficeSelectionScopeSchema.omit({sessionId:true}).optional(), proposals:z.array(nativeOfficeProposalSchema).max(16).optional(), appliedProposals:z.array(z.string()).max(16).optional(),
@@ -184,7 +186,8 @@ export type NativeOfficeAppearance = z.infer<typeof nativeOfficeAppearanceSchema
 
 export function nativeTypedWorkbookSelection(selection: NativeOfficeSelection) {
   if (selection.kind !== 'cells' || selection.ranges.length !== 1 || !selection.capture?.complete || selection.capture.truncated || !selection.cells) return null
-  const parsed=nativeWorkbookSelectionSchema.safeParse({...selection.ranges[0],cells:selection.cells})
+  if (selection.cells.some(c => c.valueError === true)) return null
+  const parsed=nativeWorkbookSelectionSchema.safeParse({...selection.ranges[0],cells:selection.cells.map(({valueError: _valueError,formulaResultType: _formulaResultType,...cell}) => cell)})
   return parsed.success ? parsed.data : null
 }
 

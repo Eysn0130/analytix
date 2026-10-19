@@ -43,21 +43,23 @@ export type NativeReferenceInput = Omit<DocxNativeReference, 'id'> | Omit<Office
 const column = (n: number): string => { let label = ''; for (n++; n; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label; return label }
 export function nativeSelectionLabel(view: NativeOfficeView, selection: NativeOfficeSelection): string {
   const name = view.path.split(/[\\/]/).at(-1) ?? view.kind
-  if (selection.kind === 'cells') return `${name} · ${selection.ranges.map(r => `${r.sheetName}!${column(r.startColumn)}${r.startRow + 1}:${column(r.endColumn)}${r.endRow + 1}`).join('；')}`
+  if (selection.kind === 'cells') return `${name} · ${selection.ranges.map(r => `${r.sheetName}!${column(r.startColumn)}${r.startRow + 1}:${column(r.endColumn)}${r.endRow + 1}`).join('；')}${!selection.capture?.complete || selection.capture.truncated ? '（部分捕获）' : ''}`
   if (selection.kind === 'shapes') return `${name} · ${selection.shapes.map(s => `第${s.pageIndex + 1}页 · ${s.name || '文本框'}`).join('；')}`
   return `${name} · 选中文本`
 }
 export function nativeSelectionText(selection: NativeOfficeSelection): string {
   if (selection.kind === 'unavailable') return ''
-  const text = selection.kind === 'shapes' ? selection.shapes.map(s => s.text.trim() ? s.text : `第${s.pageIndex + 1}页 · 形状${s.shapeIndex + 1} · ${s.name || s.type}（未捕获文本，仅对象标注）`).join('\n')
+  const content = selection.kind === 'shapes' ? selection.shapes.map(s => s.text.trim() ? s.text : `第${s.pageIndex + 1}页 · 形状${s.shapeIndex + 1} · ${s.name || s.type}（未捕获文本，仅对象标注）`).join('\n')
     : selection.kind === 'cells' && selection.cells ? selection.cells.map(c => `${column(c.column)}${c.row + 1}: ${c.text}${c.valueType === 'formula' ? ` [公式 ${c.formula}]` : ''}${!c.rowVisible || !c.columnVisible ? ' [隐藏行/列]' : ''}${c.merged ? ' [合并单元格]' : ''}`).join('\n')
     : selection.text
+  const text = selection.kind === 'cells' && (!selection.capture?.complete || selection.capture.truncated)
+    ? `[选区仅部分捕获；范围 ${selection.ranges.map(r => `${r.sheetName}!${column(r.startColumn)}${r.startRow + 1}:${column(r.endColumn)}${r.endRow + 1}`).join('；')}]\n${content}` : content
   const clipped = text.slice(0, 4096).replace(/[\uD800-\uDBFF]$/, '')
   return text.length > clipped.length ? `${clipped}\n[引用内容已截断]` : text
 }
 /** Only complete current text targets or bounded workbook rectangles can request a Core edit scope. */
 export function isNativeSelectionEditable(view: NativeOfficeView, selection: NativeOfficeSelection): boolean {
-  if (!view.editing || !selection.token || !selection.capture?.complete || selection.capture.truncated ||
+  if (!view.editing || view.kind === 'xlsx' && view.workbookEditing?.editable === false || !selection.token || !selection.capture?.complete || selection.capture.truncated ||
     selection.documentId !== view.objectId || selection.version !== view.revision ||
     selection.changeSequence !== (view.changeSequence ?? 0)) return false
   if (nativeTypedPresentationSelection(selection) || nativeTypedWorkbookSelection(selection)) return true

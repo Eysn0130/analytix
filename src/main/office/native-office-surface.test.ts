@@ -713,3 +713,49 @@ test('a protected native surface never presents or returns pointer formatting', 
   expect(s.peer.peer.messages.some((request: any) => request.phase === 'present')).toBe(false)
   expect(s.owner.webContents.send).not.toHaveBeenCalledWith('office:menu-requested', expect.anything())
 })
+
+const workbookCell={sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number',numberFormat:7,rowVisible:true,columnVisible:true,merged:false}
+const workbookSnapshot={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[workbookCell]}
+const workbookSelection={documentId:'document',version:'version-1',changeSequence:0,kind:'cells',scope:'sheet-range-address-at-version-and-change-sequence',token:'selection_cell_01',
+  ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],cells:[workbookCell],text:'1',capture:{capturedCharacters:1,totalCharacters:1,truncated:false,unit:'utf-16',complete:true}}
+
+test('typed workbook dependency transport keeps read snapshots separate from selection and write authority',()=>{
+  const base={...input('captureCells'),channel:'channel'},bounds={sheet:0,startColumn:0,endColumn:0,startRow:0,endRow:0}
+  expect(isOfficeRequest({...base,selectionToken:'selection_cell_01',expectedChangeSequence:0,bounds})).toBe(true)
+  expect(isOfficeRequest({...base,selectionToken:'selection_cell_01',expectedChangeSequence:0,bounds:{...bounds,endRow:256}})).toBe(false)
+  const result={...base,type:'result',ok:true,state:{...state(),kind:'xlsx'},workbook:workbookSnapshot}
+  expect(isOfficeResult(result)).toBe(true)
+  expect(isOfficeResult({...result,selection:workbookSelection})).toBe(false)
+  expect(isOfficeResult({...result,workbook:{...workbookSnapshot,cells:[{...workbookCell,valueType:'formula',formula:'=1/0',valueError:true}]}})).toBe(false)
+  const replace={...base,command:'replaceCells',selectionToken:'selection_cell_01',expectedChangeSequence:0,workbook:{before:workbookSnapshot,after:workbookSnapshot,results:['']},writeTarget:{sheet:0,column:0,row:0}}
+  expect(isOfficeRequest(replace)).toBe(true)
+  expect(isOfficeRequest({...replace,writeTarget:{...replace.writeTarget,path:'/tmp/other'}})).toBe(false)
+})
+
+test('displayed workbook formula errors and bounded edit intent have explicit closed protocol fields',()=>{
+  const event={type:'cell-edit-requested',intent:'f2',channel:'channel',operationId:'opened',documentId:'document',version:'version-1',selection:workbookSelection}
+  expect(isOfficeEvent(event)).toBe(true)
+  expect(isOfficeEvent({...event,intent:'paste'})).toBe(false)
+  const errorSelection={...workbookSelection,cells:[{...workbookCell,valueType:'formula',formula:'=1/0',text:'#DIV/0!',value:0,valueError:true}]}
+  expect(isOfficeEvent({...event,type:'selection',intent:undefined,selection:errorSelection})).toBe(false)
+  const {intent:_,...selectionEvent}=event
+  expect(isOfficeEvent({...selectionEvent,type:'selection',selection:errorSelection})).toBe(true)
+  expect(isOfficeEvent({...selectionEvent,type:'selection',selection:{...errorSelection,cells:[{...errorSelection.cells[0],valueError:1}]}})).toBe(false)
+  for(const formulaResultType of ['number','text'])expect(isOfficeEvent({...selectionEvent,type:'selection',selection:{...errorSelection,cells:[{...errorSelection.cells[0],valueError:false,formulaResultType}]}})).toBe(true)
+  expect(isOfficeEvent({...selectionEvent,type:'selection',selection:{...errorSelection,cells:[{...errorSelection.cells[0],formulaResultType:'error'}]}})).toBe(false)
+  expect(isOfficeEvent({...selectionEvent,type:'selection',selection:{...workbookSelection,cells:[{...workbookCell,formulaResultType:'number'}]}})).toBe(false)
+})
+
+test('readonly XLSX surfaces read dependency cells and forward fresh bounded cell edit requests without enabling input',async()=>{
+  const s=await setup(),opening=s.surface.request({...input('open'),kind:'xlsx',bytes:new Uint8Array([1,2,3])})
+  const opened=await sent(s.peer);cleanReply(s.peer,opened,{state:{...state(),kind:'xlsx'},selection:workbookSelection});await opening
+  s.peer.peer.messages.length=0
+  const reading=s.surface.request({...input('captureCells'),selectionToken:'selection_cell_01',expectedChangeSequence:0,bounds:{sheet:0,startColumn:0,endColumn:0,startRow:0,endRow:0}})
+  const request=await sent(s.peer)
+  s.peer.postMessage({command:request.command,channel:request.channel,operationId:request.operationId,documentId:request.documentId,version:request.version,type:'result',ok:true,state:{...state(),kind:'xlsx'},workbook:workbookSnapshot})
+  expect(await reading).toMatchObject({workbook:workbookSnapshot})
+  s.peer.postMessage({type:'cell-edit-requested',intent:'double-click',channel:opened.channel,operationId:opened.operationId,documentId:'document',version:'version-1',selection:workbookSelection})
+  await vi.waitFor(()=>expect(s.events.at(-1)).toMatchObject({type:'cell-edit-requested',intent:'double-click'}))
+  expect(s.view.webContents.dead).toBe(false)
+  await expect(s.surface.request({...input('replaceCells'),selectionToken:'selection_cell_01',expectedChangeSequence:0,workbook:{before:workbookSnapshot,after:workbookSnapshot,results:['']}})).rejects.toThrow('office-invalid-request')
+})

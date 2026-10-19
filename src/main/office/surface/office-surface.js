@@ -9,7 +9,7 @@ const identity = r => r && token(r.channel) && token(r.operationId) && token(r.d
 const key = r => r.command + ':' + r.operationId;
 const matches = (a, b) => a.channel === b.channel && a.operationId === b.operationId && a.documentId === b.documentId && a.version === b.version && a.command === b.command;
 const kinds = ['docx', 'xlsx', 'pptx'];
-const previewCommands = ['local-view','open', 'edit', 'manual-edit', 'format', 'freeze', 'replace', 'replaceCells', 'replacePresentation', 'export', 'ack', 'captureSelection', 'validateSelection', 'close'];
+const previewCommands = ['local-view','open', 'edit', 'manual-edit', 'format', 'freeze', 'replace', 'replaceCells', 'replacePresentation', 'export', 'ack', 'captureSelection', 'captureCells', 'validateSelection', 'close'];
 const exact = (value, fields) => value && Object.getPrototypeOf(value) === Object.prototype && Object.keys(value).length === fields.length && fields.every(k => Object.hasOwn(value,k));
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const digest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -32,6 +32,10 @@ const validFreeze = value => exact(value,['changeId','operationId','generation',
 const playActions = ['play-read','play-start','play-current','play-next-effect','play-previous-effect','play-next-slide','play-previous-slide','play-pause','play-resume','play-end'];
 const presentationErrors = ['presentation-unsupported','presentation-failed','presentation-start-timeout'];
 const playing = view => ['running','paused'].includes(view?.playback?.phase);
+const validWorkbookBounds = value => exact(value,['sheet','startColumn','startRow','endColumn','endRow']) &&
+  ['sheet','startColumn','startRow','endColumn','endRow'].every(k => integer(value[k])) && value.sheet < 20 && value.endColumn < 1024 && value.endRow < 100000 &&
+  value.startColumn <= value.endColumn && value.startRow <= value.endRow && (value.endColumn-value.startColumn+1)*(value.endRow-value.startRow+1) <= 256;
+const validWorkbookTarget = value => exact(value,['sheet','column','row']) && integer(value.sheet) && value.sheet < 20 && integer(value.column) && value.column < 1024 && integer(value.row) && value.row < 100000;
 function validPlayback(value) {
   const fields = ['generation','sequence','phase','slideIndex','slideCount'];
   if (!value || Object.getPrototypeOf(value) !== Object.prototype || Object.keys(value).length !== fields.length || !fields.every(k => Object.hasOwn(value,k)) ||
@@ -125,12 +129,15 @@ function validRequest(r) {
   } else if (r.command === 'validateSelection') {
     if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0) return false;
     extra = ['selectionToken','expectedChangeSequence'];
+  } else if (r.command === 'captureCells') {
+    if (!token(r.selectionToken) || !integer(r.expectedChangeSequence) || !validWorkbookBounds(r.bounds)) return false;
+    extra = ['selectionToken','expectedChangeSequence','bounds'];
   } else if (r.command === 'replacePresentation') {
     if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validPresentationReview(r.presentation)) return false;
     extra=['selectionToken','expectedChangeSequence','presentation'];
   } else if (r.command === 'replaceCells') {
-    if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validWorkbookReview(r.workbook)) return false;
-    extra=['selectionToken','expectedChangeSequence','workbook'];
+    if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validWorkbookReview(r.workbook) || r.writeTarget !== undefined && !validWorkbookTarget(r.writeTarget)) return false;
+    extra=['selectionToken','expectedChangeSequence','workbook',...(r.writeTarget === undefined ? [] : ['writeTarget'])];
   } else if (r.command === 'replace') {
     if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0) return false;
     if (typeof r.text !== 'string' || r.text.length > 4096 || r.valueType !== 'text') return false;
@@ -185,6 +192,11 @@ export class OfficeEngineSurface {
         if (event.type === 'keydown' && this.editing && (this.state?.dirty || this.manualInput)) this.onEvent({type:'save-requested', channel:this.channel, operationId:this.openOperationId, documentId:this.state.documentId, version:this.state.version});
         return;
       }
+      if (body && this.state?.kind === 'xlsx' && event.key === 'F2') {
+        block(event);
+        if (event.type === 'keydown' && !event.repeat && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) void this.requestCellEdit('f2');
+        return;
+      }
       if (pointerControl(event.target)) return;
       if (event.target?.closest?.('[data-view], [data-pointer-action]') && ['Enter',' '].includes(event.key)) return;
       if (body && this.manualInput) {
@@ -221,6 +233,11 @@ export class OfficeEngineSurface {
       block(event);
     };
     for (const type of ['keydown','keypress','keyup']) window.addEventListener(type, intercept, true);
+    window.addEventListener('dblclick', event => {
+      if (event.target !== this.canvas || this.state?.kind !== 'xlsx') return;
+      block(event);
+      if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) void this.requestCellEdit('double-click');
+    }, true);
     for (const type of ['compositionstart','compositionupdate','compositionend']) window.addEventListener(type, event => {
       if (pointerControl(event.target)) return;
       const settling = this.composition?.owner === this.manualInput && event.type !== 'compositionstart';
@@ -264,6 +281,19 @@ export class OfficeEngineSurface {
       // settings and Electron's Chromium context-menu hook cannot close them.
       if (this.failed || this.manualLoading || type === 'contextmenu' || event.button !== 0 || event.ctrlKey || this.manualInput && (this.inputGate || this.inputPending || this.busy || this.composition)) block(event);
     }, true);
+  }
+  async requestCellEdit(intent) {
+    if (this.failed || this.busy || !this.state || this.state.kind !== 'xlsx' || this.state.dirty || this.manualInput || this.manualLoading) return;
+    const {documentId,version,changeSequence}=this.state, opened=this.openOperationId;
+    try {
+      const result=await this.request({command:'captureSelection',channel:this.channel,operationId:crypto.randomUUID(),documentId,version});
+      const selection=result.selection;
+      if(this.failed||!this.state||this.state.documentId!==documentId||this.state.version!==version||this.state.changeSequence!==changeSequence||this.openOperationId!==opened||
+          selection?.kind!=='cells'||!token(selection.token)||selection.ranges?.length!==1||selection.cells?.length!==1||selection.capture?.complete!==true)return;
+      const range=selection.ranges[0];
+      if(range.startColumn!==range.endColumn||range.startRow!==range.endRow)return;
+      this.onEvent({type:'cell-edit-requested',intent,channel:this.channel,operationId:opened,documentId,version,selection});
+    }catch { /* A busy or changed selection never opens an editor for an older cell. */ }
   }
   observeInputRuntime() {
     const runtime = this.inputRuntime, events = globalThis.JSEvents, resolveTarget = globalThis.findEventTarget;
@@ -518,7 +548,7 @@ export class OfficeEngineSurface {
   async request(r, selectionCurrent) {
     if (!identity(r) || r.channel !== this.channel) throw Error('invalid-request');
     if (!previewCommands.includes(r.command)) throw Error('unsupported-command');
-    if (!this.editing && !['local-view','open','edit','manual-edit','captureSelection','validateSelection','close'].includes(r.command)) throw Error('unsupported-command');
+    if (!this.editing && !['local-view','open','edit','manual-edit','captureSelection','captureCells','validateSelection','close'].includes(r.command)) throw Error('unsupported-command');
     if (!validRequest(r)) throw Error('invalid-request');
     if (this.failed) throw Error('surface-state-unknown-recreate-required');
     // A menu can race the guest's autonomous read after mouseup. Wait only for

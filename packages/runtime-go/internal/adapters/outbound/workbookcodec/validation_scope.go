@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"math"
 	"path"
 	"reflect"
 	"sort"
@@ -24,6 +25,585 @@ var ErrUnsupportedWorkbook = errors.New("workbook exceeds bounded typed editing 
 
 const workbookScopeCells = 10000
 
+type workbookAdmissionError string
+
+func (e workbookAdmissionError) Error() string { return "workbook is read-only: " + string(e) }
+func (e workbookAdmissionError) Unwrap() error { return ErrUnsupportedWorkbook }
+
+// NativeEditingReadOnlyReason returns a bounded, content-free reason suitable for
+// the editing eligibility projection. It never returns an input part name.
+func NativeEditingReadOnlyReason(err error) string {
+	var reason workbookAdmissionError
+	if errors.As(err, &reason) {
+		return string(reason)
+	}
+	if errors.Is(err, ErrUnsupportedWorkbook) {
+		return "bounded_scope_exceeded"
+	}
+	return ""
+}
+
+// ValidateNativeEditingPackage admits only the small XLSX feature profile whose
+// cells, styles, rows, columns, merges and panes VerifyPatchedPackage compares.
+// This is an editing gate, not a reader: unsupported packages remain readable.
+func ValidateNativeEditingPackage(ctx context.Context, body []byte) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = patchInvalid
+		}
+	}()
+	if ctx == nil || ctx.Err() != nil || len(body) == 0 {
+		return patchInvalid
+	}
+	if len(body) > MaxOutputBytes {
+		return workbookAdmissionError("bounded_scope_exceeded")
+	}
+	entries, err := workbookPackageEntries(body)
+	if err != nil {
+		return err
+	}
+	referenced := map[string]bool{}
+	for name, entry := range entries {
+		kind := workbookAdmissionPart(name)
+		if kind == "" {
+			return workbookAdmissionError("unsupported_package_part")
+		}
+		raw, e := workbookXML(ctx, entry)
+		if e != nil {
+			return e
+		}
+		switch kind {
+		case "relationships":
+			if e = workbookAdmissionRelationships(ctx, raw, name, entries, referenced); e != nil {
+				return e
+			}
+		case "content-types":
+			if e = workbookAdmissionContentTypes(ctx, raw, entries); e != nil {
+				return e
+			}
+		case "workbook", "worksheet", "styles", "strings":
+			if e = workbookAdmissionXML(ctx, raw, kind); e != nil {
+				return e
+			}
+		case "metadata", "theme":
+			if e = workbookAdmissionAncillaryXML(ctx, raw, name); e != nil {
+				return e
+			}
+		}
+	}
+	for _, required := range []string{"[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/_rels/workbook.xml.rels", "xl/styles.xml"} {
+		if entries[required] == nil {
+			return patchInvalid
+		}
+	}
+	sheetParts := 0
+	themes := 0
+	for name := range entries {
+		kind := workbookAdmissionPart(name)
+		if kind != "content-types" && kind != "relationships" && !referenced[name] {
+			return workbookAdmissionError("unsupported_package_part")
+		}
+		if kind == "worksheet" {
+			sheetParts++
+		}
+		if kind == "theme" {
+			themes++
+		}
+	}
+	if themes > 1 {
+		return workbookAdmissionError("unsupported_package_part")
+	}
+	sheets, err := workbookPhysical(ctx, body)
+	if err == nil && len(sheets) != sheetParts {
+		return workbookAdmissionError("unsupported_package_part")
+	}
+	if err == nil {
+		_, err = workbookThemeFonts(ctx, body)
+	}
+	return err
+}
+
+func workbookAdmissionNumberedPart(name, prefix, suffix string) bool {
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		return false
+	}
+	number := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
+	if number == "" {
+		return false
+	}
+	for _, c := range number {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func workbookAdmissionPart(name string) string {
+	switch name {
+	case "[Content_Types].xml":
+		return "content-types"
+	case "_rels/.rels", "xl/_rels/workbook.xml.rels":
+		return "relationships"
+	case "docProps/app.xml", "docProps/core.xml":
+		return "metadata"
+	case "xl/workbook.xml":
+		return "workbook"
+	case "xl/styles.xml":
+		return "styles"
+	case "xl/sharedStrings.xml":
+		return "strings"
+	}
+	if workbookAdmissionNumberedPart(name, "xl/worksheets/sheet", ".xml") {
+		return "worksheet"
+	}
+	if workbookAdmissionNumberedPart(name, "xl/theme/theme", ".xml") {
+		return "theme"
+	}
+	return ""
+}
+
+func workbookPackageEntries(body []byte) (map[string]*zip.File, error) {
+	z, e := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if e != nil {
+		return nil, patchInvalid
+	}
+	entries := map[string]*zip.File{}
+	var total uint64
+	for _, f := range z.File {
+		if f.UncompressedSize64 > 64<<20 || total > (64<<20)-f.UncompressedSize64 || len(entries) >= 4096 {
+			return nil, ErrUnsupportedWorkbook
+		}
+		total += f.UncompressedSize64
+		if entries[f.Name] != nil || f.Name != path.Clean(f.Name) || strings.HasPrefix(f.Name, "/") || strings.Contains(f.Name, "\\") {
+			return nil, patchInvalid
+		}
+		entries[f.Name] = f
+	}
+	return entries, nil
+}
+
+func workbookAdmissionRelationships(ctx context.Context, raw []byte, name string, entries map[string]*zip.File, referenced map[string]bool) error {
+	// Decode attributes explicitly; namespace-qualified feature elements and
+	// external targets are outside this editing profile even when unreferenced.
+	d := xml.NewDecoder(bytes.NewReader(raw))
+	ids := map[string]bool{}
+	root, depth := false, 0
+	for {
+		if ctx == nil || ctx.Err() != nil {
+			return patchInvalid
+		}
+		t, e := d.Token()
+		if e == io.EOF {
+			break
+		}
+		if e != nil {
+			return patchInvalid
+		}
+		switch n := t.(type) {
+		case xml.StartElement:
+			depth++
+			if n.Name.Space != "http://schemas.openxmlformats.org/package/2006/relationships" {
+				return workbookAdmissionError("unsupported_relationship")
+			}
+			if depth == 1 && n.Name.Local == "Relationships" && !root {
+				for _, a := range n.Attr {
+					if a.Name.Space != "xmlns" && (a.Name.Space != "" || a.Name.Local != "xmlns") {
+						return workbookAdmissionError("unsupported_relationship")
+					}
+				}
+				root = true
+				continue
+			}
+			if depth != 2 || n.Name.Local != "Relationship" {
+				return workbookAdmissionError("unsupported_relationship")
+			}
+			attrs := map[string]string{}
+			for _, a := range n.Attr {
+				if a.Name.Space != "" || !strings.Contains(" Id Target TargetMode Type ", " "+a.Name.Local+" ") || attrs[a.Name.Local] != "" {
+					return workbookAdmissionError("unsupported_relationship")
+				}
+				attrs[a.Name.Local] = a.Value
+			}
+			id, target, typ := attrs["Id"], attrs["Target"], attrs["Type"]
+			if id == "" || ids[id] || target == "" || attrs["TargetMode"] != "" || strings.ContainsAny(target, "?#\\") {
+				return workbookAdmissionError("unsupported_relationship")
+			}
+			ids[id] = true
+			base := ""
+			if name == "xl/_rels/workbook.xml.rels" {
+				base = "xl"
+			}
+			resolved := path.Clean(path.Join(base, target))
+			if strings.HasPrefix(target, "/") {
+				resolved = strings.TrimPrefix(path.Clean(target), "/")
+			}
+			part := workbookAdmissionPart(resolved)
+			allowed := map[string]string{
+				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet":           "worksheet",
+				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles":              "styles",
+				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme":               "theme",
+				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings":       "strings",
+				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument":      "workbook",
+				"http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties": "metadata",
+				"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties":   "metadata",
+			}
+			if entries[resolved] == nil || part == "" || allowed[typ] != part || base == "xl" && (part == "workbook" || part == "metadata") || base == "" && part != "workbook" && part != "metadata" {
+				return workbookAdmissionError("unsupported_relationship")
+			}
+			if part == "metadata" && (strings.HasSuffix(typ, "/extended-properties") && resolved != "docProps/app.xml" || strings.HasSuffix(typ, "/core-properties") && resolved != "docProps/core.xml") {
+				return workbookAdmissionError("unsupported_relationship")
+			}
+			referenced[resolved] = true
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if strings.TrimSpace(string(n)) != "" {
+				return patchInvalid
+			}
+		case xml.Directive:
+			return patchInvalid
+		}
+	}
+	if !root || depth != 0 {
+		return patchInvalid
+	}
+	return nil
+}
+
+func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
+	profiles := map[string]map[string]string{
+		"workbook": {
+			"workbook": "", "workbook/fileVersion": "appName lastEdited lowestEdited rupBuild codeName",
+			"workbook/workbookPr": "date1904 filterPrivacy defaultThemeVersion backupFile showObjects updateLinks saveExternalLinkValues",
+			"workbook/bookViews":  "", "workbook/bookViews/workbookView": "xWindow yWindow windowWidth windowHeight activeTab firstSheet tabRatio visibility minimized showHorizontalScroll showVerticalScroll showSheetTabs autoFilterDateGrouping",
+			"workbook/sheets": "", "workbook/sheets/sheet": "name sheetId state",
+			"workbook/definedNames": "",
+			"workbook/calcPr":       "calcId calcMode fullCalcOnLoad forceFullCalc calcCompleted calcOnSave concurrentCalc concurrentManualCount iterate iterateCount iterateDelta refMode",
+		},
+		"worksheet": {
+			"worksheet": "", "worksheet/sheetPr": "codeName filterMode published enableFormatConditionsCalculation",
+			"worksheet/sheetPr/pageSetUpPr": "autoPageBreaks fitToPage", "worksheet/sheetPr/outlinePr": "applyStyles summaryBelow summaryRight showOutlineSymbols",
+			"worksheet/dimension": "ref", "worksheet/sheetViews": "",
+			"worksheet/sheetViews/sheetView":           "workbookViewId tabSelected topLeftCell view zoomScale zoomScaleNormal zoomScalePageLayoutView zoomScaleSheetLayoutView showGridLines showRowColHeaders showZeros showFormulas rightToLeft showRuler showWhiteSpace defaultGridColor colorId windowProtection showOutlineSymbols",
+			"worksheet/sheetViews/sheetView/pane":      "xSplit ySplit topLeftCell activePane state",
+			"worksheet/sheetViews/sheetView/selection": "pane activeCell activeCellId sqref",
+			"worksheet/sheetFormatPr":                  "baseColWidth defaultColWidth defaultRowHeight customHeight zeroHeight outlineLevelRow outlineLevelCol",
+			"worksheet/cols":                           "", "worksheet/cols/col": "min max width style hidden bestFit customWidth outlineLevel collapsed phonetic",
+			"worksheet/sheetData": "", "worksheet/sheetData/row": "r s customFormat ht hidden customHeight outlineLevel collapsed spans thickTop thickBot",
+			"worksheet/sheetData/row/c": "r s t", "worksheet/sheetData/row/c/v": "", "worksheet/sheetData/row/c/f": "t",
+			"worksheet/sheetData/row/c/is": "", "worksheet/sheetData/row/c/is/t": "",
+			"worksheet/mergeCells": "count", "worksheet/mergeCells/mergeCell": "ref",
+			"worksheet/printOptions":           "headings gridLines gridLinesSet horizontalCentered verticalCentered",
+			"worksheet/pageMargins":            "left right top bottom header footer",
+			"worksheet/pageSetup":              "paperSize scale firstPageNumber fitToWidth fitToHeight pageOrder orientation usePrinterDefaults blackAndWhite draft cellComments useFirstPageNumber errors horizontalDpi verticalDpi copies",
+			"worksheet/headerFooter":           "differentOddEven differentFirst scaleWithDoc alignWithMargins",
+			"worksheet/headerFooter/oddHeader": "", "worksheet/headerFooter/oddFooter": "", "worksheet/headerFooter/evenHeader": "", "worksheet/headerFooter/evenFooter": "", "worksheet/headerFooter/firstHeader": "", "worksheet/headerFooter/firstFooter": "",
+			"worksheet/rowBreaks": "count manualBreakCount", "worksheet/colBreaks": "count manualBreakCount",
+		},
+		"strings": {"sst": "count uniqueCount", "sst/si": "", "sst/si/t": ""},
+		"styles": {
+			"styleSheet": "", "styleSheet/numFmts": "count", "styleSheet/numFmts/numFmt": "numFmtId formatCode",
+			"styleSheet/fonts": "count", "styleSheet/fonts/font": "",
+			"styleSheet/fills": "count", "styleSheet/fills/fill": "", "styleSheet/fills/fill/patternFill": "patternType",
+			"styleSheet/fills/fill/patternFill/fgColor": "rgb indexed auto theme tint", "styleSheet/fills/fill/patternFill/bgColor": "rgb indexed auto theme tint",
+			"styleSheet/borders": "count", "styleSheet/borders/border": "diagonalUp diagonalDown outline",
+			"styleSheet/cellStyleXfs": "count", "styleSheet/cellXfs": "count",
+			"styleSheet/cellStyles": "count", "styleSheet/cellStyles/cellStyle": "name xfId builtinId customBuiltin",
+			"styleSheet/dxfs": "count", "styleSheet/tableStyles": "count defaultTableStyle defaultPivotStyle",
+		},
+	}
+	profile := profiles[kind]
+	if kind == "styles" {
+		for _, name := range []string{"b", "i", "u", "strike", "vertAlign", "sz", "name", "family", "charset", "scheme"} {
+			profile["styleSheet/fonts/font/"+name] = "val"
+		}
+		profile["styleSheet/fonts/font/color"] = "rgb indexed auto theme tint"
+		for _, name := range []string{"left", "right", "top", "bottom", "diagonal", "vertical", "horizontal"} {
+			profile["styleSheet/borders/border/"+name] = "style"
+			profile["styleSheet/borders/border/"+name+"/color"] = "rgb indexed auto theme tint"
+		}
+		for _, collection := range []string{"cellStyleXfs", "cellXfs"} {
+			prefix := "styleSheet/" + collection + "/xf"
+			profile[prefix] = "numFmtId fontId fillId borderId xfId applyNumberFormat applyFont applyFill applyBorder applyAlignment applyProtection quotePrefix pivotButton"
+			profile[prefix+"/alignment"] = "horizontal vertical textRotation wrapText shrinkToFit indent relativeIndent justifyLastLine readingOrder"
+			profile[prefix+"/protection"] = "locked hidden"
+		}
+	}
+	reason := workbookAdmissionError("unsupported_xml_feature")
+	if kind == "worksheet" {
+		reason = workbookAdmissionError("unsupported_worksheet_feature")
+	} else if kind == "workbook" {
+		reason = workbookAdmissionError("unsupported_workbook_feature")
+	}
+	d := xml.NewDecoder(bytes.NewReader(raw))
+	stack := []string{}
+	root := false
+	for {
+		if ctx == nil || ctx.Err() != nil {
+			return patchInvalid
+		}
+		t, e := d.Token()
+		if e == io.EOF {
+			break
+		}
+		if e != nil {
+			return patchInvalid
+		}
+		switch n := t.(type) {
+		case xml.StartElement:
+			if n.Name.Space != "http://schemas.openxmlformats.org/spreadsheetml/2006/main" || len(stack) == 0 && root {
+				return reason
+			}
+			root = true
+			stack = append(stack, n.Name.Local)
+			p := strings.Join(stack, "/")
+			allowed, ok := profile[p]
+			if !ok {
+				if strings.Contains(p, "/c/") || kind == "strings" {
+					return workbookAdmissionError("unsupported_cell_feature")
+				}
+				return reason
+			}
+			attrs := map[xml.Name]bool{}
+			for _, a := range n.Attr {
+				if attrs[a.Name] {
+					return patchInvalid
+				}
+				attrs[a.Name] = true
+				if a.Name.Space == "xmlns" || a.Name.Space == "" && a.Name.Local == "xmlns" {
+					continue
+				}
+				if len(stack) == 1 && (a.Name.Space == "http://schemas.openxmlformats.org/markup-compatibility/2006" && a.Name.Local == "Ignorable" || a.Name.Space == "http://schemas.microsoft.com/office/spreadsheetml/2014/revision" && a.Name.Local == "uid") {
+					continue // Namespace/identity metadata does not admit extension payloads.
+				}
+				if p == "styleSheet/fonts" && a.Name.Space == "http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" && a.Name.Local == "knownFonts" {
+					continue
+				}
+				if (p == "worksheet/sheetFormatPr" || p == "worksheet/sheetData/row") && a.Name.Space == "http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" && a.Name.Local == "dyDescent" {
+					continue // Font descent bookkeeping; row height is verified separately.
+				}
+				if n.Name.Local == "t" && a.Name.Space == "http://www.w3.org/XML/1998/namespace" && a.Name.Local == "space" && (a.Value == "preserve" || a.Value == "default") {
+					continue
+				}
+				if p == "workbook/sheets/sheet" && a.Name.Space == "http://schemas.openxmlformats.org/officeDocument/2006/relationships" && a.Name.Local == "id" {
+					continue
+				}
+				if a.Name.Space != "" || !strings.Contains(" "+allowed+" ", " "+a.Name.Local+" ") {
+					return reason
+				}
+				if workbookAdmissionAttributeUnsupported(p, a.Name.Local, a.Value) {
+					return reason
+				}
+			}
+		case xml.EndElement:
+			stack = stack[:len(stack)-1]
+		case xml.CharData:
+			if strings.TrimSpace(string(n)) != "" && (len(stack) == 0 || !strings.Contains(" t v f oddHeader oddFooter evenHeader evenFooter firstHeader firstFooter ", " "+stack[len(stack)-1]+" ")) {
+				return patchInvalid
+			}
+		case xml.Directive:
+			return patchInvalid
+		}
+	}
+	if !root || len(stack) != 0 {
+		return patchInvalid
+	}
+	return nil
+}
+
+func workbookAdmissionAttributeUnsupported(p, name, value string) bool {
+	truthy := value != "0" && value != "false"
+	switch {
+	case p == "workbook/workbookPr" && name == "date1904":
+		return truthy
+	case p == "workbook/workbookPr" && (name == "backupFile" || name == "saveExternalLinkValues"):
+		return truthy
+	case p == "workbook/workbookPr" && name == "showObjects":
+		return value != "all"
+	case p == "workbook/workbookPr" && name == "updateLinks":
+		return value != "userSet"
+	case p == "workbook/calcPr" && name == "iterate":
+		return truthy
+	case p == "workbook/calcPr" && name == "refMode":
+		return value != "A1"
+	case p == "worksheet/sheetPr" && name == "filterMode":
+		return truthy
+	case p == "worksheet/sheetPr" && (name == "published" || name == "enableFormatConditionsCalculation"):
+		return !truthy
+	case p == "worksheet/sheetViews/sheetView":
+		switch name {
+		case "rightToLeft", "windowProtection", "showFormulas":
+			return truthy
+		case "showGridLines", "showRowColHeaders", "showZeros", "showRuler", "showWhiteSpace", "defaultGridColor", "showOutlineSymbols":
+			return !truthy
+		case "view":
+			return value != "normal"
+		case "colorId":
+			return value != "64"
+		}
+	case p == "worksheet/cols/col" && (name == "collapsed" || name == "phonetic" || name == "bestFit"), p == "worksheet/sheetData/row" && (name == "collapsed" || name == "thickTop" || name == "thickBot"):
+		return truthy
+	case p == "worksheet/sheetFormatPr" && (name == "outlineLevelRow" || name == "outlineLevelCol"), p == "worksheet/rowBreaks", p == "worksheet/colBreaks":
+		return value != "0"
+	case p == "worksheet/sheetData/row/c" && name == "t":
+		return value != "n" && value != "s" && value != "inlineStr" && value != "str"
+	case p == "worksheet/sheetData/row/c/f" && name == "t":
+		return value != "normal"
+	case p == "styleSheet/cellStyles" && name == "count":
+		return value != "1"
+	case p == "styleSheet/cellStyles/cellStyle":
+		return name == "name" && value != "Normal" && value != "Default" || name == "xfId" && value != "0" || name == "builtinId" && value != "0" || name == "customBuiltin" && truthy
+	case (p == "styleSheet/dxfs" || p == "styleSheet/tableStyles") && name == "count":
+		return value != "0"
+	case strings.HasSuffix(p, "/xf") && (name == "quotePrefix" || name == "pivotButton"):
+		return truthy
+	}
+	return false
+}
+
+func workbookAdmissionAncillaryXML(ctx context.Context, raw []byte, part string) error {
+	root, namespaces, elements := "", "", ""
+	switch part {
+	case "docProps/core.xml":
+		root = "coreProperties"
+		namespaces = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties http://purl.org/dc/elements/1.1/ http://purl.org/dc/terms/"
+		elements = "coreProperties category contentStatus created creator description identifier keywords language lastModifiedBy lastPrinted modified revision subject title version"
+	case "docProps/app.xml":
+		root = "Properties"
+		namespaces = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"
+		elements = "Properties Template Manager Company Pages Words Characters PresentationFormat Lines Paragraphs Slides Notes TotalTime HiddenSlides MMClips ScaleCrop HeadingPairs TitlesOfParts LinksUpToDate CharactersWithSpaces SharedDoc HyperlinkBase HLinks HyperlinksChanged Application AppVersion DocSecurity vector variant lpstr lpwstr i4 ui4 bool"
+	default:
+		root = "theme"
+		namespaces = "http://schemas.openxmlformats.org/drawingml/2006/main"
+		// Only passive theme definitions, never image fills or extension payloads.
+		elements = "theme themeElements clrScheme dk1 lt1 dk2 lt2 accent1 accent2 accent3 accent4 accent5 accent6 hlink folHlink sysClr srgbClr schemeClr prstClr scrgbClr hslClr fontScheme majorFont minorFont latin ea cs font fmtScheme fillStyleLst bgFillStyleLst solidFill noFill gradFill gsLst gs lin path fillToRect tileRect lnStyleLst ln prstDash custDash ds round bevel miter headEnd tailEnd effectStyleLst effectStyle effectLst effectDag outerShdw innerShdw glow softEdge reflection blur scene3d camera lightRig rot sp3d bevelT bevelB contourClr extrusionClr objectDefaults extraClrSchemeLst tint shade satMod satOff lumMod lumOff alpha alphaMod alphaOff hue hueMod hueOff comp inv gray gamma invGamma red redMod redOff green greenMod greenOff blue blueMod blueOff"
+	}
+	d := xml.NewDecoder(bytes.NewReader(raw))
+	depth, seen := 0, false
+	for {
+		if ctx == nil || ctx.Err() != nil {
+			return patchInvalid
+		}
+		t, e := d.Token()
+		if e == io.EOF {
+			break
+		}
+		if e != nil {
+			return patchInvalid
+		}
+		switch n := t.(type) {
+		case xml.StartElement:
+			if depth == 0 && (seen || n.Name.Local != root) || !strings.Contains(" "+namespaces+" ", " "+n.Name.Space+" ") || !strings.Contains(" "+elements+" ", " "+n.Name.Local+" ") {
+				return workbookAdmissionError("unsupported_xml_feature")
+			}
+			seen = true
+			depth++
+			for _, a := range n.Attr {
+				if a.Name.Space == "xmlns" || a.Name.Space == "" && a.Name.Local == "xmlns" || a.Name.Space == "http://www.w3.org/2001/XMLSchema-instance" && a.Name.Local == "type" {
+					continue
+				}
+				if a.Name.Space != "" || !strings.Contains(" name script typeface panose pitchFamily charset val lastClr r g b hue sat lum ang scaled pos flip rotWithShape type w cap cmpd algn lim len dist dir blurRad sx sy kx ky al stA stAng stH stV lat lon rev zoom fov rig prst z extrusionH contourW prstMaterial baseType size l t b ", " "+a.Name.Local+" ") {
+					return workbookAdmissionError("unsupported_xml_feature")
+				}
+			}
+		case xml.EndElement:
+			depth--
+		case xml.Directive:
+			return patchInvalid
+		}
+	}
+	if !seen || depth != 0 {
+		return patchInvalid
+	}
+	return nil
+}
+
+func workbookAdmissionContentTypes(ctx context.Context, raw []byte, entries map[string]*zip.File) error {
+	d := xml.NewDecoder(bytes.NewReader(raw))
+	depth, seen := 0, false
+	for {
+		if ctx == nil || ctx.Err() != nil {
+			return patchInvalid
+		}
+		t, e := d.Token()
+		if e == io.EOF {
+			break
+		}
+		if e != nil {
+			return patchInvalid
+		}
+		switch n := t.(type) {
+		case xml.StartElement:
+			depth++
+			if n.Name.Space != "http://schemas.openxmlformats.org/package/2006/content-types" || depth == 1 && (seen || n.Name.Local != "Types") || depth == 2 && n.Name.Local != "Default" && n.Name.Local != "Override" || depth > 2 {
+				return workbookAdmissionError("unsupported_package_part")
+			}
+			seen = true
+			for _, a := range n.Attr {
+				if a.Name.Space == "xmlns" || a.Name.Space == "" && a.Name.Local == "xmlns" {
+					continue
+				}
+				if a.Name.Space != "" || depth == 1 || a.Name.Local != "ContentType" && (n.Name.Local == "Default" && a.Name.Local != "Extension" || n.Name.Local == "Override" && a.Name.Local != "PartName") {
+					return workbookAdmissionError("unsupported_package_part")
+				}
+			}
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if strings.TrimSpace(string(n)) != "" {
+				return patchInvalid
+			}
+		case xml.Directive:
+			return patchInvalid
+		}
+	}
+	if !seen || depth != 0 {
+		return patchInvalid
+	}
+	var types struct {
+		XMLName  xml.Name
+		Defaults []struct {
+			Extension string `xml:"Extension,attr"`
+			Type      string `xml:"ContentType,attr"`
+		} `xml:"Default"`
+		Overrides []struct {
+			Part string `xml:"PartName,attr"`
+			Type string `xml:"ContentType,attr"`
+		} `xml:"Override"`
+	}
+	if xml.Unmarshal(raw, &types) != nil || types.XMLName.Local != "Types" || types.XMLName.Space != "http://schemas.openxmlformats.org/package/2006/content-types" {
+		return patchInvalid
+	}
+	for _, item := range types.Defaults {
+		if item.Extension != "xml" || item.Type != "application/xml" {
+			if item.Extension != "rels" || item.Type != "application/vnd.openxmlformats-package.relationships+xml" {
+				return workbookAdmissionError("unsupported_package_part")
+			}
+		}
+	}
+	allowed := map[string]string{
+		"workbook":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+		"worksheet": "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+		"styles":    "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
+		"strings":   "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
+		"theme":     "application/vnd.openxmlformats-officedocument.theme+xml",
+	}
+	for _, item := range types.Overrides {
+		name := strings.TrimPrefix(item.Part, "/")
+		want := allowed[workbookAdmissionPart(name)]
+		if name == "docProps/core.xml" {
+			want = "application/vnd.openxmlformats-package.core-properties+xml"
+		} else if name == "docProps/app.xml" {
+			want = "application/vnd.openxmlformats-officedocument.extended-properties+xml"
+		}
+		if entries[name] == nil || want == "" || item.Type != want {
+			return workbookAdmissionError("unsupported_package_part")
+		}
+	}
+	return nil
+}
+
 type workbookPhysicalSheet struct {
 	Name, ID, State, CodeName, Filter string
 	ZeroHeight                        bool
@@ -31,6 +611,7 @@ type workbookPhysicalSheet struct {
 	Rows                              map[int]int
 	Columns                           map[int]bool
 	Merges                            map[string]bool
+	Settings                          map[string]string
 }
 
 func workbookXML(ctx context.Context, z *zip.File) ([]byte, error) {
@@ -52,24 +633,9 @@ func workbookXML(ctx context.Context, z *zip.File) ([]byte, error) {
 	return body, nil
 }
 func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet, error) {
-	z, e := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	entries, e := workbookPackageEntries(body)
 	if e != nil {
-		return nil, patchInvalid
-	}
-	entries := map[string]*zip.File{}
-	var total uint64
-	for _, f := range z.File {
-		if f.UncompressedSize64 > 64<<20 {
-			return nil, ErrUnsupportedWorkbook
-		}
-		total += f.UncompressedSize64
-		if total > 64<<20 || len(entries) >= 4096 {
-			return nil, ErrUnsupportedWorkbook
-		}
-		if entries[f.Name] != nil {
-			return nil, patchInvalid
-		}
-		entries[f.Name] = f
+		return nil, e
 	}
 	var book struct {
 		Sheets []struct {
@@ -124,7 +690,7 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 		if e != nil {
 			return nil, e
 		}
-		s := workbookPhysicalSheet{Name: sheet.Name, ID: sheet.ID, State: sheet.State, Cells: map[string]bool{}, Rows: map[int]int{}, Columns: map[int]bool{1: true, 16384: true}, Merges: map[string]bool{}}
+		s := workbookPhysicalSheet{Name: sheet.Name, ID: sheet.ID, State: sheet.State, Cells: map[string]bool{}, Rows: map[int]int{}, Columns: map[int]bool{1: true, 16384: true}, Merges: map[string]bool{}, Settings: map[string]string{}}
 		if s.State == "" {
 			s.State = "visible"
 		}
@@ -150,6 +716,16 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 				attrs[a.Name.Local] = a.Value
 			}
 			switch start.Name.Local {
+			case "pageSetUpPr", "outlinePr", "printOptions", "pageMargins", "pageSetup", "headerFooter":
+				for name, value := range attrs {
+					s.Settings[start.Name.Local+"/"+name] = value
+				}
+			case "oddHeader", "oddFooter", "evenHeader", "evenFooter", "firstHeader", "firstFooter":
+				var text string
+				if d.DecodeElement(&text, &start) != nil {
+					return nil, patchInvalid
+				}
+				s.Settings[start.Name.Local+"/text"] = text
 			case "sheetFormatPr":
 				s.ZeroHeight = attrs["zeroHeight"] == "1" || attrs["zeroHeight"] == "true"
 			case "sheetPr":
@@ -235,6 +811,17 @@ func workbookSemanticStyle(f *excelize.File, id int) (string, error) {
 	if s.Protection == nil {
 		s.Protection = &excelize.Protection{Locked: true}
 	}
+	if s.Font != nil {
+		color := f.GetBaseColor(s.Font.Color, s.Font.ColorIndexed, s.Font.ColorTheme)
+		if color != "" {
+			color = excelize.ThemeColor(color, s.Font.ColorTint)
+			if len(color) == 8 {
+				color = color[2:]
+			}
+		}
+		s.Font.Color = strings.ToUpper(color)
+		s.Font.ColorIndexed, s.Font.ColorTheme, s.Font.ColorTint = 0, nil, 0
+	}
 	if s.CustomNumFmt != nil {
 		s.NumFmt = 0
 	}
@@ -287,7 +874,112 @@ func workbookCellSemantic(f *excelize.File, sheet, address string) (string, erro
 		return strconv.Itoa(int(typ)) + ":" + v, nil
 	}
 }
+
+func workbookSameExplicitSettings(before, after map[string]string) bool {
+	defaults := map[string]string{
+		"pageSetUpPr/autoPageBreaks": "true", "pageSetUpPr/fitToPage": "false",
+		"outlinePr/applyStyles": "false", "outlinePr/summaryBelow": "true", "outlinePr/summaryRight": "true", "outlinePr/showOutlineSymbols": "true",
+		"printOptions/headings": "false", "printOptions/gridLines": "false", "printOptions/gridLinesSet": "true", "printOptions/horizontalCentered": "false", "printOptions/verticalCentered": "false",
+		"pageMargins/left": "0.7", "pageMargins/right": "0.7", "pageMargins/top": "0.75", "pageMargins/bottom": "0.75", "pageMargins/header": "0.3", "pageMargins/footer": "0.3",
+		"pageSetup/scale": "100", "pageSetup/firstPageNumber": "1", "pageSetup/fitToWidth": "1", "pageSetup/fitToHeight": "1", "pageSetup/pageOrder": "downThenOver", "pageSetup/orientation": "default", "pageSetup/usePrinterDefaults": "true", "pageSetup/blackAndWhite": "false", "pageSetup/draft": "false", "pageSetup/cellComments": "none", "pageSetup/useFirstPageNumber": "false", "pageSetup/errors": "displayed", "pageSetup/horizontalDpi": "600", "pageSetup/verticalDpi": "600", "pageSetup/copies": "1",
+		"headerFooter/differentOddEven": "false", "headerFooter/differentFirst": "false", "headerFooter/scaleWithDoc": "true", "headerFooter/alignWithMargins": "true",
+	}
+	for key, left := range before {
+		right, exists := after[key]
+		if !exists {
+			right = defaults[key]
+		}
+		if left == right {
+			continue
+		}
+		if strings.HasSuffix(key, "/text") {
+			return false
+		}
+		if defaults[key] == "true" || defaults[key] == "false" {
+			if left == "0" && right == "false" || left == "false" && right == "0" || left == "1" && right == "true" || left == "true" && right == "1" {
+				continue
+			}
+			return false
+		}
+		a, e1 := strconv.ParseFloat(left, 64)
+		b, e2 := strconv.ParseFloat(right, 64)
+		if e1 != nil || e2 != nil || math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || math.IsInf(b, 0) || math.Abs(a-b) > 1e-9*math.Max(1, math.Max(math.Abs(a), math.Abs(b))) {
+			return false
+		}
+	}
+	for key, value := range after {
+		if strings.HasSuffix(key, "/text") && value != before[key] {
+			return false
+		}
+	}
+	return true
+}
+
+func workbookThemeFonts(ctx context.Context, body []byte) (map[string]string, error) {
+	entries, err := workbookPackageEntries(body)
+	if err != nil {
+		return nil, err
+	}
+	fonts := map[string]string{}
+	for name, entry := range entries {
+		if workbookAdmissionPart(name) != "theme" {
+			continue
+		}
+		raw, err := workbookXML(ctx, entry)
+		if err != nil {
+			return nil, err
+		}
+		d := xml.NewDecoder(bytes.NewReader(raw))
+		family := ""
+		for {
+			if ctx == nil || ctx.Err() != nil {
+				return nil, patchInvalid
+			}
+			t, e := d.Token()
+			if e == io.EOF {
+				break
+			}
+			if e != nil {
+				return nil, patchInvalid
+			}
+			switch n := t.(type) {
+			case xml.StartElement:
+				switch n.Name.Local {
+				case "majorFont", "minorFont":
+					family = n.Name.Local
+				case "latin", "ea", "cs", "font":
+					if family == "" {
+						continue
+					}
+					attrs := map[string]string{}
+					for _, a := range n.Attr {
+						attrs[a.Name.Local] = a.Value
+					}
+					key := family + "/" + n.Name.Local
+					if n.Name.Local == "font" {
+						key += "/" + attrs["script"]
+					}
+					if _, exists := fonts[key]; exists {
+						return nil, patchInvalid
+					}
+					fonts[key] = attrs["typeface"]
+				}
+			case xml.EndElement:
+				if n.Name.Local == "majorFont" || n.Name.Local == "minorFont" {
+					family = ""
+				}
+			}
+		}
+	}
+	return fonts, nil
+}
+
 func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.File, original, candidate []byte, scope office.WorkbookSelection) error {
+	fontsBefore, e1 := workbookThemeFonts(ctx, original)
+	fontsAfter, e2 := workbookThemeFonts(ctx, candidate)
+	if e1 != nil || e2 != nil || len(fontsBefore) != 0 && !reflect.DeepEqual(fontsBefore, fontsAfter) {
+		return patchInvalid
+	}
 	a, e := workbookPhysical(ctx, original)
 	if e != nil {
 		return e
@@ -301,7 +993,7 @@ func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.Fil
 	}
 	for i, left := range a {
 		right := b[i]
-		if left.Name != right.Name || left.ID != right.ID || left.State != right.State || left.CodeName != right.CodeName || left.Filter != right.Filter || left.ZeroHeight != right.ZeroHeight || !reflect.DeepEqual(left.Merges, right.Merges) {
+		if left.Name != right.Name || left.ID != right.ID || left.State != right.State || left.CodeName != right.CodeName || left.Filter != right.Filter || left.ZeroHeight != right.ZeroHeight || !reflect.DeepEqual(left.Merges, right.Merges) || !workbookSameExplicitSettings(left.Settings, right.Settings) {
 			return patchInvalid
 		}
 		p1, e1 := before.GetPanes(left.Name)

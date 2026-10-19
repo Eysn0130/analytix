@@ -39,17 +39,18 @@ type nativeRecoveryIndex struct {
 	Retiring  []string              `json:"retiring,omitempty"`
 }
 type nativeRecoveryRecord struct {
-	Manual         *editing.NativeManualDraft `json:"-"`
-	Version        int                        `json:"version"`
-	ObjectIdentity string                     `json:"objectIdentity"`
-	PathBinding    string                     `json:"pathBinding"`
-	Kind           string                     `json:"kind"`
-	Draft          editing.NativeChangeDraft  `json:"draft"`
-	AfterHash      string                     `json:"afterHash,omitempty"`
-	UndoStarted    bool                       `json:"undoStarted"`
-	CreatedAt      string                     `json:"createdAt"`
-	DraftHash      string                     `json:"draftHash,omitempty"`
-	Disposition    string                     `json:"disposition,omitempty"`
+	Manual         *editing.NativeManualDraft         `json:"-"`
+	WorkbookManual *editing.NativeWorkbookManualDraft `json:"-"`
+	Version        int                                `json:"version"`
+	ObjectIdentity string                             `json:"objectIdentity"`
+	PathBinding    string                             `json:"pathBinding"`
+	Kind           string                             `json:"kind"`
+	Draft          editing.NativeChangeDraft          `json:"draft"`
+	AfterHash      string                             `json:"afterHash,omitempty"`
+	UndoStarted    bool                               `json:"undoStarted"`
+	CreatedAt      string                             `json:"createdAt"`
+	DraftHash      string                             `json:"draftHash,omitempty"`
+	Disposition    string                             `json:"disposition,omitempty"`
 }
 
 func nativeDraftHash(d editing.NativeChangeDraft) string {
@@ -67,6 +68,13 @@ func nativeCompact(r nativeRecoveryRecord, disposition string) nativeRecoveryRec
 	r.Draft.BeforeText, r.Draft.AfterText, r.Disposition = "", "", disposition
 	r.Draft.Workbook = nil
 	r.Draft.Presentation = nil
+	if r.WorkbookManual != nil {
+		draft := *r.WorkbookManual
+		draft.Workbook = nil
+		draft.WriteTarget = office.WorkbookWriteTarget{}
+		draft.Edit = office.WorkbookManualEdit{}
+		r.WorkbookManual = &draft
+	}
 	return r
 }
 
@@ -397,12 +405,12 @@ func (s *ObjectEditingFiles) PrepareNativeChange(ctx context.Context, input edit
 		if err != nil {
 			return editing.NativeChangeStatus{}, err
 		}
-		if previous.Version == 2 || previous.AfterHash != "" {
+		if previous.Version == 2 || previous.Version == 3 || previous.AfterHash != "" {
 			return editing.NativeChangeStatus{}, editing.ErrConflict
 		}
 	}
 	if index.Preparing != nil && index.Preparing.Draft.ChangeID != input.Draft.ChangeID {
-		if index.Preparing.Version == 2 {
+		if index.Preparing.Version == 2 || index.Preparing.Version == 3 {
 			return editing.NativeChangeStatus{}, editing.ErrConflict
 		}
 		if err = s.retireNativePreparing(target, &index, &indexHash, "superseded"); err != nil {
@@ -486,8 +494,8 @@ func (s *ObjectEditingFiles) retireNativePreparing(target objectEditingTarget, i
 func (s *ObjectEditingFiles) nativeStatus(ctx context.Context, target objectEditingTarget, record nativeRecoveryRecord) (editing.NativeChangeStatus, error) {
 	d := record.Draft
 	status := editing.NativeChangeStatus{ChangeID: d.ChangeID, ThreadID: d.ThreadID, ProposalID: d.ProposalID, BaseRevision: d.BaseRevision, Status: "prepared", BeforeText: d.BeforeText, AfterText: d.AfterText, Workbook: d.Workbook, Presentation: d.Presentation, SaveOperationID: nativeSaveID(d.ChangeID), UndoOperationID: nativeUndoID(d.ChangeID), CreatedAt: record.CreatedAt}
-	if record.Version == 2 {
-		status.Version, status.Origin = 2, "manual"
+	if record.Version == 2 || record.Version == 3 {
+		status.Version, status.Origin = record.Version, "manual"
 	}
 	if ctx.Err() != nil {
 		return status, ctx.Err()
@@ -648,8 +656,8 @@ func (s *ObjectEditingFiles) nativeRecoveryLocked(ctx context.Context, target ob
 	if index.Preparing != nil && index.Preparing.Draft.ThreadID == thread {
 		r := index.Preparing
 		result.Pending = &editing.NativeChangeStatus{ChangeID: r.Draft.ChangeID, ThreadID: thread, ProposalID: r.Draft.ProposalID, BaseRevision: r.Draft.BaseRevision, Status: "unknown", SaveOperationID: nativeSaveID(r.Draft.ChangeID), UndoOperationID: nativeUndoID(r.Draft.ChangeID), CreatedAt: r.CreatedAt, CanCancel: true}
-		if r.Version == 2 {
-			result.Pending.Version, result.Pending.Origin = 2, "manual"
+		if r.Version == 2 || r.Version == 3 {
+			result.Pending.Version, result.Pending.Origin = r.Version, "manual"
 		}
 	}
 	return result, nil
@@ -892,6 +900,11 @@ func (s *ObjectEditingFiles) ValidateNativeWorkbook(ctx context.Context, input e
 		return nil, editing.ErrConflict
 	}
 	if InspectOfficePackage(state.Content, "xlsx") != nil {
+		return nil, editing.ErrInvalidInput
+	}
+	if err = workbookcodec.ValidateNativeEditingPackage(ctx, state.Content); errors.Is(err, workbookcodec.ErrUnsupportedWorkbook) {
+		return nil, editing.ErrTooLarge
+	} else if err != nil {
 		return nil, editing.ErrInvalidInput
 	}
 	if err = workbookcodec.VerifySelectionPackage(ctx, state.Content, input.Selection); errors.Is(err, workbookcodec.ErrUnsupportedWorkbook) {

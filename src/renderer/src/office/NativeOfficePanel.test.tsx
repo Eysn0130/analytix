@@ -49,6 +49,64 @@ beforeEach(() => {
   container = document.createElement('div'); container.className = 'ds-right-sidebar-pane'; document.body.append(container)
   root = createRoot(container)
 })
+
+describe('bounded workbook manual controls',()=>{
+  const cells:Extract<NativeOfficeSelection,{kind:'cells'}> = {kind:'cells',documentId:view.objectId,version:view.revision,changeSequence:0,
+    token:'workbook-selection',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',
+    capture:{capturedCharacters:1,totalCharacters:1,unit:'utf-16',complete:true,truncated:false},
+    ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],
+    cells:[{sheet:0,column:0,row:0,text:'1',value:1,formula:'1',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}]}
+  const workbook:NativeOfficeView = {...view,path:'/synthetic/book.xlsx',kind:'xlsx',workbookEditing:{editable:true},selection:cells}
+  async function renderWorkbook(next:NativeOfficeView = workbook) {
+    request.mockImplementation(async()=>({ok:true,view:next}))
+    useNativeOfficeStore.setState({target:{workspace:'/synthetic',path:next.path},view:next,error:null})
+    await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'})))
+  }
+  async function fillCell(value:string) {
+    const input=container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!
+    await act(async()=>{
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value)
+      input.dispatchEvent(new Event('input',{bubbles:true}))
+    })
+  }
+  it('keeps native preview readonly while F2 focuses the bounded explicit cell input',async()=>{
+    await renderWorkbook()
+    const surface=container.querySelector('[aria-label="nativeOfficeEditor"]')!
+    await act(async()=>surface.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true})))
+    expect(document.activeElement).toBe(container.querySelector('[data-workbook-cell-input]'))
+    expect(request.mock.calls.some(([input])=>['beginManualEdit','editWorkbookCell'].includes(input.action))).toBe(false)
+    await fillCell('2');await clickNamed('保存')
+    expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toEqual([[{
+      action:'editWorkbookCell',objectId:view.objectId,revision:view.revision,expectedChangeSequence:0,
+      threadId:'thread',selectionToken:cells.token,edit:{type:'number',value:2}
+    }]])
+    expect(request.mock.calls.some(([input])=>['beginManualEdit','reference','acceptProposal'].includes(input.action))).toBe(false)
+  })
+  it('queries an uncertain manual result instead of resubmitting the edit',async()=>{
+    await renderWorkbook()
+    request.mockImplementation(async(input:NativeOfficeRequest)=>{
+      if(input.action==='editWorkbookCell') throw new Error('transport unavailable')
+      return {ok:true,view:workbook}
+    })
+    await fillCell('2');await clickNamed('保存')
+    expect(useNativeOfficeStore.getState().error).toBe('unknown')
+    expect(namedButton('保存').disabled).toBe(true)
+    await clickNamed('查询结果')
+    expect(request.mock.calls.filter(([input])=>input.action==='saveStatus')).toEqual([[{action:'saveStatus',objectId:view.objectId}]])
+    expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toHaveLength(1)
+  })
+  it('routes typed workbook recovery cancellation through the existing cancelChange owner',async()=>{
+    const selected={...cells.ranges[0],cells:cells.cells!}
+    const pending = {version:3 as const,origin:'manual' as const,changeId:'d'.repeat(64),threadId:'thread',baseRevision:view.revision,revision:'',
+      status:'prepared' as const,workbook:{before:selected,after:selected,results:['1']},saveOperationId:'save-operation',undoOperationId:'undo-operation',
+      canUndo:false,canCancel:true,canRetryUndo:false,canResume:true,createdAt:'',savedAt:''}
+    await renderWorkbook({...workbook,recovery:{pending,current:null}})
+    await clickNamed('取消未保存的修改')
+    expect(request.mock.calls.filter(([input])=>input.action==='cancelChange')).toEqual([[{action:'cancelChange',objectId:view.objectId,
+      revision:view.revision,expectedChangeSequence:0,threadId:'thread',changeId:pending.changeId}]])
+    expect(request.mock.calls.some(([input])=>input.action==='discardManualEdit')).toBe(false)
+  })
+})
 afterEach(async () => {
   await act(async () => root?.unmount()); root = null
   container.remove(); useNativeOfficeStore.setState({ target: null, view: null, error: null })

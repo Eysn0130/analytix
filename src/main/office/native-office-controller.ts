@@ -22,7 +22,7 @@ export const MAX_NATIVE_OFFICE_BYTES = 16 * 1024 * 1024
 const MAX_BASE64_LENGTH = Math.ceil(MAX_NATIVE_OFFICE_BYTES / 3) * 4
 const packageIds = { docx: 'analytix-documents', xlsx: 'analytix-spreadsheets', pptx: 'analytix-presentations' } as const
 const operations = ['open-object', 'close-object'] as const
-type HostOperation = typeof operations[number] | 'create-object' | 'begin-manual-edit' | 'commit-object' | 'object-status' | 'capture-selection' | 'selection-read' | 'proposal-read' | 'proposal-accept' | 'proposal-reject' | 'selection-revoke' | 'object-recovery' | 'undo-change' | 'cancel-change' | 'resume-change' | 'annotation-read' | 'annotation-write'
+type HostOperation = typeof operations[number] | 'create-object' | 'begin-manual-edit' | 'plan-workbook-manual' | 'prepare-workbook-manual' | 'commit-object' | 'object-status' | 'capture-selection' | 'selection-read' | 'proposal-read' | 'proposal-accept' | 'proposal-reject' | 'selection-revoke' | 'object-recovery' | 'undo-change' | 'cancel-change' | 'resume-change' | 'annotation-read' | 'annotation-write'
 const token = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const sequence = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -35,6 +35,7 @@ const eventBase = { documentId: digest, version: digest, operationId: token }
 const engineEventSchema = z.discriminatedUnion('type', [
   z.object({ ...eventBase, type: z.literal('changed'), state: engineStateSchema }).strict(),
   z.object({ ...eventBase, type: z.literal('selection'), selection: nativeOfficeSelectionSchema }).strict(),
+  z.object({ ...eventBase, type: z.literal('cell-edit-requested'), intent:z.enum(['f2','double-click']), selection: nativeOfficeSelectionSchema }).strict(),
   z.object({ ...eventBase, type: z.literal('save-requested') }).strict(),
   z.object({ ...eventBase, type: z.literal('view'), view: z.custom<OfficePreviewView>(value => isOfficePreviewView(value)).nullable() }).strict()
 ])
@@ -74,7 +75,7 @@ type Active = {
   decisionOperations: Map<string, string>
   pendingSave?: { operationId: string; sequence: number; revision: string; digest: string }
   threadId?: string
-  approvedChange?: { changeId: string; threadId: string; saveOperationId: string; baseRevision: string }
+  approvedChange?: { changeId: string; threadId: string; saveOperationId: string; baseRevision: string; workbookManual?:true }
   manualAuthority?: NativeOfficeManualAuthority
   manualFreeze?: NativeOfficeFreezeAck
   manualExportAttempted?: boolean
@@ -106,6 +107,17 @@ function withoutChannel(value: unknown): unknown {
   const copy = { ...value } as Record<string, unknown>
   delete copy.channel
   return copy
+}
+
+function workbookDiscussionText(selection: Extract<NativeOfficeSelection,{kind:'cells'}>): string {
+  const column = (value:number) => {
+    let label = ''
+    for (value++; value; value = Math.floor((value-1)/26)) label = String.fromCharCode(65+(value-1)%26)+label
+    return label
+  }
+  const ranges = selection.ranges.map(r => `${JSON.stringify(r.sheetName)}!${column(r.startColumn)}${r.startRow+1}:${column(r.endColumn)}${r.endRow+1}`).join('; ')
+  const complete = !!selection.capture?.complete && !selection.capture.truncated
+  return `Workbook selection: ${ranges}\nCapture: ${complete ? 'complete' : 'partial; values below are not the entire selection; do not infer whole-range totals'}; captured cells: ${selection.cells?.length ?? 0}; maximum 256. Read-only discussion reference; no write authority.\n${selection.text}`
 }
 
 /** Core-bound native sessions. At most two retained surfaces, only one visible. */
@@ -231,7 +243,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       if (result.success && !result.data.ok) manualBegin.innerCode = result.data.code
     }
     if (!result.success) fail('invalid_response')
-    if (!result.data.ok) fail(result.data.code === 'forbidden' ? 'forbidden' : result.data.code === 'conflict' ? 'conflict' : result.data.code === 'scope_invalid' ? 'stale_selection' : 'unavailable')
+    if (!result.data.ok) fail(result.data.code === 'forbidden' ? 'forbidden' : result.data.code === 'conflict' ? 'conflict' : result.data.code === 'scope_invalid' ? 'stale_selection' :
+      ['plan-workbook-manual','prepare-workbook-manual'].includes(operation) && ['not_text','too_large','proposal_invalid','invalid_request'].includes(result.data.code) ? 'unsupported_selection' : 'unavailable')
     return result.data
   }
 
@@ -493,8 +506,12 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       return
     }
     if (event.type === 'save-requested') { if (document.view.editing) void serialize(() => save(document)); return }
-    if (event.type !== 'selection') return
-    try { acceptSelection(document, event.selection); publish() }
+    if (event.type !== 'selection' && event.type !== 'cell-edit-requested') return
+    try {
+      const selection = event.type === 'cell-edit-requested' && document.view.kind === 'xlsx' && event.selection.kind === 'cells' && event.selection.token
+        ? {...event.selection,editIntent:{kind:event.intent,id:event.selection.token}} : event.selection
+      acceptSelection(document, selection); publish()
+    }
     catch { invalidatePreview(document, 'invalid_response') }
   }
 
@@ -559,7 +576,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         diagnosticStage = 'controller_surface_create'
         surface = await options.createSurface(event => { if (document && document.surface === surface) onEvent(document, event) })
         if (disposed || epoch !== visibilityEpoch || !visible) fail('unavailable')
-        document = { view: { objectId: opened.objectId, path: opened.path, kind, revision: opened.revision, dirty: false, status: 'loading' },
+        document = { view: { objectId: opened.objectId, path: opened.path, kind, revision: opened.revision, dirty: false, status: 'loading', ...(kind === 'xlsx' ? {workbookEditing:result.workbookEditing ?? {editable:false,reason:'unsupported_workbook' as const}} : {}) },
           workspace: request.workspace, requestedPath: request.path, sessionId: opened.sessionId,
           bounds:request.bounds, appearance:request.appearance, binding: holder.binding, selections:new Map(), appliedProposals:new Set(), revokedScopes:new Set(), decisionOperations:new Map(), surface, openOperationId: newOperationId(), ready: false, failed: false }
         documents.set(document.view.objectId, document)
@@ -737,6 +754,61 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     document.view.status = 'ready'; delete document.view.error; publish()
   }
 
+  async function editWorkbookCell(document: Active, request: Extract<ReturnType<typeof nativeOfficeRequestSchema.parse>,{action:'editWorkbookCell'}>) {
+    if (document.view.kind !== 'xlsx' || document.protectedSnapshot || document.threadId !== request.threadId ||
+      !document.view.workbookEditing?.editable) fail('unsupported_selection')
+    if (document.pendingSave || document.pendingRecovery || document.pendingManualCancel) fail('unknown')
+    if (document.view.dirty || document.approvedChange || document.manualAuthority) fail('unsaved_changes')
+    const selected = document.view.selection
+    const original = selected && nativeTypedWorkbookSelection(selected)
+    if (!selected || selected.token !== request.selectionToken || !original || original.cells.length !== 1 ||
+      selected.changeSequence !== request.expectedChangeSequence || selected.version !== request.revision) fail('stale_selection')
+    await recover(document,request.threadId)
+    if (document.view.recovery?.pending) fail('unsaved_changes')
+    const cell = original.cells[0], writeTarget = {sheet:cell.sheet,column:cell.column,row:cell.row}
+    const coreTarget = {...writeTarget,sheetName:original.sheetName}
+    const input = {sessionId:document.sessionId,threadId:request.threadId,baseRevision:request.revision,writeTarget:coreTarget,edit:request.edit}
+    // Core's existing parser determines the bounded read scope. It conveys no
+    // write authority; the native token continues to name the original cell.
+    const plan = await invokeSelection(document,'plan-workbook-manual',input)
+    if (!('dependencyBounds' in plan) || plan.dependencyBounds.sheet !== writeTarget.sheet) fail('invalid_response')
+    await engine(document,{command:'edit',operationId:newOperationId(),documentId:document.view.objectId,version:request.revision})
+    const current = document.view.selection, target = current && nativeTypedWorkbookSelection(current)
+    if (!current?.token || !target || JSON.stringify(target) !== JSON.stringify(original)) fail('stale_selection')
+    const captured = await engine(document,{command:'captureCells',operationId:newOperationId(),documentId:document.view.objectId,
+      version:request.revision,selectionToken:current.token,expectedChangeSequence:request.expectedChangeSequence,bounds:plan.dependencyBounds})
+    if (!captured?.workbook) fail('invalid_response')
+    let prepared: NativeOfficeSelectionResponse
+    try {
+      prepared = await invokeSelection(document,'prepare-workbook-manual',{...input,operationId:newOperationId(),selectionToken:current.token,
+        changeSequence:request.expectedChangeSequence,workbook:captured.workbook})
+    } catch (error) {
+      // A lost prepare reply may own a durable reservation. Discover it before
+      // another input; never synthesize a proposal or retry a new operation.
+      try { await recover(document,request.threadId) } catch { /* Preserve the original failure. */ }
+      if (error instanceof OfficeFailure && error.code === 'unavailable') fail('unknown')
+      throw error
+    }
+    if (!('workbookManual' in prepared)) fail('invalid_response')
+    const manual = prepared.workbookManual
+    if (manual.baseRevision !== request.revision || JSON.stringify(manual.workbook.before) !== JSON.stringify(captured.workbook)) fail('invalid_response')
+    document.approvedChange = {changeId:manual.changeId,threadId:request.threadId,baseRevision:manual.baseRevision,saveOperationId:manual.saveOperationId,workbookManual:true}
+    document.view.canUndo = false
+    delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
+    try {
+      await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:request.revision,
+        selectionToken:current.token,expectedChangeSequence:request.expectedChangeSequence,workbook:manual.workbook,writeTarget})
+    } catch (error) {
+      if (error instanceof OfficeFailure && error.transient) throw error
+      await restoreFailedWorkbook(document); fail('save_failed')
+    }
+    await save(document)
+    const committed = document.view.recovery?.current
+    if (!committed || !('version' in committed) || committed.version !== 3 || committed.origin !== 'manual' ||
+      committed.changeId !== manual.changeId || committed.status !== 'committed' || committed.baseRevision !== request.revision ||
+      committed.revision !== document.view.revision || committed.revision === request.revision || document.view.dirty || document.pendingSave || document.pendingRecovery) fail('unknown')
+  }
+
   async function freezeManual(document: Active): Promise<NativeOfficeFreezeAck> {
     const manual = document.manualAuthority, current = document.view.manual
     if (!manual || !current || current.changeId !== manual.changeId || current.baseRevision !== manual.baseRevision || current.baseRevision !== document.view.revision) fail('invalid_response')
@@ -827,7 +899,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         status:receipt.status === 'committed' ? 'committed' : 'conflict',
         ...(receipt.status === 'committed' ? {persistedVersion:receipt.revision} : {})})
     } catch (error) {
-      if (receipt.status !== 'committed' || !document.manualAuthority) throw error
+      if (receipt.status !== 'committed' || !(document.manualAuthority || document.approvedChange?.workbookManual)) throw error
       // The exact Core receipt already proves this artifact was committed. A
       // missing native ACK (including failed virtual-input synchronization)
       // retires that sink; it never licenses another commit or a fabricated ACK.
@@ -1148,6 +1220,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     }catch {document.failed=true;document.ready=false;setError(document,'unknown')}
   }
   async function reference(document: Active, request: Extract<ReturnType<typeof nativeOfficeRequestSchema.parse>, {action:'reference'}>) {
+    if (request.editable && document.view.kind === 'xlsx' && !document.view.workbookEditing?.editable) fail('unsupported_selection')
     if (document.threadId !== request.threadId) await recover(document, request.threadId)
     if (document.pendingSave || document.pendingRecovery || document.pendingManualCancel) fail('unknown')
     if (document.view.dirty && !request.saveFirst) fail('unsaved_changes')
@@ -1180,7 +1253,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     }
     const selection = document.selections.get(request.selectionToken)
     if (!selection || selection.version !== document.view.revision || selection.changeSequence !== document.view.changeSequence) fail('stale_selection')
-    const text = selection.kind === 'shapes' ? selection.shapes.map(s => s.text).join('\n') : selection.kind === 'unavailable' ? '' : selection.text
+    const text = selection.kind === 'shapes' ? selection.shapes.map(s => s.text).join('\n') : selection.kind === 'unavailable' ? '' : selection.kind === 'cells' && !request.editable ? workbookDiscussionText(selection) : selection.text
     const single = selection.kind === 'text' || (selection.kind === 'shapes' && selection.shapes.length === 1) || (selection.kind === 'cells' && selection.cells?.length === 1 && selection.ranges.length === 1 && selection.ranges[0].startRow === selection.ranges[0].endRow && selection.ranges[0].startColumn === selection.ranges[0].endColumn)
     const textCell = selection.kind !== 'cells' || selection.cells?.every(cell =>
       (cell.valueType === 'text' || cell.valueType === 'empty') && !cell.merged)
@@ -1393,7 +1466,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         // A lost cancellation reply retains only its recovery owner. The
         // retired native sink cannot admit input or references while Core's
         // idempotent cancellation is still awaiting confirmation.
-        if (active?.pendingManualCancel && ['beginManualEdit','format','reference','captureSelection','annotate'].includes(request.action)) {
+        if (active?.pendingManualCancel && ['beginManualEdit','editWorkbookCell','format','reference','captureSelection','annotate'].includes(request.action)) {
           if (request.action === 'beginManualEdit') logNativeOfficeManualBeginFailure('unknown',manualBeginFailureState(active))
           fail('unknown')
         }
@@ -1459,6 +1532,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
           }
           if ('objectId' in request && (request.objectId !== document.view.objectId || !('revision' in request) || request.revision !== document.view.revision || request.expectedChangeSequence !== (document.view.changeSequence ?? 0))) fail('stale_selection')
           if (request.action === 'beginManualEdit') { await beginManualEdit(document,request.threadId); return }
+          if (request.action === 'editWorkbookCell') { await editWorkbookCell(document,request); return }
           if (request.action === 'format') { await formatManual(document,request); return }
           if (request.action === 'discardManualEdit') {
             if (document.view.kind !== 'docx' || request.threadId !== document.threadId) fail('invalid_request')

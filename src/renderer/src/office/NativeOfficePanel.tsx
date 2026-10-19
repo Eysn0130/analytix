@@ -6,6 +6,7 @@ import { FileText, RotateCcw, Undo2, Quote, Pencil, ChevronDown, ScanEye, Play, 
 import { nativeOfficeActionChoiceSchema, nativeOfficeFormatSchema, nativeOfficeFormatStateSchema, nativeOfficeRangeLeaseSchema, type NativeOfficeActionMenu, type NativeOfficeFormat, type NativeOfficeFormatState, type NativeOfficeRangeLease, type NativeOfficeMenuTarget, type NativeOfficeRequest, type NativeOfficeResponse, type NativeOfficeSelection, type NativeOfficeView } from '@shared/native-office'
 import { useNativeOfficeStore, nativeOfficeTargetKey, nativeOfficeTargetMatches, nativeOfficeManualPhase, nativeOfficeHasUnresolvedChange, type NativeOfficeManualDiscardAttempt, type NativeOfficeTarget } from './native-office-store'
 import { nativeSelectionActions } from './native-selection-actions'
+import { WorkbookCellEditor } from './WorkbookCellEditor'
 import { Tooltip } from '../components/chat/presentation/Tooltip'
 import styles from './native-office-panel.module.css'
 
@@ -197,6 +198,13 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
       request.expectedChangeSequence !== formatting.expectedChangeSequence || !rangeLeaseMatches(request.rangeLease,formatting.rangeLease) ||
       !nativeOfficeFormatSchema.safeParse(request.format).success)) return undefined
     const discard = request.action === 'discardManualEdit' ? request : null
+    if (request.action === 'editWorkbookCell' && (!shown.current || !selected || selected.protectedPresent ||
+      !nativeOfficeTargetMatches(selected,live.view) || live.view?.kind !== 'xlsx' || live.view.status !== 'ready' ||
+      !live.view.workbookEditing?.editable || live.view.dirty || live.view.saving || unresolved ||
+      request.threadId !== currentThread.current || request.objectId !== live.view.objectId || request.revision !== live.view.revision ||
+      request.expectedChangeSequence !== (live.view.changeSequence ?? 0) || live.view.selection?.kind !== 'cells' ||
+      request.selectionToken !== live.view.selection.token || live.view.selection.documentId !== live.view.objectId ||
+      live.view.selection.version !== live.view.revision || live.view.selection.changeSequence !== (live.view.changeSequence ?? 0))) return undefined
     const discardAllowed = !!(discard && shown.current && selected && nativeOfficeTargetMatches(selected,live.view) &&
       !selected.protectedPresent && live.view?.kind === 'docx' && live.view.status !== 'loading' && !live.view.saving &&
       discard.threadId === currentThread.current && discard.objectId === live.view.objectId &&
@@ -205,7 +213,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
         canRetryManualDiscard(live.view,nativeOfficeTargetKey(selected),discard.threadId,discard.changeId,live.manualDiscardAttempts[discard.objectId])))
     if (discard && !discardAllowed) return undefined
     if (unresolved && !discardAllowed &&
-      ['beginManualEdit','format','discardManualEdit','save','reference','acceptProposal','rejectProposal'].includes(request.action)) return undefined
+      ['beginManualEdit','editWorkbookCell','format','discardManualEdit','save','reference','acceptProposal','rejectProposal'].includes(request.action)) return undefined
     if (live.view?.manual?.frozen && ['beginManualEdit','format','reference'].includes(request.action)) return undefined
     if (live.view?.saving && ['discardManualEdit','cancelChange','resumeChange'].includes(request.action)) return undefined
     if (request.action === 'resumeChange') {
@@ -218,8 +226,8 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     if (selected?.protectedPresent && !['openPresent','bounds','hide','status','viewControl','close'].includes(request.action)) return undefined
     const phase = useNativeOfficeStore.getState().view?.playback?.phase
     if ((phase === 'running' || phase === 'paused') &&
-      ['annotate','beginManualEdit','format','discardManualEdit','undoChange','cancelChange','resumeChange','save','annotationSave','annotationRetry','reference','acceptProposal','rejectProposal'].includes(request.action)) return undefined
-    const guardedAction = ['annotate','beginManualEdit','format','discardManualEdit','undoChange','cancelChange','resumeChange','save','saveStatus','reference','acceptProposal','rejectProposal'].includes(request.action)
+      ['annotate','beginManualEdit','editWorkbookCell','format','discardManualEdit','undoChange','cancelChange','resumeChange','save','annotationSave','annotationRetry','reference','acceptProposal','rejectProposal'].includes(request.action)) return undefined
+    const guardedAction = ['annotate','beginManualEdit','editWorkbookCell','format','discardManualEdit','undoChange','cancelChange','resumeChange','save','saveStatus','reference','acceptProposal','rejectProposal'].includes(request.action)
     if (guardedAction && actionInFlight.current) return undefined
     if (guardedAction) actionInFlight.current = true
     if (formatting) formatInFlight.current = formatting
@@ -274,7 +282,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     } catch {
       if (instanceOwner.current && epoch === generation.current && (!formatting || shown.current &&
         formatContextMatches(currentFormatContext(useNativeOfficeStore.getState(),currentThread.current),formatting)))
-        useNativeOfficeStore.setState({ error: cancellation ? 'unknown' : 'unavailable' })
+        useNativeOfficeStore.setState({ error: cancellation || request.action === 'editWorkbookCell' ? 'unknown' : 'unavailable' })
     }
     finally {
       if (guardedAction) actionInFlight.current = false
@@ -826,6 +834,11 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
   return <div className={styles.host} aria-busy={!!loading} onKeyDown={event => {
     if (event.nativeEvent.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return
     if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')) return
+    if (event.key === 'F2' && !event.shiftKey && view?.kind === 'xlsx') {
+      const input = event.currentTarget.querySelector<HTMLInputElement>('[data-workbook-cell-input]:not(:disabled)')
+      if (input) { event.preventDefault(); input.focus(); input.select() }
+      return
+    }
     if (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey) { event.preventDefault(); void menuHandler.current() }
   }}>
     <div className={`${styles.toolbar} ${docxAnnotation ? styles.docxToolbar : ''}`} role="toolbar" aria-label="文档操作">
@@ -863,7 +876,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
           onClick={() => void manualAction('discardManualEdit')}>{t('nativeOfficeManualDiscard')}</button> : null}
       </> : null}
       {!readonlyPresent && view?.canUndo ? <Tooltip bubbleClassName={styles.tooltipBubble} label={view.recovery?.current?.canRetryUndo ? '完成撤销' : '撤销'} side="bottom" portal><button type="button" className={styles.iconButton} disabled={busy || playbackActive || view.saving || view.dirty} aria-label={view.recovery?.current?.canRetryUndo ? '完成撤销' : '撤销修改'} onClick={() => targetRequest && threadId && void invoke({action:'undoChange', ...targetRequest, threadId})}><Undo2 /></button></Tooltip> : null}
-      <span className={styles.status} role="status">{loading ? t('nativeOfficeStatus_loading') : view?.saving ? '更新结果待确认' : view?.dirty ? '更新待完成' : manualPhase === 'active' ? t('nativeOfficeManualActive') : manualPhase === 'frozen' ? t('nativeOfficeManualFrozen') : view?.canUndo ? '已更新' : view?.editing ? '标注中' : error ? t('nativeOfficeOperationFailed') : '预览'}</span>
+      <span className={styles.status} role="status">{loading ? t('nativeOfficeStatus_loading') : view?.saving || view?.kind === 'xlsx' && manualUncertain ? '更新结果待确认' : view?.dirty ? '更新待完成' : manualPhase === 'active' ? t('nativeOfficeManualActive') : manualPhase === 'frozen' ? t('nativeOfficeManualFrozen') : view?.canUndo ? '已更新' : view?.editing ? '标注中' : error ? t('nativeOfficeOperationFailed') : '预览'}</span>
       <button ref={viewButton} type="button" className={styles.viewButton} data-native-view-controls
         aria-label="预览视图" aria-haspopup="menu" disabled={!controlReady || controlsBusy} onClick={() => void openViewMenu()}>
         {playbackActive ? <Play className={styles.viewIcon} aria-hidden="true" /> : <ScanEye className={styles.viewIcon} aria-hidden="true" />}
@@ -878,6 +891,8 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
       </div>
       {docxAnnotation ? <div className={styles.docxFeedback} data-native-docx-feedback role={operationNotice ? 'alert' : 'status'} title={docxNotice}>{docxNotice}</div> : null}
     </div>
+    {!readonlyPresent && targetMatches && view?.kind === 'xlsx' ? <WorkbookCellEditor view={view} threadId={threadId}
+      active={visible && !loading && !!target} busy={busy || manualUncertain} onRequest={invoke} /> : null}
     {visible && targetMatches && view?.kind === 'pptx' ? <div data-native-playback-state role={playbackNotice || playback?.phase === 'unsupported' || playback?.phase === 'error' || playbackFailure?.owner === controlDocumentOwner ? 'alert' : 'status'} className="shrink-0 px-2 text-xs text-ds-muted">
       {playbackNotice ?? (playback?.phase === 'unsupported' ? presentationErrors.presentation_unsupported : playback?.phase === 'error' ? presentationErrors.presentation_failed : playbackActive ? `${playback.phase === 'paused' ? '已暂停' : '放映中'} · ${playback.slideIndex === null || playback.slideIndex < 0 ? '—' : playback.slideIndex + 1} / ${playback.slideCount}` : playback ? '放映未开始' : '放映状态未确认')}
       {!playbackNotice && playbackFailure?.owner === controlDocumentOwner ? <span> {presentationErrors[playbackFailure.error] ?? presentationErrors.unavailable}</span> : null}
@@ -899,9 +914,9 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
       </> : <p className="text-xs text-ds-muted">{view.editing ? '请在文档中选择文本、单元格或文本框，再添加标注。' : '点击“标注”，再选择需要讨论或修改的内容。'}</p>}
     </div> : null}
     {!docxAnnotation && selection?.capture?.truncated ? <p className="shrink-0 px-2 text-xs text-ds-muted">已捕获 {selection.capture.capturedCharacters} / {selection.capture.totalCharacters} UTF-16 单元；引用不包含完整选区。</p> : null}
-    {!docxAnnotation && (error || view?.error || view?.saving || manualUncertain) && view && (view.editing || view.saving || nativeActionError) ? <div role="alert" className="flex shrink-0 items-center gap-2 px-2 text-xs">
+    {!docxAnnotation && (error || view?.error || view?.saving || manualUncertain) && view && (view.editing || view.saving || nativeActionError || view.kind === 'xlsx') ? <div role="alert" className="flex shrink-0 items-center gap-2 px-2 text-xs">
       <p>{errors[error ?? view.error ?? 'unknown'] ?? t('nativeOfficeOperationFailed')}</p>
-      {view.saving || manualUncertain || (error ?? view.error) === 'save_failed' ? <button disabled={busy || playbackActive || !visible || !targetMatches} className="shrink-0 text-xs" onClick={() => targetRequest && void invoke(manualUncertain || view.saving || view.manual ? {action:'saveStatus',objectId:view.objectId} : {action:'save',...targetRequest})}>{manualUncertain || view.saving || view.manual ? '查询结果' : '重试'}</button> : null}
+      {view.saving || manualUncertain || (error ?? view.error) === 'save_failed' ? <button disabled={busy || playbackActive || !visible || !targetMatches} className="shrink-0 text-xs" onClick={() => targetRequest && void invoke(manualUncertain || view.saving || view.manual || view.kind === 'xlsx' ? {action:'saveStatus',objectId:view.objectId} : {action:'save',...targetRequest})}>{manualUncertain || view.saving || view.manual || view.kind === 'xlsx' ? '查询结果' : '重试'}</button> : null}
     </div> : null}
     {!readonlyPresent && view?.scope?.threadId === threadId && view?.proposals?.length ? <div className="max-h-36 shrink-0 overflow-auto border-b border-ds-border px-2 py-1" aria-label="原生修改提案">
       {view.proposals.map(proposal => { const review = view.localReviews?.find(item => item.proposalId === proposal.proposalId); return <div key={proposal.proposalId} className="py-1 text-xs">
@@ -923,7 +938,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
     {!readonlyPresent && view?.recovery && [view.recovery.pending, view.recovery.current].filter(change => change?.threadId === threadId).map(change => change && <details key={change.changeId} className="max-h-40 shrink-0 overflow-auto border-b border-ds-border-muted px-2 py-1 text-xs">
       <summary>{change.status === 'committed' ? '已保存的修改' : change.status === 'undone' ? '已撤销的修改' : change.status === 'prepared' ? 'origin' in change && change.origin === 'manual' ? t('nativeOfficeManualDraft') : '已批准，尚未确认保存' : change.status === 'conflict' ? '文件已变化，保留修改记录' : '修改结果待确认'}</summary>
       {change.canResume ? <button disabled={busy || playbackActive || view.saving} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'resumeChange',...targetRequest,threadId,changeId:change.changeId})}>继续保存此修改</button> : null}
-      {change.canCancel ? <button disabled={busy || playbackActive || view.saving} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'origin' in change && change.origin === 'manual' ? 'discardManualEdit' : 'cancelChange',...targetRequest,threadId,changeId:change.changeId})}>取消未保存的修改</button> : null}
+      {change.canCancel ? <button disabled={busy || playbackActive || view.saving} className="my-1" onClick={() => targetRequest && threadId && void invoke({action:'origin' in change && change.origin === 'manual' && change.version === 2 ? 'discardManualEdit' : 'cancelChange',...targetRequest,threadId,changeId:change.changeId})}>取消未保存的修改</button> : null}
       {change.status === 'unknown' ? <button disabled={busy} className="my-1" onClick={() => void invoke({action:'saveStatus',objectId:view.objectId})}>核实结果</button> : null}
       {'origin' in change ? <p>{t('nativeOfficeManualRecord')}</p> : <>
         <del aria-label="已记录的修改前" className="block whitespace-pre-wrap no-underline">{change.beforeText}</del>

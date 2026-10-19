@@ -7,6 +7,8 @@ import (
 	"errors"
 	"time"
 
+	"analytix.local/runtime-go/internal/adapters/outbound/workbookcodec"
+	office "analytix.local/runtime-go/internal/domain/officegeneration"
 	editing "analytix.local/runtime-go/internal/ports/objectediting"
 )
 
@@ -26,8 +28,28 @@ type nativeManualRecordV2 struct {
 	Disposition    string                    `json:"disposition,omitempty"`
 }
 
+type nativeWorkbookManualRecordV3 struct {
+	Version        int                               `json:"version"`
+	Origin         string                            `json:"origin"`
+	ObjectIdentity string                            `json:"objectIdentity"`
+	PathBinding    string                            `json:"pathBinding"`
+	Kind           string                            `json:"kind"`
+	Draft          editing.NativeWorkbookManualDraft `json:"draft"`
+	AfterHash      string                            `json:"afterHash,omitempty"`
+	UndoStarted    bool                              `json:"undoStarted"`
+	CreatedAt      string                            `json:"createdAt"`
+	DraftHash      string                            `json:"draftHash,omitempty"`
+	Disposition    string                            `json:"disposition,omitempty"`
+}
+
 func (r nativeRecoveryRecord) MarshalJSON() ([]byte, error) {
 	type legacy nativeRecoveryRecord
+	if r.Version == 3 {
+		if r.WorkbookManual == nil {
+			return nil, editing.ErrPersistence
+		}
+		return json.Marshal(nativeWorkbookManualRecordV3{3, "manual", r.ObjectIdentity, r.PathBinding, r.Kind, *r.WorkbookManual, r.AfterHash, r.UndoStarted, r.CreatedAt, r.DraftHash, r.Disposition})
+	}
 	if r.Version != 2 {
 		return json.Marshal(legacy(r))
 	}
@@ -52,6 +74,16 @@ func (r *nativeRecoveryRecord) UnmarshalJSON(body []byte) error {
 		*r = nativeRecoveryRecord(value)
 		return nil
 	}
+	if header.Version == 3 {
+		var value nativeWorkbookManualRecordV3
+		if nativeDecode(body, &value, nativeChangeMetadataBytes) != nil || value.Origin != "manual" {
+			return editing.ErrPersistence
+		}
+		*r = nativeRecoveryRecord{Version: 3, WorkbookManual: &value.Draft, ObjectIdentity: value.ObjectIdentity, PathBinding: value.PathBinding, Kind: value.Kind,
+			Draft:     editing.NativeChangeDraft{ChangeID: value.Draft.ChangeID, ThreadID: value.Draft.ThreadID, BaseRevision: value.Draft.BaseRevision, Workbook: value.Draft.Workbook},
+			AfterHash: value.AfterHash, UndoStarted: value.UndoStarted, CreatedAt: value.CreatedAt, DraftHash: value.DraftHash, Disposition: value.Disposition}
+		return nil
+	}
 	var value nativeManualRecordV2
 	if header.Version != 2 || nativeDecode(body, &value, nativeChangeMetadataBytes) != nil || value.Origin != "manual" {
 		return editing.ErrPersistence
@@ -66,12 +98,24 @@ func nativeManualValid(d editing.NativeManualDraft) bool {
 }
 func nativeRecordVariantValid(r nativeRecoveryRecord, kind string) bool {
 	if r.Version == 1 {
-		return r.Manual == nil && nativeDraftValid(r.Draft)
+		return r.Manual == nil && r.WorkbookManual == nil && nativeDraftValid(r.Draft)
 	}
-	return r.Version == 2 && kind == "docx" && r.Manual != nil && nativeManualValid(*r.Manual) &&
+	if r.Version == 3 {
+		return kind == "xlsx" && r.Manual == nil && r.WorkbookManual != nil && nativeWorkbookManualValid(*r.WorkbookManual, r.DraftHash != "") &&
+			r.Draft == (editing.NativeChangeDraft{ChangeID: r.WorkbookManual.ChangeID, ThreadID: r.WorkbookManual.ThreadID, BaseRevision: r.WorkbookManual.BaseRevision, Workbook: r.WorkbookManual.Workbook})
+	}
+	return r.Version == 2 && kind == "docx" && r.WorkbookManual == nil && r.Manual != nil && nativeManualValid(*r.Manual) &&
 		r.Draft == (editing.NativeChangeDraft{ChangeID: r.Manual.ChangeID, ThreadID: r.Manual.ThreadID, BaseRevision: r.Manual.BaseRevision})
 }
 func nativeRecordContentHash(r nativeRecoveryRecord) string {
+	if r.Version == 3 {
+		body, _ := json.Marshal(struct {
+			Version int                                `json:"version"`
+			Origin  string                             `json:"origin"`
+			Draft   *editing.NativeWorkbookManualDraft `json:"draft"`
+		}{3, "manual", r.WorkbookManual})
+		return digestAtomicText(body)
+	}
 	if r.Version != 2 {
 		return nativeDraftHash(r.Draft)
 	}
@@ -89,6 +133,21 @@ func (s *ObjectEditingFiles) PrepareNativeManual(ctx context.Context, input edit
 	if s.officeKind != "docx" || !objectEditingHash(input.ObjectIdentity) || !nativeManualValid(input.Draft) {
 		return editing.NativeChangeStatus{}, editing.ErrInvalidInput
 	}
+	record := nativeRecoveryRecord{Version: 2, Manual: &input.Draft, ObjectIdentity: input.ObjectIdentity, Kind: "docx",
+		Draft: editing.NativeChangeDraft{ChangeID: input.Draft.ChangeID, ThreadID: input.Draft.ThreadID, BaseRevision: input.Draft.BaseRevision}, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	return s.prepareNativeManualRecord(ctx, input, record)
+}
+
+func (s *ObjectEditingFiles) PrepareNativeWorkbookManual(ctx context.Context, input editing.NativeWorkbookManualInput) (editing.NativeChangeStatus, error) {
+	if s.officeKind != "xlsx" || !objectEditingHash(input.ObjectIdentity) || !nativeWorkbookManualValid(input.Draft, false) {
+		return editing.NativeChangeStatus{}, editing.ErrInvalidInput
+	}
+	record := nativeRecoveryRecord{Version: 3, WorkbookManual: &input.Draft, ObjectIdentity: input.ObjectIdentity, Kind: "xlsx",
+		Draft: editing.NativeChangeDraft{ChangeID: input.Draft.ChangeID, ThreadID: input.Draft.ThreadID, BaseRevision: input.Draft.BaseRevision, Workbook: input.Draft.Workbook}, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	return s.prepareNativeManualRecord(ctx, editing.NativeManualInput{Workspace: input.Workspace, Path: input.Path, ObjectIdentity: input.ObjectIdentity, Draft: input.Draft.NativeManualDraft}, record)
+}
+
+func (s *ObjectEditingFiles) prepareNativeManualRecord(ctx context.Context, input editing.NativeManualInput, record nativeRecoveryRecord) (editing.NativeChangeStatus, error) {
 	if err := objectEditingLock(ctx); err != nil {
 		return editing.NativeChangeStatus{}, err
 	}
@@ -104,12 +163,11 @@ func (s *ObjectEditingFiles) PrepareNativeManual(ctx context.Context, input edit
 	if err != nil {
 		return editing.NativeChangeStatus{}, err
 	}
-	record := nativeRecoveryRecord{Version: 2, Manual: &input.Draft, ObjectIdentity: input.ObjectIdentity, PathBinding: target.binding, Kind: "docx",
-		Draft: editing.NativeChangeDraft{ChangeID: input.Draft.ChangeID, ThreadID: input.Draft.ThreadID, BaseRevision: input.Draft.BaseRevision}, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	record.PathBinding = target.binding
 	record.DraftHash = nativeRecordContentHash(record)
 	stored, _, readErr := s.nativeRecord(target, input.ObjectIdentity, input.Draft.ChangeID)
 	if readErr == nil {
-		if stored.Version != 2 || stored.Disposition != "" || nativeRecordDraftHash(stored) != record.DraftHash || stored.AfterHash != "" {
+		if stored.Version != record.Version || stored.Disposition != "" || nativeRecordDraftHash(stored) != record.DraftHash || stored.AfterHash != "" {
 			return editing.NativeChangeStatus{}, editing.ErrOperationMismatch
 		}
 		if index.Pending == input.Draft.ChangeID {
@@ -137,6 +195,11 @@ func (s *ObjectEditingFiles) PrepareNativeManual(ctx context.Context, input edit
 	}
 	if s.validateNativeObject(state.Content) != nil {
 		return editing.NativeChangeStatus{}, editing.ErrNotText
+	}
+	if record.Version == 3 {
+		if err = validateNativeWorkbookManualPackage(ctx, state.Content, *record.WorkbookManual); err != nil {
+			return editing.NativeChangeStatus{}, err
+		}
 	}
 	if index.Preparing == nil {
 		reservation := nativeCompact(record, "")
@@ -166,4 +229,48 @@ func (s *ObjectEditingFiles) PrepareNativeManual(ctx context.Context, input edit
 		return editing.NativeChangeStatus{}, err
 	}
 	return s.nativeStatus(ctx, target, record)
+}
+
+func nativeWorkbookManualValid(d editing.NativeWorkbookManualDraft, compact bool) bool {
+	if !nativeManualValid(d.NativeManualDraft) {
+		return false
+	}
+	if compact && d.Workbook == nil {
+		return d.WriteTarget == (office.WorkbookWriteTarget{}) && d.Edit == (office.WorkbookManualEdit{})
+	}
+	if _, err := office.PlanWorkbookManual(d.WriteTarget, d.Edit); err != nil {
+		return false
+	}
+	if d.Workbook == nil {
+		return false
+	}
+	patch, err := office.WorkbookManualPatch(d.Workbook.Before, d.WriteTarget, d.Edit)
+	if err != nil {
+		return false
+	}
+	after, err := office.ApplyWorkbookPatch(d.Workbook.Before, patch)
+	if err != nil || len(d.Workbook.Results) != len(after.Cells) {
+		return false
+	}
+	expected, _ := json.Marshal(after)
+	actual, _ := json.Marshal(d.Workbook.After)
+	return bytes.Equal(expected, actual)
+}
+
+func validateNativeWorkbookManualPackage(ctx context.Context, body []byte, draft editing.NativeWorkbookManualDraft) error {
+	if !nativeWorkbookManualValid(draft, false) {
+		return editing.ErrInvalidInput
+	}
+	if err := workbookcodec.ValidateNativeEditingPackage(ctx, body); errors.Is(err, workbookcodec.ErrUnsupportedWorkbook) {
+		return editing.ErrTooLarge
+	} else if err != nil {
+		return editing.ErrInvalidInput
+	}
+	if err := workbookcodec.VerifySelectionPackage(ctx, body, draft.Workbook.Before); err != nil {
+		return editing.ErrInvalidInput
+	}
+	if err := workbookcodec.ValidateReview(ctx, *draft.Workbook); err != nil {
+		return editing.ErrInvalidInput
+	}
+	return nil
 }

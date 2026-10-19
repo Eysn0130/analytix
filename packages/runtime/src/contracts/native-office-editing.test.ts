@@ -178,3 +178,23 @@ describe('explicit user Word authority', () => {
     expect(nativeOfficeChangeSchema.safeParse(untagged).success).toBe(false)
   })
 })
+
+describe('protected local typed workbook manual contract',()=>{
+  const request={action:'editWorkbookCell',objectId:'a'.repeat(64),revision:'b'.repeat(64),expectedChangeSequence:0,selectionToken:'cell_selection',threadId:'thread_main'}
+  it('accepts explicit finite types without broad native/path or proposal authority',()=>{
+    for(const edit of [{type:'number',value:12},{type:'text',text:'0012'},{type:'formula',formula:'=SUM(A1:A2)'},{type:'empty'}]) {
+      expect(nativeOfficeRequestSchema.safeParse({...request,edit}).success).toBe(true)
+      expect(nativeOfficeRequestSchema.safeParse({...request,edit,path:'/private/file.xlsx'}).success).toBe(false)
+      expect(nativeOfficeRequestSchema.safeParse({...request,edit,proposalId:'d'.repeat(48)}).success).toBe(false)
+    }
+    for(const edit of [{type:'number',value:'12'},{type:'number',value:NaN},{type:'formula',formula:''},{type:'empty',text:''},{type:'text',text:'a',formula:'=1'}])
+      expect(nativeOfficeRequestSchema.safeParse({...request,edit}).success).toBe(false)
+  })
+  it('keeps v2 manual shape closed against typed workbook evidence',()=>{
+    const manual={version:2,origin:'manual',changeId:'a'.repeat(64),threadId:'thread_main',baseRevision:'b'.repeat(64),revision:'',status:'unknown',saveOperationId:'save_manual_01',undoOperationId:'undo_manual_01',canUndo:false,canCancel:true,canRetryUndo:false,canResume:false,createdAt:'',savedAt:''}
+    expect(nativeOfficeChangeSchema.safeParse(manual).success).toBe(true)
+    expect(nativeOfficeChangeSchema.safeParse({...manual,workbook:{}}).success).toBe(false)
+    expect(nativeOfficeChangeSchema.safeParse({...manual,version:3}).success).toBe(true)
+    expect(nativeOfficeChangeSchema.safeParse({...manual,version:3,status:'committed'}).success).toBe(false)
+  })
+})
