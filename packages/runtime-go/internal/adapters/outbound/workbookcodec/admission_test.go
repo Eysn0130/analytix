@@ -328,6 +328,10 @@ func TestNativeEditingVerifierPreservesCalculationSettings(t *testing.T) {
 	if err := VerifyPatchedPackage(ctx, admissionCalcProps(t, before, defaults), admissionCalcProps(t, after, ""), review); err != nil {
 		t.Fatal("omission of equivalent calculation defaults rejected", err)
 	}
+	numericDefaults := strings.NewReplacer(`="false"`, `="0"`, `="true"`, `="1"`).Replace(defaults)
+	if err := VerifyPatchedPackage(ctx, before, admissionCalcProps(t, after, numericDefaults), review); err != nil {
+		t.Fatal("equivalent numeric boolean calculation defaults rejected", err)
+	}
 }
 
 func TestNativeEditingVerifierAllowsUnchangedOutsideBooleanAndErrorCells(t *testing.T) {
