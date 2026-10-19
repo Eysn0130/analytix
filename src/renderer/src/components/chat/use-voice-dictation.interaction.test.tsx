@@ -105,3 +105,46 @@ it('detaches an old recorder callback before releasing its resources', async () 
   expect(trackStop).toHaveBeenCalledTimes(released)
   expect(voice.status).toBe('recording'); expect(transcribe).not.toHaveBeenCalled()
 })
+it('cancels a recording without transcribing and cannot stop a later recording through its old callback', async () => {
+  await render('a'); await act(async () => voice.start())
+  const recorder = recorders[0], oldStop = recorder.onstop
+  vi.setSystemTime(Date.now() + 750)
+  await act(async () => voice.cancel())
+  expect(recorder.state).toBe('inactive')
+  expect(recorder.onstop).toBeNull(); expect(recorder.ondataavailable).toBeNull()
+  expect(trackStop).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0)
+  expect(voice.status).toBe('idle'); expect(voice.error).toBeNull(); expect(voice.startedAtMs).toBe(0)
+  await act(async () => voice.start())
+  await act(async () => oldStop?.(new Event('stop')))
+  expect(voice.status).toBe('recording'); expect(recorders[1].state).toBe('recording')
+  expect(trackStop).toHaveBeenCalledOnce(); expect(transcribe).not.toHaveBeenCalled()
+  await finish('send')
+  expect(delivered).toHaveBeenCalledWith('OWNED_TRANSCRIPT', 'send', expect.any(Function))
+})
+it('cancels pending microphone permission without retiring a later recording for the same owner', async () => {
+  let resolve!: (value: MediaStream) => void
+  permission.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await render('a'); await act(async () => voice.start())
+  await act(async () => voice.cancel()); await act(async () => voice.start())
+  expect(recorders).toHaveLength(1); expect(voice.status).toBe('recording')
+  await act(async () => resolve(stream()))
+  expect(recorders).toHaveLength(1); expect(recorders[0].state).toBe('recording')
+  expect(trackStop).toHaveBeenCalledOnce(); expect(voice.status).toBe('recording')
+  expect(voice.error).toBeNull(); expect(transcribe).not.toHaveBeenCalled()
+})
+it.each<SpeechTranscriptionResult>([
+  { ok: true, text: 'CANCELLED_TRANSCRIPT' },
+  { ok: false, message: 'CANCELLED_FAILURE' }
+])('drops a cancelled transcription result without changing a later recording: $ok', async result => {
+  let resolve!: (value: SpeechTranscriptionResult) => void
+  transcribe.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await render('a'); await act(async () => voice.start()); await finish()
+  expect(voice.status).toBe('transcribing')
+  await act(async () => voice.cancel()); expect(voice.status).toBe('idle')
+  await act(async () => voice.start())
+  await act(async () => resolve(result)); await settle()
+  expect(delivered).not.toHaveBeenCalled(); expect(voice.status).toBe('recording')
+  expect(voice.error).toBeNull(); expect(recorders[1].state).toBe('recording')
+  await finish()
+  expect(delivered).toHaveBeenCalledWith('OWNED_TRANSCRIPT', 'insert', expect.any(Function))
+})

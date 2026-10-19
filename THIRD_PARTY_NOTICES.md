@@ -1089,6 +1089,20 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+The selected composer-family adaptation additionally references DeepSeek Harness
+commit `687f282e8625c6b8d11ff58211a90524be2e4317`: command/menu presentation,
+trigger dismissal/completion behavior, model and permission picker geometry,
+selected regular permission and check/chevron artwork, resident conversation
+tabs, initial-only workspace accessory, busy/recording toolbar presentation,
+return-to-bottom styling, the selected upload illustration and file-drop
+overlay lifecycle. Selected activity/recording geometry and cancellation
+presentation also reference `packages/experimental/client-ui-voice-input` at
+that same fixed commit. The existing ContextMeter stylesheet is reference-only
+for this batch; context facts retain their existing Analytix owners. Copyright
+(c) 2026 DeepSeek; the full MIT terms retained above apply. Exact source objects,
+bounded local adaptations and pending test/screenshot/native evidence are recorded in
+`docs/analytix/upstreams/code-reuse-provenance.md`.
+
 ## SuperDoc 2.24.0 / React wrapper 2.19.0
 
 The published SuperDoc package retains this upstream NOTICE:

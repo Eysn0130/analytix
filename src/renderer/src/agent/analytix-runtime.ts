@@ -10,6 +10,7 @@ import type {
   NormalizedThread,
   ReviewTarget,
   ThreadEventSink,
+  ThreadExecutionPolicy,
   ThreadListOptions,
   ThreadUsageSnapshot,
   TurnUsageById,
@@ -22,7 +23,7 @@ import {
 } from '@shared/app-settings'
 import { UserInputActionSelectorSchemaV1, type UserInputActionSelectorV1, UserInputLateReplyResponseSchemaV1, UserInputWaitScheduledResponseSchemaV1, UserInputMetadataResolutionResponse, UserInputResolutionResponse } from '../../../../packages/runtime/src/contracts/approvals'
 import { userInputLocalSelectorSchemaV1, type UserInputLocalSelectorV1 } from '../../../../packages/runtime/src/contracts/user-input-local-display'
-import { CompactResponse } from '../../../../packages/runtime/src/contracts/turns'
+import { CompactResponse, StartTurnRequest as StartTurnRequestSchema } from '../../../../packages/runtime/src/contracts/turns'
 import type { UserInputWaitOwnerStateV1 } from '@shared/analytix-api'
 import { validateOptionalModelReasoningEffortV1 } from '@shared/model-reasoning-effort'
 import {
@@ -129,6 +130,7 @@ import {
   ResumeThreadResponse as ResumeThreadResponseSchema,
   ThreadSummaryResponse as ThreadSummaryResponseSchema,
   ThreadSummaryTaskMutationResponse as ThreadSummaryTaskMutationResponseSchema,
+  ThreadSchema,
   ThreadSummaryTaskOutputResponse
 } from '../../../../packages/runtime/src/contracts/threads.js'
 import { threadSummaryTaskIdentityMatchesV1 } from '../../../../packages/runtime/src/contracts/task-job-output.js'
@@ -146,6 +148,15 @@ import {
   isPublicProjectionRevoked,
   markPublicProjectionRevoked
 } from '../lib/public-projection-revocation'
+
+const threadExecutionPolicySchema = StartTurnRequestSchema.pick({ approvalPolicy: true, sandboxMode: true }).required().strict()
+const threadPolicyReadbackSchema = ThreadSchema.omit({ turns: true }).extend(threadExecutionPolicySchema.shape)
+
+function validateThreadExecutionPolicy(value: unknown): ThreadExecutionPolicy {
+  const parsed = threadExecutionPolicySchema.safeParse(value)
+  if (!parsed.success) throw new Error('Thread execution policy is invalid.')
+  return parsed.data
+}
 
 function userInputActionSelector(inputId: string, selector?: UserInputActionSelectorV1): UserInputActionSelectorV1 | undefined {
   // The absent form is the explicit original-owner compatibility command.
@@ -1121,6 +1132,7 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       model?: string
       providerId?: string
       reasoningEffort?: import('@shared/app-settings').ModelReasoningEffort
+      executionPolicy?: ThreadExecutionPolicy
       riskIntent?: 'case'
       displayText?: string
       requestedSkillIds?: string[]
@@ -1154,10 +1166,9 @@ export class AnalytixRuntimeProvider implements AgentProvider {
       prompt: text,
       async: true,
       model,
-      providerId: selection.providerId,
-      approvalPolicy: runtime.approvalPolicy,
-      sandboxMode: runtime.sandboxMode
+      providerId: selection.providerId
     }
+    if (options?.executionPolicy !== undefined) Object.assign(body, validateThreadExecutionPolicy(options.executionPolicy))
     const reasoningEffort = validateOptionalModelReasoningEffortV1(options?.reasoningEffort)
     if (reasoningEffort) {
       body.reasoningEffort = reasoningEffort
@@ -1413,6 +1424,23 @@ export class AnalytixRuntimeProvider implements AgentProvider {
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'update thread workspace failed'))
     }
+  }
+
+  async updateThreadExecutionPolicy(threadId: string, policy: ThreadExecutionPolicy): Promise<NormalizedThread> {
+    const targetId = threadId.trim()
+    if (!targetId) throw new Error('Thread execution policy owner is unavailable.')
+    const requested = validateThreadExecutionPolicy(policy)
+    const response = await rendererRuntimeClient.runtimeRequest(
+      analytixThreadPath(targetId), 'PATCH', JSON.stringify(requested)
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'update thread execution policy failed'))
+    }
+    const thread = readRuntimeSchema(response.body, 'runtime returned an invalid thread policy response', threadPolicyReadbackSchema)
+    if (thread.id !== targetId || thread.approvalPolicy !== requested.approvalPolicy || thread.sandboxMode !== requested.sandboxMode) {
+      throw new Error('Runtime thread policy response does not match its request.')
+    }
+    return threadFromCore(thread)
   }
 
   async promoteSideThread(threadId: string): Promise<void> {

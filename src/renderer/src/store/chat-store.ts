@@ -238,6 +238,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set,
     get,
     getProvider,
+    threadBindingOwner: sseAbortRef,
     t: (key) => i18n.t(key),
     formatRuntimeError,
     shouldOpenSettingsForError

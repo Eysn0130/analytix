@@ -16,7 +16,7 @@ import { stepEvent, userEvent } from '../components/trajectory/trajectory-test-f
 import { AnalytixRuntimeProvider, restoreThreadDisplayHistory } from './analytix-runtime'
 import { getProvider, resetProviderCacheForTests } from './registry'
 import { rendererRuntimeClient } from './runtime-client'
-import type { AcceptedFinalProjectionBatch, ThreadEventSink, UserInputWaitState } from './types'
+import type { AcceptedFinalProjectionBatch, ThreadEventSink, ThreadExecutionPolicy, UserInputWaitState } from './types'
 import {
   isPublicProjectionRevoked,
   markPublicProjectionRevoked,
@@ -750,6 +750,74 @@ afterEach(() => {
   rendererRuntimeClient.invalidateSettings()
   resetPublicProjectionRevocationsForTests()
   vi.unstubAllGlobals()
+})
+
+describe('thread execution policy transport', () => {
+  const readOnly: ThreadExecutionPolicy = { approvalPolicy: 'never', sandboxMode: 'read-only' }
+  const metadata = (patch: Record<string, unknown> = {}) => ({ id: 'thr_policy', title: 'Policy', workspace: '/synthetic/policy',
+    model: '', mode: 'agent', status: 'idle', createdAt: '2026-10-20T00:00:00Z', updatedAt: '2026-10-20T00:01:00Z',
+    executionPolicyVersion: 2, ...readOnly, turns: [], ...patch })
+
+  it('leaves an unspecified policy to Core rather than overriding it with global settings', async () => {
+    const globalSettings = settings()
+    globalSettings.runtime = { ...globalSettings.runtime, approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 202,
+      body: JSON.stringify({ threadId: 'thr_policy', turnId: 'turn_policy' }) }))
+    installDsGui({ runtimeRequest, getSettings: vi.fn(async () => globalSettings) })
+    await new AnalytixRuntimeProvider().sendUserMessage('thr_policy', 'retain thread defaults')
+    expect(runtimeRequest).toHaveBeenCalledExactlyOnceWith('/v1/threads/thr_policy/turns', 'POST',
+      JSON.stringify({ prompt: 'retain thread defaults', async: true }))
+  })
+
+  it.each([
+    readOnly, { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' },
+    { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' },
+    { approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access' }
+  ] satisfies ThreadExecutionPolicy[])('sends only the exact explicit pair $approvalPolicy/$sandboxMode', async executionPolicy => {
+    const runtimeRequest = vi.fn(async (_path: string, _method?: string, _body?: string) => ({ ok: true, status: 202,
+      body: JSON.stringify({ threadId: 'thr_policy', turnId: 'turn_policy' }) }))
+    installDsGui({ runtimeRequest })
+    await new AnalytixRuntimeProvider().sendUserMessage('thr_policy', 'next turn', { executionPolicy })
+    const body = JSON.parse(runtimeRequest.mock.calls[0]![2]!)
+    expect(body).toEqual({ prompt: 'next turn', async: true, ...executionPolicy })
+    expect(body).not.toHaveProperty('executionPolicy')
+    expect(body).not.toHaveProperty('executionPolicyVersion')
+  })
+
+  it.each([null, {}, { approvalPolicy: 'never' }, { ...readOnly, sandboxMode: 'invalid' },
+    { ...readOnly, executionPolicyUncertain: false }])('rejects an invalid explicit policy before HTTP: %j', async value => {
+    const runtimeRequest = vi.fn()
+    installDsGui({ runtimeRequest })
+    await expect(new AnalytixRuntimeProvider().sendUserMessage('thr_policy', 'keep local', {
+      executionPolicy: value as unknown as ThreadExecutionPolicy
+    })).rejects.toThrow('Thread execution policy is invalid.')
+    expect(runtimeRequest).not.toHaveBeenCalled()
+  })
+
+  it('PATCHes the pair without changing global settings and returns the real metadata', async () => {
+    const getSettings = vi.fn(async () => settings())
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify(metadata()) }))
+    installDsGui({ runtimeRequest, getSettings })
+    const result = await new AnalytixRuntimeProvider().updateThreadExecutionPolicy('thr_policy', readOnly)
+    expect(runtimeRequest).toHaveBeenCalledExactlyOnceWith('/v1/threads/thr_policy', 'PATCH', JSON.stringify(readOnly))
+    expect(getSettings).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ id: 'thr_policy', ...readOnly, executionPolicyVersion: 2, executionPolicyUncertain: false,
+      updatedAt: '2026-10-20T00:01:00Z' })
+  })
+
+  it.each([{ id: 'thr_other' }, { approvalPolicy: undefined }, { sandboxMode: undefined },
+    { sandboxMode: 'danger-full-access' }, { executionPolicyVersion: 3 }])('rejects an unbound or malformed PATCH response: %j', async patch => {
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200, body: JSON.stringify(metadata(patch)) }))
+    installDsGui({ runtimeRequest })
+    await expect(new AnalytixRuntimeProvider().updateThreadExecutionPolicy('thr_policy', readOnly)).rejects.toThrow(/runtime_response_schema_invalid|match its request/)
+  })
+
+  it('does not manufacture the supported marker for a legacy PATCH response', async () => {
+    const runtimeRequest = vi.fn(async () => ({ ok: true, status: 200,
+      body: JSON.stringify(metadata({ executionPolicyVersion: undefined })) }))
+    installDsGui({ runtimeRequest })
+    expect((await new AnalytixRuntimeProvider().updateThreadExecutionPolicy('thr_policy', readOnly)).executionPolicyVersion).toBeUndefined()
+  })
 })
 
 describe('AnalytixRuntimeProvider', () => {
@@ -2250,8 +2318,6 @@ describe('AnalytixRuntimeProvider', () => {
       JSON.stringify({
         prompt: 'hello',
         async: true,
-        approvalPolicy: 'on-request',
-        sandboxMode: 'workspace-write',
         requestedSkillIds: ['review']
       })
     )
@@ -2870,8 +2936,6 @@ describe('AnalytixRuntimeProvider', () => {
       JSON.stringify({
         prompt: 'describe this',
         async: true,
-        approvalPolicy: 'on-request',
-        sandboxMode: 'workspace-write',
         attachmentIds: ['att_1']
       })
     )
@@ -2906,8 +2970,6 @@ describe('AnalytixRuntimeProvider', () => {
       JSON.stringify({
         prompt: 'inspect these files',
         async: true,
-        approvalPolicy: 'on-request',
-        sandboxMode: 'workspace-write',
         fileReferences: [
           {
             path: '/workspace/analytix/src/App.tsx',
@@ -2947,8 +3009,6 @@ describe('AnalytixRuntimeProvider', () => {
         prompt: 'think harder',
         async: true,
         model: 'auto',
-        approvalPolicy: 'on-request',
-        sandboxMode: 'workspace-write',
         reasoningEffort: 'max'
       })
     )
@@ -2985,8 +3045,6 @@ describe('AnalytixRuntimeProvider', () => {
       JSON.stringify({
         prompt: 'inspect current evidence',
         async: true,
-        approvalPolicy: 'on-request',
-        sandboxMode: 'workspace-write',
         riskIntent: 'case'
       })
     )
@@ -3020,8 +3078,6 @@ describe('AnalytixRuntimeProvider', () => {
       JSON.stringify({
         prompt: 'refine the plan',
         async: true,
-        approvalPolicy: 'on-request',
-        sandboxMode: 'workspace-write',
         displayText: 'Generate implementation plan',
         mode: 'plan',
         guiPlan: {

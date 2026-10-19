@@ -68,6 +68,7 @@ export type CoreThreadSummaryJson = {
   providerId?: string
   mode: string
   status: CoreThreadStatus
+  executionPolicyVersion?: number
   approvalPolicy?: string
   sandboxMode?: string
   relation?: 'primary' | 'fork' | 'side'

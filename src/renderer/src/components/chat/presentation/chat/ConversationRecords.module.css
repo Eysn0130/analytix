@@ -14,6 +14,16 @@
 .toolbar { display: flex; gap: 8px; align-items: center; padding: 8px 0; color: var(--ds-text-muted); font-size: 12px; }
 .toolbar button { padding: 4px 10px; border-radius: 4px; }
 .toolbar button[aria-pressed="true"] { color: var(--ds-text); background: var(--ds-surface-hover); }
+/* Resident tabs: DeepSeek Harness 687f282e8625c6b8d11ff58211a90524be2e4317,
+   ConversationRoot.module.css; MIT attribution retained above. */
+.navigation { min-width: 0; color: var(--ds-text-muted); font-size: 12px; }
+.navigation > [role="status"] { display: block; padding: 4px 8px; }
+.tabs { position: relative; display: flex; gap: 36px; margin-top: 10px; padding-left: 8px; overflow-x: auto; }
+.tab { position: relative; flex: none; padding: 0 0 9px; border: none; background: transparent; font-size: 13px; line-height: 16px; font-weight: 500; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.tab::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; border-radius: 2px; background: transparent; }
+.tab[aria-selected="true"] { color: var(--dsw-alias-state-business-primary); }
+.tab[aria-selected="true"]::after { background: var(--dsw-alias-state-business-primary); }
 .notice { padding: 8px; color: var(--ds-text-faint); font-size: 12px; }
 
 .row:focus-visible, .heading:focus-visible, .toolbar button:focus-visible { outline: 2px solid var(--ds-accent); outline-offset: 2px; }
+.tab:focus-visible { outline: 2px solid var(--ds-accent); outline-offset: -2px; }

@@ -3,8 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '../../i18n'
-import { analytixToolPermissionModeSettings } from '@shared/app-settings'
-import { FloatingComposerExecutionPicker } from './FloatingComposerExecutionPicker'
+import { FloatingComposerExecutionPicker, calculateExecutionMenuPlacement, type ComposerExecutionSettings } from './FloatingComposerExecutionPicker'
 
 let root: Root
 let host: HTMLDivElement
@@ -13,7 +12,8 @@ let frames: Map<number, FrameRequestCallback>
 let nextFrame: number
 const onChange = vi.fn()
 const onOpenPermissionSettings = vi.fn()
-const value = analytixToolPermissionModeSettings('request-approval')
+const value: ComposerExecutionSettings = { approvalPolicy: 'never', sandboxMode: 'read-only' }
+const workspaceWrite: ComposerExecutionSettings = { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' }
 const trigger = () => host.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!
 const items = () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
 async function render(props: Partial<Parameters<typeof FloatingComposerExecutionPicker>[0]> = {}, scope = 'thread-a') {
@@ -54,7 +54,7 @@ afterEach(async () => {
 
 describe('execution permission menu keyboard lifecycle', () => {
   it('focuses the current item on opening without changing authority', async () => {
-    await render({ value: analytixToolPermissionModeSettings('auto-approval') })
+    await render({ value: workspaceWrite })
     await open()
     expect(document.activeElement).toBe(items()[1])
     expect(items()[1].getAttribute('aria-checked')).toBe('true')
@@ -70,28 +70,78 @@ describe('execution permission menu keyboard lifecycle', () => {
   })
   it('moves menu focus with arrows and boundaries without activating a permission', async () => {
     await open(); await key(items()[0], 'ArrowUp')
-    expect(document.activeElement).toBe(items()[3])
-    await key(items()[3], 'Home'); expect(document.activeElement).toBe(items()[0])
-    await key(items()[0], 'End'); expect(document.activeElement).toBe(items()[3])
-    await key(items()[3], 'ArrowUp'); expect(document.activeElement).toBe(items()[2])
+    expect(document.activeElement).toBe(items()[2])
+    await key(items()[2], 'Home'); expect(document.activeElement).toBe(items()[0])
+    await key(items()[0], 'End'); expect(document.activeElement).toBe(items()[2])
+    await key(items()[2], 'ArrowUp'); expect(document.activeElement).toBe(items()[1])
     expect(onChange).not.toHaveBeenCalled()
     expect(items()[0].getAttribute('aria-checked')).toBe('true')
   })
   it.each(['ArrowDown', 'ArrowUp'])('opens from the trigger using %s', async name => {
     await key(trigger(), name); await flushFrames()
-    expect(document.activeElement).toBe(name === 'ArrowDown' ? items()[0] : items()[3])
+    expect(document.activeElement).toBe(name === 'ArrowDown' ? items()[0] : items()[2])
     expect(onChange).not.toHaveBeenCalled()
   })
   it('preserves explicit activation and returns focus after a preset selection', async () => {
     await open()
     await act(async () => items()[1].click())
-    expect(onChange).toHaveBeenCalledExactlyOnceWith(analytixToolPermissionModeSettings('auto-approval'))
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(workspaceWrite)
     expect(items()).toHaveLength(0); expect(document.activeElement).toBe(trigger())
   })
-  it('keeps custom settings as its existing callback without a policy patch', async () => {
-    await open(); await act(async () => items()[3].click())
-    expect(onOpenPermissionSettings).toHaveBeenCalledOnce()
-    expect(onChange).not.toHaveBeenCalled(); expect(items()).toHaveLength(0)
+  it('shows an unmatched current pair as Custom without adding a fourth preset', async () => {
+    await render({ value: { approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access' } })
+    expect(trigger().textContent).toContain(i18n.t('common:composerPermissionCustom'))
+    await open()
+    expect(items()).toHaveLength(3)
+    expect(items().every(item => item.getAttribute('aria-checked') === 'false')).toBe(true)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(onOpenPermissionSettings).not.toHaveBeenCalled()
+    await act(async () => items()[2].click())
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ approvalPolicy: 'auto', sandboxMode: 'danger-full-access' })
+  })
+  it('shows a caller-identified legacy full-access pair as Custom until an explicit preset is chosen', async () => {
+    const full = { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' } as const
+    await render({ value: full, legacy: true })
+    expect(trigger().textContent).toContain(i18n.t('common:composerPermissionCustom'))
+    await open()
+    expect(items().every(item => item.getAttribute('aria-checked') === 'false')).toBe(true)
+    await act(async () => items()[2].click())
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(full)
+  })
+  it('keeps unknown metadata repairable without inventing a current pair', async () => {
+    await render({ value: null, unavailable: true })
+    expect(trigger().textContent).toContain(i18n.t('common:composerPermissionCustom'))
+    await open()
+    expect(items().every(item => item.getAttribute('aria-checked') === 'false')).toBe(true)
+    await act(async () => items()[1].click())
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(workspaceWrite)
+  })
+  it('allows the same pair to be explicitly reselected after an unknown metadata outcome', async () => {
+    await render({ value, unavailable: true })
+    await open()
+    expect(items().every(item => item.getAttribute('aria-checked') === 'false')).toBe(true)
+    await act(async () => items()[0].click())
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(value)
+  })
+  it('keeps read-only as an exact never/read-only next-turn pair', async () => {
+    await render({ value: workspaceWrite })
+    await open(); await act(async () => items()[0].click())
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(value)
+  })
+  it('submits even the displayed pair so its owner can materialize a hero or confirm its version', async () => {
+    await open(); await act(async () => items()[0].click())
+    expect(items()).toHaveLength(0)
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(value)
+  })
+  it('uses the shared controlled opening owner and requests dismissal without changing policy', async () => {
+    const onOpenChange = vi.fn()
+    await render({ open: true, onOpenChange }); await flushFrames()
+    expect(items()).toHaveLength(3)
+    await key(items()[0], 'Escape')
+    expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false)
+    await render({ open: false, onOpenChange })
+    expect(items()).toHaveLength(0)
+    expect(onChange).not.toHaveBeenCalled()
   })
   it.each([false, true])('dismisses for Tab with shift=%s and leaves native focus navigation enabled', async shift => {
     await open(); const event = await key(items()[0], 'Tab', shift)
@@ -100,7 +150,7 @@ describe('execution permission menu keyboard lifecycle', () => {
   })
   it('preserves menu focus through a same-thread settings update', async () => {
     await open(); await key(items()[0], 'ArrowDown'); await key(items()[1], 'ArrowDown')
-    await render({ value: analytixToolPermissionModeSettings('auto-approval') }); await flushFrames()
+    await render({ value: workspaceWrite }); await flushFrames()
     expect(document.activeElement).toBe(items()[2])
     expect(items()[1].getAttribute('aria-checked')).toBe('true')
     expect(onChange).not.toHaveBeenCalled()
@@ -134,5 +184,16 @@ describe('execution permission menu keyboard lifecycle', () => {
     await render({}, 'thread-b'); outside.focus(); await flushFrames()
     expect(items()).toHaveLength(0); expect(document.activeElement).toBe(outside)
     expect(frames.size).toBe(0); expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('execution menu viewport fit', () => {
+  it('keeps all three rows scrollable inside a narrow, short viewport', () => {
+    const placement = calculateExecutionMenuPlacement({ anchorRect: { top: 70, bottom: 98, left: 150, width: 28 },
+      menuWidth: 240, menuHeight: 110, viewportWidth: 180, viewportHeight: 100 })
+    expect(placement.left).toBe(12)
+    expect(placement.width).toBe(156)
+    expect(placement.top).toBe(12)
+    expect(placement.maxHeight).toBe(76)
   })
 })

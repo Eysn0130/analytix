@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement, Ref } from 'react'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -78,6 +78,12 @@ const ACTIONS_MENU_WIDTH = 216
 const ACTIONS_MENU_VIEWPORT_MARGIN = 8
 const ACTIONS_MENU_TRIGGER_GAP = 6
 const useSessionHeaderLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
+/** Resident header chrome. The mounted timeline retains view and request ownership. */
+export function SessionHeaderTabsSeat({ seatRef }: { seatRef: Ref<HTMLDivElement> }): ReactElement {
+  return <div ref={seatRef} data-analytix-session-header-tabs
+    className="ds-no-drag min-w-0 shrink-0 border-b border-ds-border-muted px-5 empty:hidden" />
+}
 
 function menuItems(menu: HTMLElement): HTMLButtonElement[] {
   return [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled),[role="menuitemradio"]:not(:disabled)')]

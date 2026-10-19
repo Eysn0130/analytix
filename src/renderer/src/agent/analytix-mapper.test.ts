@@ -161,6 +161,15 @@ describe('runtime event wire coverage', () => {
 })
 
 describe('thread summary mapping', () => {
+  it.each([undefined, 0, 1, 2, 3])('preserves only the real supported policy marker, source=%s', executionPolicyVersion => {
+    const thread = threadFromCore({ id: 'thr_policy', title: 'Policy', workspace: '/workspace', model: '',
+      mode: 'agent', status: 'idle', executionPolicyVersion, approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access',
+      createdAt: '2026-10-20T00:00:00Z', updatedAt: '2026-10-20T00:00:00Z' })
+    expect(thread.executionPolicyVersion).toBe(executionPolicyVersion === 2 ? 2 : undefined)
+    expect(thread.approvalPolicy).toBe('untrusted'); expect(thread.sandboxMode).toBe('danger-full-access')
+    expect(thread.executionPolicyUncertain).toBe(false)
+  })
+
   it('keeps analytix sidecar preview and counts backend-neutral', () => {
     const thread = threadFromCore({
       id: 'thr_summary',
