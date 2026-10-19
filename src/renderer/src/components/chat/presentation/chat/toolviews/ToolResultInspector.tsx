@@ -171,7 +171,7 @@ export function ToolResultInspector({ display, publicJob, publicRecord, recordId
   </dl>
   else if (activeTab === 'payload') body = <Payload value={inspect ? inspect.inputJSON : observation?.inputJSON}
     truncated={inspect ? inspect.inputTruncated : observation?.inputTruncated} wrapping={wrapping} />
-  else if (activeTab === 'result' && capture?.kind === 'inspect' && inspect?.outputText) body = <ToolRawIO outputText={inspect.outputText} />
+  else if (activeTab === 'result' && capture?.kind === 'inspect' && inspect?.outputText) body = <ToolRawIO outputText={inspect.outputText} wrapping={wrapping} />
   else if (activeTab === 'result' && readonlyRecord) {
     // Typed Result only. Common Inspect facts have their own provenance;
     // neither empty reserved body nor public prose reconstructs a result.
@@ -196,7 +196,7 @@ export function ToolResultInspector({ display, publicJob, publicRecord, recordId
       <div><dt>{t('dshToolInspect.timingSource')}</dt><dd>{t('dshToolInspect.hostExecution')}</dd></div></> : null}
   </dl>
   if (activeTab === 'result' && inspect?.outputError) {
-    const error = <ToolRawIO outputError={inspect.outputError} />
+    const error = <ToolRawIO outputError={inspect.outputError} wrapping={wrapping} />
     // Inspect-only failures have no typed Result to replace the unavailable
     // placeholder. Other captures retain their own Result beside the error.
     body = capture?.kind === 'inspect' ? error : <>{body}{error}</>
