@@ -124,6 +124,21 @@ describe('typed workbook cell drafts',()=>{
     expect(button('保存').disabled).toBe(true)
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({value:'13',unconfirmed:true,pending:false})
   })
+  it.each(['saving','loading','unknown'] as const)('retains words and blocks input, resubmission and discard while %s',async phase=>{
+    await render();await fill('13')
+    const original=useNativeOfficeStore.getState().workbookDrafts[draftKey]
+    const next:NativeOfficeView={...view,...(phase==='saving'?{saving:true}:phase==='loading'?{status:'loading' as const}:{error:'unknown' as const})}
+    await render(next)
+    expect(input().value).toBe('13');expect(input().disabled).toBe(true)
+    for(const label of ['保存','放弃草稿','保留草稿']) expect(button(label).disabled).toBe(true)
+    await act(async()=>{button('保存').click();button('放弃草稿').click();button('保留草稿').click()})
+    await fill('14')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toEqual(original)
+    expect(request).not.toHaveBeenCalled()
+    await render()
+    expect(input().value).toBe('13');expect(input().disabled).toBe(false)
+    expect(button('保存').disabled).toBe(false);expect(button('放弃草稿').disabled).toBe(false)
+  })
   it('renews the native token for the same cell without erasing input and saves with the latest token',async()=>{
     request.mockResolvedValue({ok:true,view:receipt('number','13')})
     await render();await fill('13')

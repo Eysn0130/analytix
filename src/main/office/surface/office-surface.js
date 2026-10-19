@@ -1,6 +1,8 @@
 /* global Module, FS */
 // First-party surface and transport. No Node, host bridge, remote fetch or arbitrary UNO entry point.
 const MAX_BYTES = 16 * 1024 * 1024;
+const WORKBOOK_CANDIDATE = '/tmp/analytix-office/workbook-candidate.xlsx';
+const WORKBOOK_OUTPUT = '/tmp/analytix-office/output.xlsx';
 // Main verifies the exact manifest before serving this classic-script runtime.
 // Internal registration observers below apply only to this qualified JS/WASM pair.
 const INPUT_ASSET_VERSION = 'efaf0670b4d055f838a2849becb10f08aa06a257:5143e5354f470b87f86ba272bcfef857bd13e6f07b59666e48a7ccb89643cd77:9ebd9a487e849a24b9c69f843ebdb451709c27b7722c010e36846433474a5bd4';
@@ -36,6 +38,8 @@ const validWorkbookBounds = value => exact(value,['sheet','startColumn','startRo
   ['sheet','startColumn','startRow','endColumn','endRow'].every(k => integer(value[k])) && value.sheet < 20 && value.endColumn < 1024 && value.endRow < 100000 &&
   value.startColumn <= value.endColumn && value.startRow <= value.endRow && (value.endColumn-value.startColumn+1)*(value.endRow-value.startRow+1) <= 256;
 const validWorkbookTarget = value => exact(value,['sheet','column','row']) && integer(value.sheet) && value.sheet < 20 && integer(value.column) && value.column < 1024 && integer(value.row) && value.row < 100000;
+const validWorkbookCandidate = (value, version) => exact(value,['changeId','saveOperationId','baseRevision']) &&
+  digest(value.changeId) && nativeOperation(value.saveOperationId) && digest(value.baseRevision) && value.baseRevision === version;
 function validPlayback(value) {
   const fields = ['generation','sequence','phase','slideIndex','slideCount'];
   if (!value || Object.getPrototypeOf(value) !== Object.prototype || Object.keys(value).length !== fields.length || !fields.every(k => Object.hasOwn(value,k)) ||
@@ -136,8 +140,8 @@ function validRequest(r) {
     if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validPresentationReview(r.presentation)) return false;
     extra=['selectionToken','expectedChangeSequence','presentation'];
   } else if (r.command === 'replaceCells') {
-    if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validWorkbookReview(r.workbook) || r.writeTarget !== undefined && !validWorkbookTarget(r.writeTarget)) return false;
-    extra=['selectionToken','expectedChangeSequence','workbook',...(r.writeTarget === undefined ? [] : ['writeTarget'])];
+    if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence<0 || !validWorkbookReview(r.workbook) || !validWorkbookCandidate(r.candidate,r.version) || r.writeTarget !== undefined && !validWorkbookTarget(r.writeTarget)) return false;
+    extra=['selectionToken','expectedChangeSequence','workbook','candidate',...(r.writeTarget === undefined ? [] : ['writeTarget'])];
   } else if (r.command === 'replace') {
     if (!token(r.selectionToken) || !Number.isSafeInteger(r.expectedChangeSequence) || r.expectedChangeSequence < 0) return false;
     if (typeof r.text !== 'string' || r.text.length > 4096 || r.valueType !== 'text') return false;
@@ -156,7 +160,7 @@ export class OfficeEngineSurface {
     this.openOperationId = null; this.editing = false; this.busy = false; this.viewRead = null; this.started = false;
     this.nativeWritable = false; this.manualInput = null; this.inputGate = true; this.inputPending = 0;
     this.inputTail = Promise.resolve(); this.composition = null; this.compositionSerial = 0; this.compositionKeys = new Set();
-    this.finalComposition = null; this.exportArtifact = null; this.freezeProof = null;
+    this.finalComposition = null; this.exportArtifact = null; this.freezeProof = null; this.workbookCandidate = null;
     this.manualLoading = null; this.lastManualGeneration = 0; this.fontFamilies = [];
     this.inputRuntime = {generation:0,invalid:false,registrations:new Map(),wrappers:{},bound:null,qualified:null,binding:false};
     // AI/preview body input stays closed. Only a correlated manual-edit result may
@@ -397,6 +401,17 @@ export class OfficeEngineSurface {
       manual?.version === 2 && manual.origin === 'manual' && manual.changeId === owner.changeId && manual.generation === owner.generation;
   }
   manualAvailable(owner = this.manualInput) { return this.manualCurrent(owner) && this.state.manual.frozen === false; }
+  workbookCandidateCurrent(owner = this.workbookCandidate) {
+    return !!owner && owner === this.workbookCandidate && !this.failed && this.state?.kind === 'xlsx' &&
+      owner.documentId === this.state.documentId && owner.version === this.state.version && owner.opened === this.openOperationId &&
+      owner.sequence === this.state.changeSequence;
+  }
+  clearWorkbookCandidate(preserveArtifact = false) {
+    if (!this.workbookCandidate && !this.exportArtifact?.workbookCandidate) return;
+    this.workbookCandidate = null;
+    for (const path of [WORKBOOK_CANDIDATE, WORKBOOK_OUTPUT]) try { FS.unlink(path); } catch { /* Fixed private MEMFS files may already be absent. */ }
+    if (!preserveArtifact && this.exportArtifact?.workbookCandidate) this.exportArtifact = null;
+  }
   closeInput() {
     if (this.manualLoading) { this.failed = true; this.inputRuntime.bound = this.inputRuntime.qualified = null; }
     this.manualLoading = null;
@@ -405,7 +420,7 @@ export class OfficeEngineSurface {
     this.canvas.setAttribute?.('aria-label','Office 只读预览；可浏览和选择内容');
   }
   retireInput() {
-    this.failed = true; this.closeInput();
+    this.failed = true; this.clearWorkbookCandidate(true); this.closeInput();
     this.onEvent({type:'fatal',channel:this.channel,error:'engine-operation-failed'});
   }
   queueText(text) {
@@ -571,6 +586,14 @@ export class OfficeEngineSurface {
     if (r.command === 'open' && this.state) throw Error('document-already-open');
     if (r.command === 'ack' && (!this.exportArtifact || this.exportArtifact.operationId !== r.exportOperationId || this.exportArtifact.sequence !== r.exportedSequence ||
       this.exportArtifact.documentId !== r.documentId || this.exportArtifact.version !== r.version)) throw Error('ack-mismatch');
+    if (r.command === 'replaceCells' && (this.workbookCandidate || this.exportArtifact)) throw Error('export-awaiting-ack');
+    if (r.command === 'export' && this.state.kind === 'xlsx' &&
+        (!this.workbookCandidateCurrent() || this.workbookCandidate.phase !== 'prepared' || this.exportArtifact ||
+          this.workbookCandidate.authority.saveOperationId !== r.operationId)) throw Error('export-awaiting-ack');
+    if (r.command === 'ack' && this.exportArtifact.workbookCandidate &&
+        (!this.workbookCandidateCurrent() || this.workbookCandidate.phase !== 'exported' || this.exportArtifact.workbookCandidate !== this.workbookCandidate ||
+          this.workbookCandidate.exportOperationId !== r.exportOperationId || this.exportArtifact.changeId !== this.workbookCandidate.authority.changeId ||
+          this.exportArtifact.saveOperationId !== this.workbookCandidate.authority.saveOperationId || this.exportArtifact.baseRevision !== this.workbookCandidate.authority.baseRevision)) throw Error('ack-mismatch');
     if (r.command === 'format' && (!this.manualAvailable() || r.changeId !== this.manualInput.changeId)) throw Error('native-input-unavailable');
     if (r.command === 'freeze' && (!this.manualCurrent() || r.changeId !== this.manualInput.changeId)) throw Error('native-input-unavailable');
     if (r.command === 'manual-edit' && (this.state.kind !== 'docx' || this.manualInput || this.composition || this.inputPending)) throw Error('operation-in-progress');
@@ -632,7 +655,7 @@ export class OfficeEngineSurface {
     }
     this.busy = true;
     const owner = this.manualInput, gate = this.inputGate;
-    let loading = null;
+    let loading = null, workbookOwner = this.workbookCandidate;
     if (owner) this.inputGate = true;
     try {
       const request = {...r};
@@ -640,10 +663,35 @@ export class OfficeEngineSurface {
         FS.writeFile('/tmp/analytix-office/input.' + r.kind, r.bytes);
         delete request.bytes;
       }
+      if (r.command === 'replaceCells') {
+        if (this.state.kind !== 'xlsx' || !token(this.openOperationId) || this.state.dirty ||
+            r.expectedChangeSequence !== this.state.changeSequence || this.state.changeSequence !== this.state.acknowledgedSequence) throw Error('stale-selection');
+        workbookOwner = this.workbookCandidate = {documentId:r.documentId,version:r.version,opened:this.openOperationId,
+          operationId:r.operationId,selectionToken:r.selectionToken,baseSequence:r.expectedChangeSequence,sequence:null,phase:'preparing',exportOperationId:null,
+          authority:Object.freeze({...r.candidate})};
+        const size = FS.stat('/tmp/analytix-office/input.xlsx').size;
+        if (!integer(size) || size < 1 || size > MAX_BYTES) throw Error('surface-state-unknown-recreate-required');
+        const bytes = new Uint8Array(FS.readFile('/tmp/analytix-office/input.xlsx'));
+        if (bytes.byteLength !== size) throw Error('surface-state-unknown-recreate-required');
+        // Only the complete last Core-opened/receipted input enters this private
+        // fixed URL. The renderer supplies neither a path nor replacement bytes.
+        FS.writeFile(WORKBOOK_CANDIDATE, bytes);
+      }
+      if (r.command === 'export' && workbookOwner) {
+        workbookOwner.phase = 'exporting'; workbookOwner.exportOperationId = r.operationId;
+      }
       const inputProof = r.command === 'manual-edit' ? await this.bindInputRuntime() : null;
       if (r.command === 'manual-edit') loading = this.armManualLoading(r,inputProof);
       const result = await this.worker(request);
       if (this.failed) throw Error('surface-state-unknown-recreate-required');
+      if (r.command === 'replaceCells') {
+        if (this.workbookCandidate !== workbookOwner || workbookOwner.opened !== this.openOperationId ||
+            result.state?.kind !== 'xlsx' || result.state.documentId !== workbookOwner.documentId || result.state.version !== workbookOwner.version ||
+            result.state.changeSequence !== workbookOwner.baseSequence + 1 || result.state.acknowledgedSequence !== workbookOwner.baseSequence || result.state.dirty !== true) {
+          this.retireInput(); throw Error('surface-state-unknown-recreate-required');
+        }
+        workbookOwner.sequence = result.state.changeSequence; workbookOwner.phase = 'prepared';
+      }
       if (r.command === 'manual-edit') {
         const state = result.state, manual = state?.manual;
         const runtime = this.inputRuntimeIdentity(), evidence = result.inputRuntime;
@@ -679,7 +727,11 @@ export class OfficeEngineSurface {
           if (result.bytes.byteLength !== size || !integer(result.exportedSequence) || result.state?.documentId !== r.documentId || result.state.version !== r.version || result.exportedSequence !== result.state.changeSequence) throw Error('surface-state-unknown-recreate-required');
           // The result buffer can be transferred to Main. Retain an independent
           // exact artifact, never reread a possibly replaced output path on ACK.
-          this.exportArtifact = {operationId:r.operationId,sequence:result.exportedSequence,documentId:r.documentId,version:r.version,kind:this.state.kind,bytes:new Uint8Array(result.bytes)};
+          if (workbookOwner && (this.workbookCandidate !== workbookOwner || workbookOwner.opened !== this.openOperationId ||
+              workbookOwner.sequence !== result.exportedSequence || workbookOwner.exportOperationId !== r.operationId)) throw Error('surface-state-unknown-recreate-required');
+          this.exportArtifact = {operationId:r.operationId,sequence:result.exportedSequence,documentId:r.documentId,version:r.version,kind:this.state.kind,bytes:new Uint8Array(result.bytes),
+            ...(workbookOwner ? {workbookCandidate:workbookOwner,...workbookOwner.authority} : {})};
+          if (workbookOwner) workbookOwner.phase = 'exported';
           FS.unlink(path);
         } catch (error) {
           this.retireInput();
@@ -700,18 +752,24 @@ export class OfficeEngineSurface {
           }
           if (owner) { this.closeInput(); this.editing = false; }
         }
+        this.clearWorkbookCandidate();
         this.exportArtifact = null;
       }
       if (result.state) this.state = result.state;
       if (r.command === 'edit') this.editing = true;
       if (r.command === 'open') { this.lastManualGeneration = 0; this.openOperationId = r.operationId; dispatchEvent(new Event('resize')); }
       if (r.command === 'close') {
+        this.clearWorkbookCandidate();
         for (const kind of kinds) try { FS.unlink('/tmp/analytix-office/input.' + kind); } catch { /* A missing temporary in-memory file needs no cleanup. */ }
         this.closeInput(); this.lastManualGeneration = 0; this.nativeWritable = false; this.exportArtifact = null;
         this.state = this.openOperationId = this.view = null; this.editing = false; this.onView(null);
       }
       return result;
     } catch (error) {
+      if (workbookOwner && ['replaceCells','export','ack','close'].includes(r.command)) {
+        this.clearWorkbookCandidate(true);
+        if (['export','ack'].includes(r.command) && !this.failed) this.retireInput();
+      }
       if (loading) { if (!this.failed) this.retireInput(); else this.closeInput(); }
       throw error;
     } finally {

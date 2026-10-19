@@ -3,8 +3,10 @@ import { expect, test, vi } from 'vitest'
 import * as logger from '../logger'
 import { createNativeOfficeController, type NativeOfficeEngineRequest } from './native-office-controller'
 import type { PluginPackageView } from '../../../packages/runtime/src/contracts/plugin-package-host'
+import type { NativeOfficeView } from '../../shared/native-office'
 const hash = (value: Uint8Array) => createHash('sha256').update(value).digest('hex')
 const original = new Uint8Array([80,75,1]), edited = new Uint8Array([80,75,2])
+const externallyEdited = new Uint8Array([80,75,3])
 const objectId = 'a'.repeat(64), sessionId = 'e'.repeat(48), revision = hash(original)
 const threadId = 'thread-native', changeId = '9'.repeat(64), saveOperationId = 'save_core_0001', undoOperationId = 'undo_core_0001'
 const open = {action:'open',threadId,workspace:'/workspace',path:'a.docx',bounds:{x:0,y:0,width:800,height:600}}
@@ -20,7 +22,7 @@ function setup(typed = false, presentation = false) {
   let receipt:any, deferCommit:((value:any)=>void)|undefined
   let delay=false, conflict=false, hidden=0, destroyed=0, revoked=0, loseCommit=false, failReload=false, rejectCommit=false
   const scopeId='d'.repeat(48), proposalId='f'.repeat(48)
-  let persisted:any, foreignRecovery=false, corruptOpen=false, corruptReceipt=false, corruptReload=false
+  let persisted:any, foreignRecovery=false, corruptOpen=false, corruptReceipt=false, corruptReload=false, changeReadback=false
   let interruptSave=false, interruptResume=false, interruptUndo=false, loseResumeReceipt=false, pendingCandidate:Uint8Array|undefined
   const statusOperationIds:string[]=[]
   const receipts = new Map<string, any>()
@@ -31,11 +33,18 @@ function setup(typed = false, presentation = false) {
   const pkg:PluginPackageView={packageId:presentation?'analytix-presentations':typed?'analytix-spreadsheets':'analytix-documents',packageVersion:'1.0.0',displayName:'Documents',origin:'development-source',publishable:false,materialized:true,generationId:'b'.repeat(64),activationState:'recorded',desiredState:'enabled',activationRevision:1,activationId:'c'.repeat(64),available:true,operations:['open-object','close-object','commit-object','object-status','capture-selection','selection-read','proposal-read','proposal-accept','proposal-reject','selection-revoke','object-recovery','undo-change','cancel-change','resume-change']}
   const selection=()=>presentation?({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'shapes',scope:'page-and-shape-index-at-version-and-change-sequence',shapes:[{pageIndex:0,shapeIndex:0,name:'shape',type:'com.sun.star.drawing.RectangleShape',text:'selected'}],presentation:presentationSelection,token:'selection_123',capture:{capturedCharacters:8,totalCharacters:8,truncated:false,unit:'utf-16',complete:true}}):typed?({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'cells',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],cells:workbook.cells,token:'selection_123',capture:{capturedCharacters:1,totalCharacters:1,truncated:false,unit:'utf-16',complete:true}}):({documentId:objectId,version:current.version,changeSequence:current.changeSequence,kind:'text',scope:'session-text-range-at-version-and-change-sequence',text:'selected',token:'selection_123',capture:{capturedCharacters:8,totalCharacters:8,truncated:false,unit:'utf-16',complete:true}})
   const requests:NativeOfficeEngineRequest[]=[]
+  const trace:string[]=[], views:Array<NativeOfficeView|null>=[]
   const createController=()=>createNativeOfficeController({
     async packageHost(r):Promise<any>{
       if(r.action==='list')return {ok:true,packages:[pkg]}
       if(r.action!=='invoke')throw Error('not authorized')
-      if(r.operation==='open-object'){await openGate;return {ok:true,output:{ok:true,document:{objectId,sessionId,path:presentation?'/workspace/a.pptx':typed?'/workspace/a.xlsx':'/workspace/a.docx',revision:saved,content:Buffer.from(corruptReload?original:corruptOpen?edited:saved===revision?original:edited).toString('base64')},...(typed?{workbookEditing:{editable:true}}:{})}}}
+      trace.push('core:'+r.operation)
+      if(r.operation==='open-object'){
+        await openGate
+        if(changeReadback&&saved!==revision){changeReadback=false;saved=hash(externallyEdited)}
+        const bytes=corruptReload?original:corruptOpen?edited:saved===revision?original:saved===hash(externallyEdited)?externallyEdited:edited
+        return {ok:true,output:{ok:true,document:{objectId,sessionId,path:presentation?'/workspace/a.pptx':typed?'/workspace/a.xlsx':'/workspace/a.docx',revision:saved,content:Buffer.from(bytes).toString('base64')},...(typed?{workbookEditing:{editable:true}}:{})}}
+      }
       if(r.operation==='capture-selection'){selectionCalls.push(r.operation);scope={...r.input,scopeId,parts:[{kind:'literal',text:'selected'}],...scopeOverride};delete scope.text;return {ok:true,output:{ok:true,scope}}}
       if(r.operation==='selection-read'){selectionCalls.push(r.operation);return {ok:true,output:selectionReadError?{ok:false,code:'scope_invalid',message:'stale'}:{ok:true,scope:{...scope,...scopeOverride}}}}
       if(r.operation==='proposal-read')return {ok:true,output:{ok:true,proposals:[{proposalId,status:'proposed',parts:[{kind:'literal',text:'proposed'}]}],localReviews:[{proposalId,beforeText:'selected raw field',afterText:'proposed raw field'}]}}
@@ -55,7 +64,7 @@ function setup(typed = false, presentation = false) {
         if(rejectNoop)return {ok:true,output:{ok:false,code:'proposal_invalid',message:'The proposal does not change the selected text.'}}
         if(acceptedOperation)expect(r.input.operationId).toBe(acceptedOperation)
         acceptedOperation=r.input.operationId as string
-        persisted ??= {changeId,threadId:scope.threadId,proposalId,baseRevision:scope.baseRevision,revision:'',status:'prepared',beforeText:'selected raw field',afterText:'proposed raw field',saveOperationId,undoOperationId,canUndo:false,canCancel:true,canRetryUndo:false,canResume:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
+        persisted ??= {changeId,threadId:scope.threadId,proposalId,baseRevision:scope.baseRevision,revision:'',status:'prepared',beforeText:'selected raw field',afterText:'proposed raw field',...(typed?{workbook:workbookReview}:{}),saveOperationId,undoOperationId,canUndo:false,canCancel:true,canRetryUndo:false,canResume:false,createdAt:'2026-09-15T00:00:00Z',savedAt:''}
         if(loseDecision){loseDecision=false;throw Error('transport lost after Core accepted')}
         return {ok:true,output:{ok:true,replacement:{proposalId,changeId,saveOperationId,operationId:r.input.operationId,text:replacementText,...(presentation?{presentation:presentationReview}:typed?{workbook:workbookReview}:{}),selectionToken:scope.selectionToken,changeSequence:scope.changeSequence,baseRevision:scope.baseRevision}}}
       }
@@ -114,7 +123,8 @@ function setup(typed = false, presentation = false) {
       if(r.operation==='object-status'){statusCalls++;statusOperationIds.push(r.input.operationId as string);return {ok:true,output:{ok:true,receipt:receipts.get(r.input.operationId as string)}}}
       throw Error('unexpected Core operation')
     },
-    createSurface(listener){let playbackSequence=0;onEvent=listener;return {attach(){},hide(){hidden++},destroy(){destroyed++},async request(r){
+    createSurface(listener){trace.push('surface:create');let playbackSequence=0;onEvent=listener;return {attach(){},hide(){hidden++},destroy(){trace.push('surface:destroy');destroyed++},async request(r){
+      trace.push('engine:'+r.command+(r.command==='ack'?':'+r.status:''))
       requests.push(r)
       const base={type:'result',channel:'surface',command:r.command,operationId:r.operationId,documentId:r.documentId,version:r.version,ok:true}
       if(r.command==='open'){if(failReload){failReload=false;throw Error('reload failed')}opened=r.operationId;current={...current,version:r.version,changeSequence:0,acknowledgedSequence:0,dirty:false}}
@@ -131,12 +141,13 @@ function setup(typed = false, presentation = false) {
       if(r.command==='replace'||r.command==='replaceCells'||r.command==='replacePresentation')current={...current,changeSequence:current.changeSequence+1,dirty:true}
       if(r.command==='export')return {...base,state:{...current},bytes:edited,exportedSequence:current.changeSequence}
       if(r.command==='ack'&&r.status==='committed')current={...current,version:r.persistedVersion!,acknowledgedSequence:r.exportedSequence!,dirty:current.changeSequence!==r.exportedSequence}
+      if(typed&&(r.command==='replaceCells'||r.command==='ack'))return {...base,state:{...current}}
       return {...base,state:{...current},selection:selection()}
-    }}},onChange(){}})
+    }}},onChange(view){views.push(view);trace.push('view:'+(view?.status??'closed'))}})
   let controller=createController()
   const change=()=>{current={...current,changeSequence:current.changeSequence+1,dirty:true};onEvent({type:'changed',operationId:opened,documentId:objectId,version:current.version,state:{...current}})}
   const target=()=>({objectId,revision:current.version,expectedChangeSequence:current.changeSequence})
-  return {openRequest,busyTyped:(value:boolean)=>{busyTyped=value},scopeOverride:(value:Record<string,unknown>)=>{scopeOverride=value},refuseSelectionRead:()=>{selectionReadError=true},selectionCalls,rejectFidelity:()=>{rejectFidelity=true},rejectText:()=>{rejectText=true},rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:()=>{failTyped=true},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
+  return {openRequest,trace,views,changeReadbackAfterCommit:()=>{changeReadback=true},busyTyped:(value:boolean)=>{busyTyped=value},scopeOverride:(value:Record<string,unknown>)=>{scopeOverride=value},refuseSelectionRead:()=>{selectionReadError=true},selectionCalls,rejectFidelity:()=>{rejectFidelity=true},rejectText:()=>{rejectText=true},rejectNoop:()=>{rejectNoop=true},getPrepared:()=>persisted,failTyped:()=>{failTyped=true},get controller(){return controller},restart:()=>{controller=createController()},corruptOpen:()=>{corruptOpen=true},corruptReceipt:()=>{corruptReceipt=true},foreignRecovery:()=>{foreignRecovery=true},interruptResume:()=>{interruptResume=true},interruptUndo:()=>{interruptUndo=true},mismatchRecoveryOperation:()=>{persisted.saveOperationId='other_save_0001';persisted.undoOperationId='other_undo_0001'},getResumeCalls:()=>resumeCalls,getStatusOperationIds:()=>[...statusOperationIds],interruptSave:()=>{interruptSave=true},loseResumeReceipt:()=>{loseResumeReceipt=true},corruptReload:()=>{corruptReload=true},wrongPendingBase:()=>{persisted.baseRevision='0'.repeat(64)},getUndoCalls:()=>undoCalls,getCancelCalls:()=>cancelCalls,markUndoStarted:()=>{persisted={...persisted,status:'unknown',canUndo:false,canRetryUndo:true}},markUncertain:()=>{persisted={...persisted,status:'unknown',canCancel:false}},target,change,requests,pkg,scopeId,proposalId,getRevoked:()=>revoked,getSaved:()=>saved,externalEdit:()=>{saved=hash(edited)},rejectCommit:()=>{rejectCommit=true},loseCommit:()=>{loseCommit=true},failReload:()=>{failReload=true},loseDecision:()=>{loseDecision=true},oversize:()=>{replacementText='x'.repeat(4097)},holdOpen:()=>{openGate=new Promise(resolve=>{releaseOpen=resolve})},releaseOpen:()=>releaseOpen?.(),delay:()=>{delay=true},conflict:()=>{conflict=true},complete:()=>deferCommit?.({ok:true,output:{ok:true,receipt}}),getCommitCalls:()=>commitCalls,getStatusCalls:()=>statusCalls,getHidden:()=>hidden,getDestroyed:()=>destroyed}
 }
 test('native annotation preparation is explicit; persisted receipt advances revision, close unknown object never closes active',async()=>{
   const h=setup();expect((await h.controller.request(open)).ok).toBe(true)
@@ -497,15 +508,72 @@ test.each(['xlsx','pptx'] as const)('a transient %s typed apply refusal retains 
  expect(h.controller.getView()?.appliedProposals??[]).not.toContain(h.proposalId)
  h.busyTyped(false)
  expect(await h.controller.request(request)).toMatchObject({ok:true,view:{dirty:false,canUndo:true}})
- expect(h.getDestroyed()).toBe(0);expect(h.getCommitCalls()).toBe(1)
+ expect(h.getDestroyed()).toBe(kind==='xlsx'?1:0);expect(h.getCommitCalls()).toBe(1)
  expect(h.requests.filter(r=>r.command===(kind==='pptx'?'replacePresentation':'replaceCells'))).toHaveLength(2)
 })
-test('typed approval uses only replaceCells and the fixed Core save operation',async()=>{
+// Direct controller fixtures use synthetic transport bytes and mocked Core/UNO;
+// they establish ordering and authority, not native file acceptance.
+test('typed Agent approval fixture reloads exact Core bytes after successful ACK before ready',async()=>{
  const h=setup(true);expect((await h.controller.request({...open,path:'a.xlsx'})).ok).toBe(true)
  const result=await applyProposal(h);expect(result.ok,JSON.stringify(result)).toBe(true)
- expect(h.requests.filter(r=>r.command==='replaceCells')).toHaveLength(1)
+ expect(result).toMatchObject({ok:true,view:{revision:hash(edited),status:'ready',saving:false,dirty:false,editing:false,changeSequence:0,acknowledgedSequence:0,canUndo:true}})
+ expect(h.requests.filter(r=>r.command==='replaceCells')).toEqual([expect.objectContaining({
+  selectionToken:'selection_123',expectedChangeSequence:0,version:revision,
+  candidate:{changeId,saveOperationId,baseRevision:revision}
+ })])
  expect(h.requests.some(r=>r.command==='replace')).toBe(false)
- expect(h.getCommitCalls()).toBe(1)
+ expect(h.requests.some(r=>r.command==='manual-edit')).toBe(false)
+ expect(h.getPrepared()).toMatchObject({proposalId:h.proposalId,threadId,changeId,status:'committed'})
+ expect(h.getPrepared().origin).toBeUndefined();expect(h.getPrepared().version).toBeUndefined()
+ expect(h.trace).not.toContain('core:prepare-workbook-manual')
+ expect(h.requests.filter(r=>r.command==='export')).toEqual([expect.objectContaining({operationId:saveOperationId})])
+ expect(h.requests.filter(r=>r.command==='ack')).toEqual([expect.objectContaining({status:'committed',exportOperationId:saveOperationId,exportedSequence:1,persistedVersion:hash(edited)})])
+ expect(h.requests.filter(r=>r.command==='open')).toEqual([
+  expect.objectContaining({bytes:original,version:revision}),
+  expect.objectContaining({bytes:edited,version:hash(edited)})
+ ])
+ const approval=h.trace.indexOf('core:proposal-accept'),replace=h.trace.indexOf('engine:replaceCells'),commit=h.trace.indexOf('core:commit-object')
+ const ack=h.trace.indexOf('engine:ack:committed',commit),readback=h.trace.indexOf('core:open-object',ack+1)
+ const retired=h.trace.indexOf('surface:destroy',readback+1),created=h.trace.indexOf('surface:create',retired+1),loaded=h.trace.indexOf('engine:open',created+1)
+ expect(approval).toBeGreaterThan(-1);expect(replace).toBeGreaterThan(approval);expect(commit).toBeGreaterThan(replace)
+ expect(ack).toBeGreaterThan(commit);expect(readback).toBeGreaterThan(ack);expect(retired).toBeGreaterThan(readback)
+ expect(created).toBeGreaterThan(retired);expect(loaded).toBeGreaterThan(created)
+ expect(h.trace.slice(ack+1,loaded)).not.toContain('view:ready')
+ expect(h.trace.indexOf('view:ready',loaded+1)).toBeGreaterThan(loaded)
+ expect(h.views.some(view=>view?.status==='loading'&&view.saving&&view.canUndo===false)).toBe(true)
+ expect(h.getDestroyed()).toBe(1);expect(h.getCommitCalls()).toBe(1);expect(h.getStatusCalls()).toBe(0)
+})
+test('typed Agent committed reload failure retries only exact Core readback and surface load',async()=>{
+ const h=setup(true);expect((await h.controller.request(h.openRequest)).ok).toBe(true);h.failReload()
+ expect(await applyProposal(h)).toMatchObject({ok:false,error:'unknown',view:{saving:true,canUndo:false,status:'error'}})
+ expect(h.getSaved()).toBe(hash(edited));expect(h.getPrepared()).toMatchObject({proposalId:h.proposalId,status:'committed'})
+ expect(h.getCommitCalls()).toBe(1);expect(h.requests.filter(r=>r.command==='export')).toHaveLength(1)
+ const beforeRetry=h.trace.length
+ expect(await h.controller.request({action:'saveStatus',objectId})).toMatchObject({ok:true,view:{revision:hash(edited),status:'ready',saving:false,dirty:false,editing:false,canUndo:true}})
+ expect(h.trace.slice(beforeRetry)).toContain('core:open-object')
+ expect(h.trace.slice(beforeRetry)).not.toContain('core:proposal-accept')
+ expect(h.trace.slice(beforeRetry)).not.toContain('core:commit-object')
+ expect(h.requests.filter(r=>r.command==='replaceCells')).toHaveLength(1)
+ expect(h.requests.filter(r=>r.command==='export')).toHaveLength(1)
+ expect(h.requests.filter(r=>r.command==='ack')).toHaveLength(1)
+ expect(h.requests.filter(r=>r.command==='open')).toHaveLength(3)
+ expect(h.requests.filter(r=>r.command==='open').at(-1)).toMatchObject({bytes:edited,version:hash(edited)})
+ expect(h.trace.filter(event=>event==='core:open-object')).toHaveLength(3)
+ expect(h.getCommitCalls()).toBe(1);expect(h.getStatusCalls()).toBe(0);expect(h.getDestroyed()).toBe(2)
+})
+test('typed Agent committed readback rejects a later external revision before loading its bytes',async()=>{
+ const h=setup(true);expect((await h.controller.request(h.openRequest)).ok).toBe(true);h.changeReadbackAfterCommit()
+ expect(await applyProposal(h)).toMatchObject({ok:false,error:'conflict',view:{saving:false,status:'error',canUndo:false}})
+ expect(h.getSaved()).toBe(hash(externallyEdited));expect(h.getPrepared()).toMatchObject({proposalId:h.proposalId,status:'committed',revision:hash(edited)})
+ expect(h.requests.filter(r=>r.command==='open')).toEqual([expect.objectContaining({bytes:original,version:revision})])
+ expect(h.requests.some(r=>r.command==='open'&&r.version===hash(externallyEdited))).toBe(false)
+ const commit=h.trace.indexOf('core:commit-object'),ack=h.trace.indexOf('engine:ack:committed',commit),readback=h.trace.indexOf('core:open-object',ack+1)
+ expect(ack).toBeGreaterThan(commit);expect(readback).toBeGreaterThan(ack)
+ expect(h.trace.slice(readback+1)).toContain('surface:destroy')
+ expect(h.trace.slice(readback+1)).not.toContain('surface:create')
+ expect(h.trace.slice(ack+1)).not.toContain('view:ready')
+ expect(h.requests.filter(r=>r.command==='replaceCells')).toHaveLength(1);expect(h.requests.filter(r=>r.command==='export')).toHaveLength(1)
+ expect(h.getCommitCalls()).toBe(1);expect(h.getDestroyed()).toBe(1)
 })
 test('typed Agent commit rejection records its Core code while preserving save_failed',async()=>{
  const diagnostic=vi.spyOn(logger,'logNativeOfficeSaveFailure').mockImplementation(()=>undefined)

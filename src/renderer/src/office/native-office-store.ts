@@ -246,7 +246,7 @@ export const useNativeOfficeStore = create<{
     if (view) for (const [identity,draft] of Object.entries(workbookDrafts)) {
       const change=matchingWorkbookDraftChange(draft,view)
       if (!change) continue
-      if (!draft.pending && draft.unconfirmed && !view.dirty && !view.saving && change.status === 'committed' && change.revision === view.revision)
+      if (!draft.pending && draft.unconfirmed && view.status === 'ready' && !view.dirty && !view.saving && change.status === 'committed' && change.revision === view.revision)
         delete workbookDrafts[identity]
       else workbookDrafts[identity]={...draft,submitted:{...draft.submitted!,changeId:change.changeId,saveOperationId:change.saveOperationId}}
     }

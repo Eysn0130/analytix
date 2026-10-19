@@ -172,23 +172,116 @@ test('typed private protocol admits only exact AI text replacement and denies ma
 
 
 test('actual surface relay forwards only strict typed rectangles after edit admission',async()=>{
- const context:any={document:{getElementById:()=>null},window:{addEventListener(){}}};vm.createContext(context)
- const source=readFileSync(new URL('./surface/office-surface.js',import.meta.url),'utf8').replaceAll('export ','')
- vm.runInContext(source+'\nglobalThis.engine=new OfficeEngineSurface({},()=>{});',context)
- const state={documentId:'document',version:'version',kind:'xlsx',changeSequence:0,acknowledgedSequence:0,dirty:false}
- context.engine.channel='channel';context.engine.state=state;context.engine.worker=vi.fn(async()=>({state}))
- const cell={sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
- const before={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[cell]}
- const request={...envelope('replaceCells'),selectionToken:'selection',expectedChangeSequence:0,workbook:{before,after:{...before,cells:[{...cell,text:'2',formula:'2',value:2}]},results:['']}}
- const deliver=(value:unknown)=>{context.payload=JSON.stringify(value);return vm.runInContext('engine.request(JSON.parse(payload))',context)}
+ const {engine,worker,request,deliver}=workbookSurfaceCandidate(),before=request.workbook.before,cell=before.cells[0]
+ engine.editing=false
  expect(isOfficeRequest(request)).toBe(true)
  await expect(deliver(request)).rejects.toThrow('unsupported-command')
- context.engine.editing=true;await deliver(request);expect(context.engine.worker).toHaveBeenCalledOnce()
- expect(context.engine.worker.mock.calls[0][0].workbook).toEqual(request.workbook)
- for(const bad of [{...request,path:'/private'},{...request,workbook:{...request.workbook,after:{...before,endRow:1}}},{...request,workbook:{...request.workbook,before:{...before,cells:[{...cell,merged:true}]}}},{...request,workbook:{...request.workbook,before:{...before,cells:[{...cell,valueType:'command',command:'.uno:Shell'}]}}}]){
+ engine.editing=true;await deliver(request);expect(worker).toHaveBeenCalledOnce()
+ expect(worker.mock.calls[0][0].workbook).toEqual(request.workbook)
+ for(const bad of [{...request,path:'/private'},{...request,candidate:undefined},{...request,candidate:{...request.candidate,baseRevision:'c'.repeat(64)}},{...request,candidate:{...request.candidate,path:'/private'}},{...request,workbook:{...request.workbook,after:{...before,endRow:1}}},{...request,workbook:{...request.workbook,before:{...before,cells:[{...cell,merged:true}]}}},{...request,workbook:{...request.workbook,before:{...before,cells:[{...cell,valueType:'command',command:'.uno:Shell'}]}}}]){
   expect(isOfficeRequest(bad)).toBe(false);await expect(deliver(bad)).rejects.toThrow('invalid-request')
  }
- expect(context.engine.worker).toHaveBeenCalledOnce()
+ expect(worker).toHaveBeenCalledOnce()
+})
+
+function workbookSurfaceCandidate() {
+  // Synthetic package bytes verify private transport ownership only, not OOXML
+  // fidelity, native calculation, Core acceptance or an actual file save.
+  const inputPath='/tmp/analytix-office/input.xlsx',candidatePath='/tmp/analytix-office/workbook-candidate.xlsx',outputPath='/tmp/analytix-office/output.xlsx'
+  const inputBytes=new Uint8Array([80,75,3,4,9,8,7,6,5,4]),exportBytes=new Uint8Array([80,75,3,4,4,2,0,1])
+  const files=new Map<string,Uint8Array>([[inputPath,new Uint8Array(inputBytes)]])
+  const fileSystem={
+    stat:vi.fn((file:string)=>{if(!files.has(file))throw Error('absent');return {size:files.get(file)!.byteLength}}),
+    readFile:vi.fn((file:string)=>{if(!files.has(file))throw Error('absent');return files.get(file)!}),
+    writeFile:vi.fn((file:string,bytes:Uint8Array)=>files.set(file,new Uint8Array(bytes))),
+    unlink:vi.fn((file:string)=>{if(!files.delete(file))throw Error('absent')})
+  }
+  const events=vi.fn(),context:any={FS:fileSystem,document:{getElementById:()=>null},window:{addEventListener(){}},events}
+  vm.createContext(context)
+  const source=readFileSync(new URL('./surface/office-surface.js',import.meta.url),'utf8').replaceAll('export ','')
+  vm.runInContext(source+'\nglobalThis.engine=new OfficeEngineSurface({contentEditable:"false",setAttribute(){}},events);',context)
+  const realm=(value:unknown)=>{context.payload=JSON.stringify(value);return vm.runInContext('JSON.parse(payload)',context)}
+  const engine=context.engine,version='a'.repeat(64)
+  engine.channel='channel';engine.openOperationId='opened';engine.editing=true
+  engine.state=realm({documentId:'document',version,kind:'xlsx',changeSequence:0,acknowledgedSequence:0,dirty:false})
+  const cell={sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
+  const before={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[cell]}
+  const authority={changeId:'b'.repeat(64),saveOperationId:'native_save_operation',baseRevision:version}
+  const request={...envelope('replaceCells',{version}),selectionToken:'selection',expectedChangeSequence:0,candidate:authority,
+    workbook:{before,after:{...before,cells:[{...cell,text:'2',formula:'2',value:2}]},results:['']}}
+  const worker=vi.fn(async(r:any)=>{
+    const base={type:'result',command:r.command,channel:r.channel,operationId:r.operationId,documentId:r.documentId,version:r.version,ok:true}
+    if(r.command==='replaceCells')return realm({...base,state:{...engine.state,changeSequence:1,dirty:true}})
+    if(r.command==='export'){files.set(outputPath,new Uint8Array(exportBytes));return realm({...base,state:engine.state,exportedSequence:1})}
+    if(r.command==='ack')return realm({...base,state:{...engine.state,...(r.status==='committed'?{version:r.persistedVersion,acknowledgedSequence:1,dirty:false}:{})}})
+    if(r.command==='close')return realm(base)
+    throw Error('unexpected fixture command')
+  })
+  engine.worker=worker
+  const deliver=(value:unknown)=>engine.request(realm(value))
+  const exporting={...envelope('export',{version,operationId:authority.saveOperationId})}
+  const acknowledgement=(status:'committed'|'failed'='committed')=>({...envelope('ack',{version,operationId:'ack_operation'}),exportOperationId:authority.saveOperationId,exportedSequence:1,status,...(status==='committed'?{persistedVersion:'c'.repeat(64)}:{})})
+  return {engine,worker,request,deliver,exporting,acknowledgement,files,fileSystem,events,inputBytes,exportBytes,inputPath,candidatePath,outputPath}
+}
+
+test('workbook candidate stages the complete committed input once and rejects a second owner',async()=>{
+  const h=workbookSurfaceCandidate()
+  await h.deliver(h.request)
+  expect(h.files.get(h.candidatePath)).toEqual(h.inputBytes)
+  expect(h.files.get(h.inputPath)).toEqual(h.inputBytes)
+  expect(h.engine.workbookCandidate).toMatchObject({documentId:'document',version:h.request.version,opened:'opened',operationId:'replaceCells',selectionToken:'selection',baseSequence:0,sequence:1,phase:'prepared',authority:h.request.candidate})
+  await expect(h.deliver({...h.request,operationId:'another_replace'})).rejects.toThrow('export-awaiting-ack')
+  expect(h.worker).toHaveBeenCalledOnce()
+  expect(h.fileSystem.writeFile.mock.calls.map(([file])=>file)).toEqual([h.candidatePath])
+})
+
+test('workbook export and ACK retain the exact candidate artifact and approved save binding',async()=>{
+  const h=workbookSurfaceCandidate();await h.deliver(h.request)
+  await expect(h.deliver({...h.exporting,operationId:'another_save_operation'})).rejects.toThrow('export-awaiting-ack')
+  await h.deliver(h.exporting)
+  expect(h.engine.exportArtifact).toMatchObject({operationId:h.request.candidate.saveOperationId,changeId:h.request.candidate.changeId,baseRevision:h.request.version,saveOperationId:h.request.candidate.saveOperationId,sequence:1})
+  h.files.set(h.outputPath,new Uint8Array([99]));h.files.set(h.candidatePath,new Uint8Array([98]))
+  await expect(h.deliver({...h.acknowledgement(),exportOperationId:'another_save_operation'})).rejects.toThrow('ack-mismatch')
+  await h.deliver(h.acknowledgement())
+  expect(h.files.get(h.inputPath)).toEqual(h.exportBytes)
+  expect(h.files.has(h.candidatePath)).toBe(false);expect(h.files.has(h.outputPath)).toBe(false)
+  expect(h.engine.workbookCandidate).toBeNull();expect(h.engine.exportArtifact).toBeNull()
+  expect(h.worker.mock.calls.map(([request])=>request.command)).toEqual(['replaceCells','export','ack'])
+  expect(h.engine.canvas.contentEditable).toBe('false')
+})
+
+test('an unknown workbook surface retains its exact exported artifact and cannot export again',async()=>{
+  const h=workbookSurfaceCandidate();await h.deliver(h.request);await h.deliver(h.exporting)
+  const artifact=h.engine.exportArtifact
+  await expect(h.deliver({...h.exporting,operationId:'another_save_operation'})).rejects.toThrow('export-awaiting-ack')
+  h.engine.retireInput()
+  expect(h.engine.exportArtifact).toBe(artifact)
+  expect(Array.from(artifact.bytes)).toEqual(Array.from(h.exportBytes))
+  expect(h.files.has(h.candidatePath)).toBe(false);expect(h.files.has(h.outputPath)).toBe(false)
+  await expect(h.deliver(h.exporting)).rejects.toThrow('surface-state-unknown-recreate-required')
+  expect(h.worker.mock.calls.map(([request])=>request.command)).toEqual(['replaceCells','export'])
+  expect(h.files.get(h.inputPath)).toEqual(h.inputBytes)
+})
+
+test.each(['replaceCells','export','ack'] as const)('failed workbook %s retires its private temporary files without replacing input',async command=>{
+  const h=workbookSurfaceCandidate()
+  if(command!=='replaceCells')await h.deliver(h.request)
+  if(command==='ack')await h.deliver(h.exporting)
+  h.worker.mockRejectedValueOnce(Error('typed-mutation-failed'))
+  await expect(h.deliver(command==='replaceCells'?h.request:command==='export'?h.exporting:h.acknowledgement())).rejects.toThrow('typed-mutation-failed')
+  expect(h.engine.workbookCandidate).toBeNull()
+  expect(h.files.has(h.candidatePath)).toBe(false);expect(h.files.has(h.outputPath)).toBe(false)
+  expect(h.files.get(h.inputPath)).toEqual(h.inputBytes)
+})
+
+test('workbook close clears private staging and a stale native generation cannot export',async()=>{
+  const h=workbookSurfaceCandidate();await h.deliver(h.request)
+  h.engine.openOperationId='another_open'
+  await expect(h.deliver(h.exporting)).rejects.toThrow('export-awaiting-ack')
+  expect(h.worker).toHaveBeenCalledOnce()
+  await h.deliver({...envelope('close',{version:h.request.version}),expectedChangeSequence:1,discard:true})
+  expect(h.engine.workbookCandidate).toBeNull();expect(h.engine.state).toBeNull()
+  expect(h.files.has(h.candidatePath)).toBe(false);expect(h.files.has(h.outputPath)).toBe(false)
 })
 
 

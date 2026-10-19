@@ -727,9 +727,19 @@ test('typed workbook dependency transport keeps read snapshots separate from sel
   expect(isOfficeResult(result)).toBe(true)
   expect(isOfficeResult({...result,selection:workbookSelection})).toBe(false)
   expect(isOfficeResult({...result,workbook:{...workbookSnapshot,cells:[{...workbookCell,valueType:'formula',formula:'=1/0',valueError:true}]}})).toBe(false)
-  const replace={...base,command:'replaceCells',selectionToken:'selection_cell_01',expectedChangeSequence:0,workbook:{before:workbookSnapshot,after:workbookSnapshot,results:['']},writeTarget:{sheet:0,column:0,row:0}}
+  const replace={...base,version:'a'.repeat(64),command:'replaceCells',selectionToken:'selection_cell_01',expectedChangeSequence:0,workbook:{before:workbookSnapshot,after:workbookSnapshot,results:['']},writeTarget:{sheet:0,column:0,row:0},candidate:{changeId:'b'.repeat(64),saveOperationId:'save_workbook_01',baseRevision:'a'.repeat(64)}}
   expect(isOfficeRequest(replace)).toBe(true)
   expect(isOfficeRequest({...replace,writeTarget:{...replace.writeTarget,path:'/tmp/other'}})).toBe(false)
+  const {candidate:_,...unbound}=replace
+  expect(isOfficeRequest(unbound)).toBe(false)
+  expect(isOfficeRequest({...replace,candidate:{...replace.candidate,baseRevision:'c'.repeat(64)}})).toBe(false)
+  expect(isOfficeRequest({...replace,candidate:{...replace.candidate,path:'/tmp/other'}})).toBe(false)
+  for(const command of ['replaceCells','ack']) {
+    const changed={...base,command,type:'result',ok:true,state:{...state(),kind:'xlsx'}}
+    expect(isOfficeResult(changed)).toBe(true)
+    expect(isOfficeResult({...changed,selection:workbookSelection})).toBe(false)
+    expect(isOfficeResult({...changed,state:state()})).toBe(false)
+  }
 })
 
 test('displayed workbook formula errors and bounded edit intent have explicit closed protocol fields',()=>{

@@ -818,14 +818,15 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const manual = prepared.workbookManual
     if (manual.baseRevision !== request.revision || JSON.stringify(manual.workbook.before) !== JSON.stringify(captured.workbook)) fail('invalid_response')
     document.approvedChange = {changeId:manual.changeId,threadId:request.threadId,baseRevision:manual.baseRevision,saveOperationId:manual.saveOperationId,workbookManual:true}
-    document.view.canUndo = false
+    document.view.canUndo = false; document.view.saving = true; publish()
     delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
     try {
       await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:request.revision,
-        selectionToken:current.token,expectedChangeSequence:request.expectedChangeSequence,workbook:manual.workbook,writeTarget})
+        selectionToken:current.token,expectedChangeSequence:request.expectedChangeSequence,workbook:manual.workbook,writeTarget,
+        candidate:{changeId:manual.changeId,saveOperationId:manual.saveOperationId,baseRevision:manual.baseRevision}})
     } catch (error) {
       recordSaveFailure(document,error,saveDiagnostic('replace'))
-      if (error instanceof OfficeFailure && error.transient) throw error
+      if (error instanceof OfficeFailure && error.transient) { document.view.saving = false; publish(); throw error }
       await restoreFailedWorkbook(document); fail('save_failed')
     }
     await save(document)
@@ -916,8 +917,18 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     if (receipt.operationId !== pending.operationId) fail('invalid_response')
     if (receipt.status === 'unknown' || receipt.status === 'pending') fail('unknown')
     if (receipt.status === 'committed' && receipt.revision !== pending.digest) fail('invalid_response')
-    if (receipt.status === 'committed') {
+    const reloadWorkbook = receipt.status === 'committed' && document.view.kind === 'xlsx'
+    if (receipt.status === 'committed' && !reloadWorkbook) {
       delete document.view.scope; delete document.view.proposals; delete document.view.localReviews; document.selections.clear()
+    }
+    if (reloadWorkbook) {
+      // The exported workbook belongs to a private candidate, while the visible
+      // model still shows the base. A receipt cannot make that old view current.
+      // Retain the exact operation across ACK/reload failure; recovery rereads
+      // Core bytes and rebuilds the readonly surface before publishing ready.
+      document.pendingRecovery = {operationId:pending.operationId,revision:receipt.revision,committed:true}
+      document.view.saving = true; document.view.status = 'loading'; document.view.canUndo = false
+      publish()
     }
     const receiptPhase = diagnostic?.phase
     if (diagnostic) diagnostic.phase = 'ack'
@@ -927,7 +938,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         status:receipt.status === 'committed' ? 'committed' : 'conflict',
         ...(receipt.status === 'committed' ? {persistedVersion:receipt.revision} : {})})
     } catch (error) {
-      if (receipt.status !== 'committed' || !(document.manualAuthority || document.approvedChange?.workbookManual)) throw error
+      if (receipt.status !== 'committed' || !(reloadWorkbook || document.manualAuthority || document.approvedChange?.workbookManual)) throw error
       if (diagnostic) { recordSaveFailure(document,error,diagnostic); diagnostic.phase = 'recovery' }
       // The exact Core receipt already proves this artifact was committed. A
       // missing native ACK (including failed virtual-input synchronization)
@@ -936,6 +947,11 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       // before constructing a fresh readonly model.
       document.pendingRecovery = {operationId:pending.operationId,revision:receipt.revision,committed:true}
       document.view.saving = true; publish()
+      await finishRecovery(document)
+      return
+    }
+    if (reloadWorkbook) {
+      if (diagnostic) diagnostic.phase = 'recovery'
       await finishRecovery(document)
       return
     }
@@ -1074,7 +1090,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       const surface = await options.createSurface(event => { if (document.surface === surface) onEvent(document, event) })
       document.surface = surface; document.failed = false; document.surfaceRetired = false
       document.view = {...document.view, revision:pending.revision, changeSequence:0, acknowledgedSequence:0,
-        dirty:false, editing:false, canUndo:false, saving:true, status:'loading', selection:undefined, scope:undefined, proposals:undefined, localReviews:undefined}
+        dirty:false, editing:false, canUndo:false, saving:true, status:'loading', selection:undefined,
+        ...(document.view.kind === 'xlsx' ? {} : {scope:undefined,proposals:undefined,localReviews:undefined})}
       document.openOperationId = newOperationId()
       delete document.view.playback; document.playbackAttempted = false
       document.playbackStopUnknown = false
@@ -1083,10 +1100,12 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       document.ready = true
       if (active === document && visible) await surface.attach(document.bounds, document.appearance)
     } catch { setError(document, 'unknown'); fail('unknown') }
+    await recover(document, document.threadId)
     delete document.pendingRecovery; delete document.pendingSave; delete document.approvedChange
     document.selections.clear(); document.decisionOperations.clear()
+    delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
     document.view.saving = false; document.view.status = 'ready'; delete document.view.error
-    await recover(document, document.threadId); publish()
+    publish()
   }
   async function acceptRecoveryReceipt(document: Active, result: ObjectEditingResponse, committing = false) {
     const pending = document.pendingRecovery!
@@ -1174,8 +1193,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const pending = document.view.recovery?.pending
     const retry = document.pendingManualCancel?.changeId === changeId && document.pendingManualCancel.threadId === threadId
     if ((!pending || pending.changeId !== changeId || !pending.canCancel) && !retry) fail('unknown')
-    if (document.manualAuthority) {
-      if (document.manualAuthority.changeId !== changeId) fail('invalid_request')
+    if (document.manualAuthority || document.view.kind === 'xlsx') {
+      if (document.manualAuthority && document.manualAuthority.changeId !== changeId) fail('invalid_request')
       // Retire the discarded input sink before cancelling its Core authority.
       // Retain the exact cancellation identity across a lost reply; Core's
       // cancelled record is idempotent, while pending=null alone proves nothing.
@@ -1362,8 +1381,14 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         catch (error) { if (error instanceof OfficeFailure && error.transient) throw error; await restoreFailedWorkbook(document); fail('save_failed') }
       } else if (replacement.workbook) {
         if (scope.presentation || !scope.workbook || JSON.stringify(replacement.workbook.before) !== JSON.stringify(scope.workbook)) fail('invalid_response')
-        try { await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,workbook:replacement.workbook}) }
-        catch (error) { recordSaveFailure(document,error,saveDiagnostic('replace')); if (error instanceof OfficeFailure && error.transient) throw error; await restoreFailedWorkbook(document); fail('save_failed') }
+        document.view.saving = true; publish()
+        try { await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,workbook:replacement.workbook,
+          candidate:{changeId:replacement.changeId,saveOperationId:replacement.saveOperationId,baseRevision:scope.baseRevision}}) }
+        catch (error) {
+          recordSaveFailure(document,error,saveDiagnostic('replace'))
+          if (error instanceof OfficeFailure && error.transient) { document.view.saving = false; publish(); throw error }
+          await restoreFailedWorkbook(document); fail('save_failed')
+        }
       } else {
         if (scope.workbook) fail('invalid_response')
       await engine(document, {command:'replace',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,text:replacement.text,valueType:'text'})

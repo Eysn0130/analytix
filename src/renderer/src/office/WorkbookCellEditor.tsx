@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { nativeTypedWorkbookSelection, type NativeOfficeRequest, type NativeOfficeResponse, type NativeOfficeSelection, type NativeOfficeView } from '@shared/native-office'
 import styles from './workbook-cell-editor.module.css'
-import {useNativeOfficeStore,nativeWorkbookDraftKey,nativeOfficeTargetKey,nativeWorkbookDraftUnsettled,nativeWorkbookDraftCellMatches,type NativeWorkbookCellDraft} from './native-office-store'
+import {useNativeOfficeStore,nativeWorkbookDraftKey,nativeOfficeTargetKey,nativeWorkbookDraftUnsettled,nativeWorkbookDraftCellMatches,nativeOfficeHasUnresolvedChange,type NativeWorkbookCellDraft} from './native-office-store'
 import {registerWriteShutdownInput} from '../write/write-shutdown'
 
 let workbookShutdownRegistered = false
@@ -94,6 +94,8 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
   const input=useRef<HTMLInputElement>(null),lastIntent=useRef('')
   const latest=useRef({view,threadId,active});latest.current={view,threadId,active}
   const pending=!!draft?.pending,unresolved=[view.recovery?.pending,view.recovery?.current].some(change=>['prepared','unknown','conflict'].includes(change?.status ?? ''))
+  const transitioning=view.kind === 'xlsx' && (view.status !== 'ready' || !!view.saving || nativeOfficeHasUnresolvedChange(view,null))
+  const inputBlocked=busy || transitioning
   const available=!!(active && threadId && view.kind === 'xlsx' && view.status === 'ready' && !view.protectedPresent &&
     view.workbookEditing?.editable && cell && !view.dirty && !view.saving && !unresolved)
   // A draft's identity is the original cell and revision. A fresh native token
@@ -101,7 +103,7 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
   // these words. Lost authority disables Save without erasing the user's input.
   const sameTarget=!!(!draft || draft.threadId === threadId && draft.objectId === view.objectId && draft.revision === view.revision &&
     bounded?.sheetName === draft.sheetName && cell && nativeWorkbookDraftCellMatches(cell,draft.cell))
-  const editable=active && !busy && !pending && !frozen && !closing && !draft?.unconfirmed && (!!draft || available)
+  const editable=active && !inputBlocked && !pending && !frozen && !closing && !draft?.unconfirmed && (!!draft || available)
   const canSave=available && sameTarget && editable && !draft?.unconfirmed
   const form=draft ?? initialValue(cell),change=workbookDraftEdit(form.type,form.value)
   const changed=!!draft?.changed
@@ -124,12 +126,12 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
     useNativeOfficeStore.getState().setWorkbookDraft(draftKey,next,draft?.id);setNotice(null)
   }
   const discard=()=>{
-    if (!draft || pending || frozen) return
+    if (!draft || pending || frozen || inputBlocked) return
     useNativeOfficeStore.getState().setWorkbookDraft(draftKey,null,draft.id)
     setNotice({owner:JSON.stringify([draftKey,view.objectId,view.revision,cell?.sheet,cell?.column,cell?.row]),text:'本地草稿已放弃。',error:false})
   }
   const keep=()=>{
-    if (!draft || pending || frozen) return
+    if (!draft || pending || frozen || inputBlocked) return
     useNativeOfficeStore.getState().setWorkbookDraft(draftKey,{...draft,closeRequested:false},draft.id)
     setNotice({owner:draft.id,text:'草稿已保留；切换文档不会丢失，保存仍需原单元格和原版本的有效选区。',error:false})
   }
@@ -181,8 +183,8 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
           else if (event.key === 'Escape') {event.preventDefault();keep()}
         }} />
       <button type="button" className={styles.save} disabled={!canSave || !changed || !change} onClick={()=>void save()}>{pending ? '保存中…' : '保存'}</button>
-      <button type="button" className={styles.cancel} disabled={!draft || pending || frozen} onClick={discard}>放弃草稿</button>
-      {draft ? <button type="button" className={styles.cancel} disabled={pending || frozen} onClick={keep}>保留草稿</button> : null}
+      <button type="button" className={styles.cancel} disabled={!draft || pending || frozen || inputBlocked} onClick={discard}>放弃草稿</button>
+      {draft ? <button type="button" className={styles.cancel} disabled={pending || frozen || inputBlocked} onClick={keep}>保留草稿</button> : null}
     </div>
     <div className={styles.feedback} role={currentNotice?.error || draft?.closeRequested ? 'alert' : 'status'}>
       {sum !== null ? <output className={styles.sum} aria-label="完整选区求和">求和 {sum.toLocaleString(undefined,{maximumSignificantDigits:15})} · </output> : null}
