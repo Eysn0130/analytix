@@ -35,6 +35,7 @@ type ThreadEventsHandler struct {
 	HeartbeatInterval time.Duration
 	Now               func() time.Time
 	SanitizeError     func(error) string
+	ReplayDiagnostics *FiniteReplayDiagnostics
 }
 
 const maxLiveReplayEvents = 1024
@@ -55,15 +56,19 @@ func (h ThreadEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, t
 		return
 	}
 	events, setupErr, revocationCode := h.replay(r.Context(), threadID, sinceSeq)
+	finishResponseWrite := h.ReplayDiagnostics.Begin(ReplayResponseWrite)
 	if revocationCode != "" {
 		h.writeProjectionRevokedResponse(w, threadID, revocationCode)
+		finishResponseWrite(1)
 		return
 	}
 	if setupErr != nil {
 		httpapi.WriteDurableSSE(w, http.StatusOK, []map[string]any{h.withSSETrace(h.setupErrorEvent(threadID, sinceSeq, setupErr.phase, setupErr.err))})
+		finishResponseWrite(1)
 		return
 	}
 	httpapi.WriteDurableSSE(w, http.StatusOK, h.withSSETraceEvents(events))
+	finishResponseWrite(len(events))
 }
 
 func SinceSeq(r *http.Request) int {
@@ -90,13 +95,18 @@ func (h ThreadEventsHandler) replay(ctx context.Context, threadID string, sinceS
 }
 
 func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID string, sinceSeq, snapshotLimit int) ([]map[string]any, *setupError, string) {
-	if code := h.preflightPublic(threadID); code != "" {
+	finishPreflight := h.ReplayDiagnostics.Begin(ReplayPublicPreflight)
+	code := h.preflightPublic(threadID)
+	finishPreflight(1)
+	if code != "" {
 		return nil, nil, code
 	}
 	if h.Store.HighestSeq == nil {
 		return nil, &setupError{phase: "highest_seq", err: errors.New("highest seq store is not configured")}, ""
 	}
+	finishHighestSeq := h.ReplayDiagnostics.Begin(ReplayHighestSeq)
 	highestSeq, err := h.Store.HighestSeq(threadID)
+	finishHighestSeq(1)
 	if err != nil {
 		return nil, &setupError{phase: "highest_seq", err: err}, ""
 	}
@@ -119,19 +129,25 @@ func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID strin
 	// the requested cursor lands inside it, then apply the exact cursor locally.
 	loadAfterSeq := max(0, sinceSeq-3)
 	var events []map[string]any
+	finishLoadEvents := h.ReplayDiagnostics.Begin(ReplayLoadEvents)
 	if loadEventsWithContext != nil {
 		events, err = loadEventsWithContext(ctx, threadID, loadAfterSeq)
 	} else {
 		events, err = loadEvents(threadID, loadAfterSeq)
 	}
+	finishLoadEvents(len(events))
 	if err != nil {
 		return nil, &setupError{phase: "replay", err: err}, ""
 	}
+	finishTerminalGroups := h.ReplayDiagnostics.Begin(ReplayTerminalGroups)
 	events, err = domainevent.AtomicTerminalReplayEventsAfter(events, sinceSeq)
+	finishTerminalGroups(len(events))
 	if err != nil {
 		return nil, nil, casePublicAuthorityRejectedCode
 	}
+	finishAcceptedFinalGroups := h.ReplayDiagnostics.Begin(ReplayAcceptedFinalGroups)
 	deliveryUnits, err := acceptedFinalDeliveryUnits(threadID, events, h.Store.SealAcceptedFinalDelivery)
+	finishAcceptedFinalGroups(len(deliveryUnits))
 	if err != nil {
 		return nil, nil, casePublicAuthorityRejectedCode
 	}
@@ -151,7 +167,9 @@ func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID strin
 			Timestamp: h.now().UTC().Format(time.RFC3339Nano),
 		})}, nil, ""
 	}
+	finishProjectPublic := h.ReplayDiagnostics.Begin(ReplayProjectPublic)
 	public, revocationCode := h.publicEvents(threadID, deliveryUnits)
+	finishProjectPublic(len(public))
 	if revocationCode != "" {
 		return nil, nil, revocationCode
 	}
