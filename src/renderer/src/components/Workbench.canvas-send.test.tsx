@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { createPortal } from 'react-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WriteRetrievalResult } from '@shared/write-retrieval'
-import type { AppSettingsV1 } from '@shared/app-settings'
+import { defaultAnalytixRuntimeSettings, type AppSettingsV1 } from '@shared/app-settings'
 import type { NormalizedThread, ThreadEventSink } from '../agent/types'
 import type { InputBar } from './chat/InputBar'
 import type { CoreThreadSummaryResponseJson, CoreThreadSummarySubagentJson } from '../agent/analytix-contract'
@@ -75,7 +75,11 @@ vi.mock('./chat/WorkbenchTopBar', async importOriginal => {
 vi.mock('./chat/AssistantMarkdown', () => ({ preloadAssistantMarkdownRenderer: () => null }))
 vi.mock('./chat/ChatFileTreePanel', async importOriginal => { const actual=await importOriginal<typeof import('./chat/ChatFileTreePanel')>();return {ChatFileTreePanel:(props:ComponentProps<typeof actual.ChatFileTreePanel>)=>io.realFileTree?createElement(actual.ChatFileTreePanel,props):null} })
 vi.mock('./chat/SideConversationPanel', () => ({ SideConversationPanel: () => null }))
-vi.mock('./SessionHeader', () => ({ SessionHeader: () => null }))
+vi.mock('./SessionHeader', () => ({
+  SessionHeader: () => null,
+  SessionHeaderTabsSeat: ({ seatRef }: ComponentProps<typeof import('./SessionHeader').SessionHeaderTabsSeat>) =>
+    createElement('div', { ref: seatRef, 'data-analytix-session-header-tabs': '' })
+}))
 vi.mock('./shell/ShellNavigationControls', () => ({ ShellNavigationControls: () => null }))
 vi.mock('./DevPreviewLaunchCard', () => ({ DevPreviewLaunchCard: () => null }))
 vi.mock('./RuntimeBanner', () => ({ RuntimeBanner: () => null }))
@@ -83,6 +87,7 @@ vi.mock('./brand/AnalytixLoadingPage', () => ({ AnalytixLoadingPage: () => null 
 vi.mock('./workbench/RightPanelIslands', async () => {
   const { WorkspaceFilePreviewPanel: ActualPreview } = await import('./WorkspaceFilePreviewPanel')
   const { DocumentWorkspacePanel: ActualDocument } = await import('./workbench/DocumentWorkspacePanel')
+  const { WorkspaceViewerHeader } = await import('./workbench/WorkspaceViewerHeader')
   return ({ TerminalWorkspacePanel: (props: { visible: boolean; focusRequest: number; onCollapse: () => void }) => createElement('div', { id: 'workbench-workspace-terminal' },
     createElement('div', { className: 'xterm' }, createElement('textarea', { className: 'xterm-helper-textarea', 'data-synthetic-terminal': '', 'data-focus-request': props.focusRequest, hidden: !props.visible })),
     props.visible ? createPortal(createElement('button', { 'data-workbench-terminal-menu': '', onClick: props.onCollapse }, 'Close all terminals'), document.body) : null), ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null,
@@ -93,7 +98,14 @@ vi.mock('./workbench/RightPanelIslands', async () => {
     }, ThreadSummaryPanelIsland: (props: { titleId?: string; onCollapse: () => void }) => {
       useEffect(() => { io.summaryMounted(); return () => { io.summaryUnmounted() } }, [])
       return createElement('div', null, createElement('h2', { id: props.titleId }, 'Summary'), createElement('button', { 'data-synthetic-summary-close': '', onClick: props.onCollapse }, 'Close'))
-    }, TodoPanel: () => null, WorkspaceFilePreviewPanel: (props: ComponentProps<typeof ActualPreview>) => io.realPreview ? createElement(ActualPreview, props) : null, DocumentWorkspacePanel: (props: ComponentProps<typeof ActualDocument> & NonNullable<typeof io.document>) => { io.document = props; return io.realDocument ? createElement(ActualDocument,props) : null }, preloadRightPanelIsland: () => null }) })
+    }, TodoPanel: () => null, WorkspaceFilePreviewPanel: (props: ComponentProps<typeof ActualPreview>) => io.realPreview ? createElement(ActualPreview, props) : null,
+    DocumentWorkspacePanel: (props: ComponentProps<typeof ActualDocument> & NonNullable<typeof io.document>) => {
+      io.document = props
+      if (io.realDocument) return createElement(ActualDocument, props)
+      return io.realWorkspaceChrome && props.visible && props.viewerControls
+        ? createElement(WorkspaceViewerHeader, { title: props.activeTab?.title ?? 'Document', viewerControls: props.viewerControls })
+        : null
+    }, preloadRightPanelIsland: () => null }) })
 
 vi.mock('./sdd/SddDraftEditorView', () => ({ SddDraftEditorView: (props: { onNext: () => void }) => { io.sddNext = props.onNext; return null } }))
 vi.mock('./workbench/ChatTimelineIsland', async () => {
@@ -234,7 +246,7 @@ beforeEach(async () => {
   useSddDraftStore.setState(initialSdd, true)
   useNativeReferenceStore.setState({ references: [], drafts: {} })
   useNativeOfficeStore.setState(useNativeOfficeStore.getInitialState(),true)
-  io.settings.mockResolvedValue({ workspaceRoot: workspace } as AppSettingsV1)
+  io.settings.mockResolvedValue({ workspaceRoot: workspace, runtime: defaultAnalytixRuntimeSettings() } as AppSettingsV1)
   vi.spyOn(rendererRuntimeClient, 'getSettings').mockImplementation(() => io.settings())
   io.provider.getRuntimeInfo.mockResolvedValue({ capabilities: {
     attachments: { available: true }, model: { id: 'synthetic-model', inputModalities: ['text'], contextWindowTokens: 128000 },
@@ -562,7 +574,8 @@ describe('Workbench Canvas consumer path', () => {
     Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() })
     vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(() => fn(performance.now()), 0))
     vi.stubGlobal('cancelAnimationFrame', clearTimeout)
-    const fresh = { ...thread('brand-first-send'), status: 'idle' as const }
+    const fresh = { ...thread('brand-first-send'), status: 'idle' as const,
+      executionPolicyVersion: 2 as const, approvalPolicy: 'on-request' as const, sandboxMode: 'workspace-write' as const }
     const receipt = deferred<{ turnId: string; userMessageItemId: string }>()
     Object.assign(io.provider, { createThread: vi.fn().mockResolvedValueOnce(fresh) })
     io.provider.listThreads.mockResolvedValue([fresh, thread('a'), thread('b')])
@@ -1675,12 +1688,20 @@ describe('mounted Workbench protected source navigation', () => {
     expect(io.read).toHaveBeenCalledWith(expect.objectContaining({ protectedRead, preview: 'source', line: 2 }))
     expect(element.querySelector('[data-line="2"]')).not.toBeNull()
     expect(element.querySelector('[data-protected-source-preview] img')).toBeNull()
-    const copy = [...element.querySelectorAll<HTMLButtonElement>('.ds-file-viewer-menu-content button')]
-      .find(button => button.textContent === 'filePreviewCopyContent')
+    const source = element.querySelector('[data-protected-source-preview]')!
+    const filename = source.querySelector<HTMLButtonElement>('[data-workspace-viewer-header] button[aria-haspopup="menu"]')!
+    expect(filename).not.toBeNull()
+    await act(async () => filename.click())
+    const menu = document.getElementById(filename.getAttribute('aria-controls')!)!
+    expect(menu).not.toBeNull()
+    expect(menu.getAttribute('role')).toBe('menu')
+    const copy = [...menu.querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.getAttribute('aria-label') === 'filePreviewCopyContent')
     expect(copy).toBeDefined()
     expect(copy!.disabled).toBe(true)
-    expect((element.querySelector('[aria-label="filePreviewOpenEditor"]') as HTMLButtonElement).disabled).toBe(true)
-    const source = element.querySelector('[data-protected-source-preview]')!
+    const openEditor = menu.querySelector<HTMLButtonElement>('[aria-label="filePreviewOpenEditor"]')
+    expect(openEditor).not.toBeNull()
+    expect(openEditor!.disabled).toBe(true)
     for (const name of ['copy', 'cut', 'dragstart']) {
       const event = new Event(name, { bubbles: true, cancelable: true }); source.dispatchEvent(event); expect(event.defaultPrevented).toBe(true)
     }
@@ -1934,7 +1955,7 @@ it.each([
       window.dispatchEvent(new Event('resize'))
     })
     const writes = io.writeFile.mock.calls.length, sends = io.provider.sendUserMessage.mock.calls.length
-    const restore = element.querySelector<HTMLButtonElement>('.workspace-tabs-actions button[aria-pressed="true"]')!
+    const restore = element.querySelector<HTMLButtonElement>('[data-workspace-viewer-header][data-viewer-controls="true"] button[aria-label="workbenchDock"][aria-pressed="true"]')!
     expect(restore).not.toBeNull()
     expect(restore.disabled).toBe(false)
     expect(element.querySelector('#workbench-right-workspace')?.getAttribute('data-auto-overlay')).toBe(collapse ? 'true' : null)

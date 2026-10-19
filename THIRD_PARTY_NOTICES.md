@@ -1099,9 +1099,7 @@ overlay lifecycle. Selected activity/recording geometry and cancellation
 presentation also reference `packages/experimental/client-ui-voice-input` at
 that same fixed commit. The existing ContextMeter stylesheet is reference-only
 for this batch; context facts retain their existing Analytix owners. Copyright
-(c) 2026 DeepSeek; the full MIT terms retained above apply. Exact source objects,
-bounded local adaptations and pending test/screenshot/native evidence are recorded in
-`docs/analytix/upstreams/code-reuse-provenance.md`.
+(c) 2026 DeepSeek; the full MIT terms retained above apply.
 
 ## SuperDoc 2.24.0 / React wrapper 2.19.0
 

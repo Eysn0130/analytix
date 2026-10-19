@@ -72,6 +72,7 @@ export const FloatingComposerCommandMenu = forwardRef<HTMLDivElement, FloatingCo
         role={role}
         aria-label={ariaLabel}
         aria-activedescendant={role === 'listbox' && selected ? composerCommandOptionId(menuId, selected.id) : undefined}
+        data-composer-menu=""
         data-composer-command-menu=""
         className={`dsh-input-menu dsh-composer-command-menu${className ? ` ${className}` : ''}`}
         onKeyDown={onKeyDown}

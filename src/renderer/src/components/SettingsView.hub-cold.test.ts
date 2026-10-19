@@ -33,9 +33,18 @@ describe('Settings Hub compatibility boundary', () => {
     expect(sidebarAccountMenuSource).toContain('if (opening && !snapshot)')
   })
 
-  it('does not invoke the deprecated Hub marketplace service before an explicit mention action', () => {
+  it('does not invoke the deprecated Hub marketplace service before an explicit mention or command action', () => {
     expect(floatingComposerSource).toContain("if (route === 'claw')")
-    expect(floatingComposerSource).toContain('if (!showAtMentionMenu) {')
+    expect(floatingComposerSource).toContain(
+      'const commandDiscoveryOpen = composerMenuOpen || slashQuery != null'
+    )
+    expect(floatingComposerSource).toMatch(
+      /if \(!showAtMentionMenu && !commandDiscoveryOpen\) \{\s*setAgentPluginsLoading\(false\)\s*return\s*\}\s*const sync = window\.analytix\?\.app\?\.syncHubAgentMarketplace/u
+    )
+    expect(floatingComposerSource.match(/syncHubAgentMarketplace/gu)).toHaveLength(1)
+    expect(floatingComposerSource).toMatch(
+      /return \(\) => \{\s*cancelled = true\s*\}\s*\}, \[route, showAtMentionMenu, commandDiscoveryOpen, composerOwnerKey\]\)/u
+    )
     expect(floatingComposerSource).not.toMatch(
       /useEffect\(\(\) => \{\s*if \(route === 'claw'\)[\s\S]*?void sync\(\{ mode: 'cache' \}\)[\s\S]*?\}, \[route\]\)/u
     )

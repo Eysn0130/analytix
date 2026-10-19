@@ -1391,21 +1391,23 @@ export function InputBar({
     && canOpenGoalPanel
     && !executionPolicyBlocked
     && goalPanelDraftObjective.length > 0
-  const busyHasDraft = busy && hasComposerPayload
+  const primaryActionIsStop = busy && !highlightedSlashCommand && (!allowBusyFollowUp || !hasComposerPayload)
   const busyCanSendFollowup = busy && canSend
   const primaryActionLabel = highlightedSlashCommand
     ? t('slashCommandApply')
+    : primaryActionIsStop
+    ? t('interrupt')
     : busy
-    ? busyHasDraft
-      ? t('composerSteerSend')
-      : t('interrupt')
+    ? t('composerSteerSend')
     : canSetGoalPanelDraft
       ? t('goalSetCurrentInput')
       : t('send')
   const primaryActionDisabled = highlightedSlashCommand
     ? highlightedSlashCommand.disabled === true
+    : primaryActionIsStop
+    ? false
     : busy
-    ? busyHasDraft && !canSend
+    ? !canSend
     : canSetGoalPanelDraft
       ? false
     : !canSend
@@ -1893,11 +1895,11 @@ export function InputBar({
       if (!highlightedSlashCommand.disabled) applySlashCommand(highlightedSlashCommand.id)
       return
     }
-    if (busy && !busyHasDraft) {
+    if (primaryActionIsStop) {
       onInterrupt()
       return
     }
-    if (executionPolicyBlocked || (busyHasDraft && !canSend)) return
+    if (executionPolicyBlocked || (busy && !canSend)) return
     if (busyCanSendFollowup) {
       if (intent) onSend(intent)
       else onSend()
@@ -2757,7 +2759,7 @@ export function InputBar({
               >
                 {primaryActionLoading ? (
                   <Loader2 className="ds-composer-primary-action-icon animate-spin" strokeWidth={2.2} />
-                ) : busy && !busyHasDraft && !highlightedSlashCommand ? (
+                ) : primaryActionIsStop ? (
                   <ComposerPrimaryStopIcon mainChat={mainChatComposer} className="ds-composer-primary-action-icon" />
                 ) : (
                   <ComposerPrimarySendIcon mainChat={mainChatComposer} className="ds-composer-primary-action-icon" />
