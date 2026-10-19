@@ -67,23 +67,13 @@ func (owner *TurnExecutionOwnerV1) Done() <-chan struct{} {
 	return owner.done
 }
 
-// Wait observes this exact producer's completion without cancelling it or
-// acquiring an effect/gate claim. The producer cannot wait for itself.
-func (owner *TurnExecutionOwnerV1) Wait(ctx context.Context) error {
-	return owner.wait(ctx, 0)
-}
-
-// WaitBounded also limits the handoff independently of a caller's deadline.
-// Keeping the original context makes cancellation and completion observations
-// available at the actual wait, without creating another execution owner.
+// WaitBounded observes the exact producer's completion without cancelling it
+// or acquiring an effect/gate claim. It preserves the caller's context and
+// limits the handoff independently of its deadline; self-wait is rejected.
 func (owner *TurnExecutionOwnerV1) WaitBounded(ctx context.Context, maximum time.Duration) error {
 	if maximum <= 0 {
 		return ErrTurnExecutionConflict
 	}
-	return owner.wait(ctx, maximum)
-}
-
-func (owner *TurnExecutionOwnerV1) wait(ctx context.Context, maximum time.Duration) error {
 	if owner == nil || !owner.owned || owner.controller == nil || owner.done == nil || ctx == nil {
 		return ErrTurnExecutionConflict
 	}
@@ -93,24 +83,19 @@ func (owner *TurnExecutionOwnerV1) wait(ctx context.Context, maximum time.Durati
 	if current, _ := ctx.Value(turnExecutionOwnerContextKeyV1{}).(*TurnExecutionOwnerV1); current == owner {
 		return ErrTurnExecutionConflict
 	}
-	var timeout <-chan time.Time
-	var expires time.Time
-	if maximum > 0 {
-		expires = time.Now().Add(maximum)
-		timer := time.NewTimer(maximum)
-		defer timer.Stop()
-		timeout = timer.C
-	}
+	expires := time.Now().Add(maximum)
+	timer := time.NewTimer(maximum)
+	defer timer.Stop()
 	select {
 	case <-owner.done:
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !expires.IsZero() && !time.Now().Before(expires) {
+		if !time.Now().Before(expires) {
 			return context.DeadlineExceeded
 		}
 		return nil
-	case <-timeout:
+	case <-timer.C:
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -118,13 +103,6 @@ func (owner *TurnExecutionOwnerV1) wait(ctx context.Context, maximum time.Durati
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func (c *Controller) WaitTurnExecutionOwnerV1(ctx context.Context, owner *TurnExecutionOwnerV1) error {
-	if c == nil || owner == nil || owner.controller != c {
-		return ErrTurnExecutionConflict
-	}
-	return owner.Wait(ctx)
 }
 
 // ReleaseTurnExecutionOwnerV1 cannot remove a replacement execution or its

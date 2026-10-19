@@ -458,6 +458,8 @@ func questionResponseHandoffAssertUnansweredV1(t *testing.T, h *runtimeServerHan
 	t.Helper()
 	if _, _, err := h.continuations.ResolveTrustedDispositionForAudit(context.Background(), selector.RequestID); err == nil {
 		t.Fatal("waiting/rejected answer acquired a signed disposition")
+	} else if !errors.Is(err, continuationstoreport.ErrNotFound) {
+		t.Fatal("could not verify the absence of a signed disposition", err)
 	}
 	replay, err := h.store.LoadEventsSince(selector.ThreadID, 0)
 	if err != nil {

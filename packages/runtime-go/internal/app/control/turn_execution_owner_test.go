@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// These barriers observe entry into Wait's select; elapsed time is never used
+// These barriers observe entry into WaitBounded's select; elapsed time is never used
 // to decide whether an execution owner has actually released its registration.
 type turnExecutionOwnerWaitContextV1 struct {
 	context.Context
@@ -238,60 +238,48 @@ func TestTurnExecutionOwnerV1StaleReleaseCannotClearReplacementOrCancellation(t 
 }
 
 func TestTurnExecutionOwnerV1WaitRequiresActualReleaseAndDoesNotCancelWorker(t *testing.T) {
-	for _, useController := range []bool{false, true} {
-		name := "owner wait"
-		if useController {
-			name = "controller wait"
-		}
-		t.Run(name, func(t *testing.T) {
-			c := NewController(&stubDriver{})
-			workerCtx, cancelWorker := context.WithCancel(context.Background())
-			defer cancelWorker()
-			_, owner := registerTurnExecutionOwnerTestV1(t, c, workerCtx, "thread", "turn", cancelWorker)
-			wait := owner.Wait
-			if useController {
-				wait = func(ctx context.Context) error { return c.WaitTurnExecutionOwnerV1(ctx, owner) }
-			}
-			waitCtx, cancelWait := context.WithCancel(context.Background())
-			defer cancelWait()
-			barrier := &turnExecutionOwnerWaitContextV1{Context: waitCtx, entered: make(chan struct{})}
-			waited := make(chan error, 1)
-			go func() { waited <- wait(barrier) }()
-			receiveTurnExecutionOwnerTestV1(t, barrier.entered)
-			cancelWait()
-			if err := receiveTurnExecutionOwnerTestV1(t, waited); !errors.Is(err, context.Canceled) {
-				t.Fatalf("wait cancellation = %v", err)
-			}
-			if workerCtx.Err() != nil {
-				t.Fatal("canceling wait canceled execution")
-			}
-			assertTurnExecutionOwnerOpenV1(t, owner)
-			barrier = &turnExecutionOwnerWaitContextV1{Context: context.Background(), entered: make(chan struct{})}
-			go func() { waited <- wait(barrier) }()
-			receiveTurnExecutionOwnerTestV1(t, barrier.entered)
-			cancelWorker()
-			assertTurnExecutionOwnerOpenV1(t, owner)
-			select {
-			case err := <-waited:
-				t.Fatalf("cancelFunc alone completed owner wait: %v", err)
-			default:
-			}
-			if !c.ReleaseTurnExecutionOwnerV1(owner) {
-				t.Fatal("actual owner cleanup failed")
-			}
-			if err := receiveTurnExecutionOwnerTestV1(t, waited); err != nil {
-				t.Fatalf("wait after actual cleanup = %v", err)
-			}
-			if err := wait(context.Background()); err != nil {
-				t.Fatalf("released owner did not remain waitable: %v", err)
-			}
-		})
+	c := NewController(&stubDriver{})
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	defer cancelWorker()
+	_, owner := registerTurnExecutionOwnerTestV1(t, c, workerCtx, "thread", "turn", cancelWorker)
+	wait := func(ctx context.Context) error { return owner.WaitBounded(ctx, 10*time.Second) }
+	waitCtx, cancelWait := context.WithCancel(context.Background())
+	defer cancelWait()
+	barrier := &turnExecutionOwnerWaitContextV1{Context: waitCtx, entered: make(chan struct{})}
+	waited := make(chan error, 1)
+	go func() { waited <- wait(barrier) }()
+	receiveTurnExecutionOwnerTestV1(t, barrier.entered)
+	cancelWait()
+	if err := receiveTurnExecutionOwnerTestV1(t, waited); !errors.Is(err, context.Canceled) {
+		t.Fatalf("wait cancellation = %v", err)
+	}
+	if workerCtx.Err() != nil {
+		t.Fatal("canceling wait canceled execution")
+	}
+	assertTurnExecutionOwnerOpenV1(t, owner)
+	barrier = &turnExecutionOwnerWaitContextV1{Context: context.Background(), entered: make(chan struct{})}
+	go func() { waited <- wait(barrier) }()
+	receiveTurnExecutionOwnerTestV1(t, barrier.entered)
+	cancelWorker()
+	assertTurnExecutionOwnerOpenV1(t, owner)
+	select {
+	case err := <-waited:
+		t.Fatalf("cancelFunc alone completed owner wait: %v", err)
+	default:
+	}
+	if !c.ReleaseTurnExecutionOwnerV1(owner) {
+		t.Fatal("actual owner cleanup failed")
+	}
+	if err := receiveTurnExecutionOwnerTestV1(t, waited); err != nil {
+		t.Fatalf("wait after actual cleanup = %v", err)
+	}
+	if err := wait(context.Background()); err != nil {
+		t.Fatalf("released owner did not remain waitable: %v", err)
 	}
 }
 
 func TestTurnExecutionOwnerV1WaitRejectsUnprovenAndSelfWait(t *testing.T) {
 	c := NewController(&stubDriver{})
-	other := NewController(&stubDriver{})
 	ownedCtx, owner := registerTurnExecutionOwnerTestV1(t, c, context.Background(), "thread", "turn", func() {})
 	var nilOwner *TurnExecutionOwnerV1
 	zeroOwner := &TurnExecutionOwnerV1{}
@@ -299,14 +287,10 @@ func TestTurnExecutionOwnerV1WaitRejectsUnprovenAndSelfWait(t *testing.T) {
 		name string
 		wait func() error
 	}{
-		{name: "owner nil context", wait: func() error { return owner.Wait(nil) }},
-		{name: "nil owner", wait: func() error { return nilOwner.Wait(context.Background()) }},
-		{name: "zero owner", wait: func() error { return zeroOwner.Wait(context.Background()) }},
-		{name: "controller nil owner", wait: func() error { return c.WaitTurnExecutionOwnerV1(context.Background(), nil) }},
-		{name: "controller zero owner", wait: func() error { return c.WaitTurnExecutionOwnerV1(context.Background(), zeroOwner) }},
-		{name: "foreign controller", wait: func() error { return other.WaitTurnExecutionOwnerV1(context.Background(), owner) }},
-		{name: "owner self wait", wait: func() error { return owner.Wait(ownedCtx) }},
-		{name: "controller self wait", wait: func() error { return c.WaitTurnExecutionOwnerV1(ownedCtx, owner) }},
+		{name: "owner nil context", wait: func() error { return owner.WaitBounded(nil, time.Second) }},
+		{name: "nil owner", wait: func() error { return nilOwner.WaitBounded(context.Background(), time.Second) }},
+		{name: "zero owner", wait: func() error { return zeroOwner.WaitBounded(context.Background(), time.Second) }},
+		{name: "owner self wait", wait: func() error { return owner.WaitBounded(ownedCtx, time.Second) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			waited := make(chan error, 1)
