@@ -113,6 +113,54 @@ function surfaceFixture() {
   return {engine,worker,onEvent,event,canvas,validRequest,validPreviewView,close:()=>{release();document.body.innerHTML=''}}
 }
 
+test('XLSX F2 and double-click request a bounded cell editor while native body input stays closed',async()=>{
+  const f=surfaceFixture()
+  try {
+    f.engine.state={...f.engine.state,kind:'xlsx'};f.engine.view=null
+    let sequence=0
+    const selection=()=>({documentId:'document',version:'version',changeSequence:0,kind:'cells',scope:'sheet-range-address-at-version-and-change-sequence',
+      token:`selection_cell_${++sequence}`,ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:2,endRow:2}],
+      cells:[{sheet:0,column:0,row:2,text:'3',formula:'3',value:3,valueType:'number',numberFormat:7,rowVisible:true,columnVisible:true,merged:false}],
+      text:'3',capture:{capturedCharacters:1,totalCharacters:1,truncated:false,unit:'utf-16',complete:true}})
+    f.worker.mockImplementation(async(request:any):Promise<any>=>({...request,type:'result',ok:true,state:{...f.engine.state},selection:selection()}))
+    const key=new KeyboardEvent('keydown',{key:'F2',bubbles:true,cancelable:true})
+    f.canvas.dispatchEvent(key)
+    await vi.waitFor(()=>expect(f.onEvent).toHaveBeenCalledWith(expect.objectContaining({type:'cell-edit-requested',intent:'f2',selection:expect.objectContaining({token:'selection_cell_1'})})))
+    expect(key.defaultPrevented).toBe(true)
+    const doubleClick=new MouseEvent('dblclick',{button:0,bubbles:true,cancelable:true})
+    f.canvas.dispatchEvent(doubleClick)
+    await vi.waitFor(()=>expect(f.onEvent).toHaveBeenCalledWith(expect.objectContaining({type:'cell-edit-requested',intent:'double-click',selection:expect.objectContaining({token:'selection_cell_2'})})))
+    expect(doubleClick.defaultPrevented).toBe(true)
+    expect(f.worker.mock.calls.map(([request])=>request.command)).toEqual(['captureSelection','captureSelection'])
+    expect(f.engine.editing).toBe(false);expect(f.engine.nativeWritable).toBe(false);expect(f.engine.manualInput).toBeNull()
+    const typing=new KeyboardEvent('keydown',{key:'a',bubbles:true,cancelable:true})
+    f.canvas.dispatchEvent(typing);expect(typing.defaultPrevented).toBe(true)
+  }finally{f.close()}
+})
+
+test('cell editor intent ignores multiple cells and a result that races the base revision',async()=>{
+  const f=surfaceFixture()
+  try {
+    f.engine.state={...f.engine.state,kind:'xlsx'};f.engine.view=null
+    const selected={kind:'cells',token:'selection_cell_01',ranges:[{startColumn:0,endColumn:0,startRow:0,endRow:1}],cells:[{},{}],capture:{complete:true}}
+    f.worker.mockImplementation(async(request:any):Promise<any>=>({...request,state:{...f.engine.state},selection:selected}))
+    await f.engine.requestCellEdit('f2');expect(f.onEvent).not.toHaveBeenCalled()
+    f.worker.mockImplementation(async(request:any):Promise<any>=>{f.engine.state={...f.engine.state,version:'newer'};return {...request,state:{...f.engine.state},selection:{...selected,ranges:[{startColumn:0,endColumn:0,startRow:0,endRow:0}],cells:[{}]}}})
+    await f.engine.requestCellEdit('double-click');expect(f.onEvent).not.toHaveBeenCalled()
+  }finally{f.close()}
+})
+
+test('read-only dependency captures admit only bounded rectangles and preserve separate write-target validation',()=>{
+  const f=surfaceFixture()
+  try {
+    const request={command:'captureCells',channel:'channel',operationId:'capture_01',documentId:'document',version:'version',selectionToken:'selection_cell_01',expectedChangeSequence:0,
+      bounds:{sheet:0,startColumn:0,endColumn:0,startRow:0,endRow:2}}
+    expect(f.validRequest(request)).toBe(true)
+    expect(f.validRequest({...request,bounds:{...request.bounds,endRow:256}})).toBe(false)
+    expect(f.validRequest({...request,bounds:{...request.bounds,path:'/tmp/other'}})).toBe(false)
+  }finally{f.close()}
+})
+
 const manualRevision='a'.repeat(64), manualChange='b'.repeat(64)
 const manualAuthority={version:2,origin:'manual',changeId:manualChange,baseRevision:manualRevision,saveOperationId:'save_operation_01',undoOperationId:'undo_operation_01'}
 function manualSurfaceFixture(registerRuntime = true) {

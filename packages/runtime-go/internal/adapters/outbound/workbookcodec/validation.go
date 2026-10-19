@@ -73,13 +73,16 @@ func openPatchWorkbook(body []byte) (*excelize.File, error) {
 	}
 	return excelize.OpenReader(bytes.NewReader(body), excelize.Options{UnzipSizeLimit: 64 << 20, UnzipXMLSizeLimit: 64 << 20, RawCellValue: true})
 }
+
+// VerifySelectionPackage authorizes a typed editing capture against the actual
+// source package. General native document opening does not use this edit gate.
 func VerifySelectionPackage(ctx context.Context, body []byte, s office.WorkbookSelection) (err error) {
 	defer func() {
 		if recover() != nil {
 			err = patchInvalid
 		}
 	}()
-	if _, e := workbookPhysical(ctx, body); e != nil {
+	if e := ValidateNativeEditingPackage(ctx, body); e != nil {
 		return e
 	}
 	if s.Validate() != nil {
@@ -184,6 +187,7 @@ func ValidateReview(ctx context.Context, r office.WorkbookReview) error {
 		case "text":
 			v := c.Text
 			e.Text = &v
+		case "empty":
 		default:
 			return patchInvalid
 		}
@@ -206,6 +210,12 @@ func VerifyPatchedPackage(ctx context.Context, original, candidate []byte, r off
 			err = patchInvalid
 		}
 	}()
+	if err = ValidateNativeEditingPackage(ctx, original); err != nil {
+		return err
+	}
+	if err = ValidateNativeEditingPackage(ctx, candidate); err != nil {
+		return err
+	}
 	if ValidateReview(ctx, r) != nil || VerifySelectionPackage(ctx, original, r.Before) != nil {
 		return patchInvalid
 	}

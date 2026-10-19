@@ -69,7 +69,7 @@ func (a *Adapter) BindManualHost(capture func(context.Context, string, string, f
 	if a == nil || capture == nil {
 		return ErrBinding
 	}
-	if a.kind != "docx" {
+	if a.kind != "docx" && a.kind != "xlsx" {
 		return nil
 	}
 	a.mu.Lock()

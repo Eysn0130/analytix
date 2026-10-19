@@ -184,8 +184,8 @@ export class NativeOfficeSurface {
     const request = { ...input, channel: this.channel }
     if (!isOfficeRequest(request)) throw failure('office-invalid-request')
     if (this.options.protectedPresent && !['open','local-view','close'].includes(request.command)) throw failure('office-invalid-request')
-    if (!this.editing && !['local-view','open','edit','manual-edit','captureSelection','validateSelection','close'].includes(request.command)) throw failure('office-invalid-request')
-    if (!['captureSelection','validateSelection'].includes(request.command) && !(request.command === 'local-view' && ['read','play-read'].includes(request.action ?? ''))) this.dismissPointerActions()
+    if (!this.editing && !['local-view','open','edit','manual-edit','captureSelection','captureCells','validateSelection','close'].includes(request.command)) throw failure('office-invalid-request')
+    if (!['captureSelection','captureCells','validateSelection'].includes(request.command) && !(request.command === 'local-view' && ['read','play-read'].includes(request.action ?? ''))) this.dismissPointerActions()
     // Snapshot caller-owned bytes before any await or structured-clone dispatch.
     if (request.bytes) request.bytes = new Uint8Array(request.bytes)
     await this.start()
@@ -379,8 +379,9 @@ export class NativeOfficeSurface {
     if (value.type === 'view' && value.view && ((!this.editing && value.view.modified) || !value.view.readOnly && (!this.nativeWritable || this.current.kind !== 'docx' || !!this.options.protectedPresent) ||
       (this.current.kind === 'pptx' ? value.view.page === null : value.view.page !== null))) { this.fail('office-protocol-invalid'); return }
     if (value.selection && value.selection.changeSequence !== this.current.changeSequence) return
+    if (value.type === 'cell-edit-requested' && (this.current.kind !== 'xlsx' || this.current.dirty || this.options.protectedPresent)) return
     if (value.type === 'view') this.acceptPointerView(value.view)
-    else if (value.type === 'selection' && value.selection) this.acceptPointerSelection(value.selection)
+    else if (['selection','cell-edit-requested'].includes(value.type) && value.selection) this.acceptPointerSelection(value.selection)
     else if (value.type !== 'save-requested') this.dismissPointerActions()
     this.emit(value)
   }

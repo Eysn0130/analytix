@@ -247,12 +247,12 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			if session.manualChangeID != "" {
 				return failure(fileport.ErrConflict)
 			}
-			if recovery, ok := a.service.(NativeRecoveryService); ok && a.kind == "docx" {
+			if recovery, ok := a.service.(NativeRecoveryService); ok && (a.kind == "docx" || a.kind == "xlsx") {
 				state, err := recovery.NativeRecovery(ctx, sessionID, thread)
 				if err != nil {
 					return failure(err)
 				}
-				if state.Pending != nil && state.Pending.Version == 2 {
+				if state.Pending != nil && (state.Pending.Version == 2 && a.kind == "docx" || state.Pending.Version == 3 && a.kind == "xlsx") {
 					return failure(fileport.ErrConflict)
 				}
 			}

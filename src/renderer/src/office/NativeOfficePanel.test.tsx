@@ -3,7 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NativeOfficePanel } from './NativeOfficePanel'
-import { useNativeOfficeStore, nativeOfficeTargetKey } from './native-office-store'
+import { useNativeOfficeStore, nativeOfficeTargetKey, nativeWorkbookDraftKey } from './native-office-store'
 import { useNativeReferenceStore } from './native-reference-store'
 import type { NativeOfficeActionMenu, NativeOfficeFormat, NativeOfficeMenuTarget, NativeOfficeRequest, NativeOfficeView, NativeOfficeSelection, NativeOfficePlayback } from '@shared/native-office'
 import { nativeOfficeActionChoiceSchema, nativeOfficeActionMenuSchema } from '@shared/native-office'
@@ -44,14 +44,95 @@ beforeEach(() => {
   request = vi.fn(async (_input: NativeOfficeRequest) => ({ ok: true, view }))
   unsubscribe = vi.fn<() => void>()
   Object.defineProperty(window, 'analytix', { configurable: true, value: { office: { request, onChange: () => unsubscribe } } })
-  useNativeOfficeStore.setState({ target: null, view, error: null, proposalInFlight:false, annotationInputFrozen:false, manualDiscardAttempts:{}, manualOwners:{} })
+  useNativeOfficeStore.setState({ target: null, view, error: null, engineViews:{}, views:{}, workbookDrafts:{}, workbookClosing:{},
+    workbookDraftInputFrozen:false, workbookDraftComposing:false, receiveSequence:0, creationAttempt:null,
+    proposalInFlight:false, annotationInputFrozen:false, manualDiscardAttempts:{}, manualOwners:{} })
   useNativeReferenceStore.setState({ references: [], drafts: {} })
   container = document.createElement('div'); container.className = 'ds-right-sidebar-pane'; document.body.append(container)
   root = createRoot(container)
 })
+
+describe('bounded workbook manual controls',()=>{
+  const cells:Extract<NativeOfficeSelection,{kind:'cells'}> = {kind:'cells',documentId:view.objectId,version:view.revision,changeSequence:0,
+    token:'workbook-selection',scope:'sheet-range-address-at-version-and-change-sequence',text:'1',
+    capture:{capturedCharacters:1,totalCharacters:1,unit:'utf-16',complete:true,truncated:false},
+    ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],
+    cells:[{sheet:0,column:0,row:0,text:'1',value:1,formula:'1',valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}]}
+  const workbook:NativeOfficeView = {...view,path:'/synthetic/book.xlsx',kind:'xlsx',workbookEditing:{editable:true},selection:cells}
+  async function renderWorkbook(next:NativeOfficeView = workbook,path=next.path) {
+    request.mockImplementation(async()=>({ok:true,view:next}))
+    await act(async()=>{
+      const target={workspace:'/synthetic',path},identity=nativeOfficeTargetKey(target)
+      useNativeOfficeStore.setState(state=>({target,view:next,error:null,engineViews:{...state.engineViews,[identity]:next},views:{...state.views,[identity]:next}}))
+      root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'}))
+    })
+  }
+  async function fillCell(value:string) {
+    const input=container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!
+    await act(async()=>{
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value)
+      input.dispatchEvent(new Event('input',{bubbles:true}))
+    })
+  }
+  it('keeps native preview readonly while F2 focuses the bounded explicit cell input',async()=>{
+    await renderWorkbook()
+    const surface=container.querySelector('[aria-label="nativeOfficeEditor"]')!
+    await act(async()=>surface.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true})))
+    expect(document.activeElement).toBe(container.querySelector('[data-workbook-cell-input]'))
+    expect(request.mock.calls.some(([input])=>['beginManualEdit','editWorkbookCell'].includes(input.action))).toBe(false)
+    await fillCell('2');await clickNamed('保存')
+    expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toEqual([[{
+      action:'editWorkbookCell',objectId:view.objectId,revision:view.revision,expectedChangeSequence:0,
+      threadId:'thread',selectionToken:cells.token,edit:{type:'number',value:2}
+    }]])
+    expect(request.mock.calls.some(([input])=>['beginManualEdit','reference','acceptProposal'].includes(input.action))).toBe(false)
+  })
+  it('queries an uncertain manual result instead of resubmitting the edit',async()=>{
+    await renderWorkbook()
+    request.mockImplementation(async(input:NativeOfficeRequest)=>{
+      if(input.action==='editWorkbookCell') throw new Error('transport unavailable')
+      return {ok:true,view:workbook}
+    })
+    await fillCell('2');await clickNamed('保存')
+    expect(useNativeOfficeStore.getState().error).toBe('unknown')
+    expect(namedButton('保存').disabled).toBe(true)
+    await clickNamed('查询结果')
+    expect(request.mock.calls.filter(([input])=>input.action==='saveStatus')).toEqual([[{action:'saveStatus',objectId:view.objectId}]])
+    expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toHaveLength(1)
+  })
+  it('passes the workspace target path into retained drafts and exposes explicit close choices',async()=>{
+    await renderWorkbook(workbook,'book.xlsx');await fillCell('2')
+    const key=nativeWorkbookDraftKey('/synthetic','book.xlsx','thread')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toMatchObject({workspace:'/synthetic',path:'book.xlsx',threadId:'thread',value:'2'})
+    expect(useNativeOfficeStore.getState().workbookDrafts[nativeWorkbookDraftKey('',workbook.path,'thread')]).toBeUndefined()
+    let closed=true
+    await act(async()=>{closed=await useNativeOfficeStore.getState().close('/synthetic','book.xlsx')})
+    expect(closed).toBe(false);expect(container.textContent).toContain('保留会取消关闭')
+    await clickNamed('保留草稿')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toMatchObject({value:'2',closeRequested:false})
+    expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('2')
+    await act(async()=>{closed=await useNativeOfficeStore.getState().close('/synthetic','book.xlsx')})
+    expect(closed).toBe(false);await clickNamed('放弃草稿')
+    expect(useNativeOfficeStore.getState().workbookDrafts[key]).toBeUndefined()
+    expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('1')
+    expect(request.mock.calls.some(([input])=>['editWorkbookCell','close'].includes(input.action))).toBe(false)
+  })
+  it('routes typed workbook recovery cancellation through the existing cancelChange owner',async()=>{
+    const selected={...cells.ranges[0],cells:cells.cells!}
+    const pending = {version:3 as const,origin:'manual' as const,changeId:'d'.repeat(64),threadId:'thread',baseRevision:view.revision,revision:'',
+      status:'prepared' as const,workbook:{before:selected,after:selected,results:['1']},saveOperationId:'save-operation',undoOperationId:'undo-operation',
+      canUndo:false,canCancel:true,canRetryUndo:false,canResume:true,createdAt:'',savedAt:''}
+    await renderWorkbook({...workbook,recovery:{pending,current:null}})
+    await clickNamed('取消未保存的修改')
+    expect(request.mock.calls.filter(([input])=>input.action==='cancelChange')).toEqual([[{action:'cancelChange',objectId:view.objectId,
+      revision:view.revision,expectedChangeSequence:0,threadId:'thread',changeId:pending.changeId}]])
+    expect(request.mock.calls.some(([input])=>input.action==='discardManualEdit')).toBe(false)
+  })
+})
 afterEach(async () => {
   await act(async () => root?.unmount()); root = null
-  container.remove(); useNativeOfficeStore.setState({ target: null, view: null, error: null })
+  container.remove(); useNativeOfficeStore.setState({ target: null, view: null, error: null, engineViews:{}, views:{}, workbookDrafts:{},
+    workbookClosing:{}, workbookDraftInputFrozen:false, workbookDraftComposing:false })
   Reflect.deleteProperty(window, 'analytix'); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
