@@ -280,7 +280,7 @@ describe('manual workspace tabs', () => {
     expect(useWorkspaceTabsStore.getState().tabs).toEqual([a,b])
     expect(useWorkspaceTabsStore.getState().tabs[1].dirty).toBe(true)
   })
-  it('terminal selector dispatches one action and creates no right-side terminal tab', async () => {
+  it('terminal selector dispatches one action to the workspace owner', async () => {
     const onOpen = vi.fn()
     await act(async () => root.render(createElement(WorkspaceToolSelector, { onOpen, filesEnabled: true, sideChatEnabled: false, planEnabled: false })))
     const button = container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="terminal"]')!

@@ -21,18 +21,16 @@ describe('WorkbenchTopBar workspace entry ownership', () => {
     container.remove()
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: false })
   })
-  it('reopens a Schedule workspace without offering an unmounted terminal', async () => {
+  it('reopens the shared workspace without a separate terminal button', async () => {
     const reopen = vi.fn()
-    await act(async () => root.render(createElement(WorkbenchTopBar, { workspaceOpen: false, terminalOpen: false,
-      terminalAvailable: false, onToggleWorkspace: reopen, onToggleTerminal: vi.fn() })))
+    await act(async () => root.render(createElement(WorkbenchTopBar, { workspaceOpen: false, onToggleWorkspace: reopen })))
     expect(container.querySelector('#workbench-terminal-toggle')).toBeNull()
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-controls="workbench-right-workspace"]')?.click())
     expect(reopen).toHaveBeenCalledTimes(1)
   })
   it('offers one reopen callback when closed and leaves collapse to the dock when open', async () => {
     const onToggleWorkspace = vi.fn()
-    const onToggleTerminal = vi.fn()
-    const props = { workspaceOpen: false, terminalOpen: false, onToggleWorkspace, onToggleTerminal }
+    const props = { workspaceOpen: false, onToggleWorkspace }
     await act(async () => root.render(createElement(WorkbenchTopBar, props)))
     const reopen = container.querySelector<HTMLButtonElement>('[aria-controls="workbench-right-workspace"]')
     expect(reopen?.getAttribute('aria-expanded')).toBe('false')
@@ -44,16 +42,12 @@ describe('WorkbenchTopBar workspace entry ownership', () => {
     expect(onToggleWorkspace).toHaveBeenCalledTimes(1)
     await act(async () => root.render(createElement(WorkbenchTopBar, { ...props, workspaceOpen: true })))
     expect(container.querySelector('[aria-controls="workbench-right-workspace"]')).toBeNull()
-    const terminal = container.querySelector<HTMLButtonElement>('button')
-    expect(terminal?.getAttribute('aria-label')).toBe(i18n.t('common:workbenchOpenTerminal'))
-    await act(async () => terminal?.click())
-    expect(onToggleTerminal).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('button')).toBeNull()
     expect(onToggleWorkspace).toHaveBeenCalledTimes(1)
   })
   it('offers a chat summary entry independently of an open workspace', async () => {
     const summary = vi.fn(), workspace = vi.fn()
-    const props = { workspaceOpen: true, terminalOpen: false, terminalAvailable: false,
-      onToggleWorkspace: workspace, onToggleTerminal: vi.fn(), summaryAvailable: true, summaryOpen: false, onToggleSummary: summary }
+    const props = { workspaceOpen: true, onToggleWorkspace: workspace, summaryAvailable: true, summaryOpen: false, onToggleSummary: summary }
     await act(async () => root.render(createElement(WorkbenchTopBar, props)))
     const trigger = container.querySelector<HTMLButtonElement>('#workbench-summary-toggle')!
     expect(trigger.getAttribute('aria-controls')).toBe('workbench-thread-summary')

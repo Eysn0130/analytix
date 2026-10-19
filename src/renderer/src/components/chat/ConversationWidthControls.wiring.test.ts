@@ -24,7 +24,7 @@ function rule(source: string, selector: string) {
 }
 
 describe('main Conversation width boundary', () => {
-  it('mounts exactly once in the non-scrolling body below header and before terminal, sharing message/composer geometry', () => {
+  it('mounts exactly once in the non-scrolling conversation body below its header, sharing message/composer geometry', () => {
     expect(workbench.match(/<ConversationWidthControls\b/g)).toHaveLength(1)
     const header = workbench.indexOf('<header ref={windowChromeRef}')
     const sdd = workbench.indexOf('{activeSddDraft ? (', header)
@@ -32,10 +32,10 @@ describe('main Conversation width boundary', () => {
     const stage = workbench.indexOf('className="ds-chat-stage ', analysis)
     const body = workbench.indexOf('ref={setConversationBody} data-analytix-conversation-body', stage)
     const timeline = workbench.indexOf('<ChatTimelineIsland', body)
-    const composer = workbench.indexOf('ref={terminalComposerRef}', timeline)
+    const composer = workbench.indexOf('ref={composerRef}', timeline)
     const handles = workbench.indexOf('<ConversationWidthControls', composer)
-    const terminal = workbench.indexOf('{terminalOpen || terminalPanelMotion.isMounted', handles)
-    expect([header, sdd, analysis, stage, body, timeline, composer, handles, terminal].every((position, index, all) => position >= 0 && (index === 0 || position > all[index - 1]))).toBe(true)
+    const stageEnd = workbench.indexOf('</section>', handles)
+    expect([header, sdd, analysis, stage, body, timeline, composer, handles, stageEnd].every((position, index, all) => position >= 0 && (index === 0 || position > all[index - 1]))).toBe(true)
     expect(workbench).toMatch(/\{route === 'chat' \? <>\s*<ConversationWidthControls container=\{conversationBody\} phase=\{conversationPhase\}[^>]*reservedInlineEnd=\{summaryReservedInlineEnd\}/)
     for (const embedded of [sideConversation, inspector, sddAssistant]) expect(embedded).not.toContain('ConversationWidthControls')
     expect(controls).toContain("container.style.setProperty('--ax-chat-content-axis'")

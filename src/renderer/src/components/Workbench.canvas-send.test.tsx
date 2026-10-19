@@ -2,6 +2,7 @@
 import { act, createElement, Profiler, useContext, useEffect, useRef, useState, type ComponentProps, type ContextType } from 'react'
 import { File as NodeFile } from 'node:buffer'
 import { createRoot, type Root } from 'react-dom/client'
+import { createPortal } from 'react-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WriteRetrievalResult } from '@shared/write-retrieval'
 import type { AppSettingsV1 } from '@shared/app-settings'
@@ -82,7 +83,9 @@ vi.mock('./brand/AnalytixLoadingPage', () => ({ AnalytixLoadingPage: () => null 
 vi.mock('./workbench/RightPanelIslands', async () => {
   const { WorkspaceFilePreviewPanel: ActualPreview } = await import('./WorkspaceFilePreviewPanel')
   const { DocumentWorkspacePanel: ActualDocument } = await import('./workbench/DocumentWorkspacePanel')
-  return ({ ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null,
+  return ({ TerminalWorkspacePanel: (props: { visible: boolean; onCollapse: () => void }) => createElement('div', null,
+    createElement('textarea', { 'data-synthetic-terminal': '', hidden: !props.visible }),
+    props.visible ? createPortal(createElement('button', { 'data-workbench-terminal-menu': '', onClick: props.onCollapse }, 'Close all terminals'), document.body) : null), ChangeInspectorIsland: () => null, DevBrowserPanelIsland: () => null, PlanPanel: () => null, SddAssistantPanelIsland: () => null,
     SubagentInspectorPanelIsland: (props: NonNullable<typeof io.inspector>) => {
       io.inspector = props
       useEffect(() => () => { if (io.inspector === props) io.inspector = null }, [props])
@@ -2430,3 +2433,40 @@ it('extracts initial skill requests from direct input before native context asse
   expect(io.provider.sendUserMessage.mock.calls[0][1]).toContain('/injected-from-file');
   expect(io.provider.sendUserMessage.mock.calls[0][2]).toMatchObject({requestedSkillIds:['review']});
 });
+
+
+it.each([360, 1600])('opens one terminal workspace tab from selector and repeated shortcuts at width %s, and restores close focus', async width => {
+  const viewport = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+  io.realWorkspaceChrome = true
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+  try {
+    await act(async () => window.dispatchEvent(new Event('resize')))
+    await act(async () => useWorkspaceTabsStore.getState().showSelector())
+    const terminalEntry = element.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="terminal"]')!
+    await act(async () => terminalEntry.click())
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, selectorOpen: false, activeTabId: 'tool:terminal' })
+    for (let n = 0; n < 3; n++) {
+      await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+    }
+    expect(useWorkspaceTabsStore.getState().tabs.filter(tab => tab.mode === 'terminal')).toHaveLength(1)
+    expect(element.querySelector('#workbench-terminal-toggle')).toBeNull()
+    expect(element.querySelector('#workbench-terminal-panel')).toBeNull()
+    element.querySelector<HTMLTextAreaElement>('[data-synthetic-terminal]')!.focus()
+    await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'close-tab' })))
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, selectorOpen: true, tabs: [] })
+    expect(document.activeElement?.hasAttribute('data-sidebar-right-guide-entry')).toBe(true)
+    await act(async () => window.dispatchEvent(new CustomEvent('analytix:workspace-shortcut', { detail: 'toggle-terminal' })))
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({ open: true, selectorOpen: false, activeTabId: 'tool:terminal' })
+    expect(element.querySelector('#workbench-right-workspace')?.getAttribute('data-auto-overlay')).toBe(width === 360 ? 'true' : null)
+    const closeAll = document.querySelector<HTMLButtonElement>('[data-workbench-terminal-menu]')!
+    closeAll.focus()
+    await act(async () => closeAll.click())
+    await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    expect(useWorkspaceTabsStore.getState().open).toBe(false)
+    expect(document.activeElement?.id).toBe('workbench-workspace-expand')
+  } finally {
+    if (viewport) Object.defineProperty(window, 'innerWidth', viewport)
+    else Reflect.deleteProperty(window, 'innerWidth')
+  }
+})
