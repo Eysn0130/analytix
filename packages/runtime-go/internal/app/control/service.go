@@ -43,6 +43,7 @@ type Controller struct {
 	auxiliary             map[string]*auxiliaryOperation
 	foregroundPreparing   map[string]*foregroundPreparation
 	turnCancels           map[turnKey]context.CancelFunc
+	turnOwners            map[turnKey]*TurnExecutionOwnerV1
 	interruptReservations map[turnKey]struct{}
 	cancelReservations    map[turnKey]struct{}
 	candidateTerminals    map[turnKey]string
@@ -201,6 +202,7 @@ func NewController(driver Driver) *Controller {
 		auxiliary:             map[string]*auxiliaryOperation{},
 		foregroundPreparing:   map[string]*foregroundPreparation{},
 		turnCancels:           map[turnKey]context.CancelFunc{},
+		turnOwners:            map[turnKey]*TurnExecutionOwnerV1{},
 		interruptReservations: map[turnKey]struct{}{},
 		cancelReservations:    map[turnKey]struct{}{},
 		candidateTerminals:    map[turnKey]string{},
@@ -425,47 +427,62 @@ func (c *Controller) RegisterTurnCancelAfterThreadTail(
 				return ctx.Err()
 			}
 		}
-		c.turnCancels[key] = cancel
-		c.notifyTurnStateChangedLocked()
+		c.installTurnExecutionOwnerLockedV1(key, cancel, false)
 		c.mu.Unlock()
 		return nil
 	}
 }
 
 func (c *Controller) RegisterTurnCancelWithError(threadID, turnID string, cancel context.CancelFunc) error {
+	_, err := c.registerTurnExecutionOwnerV1(nil, threadID, turnID, cancel, false)
+	return err
+}
+
+func (c *Controller) registerTurnExecutionOwnerV1(ctx context.Context, threadID, turnID string, cancel context.CancelFunc, owned bool) (*TurnExecutionOwnerV1, error) {
 	key, ok := normalizedTurnKey(threadID, turnID)
-	if !ok || cancel == nil {
-		return ErrTurnExecutionConflict
+	if c == nil || !ok || cancel == nil || owned && ctx == nil {
+		return nil, ErrTurnExecutionConflict
+	}
+	if owned {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	c.mu.Lock()
+	if owned {
+		if err := ctx.Err(); err != nil {
+			c.mu.Unlock()
+			return nil, err
+		}
+	}
 	if c.shuttingDown || c.maintenance {
 		c.mu.Unlock()
-		return ErrRuntimeShuttingDown
+		return nil, ErrRuntimeShuttingDown
 	}
 	if auxiliary := c.auxiliary[key.threadID]; auxiliary != nil {
 		c.mu.Unlock()
 		auxiliary.cancel()
-		return ErrTurnExecutionConflict
+		return nil, ErrTurnExecutionConflict
 	}
 	if _, exists := c.turnCancels[key]; exists {
 		c.mu.Unlock()
-		return ErrTurnExecutionConflict
+		return nil, ErrTurnExecutionConflict
 	}
 	if _, reserved := c.interruptReservations[key]; reserved {
 		c.mu.Unlock()
-		return ErrTurnExecutionConflict
+		return nil, ErrTurnExecutionConflict
 	}
 	if _, cancelled := c.cancelReservations[key]; cancelled {
 		c.mu.Unlock()
-		return ErrTurnExecutionConflict
+		return nil, ErrTurnExecutionConflict
 	}
 	if _, terminalActive := c.candidateTerminals[key]; terminalActive {
 		c.mu.Unlock()
-		return ErrTurnExecutionConflict
+		return nil, ErrTurnExecutionConflict
 	}
 	if _, transitioning := c.threadTransitions[key.threadID]; transitioning {
 		c.mu.Unlock()
-		return ErrTurnExecutionConflict
+		return nil, ErrTurnExecutionConflict
 	}
 	// A durable terminal transition owns the whole thread until its
 	// post-CAS event/projection tail has completed. Admitting another turn for
@@ -473,12 +490,11 @@ func (c *Controller) RegisterTurnCancelWithError(threadID, turnID string, cancel
 	// though the previous thread record already reads idle.
 	if c.threadTerminalActiveLocked(key.threadID) {
 		c.mu.Unlock()
-		return ErrTurnExecutionConflict
+		return nil, ErrTurnExecutionConflict
 	}
-	c.turnCancels[key] = cancel
-	c.notifyTurnStateChangedLocked()
+	owner := c.installTurnExecutionOwnerLockedV1(key, cancel, owned)
 	c.mu.Unlock()
-	return nil
+	return owner, nil
 }
 
 // BeginTurnOperation admits one host-owned turn operation. The returned done
@@ -616,18 +632,18 @@ func (c *Controller) OwnsTerminalClaim(threadID, turnID, contextDigest string) b
 
 func (c *Controller) UnregisterTurnCancel(threadID, turnID string) bool {
 	key, ok := normalizedTurnKey(threadID, turnID)
-	if !ok {
+	if c == nil || !ok {
 		return false
 	}
 	c.mu.Lock()
-	_, existed := c.turnCancels[key]
-	delete(c.turnCancels, key)
-	delete(c.cancelReservations, key)
-	if existed {
-		c.notifyTurnStateChangedLocked()
+	defer c.mu.Unlock()
+	owner := c.turnOwners[key]
+	// A key alone cannot release an identity-bearing execution. Legacy callers
+	// retain their paired key API without being able to retire a newer owner.
+	if owner == nil || owner.owned {
+		return false
 	}
-	c.mu.Unlock()
-	return existed
+	return c.releaseTurnExecutionOwnerLockedV1(owner)
 }
 
 // CancelThreadTurnsAndWait cancels every registered execution for one thread

@@ -54,32 +54,33 @@ type Manager interface {
 }
 
 type Dependencies struct {
-	UserInputConfig         toolcatalogapp.UserInputConfig
-	ScheduleUserInputWait   func(string, *domaincontinuation.UserInputTimedWaitV1, string)
-	Store                   Store
-	WorkspaceReader         turnsecurityapp.WorkspaceReader
-	SecurityAuthority       turnsecurityapp.WorkspaceSecurityAuthority
-	Source                  runtimeports.MCPToolAdvertisementSource
-	Registry                *controlapp.GateRegistry[appmodel.PendingToolCall]
-	Manager                 Manager
-	Continuations           *continuationapp.Service
-	AcquireContextEffect    apploop.AcquireToolEffect
-	AcquireOrdinaryEffect   apploop.AcquireToolEffect
-	ValidateCatalog         func(appmodel.PendingToolCall) error
-	ExecuteAndSettle        func(context.Context, appmodel.PendingToolCall) (apploop.SettledToolExecution, error)
-	PersistToolResult       func(context.Context, appmodel.PendingToolCall, any, bool) error
-	SettleTerminalQuestion  func(context.Context, controlapp.DrainedGate[appmodel.PendingToolCall]) error
-	Complete                func(context.Context, appmodel.PendingToolCall, any, bool) (apploop.RuntimeAgentLoopResult, error)
-	CompleteSettled         func(context.Context, appmodel.PendingToolCall, apploop.SettledToolExecution) (apploop.RuntimeAgentLoopResult, error)
-	Finalize                func(context.Context, appmodel.PendingToolCall, apploop.RuntimeAgentLoopResult, evidenceapp.TerminalReason) error
-	RecordFailure           func(appmodel.PendingToolCall, error) error
-	TerminalStatus          func(string, string) (string, bool, error)
-	RecordCancellations     func([]controlapp.PendingGateCancellation, string) error
-	RecordRequest           func(map[string]any) error
-	RecordGrantTransition   func(map[string]any) error
-	EnsureGrantTransition   func(string, string, map[string]any) error
-	RecordResolution        func(map[string]any) error
-	TerminalTakeoverPending func(string, string) bool
+	UserInputConfig          toolcatalogapp.UserInputConfig
+	ScheduleUserInputWait    func(string, *domaincontinuation.UserInputTimedWaitV1, string)
+	CaptureUserInputProducer func(context.Context, string, string) (*controlapp.TurnExecutionOwnerV1, error)
+	Store                    Store
+	WorkspaceReader          turnsecurityapp.WorkspaceReader
+	SecurityAuthority        turnsecurityapp.WorkspaceSecurityAuthority
+	Source                   runtimeports.MCPToolAdvertisementSource
+	Registry                 *controlapp.GateRegistry[appmodel.PendingToolCall]
+	Manager                  Manager
+	Continuations            *continuationapp.Service
+	AcquireContextEffect     apploop.AcquireToolEffect
+	AcquireOrdinaryEffect    apploop.AcquireToolEffect
+	ValidateCatalog          func(appmodel.PendingToolCall) error
+	ExecuteAndSettle         func(context.Context, appmodel.PendingToolCall) (apploop.SettledToolExecution, error)
+	PersistToolResult        func(context.Context, appmodel.PendingToolCall, any, bool) error
+	SettleTerminalQuestion   func(context.Context, controlapp.DrainedGate[appmodel.PendingToolCall]) error
+	Complete                 func(context.Context, appmodel.PendingToolCall, any, bool) (apploop.RuntimeAgentLoopResult, error)
+	CompleteSettled          func(context.Context, appmodel.PendingToolCall, apploop.SettledToolExecution) (apploop.RuntimeAgentLoopResult, error)
+	Finalize                 func(context.Context, appmodel.PendingToolCall, apploop.RuntimeAgentLoopResult, evidenceapp.TerminalReason) error
+	RecordFailure            func(appmodel.PendingToolCall, error) error
+	TerminalStatus           func(string, string) (string, bool, error)
+	RecordCancellations      func([]controlapp.PendingGateCancellation, string) error
+	RecordRequest            func(map[string]any) error
+	RecordGrantTransition    func(map[string]any) error
+	EnsureGrantTransition    func(string, string, map[string]any) error
+	RecordResolution         func(map[string]any) error
+	TerminalTakeoverPending  func(string, string) bool
 }
 
 type TurnExecutionController interface {
@@ -97,16 +98,50 @@ func ApproveRegistered(ctx context.Context, request controlapp.ApprovalDecision,
 }
 
 func RespondUserInputRegistered(ctx context.Context, request controlapp.UserInputResponse, dependencies Dependencies, controller TurnExecutionController) controlapp.ActionResult {
-	record, pending, _, hasPending := dependencies.Registry.PeekUserInput(request.InputID)
-	if hasPending && (request.Selector != nil && (record.ThreadID != pending.ThreadID || record.TurnID != pending.TurnID) ||
-		!controlapp.UserInputResponseMatchesOwnerV1(request, pending.ThreadID, pending.TurnID, record.ItemID, request.InputID)) {
+	admission, exists, candidate := dependencies.Registry.PeekUserInputAdmissionV1(request.InputID)
+	if !exists {
+		return action(statusNotFound, "not_found", "user input not found: "+request.InputID)
+	}
+	if !candidate {
+		return controlapp.ActionResult{StatusCode: statusConflict, Body: appturn.GateContinuationUnavailableResponse("user_input", request.InputID)}
+	}
+	record, pending := admission.Record, admission.Pending
+	if request.Selector != nil && (record.ThreadID != pending.ThreadID || record.TurnID != pending.TurnID) ||
+		!controlapp.UserInputResponseMatchesOwnerV1(request, pending.ThreadID, pending.TurnID, record.ItemID, request.InputID) {
 		return action(statusConflict, "user_input_owner_mismatch", "user input owner does not match")
 	}
-	if !hasPending || controller == nil {
-		return RespondUserInput(ctx, request, dependencies)
+	conflict := func() controlapp.ActionResult {
+		return action(statusConflict, "turn_execution_conflict", "turn execution handoff is unavailable")
+	}
+	if ctx == nil || ctx.Err() != nil {
+		return conflict()
+	}
+	if producer := admission.Producer(); producer != nil {
+		if controller == nil {
+			return conflict()
+		}
+		// Only the exact captured producer may be awaited. No effect lease or
+		// gate claim is held, and an abandoned producer cannot hold HTTP forever.
+		err := producer.WaitBounded(ctx, 10*time.Second)
+		if err != nil || ctx.Err() != nil {
+			return conflict()
+		}
+	}
+	current, active, _, hasPending := dependencies.Registry.PeekUserInput(request.InputID)
+	if !hasPending || current != record || !reflect.DeepEqual(active, pending) {
+		return controlapp.ActionResult{StatusCode: statusConflict, Body: appturn.GateContinuationUnavailableResponse("user_input", request.InputID)}
+	}
+	if ctx.Err() != nil {
+		return conflict()
+	}
+	if controller == nil {
+		return respondUserInput(ctx, request, dependencies, &admission)
 	}
 	return controller.RunRegisteredTurn(ctx, pending.ThreadID, pending.TurnID, func(turnCtx context.Context) controlapp.ActionResult {
-		return respondUserInput(turnCtx, request, dependencies, &controlapp.PendingGateState[appmodel.PendingToolCall]{Record: record, Pending: pending})
+		if turnCtx == nil || turnCtx.Err() != nil {
+			return conflict()
+		}
+		return respondUserInput(turnCtx, request, dependencies, &admission)
 	})
 }
 
@@ -147,6 +182,14 @@ func RequestApproval(ctx context.Context, pending appmodel.PendingToolCall, depe
 }
 
 func RequestUserInput(ctx context.Context, pending appmodel.PendingToolCall, dependencies Dependencies) (string, error) {
+	var producer *controlapp.TurnExecutionOwnerV1
+	if dependencies.CaptureUserInputProducer != nil {
+		var err error
+		producer, err = dependencies.CaptureUserInputProducer(ctx, pending.ThreadID, pending.TurnID)
+		if err != nil || producer == nil {
+			return "", errors.Join(errors.New("user-input producer identity is unavailable"), err)
+		}
+	}
 	config := dependencies.UserInputConfig
 	if pending.Call.Name == toolcatalogapp.ToolExitPlanModeName {
 		config = toolcatalogapp.UserInputConfig{Mode: "legacy"}
@@ -188,7 +231,7 @@ func RequestUserInput(ctx context.Context, pending appmodel.PendingToolCall, dep
 	if err != nil || projectionErr != nil {
 		return "", errors.Join(errors.New("user-input request projection is invalid"), err, projectionErr)
 	}
-	if err := persistAndActivateGateRequest(projection, pending, dependencies); err != nil {
+	if err := persistAndActivateGateRequestWithProducer(projection, pending, dependencies, producer); err != nil {
 		return "", err
 	}
 	if wait != nil && dependencies.ScheduleUserInputWait != nil {
@@ -214,6 +257,15 @@ func persistAndActivateGateRequest(
 	pending appmodel.PendingToolCall,
 	dependencies Dependencies,
 ) error {
+	return persistAndActivateGateRequestWithProducer(projection, pending, dependencies, nil)
+}
+
+func persistAndActivateGateRequestWithProducer(
+	projection GateRequestProjectionV1,
+	pending appmodel.PendingToolCall,
+	dependencies Dependencies,
+	producer *controlapp.TurnExecutionOwnerV1,
+) error {
 	if err := validateGateRequestProjectionV1(projection); err != nil {
 		return err
 	}
@@ -222,7 +274,11 @@ func persistAndActivateGateRequest(
 	case domaincontinuation.KindApproval:
 		reserve = dependencies.Registry.ReservePendingApproval(projection.GateID, projection.Record, pending)
 	case domaincontinuation.KindUserInput:
-		reserve = dependencies.Registry.ReservePendingUserInput(projection.GateID, projection.Record, pending)
+		if producer == nil {
+			reserve = dependencies.Registry.ReservePendingUserInput(projection.GateID, projection.Record, pending)
+		} else {
+			reserve = dependencies.Registry.ReservePendingUserInputOwnedV1(projection.GateID, projection.Record, pending, producer)
+		}
 	default:
 		return errors.New("gate request projection kind is unsupported")
 	}
@@ -626,7 +682,7 @@ func RespondUserInput(ctx context.Context, request controlapp.UserInputResponse,
 	return respondUserInput(ctx, request, dependencies, nil)
 }
 
-func respondUserInput(ctx context.Context, request controlapp.UserInputResponse, dependencies Dependencies, expected *controlapp.PendingGateState[appmodel.PendingToolCall]) controlapp.ActionResult {
+func respondUserInput(ctx context.Context, request controlapp.UserInputResponse, dependencies Dependencies, expected *controlapp.UserInputAdmissionV1[appmodel.PendingToolCall]) controlapp.ActionResult {
 	id := request.InputID
 	originalRecord, originalPending, exists, hasPending := dependencies.Registry.PeekUserInput(id)
 	if !exists {
@@ -677,7 +733,16 @@ func respondUserInput(ctx context.Context, request controlapp.UserInputResponse,
 	// the private manager/model path receives normalized Core question IDs.
 	legacyResponseAnswers := privacyprojectionapp.ProjectStringRecords(request.Answers)
 	request.Answers = privacyprojectionapp.ProjectHostValidatedUserInputAnswers(id, questions, answers)
-	claim, claimed := dependencies.Registry.ClaimUserInputExact(id, originalRecord, originalPending)
+	if ctx == nil || ctx.Err() != nil {
+		return action(statusConflict, "turn_execution_conflict", "turn execution handoff is unavailable")
+	}
+	var claim controlapp.GateClaim[appmodel.PendingToolCall]
+	var claimed bool
+	if expected == nil {
+		claim, claimed = dependencies.Registry.ClaimUserInputExact(id, originalRecord, originalPending)
+	} else {
+		claim, claimed = dependencies.Registry.ClaimUserInputAdmissionV1(id, *expected)
+	}
 	if !claimed {
 		return controlapp.ActionResult{StatusCode: statusConflict, Body: appturn.GateContinuationUnavailableResponse("user_input", id)}
 	}
