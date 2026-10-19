@@ -1611,7 +1611,7 @@ func acceptedFinalSSEFixtureWithAuthority(t *testing.T) (map[string]any, ed25519
 
 func TestThreadEventReplayPropagatesCancelledRequestContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
 	called := false
 	handler := ThreadEventsHandler{Store: ThreadEventStore{
 		HighestSeq:      func(string) (int, error) { return 1, nil },
@@ -1621,6 +1621,12 @@ func TestThreadEventReplayPropagatesCancelledRequestContext(t *testing.T) {
 		},
 		LoadPublicEventsSinceContext: func(observed context.Context, _ string, _ int) ([]map[string]any, error) {
 			called = true
+			if observed != ctx {
+				t.Fatal("loader did not receive the exact request context")
+			}
+			// A request cancelled before entry now stops before I/O. Cancel
+			// inside the loader to retain the context/error propagation check.
+			cancel()
 			if !errors.Is(observed.Err(), context.Canceled) {
 				t.Fatalf("loader received a live context after request cancellation: %v", observed.Err())
 			}

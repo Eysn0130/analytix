@@ -60,7 +60,7 @@ func ValidatePublicRecord(value any) error {
 	if err := domainsecret.ValidateValueLimitsV1(resource); err != nil {
 		return errors.Join(ErrCredentialProjection, err)
 	}
-	value, _, err = StageQuestionReplyContentV1(value)
+	value, err = questionReplyValidationViewV1(value)
 	if err != nil {
 		return err
 	}
@@ -566,7 +566,7 @@ func ContainsPrivateTerminalAuthority(value any) bool {
 
 func SanitizePublicValue(value any, allowUserText bool) (any, bool) {
 	original := value
-	staged, _, err := StageQuestionReplyContentV1(value)
+	staged, err := questionReplyValidationViewV1(value)
 	if err != nil {
 		return nil, false
 	}
@@ -581,7 +581,7 @@ func SanitizePublicValue(value any, allowUserText bool) (any, bool) {
 	if !ok || !sameQuestionReplyBodiesV1(original, public) {
 		return nil, false
 	}
-	scan, _, err := StageQuestionReplyContentV1(public)
+	scan, err := questionReplyValidationViewV1(public)
 	if err != nil || domaincaseentity.ValidatePublicValueWithoutReferenceV1(scan) != nil {
 		return nil, false
 	}
@@ -593,7 +593,7 @@ func SanitizePublicValue(value any, allowUserText bool) (any, bool) {
 // It must never be used for HTTP, SSE, renderer, export, or report projection.
 func SanitizeDurableValue(value any, allowUserText bool) (any, bool) {
 	original := value
-	staged, _, err := StageQuestionReplyContentV1(value)
+	staged, err := questionReplyValidationViewV1(value)
 	if err != nil {
 		return nil, false
 	}
@@ -1144,6 +1144,12 @@ func StageQuestionReplyContentV1(value any) (any, func(any) (any, bool), error) 
 	return staged, func(projected any) (any, bool) { return restoreClosedPlanDigestsV1(projected, entries) }, err
 }
 
+// Read-only scanners need the complete decoded AST, without restoration data.
+func questionReplyValidationViewV1(value any) (any, error) {
+	budget := 100000
+	return questionReplyViewV1(value, nil, nil, false, &budget)
+}
+
 func questionReplyViewV1(value any, path []closedPlanDigestProjectionPathV1, entries *[]closedPlanDigestProjectionEntryV1, resource bool, budget *int) (any, error) {
 	return walkQuestionReplyV1(value, path, entries, resource, budget, len(path), nil)
 }
@@ -1166,7 +1172,7 @@ func walkQuestionReplyV1(value any, path []closedPlanDigestProjectionPathV1, ent
 		}
 		for key, child := range current {
 			var childPath []closedPlanDigestProjectionPathV1
-			if bodies == nil {
+			if entries != nil && bodies == nil {
 				childPath = append(append([]closedPlanDigestProjectionPathV1(nil), path...), closedPlanDigestProjectionPathV1{kind: "key", key: key})
 			}
 			parsed, matched, err := questionReplySlotContentV1(current, key)
@@ -1194,7 +1200,9 @@ func walkQuestionReplyV1(value any, path []closedPlanDigestProjectionPathV1, ent
 						*bodies = append(*bodies, text)
 					} else {
 						out[key] = parsed
-						*entries = append(*entries, closedPlanDigestProjectionEntryV1{path: childPath, digest: text, placeholder: cloneQuestionReplyASTV1(parsed).(map[string]any)})
+						if entries != nil {
+							*entries = append(*entries, closedPlanDigestProjectionEntryV1{path: childPath, digest: text, placeholder: cloneQuestionReplyASTV1(parsed).(map[string]any)})
+						}
 					}
 				}
 				continue
@@ -1215,7 +1223,7 @@ func walkQuestionReplyV1(value any, path []closedPlanDigestProjectionPathV1, ent
 		}
 		for index, child := range current {
 			var childPath []closedPlanDigestProjectionPathV1
-			if bodies == nil {
+			if entries != nil && bodies == nil {
 				childPath = append(append([]closedPlanDigestProjectionPathV1(nil), path...), closedPlanDigestProjectionPathV1{kind: "index", index: index})
 			}
 			projected, err := walkQuestionReplyV1(child, childPath, entries, resource, budget, depth+1, bodies)
