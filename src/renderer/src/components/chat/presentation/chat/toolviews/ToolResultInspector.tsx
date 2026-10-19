@@ -63,6 +63,7 @@ function JsonValue({ value, label, depth = 0, wrapping }: { value: unknown; labe
 function Payload({ value, truncated, wrapping, error = false }: { value?: string; truncated?: boolean; wrapping: boolean; error?: boolean }) {
   const { t } = useTranslation('common')
   if (value === undefined) return <p className={css.unavailable}>{t(truncated ? 'dshToolInspect.captureLimit' : 'dshToolInspect.unavailable')}</p>
+  if (value === '') return <p className={css.unavailable}>{t(truncated ? 'dshToolInspect.captureLimit' : 'protectedToolEmpty')}</p>
   let json: unknown
   try { json = JSON.parse(value) } catch { /* Actual non-JSON tool text remains text. */ }
   const object = json !== null && typeof json === 'object'
@@ -194,6 +195,12 @@ export function ToolResultInspector({ display, publicJob, publicRecord, recordId
       <div><dt>{t('dshToolInspect.executionDuration')}</dt><dd>{capture?.durationMs} ms</dd></div>
       <div><dt>{t('dshToolInspect.timingSource')}</dt><dd>{t('dshToolInspect.hostExecution')}</dd></div></> : null}
   </dl>
+  if (activeTab === 'result' && inspect?.outputError) {
+    const error = <ToolRawIO outputError={inspect.outputError} />
+    // Inspect-only failures have no typed Result to replace the unavailable
+    // placeholder. Other captures retain their own Result beside the error.
+    body = capture?.kind === 'inspect' ? error : <>{body}{error}</>
+  }
   return <aside data-tool-result-inspector data-protected-tool-body data-protected-tool-readonly={readonlyRecord || undefined} data-call-id={callId} className={css.details} data-presentation={presentation} style={presentation === 'embedded' ? undefined : { width }}
     aria-label={t('dshToolInspect.label')} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
     {presentation === 'overlay' ? <button type="button" className={css.resizeHandle} aria-label={t('dshToolInspect.resize')}
