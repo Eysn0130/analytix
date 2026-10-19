@@ -270,6 +270,10 @@ it('keeps an unconfirmed draft until a query proves its exact target, base, thre
     store.receive({...book,revision:change.revision,recovery:{current:change,pending:null}})
     expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toEqual(draft)
   }
+  for (const phase of [{status:'loading' as const,saving:true},{status:'loading' as const,saving:false},{status:'error' as const,saving:false}]) {
+    store.receive({...book,...phase,revision:expected.revision,recovery:{current:expected,pending:null}})
+    expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toEqual(draft)
+  }
   store.receive({...book,revision:expected.revision,recovery:{current:expected,pending:null}})
   expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toBeUndefined()
   expect(useNativeOfficeStore.getState().views[nativeOfficeTargetKey({workspace:'/workspace',path:book.path})].dirty).toBe(false)

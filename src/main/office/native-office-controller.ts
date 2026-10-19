@@ -1,4 +1,4 @@
-import { logNativeOfficeFailure, logNativeOfficeManualBeginFailure, type NativeOfficeManualBeginFailureState, type NativeOfficeDiagnosticStage, type NativeOfficeDiagnosticErrorCode } from '../logger'
+import { logNativeOfficeFailure, logNativeOfficeManualBeginFailure, logNativeOfficeSaveFailure, type NativeOfficeSaveFailureState, type NativeOfficeManualBeginFailureState, type NativeOfficeDiagnosticStage, type NativeOfficeDiagnosticErrorCode } from '../logger'
 import { isOfficeResult, isOfficePreviewView, type OfficePreviewView, type OfficeRequestInput } from './office-protocol'
 import { nativeOfficeCreateInputSchema, type NativeOfficeCreation, type NativeOfficeManualAuthority, nativeOfficeCommitInputSchema, nativeOfficeSelectionResponseSchema, nativeOfficeSelectionScopeSchema, type NativeOfficeSelectionResponse } from '../../../packages/runtime/src/contracts/native-office-editing'
 import { createHash, randomUUID, randomBytes } from 'node:crypto'
@@ -31,6 +31,9 @@ const engineStateSchema = z.object({
   changeSequence: sequence, acknowledgedSequence: sequence, dirty: z.boolean(), manual: nativeOfficeManualStateSchema.optional()
 }).strict().refine(s => s.acknowledgedSequence <= s.changeSequence && s.dirty === (s.changeSequence !== s.acknowledgedSequence))
 type EngineState = z.infer<typeof engineStateSchema>
+type HostResponseDiagnostic = Pick<NativeOfficeManualBeginFailureState, 'schemaAccepted' | 'outerCode' | 'innerCode'> &
+  Partial<Pick<NativeOfficeSaveFailureState, 'outerSchemaAccepted' | 'innerSchemaAccepted' | 'receiptPresent' | 'receiptStatus'>>
+type SaveDiagnostic = NativeOfficeSaveFailureState & Pick<NativeOfficeManualBeginFailureState, 'schemaAccepted'>
 const eventBase = { documentId: digest, version: digest, operationId: token }
 const engineEventSchema = z.discriminatedUnion('type', [
   z.object({ ...eventBase, type: z.literal('changed'), state: engineStateSchema }).strict(),
@@ -94,6 +97,18 @@ class OfficeFailure extends Error {
 function fail(code: NativeOfficeError, transient = false): never { throw new OfficeFailure(code, transient) }
 function diagnosticError(code: NativeOfficeError): NativeOfficeDiagnosticErrorCode {
   return code === 'native_input_unavailable' || code === 'composition_pending' || code === 'presentation_unsupported' || code === 'presentation_failed' || code === 'presentation_start_timeout' ? 'engine_unavailable' : code
+}
+function saveDiagnostic(phase: NativeOfficeSaveFailureState['phase']): SaveDiagnostic {
+  return {phase, schemaAccepted:null, outerSchemaAccepted:null, innerSchemaAccepted:null, outerCode:null, innerCode:null, receiptPresent:null, receiptStatus:null}
+}
+function recordSaveFailure(document: Pick<Active, 'view'>, error: unknown, state: NativeOfficeSaveFailureState): void {
+  if (document.view.kind !== 'xlsx' || document.view.protectedPresent) return
+  // Observability must never change the operation's result, including refusal.
+  try {
+    const { phase, outerSchemaAccepted, innerSchemaAccepted, outerCode, innerCode, receiptPresent, receiptStatus } = state
+    logNativeOfficeSaveFailure(error instanceof OfficeFailure ? diagnosticError(error.code) : 'unexpected',
+      { phase, outerSchemaAccepted, innerSchemaAccepted, outerCode, innerCode, receiptPresent, receiptStatus })
+  } catch { /* Preserve the original failure. */ }
 }
 function hash(bytes: Uint8Array): string { return createHash('sha256').update(bytes).digest('hex') }
 function decodeContent(content: string): Uint8Array {
@@ -209,7 +224,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     return binding
   }
 
-  async function invokeOutput(document: { binding: PluginPackageView; view: Pick<NativeOfficeView, 'kind'> }, operation: HostOperation, input: Record<string, unknown>, manualBegin?: NativeOfficeManualBeginFailureState): Promise<unknown> {
+  async function invokeOutput(document: { binding: PluginPackageView; view: Pick<NativeOfficeView, 'kind'> }, operation: HostOperation, input: Record<string, unknown>, diagnostic?: HostResponseDiagnostic): Promise<unknown> {
     // Relist only the same generation. This never enables or installs a plugin.
     document.binding = await listBinding(document.view.kind, document.binding)
     if (!document.binding.operations.includes(operation)) fail('package_unavailable')
@@ -221,17 +236,27 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         contributionId: 'workspace-editor', operation, input })
     } catch { fail('unavailable') }
     const outer = pluginPackageHostResponseSchema.safeParse(raw)
-    if (manualBegin) {
-      manualBegin.schemaAccepted = outer.success
-      if (outer.success && !outer.data.ok) manualBegin.outerCode = outer.data.code
+    if (diagnostic) {
+      diagnostic.schemaAccepted = outer.success
+      if ('outerSchemaAccepted' in diagnostic) diagnostic.outerSchemaAccepted = outer.success
+      if (outer.success && !outer.data.ok) diagnostic.outerCode = outer.data.code
     }
     if (!outer.success) fail('invalid_response')
     if (!outer.data.ok) fail('package_unavailable')
     if (!('output' in outer.data)) fail('invalid_response')
     return outer.data.output
   }
-  async function invoke(document: { binding: PluginPackageView; view: Pick<NativeOfficeView, 'kind'> }, operation: HostOperation, input: Record<string, unknown>): Promise<ObjectEditingResponse> {
-    const inner = objectEditingResponseSchema.safeParse(await invokeOutput(document, operation, input))
+  async function invoke(document: { binding: PluginPackageView; view: Pick<NativeOfficeView, 'kind'> }, operation: HostOperation, input: Record<string, unknown>, diagnostic?: HostResponseDiagnostic): Promise<ObjectEditingResponse> {
+    const inner = objectEditingResponseSchema.safeParse(await invokeOutput(document, operation, input, diagnostic))
+    if (diagnostic) {
+      diagnostic.schemaAccepted = inner.success
+      diagnostic.innerSchemaAccepted = inner.success
+      if (inner.success) {
+        if (!inner.data.ok) diagnostic.innerCode = inner.data.code
+        diagnostic.receiptPresent = 'receipt' in inner.data && !!inner.data.receipt
+        diagnostic.receiptStatus = 'receipt' in inner.data && inner.data.receipt ? inner.data.receipt.status : null
+      }
+    }
     if (!inner.success) fail('invalid_response')
     return inner.data
   }
@@ -793,13 +818,15 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const manual = prepared.workbookManual
     if (manual.baseRevision !== request.revision || JSON.stringify(manual.workbook.before) !== JSON.stringify(captured.workbook)) fail('invalid_response')
     document.approvedChange = {changeId:manual.changeId,threadId:request.threadId,baseRevision:manual.baseRevision,saveOperationId:manual.saveOperationId,workbookManual:true}
-    document.view.canUndo = false
+    document.view.canUndo = false; document.view.saving = true; publish()
     delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
     try {
       await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:request.revision,
-        selectionToken:current.token,expectedChangeSequence:request.expectedChangeSequence,workbook:manual.workbook,writeTarget})
+        selectionToken:current.token,expectedChangeSequence:request.expectedChangeSequence,workbook:manual.workbook,writeTarget,
+        candidate:{changeId:manual.changeId,saveOperationId:manual.saveOperationId,baseRevision:manual.baseRevision}})
     } catch (error) {
-      if (error instanceof OfficeFailure && error.transient) throw error
+      recordSaveFailure(document,error,saveDiagnostic('replace'))
+      if (error instanceof OfficeFailure && error.transient) { document.view.saving = false; publish(); throw error }
       await restoreFailedWorkbook(document); fail('save_failed')
     }
     await save(document)
@@ -883,23 +910,36 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       publish()
     } finally { await releaseFreeze() }
   }
-  async function settleSave(document: Active, result: ObjectEditingResponse) {
+  async function settleSave(document: Active, result: ObjectEditingResponse, diagnostic?: SaveDiagnostic) {
     const pending = document.pendingSave
     if (!pending || !('receipt' in result) || !result.receipt) fail('unknown')
     const receipt = result.receipt
     if (receipt.operationId !== pending.operationId) fail('invalid_response')
     if (receipt.status === 'unknown' || receipt.status === 'pending') fail('unknown')
     if (receipt.status === 'committed' && receipt.revision !== pending.digest) fail('invalid_response')
-    if (receipt.status === 'committed') {
+    const reloadWorkbook = receipt.status === 'committed' && document.view.kind === 'xlsx'
+    if (receipt.status === 'committed' && !reloadWorkbook) {
       delete document.view.scope; delete document.view.proposals; delete document.view.localReviews; document.selections.clear()
     }
+    if (reloadWorkbook) {
+      // The exported workbook belongs to a private candidate, while the visible
+      // model still shows the base. A receipt cannot make that old view current.
+      // Retain the exact operation across ACK/reload failure; recovery rereads
+      // Core bytes and rebuilds the readonly surface before publishing ready.
+      document.pendingRecovery = {operationId:pending.operationId,revision:receipt.revision,committed:true}
+      document.view.saving = true; document.view.status = 'loading'; document.view.canUndo = false
+      publish()
+    }
+    const receiptPhase = diagnostic?.phase
+    if (diagnostic) diagnostic.phase = 'ack'
     try {
       await engine(document, {command:'ack', documentId:document.view.objectId, version:pending.revision,
         operationId:newOperationId(), exportOperationId:pending.operationId, exportedSequence:pending.sequence,
         status:receipt.status === 'committed' ? 'committed' : 'conflict',
         ...(receipt.status === 'committed' ? {persistedVersion:receipt.revision} : {})})
     } catch (error) {
-      if (receipt.status !== 'committed' || !(document.manualAuthority || document.approvedChange?.workbookManual)) throw error
+      if (receipt.status !== 'committed' || !(reloadWorkbook || document.manualAuthority || document.approvedChange?.workbookManual)) throw error
+      if (diagnostic) { recordSaveFailure(document,error,diagnostic); diagnostic.phase = 'recovery' }
       // The exact Core receipt already proves this artifact was committed. A
       // missing native ACK (including failed virtual-input synchronization)
       // retires that sink; it never licenses another commit or a fabricated ACK.
@@ -910,16 +950,29 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       await finishRecovery(document)
       return
     }
+    if (reloadWorkbook) {
+      if (diagnostic) diagnostic.phase = 'recovery'
+      await finishRecovery(document)
+      return
+    }
+    if (diagnostic && receiptPhase) diagnostic.phase = receiptPhase
     document.pendingSave = undefined; document.view.saving = false
     if (receipt.status === 'conflict') { setError(document, 'conflict'); fail('conflict') }
     delete document.approvedChange; delete document.manualAuthority; delete document.pendingManualBegin
     delete document.manualFreeze; delete document.manualExportAttempted; delete document.pendingManualCancel
+    if (diagnostic) diagnostic.phase = 'recovery'
     await recover(document, document.threadId)
     document.view.status = 'ready'; delete document.view.error; publish()
   }
   async function save(document: Active) {
+    const diagnostic = document.view.kind === 'xlsx' ? saveDiagnostic('prepare') : undefined
+    try { await saveAttempt(document,diagnostic) }
+    catch (error) { if (diagnostic) recordSaveFailure(document,error,diagnostic); throw error }
+  }
+  async function saveAttempt(document: Active, diagnostic?: SaveDiagnostic) {
     if (document.closePending) fail('unavailable')
     if (document.pendingRecovery) {
+      if (diagnostic) diagnostic.phase = 'recovery'
       const pending = document.pendingRecovery
       try { await finishRecovery(document) } catch (error) {
         try {
@@ -941,8 +994,9 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     }
     if (!document.view.editing) fail('invalid_request')
     if (document.pendingSave) {
+      if (diagnostic) diagnostic.phase = 'query'
       try {
-        await settleSave(document, await invoke(document, 'object-status', {sessionId:document.sessionId, operationId:document.pendingSave.operationId}))
+        await settleSave(document, await invoke(document, 'object-status', {sessionId:document.sessionId, operationId:document.pendingSave.operationId},diagnostic),diagnostic)
       } catch (error) {
         // The journal may not exist yet even though Core retained the candidate.
         // Discover explicit recovery actions without retrying the file write.
@@ -978,6 +1032,7 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       }
     }
     if (manual) document.manualExportAttempted = true
+    if (diagnostic) diagnostic.phase = 'export'
     const exported = await engine(document, {command:'export', operationId, documentId:document.view.objectId, version:revision,
       ...(manual ? {changeId:manual.changeId,freezeAck} : {})})
     if (freezeAck && exported?.exportedSequence !== freezeAck.sequence) fail('invalid_response')
@@ -989,14 +1044,17 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     document.view.saving = true; publish()
     // Never retry a commit after an uncertain result; subsequent saves query this operation.
     let result: ObjectEditingResponse
-    try { result = await invoke(document, 'commit-object', input) } catch { setError(document, 'unknown'); fail('unknown') }
+    if (diagnostic) diagnostic.phase = 'commit'
+    try { result = await invoke(document, 'commit-object', input,diagnostic) } catch { setError(document, 'unknown'); fail('unknown') }
     if (!result.ok && !result.receipt) {
+      if (diagnostic) diagnostic.phase = 'ack'
       await engine(document, {command:'ack', operationId:newOperationId(), documentId:document.view.objectId, version:revision,
         exportOperationId:operationId, exportedSequence:exported.exportedSequence, status:'failed'})
       document.pendingSave = undefined; document.view.saving = false
+      if (diagnostic) diagnostic.phase = 'commit'
       setError(document, result.code === 'conflict' ? 'conflict' : 'save_failed'); fail(result.code === 'conflict' ? 'conflict' : 'save_failed')
     }
-    await settleSave(document, result)
+    await settleSave(document, result,diagnostic)
   }
 
   async function finishRecovery(document: Active) {
@@ -1032,7 +1090,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       const surface = await options.createSurface(event => { if (document.surface === surface) onEvent(document, event) })
       document.surface = surface; document.failed = false; document.surfaceRetired = false
       document.view = {...document.view, revision:pending.revision, changeSequence:0, acknowledgedSequence:0,
-        dirty:false, editing:false, canUndo:false, saving:true, status:'loading', selection:undefined, scope:undefined, proposals:undefined, localReviews:undefined}
+        dirty:false, editing:false, canUndo:false, saving:true, status:'loading', selection:undefined,
+        ...(document.view.kind === 'xlsx' ? {} : {scope:undefined,proposals:undefined,localReviews:undefined})}
       document.openOperationId = newOperationId()
       delete document.view.playback; document.playbackAttempted = false
       document.playbackStopUnknown = false
@@ -1041,10 +1100,12 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
       document.ready = true
       if (active === document && visible) await surface.attach(document.bounds, document.appearance)
     } catch { setError(document, 'unknown'); fail('unknown') }
+    await recover(document, document.threadId)
     delete document.pendingRecovery; delete document.pendingSave; delete document.approvedChange
     document.selections.clear(); document.decisionOperations.clear()
+    delete document.view.scope; delete document.view.proposals; delete document.view.localReviews
     document.view.saving = false; document.view.status = 'ready'; delete document.view.error
-    await recover(document, document.threadId); publish()
+    publish()
   }
   async function acceptRecoveryReceipt(document: Active, result: ObjectEditingResponse, committing = false) {
     const pending = document.pendingRecovery!
@@ -1132,8 +1193,8 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
     const pending = document.view.recovery?.pending
     const retry = document.pendingManualCancel?.changeId === changeId && document.pendingManualCancel.threadId === threadId
     if ((!pending || pending.changeId !== changeId || !pending.canCancel) && !retry) fail('unknown')
-    if (document.manualAuthority) {
-      if (document.manualAuthority.changeId !== changeId) fail('invalid_request')
+    if (document.manualAuthority || document.view.kind === 'xlsx') {
+      if (document.manualAuthority && document.manualAuthority.changeId !== changeId) fail('invalid_request')
       // Retire the discarded input sink before cancelling its Core authority.
       // Retain the exact cancellation identity across a lost reply; Core's
       // cancelled record is idempotent, while pending=null alone proves nothing.
@@ -1320,8 +1381,14 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         catch (error) { if (error instanceof OfficeFailure && error.transient) throw error; await restoreFailedWorkbook(document); fail('save_failed') }
       } else if (replacement.workbook) {
         if (scope.presentation || !scope.workbook || JSON.stringify(replacement.workbook.before) !== JSON.stringify(scope.workbook)) fail('invalid_response')
-        try { await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,workbook:replacement.workbook}) }
-        catch (error) { if (error instanceof OfficeFailure && error.transient) throw error; await restoreFailedWorkbook(document); fail('save_failed') }
+        document.view.saving = true; publish()
+        try { await engine(document,{command:'replaceCells',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,workbook:replacement.workbook,
+          candidate:{changeId:replacement.changeId,saveOperationId:replacement.saveOperationId,baseRevision:scope.baseRevision}}) }
+        catch (error) {
+          recordSaveFailure(document,error,saveDiagnostic('replace'))
+          if (error instanceof OfficeFailure && error.transient) { document.view.saving = false; publish(); throw error }
+          await restoreFailedWorkbook(document); fail('save_failed')
+        }
       } else {
         if (scope.workbook) fail('invalid_response')
       await engine(document, {command:'replace',operationId:newOperationId(),documentId:document.view.objectId,version:scope.baseRevision,selectionToken:scope.selectionToken,expectedChangeSequence:scope.changeSequence,text:replacement.text,valueType:'text'})

@@ -15,7 +15,8 @@ export type OfficeState = { documentId: string; version: string; kind: OfficeKin
 export type OfficeEnvelope = { command: OfficeCommand; operationId: string; documentId: string; version: string; channel: string }
 export type OfficeWorkbookBounds = Pick<NativeWorkbookSelection, 'sheet'|'startColumn'|'startRow'|'endColumn'|'endRow'>
 export type OfficeWorkbookWriteTarget = { sheet:number; column:number; row:number }
-export type OfficeRequest = OfficeEnvelope & { action?: OfficeViewAction; zoom?: number; playbackGeneration?: number; kind?: OfficeKind; bytes?: Uint8Array; status?: 'committed' | 'conflict' | 'failed'; persistedVersion?: string; expectedChangeSequence?: number; discard?: boolean; selectionToken?: string; text?: string; valueType?: 'text'; workbook?: NativeWorkbookReview; bounds?:OfficeWorkbookBounds; writeTarget?:OfficeWorkbookWriteTarget; presentation?: NativePresentationReview; exportOperationId?: string; exportedSequence?: number; manual?: NativeOfficeManualAuthority; changeId?: string; rangeLease?: NativeOfficeRangeLease; format?: NativeOfficeFormat; freezeAck?: NativeOfficeFreezeAck }
+export type OfficeWorkbookCandidateAuthority = { changeId:string; saveOperationId:string; baseRevision:string }
+export type OfficeRequest = OfficeEnvelope & { action?: OfficeViewAction; zoom?: number; playbackGeneration?: number; kind?: OfficeKind; bytes?: Uint8Array; status?: 'committed' | 'conflict' | 'failed'; persistedVersion?: string; expectedChangeSequence?: number; discard?: boolean; selectionToken?: string; text?: string; valueType?: 'text'; workbook?: NativeWorkbookReview; bounds?:OfficeWorkbookBounds; writeTarget?:OfficeWorkbookWriteTarget; candidate?:OfficeWorkbookCandidateAuthority; presentation?: NativePresentationReview; exportOperationId?: string; exportedSequence?: number; manual?: NativeOfficeManualAuthority; changeId?: string; rangeLease?: NativeOfficeRangeLease; format?: NativeOfficeFormat; freezeAck?: NativeOfficeFreezeAck }
 export type OfficeRequestInput = Omit<OfficeRequest, 'channel'>
 export type OfficeResult = OfficeEnvelope & { type: 'result'; ok: boolean; view?: OfficePreviewView; state?: OfficeState; selection?: Record<string, unknown>; workbook?:NativeWorkbookSelection; bytes?: Uint8Array; exportedSequence?: number; rangeLease?: NativeOfficeRangeLease; formatState?: NativeOfficeFormatState; freezeAck?: NativeOfficeFreezeAck; error?: string }
 export type OfficeEvent = { type: 'changed' | 'selection' | 'save-requested' | 'view' | 'cell-edit-requested'; intent?:'f2'|'double-click'; view?: OfficePreviewView | null; channel: string; operationId: string; documentId: string; version: string; state?: OfficeState; selection?: Record<string, unknown> }
@@ -109,7 +110,8 @@ export function isOfficeRequest(v: unknown): v is OfficeRequest {
   if (v.command === 'export') return exact(v, base) || exact(v, [...base,'changeId','freezeAck']) && digest(v.changeId) && isOfficeFreezeAck(v.freezeAck) && v.freezeAck.changeId === v.changeId
   if (['captureSelection', 'edit'].includes(String(v.command))) return exact(v, base)
   if (v.command === 'replacePresentation') return exact(v, [...base,'selectionToken','expectedChangeSequence','presentation']) && officeToken(v.selectionToken) && integer(v.expectedChangeSequence) && isOfficePresentationReview(v.presentation)
-  if (v.command === 'replaceCells') return exact(v, [...base,'selectionToken','expectedChangeSequence','workbook'],['writeTarget']) && officeToken(v.selectionToken) && integer(v.expectedChangeSequence) && isOfficeWorkbookReview(v.workbook) && (v.writeTarget === undefined || isOfficeWorkbookWriteTarget(v.writeTarget))
+  if (v.command === 'replaceCells') return exact(v, [...base,'selectionToken','expectedChangeSequence','workbook','candidate'],['writeTarget']) && officeToken(v.selectionToken) && integer(v.expectedChangeSequence) && isOfficeWorkbookReview(v.workbook) && (v.writeTarget === undefined || isOfficeWorkbookWriteTarget(v.writeTarget)) &&
+    officeRecord(v.candidate) && exact(v.candidate,['changeId','saveOperationId','baseRevision']) && digest(v.candidate.changeId) && nativeOperation(v.candidate.saveOperationId) && digest(v.candidate.baseRevision) && v.candidate.baseRevision === v.version
   if (v.command === 'replace') return exact(v, [...base, 'selectionToken', 'expectedChangeSequence', 'text', 'valueType']) && officeToken(v.selectionToken) && integer(v.expectedChangeSequence) && text(v.text) && v.valueType === 'text'
   return v.command === 'ack' && exact(v, [...base, 'status', 'exportOperationId', 'exportedSequence'], ['persistedVersion']) && ['committed', 'conflict', 'failed'].includes(String(v.status)) && officeToken(v.exportOperationId) && integer(v.exportedSequence) && (v.status === 'committed' ? officeToken(v.persistedVersion) : v.persistedVersion === undefined)
 }
@@ -171,6 +173,10 @@ export function isOfficeResult(v: unknown): v is OfficeResult {
   if (v.command === 'manual-edit' && (!v.state.manual || v.state.manual.frozen)) return false
   if (v.command === 'local-view') return exact(v, [...fields, 'state', 'view']) && isOfficePreviewView(v.view, v.state.kind)
   if (v.command === 'export') return exact(v, [...fields, 'state', 'bytes', 'exportedSequence']) && bytes(v.bytes) && integer(v.exportedSequence) && v.exportedSequence <= v.state.changeSequence
+  // XLSX typed changes live in a private candidate. Returning the base model's
+  // selection here would incorrectly attach its cells to the candidate state.
+  if (v.command === 'replaceCells') return v.state.kind === 'xlsx' && exact(v,[...fields,'state'])
+  if (v.command === 'ack' && v.state.kind === 'xlsx') return exact(v,[...fields,'state'])
   return exact(v, [...fields, 'state', 'selection']) && selection(v.selection) && v.selection.documentId === v.documentId && v.selection.version === v.state.version && v.selection.changeSequence === v.state.changeSequence
 }
 export function isOfficeEvent(v: unknown): v is OfficeEvent {

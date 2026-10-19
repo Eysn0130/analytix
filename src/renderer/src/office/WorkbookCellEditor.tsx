@@ -5,7 +5,7 @@ import { Check, Info, Save, Trash2 } from '../design/AnalytixUiIcons'
 import { WorkspaceViewerIconButton, WorkspaceViewerMenu } from '../components/workbench/WorkspaceViewerHeader'
 import { useAnchoredPanel } from '../components/chat/presentation/useAnchoredPanel'
 import styles from './workbook-cell-editor.module.css'
-import {useNativeOfficeStore,nativeWorkbookDraftKey,nativeOfficeTargetKey,nativeWorkbookDraftUnsettled,nativeWorkbookDraftCellMatches,type NativeWorkbookCellDraft} from './native-office-store'
+import {useNativeOfficeStore,nativeWorkbookDraftKey,nativeOfficeTargetKey,nativeWorkbookDraftUnsettled,nativeWorkbookDraftCellMatches,nativeOfficeHasUnresolvedChange,type NativeWorkbookCellDraft} from './native-office-store'
 import {registerWriteShutdownInput} from '../write/write-shutdown'
 
 let workbookShutdownRegistered = false
@@ -117,6 +117,8 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
   const input=useRef<HTMLInputElement>(null),lastIntent=useRef('')
   const latest=useRef({view,threadId,active});latest.current={view,threadId,active}
   const pending=!!draft?.pending,unresolved=[view.recovery?.pending,view.recovery?.current].some(change=>['prepared','unknown','conflict'].includes(change?.status ?? ''))
+  const transitioning=view.kind === 'xlsx' && (view.status !== 'ready' || !!view.saving || nativeOfficeHasUnresolvedChange(view,null))
+  const inputBlocked=busy || transitioning
   const available=!!(active && threadId && view.kind === 'xlsx' && view.status === 'ready' && !view.protectedPresent &&
     view.workbookEditing?.editable && cell && !view.dirty && !view.saving && !unresolved)
   // A draft's identity is the original cell and revision. A fresh native token
@@ -124,7 +126,7 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
   // these words. Lost authority disables Save without erasing the user's input.
   const sameTarget=!!(!draft || draft.threadId === threadId && draft.objectId === view.objectId && draft.revision === view.revision &&
     bounded?.sheetName === draft.sheetName && cell && nativeWorkbookDraftCellMatches(cell,draft.cell))
-  const editable=active && !busy && !pending && !frozen && !closing && !draft?.unconfirmed && (!!draft || available)
+  const editable=active && !inputBlocked && !pending && !frozen && !closing && !draft?.unconfirmed && (!!draft || available)
   const canSave=available && sameTarget && editable && !draft?.unconfirmed
   const form=draft ?? initialValue(cell),change=workbookDraftEdit(form.type,form.value)
   const inputMode:InputMode=draft ? draft.inputMode ?? draft.type : 'auto'
@@ -173,7 +175,8 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
           const live=state.view,selected=live && currentSelection(live),liveCells=selected && nativeTypedWorkbookSelection(selected)
           if (currentContext.current !== contextOwner || state.workbookDraftInputFrozen || state.workbookDraftComposing ||
             state.workbookClosing[nativeOfficeTargetKey({workspace,path})] || state.workbookDrafts[draftKey] !== draft ||
-            !live || live.kind !== 'xlsx' || live.protectedPresent || live.objectId !== context.objectId || live.revision !== context.revision ||
+            !live || live.kind !== 'xlsx' || live.protectedPresent || live.status !== 'ready' || live.saving || nativeOfficeHasUnresolvedChange(live,state.error) ||
+            live.objectId !== context.objectId || live.revision !== context.revision ||
             (live.changeSequence ?? 0) !== context.changeSequence || selected?.token !== context.selectionToken ||
             !liveCells || liveCells.cells.length !== 1 || JSON.stringify([liveCells.sheetName,liveCells.cells[0]]) !== contextCell) return
           applyContextMode.current(mode.value)
@@ -183,12 +186,12 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
     return ()=>onContextActionsChange(null)
   },[onContextActionsChange,editable,sameTarget,selection?.token,contextOwner,contextCell,view.objectId,view.revision,view.changeSequence,workspace,path,draftKey,draft])
   const discard=()=>{
-    if (!draft || pending || frozen) return
+    if (!draft || pending || frozen || inputBlocked) return
     useNativeOfficeStore.getState().setWorkbookDraft(draftKey,null,draft.id)
     setNotice({owner:JSON.stringify([draftKey,view.objectId,view.revision,cell?.sheet,cell?.column,cell?.row]),text:'本地草稿已放弃。',error:false})
   }
   const keep=()=>{
-    if (!draft || pending || frozen) return
+    if (!draft || pending || frozen || inputBlocked) return
     useNativeOfficeStore.getState().setWorkbookDraft(draftKey,{...draft,closeRequested:false},draft.id)
     setNotice({owner:draft.id,text:'草稿已保留；切换文档不会丢失，保存仍需原单元格和原版本的有效选区。',error:false})
   }
@@ -235,8 +238,8 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
     <WorkspaceViewerIconButton label={pending ? '保存中…' : '保存'} tone={canSave && changed && change ? 'commit' : undefined}
       disabled={!canSave || !changed || !change} onClick={()=>void save()}><Save aria-hidden="true" /></WorkspaceViewerIconButton>
     <WorkspaceViewerMenu label="单元格编辑选项" ownerKey={owner} enabled={active}>
-      <button type="button" role="menuitem" aria-label="放弃草稿" disabled={!draft || pending || frozen} onClick={discard}><Trash2 aria-hidden="true" />放弃草稿</button>
-      {draft ? <button type="button" role="menuitem" aria-label="保留草稿" disabled={pending || frozen} onClick={keep}><Check aria-hidden="true" />保留草稿</button> : null}
+      <button type="button" role="menuitem" aria-label="放弃草稿" disabled={!draft || pending || frozen || inputBlocked} onClick={discard}><Trash2 aria-hidden="true" />放弃草稿</button>
+      {draft ? <button type="button" role="menuitem" aria-label="保留草稿" disabled={pending || frozen || inputBlocked} onClick={keep}><Check aria-hidden="true" />保留草稿</button> : null}
     </WorkspaceViewerMenu>
     <span ref={feedbackPanel.rootRef} className={styles.feedbackAnchor} data-feedback-error={feedbackError || undefined}>
       <WorkspaceViewerIconButton ref={feedbackPanel.triggerRef} label={feedbackText} className={styles.feedbackButton}

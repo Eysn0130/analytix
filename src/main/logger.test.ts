@@ -14,7 +14,9 @@ import {
   logNativeOfficeFailure,
   logNativeOfficeManualBeginFailure,
   logNativeOfficeManualBeginPhaseV1,
+  logNativeOfficeSaveFailure,
   type NativeOfficeManualBeginFailureState,
+  type NativeOfficeSaveFailureState,
   logWarn,
   publicConsoleError,
   publicConsoleInfo,
@@ -562,6 +564,75 @@ describe('native Office manual-begin diagnostic projection', () => {
     }
   })
 
+})
+
+describe('native Office save failure projection', () => {
+  const state: NativeOfficeSaveFailureState = {
+    phase: 'commit', outerSchemaAccepted: true, innerSchemaAccepted: true,
+    outerCode: null, innerCode: 'invalid_request', receiptPresent: false, receiptStatus: null
+  }
+
+  it('persists only closed save facts and drops workbook, envelope, path, token and ID canaries', async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'analytix-office-save-logger-'))
+    configureLogger({ dir: testDir, enabled: true })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const privateFacts = {
+      path: directCanaries[2], formula: '=PRIVATE_FORMULA_CANARY(A1:A2)', bytes: 'PRIVATE_BYTES_CANARY',
+      envelope: { message: directCanaries.join(' | ') }, token: 'PRIVATE_SELECTION_TOKEN_CANARY',
+      operationId: 'PRIVATE_OPERATION_ID_CANARY'
+    }
+    const expected = { stage: 'controller_save_failure', errorCode: 'save_failed', protectedPresent: false, ...state }
+    const hostile = { ...expected, ...privateFacts, saveFailure: { ...state, ...privateFacts } }
+    logNativeOfficeSaveFailure('save_failed', state)
+    logWarn('native-office', directCanaries.join(' | '), hostile)
+    publicConsoleWarn('native-office', directCanaries.join(' | '), hostile)
+    const detail = JSON.stringify(expected)
+    expect(warn).toHaveBeenCalledExactlyOnceWith(`[analytix] [main] event=main_warn detail=${detail}`)
+    await vi.waitFor(async () => {
+      const content = await managedLogContent()
+      expect(content.split('\n').filter(line => line.includes(`detail=${detail}`))).toHaveLength(2)
+      expect(content).not.toContain('"saveFailure"')
+      for (const canary of [...directCanaries, ...Object.values(privateFacts).filter(value => typeof value === 'string')]) expect(content).not.toContain(canary)
+    })
+  })
+
+  it('retains native, parse, receipt and schema-code evidence without inventing response facts', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const states: NativeOfficeSaveFailureState[] = [
+      { phase: 'replace', outerSchemaAccepted: null, innerSchemaAccepted: null, outerCode: null, innerCode: null, receiptPresent: null, receiptStatus: null },
+      { ...state, phase: 'export', outerSchemaAccepted: false, innerSchemaAccepted: null, innerCode: null, receiptPresent: null },
+      { ...state, outerCode: 'adapter_unavailable', innerSchemaAccepted: null, innerCode: null, receiptPresent: null },
+      { ...state, innerSchemaAccepted: false, innerCode: null, receiptPresent: null },
+      ...(['committed', 'conflict', 'unknown', 'pending'] as const).map(receiptStatus => ({ ...state, phase: 'ack' as const, innerCode: null, receiptPresent: true, receiptStatus })),
+      ...(['invalid_request', 'not_text', 'too_large', 'persistence_failure'] as const).map(innerCode => ({ ...state, innerCode }))
+    ]
+    for (const saveFailure of states) {
+      publicConsoleWarn('native-office', '', { stage: 'controller_save_failure', errorCode: 'unknown', protectedPresent: false, saveFailure })
+      expect(warn).toHaveBeenLastCalledWith(`[analytix] [main] event=main_warn detail=${JSON.stringify({ stage: 'controller_save_failure', errorCode: 'unknown', protectedPresent: false, ...saveFailure })}`)
+    }
+  })
+
+  it('rejects partial, hostile, unknown-code, protected and cross-stage save facts as a whole', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const base = { stage: 'controller_save_failure', errorCode: 'unknown', protectedPresent: false }
+    const invalid = [
+      undefined, null, [], {}, Object.create(state),
+      ...Object.keys(state).map(missing => Object.fromEntries(Object.entries(state).filter(([key]) => key !== missing))),
+      { ...state, phase: directCanaries[0] }, { ...state, outerSchemaAccepted: 'true' }, { ...state, innerSchemaAccepted: 0 },
+      { ...state, outerCode: 'constructor' }, { ...state, innerCode: directCanaries[0] },
+      { ...state, receiptPresent: 'false' }, { ...state, receiptStatus: 'saved' }, { ...state, receiptStatus: 'committed' },
+      Object.defineProperty({ ...state }, 'innerCode', { get() { throw Error(directCanaries[0]) } })
+    ]
+    const details = [
+      ...invalid.map(saveFailure => ({ ...base, saveFailure })), base,
+      { ...base, saveFailure: state, protectedPresent: true },
+      { ...base, saveFailure: state, stage: 'controller_recovery' },
+      { ...base, saveFailure: state, manualBegin: undefined }, { ...base, saveFailure: state, openState: undefined }
+    ]
+    for (const detail of details) expect(() => publicConsoleWarn('native-office', directCanaries[0], detail)).not.toThrow()
+    publicConsoleWarn('main', directCanaries[0], state)
+    for (const call of warn.mock.calls) expect(call).toEqual(['[analytix] [main] event=main_warn'])
+  })
 })
 
 describe('Core native manual-begin phase projection', () => {

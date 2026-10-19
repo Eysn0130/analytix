@@ -60,12 +60,12 @@ describe('bounded workbook manual controls',()=>{
     ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],
     cells:[editableCell]}
   const workbook:NativeOfficeView = {...view,path:'/synthetic/book.xlsx',kind:'xlsx',workbookEditing:{editable:true},selection:cells}
-  async function renderWorkbook(next:NativeOfficeView = workbook,path=next.path) {
+  async function renderWorkbook(next:NativeOfficeView = workbook,path=next.path,props:Partial<Parameters<typeof NativeOfficePanel>[0]>={}) {
     request.mockImplementation(async()=>({ok:true,view:next}))
     await act(async()=>{
       const target={workspace:'/synthetic',path},identity=nativeOfficeTargetKey(target)
       useNativeOfficeStore.setState(state=>({target,view:next,error:null,engineViews:{...state.engineViews,[identity]:next},views:{...state.views,[identity]:next}}))
-      root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'}))
+      root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread',...props}))
     })
   }
   async function fillCell(value:string) {
@@ -100,6 +100,32 @@ describe('bounded workbook manual controls',()=>{
     await clickNamed('查询结果')
     expect(request.mock.calls.filter(([input])=>input.action==='saveStatus')).toEqual([[{action:'saveStatus',objectId:view.objectId}]])
     expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toHaveLength(1)
+  })
+  it.each(['saving','loading','unknown'] as const)('keeps Agent before/after visible and blocks proposal actions and Undo while %s',async phase=>{
+    const proposalId='c'.repeat(48)
+    const scope:NonNullable<NativeOfficeView['scope']>={scopeId:'d'.repeat(48),threadId:'thread',selectionToken:cells.token!,
+      baseRevision:workbook.revision,changeSequence:0,editable:true,parts:[],workbook:{...cells.ranges[0],cells:[editableCell]}}
+    const proposal:NonNullable<NativeOfficeView['proposals']>[number]={proposalId,status:'proposed',parts:[{kind:'literal',text:'2'}],workbook:{kind:'number',value:2}}
+    const review:NonNullable<NativeOfficeView['localReviews']>[number]={proposalId,beforeText:'Sheet1!A1: 1',afterText:'Sheet1!A1: 2'}
+    const ready:NativeOfficeView={...workbook,editing:true,scope,proposals:[proposal],localReviews:[review],canUndo:true}
+    const onSubmitPrompt=vi.fn()
+    await renderWorkbook(ready,ready.path,{onSubmitPrompt})
+    const next:NativeOfficeView={...ready,...(phase==='saving'?{saving:true}:phase==='loading'?{status:'loading' as const}:{error:'unknown' as const})}
+    await act(async()=>useNativeOfficeStore.setState({view:next,error:phase==='unknown'?'unknown':null}))
+    expect(container.querySelector('del[aria-label="修改前"]')?.textContent).toBe(review.beforeText)
+    expect(container.querySelector('ins[aria-label="修改后"]')?.textContent).toBe(review.afterText)
+    for(const label of ['应用修改','拒绝','nativeOfficeRegenerate','撤销修改']) expect(namedButton(label).disabled).toBe(true)
+    await clickNamed('应用修改');await clickNamed('拒绝');await clickNamed('nativeOfficeRegenerate');await clickNamed('撤销修改')
+    expect(request.mock.calls.some(([input])=>['acceptProposal','rejectProposal','undoChange'].includes(input.action))).toBe(false)
+    expect(onSubmitPrompt).not.toHaveBeenCalled()
+    await act(async()=>useNativeOfficeStore.setState({view:{...next,appliedProposals:[proposalId]}}))
+    const pending=container.querySelector('[aria-label="原生修改提案"]')!
+    expect(pending.textContent).toContain('正在更新，结果待确认')
+    expect(pending.textContent).not.toContain('已更新');expect(pending.textContent).not.toContain('修改已处理')
+    expect(pending.querySelector('del')?.textContent).toBe(review.beforeText)
+    await act(async()=>useNativeOfficeStore.setState({view:ready,error:null}))
+    expect(namedButton('应用修改').disabled).toBe(false);expect(namedButton('拒绝').disabled).toBe(false)
+    expect(namedButton('nativeOfficeRegenerate').disabled).toBe(false);expect(namedButton('撤销修改').disabled).toBe(false)
   })
   it('passes the workspace target path into retained drafts and exposes explicit close choices',async()=>{
     await renderWorkbook(workbook,'book.xlsx');await fillCell('2')
