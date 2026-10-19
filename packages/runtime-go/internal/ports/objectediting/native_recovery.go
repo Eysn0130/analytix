@@ -63,6 +63,32 @@ type NativeCommitInput struct {
 	ChangeID string
 }
 
+// Candidate generation reads only Core's durable prepared workbook review and
+// original backup. It neither authorizes a change nor starts a save journal.
+type NativeWorkbookCandidateInput struct {
+	Workspace, Path, ObjectIdentity               string
+	ThreadID, ChangeID, OperationID, BaseRevision string
+}
+
+type NativeWorkbookCandidateContent struct {
+	Encoding   string `json:"encoding"`
+	Kind       string `json:"kind"`
+	ByteLength int    `json:"byteLength"`
+	SHA256     string `json:"sha256"`
+	Data       string `json:"data"`
+}
+
+type NativeWorkbookCandidate struct {
+	ChangeID        string                         `json:"changeId"`
+	SaveOperationID string                         `json:"saveOperationId"`
+	BaseRevision    string                         `json:"baseRevision"`
+	Content         NativeWorkbookCandidateContent `json:"content"`
+}
+
+type NativeWorkbookCandidateFiles interface {
+	BuildNativeWorkbookCandidate(context.Context, NativeWorkbookCandidateInput) (NativeWorkbookCandidate, error)
+}
+
 type NativeUndoInput struct {
 	Workspace      string
 	Path           string
