@@ -9,7 +9,7 @@ import { getProvider } from '../../agent/registry'
 import { dispatchAnalytixRuntimeEvent } from '../../agent/analytix-mapper'
 import { InputBar } from './InputBar'
 import { Dialog } from '../../data-analysis/components/overlay/Dialog'
-import * as capacityEstimates from '../../lib/context-capacity'
+import * as capacityModel from '../../lib/context-capacity'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
 import { normalizeAppSettings, defaultModelProviderSettings, defaultAnalytixRuntimeSettings, normalizeAppBehaviorSettings,
   defaultKeyboardShortcuts, defaultWriteSettings, defaultClawSettings, defaultScheduleSettings, type AppSettingsV1 } from '@shared/app-settings'
@@ -877,7 +877,7 @@ it('opens a selected settled full Review readonly, paginates, closes and reopens
 })
 
 
-it('keeps measured context capacity while missing whole-log accounting supplies no legacy Footer substitute', async () => {
+it('keeps context observations independent while missing whole-log accounting supplies no legacy Footer substitute', async () => {
   const usage: ThreadUsageSnapshot = { inputTokens: 100, outputTokens: 900, totalTokens: 1000,
     reasoningTokens: 0, cachedTokens: 50, cacheMissTokens: 50, cacheHitRate: 0.5,
     costUsd: null, costCny: null, priceConfigured: false, tokenEconomySavingsTokens: 0, turns: 1 }
@@ -886,27 +886,28 @@ it('keeps measured context capacity while missing whole-log accounting supplies 
     root.render(createElement(InputBar, { ...floatingElement().props, contextWindowTokens: 1000, runtimeToolCount: 0, runtimeSkillCount: 0 }))
   })
   const capacity = host.querySelector<HTMLButtonElement>('button.ds-composer-context')!
-  expect(capacity).not.toBeNull(); expect(capacity.getAttribute('aria-label')).toContain('10%')
-  expect(capacity.textContent).toBe('10%')
+  expect(capacity).not.toBeNull()
+  expect(capacity.textContent).toBe(i18n.t('common:contextCapacityChipLabel'))
+  expect(capacity.getAttribute('aria-label')).not.toContain('%')
   const ring = capacity.querySelector('svg')!
   expect(ring.getAttribute('width')).toBe('14')
   expect(ring.getAttribute('height')).toBe('14')
   expect(ring.getAttribute('viewBox')).toBe('0 0 14 14')
   const circles = ring.querySelectorAll('circle')
-  expect(circles).toHaveLength(2)
+  expect(circles).toHaveLength(1)
   for (const circle of circles) {
     expect(circle.getAttribute('r')).toBe('5.5')
     expect(circle.getAttribute('stroke-width')).toBe('2')
   }
   expect(circles[0].getAttribute('stroke')).toBe('var(--dsw-alias-border-l3)')
-  expect(circles[1].getAttribute('stroke')).toBe('var(--dsw-alias-label-tertiary)')
+  expect(circles[0].hasAttribute('stroke-dasharray')).toBe(false)
   const dock=host.querySelector('[data-composer-stats-dock]')!
   expect(dock.contains(capacity)).toBe(true)
   expect(capacity.closest('.ds-composer-toolbar')).toBeNull()
   expect(dock.querySelector('.ds-composer-footer-hint')).toBeNull()
   expect(host.querySelector('.ds-composer-footer-hint')).toBeNull()
   expect(host.querySelector('.ds-composer-footer')).toBeNull()
-  expect(capacity.getAttribute('aria-label')).toBe(i18n.t('common:contextCapacityChipAria', { percent: '10%' }))
+  expect(capacity.getAttribute('aria-label')).toBe(i18n.t('common:contextCapacityChipAria'))
   await act(async () => capacity.click())
   expect(capacity.getAttribute('aria-expanded')).toBe('true')
   expect(host.querySelector('.ds-composer-footer-left')).toBeNull()
@@ -1001,29 +1002,74 @@ describe('real InputBar anchored capacity panel', () => {
     expect(panel()).toBeNull()
   })
 
-  it('composer closure hides unknown capacity immediately and never revives its old panel', async () => {
+  it('keeps unknown window metadata visible without inventing a fallback and closes on a model switch', async () => {
     await act(async () => root.render(floatingElement(false, false, capacityProps)))
     await act(async () => ring().click())
     expect(panel()).not.toBeNull()
     await act(async () => root.render(floatingElement(false, false, { ...capacityProps, contextWindowTokens: undefined })))
-    expect(ring()).toBeNull(); expect(panel()).toBeNull()
-    await act(async () => root.render(floatingElement(false, false, capacityProps)))
-    expect(ring()).not.toBeNull(); expect(panel()).toBeNull()
-    await act(async () => ring().click())
+    expect(ring()).not.toBeNull()
+    expect(panel()!.querySelector('[data-context-reading="selected-window"]')!.textContent)
+      .toContain(i18n.t('common:contextCapacityUnknown'))
+    expect(panel()!.textContent).not.toContain('%')
     await act(async () => root.render(floatingElement(false, false, { ...capacityProps, composerModel: 'another-model' })))
     expect(panel()).toBeNull()
   })
-  it('composer closure drops the previous busy owner measured numerator', async () => {
+
+  it.each([false, true])('separates old sample identity from a new model/provider window while busy=%s', async busy => {
     await act(async () => {
-      useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: { ...usage, inputTokens: 5000, totalTokens: 5900 } } })
-      root.render(floatingElement(false, false, { ...capacityProps, contextWindowTokens: 10000 }))
+      useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: {
+        ...usage, inputTokens: 5000, totalTokens: 5900, model: 'old-model', providerId: 'old-provider'
+      } } })
+      root.render(floatingElement(busy, false, { ...capacityProps, composerModel: 'old-model', composerProviderId: 'old-provider' }))
     })
-    expect(ring().textContent).toBe('50%')
+    await act(async () => ring().click())
+    expect(panel()!.querySelector('[data-context-reading="last-request"]')!.textContent).toContain('5.0k tokens')
+    for (const selection of [
+      { composerModel: 'new-model', composerProviderId: 'old-provider', contextWindowTokens: 20000 },
+      { composerModel: 'new-model', composerProviderId: 'new-provider', contextWindowTokens: 40000 }
+    ]) {
+      await act(async () => root.render(floatingElement(busy, false, { ...capacityProps, ...selection })))
+      expect(panel()).toBeNull()
+      await act(async () => ring().click())
+      const selected = panel()!.querySelector('[data-context-reading="selected-window"]')!
+      const sample = panel()!.querySelector('[data-context-reading="last-request"]')!
+      expect(selected.textContent).toContain(selection.composerProviderId + ' · ' + selection.composerModel)
+      expect(selected.textContent).toContain(selection.contextWindowTokens === 20000 ? '20.0k tokens' : '40.0k tokens')
+      expect(sample.textContent).toContain('old-provider · old-model')
+      expect(sample.textContent).toContain('5.0k tokens')
+      expect(panel()!.textContent).not.toContain('%')
+      expect(ring().textContent).toBe(i18n.t('common:contextCapacityChipLabel'))
+    }
+  })
+
+  it('drops another thread sample without fabricating zero occupancy while busy', async () => {
+    await act(async () => {
+      useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: { ...usage, inputTokens: 5000 } } })
+      root.render(floatingElement(false, false, capacityProps))
+    })
     await act(async () => {
       useChatStore.setState({ activeThreadId: 'another-busy-thread', blocks: [] })
-      root.render(floatingElement(true, false, { ...capacityProps, contextWindowTokens: 10000 }))
+      root.render(floatingElement(true, false, capacityProps))
     })
-    expect(ring().textContent).not.toBe('50%')
+    await act(async () => ring().click())
+    const sample = panel()!.querySelector('[data-context-reading="last-request"]')!
+    expect(sample.textContent).toContain(i18n.t('common:contextCapacityUnknown'))
+    expect(sample.textContent).not.toContain('5.0k')
+    expect(sample.textContent).not.toContain('0 tokens')
+    expect(panel()!.textContent).not.toContain('%')
+  })
+
+  it('keeps missing sample identity and defaulted zero unknown in the actual composer', async () => {
+    await act(async () => {
+      useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: { ...usage, inputTokens: 0 } } })
+      root.render(floatingElement(false, false, { ...capacityProps, composerModel: 'selected-model', composerProviderId: 'selected-provider' }))
+    })
+    await act(async () => ring().click())
+    const sample = panel()!.querySelector('[data-context-reading="last-request"]')!
+    expect(sample.textContent).toContain(i18n.t('common:contextCapacityUnknown'))
+    expect(sample.textContent).not.toContain('selected-model')
+    expect(sample.textContent).not.toContain('selected-provider')
+    expect(sample.textContent).not.toContain('0 tokens')
   })
   it('retires the panel when recording replaces the real trigger and does not reopen when it returns', async () => {
     // Replace only the voice I/O leaf after retiring its real hook instance.
@@ -1043,20 +1089,24 @@ describe('real InputBar anchored capacity panel', () => {
     expect(ring()).not.toBeNull(); expect(panel()).toBeNull()
   })
 
-  it('does not estimate streaming blocks while closed and resumes estimation only while open', async () => {
+  it('does not derive context composition from streaming blocks or catalog counts while closed or open', async () => {
     await act(async () => {
       useChatStore.setState({ lastTurnUsage: { threadId: 'menu-fixture', snapshot: usage }, busy: false })
-      root.render(floatingElement(false, false, capacityProps))
+      root.render(floatingElement(true, false, capacityProps))
     })
-    await act(async () => root.render(floatingElement(true, false, capacityProps)))
-    const estimate = vi.spyOn(capacityEstimates, 'estimateBlockTokens')
+    const build = vi.spyOn(capacityModel, 'buildContextCapacity')
     await act(async () => useChatStore.setState({ blocks: [{ kind: 'assistant', id: 'capacity-a', text: 'Synthetic first delta' }] }))
-    expect(estimate).not.toHaveBeenCalled()
+    expect(build).not.toHaveBeenCalled()
     await act(async () => ring().click())
-    expect(estimate).toHaveBeenCalled()
-    await key(ring(), 'Escape'); estimate.mockClear()
-    await act(async () => useChatStore.setState({ blocks: [{ kind: 'assistant', id: 'capacity-b', text: 'Synthetic later delta' }] }))
-    expect(estimate).not.toHaveBeenCalled()
+    build.mockClear()
+    await act(async () => {
+      useChatStore.setState({ blocks: [{ kind: 'assistant', id: 'capacity-b', text: 'Synthetic later delta' }] })
+      root.render(floatingElement(true, false, { ...capacityProps, runtimeToolCount: 1000, runtimeSkillCount: 1000 }))
+    })
+    expect(build).not.toHaveBeenCalled()
+    expect([...panel()!.querySelectorAll('[data-context-category]')].every(row =>
+      row.textContent?.includes(i18n.t('common:contextCapacityUnmeasured')))).toBe(true)
+    expect(panel()!.textContent).not.toContain('%')
   })
 })
 
@@ -1096,8 +1146,8 @@ it('lays out whole-session activity, usage and capacity as independent dock entr
   expect(host.querySelector('.ds-composer-footer')).toBeNull()
   expect(dock.querySelector('.ds-composer-footer-hint')).toBeNull()
   await act(async()=>root.render(createElement(InputBar,{...floatingElement().props,key:'stats-only'})))
-  expect([...host.querySelector('[data-composer-stats-dock]')!.children].map(entry=>entry.getAttribute('data-composer-stat'))).toEqual(['activity','usage'])
-  expect(host.querySelector('button.ds-composer-context')).toBeNull()
+  expect([...host.querySelector('[data-composer-stats-dock]')!.children].map(entry=>entry.getAttribute('data-composer-stat'))).toEqual(['activity','usage',null])
+  expect(host.querySelector('button.ds-composer-context')).not.toBeNull()
   await act(async()=>root.render(floatingElement(false,false,{contextWindowTokens:1000,presentationPhase:'hero'})))
   expect(host.querySelector('[data-composer-stats-dock] button.ds-composer-context')).not.toBeNull()
   expect(host.querySelector('[data-composer-stat]')).toBeNull()

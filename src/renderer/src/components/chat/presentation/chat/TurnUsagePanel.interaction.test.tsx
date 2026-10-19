@@ -532,52 +532,61 @@ describe('whole-session confirmed-zero billing visibility',()=>{
 })
 
 
-describe('context capacity body preserves the actual five-category model', () => {
-  function capacity(usedRatio = 0.5, estimated = true, hasMeasuredTotal = true): ContextCapacity {
-    return { windowTokens: 10000, usedTokens: usedRatio * 10000, freeTokens: (1 - usedRatio) * 10000,
-      usedRatio, freeRatio: 1 - usedRatio, estimated, hasMeasuredTotal,
-      categories: ['tools', 'system', 'skills', 'messages', 'other'].map(key => ({
-        key: key as ContextCapacity['categories'][number]['key'], tokens: usedRatio * 2000, ratio: usedRatio / 5
-      })) }
+describe('context capacity separates historical samples and selected metadata', () => {
+  function capacity(): ContextCapacity {
+    return { windowTokens: 1000, model: 'selected-model', providerId: 'selected-provider',
+      lastRequest: { inputTokens: 5000, model: 'sample-model', providerId: 'sample-provider', toolDefinitionTokens: null } }
   }
 
-  it('retains all five categories and free, with mapped segment and legend colors', async () => {
+  it('renders three compact unmeasured categories without a fabricated bar, shares or free row', async () => {
     await render(createElement(ContextCapacityPopover, { capacity: capacity() }))
-    const bar = host.querySelector('[role="img"]')!
-    const colors = ['rgb(167, 139, 250)', 'rgb(173, 178, 184)', 'rgb(29, 158, 117)', 'rgb(77, 147, 248)', 'rgb(216, 145, 13)']
-    expect([...bar.children].map(element => (element as HTMLElement).style.background)).toEqual(colors)
-    const rows = [...host.querySelectorAll<HTMLElement>('[class*="capacityRow"]')]
-    expect(rows).toHaveLength(6)
-    for (const [index, key] of ['tools', 'system', 'skills', 'messages', 'other'].entries()) {
+    const rows = [...host.querySelectorAll<HTMLElement>('[data-context-category]')]
+    expect(rows.map(row => row.dataset.contextCategory)).toEqual(['system', 'tools', 'messages'])
+    const colors = ['rgb(173, 178, 184)', 'rgb(167, 139, 250)', 'rgb(77, 147, 248)']
+    for (const [index, key] of ['system', 'tools', 'messages'].entries()) {
       expect(rows[index]!.textContent).toContain(t(`contextCapacityCat_${key}`))
+      expect(rows[index]!.textContent).toContain(t('contextCapacityUnmeasured'))
       expect((rows[index]!.firstElementChild as HTMLElement).style.background).toBe(colors[index])
-      expect(rows[index]!.textContent).toContain('10%')
     }
-    expect(rows[5]!.textContent).toContain(t('contextCapacityCat_free'))
-    expect(rows[5]!.textContent).toContain('50%')
-    expect(host.textContent).toContain(t('contextCapacityEstimatedBreakdown'))
+    expect(host.querySelector('[role="img"]')).toBeNull()
+    expect(host.textContent).not.toContain('%')
+    expect(host.textContent).toContain(t('contextCapacitySampleNote'))
   })
 
-  it.each([
-    { ratio: 0.74, key: 'contextCapacityShareNote' },
-    { ratio: 0.75, key: 'contextCapacityNearLimit' },
-    { ratio: 0.9, key: 'contextCapacityOverLimit' }
-  ])('retains the real $ratio status and threshold', async ({ ratio, key }) => {
-    await render(createElement(ContextCapacityPopover, { capacity: capacity(ratio), thresholdRatio: 0.9 }))
-    expect(host.textContent).toContain(t(key))
-    expect(host.textContent).toContain(t('contextCapacityThresholdLabel', { percent: '90%' }))
+  it('labels sample and selected window separately with their original identities', async () => {
+    await render(createElement(ContextCapacityPopover, { capacity: capacity() }))
+    const selected = host.querySelector('[data-context-reading="selected-window"]')!
+    const sample = host.querySelector('[data-context-reading="last-request"]')!
+    expect(selected.textContent).toContain(t('contextCapacitySelectedWindow'))
+    expect(selected.textContent).toContain('1.0k tokens')
+    expect(selected.textContent).toContain('selected-provider · selected-model')
+    expect(sample.textContent).toContain(t('contextCapacityLastInput'))
+    expect(sample.textContent).toContain('5.0k tokens')
+    expect(sample.textContent).toContain('sample-provider · sample-model')
+    expect(sample.textContent).not.toContain('selected-provider')
   })
 
-  it('keeps zero categories in the legend and distinguishes measured/estimated totals', async () => {
-    const value = capacity(0.5, true, false)
-    value.categories[0] = { key: 'tools', tokens: 0, ratio: 0 }
-    value.categories[3] = { key: 'messages', tokens: 2000, ratio: 0.2 }
+  it('shows unknown readings and identities without substituting zero or current model metadata', async () => {
+    await render(createElement(ContextCapacityPopover, { capacity: { windowTokens: null,
+      model: 'current-model', lastRequest: { inputTokens: null, toolDefinitionTokens: null } } }))
+    const selected = host.querySelector('[data-context-reading="selected-window"]')!
+    const sample = host.querySelector('[data-context-reading="last-request"]')!
+    expect(selected.textContent).toContain(t('contextCapacityUnknown'))
+    expect(sample.textContent).toContain(t('contextCapacityUnknown'))
+    expect(sample.textContent).not.toContain('current-model')
+    expect(host.textContent).not.toContain('0 tokens')
+    expect(host.textContent).not.toContain('%')
+    expect(host.querySelector('[data-context-reading="tool-estimate"]')).toBeNull()
+  })
+
+  it('shows an attributed tool-definition estimate separately and leaves every category unmeasured', async () => {
+    const value = capacity()
+    value.lastRequest!.toolDefinitionTokens = 2000
     await render(createElement(ContextCapacityPopover, { capacity: value }))
-    expect(host.querySelector('[role="img"]')!.children).toHaveLength(4)
-    expect(host.querySelectorAll('[class*="capacityRow"]')).toHaveLength(6)
-    expect(host.textContent).toContain(t('contextCapacityEstimatedAll'))
-    await render(createElement(ContextCapacityPopover, { capacity: { ...value, estimated: false, hasMeasuredTotal: true } }))
-    expect(host.textContent).not.toContain(t('contextCapacityEstimatedAll'))
-    expect(host.textContent).not.toContain(t('contextCapacityEstimatedBreakdown'))
+    const estimate = host.querySelector('[data-context-reading="tool-estimate"]')!
+    expect(estimate.textContent).toBe(t('contextCapacityLastToolEstimate', { tokens: '2.0k' }))
+    expect([...host.querySelectorAll('[data-context-category]')].every(row =>
+      row.textContent?.includes(t('contextCapacityUnmeasured')))).toBe(true)
+    expect(host.textContent).not.toContain('%')
   })
 })

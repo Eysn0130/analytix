@@ -101,11 +101,8 @@ import {
   type SlashCommandId
 } from './floating-composer-commands'
 export { buildResearchPrompt, parseBtwCommand, parseCompactCommand, parseGoalCommand, parseNewCommand, parseResearchCommand, parseReviewCommand } from './floating-composer-commands'
-import {
-  formatPercent,
-  useThreadUsageState
-} from '../../hooks/use-thread-usage'
-import { buildContextCapacity, estimateBlockTokens } from '../../lib/context-capacity'
+import { useThreadUsageState } from '../../hooks/use-thread-usage'
+import { buildContextCapacity } from '../../lib/context-capacity'
 import { ContextCapacityPopover } from './ContextCapacityPopover'
 import { GitBranchPicker } from './GitBranchPicker'
 import { WorkspaceProjectPicker } from './WorkspaceProjectPicker'
@@ -146,7 +143,6 @@ export type { ComposerExecutionSettings } from './FloatingComposerExecutionPicke
 const CONTEXT_CAPACITY_RING_SIZE = 14
 const CONTEXT_CAPACITY_RING_STROKE = 2
 const CONTEXT_CAPACITY_RING_RADIUS = 5.5
-const CONTEXT_CAPACITY_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_CAPACITY_RING_RADIUS
 
 type Props = {
   gateOverride?: { threadId?: string | null; block: Extract<ChatBlock, { kind: 'approval' | 'user_input' }> | null; onOpenOwnerThread?: (requestId: string) => void }
@@ -238,11 +234,10 @@ type Props = {
    * Hide the `/btw` slash entry (e.g. inside a side conversation).
    */
   hideBtwCommand?: boolean
-  /** Active model's context window, for the 上下文容量 gauge. */
+  /** Selected model's window metadata, independent of historical input samples. */
   contextWindowTokens?: number
-  /** Tool definitions advertised to the model (built-ins are added on top). */
+  /** Catalog metadata; these counts are not context-token measurements. */
   runtimeToolCount?: number
-  /** Skills in the always-injected catalog. */
   runtimeSkillCount?: number
 }
 
@@ -300,7 +295,6 @@ type ComposerSkillMentionChip = {
   description: string
 }
 
-const EMPTY_CONTEXT_BLOCKS: ChatBlock[] = []
 const EMPTY_MODEL_GROUPS: ModelProviderModelGroup[] = []
 const EMPTY_ATTACHMENTS: AttachmentReference[] = []
 const EMPTY_FILE_REFERENCES: ComposerFileReference[] = []
@@ -689,9 +683,7 @@ export function InputBar({
   reviewChangesDisabled = false,
   onBtwCommand,
   hideBtwCommand = false,
-  contextWindowTokens,
-  runtimeToolCount,
-  runtimeSkillCount
+  contextWindowTokens
 }: Props): ReactElement {
   const { t, i18n } = useTranslation('common')
   const route = useChatStore((s) => s.route)
@@ -867,76 +859,22 @@ export function InputBar({
   const composerMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const composerMenuPanelRef = useRef<HTMLDivElement | null>(null)
   const goalPanelRef = useRef<HTMLDivElement | null>(null)
-  const messageTokenCacheRef = useRef<WeakMap<object, number>>(new WeakMap())
   const contextOwnerKey = JSON.stringify([activeThreadId, composerProviderId ?? '', composerModel])
-  const effectiveContextWindow = typeof contextWindowTokens === 'number' && Number.isFinite(contextWindowTokens)
-    && contextWindowTokens > 0 ? contextWindowTokens : 0
-  const effectiveToolCount = runtimeToolCount ?? 0
-  const effectiveSkillCount = runtimeSkillCount ?? 0
   const canShowContextCapacity =
-    !compact && runtimeReady && route === 'chat' && Boolean(activeThreadId) && effectiveContextWindow > 0
-  // buildContextCapacity always returns a value when canShowContextCapacity;
-  // recording replaces the trigger, so it must also retire its portaled panel.
+    !compact && runtimeReady && route === 'chat' && Boolean(activeThreadId)
+  // Recording replaces the trigger, so it must also retire its portaled panel.
   const capacityTriggerVisible = canShowContextCapacity && dictation.status !== 'recording'
   const capacityPanel = useAnchoredPanel<HTMLDivElement>({
     enabled: capacityTriggerVisible, ownerKey: contextOwnerKey
   })
   const contextCapacityOpen = capacityPanel.open
-  // Freeze the measured total for the duration of a turn: the runtime can emit
-  // several `usage` events while streaming, and tracking them live makes the
-  // chip jitter (visible flicker). Adopt the latest value only while idle.
-  const liveMeasuredTotal =
-    lastTurnUsage && lastTurnUsage.threadId === activeThreadId
-      ? lastTurnUsage.snapshot.inputTokens
-      : null
-  const measuredTotalRef = useRef<{ owner: string; value: number | null }>({ owner: contextOwnerKey, value: null })
-  if (measuredTotalRef.current.owner !== contextOwnerKey) measuredTotalRef.current = { owner: contextOwnerKey, value: null }
-  if (!busy) measuredTotalRef.current.value = liveMeasuredTotal
-  const measuredContextTotal = busy ? measuredTotalRef.current.value : liveMeasuredTotal
-  // The message estimate only feeds the per-category split (popover) or the
-  // no-measured-total fallback. Never subscribe to `blocks` while streaming with
-  // the popover closed — blocks churn on every delta and re-render the whole
-  // composer. Freeze the last estimate in a ref instead.
-  const needMessageEstimate =
-    canShowContextCapacity && (contextCapacityOpen || measuredContextTotal == null)
-  const subscribeContextBlocks = needMessageEstimate && (contextCapacityOpen || !busy)
-  const contextBlocks = useChatStore((s) => (subscribeContextBlocks ? s.blocks : EMPTY_CONTEXT_BLOCKS))
-  const conversationTokensRef = useRef({ owner: contextOwnerKey, value: 0 })
-  const conversationTokens = useMemo(() => {
-    if (conversationTokensRef.current.owner !== contextOwnerKey) conversationTokensRef.current = { owner: contextOwnerKey, value: 0 }
-    if (!subscribeContextBlocks) return conversationTokensRef.current.value
-    // Cache per block: block identity is preserved for unchanged history across
-    // streaming updates, so only the block that changed is re-estimated.
-    const cache = messageTokenCacheRef.current
-    let sum = 0
-    for (const block of contextBlocks) {
-      let cached = cache.get(block)
-      if (cached === undefined) {
-        cached = estimateBlockTokens(block)
-        cache.set(block, cached)
-      }
-      sum += cached
-    }
-    conversationTokensRef.current.value = sum
-    return sum
-  }, [subscribeContextBlocks, contextBlocks, contextOwnerKey])
-  const contextCapacity = useMemo(() => {
-    if (!canShowContextCapacity) return null
-    return buildContextCapacity({
-      windowTokens: effectiveContextWindow,
-      lastTurnInputTokens: measuredContextTotal,
-      messageTokens: conversationTokens,
-      toolCount: effectiveToolCount,
-      skillCount: effectiveSkillCount
-    })
-  }, [
-    canShowContextCapacity,
-    effectiveContextWindow,
-    measuredContextTotal,
-    conversationTokens,
-    effectiveToolCount,
-    effectiveSkillCount
-  ])
+  const contextCapacity = useMemo(() => buildContextCapacity({
+    windowTokens: contextWindowTokens,
+    model: composerModel,
+    providerId: composerProviderId,
+    threadId: activeThreadId,
+    lastTurnUsage
+  }), [contextWindowTokens, composerModel, composerProviderId, activeThreadId, lastTurnUsage])
   const goalRuntimeStartedAtRef = useRef<number | null>(null)
   const placeholder = !runtimeReady
     ? t('runtimeActionNeedsConnection')
@@ -2782,7 +2720,7 @@ export function InputBar({
                     ref={capacityPanel.triggerRef}
                     onClick={() => capacityPanel.setOpen(!contextCapacityOpen)}
                     className={`${dockCss.capacityTrigger} ds-composer-context ds-no-drag`}
-                    aria-label={t('contextCapacityChipAria', { percent: formatPercent(contextCapacity.usedRatio) })}
+                    aria-label={t('contextCapacityChipAria')}
                     aria-haspopup="dialog"
                     aria-expanded={contextCapacityOpen}
                     aria-controls={contextCapacityOpen ? capacityPanel.id : undefined}
@@ -2803,22 +2741,8 @@ export function InputBar({
                         stroke="var(--dsw-alias-border-l3)"
                         strokeWidth={CONTEXT_CAPACITY_RING_STROKE}
                       />
-                      <circle
-                        cx={CONTEXT_CAPACITY_RING_SIZE / 2}
-                        cy={CONTEXT_CAPACITY_RING_SIZE / 2}
-                        r={CONTEXT_CAPACITY_RING_RADIUS}
-                        fill="none"
-                        stroke="var(--dsw-alias-label-tertiary)"
-                        strokeWidth={CONTEXT_CAPACITY_RING_STROKE}
-                        strokeLinecap="round"
-                        strokeDasharray={CONTEXT_CAPACITY_RING_CIRCUMFERENCE}
-                        strokeDashoffset={
-                          CONTEXT_CAPACITY_RING_CIRCUMFERENCE *
-                          (1 - Math.min(1, Math.max(0, contextCapacity.usedRatio)))
-                        }
-                      />
                     </svg>
-                    <span>{formatPercent(contextCapacity.usedRatio)}</span>
+                    <span>{t('contextCapacityChipLabel')}</span>
                   </button>
                   {contextCapacityOpen ? createPortal(
                     <div id={capacityPanel.id} ref={capacityPanel.panelRef}
