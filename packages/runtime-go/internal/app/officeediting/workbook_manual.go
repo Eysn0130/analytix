@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	office "analytix.local/runtime-go/internal/domain/officegeneration"
@@ -13,9 +14,38 @@ import (
 )
 
 type nativeWorkbookManualService interface {
+	nativeWorkbookCandidateService
 	NativeWorkbookEditing(context.Context, string, string) error
 	ValidateNativeWorkbookManual(context.Context, string, string, office.WorkbookSelection, office.WorkbookWriteTarget, office.WorkbookManualEdit) (*office.WorkbookReview, error)
 	PrepareNativeWorkbookManual(context.Context, string, fileport.NativeWorkbookManualDraft) (fileport.NativeChangeStatus, error)
+}
+
+type nativeWorkbookCandidateService interface {
+	BuildNativeWorkbookCandidate(context.Context, string, string, string, string, string) (fileport.NativeWorkbookCandidate, error)
+}
+
+// Both typed entry points use the same durable-record builder. Candidate bytes
+// stay on the protected-local response lane, outside proposals and model reads.
+func (a *Adapter) preparedWorkbookCandidate(ctx context.Context, session, thread, change, operation, base string) (fileport.NativeWorkbookCandidate, error) {
+	service, ok := a.service.(nativeWorkbookCandidateService)
+	if a.kind != "xlsx" || !ok {
+		return fileport.NativeWorkbookCandidate{}, ErrUnavailable
+	}
+	if !revisionPattern.MatchString(change) || !revisionPattern.MatchString(base) || operation != "native_save_"+change {
+		return fileport.NativeWorkbookCandidate{}, fileport.ErrOperationMismatch
+	}
+	candidate, err := service.BuildNativeWorkbookCandidate(ctx, session, thread, change, operation, base)
+	if err != nil {
+		return fileport.NativeWorkbookCandidate{}, err
+	}
+	if candidate.ChangeID != change || candidate.SaveOperationID != operation || candidate.BaseRevision != base {
+		return fileport.NativeWorkbookCandidate{}, fileport.ErrOperationMismatch
+	}
+	content := candidate.Content
+	if _, err = a.nativeContent(map[string]any{"encoding": content.Encoding, "kind": content.Kind, "byteLength": json.Number(strconv.Itoa(content.ByteLength)), "sha256": content.SHA256, "data": content.Data}); err != nil {
+		return fileport.NativeWorkbookCandidate{}, err
+	}
+	return candidate, nil
 }
 
 // Both operations are protected-local only. Planning uses Core's bounded parser;
@@ -121,5 +151,12 @@ func (a *Adapter) invokeWorkbookManual(ctx context.Context, call adapterport.Cal
 		return fail(fileport.ErrConflict)
 	}
 	a.invalidateSelection(id)
-	return output(map[string]any{"ok": true, "workbookManual": map[string]any{"version": 3, "origin": "manual", "changeId": change, "baseRevision": base, "saveOperationId": prepared.SaveOperationID, "undoOperationId": prepared.UndoOperationID, "workbook": prepared.Workbook}})
+	candidate, err := a.preparedWorkbookCandidate(ctx, id, thread, change, prepared.SaveOperationID, base)
+	if err != nil {
+		// Preparation already owns a durable pending record and original backup.
+		// Keep its lease; only the same operation or explicit cancellation may
+		// settle it. A build failure never falls back to native export.
+		return failure(err)
+	}
+	return output(map[string]any{"ok": true, "workbookManual": map[string]any{"version": 3, "origin": "manual", "changeId": change, "baseRevision": base, "saveOperationId": prepared.SaveOperationID, "undoOperationId": prepared.UndoOperationID, "workbook": prepared.Workbook, "candidate": candidate}})
 }

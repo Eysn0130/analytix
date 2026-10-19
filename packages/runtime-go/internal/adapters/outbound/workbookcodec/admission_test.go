@@ -642,6 +642,10 @@ func TestNativeEditingNativeExportWithExplicitCharsetSourcePreservesWorkbook(t *
 	if err := VerifyPatchedPackage(ctx, original, reordered, review); err != nil {
 		t.Fatal("equivalent unused built-in styles were tied to fixed XF indexes", err)
 	}
+	falseArrayFlag := admissionNativeReplace(t, candidate, "xl/worksheets/sheet1.xml", `aca="false"`, `aca="0"`)
+	if err := VerifyPatchedPackage(ctx, original, falseArrayFlag, review); err != nil {
+		t.Fatal("equivalent numeric false array flag rejected", err)
+	}
 }
 
 func TestNativeEditingMeasuredExportCanBeNextCodecInput(t *testing.T) {
@@ -758,6 +762,43 @@ func TestNativeEditingVerifierPreservesEffectiveRowHeight(t *testing.T) {
 	}
 }
 
+func TestNativeEditingVerifierPreservesNormalizedCustomHeightFlags(t *testing.T) {
+	ctx := context.Background()
+	original, candidate := admissionNativeExportFixtures(t)
+	original = admissionNativeExplicitCharsetSource(t, original)
+	review := admissionNativeManualReview(t)
+	withSheetFlag := func(body []byte, value string) []byte {
+		return admissionNativeReplace(t, body, "xl/worksheets/sheet1.xml", "<sheetFormatPr ", `<sheetFormatPr customHeight="`+value+`" `)
+	}
+	numericFalse := scopeRewrite(t, withSheetFlag(candidate, "0"), "xl/worksheets/sheet1.xml", func(s string) string {
+		return strings.ReplaceAll(s, `customHeight="false"`, `customHeight="0"`)
+	})
+	if err := VerifyPatchedPackage(ctx, original, numericFalse, review); err != nil {
+		t.Fatal("omitted and explicit false custom-height flags differ", err)
+	}
+	beforeTrue := admissionNativeReplace(t, withSheetFlag(original, "true"), "xl/worksheets/sheet1.xml", `<row r="1">`, `<row r="1" customHeight="true">`)
+	afterTrue := admissionNativeReplace(t, withSheetFlag(candidate, "1"), "xl/worksheets/sheet1.xml", `customHeight="false"`, `customHeight="1"`)
+	if err := VerifyPatchedPackage(ctx, beforeTrue, afterTrue, review); err != nil {
+		t.Fatal("equivalent true custom-height flags differ", err)
+	}
+	for name, body := range map[string][]byte{
+		"sheet_flag": withSheetFlag(candidate, "true"),
+		"row_flag":   admissionNativeReplace(t, candidate, "xl/worksheets/sheet1.xml", `customHeight="false"`, `customHeight="true"`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateNativeEditingPackage(ctx, body); err != nil {
+				t.Fatal("custom-height fixture must reach the preservation check", err)
+			}
+			if VerifyPatchedPackage(ctx, original, body, review) == nil {
+				t.Fatal("typed edit changed a custom-height flag")
+			}
+		})
+	}
+	if err := ValidateNativeEditingPackage(ctx, withSheetFlag(candidate, "invalid")); !errors.Is(err, ErrUnsupportedWorkbook) {
+		t.Fatal("invalid custom-height boolean admitted", err)
+	}
+}
+
 func TestNativeEditingMeasuredNativeExportPassiveFeaturesStayBounded(t *testing.T) {
 	ctx := context.Background()
 	original, candidate := admissionNativeExportFixtures(t)
@@ -774,7 +815,7 @@ func TestNativeEditingMeasuredNativeExportPassiveFeaturesStayBounded(t *testing.
 		"duplicate_extension":               {"xl/workbook.xml", "</extLst>", `<ext xmlns:loext="http://schemas.libreoffice.org/" uri="{7626C862-2A13-11E5-B345-FEFF819CDC9F}"><loext:extCalcPr stringRefSyntax="CalcA1ExcelA1"/></ext></extLst>`},
 		"unknown_extension_child":           {"xl/workbook.xml", `<loext:extCalcPr stringRefSyntax="CalcA1ExcelA1"/>`, `<loext:extCalcPr stringRefSyntax="CalcA1ExcelA1"><loext:feature/></loext:extCalcPr>`},
 		"always_calculate_array":            {"xl/worksheets/sheet1.xml", `aca="false"`, `aca="true"`},
-		"nonprofile_array_flag":             {"xl/worksheets/sheet1.xml", `aca="false"`, `aca="0"`},
+		"nonprofile_array_flag":             {"xl/worksheets/sheet1.xml", `aca="false"`, `aca="invalid"`},
 		"unsupported_reference_formula":     {"xl/worksheets/sheet1.xml", "SUM(A1:B1)", `INDIRECT("A1")`},
 		"string_reference_formula":          {"xl/worksheets/sheet1.xml", "SUM(A1:B1)", `COUNTIF("A1",">0")`},
 		"dynamic_reference_formula":         {"xl/worksheets/sheet1.xml", "SUM(A1:B1)", "OFFSET(A1,0,0)"},
@@ -819,13 +860,15 @@ func TestNativeEditingNativeExportWithExplicitCharsetSourceRejectsChanges(t *tes
 	original = admissionNativeExplicitCharsetSource(t, original)
 	review := admissionNativeManualReview(t)
 	for name, change := range map[string]struct{ part, before, after string }{
-		"outside_number":       {"xl/worksheets/sheet1.xml", `<c r="B1" s="0" t="n"><v>7</v>`, `<c r="B1" s="0" t="n"><v>8</v>`},
-		"outside_formula":      {"xl/worksheets/sheet1.xml", "SUM(A1:B1)", "SUM(A1:B2)"},
-		"direct_font_name":     {"xl/styles.xml", `<name val="Noto Sans"/>`, `<name val="Different Font"/>`},
-		"direct_font_size":     {"xl/styles.xml", `<sz val="10"/>`, `<sz val="12"/>`},
-		"direct_font_charset":  {"xl/styles.xml", `<charset val="1"/>`, `<charset val="2"/>`},
-		"removed_font_charset": {"xl/styles.xml", `<charset val="1"/>`, ""},
-		"number_format":        {"xl/styles.xml", `numFmtId="164" formatCode="General"`, `numFmtId="164" formatCode="0.00"`},
+		"outside_number":              {"xl/worksheets/sheet1.xml", `<c r="B1" s="0" t="n"><v>7</v>`, `<c r="B1" s="0" t="n"><v>8</v>`},
+		"outside_formula":             {"xl/worksheets/sheet1.xml", "SUM(A1:B1)", "SUM(A1:B2)"},
+		"direct_font_name":            {"xl/styles.xml", `<name val="Noto Sans"/>`, `<name val="Different Font"/>`},
+		"direct_font_size":            {"xl/styles.xml", `<sz val="10"/>`, `<sz val="12"/>`},
+		"direct_numeric_font_family":  {"xl/styles.xml", `<family val="2"/>`, `<family val="5"/>`},
+		"removed_numeric_font_family": {"xl/styles.xml", `<family val="2"/>`, ""},
+		"direct_font_charset":         {"xl/styles.xml", `<charset val="1"/>`, `<charset val="2"/>`},
+		"removed_font_charset":        {"xl/styles.xml", `<charset val="1"/>`, ""},
+		"number_format":               {"xl/styles.xml", `numFmtId="164" formatCode="General"`, `numFmtId="164" formatCode="0.00"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			bad := admissionNativeReplace(t, candidate, change.part, change.before, change.after)

@@ -70,6 +70,32 @@ func (s *Service) CommitNativeChange(ctx context.Context, id, thread, change, op
 	return s.verifyCurrentReceipt(ctx, current, receipt)
 }
 
+// BuildNativeWorkbookCandidate is an internal prepared-change operation. The
+// session supplies all file authority; no caller can substitute a path/review.
+func (s *Service) BuildNativeWorkbookCandidate(ctx context.Context, id, thread, change, operation, baseRevision string) (fileport.NativeWorkbookCandidate, error) {
+	if s == nil {
+		return fileport.NativeWorkbookCandidate{}, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return fileport.NativeWorkbookCandidate{}, err
+	}
+	files, ok := s.files.(fileport.NativeWorkbookCandidateFiles)
+	if !ok {
+		return fileport.NativeWorkbookCandidate{}, ErrUnavailable
+	}
+	result, err := files.BuildNativeWorkbookCandidate(ctx, fileport.NativeWorkbookCandidateInput{
+		Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID,
+		ThreadID: thread, ChangeID: change, OperationID: operation, BaseRevision: baseRevision,
+	})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return fileport.NativeWorkbookCandidate{}, ErrUnavailable
+	}
+	return result, err
+}
+
 func (s *Service) UndoNativeChange(ctx context.Context, id, thread, change, baseRevision string) (fileport.Receipt, error) {
 	if s == nil {
 		return fileport.Receipt{}, ErrUnavailable

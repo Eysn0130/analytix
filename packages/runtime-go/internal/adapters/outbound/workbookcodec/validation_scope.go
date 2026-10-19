@@ -396,7 +396,9 @@ func workbookAdmissionAttributeUnsupported(p, name, value string) bool {
 	case p == "worksheet/sheetData/row/c/f" && name == "t":
 		return value != "normal"
 	case p == "worksheet/sheetData/row/c/f" && name == "aca":
-		return value != "false"
+		return value != "false" && value != "0"
+	case (p == "worksheet/sheetFormatPr" || p == "worksheet/sheetData/row") && name == "customHeight":
+		return value != "false" && value != "0" && value != "true" && value != "1"
 	case p == "styleSheet/cellStyles" && name == "count":
 		return value != "1" && value != "6"
 	case p == "styleSheet/cellStyles/cellStyle":
@@ -763,9 +765,11 @@ type workbookPhysicalSheet struct {
 	Name, ID, State, CodeName, Filter string
 	ZeroHeight                        bool
 	DefaultRowHeight                  float64
+	DefaultCustomHeight               bool
 	Cells                             map[string]bool
 	Rows                              map[int]int
 	RowHeights                        map[int]float64
+	RowCustomHeights                  map[int]bool
 	Columns                           map[int]bool
 	Merges                            map[string]bool
 	Settings                          map[string]string
@@ -847,7 +851,7 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 		if e != nil {
 			return nil, e
 		}
-		s := workbookPhysicalSheet{Name: sheet.Name, ID: sheet.ID, State: sheet.State, DefaultRowHeight: 15, Cells: map[string]bool{}, Rows: map[int]int{}, RowHeights: map[int]float64{}, Columns: map[int]bool{1: true, 16384: true}, Merges: map[string]bool{}, Settings: map[string]string{}}
+		s := workbookPhysicalSheet{Name: sheet.Name, ID: sheet.ID, State: sheet.State, DefaultRowHeight: 15, Cells: map[string]bool{}, Rows: map[int]int{}, RowHeights: map[int]float64{}, RowCustomHeights: map[int]bool{}, Columns: map[int]bool{1: true, 16384: true}, Merges: map[string]bool{}, Settings: map[string]string{}}
 		if s.State == "" {
 			s.State = "visible"
 		}
@@ -885,6 +889,7 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 				s.Settings[start.Name.Local+"/text"] = text
 			case "sheetFormatPr":
 				s.ZeroHeight = attrs["zeroHeight"] == "1" || attrs["zeroHeight"] == "true"
+				s.DefaultCustomHeight = attrs["customHeight"] == "1" || attrs["customHeight"] == "true"
 				if value := attrs["defaultRowHeight"]; value != "" {
 					height, err := strconv.ParseFloat(value, 64)
 					if err != nil || math.IsNaN(height) || math.IsInf(height, 0) || height < 0 {
@@ -917,6 +922,7 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 					}
 				}
 				s.Rows[r] = style
+				s.RowCustomHeights[r] = attrs["customHeight"] == "1" || attrs["customHeight"] == "true"
 				if value := attrs["ht"]; value != "" {
 					height, err := strconv.ParseFloat(value, 64)
 					if err != nil || math.IsNaN(height) || math.IsInf(height, 0) || height < 0 {
@@ -1128,7 +1134,19 @@ func (r *workbookStyleResolver) semantic(id int) (string, error) {
 	}
 	s.Border = borders
 	sort.Slice(s.Border, func(i, j int) bool { return s.Border[i].Type < s.Border[j].Type })
-	raw, e := json.Marshal(s)
+	// Excelize's public Font omits the numeric OOXML family classification.
+	// Preserve the active raw definition as part of the effective fingerprint,
+	// including absence, rather than conflating it with the font's name.
+	var rawFamily *int
+	familyPresent := false
+	if font := styles.Fonts.Font[*xf.FontID]; font != nil && font.Family != nil {
+		familyPresent, rawFamily = true, font.Family.Val
+	}
+	raw, e := json.Marshal(struct {
+		*excelize.Style
+		RawFontFamilyPresent bool `json:"rawFontFamilyPresent"`
+		RawFontFamily        *int `json:"rawFontFamily"`
+	}{s, familyPresent, rawFamily})
 	if e == nil {
 		r.cache[id] = string(raw)
 	}
@@ -1406,7 +1424,7 @@ func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.Fil
 	}
 	for i, left := range a {
 		right := b[i]
-		if left.Name != right.Name || left.ID != right.ID || left.State != right.State || left.CodeName != right.CodeName || left.Filter != right.Filter || left.ZeroHeight != right.ZeroHeight || left.DefaultRowHeight != right.DefaultRowHeight || !reflect.DeepEqual(left.Merges, right.Merges) || !workbookSameExplicitSettings(left.Settings, right.Settings) {
+		if left.Name != right.Name || left.ID != right.ID || left.State != right.State || left.CodeName != right.CodeName || left.Filter != right.Filter || left.ZeroHeight != right.ZeroHeight || left.DefaultRowHeight != right.DefaultRowHeight || left.DefaultCustomHeight != right.DefaultCustomHeight || !reflect.DeepEqual(left.Merges, right.Merges) || !workbookSameExplicitSettings(left.Settings, right.Settings) {
 			return patchInvalid
 		}
 		p1, e1 := before.GetPanes(left.Name)
@@ -1449,7 +1467,7 @@ func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.Fil
 			o2, e6 := after.GetRowOutlineLevel(left.Name, r)
 			s1, e7 := beforeStyles.semantic(left.Rows[r])
 			s2, e8 := afterStyles.semantic(right.Rows[r])
-			if e3 != nil || e4 != nil || e5 != nil || e6 != nil || e7 != nil || e8 != nil || h1 != h2 || v1 != v2 || o1 != o2 || s1 != s2 {
+			if e3 != nil || e4 != nil || e5 != nil || e6 != nil || e7 != nil || e8 != nil || h1 != h2 || left.RowCustomHeights[r] != right.RowCustomHeights[r] || v1 != v2 || o1 != o2 || s1 != s2 {
 				return patchInvalid
 			}
 		}
