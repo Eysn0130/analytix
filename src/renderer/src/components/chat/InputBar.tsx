@@ -1970,25 +1970,19 @@ export function InputBar({
 
   useEffect(() => {
     if (compact || route !== 'chat' || !canEditComposer || presentationPhase === 'settling') return
-    const active = document.activeElement
-    const activeIsExternalEditor =
-      active instanceof HTMLElement &&
-      Boolean(active.closest("input,textarea,select,[contenteditable='true'],[data-gate-request-id]")) &&
-      !composerRootRef.current?.contains(active)
-    if (activeIsExternalEditor) return
+    const mayFocusComposer = (): boolean => {
+      const active = document.activeElement
+      return active === null || active === document.body || active === document.documentElement ||
+        Boolean(composerRootRef.current?.contains(active))
+    }
+    if (!mayFocusComposer()) return
 
     const frame = window.requestAnimationFrame(() => {
-      // A delayed editor focus must preserve the disclosure's current focus owner.
+      // Modal restoration or user navigation may establish a new focus owner before this frame.
       if (composerMenuPanelRef.current || goalPanelRef.current) return
       const current = document.activeElement
       if (current instanceof Node && composerMenuButtonRef.current?.contains(current)) return
-      const currentIsExternalEditor =
-        current instanceof HTMLElement &&
-        Boolean(current.closest("input,textarea,select,[contenteditable='true'],[data-gate-request-id]")) &&
-        !composerRootRef.current?.contains(current)
-      if (!currentIsExternalEditor) {
-        draft.textareaRef.current?.focus()
-      }
+      if (mayFocusComposer()) draft.textareaRef.current?.focus()
     })
 
     return () => window.cancelAnimationFrame(frame)
