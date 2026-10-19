@@ -861,6 +861,10 @@ func workbookCalculationSettings(ctx context.Context, f *excelize.File, body []b
 	putBool := func(name string, value *bool) {
 		if value != nil {
 			values[name] = strconv.FormatBool(*value)
+		} else if present[name] {
+			// Excelize v2.11.0's getter omits scalar zero values. Original
+			// XML presence distinguishes explicit false from an absent default.
+			values[name] = "false"
 		}
 	}
 	putUint := func(name string, value *uint) {
@@ -878,12 +882,18 @@ func workbookCalculationSettings(ctx context.Context, f *excelize.File, body []b
 	putUint("iterateCount", props.IterateCount)
 	if props.CalcMode != nil {
 		values["calcMode"] = *props.CalcMode
+	} else if present["calcMode"] {
+		values["calcMode"] = ""
 	}
 	if props.RefMode != nil {
 		values["refMode"] = *props.RefMode
+	} else if present["refMode"] {
+		values["refMode"] = ""
 	}
 	if props.IterateDelta != nil {
 		values["iterateDelta"] = strconv.FormatFloat(*props.IterateDelta, 'g', -1, 64)
+	} else if present["iterateDelta"] {
+		values["iterateDelta"] = "0"
 	}
 	// GetCalcProps exposes parsed typed values but not attribute presence. Fill
 	// absent OOXML properties from their known defaults, including true booleans.
