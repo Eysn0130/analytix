@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	domaincaseentity "analytix.local/runtime-go/internal/domain/caseentity"
+	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
+	domainreasoningmarkup "analytix.local/runtime-go/internal/domain/reasoningmarkup"
 	domainrestrictedevidence "analytix.local/runtime-go/internal/domain/restrictedevidence"
 	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
@@ -433,4 +436,188 @@ func questionValidationFrozenCloneCB940V1(value any) any {
 	default:
 		return value
 	}
+}
+
+func TestQuestionReplyValidationViewPreservesFrozenPublicRecordValidationV1(t *testing.T) {
+	reference, err := domaincaseentity.NewReferenceV1FromKeyedDigest(strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := " \n" + questionReplyEventFixtureV1(t, 3, "literal 你好")["text"].(string) + "\t "
+	secret := questionReplyEventFixtureV1(t, 3, " api_key=sk-"+strings.Repeat("x", 20)+" ")
+	for _, test := range []struct {
+		name  string
+		value any
+		want  []error
+	}{
+		{"closed-question-raw-body", questionCollectorUserCarrierV1(body), nil},
+		{"ordinary-types", map[string]any{"kind": "thread_updated", "details": []any{json.Number("1e0"), float64(3), true, nil}}, nil},
+		{"closed-codec", questionCollectorUserCarrierV1(strings.Replace(body, `"custom":`, `"custom":"discarded","custom":`, 1)), []error{ErrQuestionReplyContentV1}},
+		{"question-credential", secret, []error{ErrCredentialProjection, domainsecret.ErrCredentialMaterialV1}},
+		{"question-restricted", questionReplyEventFixtureV1(t, 3, `{"purpose":"analytix.source-row-lineage/v1"}`), []error{ErrRestrictedEvidenceProjection, domainrestrictedevidence.ErrRestrictedEvidence}},
+		{"restricted-before-draft", map[string]any{"kind": "assistant_text_delta", "details": map[string]any{"purpose": "analytix.source-row-lineage/v1"}}, []error{ErrRestrictedEvidenceProjection, domainrestrictedevidence.ErrRestrictedEvidence}},
+		{"question-pii", questionReplyEventFixtureV1(t, 3, " account number: 6222020202020202020 "), []error{ErrPrivacyProjection, domainprivacy.ErrRestrictedPII}},
+		{"question-entity", questionReplyEventFixtureV1(t, 3, " "+string(reference)+" "), []error{ErrInternalEntityReferenceProjection, domaincaseentity.ErrPublicValueInternalReferenceV1}},
+		{"incomplete-reasoning", map[string]any{"kind": "provider_error", "error": "public</thi"}, []error{ErrPrivateReasoningPersistence, domainreasoningmarkup.ErrIncomplete}},
+		{"assistant-draft", map[string]any{"kind": "assistant_text_delta", "threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"kind": "assistant_text", "text": "unaccepted provider draft"}}, []error{ErrAssistantDraftPersistence}},
+		{"depth-limit", questionCollectorNestedV1(nil, 65), []error{domainsecret.ErrProjectionLimitV1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := questionValidationInputCopyV1(test.value)
+			oldErr := questionValidationFrozenPublicRecordCB940V1(test.value)
+			err := ValidatePublicRecord(test.value)
+			if (err == nil) != (oldErr == nil) || (err == nil) != (len(test.want) == 0) {
+				t.Fatalf("public validation outcome changed: err=%v old=%v want=%v", err, oldErr, test.want)
+			}
+			// Compare all relevant outer kinds and joined causes, not only the
+			// narrower collector error helper. Each scanner has one defective
+			// leaf; the precedence fixture also exercises a later draft gate.
+			for _, cause := range []error{ErrQuestionReplyContentV1, ErrPrivateReasoningPersistence, ErrAssistantDraftPersistence, ErrRestrictedEvidenceProjection, ErrCredentialProjection, ErrPrivacyProjection, ErrInternalEntityReferenceProjection, domainsecret.ErrCredentialMaterialV1, domainsecret.ErrProjectionLimitV1, domainrestrictedevidence.ErrRestrictedEvidence, domainrestrictedevidence.ErrInspectionLimit, domainprivacy.ErrRestrictedPII, domaincaseentity.ErrPublicValueInternalReferenceV1, domaincaseentity.ErrPublicValueReferenceInspectionV1, domainreasoningmarkup.ErrIncomplete} {
+				if errors.Is(err, cause) != errors.Is(oldErr, cause) {
+					t.Fatalf("public validation lost an error kind/joined cause: %v err=%v old=%v", cause, err, oldErr)
+				}
+			}
+			for _, cause := range test.want {
+				if !errors.Is(err, cause) || !errors.Is(oldErr, cause) {
+					t.Fatalf("expected public rejection cause missing: %v err=%v old=%v", cause, err, oldErr)
+				}
+			}
+			if err != nil && err.Error() != oldErr.Error() {
+				t.Fatalf("single-defect public error text changed: err=%v old=%v", err, oldErr)
+			}
+			if !reflect.DeepEqual(test.value, before) {
+				t.Fatal("public validation or frozen wrapper changed input")
+			}
+		})
+	}
+}
+
+func TestQuestionReplyValidationViewPreservesFrozenPublicSanitizerV1(t *testing.T) {
+	reference, err := domaincaseentity.NewReferenceV1FromKeyedDigest(strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := " \n\t" + questionReplyEventFixtureV1(t, 3, "literal <think>user example</think>")["text"].(string) + "\n "
+	progressText := "before<think>hidden</think>after"
+	for _, test := range []struct {
+		name     string
+		value    any
+		accepted bool
+	}{
+		{"closed-question-raw-body", questionCollectorUserCarrierV1(raw), true},
+		{"ordinary-types", map[string]any{"kind": "thread_updated", "details": []any{json.Number("1e0"), float64(3), true, nil}}, true},
+		{"reasoning-cleanup", map[string]any{"kind": "provider_progress", "text": progressText, "reasoningContent": "private"}, true},
+		{"user-literal", map[string]any{"kind": "user_message", "text": progressText}, true},
+		{"private-reasoning-kind", map[string]any{"kind": "assistant_reasoning", "text": "private"}, false},
+		{"closed-codec", questionCollectorUserCarrierV1(strings.Replace(raw, `"selected":[]`, `"selected":null`, 1)), false},
+		{"question-credential", questionReplyEventFixtureV1(t, 3, " api_key=sk-"+strings.Repeat("x", 20)+" "), false},
+		{"question-restricted", questionReplyEventFixtureV1(t, 3, `{"purpose":"analytix.source-row-lineage/v1"}`), false},
+		{"final-entity-scan", map[string]any{"kind": "accepted_final_label", "details": map[string]any{"text": "已核验主体 " + string(reference)}}, false},
+		{"final-question-entity-scan", questionReplyEventFixtureV1(t, 3, " "+string(reference)+" "), false},
+	} {
+		for _, allow := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/user-text-%t", test.name, allow), func(t *testing.T) {
+				before := questionValidationInputCopyV1(test.value)
+				expected, oldOK := questionValidationFrozenPublicSanitizerCB940V1(test.value, allow)
+				got, ok := SanitizePublicValue(test.value, allow)
+				if oldOK != test.accepted || ok != oldOK || !reflect.DeepEqual(got, expected) {
+					t.Fatalf("public sanitation changed: ok=%t old=%t want=%t got=%#v expected=%#v", ok, oldOK, test.accepted, got, expected)
+				}
+				if !reflect.DeepEqual(test.value, before) {
+					t.Fatal("public sanitation or frozen wrapper changed input")
+				}
+				if !ok {
+					if got != nil {
+						t.Fatal("rejected public sanitation returned a partial value")
+					}
+					return
+				}
+				public := got.(map[string]any)
+				if test.name == "closed-question-raw-body" && public["text"] != raw {
+					t.Fatal("public sanitation changed original closed body bytes")
+				}
+				if test.name == "reasoning-cleanup" {
+					want := "beforeafter"
+					if allow {
+						want = progressText
+					}
+					if public["text"] != want || public["reasoningContent"] != nil {
+						t.Fatal("public reasoning cleanup or allow-user-text semantics changed")
+					}
+				}
+				if test.name == "user-literal" && public["text"] != progressText {
+					t.Fatal("public sanitation rewrote a literal user message")
+				}
+			})
+		}
+	}
+}
+
+// Freeze the cb940 public outer pipelines while replacing their discarded
+// Stage calls with the independent full-stage oracle already above. Resource
+// accounting, scanners, privacy helpers, item sanitation and body collection
+// remain the unchanged owners; these wrappers isolate the three Stage call
+// substitutions, not an independent reimplementation of every public rule.
+func questionValidationFrozenPublicRecordCB940V1(value any) error {
+	if containsSettledProcessHistoryV1(value) {
+		return ErrPrivateReasoningPersistence
+	}
+	original := value
+	resource, err := QuestionReplyResourceViewV1(value)
+	if err != nil {
+		return err
+	}
+	if err := domainsecret.ValidateValueLimitsV1(resource); err != nil {
+		return errors.Join(ErrCredentialProjection, err)
+	}
+	value, _, err = questionValidationFrozenStageCB940V1(value)
+	if err != nil {
+		return err
+	}
+	if err := domainrestrictedevidence.Validate(value); err != nil {
+		return errors.Join(ErrRestrictedEvidenceProjection, err)
+	}
+	if err := privateReasoningError(original, false); err != nil {
+		return err
+	}
+	if err := validateClosedFailureProjectionV1(value); err != nil {
+		return err
+	}
+	if containsAssistantDraft(value) {
+		return ErrAssistantDraftPersistence
+	}
+	if err := domainsecret.ValidateValueV1(value); err != nil {
+		return errors.Join(ErrCredentialProjection, err)
+	}
+	if err := domainprivacy.ValidatePublicValue(publicPrivacyValidationViewV1(value)); err != nil {
+		return errors.Join(ErrPrivacyProjection, err)
+	}
+	if err := domaincaseentity.ValidatePublicValueWithoutReferenceV1(value); err != nil {
+		return errors.Join(ErrInternalEntityReferenceProjection, err)
+	}
+	return nil
+}
+
+func questionValidationFrozenPublicSanitizerCB940V1(value any, allowUserText bool) (any, bool) {
+	original := value
+	staged, _, err := questionValidationFrozenStageCB940V1(value)
+	if err != nil {
+		return nil, false
+	}
+	value = staged
+	if domainrestrictedevidence.Validate(value) != nil {
+		return nil, false
+	}
+	if hasInvalidPublicReasoningMetadataV1(value) {
+		return nil, false
+	}
+	public, ok := sanitizeValue(original, allowUserText, false)
+	if !ok || !sameQuestionReplyBodiesV1(original, public) {
+		return nil, false
+	}
+	scan, _, err := questionValidationFrozenStageCB940V1(public)
+	if err != nil || domaincaseentity.ValidatePublicValueWithoutReferenceV1(scan) != nil {
+		return nil, false
+	}
+	return public, true
 }

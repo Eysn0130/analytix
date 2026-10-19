@@ -60,7 +60,7 @@ func ValidatePublicRecord(value any) error {
 	if err := domainsecret.ValidateValueLimitsV1(resource); err != nil {
 		return errors.Join(ErrCredentialProjection, err)
 	}
-	value, _, err = StageQuestionReplyContentV1(value)
+	value, err = questionReplyValidationViewV1(value)
 	if err != nil {
 		return err
 	}
@@ -566,7 +566,7 @@ func ContainsPrivateTerminalAuthority(value any) bool {
 
 func SanitizePublicValue(value any, allowUserText bool) (any, bool) {
 	original := value
-	staged, _, err := StageQuestionReplyContentV1(value)
+	staged, err := questionReplyValidationViewV1(value)
 	if err != nil {
 		return nil, false
 	}
@@ -581,7 +581,7 @@ func SanitizePublicValue(value any, allowUserText bool) (any, bool) {
 	if !ok || !sameQuestionReplyBodiesV1(original, public) {
 		return nil, false
 	}
-	scan, _, err := StageQuestionReplyContentV1(public)
+	scan, err := questionReplyValidationViewV1(public)
 	if err != nil || domaincaseentity.ValidatePublicValueWithoutReferenceV1(scan) != nil {
 		return nil, false
 	}
