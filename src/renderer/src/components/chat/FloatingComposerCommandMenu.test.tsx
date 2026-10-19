@@ -19,7 +19,7 @@ let host: HTMLDivElement
 const onSelect = vi.fn()
 const onHover = vi.fn()
 async function render(props: Partial<FloatingComposerCommandMenuProps> = {}) {
-  await act(async () => root.render(createElement(FloatingComposerCommandMenu, {
+  await act(async () => root.render(createElement(FloatingComposerCommandMenu<ComposerCommandRow>, {
     id: 'commands', items: [], groupLabels, ariaLabel: 'Composer commands', emptyLabel: 'No commands', onSelect, onHover, ...props
   })))
 }
@@ -120,6 +120,46 @@ describe('shared composer command menu', () => {
     expect(item('plan').getAttribute('aria-selected')).toBe('false')
   })
 
+  it('keeps the selected option visible when keyboard selection or catalog order changes', async () => {
+    const scroll = vi.fn()
+    const previous = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    try {
+      const plan = row('plan'), goal = row('goal')
+      await render({ items: [plan, goal], selectedIndex: 0, role: 'listbox' })
+      expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest' })
+      expect(scroll.mock.contexts.at(-1)).toBe(item('plan'))
+      await render({ items: [plan, goal], selectedIndex: 1, role: 'listbox' })
+      expect(scroll.mock.contexts.at(-1)).toBe(item('goal'))
+      await render({ items: [goal, plan], selectedIndex: 1, role: 'listbox' })
+      expect(scroll.mock.contexts.at(-1)).toBe(item('plan'))
+      expect(scroll).toHaveBeenCalledTimes(3)
+    } finally {
+      if (previous) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previous)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+    }
+  })
+
+  it('accepts a file row without coercing its identity or original reference into a command', async () => {
+    const reference = { path: '/workspace/notes/Meeting notes.md', relativePath: 'notes/Meeting notes.md', type: 'file' }
+    const file = {
+      id: 'file:file:notes/Meeting notes.md', title: 'Meeting notes.md', canonicalName: 'Meeting notes.md',
+      description: reference.relativePath, icon: createElement('svg'), section: 'files', sectionLabel: 'Files', reference
+    }
+    const select = vi.fn<(item: typeof file, index: number) => void>()
+    await act(async () => root.render(createElement(FloatingComposerCommandMenu<typeof file>, {
+      id: 'mentions', items: [file], selectedIndex: 0, role: 'listbox', ariaLabel: 'Mentions', emptyLabel: 'Empty', onSelect: select
+    })))
+    const option = host.querySelector<HTMLButtonElement>('[role="option"]')!
+    expect(option.dataset.commandId).toBe(file.id)
+    expect(option.id).toBe(composerCommandOptionId('mentions', file.id))
+    expect(option.querySelector('.dsh-composer-command-alias')).toBeNull()
+    expect(host.querySelector('[data-command-section]')?.textContent).toBe('Files')
+    await act(async () => option.click())
+    expect(select).toHaveBeenCalledExactlyOnceWith(file, 0)
+    expect(select.mock.calls[0]?.[0].reference).toBe(reference)
+  })
+
   it('keeps focus with the editor while selecting a real item and leaves dispatch to its owner', async () => {
     const command = row('file', { title: 'File' })
     await render({ items: [command] })
@@ -175,5 +215,12 @@ describe('shared composer command menu', () => {
     await render()
     expect(host.querySelector('[role="status"]')?.textContent).toBe('No commands')
     expect(host.querySelector('button')).toBeNull()
+  })
+
+  it('exposes loading as a busy status without inventing a selectable item', async () => {
+    await render({ role: 'listbox', loading: true, emptyLabel: 'Loading mentions…' })
+    expect(host.querySelector('[role="listbox"]')?.getAttribute('aria-busy')).toBe('true')
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Loading mentions…')
+    expect(host.querySelector('[role="option"]')).toBeNull()
   })
 })
