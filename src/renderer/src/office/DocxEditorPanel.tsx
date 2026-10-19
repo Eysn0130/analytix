@@ -1,6 +1,6 @@
 import { useWorkspaceTabsStore } from '../store/workspace-tabs-store'
 import { useChatStore } from '../store/chat-store'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { SuperDocEditor, type SuperDocRef, type SuperDocInstance } from '@superdoc/react'
 import type { SelectionCapture } from 'superdoc/ui'
 import '@superdoc/react/style.css'
@@ -9,6 +9,7 @@ import { type NativeReference, type DocxNativeReference } from './native-referen
 import type { DocxEditorRequest,DocxEditorView } from '@shared/docx-editor'
 import { WriteInlineAgent } from '../components/write/WriteInlineAgent'
 import { inlineAgentPosition } from '../components/write/write-workspace-view-utils'
+import { Dialog } from '../data-analysis/components/overlay/Dialog'
 import styles from './docx-editor-panel.module.css'
 
 const ownerKey=(view:DocxEditorView)=>JSON.stringify([view.editorId,view.threadId,view.workspace,view.path,view.objectId])
@@ -27,12 +28,13 @@ async function content(blob:Blob) {
   return {encoding:'base64' as const,kind:'docx' as const,byteLength:bytes.length,sha256:hash,data:btoa(binary)}
 }
 const success=(result:unknown)=>result===true || !!result && typeof result==='object' && ('success' in result && result.success===true || 'ok' in result && result.ok===true)
-const messages:Record<string,string>={unknown:'保存结果尚未确认，请查询本次操作。',conflict:'文件已在外部修改，工作副本保留。',
+const messages:Record<string,string>={unknown:'操作结果尚未确认，请查询本次操作。',conflict:'文件已在外部修改，工作副本保留。',
   unsaved_changes:'请先保存或放弃当前工作副本。',stale_selection:'选区已变化，请重新选择。',unavailable:'文档暂不可用，请重试。',forbidden:'当前权限不允许此操作。'}
 /** Upstream owns layout, selection, formatting and local history; Core owns saves. */
-export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
+export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft,fileActions}: {
   view:DocxEditorView;visible:boolean;onSubmitPrompt:(value:string,references?:NativeReference[])=>void;
   onPrepareDraft?:(value:string,references:NativeReference[])=>boolean
+  fileActions?:(beforeOpen:(open:()=>void)=>void,exportCurrent:()=>void)=>ReactNode
 }) {
   const [workerUrls]=useState(()=>{
     if (typeof __ANALYTIX_DOCX_WORKER_PATHS__==='undefined') throw new Error('DOCX worker paths were not supplied by the renderer build.')
@@ -53,7 +55,12 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
   const [ready,setReady]=useState(false), [working,setWorking]=useState(false), [error,setError]=useState('')
   const [selection,setSelection]=useState<{text:string;left:number;width:number;top:number;bottom:number;bounds:{left:number;right:number}}|null>(null)
   const [prompt,setPrompt]=useState(''), textarea=useRef<HTMLTextAreaElement>(null)
-  const [source]=useState(()=>new File([fromBase64(view.content.data)],view.path.split('/').at(-1)??'document.docx',{type:mime}))
+  const [pendingOpen,setPendingOpen]=useState<{owner:string;open:()=>void;waitingForSave?:boolean}|null>(null)
+  const openIntent=useRef<typeof pendingOpen>(null)
+  const rememberOpen=(intent:typeof pendingOpen)=>{openIntent.current=intent;setPendingOpen(intent)}
+  const [source,setSource]=useState(()=>new File([fromBase64(view.content.data)],view.path.split('/').at(-1)??'document.docx',{type:mime}))
+  const [sourceVersion,setSourceVersion]=useState(0)
+  const modelRevision=useRef(view.revision)
   const current=useCallback(()=>mounted.current && shown.current && useChatStore.getState().route!=='settings' && useDocxEditorStore.getState().views[view.editorId]?.editorId===view.editorId,[view.editorId])
   const request=useCallback(async(input:DocxEditorRequest)=>{
     const result=await useDocxEditorStore.getState().request(input)
@@ -91,10 +98,42 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
   async function save() {
     const before=latest.current, version=localVersion.current, epoch=mutationEpoch.current
     const bytes=await content(await exportBlob())
-    if (!current() || version!==localVersion.current || latest.current.editorId!==before.editorId) return
+    if (!current() || version!==localVersion.current || latest.current.editorId!==before.editorId) return false
     if (epoch!==mutationEpoch.current) throw new Error('文档仍在更新，请重新保存。')
     const result=await request({action:'save',editorId:before.editorId,version,content:bytes})
-    if (result.ok) {appliedProof.current=null;captured.current=null;setSelection(null)}
+    const saved=result.ok && result.view?.phase==='ready' && !result.view.dirty
+    if (saved) {modelRevision.current=result.view!.revision;appliedProof.current=null;retireCapture();setApplyFailed(false)}
+    return saved
+  }
+  async function exportCurrent() {
+    const bytes=await content(await exportBlob())
+    if(current()) await window.analytix.files.saveAs({suggestedName:view.path.split('/').at(-1),dataBase64:bytes.data,mimeType:mime})
+  }
+  const beforeOpen=(open:()=>void)=>{
+    if (!current() || busy.current) return
+    const owner=useDocxEditorStore.getState().views[view.editorId]
+    if (!owner) return
+    if (owner.dirty || owner.phase!=='ready' || unrecorded.current) rememberOpen({owner:ownerKey(owner),open})
+    else open()
+  }
+  const pendingOpenCurrent=(intent:NonNullable<typeof pendingOpen>)=>current() && intent.owner===ownerKey(latest.current)
+  async function openAfterSave() {
+    const intent=pendingOpen
+    if (!intent || !pendingOpenCurrent(intent)) {rememberOpen(null);return}
+    intent.waitingForSave=true
+    if (await save() && openIntent.current===intent && pendingOpenCurrent(intent)) {rememberOpen(null);intent.open()}
+  }
+  async function undoSaved() {
+    const result=await request({action:'undoChange',editorId:view.editorId,version:localVersion.current})
+    const retained=useDocxEditorStore.getState().views[view.editorId]
+    if (!mounted.current || !result.ok || result.view?.phase!=='ready' || result.view.dirty ||
+      ownerKey(result.view)!==ownerKey(latest.current) || !retained || retained.revision!==result.view.revision || retained.version!==result.view.version) return
+    localVersion.current=result.view.version;appliedProof.current=null;retireCapture();setApplyFailed(false)
+    // A Core undo changes disk bytes. Replace the SDK document only after its receipt and fresh read.
+    instance.current=null;setReady(false)
+    setSource(new File([fromBase64(result.view.content.data)],view.path.split('/').at(-1)??'document.docx',{type:mime}))
+    modelRevision.current=result.view.revision
+    setSourceVersion(value=>value+1)
   }
   async function changed() {
     if (!instance.current || !ready || applying.current || latest.current.phase!=='editing') return
@@ -163,7 +202,7 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
   },[ready,view.editorId,updateGeometry,captureCurrent,retireCapture])
   useEffect(()=>{if(visible && !working)updateGeometry()},[visible,working,updateGeometry])
   useEffect(()=>{
-    if (!visible) {captured.current=null;setSelection(null);if (latest.current.scope && latest.current.phase==='ready') void request({action:'revoke',editorId:view.editorId})}
+    if (!visible) {openIntent.current=null;setPendingOpen(null);captured.current=null;setSelection(null);if (latest.current.scope && latest.current.phase==='ready') void request({action:'revoke',editorId:view.editorId})}
   },[visible,view.editorId,request])
   const scopeId=view.scope?.scopeId
   useEffect(()=>{
@@ -252,7 +291,7 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
   }
   async function format(command:string,value?:string|number) {
     const sd=instance.current,capture=captured.current
-    if (!sd || !capture || latest.current.phase!=='editing' || !selectionCurrent(capture)) return
+    if (!sd || !capture || latest.current.phase!=='editing' || !await restoreSelection(capture) || latest.current.phase!=='editing' || latest.current.scope) return
     if (!sd.ui.selection.restore(capture.capture).ok || !sd.ui.commands.get(command)?.getState().enabled) return
     const result=await sd.ui.commands.executeAsync(command,value)
     if (!success(result)) throw new Error('当前选区不支持此格式操作。')
@@ -281,8 +320,10 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
       localVersion.current=acknowledged.view!.version
       const bytes=await content(await exportBlob())
       if (!current()) return
-      await request({action:'save',editorId:view.editorId,version:localVersion.current,content:bytes})
-      captured.current=null;setSelection(null)
+      const saved=await request({action:'save',editorId:view.editorId,version:localVersion.current,content:bytes})
+      // The old range is no longer usable after replacement. Keep the applied proof
+      // through a failed/unknown save so status can recover without replacing again.
+      if (saved.ok && saved.view?.phase==='ready' && !saved.view.dirty) {modelRevision.current=saved.view.revision;appliedProof.current=null;retireCapture();setApplyFailed(false)}
     } catch(error) {setApplyFailed(true);throw error} finally {sd.setDocumentMode('viewing');applying.current=false}
   }
   async function reopenTab(tabId:string|null) {
@@ -299,7 +340,17 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
       if (result.view.phase==='applying') result=await request({action:'applied',editorId:view.editorId,version:proof.version,instanceId:instanceId.current,captureId:proof.captureId})
       if (result.ok && result.view?.phase==='editing' && result.view.version===proof.version+1) {localVersion.current=result.view.version;setApplyFailed(false)}
     }
-    if (result.ok && result.view?.phase==='ready') {appliedProof.current=null;setApplyFailed(false)}
+    if (result.ok && result.view?.phase==='ready') {
+      appliedProof.current=null;setApplyFailed(false)
+      if (result.view.revision!==modelRevision.current) {
+        instance.current=null;setReady(false);localVersion.current=result.view.version;retireCapture()
+        setSource(new File([fromBase64(result.view.content.data)],view.path.split('/').at(-1)??'document.docx',{type:mime}))
+        modelRevision.current=result.view.revision
+        setSourceVersion(value=>value+1)
+      }
+      const intent=openIntent.current
+      if (intent?.waitingForSave && pendingOpenCurrent(intent)) {rememberOpen(null);intent.open()}
+    }
   }
   const resumeDocumentSelection=(event:{type:string})=>{
     // Focus may belong to this operation; new pointer/key intent cancels a pending restore.
@@ -313,24 +364,24 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
       <strong className={styles.title}>{view.path.split('/').at(-1)}</strong>
       <span role="status">{view.phase==='unknown'?'结果待确认':view.phase==='conflict'?'文件冲突':view.dirty?'未保存':'已保存'}</span>
       <button disabled={!ready||working||view.phase!=='ready'} onClick={()=>void exclusive(async()=>{await request({action:'begin',editorId:view.editorId,version:localVersion.current})})}>编辑</button>
-      <button disabled={!ready||working||applyFailed||view.phase!=='editing'} onClick={()=>void exclusive(save)}>保存</button>
+      <button disabled={!ready||working||applyFailed||view.phase!=='editing'} onClick={()=>void exclusive(async()=>{await save()})}>保存</button>
       <button disabled={working||view.phase!=='unknown'&&view.phase!=='applying'&&!applyFailed} onClick={()=>void exclusive(status)}>查询结果</button>
-      <button disabled={!ready||working} onClick={()=>void exclusive(async()=>{
-        const bytes=await content(await exportBlob());if(current()) await window.analytix.files.saveAs({suggestedName:view.path.split('/').at(-1),dataBase64:bytes.data,mimeType:mime})
-      })}>另存为</button>
+      {fileActions?<div inert={!ready||working}>{fileActions(beforeOpen,()=>void exclusive(exportCurrent))}</div>:
+        <button disabled={!ready||working} onClick={()=>void exclusive(exportCurrent)}>另存为</button>}
       <button disabled={working} onClick={()=>void exclusive(async()=>{
         const tabId=useWorkspaceTabsStore.getState().activeTabId
         const result=await request({action:'close',editorId:view.editorId,discard:true})
         if (result.ok) await reopenTab(tabId)
       })}>放弃工作副本</button>
-      <button disabled={!ready||working||view.phase!=='editing'} onClick={()=>void exclusive(async()=>{
+      <button title="仅更改工作副本，保存后才写入文件。" disabled={!ready||working||view.phase!=='editing'||!!view.scope||applyFailed} onClick={()=>void exclusive(async()=>{
         const sd=instance.current;if(sd?.ui.commands.get('undo')?.getState().enabled){await sd.ui.commands.executeAsync('undo');localVersion.current++;await request({action:'changed',editorId:view.editorId,version:localVersion.current})}
-      })}>撤销</button>
+      })}>撤销工作副本编辑</button>
+      <button title="恢复保存前的内容并保存文件。" disabled={!ready||working||!view.canUndo||view.dirty||view.phase!=='ready'&&!(view.phase==='unknown'&&view.recovery?.current?.canRetryUndo)} onClick={()=>void exclusive(undoSaved)}>{view.phase==='unknown'&&view.recovery?.current?.canRetryUndo?'完成已保存撤销':'撤销已保存修改'}</button>
     </header>
-    {error?<p role="alert" className={styles.notice}>{error}</p>:null}
+    {error&&!pendingOpen?<p role="alert" className={styles.notice}>{error}</p>:null}
     <div ref={editorHost} className={styles.editor} aria-busy={working} inert={working}
       onPointerDownCapture={resumeDocumentSelection} onFocusCapture={resumeDocumentSelection} onKeyDownCapture={resumeDocumentSelection}>
-      <SuperDocEditor ref={ref} document={source} contained allowSelectionInViewMode ui={ui} telemetry={telemetry} workerUrls={workerUrls}
+      <SuperDocEditor key={sourceVersion} ref={ref} document={source} contained allowSelectionInViewMode ui={ui} telemetry={telemetry} workerUrls={workerUrls}
         documentMode={view.phase==='editing'&&!view.scope&&!applyFailed?'editing':'viewing'}
         onReady={({superdoc})=>{instance.current=superdoc;setReady(true)}} onEditorUpdate={()=>{void changed()}} />
     </div>
@@ -349,14 +400,23 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft}: {
       </div>:inlineAction?<WriteInlineAgent action={inlineAction} value={prompt} inFlight={working}
         textareaRef={textarea} onValueChange={setPrompt} formattingEnabled={false} onSubmitPrompt={value=>void exclusive(()=>reference(false,value))}
         onApplyEdit={value=>void exclusive(()=>reference(true,value))} onQuoteSelection={()=>void exclusive(()=>reference(false,'请参考这段文档内容。',true))}
-        quickActions={[{id:'polish',label:'润色',prompt:'润色选中内容，保留事实。',mode:'edit'},{id:'expand',label:'扩写',prompt:'扩写选中内容，保留事实，不编造。',mode:'edit'}]}
+        quickActions={[{id:'polish',label:'润色',prompt:'润色选中内容，保留事实。',mode:'edit'},{id:'expand',label:'扩写',prompt:'扩写选中内容，保留事实，不编造。',mode:'edit'},{id:'shorten',label:'精简',prompt:'精简选中内容，保留关键事实与原意。',mode:'edit'}]}
         onQuickAction={action=>void exclusive(()=>reference(action.mode==='edit',action.prompt))}/>:null}</>:null}
     {view.reviews.map(review=><aside key={review.proposalId} className={styles.review}>
-      <p>Agent 建议</p><p>{review.afterText}</p>
-      <button disabled={working||view.proposals.find(p=>p.proposalId===review.proposalId)?.status!=='proposed'} onClick={()=>void exclusive(()=>decide(review.proposalId,true))}>应用并保存</button>
-      <button disabled={working} onClick={()=>void exclusive(()=>decide(review.proposalId,false))}>拒绝</button>
-      <button disabled={working} onClick={()=>void exclusive(()=>reference(true,'请重新生成选中内容的修改建议。'))}>重试</button>
+      <p>Agent 建议</p><dl className={styles.comparison}><div><dt>原文</dt><dd>{review.beforeText}</dd></div><div><dt>修改后</dt><dd>{review.afterText}</dd></div></dl>
+      <button className={styles.accept} disabled={working||view.phase!=='ready'||view.proposals.find(p=>p.proposalId===review.proposalId)?.status!=='proposed'} onClick={()=>void exclusive(()=>decide(review.proposalId,true))}>应用并保存</button>
+      <button disabled={working||view.phase!=='ready'} onClick={()=>void exclusive(()=>decide(review.proposalId,false))}>拒绝</button>
+      <button disabled={working||view.phase!=='ready'} onClick={()=>void exclusive(()=>reference(true,'请重新生成选中内容的修改建议。'))}>重试</button>
     </aside>)}
     </div>
+    {visible && pendingOpen?<Dialog open title="打开 Word 文档" onClose={()=>{if(!working)rememberOpen(null)}}
+      footer={<>{view.phase==='unknown'?<button disabled={working} onClick={()=>void exclusive(status)}>查询结果</button>:null}
+        <button disabled={working||applyFailed||view.phase!=='editing'} onClick={()=>void exclusive(openAfterSave)}>保存并打开</button>
+        <button disabled={working} onClick={()=>{const intent=pendingOpen;rememberOpen(null);if(pendingOpenCurrent(intent))intent.open()}}>打开已保存版本</button>
+        <button disabled={working} onClick={()=>rememberOpen(null)}>取消</button></>}>
+      <p>当前工作副本尚未保存。选择保存后打开，或打开磁盘上的已保存版本。</p>
+      {error?<p role="alert">{error}</p>:null}
+      {view.phase==='unknown'?<p>保存结果待确认，请先查询本次操作。</p>:null}
+    </Dialog>:null}
   </section>
 }

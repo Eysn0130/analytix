@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { nativeOfficeContentSchema, nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema } from '../../packages/runtime/src/contracts/native-office-editing'
+import { nativeOfficeContentSchema, nativeOfficeSelectionScopeSchema, nativeOfficeProposalSchema, nativeOfficeLocalReviewSchema, nativeOfficeRecoverySchema } from '../../packages/runtime/src/contracts/native-office-editing'
 
 const id = z.string().uuid()
 const revision = z.string().regex(/^[a-f0-9]{64}$/)
@@ -12,6 +12,7 @@ export const docxEditorRequestSchema = z.discriminatedUnion('action', [
   z.object({ action:z.literal('begin'), ...target }).strict(),
   z.object({ action:z.literal('changed'), ...target }).strict(),
   z.object({ action:z.literal('save'), ...target, content }).strict(),
+  z.object({ action:z.literal('undoChange'), ...target }).strict(),
   z.object({ action:z.literal('status'), editorId:id }).strict(),
   z.object({ action:z.literal('close'), editorId:id, discard:z.boolean().default(false) }).strict(),
   // Public upstream captures stay in the bound renderer instance. Main issues a
@@ -28,6 +29,7 @@ export const docxEditorViewSchema = z.object({
   editorId:id, workspace:path, path, threadId:z.string(), objectId:revision, revision,
   version, phase:z.enum(['ready','editing','applying','unknown','conflict']), dirty:z.boolean(),
   content, scope:nativeOfficeSelectionScopeSchema.omit({sessionId:true}).optional(),
+  canUndo:z.boolean().optional(), recovery:nativeOfficeRecoverySchema.optional(),
   proposals:z.array(nativeOfficeProposalSchema).max(16).default([]),
   reviews:z.array(nativeOfficeLocalReviewSchema).max(16).default([])
 }).strict()
