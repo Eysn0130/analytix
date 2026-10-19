@@ -247,17 +247,40 @@ Module.zetajs.then(zeta => {
     validateWorkbookFormulas(after);
     try {
       mutate(()=>{
-        for(let i=0;i<targets.length;i++){
-          const c=after.cells[i],old=before.cells[i];
-          if(c.valueType===old.valueType&&(c.valueType==='formula'?formulaKey(c.formula)===formulaKey(old.formula):c.valueType==='number'?c.value===old.value:c.text===old.text))continue;
-          if(c.valueType==='number')targets[i].setValue(c.value);
-          else if(c.valueType==='formula')targets[i].setFormula(nativeFormula(c.formula));
-          else targets[i].setString(c.text);
-        }
-        model.calculateAll();
-        for(let i=0;i<targets.length;i++){
-          const c=after.cells[i],actual=workbookCell(sheet,c);
-          if(actual.valueType!==c.valueType||actual.numberFormat!==c.numberFormat||actual.merged||!actual.rowVisible||!actual.columnVisible||c.valueType==='number'&&actual.value!==c.value||c.valueType==='text'&&actual.text!==c.text||c.valueType==='formula'&&(formulaKey(actual.formula)!==formulaKey(c.formula)||targets[i].getError()!==0))throw Error('typed-mutation-failed');
+        let stage='write';
+        const verificationFailure=Error('typed-mutation-failed');
+        try {
+          for(let i=0;i<targets.length;i++){
+            const c=after.cells[i],old=before.cells[i];
+            if(c.valueType===old.valueType&&(c.valueType==='formula'?formulaKey(c.formula)===formulaKey(old.formula):c.valueType==='number'?c.value===old.value:c.text===old.text))continue;
+            if(c.valueType==='number'){stage='write-number';targets[i].setValue(c.value);}
+            else if(c.valueType==='formula'){stage='write-formula';targets[i].setFormula(nativeFormula(c.formula));}
+            else {stage='write-text';targets[i].setString(c.text);}
+          }
+          stage='calculate';model.calculateAll();
+          for(let i=0;i<targets.length;i++){
+            const c=after.cells[i];
+            stage='readback';const actual=workbookCell(sheet,c);
+            stage='verify-type';if(actual.valueType!==c.valueType)throw verificationFailure;
+            stage='verify-format';if(actual.numberFormat!==c.numberFormat)throw verificationFailure;
+            stage='verify-merged';if(actual.merged)throw verificationFailure;
+            stage='verify-row-visible';if(!actual.rowVisible)throw verificationFailure;
+            stage='verify-column-visible';if(!actual.columnVisible)throw verificationFailure;
+            stage='verify-number';if(c.valueType==='number'&&actual.value!==c.value)throw verificationFailure;
+            stage='verify-text';if(c.valueType==='text'&&actual.text!==c.text)throw verificationFailure;
+            if(c.valueType==='formula'){
+              stage='verify-formula';if(formulaKey(actual.formula)!==formulaKey(c.formula))throw verificationFailure;
+              stage='verify-formula-error';if(targets[i].getError()!==0)throw verificationFailure;
+            }
+          }
+        }catch(error){
+          // Fixed, content-free diagnostics only; reporting cannot change the
+          // existing poison/rejection behavior or expose native exception text.
+          try {
+            const causeClass=error===verificationFailure?'verification-mismatch':error?.name==='TypeError'?'TypeError':error?.name==='RangeError'?'RangeError':error?.name==='RuntimeError'?'RuntimeError':'native-exception';
+            console.warn('ANALYTIX_WORKBOOK_MUTATION_DIAGNOSTIC '+stage+':'+causeClass);
+          }catch { /* Preserve the original failure. */ }
+          throw error;
         }
       });
     }catch {active.mutationFailed=true;clearHandles();throw Error('typed-mutation-failed');}

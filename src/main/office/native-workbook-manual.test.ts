@@ -1,10 +1,11 @@
 import {createHash} from 'node:crypto'
 import {describe,expect,it,vi} from 'vitest'
 import {createNativeOfficeController,type NativeOfficeEngineRequest} from './native-office-controller'
-import type {PluginPackageHostRequest,PluginPackageView} from '../../../packages/runtime/src/contracts/plugin-package-host'
+import type {PluginPackageHostRequest,PluginPackageHostResponse,PluginPackageView} from '../../../packages/runtime/src/contracts/plugin-package-host'
 import {nativeOfficeResponseSchema} from '../../shared/native-office'
+import {logNativeOfficeSaveFailure} from '../logger'
 
-vi.mock('../logger',()=>({logNativeOfficeFailure:vi.fn(),logNativeOfficeManualBeginFailure:vi.fn()}))
+vi.mock('../logger',()=>({logNativeOfficeFailure:vi.fn(),logNativeOfficeManualBeginFailure:vi.fn(),logNativeOfficeSaveFailure:vi.fn()}))
 const digest=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex')
 const original=new Uint8Array([80,75,3,4,1]), exported=new Uint8Array([80,75,3,4,2])
 const base=digest(original),next=digest(exported),objectId='a'.repeat(64),sessionId='b'.repeat(48),changeId='c'.repeat(64)
@@ -13,7 +14,8 @@ const before={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,en
 const after={...before,cells:[...before.cells.slice(0,2),{...cell(2,0),text:'3',formula:'=SUM(A1:A2)',valueType:'formula' as const}]}
 const workbook={before,after,results:['1','2','3']}
 const bounds={x:0,y:0,width:600,height:400}
-function harness(fault?:'commit-unknown'|'replace-failed'|'ack-failed',eligible=true) {
+type Fault='commit-unknown'|'replace-failed'|'ack-failed'|'export-failed'|'commit-rejected'|'commit-outer'|'commit-invalid-outer'|'commit-invalid-inner'|'commit-conflict'
+function harness(fault?:Fault,eligible=true,innerCode:'invalid_request'|'not_text'|'too_large'|'persistence_failure'='invalid_request') {
   const calls:NativeOfficeEngineRequest[]=[],hostCalls:PluginPackageHostRequest[]=[]
   let sequence=0,version=base,saved=false,counter=0,prepared=false,destroyed=0
   let partial=false,scope:Record<string,unknown>|undefined
@@ -29,8 +31,10 @@ function harness(fault?:'commit-unknown'|'replace-failed'|'ack-failed',eligible=
       calls.push(r)
       if(r.command==='open'){sequence=0;version=r.version}
       if(r.command==='replaceCells'){if(fault==='replace-failed')throw Error('typed-mutation-failed');sequence++}
+      if(r.command==='export'&&fault==='export-failed')throw Error('export-too-large')
       if(r.command==='ack'&&r.status==='committed'){version=r.persistedVersion!;if(fault==='ack-failed')throw Error('lost native ACK')}
-      const state={documentId:objectId,version,kind:'xlsx',changeSequence:sequence,acknowledgedSequence:r.command==='ack'?sequence:0,dirty:r.command!=='ack'&&sequence>0}
+      const acknowledged=r.command==='ack'&&r.status==='committed'
+      const state={documentId:objectId,version,kind:'xlsx',changeSequence:sequence,acknowledgedSequence:acknowledged?sequence:0,dirty:!acknowledged&&sequence>0}
       const result={type:'result',channel:'fixture-channel',operationId:r.operationId,documentId:r.documentId,version:r.version,command:r.command,ok:true,state}
       if(r.command==='close')return {...result,state:undefined}
       if(r.command==='captureCells')return {...result,workbook:before}
@@ -50,7 +54,14 @@ function harness(fault?:'commit-unknown'|'replace-failed'|'ack-failed',eligible=
         case 'proposal-read':output={ok:true,proposals:[],localReviews:[]};break
         case 'plan-workbook-manual':output={ok:true,dependencyBounds:{sheet:0,startColumn:0,endColumn:0,startRow:0,endRow:2}};break
         case 'prepare-workbook-manual':prepared=true;output={ok:true,workbookManual:{version:3,origin:'manual',changeId,baseRevision:base,saveOperationId:'save_manual_cell',undoOperationId:'undo_manual_cell',workbook}};break
-        case 'commit-object':if(fault==='commit-unknown')throw Error('lost reply');saved=true;output={ok:true,receipt:{operationId:'save_manual_cell',revision:next,status:'committed',savedAt:'2026-10-19T00:00:00Z'}};break
+        case 'commit-object':
+          if(fault==='commit-unknown')throw Error('lost reply')
+          if(fault==='commit-outer')return {ok:false,code:'adapter_unavailable',message:'PRIVATE_COMMIT_MESSAGE_CANARY'}
+          if(fault==='commit-invalid-outer')return {ok:false,code:'PRIVATE_OUTER_CODE_CANARY',message:'PRIVATE_COMMIT_MESSAGE_CANARY'} as unknown as PluginPackageHostResponse
+          if(fault==='commit-invalid-inner'){output={ok:false,code:'PRIVATE_INNER_CODE_CANARY',message:'PRIVATE_COMMIT_MESSAGE_CANARY'};break}
+          if(fault==='commit-rejected'){output={ok:false,code:innerCode,message:'PRIVATE_COMMIT_MESSAGE_CANARY'};break}
+          if(fault==='commit-conflict'){output={ok:true,receipt:{operationId:'save_manual_cell',revision:'',status:'conflict',savedAt:''}};break}
+          saved=true;output={ok:true,receipt:{operationId:'save_manual_cell',revision:next,status:'committed',savedAt:'2026-10-19T00:00:00Z'}};break
         case 'object-status':output={ok:true,receipt:{operationId:'save_manual_cell',revision:'',status:'unknown',savedAt:''}};break
         case 'close-object':output={ok:true,closed:true};break
         default:throw Error('unexpected operation '+r.operation)
@@ -79,22 +90,59 @@ describe('protected local workbook manual controller',()=>{
     expect(h.calls.some(r=>['edit','replaceCells','export'].includes(r.command))).toBe(false)
   })
   it('never repeats a commit after its reply is lost',async()=>{
+    vi.mocked(logNativeOfficeSaveFailure).mockClear()
     const h=harness('commit-unknown');await h.open();expect((await h.edit()).error).toBe('unknown')
+    expect(logNativeOfficeSaveFailure).toHaveBeenLastCalledWith('unknown',{phase:'commit',outerSchemaAccepted:null,innerSchemaAccepted:null,outerCode:null,innerCode:null,receiptPresent:null,receiptStatus:null})
     await h.controller.request({action:'saveStatus',objectId})
+    expect(logNativeOfficeSaveFailure).toHaveBeenLastCalledWith('unknown',{phase:'query',outerSchemaAccepted:true,innerSchemaAccepted:true,outerCode:null,innerCode:null,receiptPresent:true,receiptStatus:'unknown'})
     expect(h.hostCalls.filter(r=>r.action==='invoke'&&r.operation==='commit-object')).toHaveLength(1)
     expect(h.hostCalls.some(r=>r.action==='invoke'&&r.operation==='object-status')).toBe(true)
   })
   it('retires a partially failed native writer without export',async()=>{
+    vi.mocked(logNativeOfficeSaveFailure).mockClear()
     const h=harness('replace-failed');await h.open();expect((await h.edit()).error).toBe('save_failed')
     expect(h.destroyed).toBeGreaterThan(0);expect(h.calls.some(r=>r.command==='export')).toBe(false)
     expect(h.controller.getView()?.recovery?.pending).toMatchObject({version:3,status:'prepared'})
+    expect(logNativeOfficeSaveFailure).toHaveBeenCalledExactlyOnceWith('engine_unavailable',{phase:'replace',outerSchemaAccepted:null,innerSchemaAccepted:null,outerCode:null,innerCode:null,receiptPresent:null,receiptStatus:null})
+  })
+  it.each(['invalid_request','not_text','too_large','persistence_failure'] as const)('retains Core %s diagnostics while preserving save_failed and the original revision',async code=>{
+    vi.mocked(logNativeOfficeSaveFailure).mockClear()
+    const h=harness('commit-rejected',true,code);await h.open()
+    expect(await h.edit()).toMatchObject({ok:false,error:'save_failed',view:{revision:base,dirty:true}})
+    expect(logNativeOfficeSaveFailure).toHaveBeenCalledExactlyOnceWith('save_failed',{phase:'commit',outerSchemaAccepted:true,innerSchemaAccepted:true,outerCode:null,innerCode:code,receiptPresent:false,receiptStatus:null})
+    expect(h.hostCalls.filter(r=>r.action==='invoke'&&r.operation==='commit-object')).toHaveLength(1)
+    expect(h.calls.filter(r=>r.command==='ack')).toEqual([expect.objectContaining({status:'failed'})])
+    expect(JSON.stringify(vi.mocked(logNativeOfficeSaveFailure).mock.calls)).not.toContain('PRIVATE_COMMIT_MESSAGE_CANARY')
+  })
+  it.each([
+    ['commit-outer',true,null,'adapter_unavailable'],
+    ['commit-invalid-outer',false,null,null],
+    ['commit-invalid-inner',true,false,null]
+  ] as const)('records %s schema evidence without logging an envelope or changing unknown',async(fault,outerSchemaAccepted,innerSchemaAccepted,outerCode)=>{
+    vi.mocked(logNativeOfficeSaveFailure).mockClear()
+    const h=harness(fault);await h.open();expect((await h.edit()).error).toBe('unknown')
+    expect(logNativeOfficeSaveFailure).toHaveBeenCalledExactlyOnceWith('unknown',{phase:'commit',outerSchemaAccepted,innerSchemaAccepted,outerCode,innerCode:null,receiptPresent:null,receiptStatus:null})
+    expect(JSON.stringify(vi.mocked(logNativeOfficeSaveFailure).mock.calls)).not.toContain('PRIVATE_')
+  })
+  it('keeps export refusal distinct from a Core commit',async()=>{
+    vi.mocked(logNativeOfficeSaveFailure).mockClear()
+    const h=harness('export-failed');await h.open();expect((await h.edit()).error).toBe('save_failed')
+    expect(h.hostCalls.some(r=>r.action==='invoke'&&r.operation==='commit-object')).toBe(false)
+    expect(logNativeOfficeSaveFailure).toHaveBeenCalledExactlyOnceWith('save_failed',{phase:'export',outerSchemaAccepted:null,innerSchemaAccepted:null,outerCode:null,innerCode:null,receiptPresent:null,receiptStatus:null})
+  })
+  it('records a Core conflict as commit after its native ACK succeeds',async()=>{
+    vi.mocked(logNativeOfficeSaveFailure).mockClear()
+    const h=harness('commit-conflict');await h.open();expect((await h.edit()).error).toBe('conflict')
+    expect(logNativeOfficeSaveFailure).toHaveBeenCalledExactlyOnceWith('conflict',{phase:'commit',outerSchemaAccepted:true,innerSchemaAccepted:true,outerCode:null,innerCode:null,receiptPresent:true,receiptStatus:'conflict'})
   })
   it('reloads exact Core bytes after a committed manual save loses native ACK',async()=>{
+    vi.mocked(logNativeOfficeSaveFailure).mockClear()
     const h=harness('ack-failed');await h.open();const result=await h.edit()
     expect(result.ok).toBe(true);expect(result.view?.revision).toBe(next);expect(result.view?.dirty).toBe(false)
     expect(result.view?.canUndo).toBe(true);expect(h.destroyed).toBeGreaterThan(0)
     expect(h.hostCalls.filter(r=>r.action==='invoke'&&r.operation==='commit-object')).toHaveLength(1)
     expect(h.calls.filter(r=>r.command==='open')).toHaveLength(2)
+    expect(logNativeOfficeSaveFailure).toHaveBeenCalledExactlyOnceWith('engine_unavailable',{phase:'ack',outerSchemaAccepted:true,innerSchemaAccepted:true,outerCode:null,innerCode:null,receiptPresent:true,receiptStatus:'committed'})
   })
   it('projects actual full-range and partial evidence into the Core readonly scope',async()=>{
     const h=harness();h.setPartial();await h.open()

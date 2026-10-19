@@ -3,7 +3,7 @@ import vm from 'node:vm'
 import {test,expect,vi} from 'vitest'
 function fixture(count=3,editing=true){
   let listener:any,selectionListener:any,failAt=-1,formulaError=0,numberFormat=7,startRow=0,endRow=count-1,formulaResultType2:unknown=1,formulaResultType:unknown=1
-  const values=Array.from({length:count},(_,i)=>({value:i+1,type:1,formula:String(i+1),text:String(i+1)})),messages:any[]=[]
+  const values=Array.from({length:count},(_,i)=>({value:i+1,type:1,formula:String(i+1),text:String(i+1)})),messages:any[]=[],warnings:unknown[][]=[]
   const cells=values.map((v,i)=>({getString:()=>v.text,getValue:()=>v.value,getType:()=>v.type,getFormula:()=>v.formula,getPropertyValue:(name:string)=>{
     if(name==='NumberFormat')return numberFormat
     const result=name==='FormulaResultType2'?formulaResultType2:name==='FormulaResultType'?formulaResultType:undefined
@@ -18,12 +18,12 @@ function fixture(count=3,editing=true){
   const model={getSheets:()=>({getByIndex:()=>sheet}),isReadonly:()=>true,getCurrentController:()=>controller,addModifyListener:(v:any)=>{listener=v},removeModifyListener(){},close(){},calculateAll:vi.fn(),storeToURL:vi.fn()}
   const css={frame:{Desktop:{create:()=>({loadComponentFromURL:()=>model})}},beans:{PropertyValue:function(this:any,v:any){Object.assign(this,v)}},util:{XModifyListener:{}},view:{XSelectionChangeListener:{}}}
   const port:any={postMessage:(v:any)=>messages.push(v)},zeta={uno:{com:{sun:{star:css}}},getUnoComponentContext(){},unoObject:(_:any,v:any)=>v,mainPort:port}
-  vm.runInNewContext(readFileSync(new URL('./surface/office-worker.js',import.meta.url),'utf8'),{Module:{zetajs:{then:(f:any)=>f(zeta)}}})
+  vm.runInNewContext(readFileSync(new URL('./surface/office-worker.js',import.meta.url),'utf8'),{Module:{zetajs:{then:(f:any)=>f(zeta)}},console:{warn:(...args:unknown[])=>warnings.push(args)}})
   let id=0;const send=(command:string,extra:any={})=>{port.onmessage({data:{command,channel:'channel',operationId:`operation_${++id}`,documentId:'d'.repeat(64),version:'a'.repeat(64),...extra}});return messages.at(-1)}
   send('bind');send('open',{kind:'xlsx'});if(editing)send('edit');const captured=send('captureSelection').selection
   const before=structuredClone({...captured.ranges[0],cells:captured.cells}),after=structuredClone(before)
   const apply=()=>send('replaceCells',{selectionToken:captured.token,expectedChangeSequence:0,workbook:{before,after,results:after.cells.map(()=> '')}})
-  return {send,before,after,apply,values,model,select:(start:number,end=start)=>{startRow=start;endRow=end;selectionListener?.selectionChanged()},reformat:()=>{numberFormat=8},fail:(i:number)=>{failAt=i},formulaError:()=>{formulaError=532},formulaResult:(modern:unknown,legacy:unknown)=>{formulaResultType2=modern;formulaResultType=legacy}}
+  return {send,before,after,apply,values,model,warnings,select:(start:number,end=start)=>{startRow=start;endRow=end;selectionListener?.selectionChanged()},reformat:()=>{numberFormat=8},fail:(i:number)=>{failAt=i},formulaError:()=>{formulaError=532},formulaResult:(modern:unknown,legacy:unknown)=>{formulaResultType2=modern;formulaResultType=legacy}}
 }
 test('typed number, formula and rectangle use native typed methods and preserve numeric text protection',()=>{
   const one=fixture(1);one.after.cells[0].value=4;one.after.cells[0].formula='4';one.after.cells[0].text='4';expect(one.apply().ok).toBe(true);expect(one.values[0].type).toBe(1)
@@ -39,6 +39,18 @@ test('scope escape and unknown/external/circular formula are rejected before any
 })
 test('partial mutation and native formula error poison export until the Core original is reopened',()=>{
  for(const mode of ['throw','calculation']){const w=fixture();Object.assign(w.after.cells[0],{value:4,text:'4',formula:'4'});Object.assign(w.after.cells[2],{valueType:'formula',formula:'=SUM(A1:A2)',value:0,text:''});if(mode==='throw')w.fail(2);else w.formulaError();expect(w.apply()).toMatchObject({ok:false,error:'typed-mutation-failed'});expect(w.values[0].value).toBe(4);expect(w.send('export')).toMatchObject({ok:false,error:'typed-mutation-failed'});expect(w.model.storeToURL).not.toHaveBeenCalled()}
+})
+
+test('a native calculation exception after a successful write emits only its fixed stage and still poisons export',()=>{
+  const w=fixture(1)
+  Object.assign(w.after.cells[0],{value:4,text:'4',formula:'4'})
+  w.model.calculateAll.mockImplementationOnce(()=>{throw new Error('private synthetic native exception text')})
+  expect(w.apply()).toMatchObject({ok:false,error:'typed-mutation-failed'})
+  expect(w.values[0].value).toBe(4)
+  expect(w.warnings).toEqual([['ANALYTIX_WORKBOOK_MUTATION_DIAGNOSTIC calculate:native-exception']])
+  expect(JSON.stringify(w.warnings)).not.toContain('private synthetic')
+  expect(w.send('export')).toMatchObject({ok:false,error:'typed-mutation-failed'})
+  expect(w.model.storeToURL).not.toHaveBeenCalled()
 })
 
 test('native formula separator conversion preserves quoted commas',()=>{

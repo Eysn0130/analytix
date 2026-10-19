@@ -507,7 +507,17 @@ test('typed approval uses only replaceCells and the fixed Core save operation',a
  expect(h.requests.some(r=>r.command==='replace')).toBe(false)
  expect(h.getCommitCalls()).toBe(1)
 })
+test('typed Agent commit rejection records its Core code while preserving save_failed',async()=>{
+ const diagnostic=vi.spyOn(logger,'logNativeOfficeSaveFailure').mockImplementation(()=>undefined)
+ try {
+  const h=setup(true);h.rejectCommit()
+  expect(await applyProposal(h)).toMatchObject({ok:false,error:'save_failed',view:{dirty:true,revision}})
+  expect(diagnostic).toHaveBeenCalledExactlyOnceWith('save_failed',{phase:'commit',outerSchemaAccepted:true,innerSchemaAccepted:true,outerCode:null,innerCode:'not_text',receiptPresent:false,receiptStatus:null})
+  expect(h.getSaved()).toBe(revision);expect(h.getCommitCalls()).toBe(1)
+ } finally { diagnostic.mockRestore() }
+})
 test('partial typed mutation destroys poisoned workcopy and reloads Core original before saveAll',async()=>{
+ const diagnostic=vi.spyOn(logger,'logNativeOfficeSaveFailure').mockImplementation(()=>undefined)
  const h=setup(true);expect((await h.controller.request({...open,path:'a.xlsx'})).ok).toBe(true);h.failTyped()
  expect(await applyProposal(h)).toMatchObject({ok:false,error:'save_failed',view:{dirty:false,editing:false,revision}})
  expect(h.getDestroyed()).toBe(1)
@@ -516,6 +526,8 @@ test('partial typed mutation destroys poisoned workcopy and reloads Core origina
  await h.controller.saveAll()
  expect(h.requests.some(r=>r.command==='export')).toBe(false)
  expect(h.getCommitCalls()).toBe(0)
+ expect(diagnostic).toHaveBeenCalledExactlyOnceWith('engine_unavailable',{phase:'replace',outerSchemaAccepted:null,innerSchemaAccepted:null,outerCode:null,innerCode:null,receiptPresent:null,receiptStatus:null})
+ diagnostic.mockRestore()
 })
 
 test('presentation approval uses typed worker command and the existing Core save receipt',async()=>{
