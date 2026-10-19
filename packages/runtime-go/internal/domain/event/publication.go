@@ -1145,18 +1145,30 @@ func StageQuestionReplyContentV1(value any) (any, func(any) (any, bool), error) 
 }
 
 func questionReplyViewV1(value any, path []closedPlanDigestProjectionPathV1, entries *[]closedPlanDigestProjectionEntryV1, resource bool, budget *int) (any, error) {
+	return walkQuestionReplyV1(value, path, entries, resource, budget, len(path), nil)
+}
+
+// A non-nil bodies collector shares the complete validation walk without
+// constructing a staged AST, restoration paths or placeholders.
+func walkQuestionReplyV1(value any, path []closedPlanDigestProjectionPathV1, entries *[]closedPlanDigestProjectionEntryV1, resource bool, budget *int, depth int, bodies *[]string) (any, error) {
 	if *budget <= 0 {
 		return nil, domainsecret.ErrProjectionLimitV1
 	}
 	*budget--
-	if len(path) > 64 {
+	if depth > 64 {
 		return nil, domainsecret.ErrProjectionLimitV1
 	}
 	switch current := value.(type) {
 	case map[string]any:
-		out := make(map[string]any, len(current))
+		var out map[string]any
+		if bodies == nil {
+			out = make(map[string]any, len(current))
+		}
 		for key, child := range current {
-			childPath := append(append([]closedPlanDigestProjectionPathV1(nil), path...), closedPlanDigestProjectionPathV1{kind: "key", key: key})
+			var childPath []closedPlanDigestProjectionPathV1
+			if bodies == nil {
+				childPath = append(append([]closedPlanDigestProjectionPathV1(nil), path...), closedPlanDigestProjectionPathV1{kind: "key", key: key})
+			}
 			parsed, matched, err := questionReplySlotContentV1(current, key)
 			if err != nil {
 				return nil, err
@@ -1178,27 +1190,41 @@ func questionReplyViewV1(value any, path []closedPlanDigestProjectionPathV1, ent
 					if err := domainsecret.ValidateValueV1(parsed); err != nil {
 						return nil, errors.Join(ErrCredentialProjection, err)
 					}
-					out[key] = parsed
-					*entries = append(*entries, closedPlanDigestProjectionEntryV1{path: childPath, digest: text, placeholder: cloneQuestionReplyASTV1(parsed).(map[string]any)})
+					if bodies != nil {
+						*bodies = append(*bodies, text)
+					} else {
+						out[key] = parsed
+						*entries = append(*entries, closedPlanDigestProjectionEntryV1{path: childPath, digest: text, placeholder: cloneQuestionReplyASTV1(parsed).(map[string]any)})
+					}
 				}
 				continue
 			}
-			projected, err := questionReplyViewV1(child, childPath, entries, resource, budget)
+			projected, err := walkQuestionReplyV1(child, childPath, entries, resource, budget, depth+1, bodies)
 			if err != nil {
 				return nil, err
 			}
-			out[key] = projected
+			if out != nil {
+				out[key] = projected
+			}
 		}
 		return out, nil
 	case []any:
-		out := make([]any, len(current))
+		var out []any
+		if bodies == nil {
+			out = make([]any, len(current))
+		}
 		for index, child := range current {
-			childPath := append(append([]closedPlanDigestProjectionPathV1(nil), path...), closedPlanDigestProjectionPathV1{kind: "index", index: index})
-			projected, err := questionReplyViewV1(child, childPath, entries, resource, budget)
+			var childPath []closedPlanDigestProjectionPathV1
+			if bodies == nil {
+				childPath = append(append([]closedPlanDigestProjectionPathV1(nil), path...), closedPlanDigestProjectionPathV1{kind: "index", index: index})
+			}
+			projected, err := walkQuestionReplyV1(child, childPath, entries, resource, budget, depth+1, bodies)
 			if err != nil {
 				return nil, err
 			}
-			out[index] = projected
+			if out != nil {
+				out[index] = projected
+			}
 		}
 		return out, nil
 	default:
@@ -1208,15 +1234,11 @@ func questionReplyViewV1(value any, path []closedPlanDigestProjectionPathV1, ent
 
 // Bodies are returned unchanged for recovery completeness checks, not display.
 func QuestionReplyBodiesV1(value any) ([]string, error) {
-	entries := []closedPlanDigestProjectionEntryV1{}
+	texts := []string{}
 	budget := 100000
-	_, err := questionReplyViewV1(value, nil, &entries, false, &budget)
+	_, err := walkQuestionReplyV1(value, nil, nil, false, &budget, 0, &texts)
 	if err != nil {
 		return nil, err
-	}
-	texts := make([]string, len(entries))
-	for i, entry := range entries {
-		texts[i] = entry.digest
 	}
 	sort.Strings(texts)
 	return texts, nil
