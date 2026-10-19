@@ -555,6 +555,55 @@ test('typed Agent approval commits exact Core candidate bytes and reloads before
  expect(h.views.some(view=>view?.dirty)).toBe(false)
  expect(h.getDestroyed()).toBe(1);expect(h.getCommitCalls()).toBe(1);expect(h.getStatusCalls()).toBe(0)
 })
+test('retired workbook scope queued poll cannot mark a committed reopened workbook as failed or disable its undo',async()=>{
+ const h=setup(true);h.delay()
+ const applying=applyProposal(h)
+ await vi.waitFor(()=>expect(h.getCommitCalls()).toBe(1))
+ const oldPoll=h.controller.request({action:'proposals',objectId,scopeId:h.scopeId})
+ h.complete()
+ const committed=await applying
+ expect(committed).toMatchObject({ok:true,view:{revision:hash(edited),status:'ready',canUndo:true,saving:false,dirty:false,editing:false}})
+ expect(committed.view?.scope).toBeUndefined();expect(committed.view?.error).toBeUndefined()
+ const stale=await oldPoll
+ expect(stale).toMatchObject({ok:false,error:'stale_selection'})
+ expect(stale.view?.status).toBe('ready');expect(stale.view?.error).toBeUndefined()
+ expect(stale.view).toEqual(committed.view);expect(h.controller.getView()).toEqual(committed.view)
+ expect(h.views.some(view=>view?.status==='error'||view?.error)).toBe(false)
+ expect(h.decisionInputs).toHaveLength(1);expect(h.getCommitCalls()).toBe(1)
+ expect(h.trace.filter(event=>event==='core:proposal-read')).toHaveLength(0)
+ expect(await h.controller.request({action:'undoChange',...h.target(),threadId})).toMatchObject({ok:true,view:{revision,status:'ready',canUndo:false,saving:false,dirty:false}})
+ expect(h.getUndoCalls()).toBe(1);expect(h.getSaved()).toBe(revision)
+ expect(h.decisionInputs).toHaveLength(1);expect(h.getCommitCalls()).toBe(1)
+ expect(h.requests.some(r=>['replace','replaceCells','export','ack','manual-edit'].includes(r.command))).toBe(false)
+})
+test.each(['proposals','rejectProposal','acceptProposal'] as const)('retired workbook scope %s fails without changing the committed workbook view or repeating approval',async action=>{
+ const h=setup(true);expect((await applyProposal(h)).ok).toBe(true)
+ const committed=h.controller.getView(),published=h.views.length
+ const result=await h.controller.request(action==='proposals'?{action,objectId,scopeId:h.scopeId}:
+  action==='rejectProposal'?{action,objectId,scopeId:h.scopeId,proposalId:h.proposalId}:
+   {action,...h.target(),scopeId:h.scopeId,proposalId:h.proposalId})
+ expect(result).toMatchObject({ok:false,error:'stale_selection',view:{revision:hash(edited),status:'ready',canUndo:true,saving:false}})
+ expect(result.view?.error).toBeUndefined();expect(result.view).toEqual(committed)
+ expect(h.controller.getView()).toEqual(committed);expect(h.views).toHaveLength(published)
+ expect(h.decisionInputs).toHaveLength(1);expect(h.getCommitCalls()).toBe(1)
+ expect(h.trace.filter(event=>event==='core:proposal-read'||event==='core:proposal-reject')).toHaveLength(0)
+ expect(h.requests.some(r=>['replace','replaceCells','export','ack','manual-edit'].includes(r.command))).toBe(false)
+})
+test('retired workbook scope poll cannot erase or mark a newly referenced workbook scope as failed',async()=>{
+ const h=setup(true);expect((await applyProposal(h)).ok).toBe(true)
+ expect(await h.controller.request({action:'captureSelection'})).toMatchObject({ok:true})
+ const newScopeId='5'.repeat(48);h.scopeOverride({scopeId:newScopeId})
+ expect(await h.controller.request({action:'reference',...h.target(),selectionToken:'selection_123',threadId,editable:false})).toMatchObject({ok:true,view:{scope:{scopeId:newScopeId}}})
+ expect(await h.controller.request({action:'proposals',objectId,scopeId:newScopeId})).toMatchObject({ok:true})
+ const referenced=h.controller.getView(),published=h.views.length,reads=h.trace.filter(event=>event==='core:proposal-read').length
+ const stale=await h.controller.request({action:'proposals',objectId,scopeId:h.scopeId})
+ expect(stale).toMatchObject({ok:false,error:'stale_selection',view:{status:'ready',canUndo:true,scope:{scopeId:newScopeId}}})
+ expect(stale.view?.error).toBeUndefined();expect(stale.view).toEqual(referenced)
+ expect(h.controller.getView()).toEqual(referenced);expect(h.views).toHaveLength(published)
+ expect(h.trace.filter(event=>event==='core:proposal-read')).toHaveLength(reads)
+ expect(h.decisionInputs).toHaveLength(1);expect(h.getCommitCalls()).toBe(1)
+ expect(h.requests.some(r=>['replace','replaceCells','export','ack','manual-edit'].includes(r.command))).toBe(false)
+})
 test('typed Agent committed reload failure retries only exact Core readback and surface load',async()=>{
  const h=setup(true);expect((await h.controller.request(h.openRequest)).ok).toBe(true);h.failReload()
  expect(await applyProposal(h)).toMatchObject({ok:false,error:'unknown',view:{saving:true,canUndo:false,status:'error'}})

@@ -1744,6 +1744,11 @@ export function createNativeOfficeController(options: NativeOfficeControllerOpti
         }
         if (request.action === 'bounds') { if (visible && epoch === visibilityEpoch) { document.bounds = request.bounds; document.appearance = request.appearance; if (!document.pendingRecovery) await document.surface.attach(request.bounds, request.appearance); await guardPresent(document) } return }
         if (isPlaying(document) || document.view.playback?.phase === 'error') fail('unavailable')
+        // A poll or decision can queue behind a save that retires its scope.
+        // Refuse that old request before the state-error path: it must not mark
+        // the successfully reopened view as failed or disable its saved undo.
+        if ((request.action === 'proposals' || request.action === 'acceptProposal' || request.action === 'rejectProposal') &&
+          request.scopeId !== document.view.scope?.scopeId) fail('stale_selection')
         try {
           document.binding = await listBinding(document.view.kind, document.binding)
           if (request.action === 'proposals') { await proposals(document,request.scopeId); return }
