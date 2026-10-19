@@ -75,11 +75,11 @@ func ValidateNativeEditingPackage(ctx context.Context, body []byte) (err error) 
 		}
 		switch kind {
 		case "relationships":
-			if e = workbookAdmissionRelationships(raw); e != nil {
+			if e = workbookAdmissionRelationships(raw, name, entries); e != nil {
 				return e
 			}
 		case "content-types":
-			if e = workbookAdmissionContentTypes(raw); e != nil {
+			if e = workbookAdmissionContentTypes(raw, entries); e != nil {
 				return e
 			}
 		case "workbook", "worksheet", "styles", "strings":
@@ -88,6 +88,10 @@ func ValidateNativeEditingPackage(ctx context.Context, body []byte) (err error) 
 			}
 		case "metadata", "theme":
 			if e = workbookAdmissionAncillaryXML(ctx, raw, name); e != nil {
+				return e
+			}
+		case "empty-custom-properties":
+			if e = workbookAdmissionEmptyCustomProperties(raw); e != nil {
 				return e
 			}
 		}
@@ -112,6 +116,9 @@ func ValidateNativeEditingPackage(ctx context.Context, body []byte) (err error) 
 	}
 	if err == nil {
 		_, err = workbookThemeFonts(ctx, body)
+	}
+	if err == nil {
+		err = workbookAdmissionPassivePackage(ctx, body, entries, sheets)
 	}
 	return err
 }
@@ -140,6 +147,8 @@ func workbookAdmissionPart(name string) string {
 		return "relationships"
 	case "docProps/app.xml", "docProps/core.xml":
 		return "metadata"
+	case "docProps/custom.xml":
+		return "empty-custom-properties"
 	case "xl/workbook.xml":
 		return "workbook"
 	case "xl/styles.xml":
@@ -178,15 +187,22 @@ func workbookPackageEntries(body []byte) (map[string]*zip.File, error) {
 
 // OPC target resolution, IDs and external-link safety are owned by the existing
 // filestore preflight. Only relationship feature kinds are restricted here.
-func workbookAdmissionRelationships(raw []byte) error {
+func workbookAdmissionRelationships(raw []byte, part string, entries map[string]*zip.File) error {
 	var rels struct {
 		Items []struct {
-			Type string `xml:"Type,attr"`
+			XMLName    xml.Name
+			ID         string     `xml:"Id,attr"`
+			Type       string     `xml:"Type,attr"`
+			Target     string     `xml:"Target,attr"`
+			TargetMode string     `xml:"TargetMode,attr"`
+			Other      []xml.Attr `xml:",any,attr"`
+			Inner      string     `xml:",innerxml"`
 		} `xml:"Relationship"`
 	}
 	if xml.Unmarshal(raw, &rels) != nil {
 		return patchInvalid
 	}
+	custom := 0
 	for _, r := range rels.Items {
 		switch r.Type {
 		case "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet",
@@ -196,9 +212,17 @@ func workbookAdmissionRelationships(raw []byte) error {
 			"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument",
 			"http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties",
 			"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties":
+		case "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties":
+			custom++
+			if part != "_rels/.rels" || r.XMLName.Space != "http://schemas.openxmlformats.org/package/2006/relationships" || r.ID == "" || r.Target != "docProps/custom.xml" || r.TargetMode != "" || len(r.Other) != 0 || strings.TrimSpace(r.Inner) != "" || entries["docProps/custom.xml"] == nil || custom != 1 {
+				return workbookAdmissionError("unsupported_relationship")
+			}
 		default:
 			return workbookAdmissionError("unsupported_relationship")
 		}
+	}
+	if part == "_rels/.rels" && entries["docProps/custom.xml"] != nil && custom != 1 {
+		return workbookAdmissionError("unsupported_relationship")
 	}
 	return nil
 }
@@ -212,8 +236,11 @@ func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
 			"workbook/workbookPr": "date1904 filterPrivacy defaultThemeVersion backupFile showObjects updateLinks saveExternalLinkValues",
 			"workbook/bookViews":  "", "workbook/bookViews/workbookView": "xWindow yWindow windowWidth windowHeight activeTab firstSheet tabRatio visibility minimized showHorizontalScroll showVerticalScroll showSheetTabs autoFilterDateGrouping",
 			"workbook/sheets": "", "workbook/sheets/sheet": "name sheetId state",
-			"workbook/definedNames": "",
-			"workbook/calcPr":       "calcId calcMode fullCalcOnLoad forceFullCalc calcCompleted calcOnSave concurrentCalc concurrentManualCount iterate iterateCount iterateDelta refMode",
+			"workbook/definedNames":       "",
+			"workbook/workbookProtection": "",
+			"workbook/extLst":             "", "workbook/extLst/ext": "uri",
+			"workbook/extLst/ext/extCalcPr": "stringRefSyntax",
+			"workbook/calcPr":               "calcId calcMode fullCalcOnLoad forceFullCalc calcCompleted calcOnSave concurrentCalc concurrentManualCount iterate iterateCount iterateDelta refMode",
 		},
 		"worksheet": {
 			"worksheet": "", "worksheet/sheetPr": "codeName filterMode published enableFormatConditionsCalculation",
@@ -225,7 +252,7 @@ func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
 			"worksheet/sheetFormatPr":                  "baseColWidth defaultColWidth defaultRowHeight customHeight zeroHeight outlineLevelRow outlineLevelCol",
 			"worksheet/cols":                           "", "worksheet/cols/col": "min max width style hidden bestFit customWidth outlineLevel collapsed phonetic",
 			"worksheet/sheetData": "", "worksheet/sheetData/row": "r s customFormat ht hidden customHeight outlineLevel collapsed spans thickTop thickBot",
-			"worksheet/sheetData/row/c": "r s t", "worksheet/sheetData/row/c/v": "", "worksheet/sheetData/row/c/f": "t",
+			"worksheet/sheetData/row/c": "r s t", "worksheet/sheetData/row/c/v": "", "worksheet/sheetData/row/c/f": "t aca",
 			"worksheet/sheetData/row/c/is": "", "worksheet/sheetData/row/c/is/t": "",
 			"worksheet/mergeCells": "count", "worksheet/mergeCells/mergeCell": "ref",
 			"worksheet/printOptions":           "headings gridLines gridLinesSet horizontalCentered verticalCentered",
@@ -285,11 +312,11 @@ func workbookAdmissionXML(ctx context.Context, raw []byte, kind string) error {
 		}
 		switch n := t.(type) {
 		case xml.StartElement:
-			if n.Name.Space != "http://schemas.openxmlformats.org/spreadsheetml/2006/main" {
-				return reason
-			}
 			stack = append(stack, n.Name.Local)
 			p := strings.Join(stack, "/")
+			if n.Name.Space != "http://schemas.openxmlformats.org/spreadsheetml/2006/main" && !(kind == "workbook" && p == "workbook/extLst/ext/extCalcPr" && n.Name.Space == "http://schemas.libreoffice.org/") {
+				return reason
+			}
 			allowed, ok := profile[p]
 			if !ok {
 				if strings.Contains(p, "/c/") || kind == "strings" {
@@ -368,10 +395,14 @@ func workbookAdmissionAttributeUnsupported(p, name, value string) bool {
 		return value != "n" && value != "s" && value != "inlineStr" && value != "str" && value != "b" && value != "e"
 	case p == "worksheet/sheetData/row/c/f" && name == "t":
 		return value != "normal"
+	case p == "worksheet/sheetData/row/c/f" && name == "aca":
+		return value != "false"
 	case p == "styleSheet/cellStyles" && name == "count":
-		return value != "1"
+		return value != "1" && value != "6"
 	case p == "styleSheet/cellStyles/cellStyle":
-		return name == "name" && value != "Normal" && value != "Default" || name == "xfId" && value != "0" || name == "builtinId" && value != "0" || name == "customBuiltin" && truthy
+		// Identity, definitions and references are checked together against the
+		// finite passive catalog, using Excelize's already parsed Styles.
+		return name == "customBuiltin" && truthy
 	case (p == "styleSheet/dxfs" || p == "styleSheet/tableStyles") && name == "count":
 		return value != "0"
 	case strings.HasSuffix(p, "/xf") && (name == "quotePrefix" || name == "pivotButton"):
@@ -423,15 +454,21 @@ func workbookAdmissionAncillaryXML(ctx context.Context, raw []byte, part string)
 
 // The preflight already validates declarations against archive entries. These
 // are only the passive content types supported by this editing feature profile.
-func workbookAdmissionContentTypes(raw []byte) error {
+func workbookAdmissionContentTypes(raw []byte, entries map[string]*zip.File) error {
 	var types struct {
 		Items []struct {
-			Type string `xml:"ContentType,attr"`
+			XMLName   xml.Name
+			Type      string     `xml:"ContentType,attr"`
+			Extension string     `xml:"Extension,attr"`
+			PartName  string     `xml:"PartName,attr"`
+			Other     []xml.Attr `xml:",any,attr"`
+			Inner     string     `xml:",innerxml"`
 		} `xml:",any"`
 	}
 	if xml.Unmarshal(raw, &types) != nil {
 		return patchInvalid
 	}
+	custom := 0
 	for _, item := range types.Items {
 		switch item.Type {
 		case "application/xml", "application/vnd.openxmlformats-package.relationships+xml",
@@ -442,8 +479,281 @@ func workbookAdmissionContentTypes(raw []byte) error {
 			"application/vnd.openxmlformats-officedocument.theme+xml",
 			"application/vnd.openxmlformats-package.core-properties+xml",
 			"application/vnd.openxmlformats-officedocument.extended-properties+xml":
+		case "application/vnd.openxmlformats-officedocument.custom-properties+xml":
+			custom++
+			if item.XMLName.Local != "Override" || item.XMLName.Space != "http://schemas.openxmlformats.org/package/2006/content-types" || item.PartName != "/docProps/custom.xml" || item.Extension != "" || len(item.Other) != 0 || strings.TrimSpace(item.Inner) != "" || entries["docProps/custom.xml"] == nil || custom != 1 {
+				return workbookAdmissionError("unsupported_package_part")
+			}
+		case "image/png", "image/jpeg":
+			extension := "png"
+			if item.Type == "image/jpeg" {
+				extension = "jpeg"
+			}
+			if item.XMLName.Local != "Default" || item.XMLName.Space != "http://schemas.openxmlformats.org/package/2006/content-types" || item.Extension != extension || item.PartName != "" || len(item.Other) != 0 || strings.TrimSpace(item.Inner) != "" {
+				return workbookAdmissionError("unsupported_package_part")
+			}
+			for name := range entries {
+				if strings.HasPrefix(name, "xl/media/") {
+					return workbookAdmissionError("unsupported_package_part")
+				}
+			}
 		default:
 			return workbookAdmissionError("unsupported_package_part")
+		}
+	}
+	if entries["docProps/custom.xml"] != nil && custom != 1 {
+		return workbookAdmissionError("unsupported_package_part")
+	}
+	return nil
+}
+
+const workbookPassiveCalcURI = "{7626C862-2A13-11E5-B345-FEFF819CDC9F}"
+const workbookPassiveCalcNamespace = "http://schemas.libreoffice.org/"
+
+func workbookAdmissionExactAttributes(attrs []xml.Attr, expected map[string]string) bool {
+	count := 0
+	for _, a := range attrs {
+		if a.Name.Space == "xmlns" || a.Name.Space == "" && a.Name.Local == "xmlns" {
+			continue
+		}
+		value, ok := expected[a.Name.Local]
+		if a.Name.Space != "" || !ok || a.Value != value {
+			return false
+		}
+		count++
+	}
+	return count == len(expected)
+}
+
+func workbookAdmissionEmptyCustomProperties(raw []byte) error {
+	d := xml.NewDecoder(bytes.NewReader(raw))
+	seen, depth := false, 0
+	for {
+		token, err := d.Token()
+		if err == io.EOF {
+			if seen && depth == 0 {
+				return nil
+			}
+			return patchInvalid
+		}
+		if err != nil {
+			return patchInvalid
+		}
+		switch n := token.(type) {
+		case xml.StartElement:
+			if seen || n.Name.Local != "Properties" || n.Name.Space != "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" || !workbookAdmissionExactAttributes(n.Attr, nil) {
+				return workbookAdmissionError("unsupported_package_part")
+			}
+			seen, depth = true, 1
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if strings.TrimSpace(string(n)) != "" {
+				return workbookAdmissionError("unsupported_package_part")
+			}
+		case xml.Comment, xml.Directive:
+			return workbookAdmissionError("unsupported_package_part")
+		case xml.ProcInst:
+			if seen || n.Target != "xml" {
+				return workbookAdmissionError("unsupported_package_part")
+			}
+		}
+	}
+}
+
+// Only the observed empty protection marker and one passive Calc syntax marker
+// are admitted. The syntax marker requires formulas without string literals
+// that also pass Core's existing closed formula grammar.
+func workbookAdmissionPassiveWorkbook(raw []byte) (bool, error) {
+	d := xml.NewDecoder(bytes.NewReader(raw))
+	stack := []string{}
+	protection, lists, extensions, calculation := 0, 0, 0, 0
+	reject := workbookAdmissionError("unsupported_workbook_feature")
+	for {
+		token, err := d.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return false, patchInvalid
+		}
+		switch n := token.(type) {
+		case xml.StartElement:
+			stack = append(stack, n.Name.Local)
+			p := strings.Join(stack, "/")
+			switch p {
+			case "workbook/workbookProtection":
+				protection++
+				if protection != 1 || !workbookAdmissionExactAttributes(n.Attr, nil) {
+					return false, reject
+				}
+			case "workbook/extLst":
+				lists++
+				if lists != 1 || !workbookAdmissionExactAttributes(n.Attr, nil) {
+					return false, reject
+				}
+			case "workbook/extLst/ext":
+				extensions++
+				if extensions != 1 || !workbookAdmissionExactAttributes(n.Attr, map[string]string{"uri": workbookPassiveCalcURI}) {
+					return false, reject
+				}
+			case "workbook/extLst/ext/extCalcPr":
+				calculation++
+				if calculation != 1 || n.Name.Space != workbookPassiveCalcNamespace || !workbookAdmissionExactAttributes(n.Attr, map[string]string{"stringRefSyntax": "CalcA1ExcelA1"}) {
+					return false, reject
+				}
+			}
+		case xml.EndElement:
+			stack = stack[:len(stack)-1]
+		case xml.CharData:
+			p := strings.Join(stack, "/")
+			if (strings.HasPrefix(p, "workbook/extLst") || strings.HasPrefix(p, "workbook/workbookProtection")) && strings.TrimSpace(string(n)) != "" {
+				return false, reject
+			}
+		case xml.Comment, xml.Directive, xml.ProcInst:
+			p := strings.Join(stack, "/")
+			if strings.HasPrefix(p, "workbook/extLst") || strings.HasPrefix(p, "workbook/workbookProtection") {
+				return false, reject
+			}
+		}
+	}
+	if lists != 0 && (extensions != 1 || calculation != 1) {
+		return false, reject
+	}
+	return lists == 1, nil
+}
+
+func workbookAdmissionPassivePackage(ctx context.Context, body []byte, entries map[string]*zip.File, sheets []workbookPhysicalSheet) error {
+	raw, err := workbookXML(ctx, entries["xl/workbook.xml"])
+	if err != nil {
+		return err
+	}
+	hasCalcMarker, err := workbookAdmissionPassiveWorkbook(raw)
+	if err != nil {
+		return err
+	}
+	f, err := openPatchWorkbook(body)
+	if err != nil {
+		return patchInvalid
+	}
+	defer f.Close()
+	if err = workbookAdmissionNamedStyles(f); err != nil {
+		return err
+	}
+	if !hasCalcMarker {
+		return nil
+	}
+	w := office.Workbook{}
+	for i, physical := range sheets {
+		sheet := office.Sheet{ID: "sheet" + strconv.Itoa(i), Name: physical.Name}
+		for address := range physical.Cells {
+			if ctx.Err() != nil {
+				return patchInvalid
+			}
+			formula, e := f.GetCellFormula(physical.Name, address)
+			if e != nil {
+				return patchInvalid
+			}
+			if strings.Contains(formula, `"`) {
+				// The extension changes string-reference syntax. Keep its passive
+				// profile to formulas without string literals; Core still owns
+				// the closed grammar and supported functions below.
+				return workbookAdmissionError("unsupported_workbook_feature")
+			}
+			if formula != "" {
+				sheet.Cells = append(sheet.Cells, office.Cell{Address: address, Type: "formula", Formula: formula})
+			}
+		}
+		w.Sheets = append(w.Sheets, sheet)
+	}
+	if w.Validate() != nil {
+		return workbookAdmissionError("unsupported_workbook_feature")
+	}
+	return nil
+}
+
+// Native export adds exactly this unused built-in catalog. Resolve every
+// referenced definition instead of trusting a name or export-specific XF index.
+func workbookAdmissionNamedStyles(f *excelize.File) error {
+	reject := workbookAdmissionError("unsupported_xml_feature")
+	if _, err := f.GetStyle(0); err != nil {
+		return patchInvalid
+	}
+	s := f.Styles
+	if s.CellStyles == nil {
+		return nil
+	}
+	if s.CellStyles.Count != len(s.CellStyles.CellStyle) || s.CellStyles.Count != 1 && s.CellStyles.Count != 6 || s.CellStyleXfs == nil || s.CellStyleXfs.Count != len(s.CellStyleXfs.Xf) {
+		return reject
+	}
+	catalog := map[string]struct{ builtin, format int }{
+		"Comma": {3, 43}, "Comma [0]": {6, 41}, "Currency": {4, 44}, "Currency [0]": {7, 42}, "Percent": {5, 9},
+	}
+	seen := map[string]bool{}
+	passiveXfs := map[int]bool{}
+	normal := false
+	for _, named := range s.CellStyles.CellStyle {
+		if named == nil || seen[named.Name] || named.XfID < 0 || named.XfID >= len(s.CellStyleXfs.Xf) || named.ILevel != nil || named.Hidden != nil || named.CustomBuiltIn != nil && *named.CustomBuiltIn {
+			return reject
+		}
+		seen[named.Name] = true
+		if named.Name == "Normal" || named.Name == "Default" {
+			if normal || s.CellStyles.Count == 6 && named.Name != "Normal" || named.XfID != 0 || named.BuiltInID != nil && *named.BuiltInID != 0 {
+				return reject
+			}
+			normal = true
+			continue
+		}
+		expected, ok := catalog[named.Name]
+		if !ok || s.CellStyles.Count != 6 || named.BuiltInID == nil || *named.BuiltInID != expected.builtin || passiveXfs[named.XfID] || named.XfID == 0 {
+			return reject
+		}
+		xf := s.CellStyleXfs.Xf[named.XfID]
+		if xf.NumFmtID == nil || *xf.NumFmtID != expected.format || xf.FontID == nil || xf.FillID == nil || xf.BorderID == nil || xf.XfID != nil || xf.QuotePrefix != nil || xf.PivotButton != nil || xf.ApplyNumberFormat != nil || xf.ApplyFill != nil || xf.ApplyFont == nil || !*xf.ApplyFont || xf.ApplyBorder == nil || *xf.ApplyBorder || xf.ApplyAlignment == nil || *xf.ApplyAlignment || xf.ApplyProtection == nil || *xf.ApplyProtection || xf.Alignment != nil || xf.Protection != nil {
+			return reject
+		}
+		if s.Fonts == nil || s.Fills == nil || s.Borders == nil || s.Fonts.Count != len(s.Fonts.Font) || s.Fills.Count != len(s.Fills.Fill) || s.Borders.Count != len(s.Borders.Border) || *xf.FontID < 0 || *xf.FontID >= len(s.Fonts.Font) || *xf.FillID < 0 || *xf.FillID >= len(s.Fills.Fill) || *xf.BorderID < 0 || *xf.BorderID >= len(s.Borders.Border) {
+			return reject
+		}
+		font, fill, border := s.Fonts.Font[*xf.FontID], s.Fills.Fill[*xf.FillID], s.Borders.Border[*xf.BorderID]
+		if font == nil || font.Name == nil || font.Name.Val == nil || *font.Name.Val != "Arial" || font.Sz == nil || font.Sz.Val == nil || *font.Sz.Val != 10 || font.Family == nil || font.Family.Val == nil || *font.Family.Val != 0 || font.Charset != nil || font.B != nil || font.I != nil || font.Strike != nil || font.Outline != nil || font.Shadow != nil || font.Condense != nil || font.Extend != nil || font.Color != nil || font.U != nil || font.VertAlign != nil || font.Scheme != nil {
+			return reject
+		}
+		if fill == nil || fill.GradientFill != nil || fill.PatternFill == nil || fill.PatternFill.PatternType != "none" || fill.PatternFill.FgColor != nil || fill.PatternFill.BgColor != nil || border == nil || border.DiagonalDown || border.DiagonalUp || border.Outline || border.Vertical != nil || border.Horizontal != nil {
+			return reject
+		}
+		if border.Left == nil || border.Right == nil || border.Top == nil || border.Bottom == nil || border.Diagonal == nil {
+			return reject
+		}
+		if border.Left.Style != "" || border.Left.Color != nil || border.Right.Style != "" || border.Right.Color != nil || border.Top.Style != "" || border.Top.Color != nil || border.Bottom.Style != "" || border.Bottom.Color != nil || border.Diagonal.Style != "" || border.Diagonal.Color != nil {
+			return reject
+		}
+		if s.NumFmts != nil {
+			if s.NumFmts.Count != len(s.NumFmts.NumFmt) {
+				return reject
+			}
+			for _, format := range s.NumFmts.NumFmt {
+				if format == nil || format.NumFmtID == expected.format {
+					return reject
+				}
+			}
+		}
+		passiveXfs[named.XfID] = true
+	}
+	if !normal || s.CellStyles.Count == 6 && len(passiveXfs) != len(catalog) {
+		return reject
+	}
+	if s.CellXfs == nil || s.CellXfs.Count != len(s.CellXfs.Xf) {
+		return reject
+	}
+	for _, xf := range s.CellXfs.Xf {
+		if xf.XfID != nil && passiveXfs[*xf.XfID] {
+			return reject
+		}
+	}
+	for _, xf := range s.CellStyleXfs.Xf {
+		if xf.XfID != nil && passiveXfs[*xf.XfID] {
+			return reject
 		}
 	}
 	return nil
@@ -452,8 +762,10 @@ func workbookAdmissionContentTypes(raw []byte) error {
 type workbookPhysicalSheet struct {
 	Name, ID, State, CodeName, Filter string
 	ZeroHeight                        bool
+	DefaultRowHeight                  float64
 	Cells                             map[string]bool
 	Rows                              map[int]int
+	RowHeights                        map[int]float64
 	Columns                           map[int]bool
 	Merges                            map[string]bool
 	Settings                          map[string]string
@@ -535,7 +847,7 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 		if e != nil {
 			return nil, e
 		}
-		s := workbookPhysicalSheet{Name: sheet.Name, ID: sheet.ID, State: sheet.State, Cells: map[string]bool{}, Rows: map[int]int{}, Columns: map[int]bool{1: true, 16384: true}, Merges: map[string]bool{}, Settings: map[string]string{}}
+		s := workbookPhysicalSheet{Name: sheet.Name, ID: sheet.ID, State: sheet.State, DefaultRowHeight: 15, Cells: map[string]bool{}, Rows: map[int]int{}, RowHeights: map[int]float64{}, Columns: map[int]bool{1: true, 16384: true}, Merges: map[string]bool{}, Settings: map[string]string{}}
 		if s.State == "" {
 			s.State = "visible"
 		}
@@ -573,6 +885,13 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 				s.Settings[start.Name.Local+"/text"] = text
 			case "sheetFormatPr":
 				s.ZeroHeight = attrs["zeroHeight"] == "1" || attrs["zeroHeight"] == "true"
+				if value := attrs["defaultRowHeight"]; value != "" {
+					height, err := strconv.ParseFloat(value, 64)
+					if err != nil || math.IsNaN(height) || math.IsInf(height, 0) || height < 0 {
+						return nil, patchInvalid
+					}
+					s.DefaultRowHeight = height
+				}
 			case "sheetPr":
 				s.CodeName = attrs["codeName"]
 			case "autoFilter":
@@ -598,6 +917,13 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 					}
 				}
 				s.Rows[r] = style
+				if value := attrs["ht"]; value != "" {
+					height, err := strconv.ParseFloat(value, 64)
+					if err != nil || math.IsNaN(height) || math.IsInf(height, 0) || height < 0 {
+						return nil, patchInvalid
+					}
+					s.RowHeights[r] = height
+				}
 				rows++
 				if rows > 10000 {
 					return nil, ErrUnsupportedWorkbook
@@ -644,8 +970,129 @@ func workbookPhysical(ctx context.Context, body []byte) ([]workbookPhysicalSheet
 	}
 	return result, nil
 }
-func workbookSemanticStyle(f *excelize.File, id int) (string, error) {
-	s, e := f.GetStyle(id)
+
+// workbookStyleResolver uses Excelize's parsed styles and public style decoder.
+// GetStyle alone omits components whose cell-XF apply flag is false; that does
+// not mean the effective font/border/etc. is absent. Resolve the named-style
+// parent first, without changing either the source styles or any package bytes.
+type workbookStyleResolver struct {
+	source     *excelize.File
+	projection *excelize.File
+	cache      map[int]string
+}
+
+func newWorkbookStyleResolver(f *excelize.File) (*workbookStyleResolver, error) {
+	if _, err := f.GetStyle(0); err != nil || f.Styles == nil || f.Styles.CellXfs == nil || f.Styles.CellStyleXfs == nil || f.Styles.Fonts == nil || f.Styles.Fills == nil || f.Styles.Borders == nil {
+		return nil, patchInvalid
+	}
+	projection := excelize.NewFile()
+	// Do not copy File/style-sheet mutexes or alter the source's shared records.
+	// Only the cell-XF slice is private; referenced definitions remain read-only.
+	cellXfs := *f.Styles.CellXfs
+	cellXfs.Xf = append(cellXfs.Xf[:0:0], cellXfs.Xf...)
+	projection.Styles.CellXfs = &cellXfs
+	projection.Styles.CellStyleXfs = f.Styles.CellStyleXfs
+	projection.Styles.NumFmts = f.Styles.NumFmts
+	projection.Styles.Fonts = f.Styles.Fonts
+	projection.Styles.Fills = f.Styles.Fills
+	projection.Styles.Borders = f.Styles.Borders
+	projection.Styles.Colors = f.Styles.Colors
+	projection.Theme = f.Theme
+	return &workbookStyleResolver{source: f, projection: projection, cache: map[int]string{}}, nil
+}
+
+func workbookInheritedStyleID(local, parent *int, apply, parentApply *bool, count int, same func(int, int) bool) (*int, error) {
+	index := func(value *int) int {
+		if value == nil {
+			return 0
+		}
+		return *value
+	}
+	a, b := index(local), index(parent)
+	if a < 0 || b < 0 || count >= 0 && (a >= count || b >= count) {
+		return nil, patchInvalid
+	}
+	if apply != nil && *apply {
+		return &a, nil
+	}
+	// Cell-XF apply flags default to false. A local component that disagrees
+	// with its parent must explicitly opt out of inheritance; do not guess which
+	// contradictory definition a reader would display. Style-XF flags default
+	// to true; an explicitly disabled parent component is outside this resolver.
+	if parentApply != nil && !*parentApply || local != nil && !same(a, b) {
+		return nil, patchInvalid
+	}
+	return &b, nil
+}
+
+func (r *workbookStyleResolver) semantic(id int) (string, error) {
+	if value, ok := r.cache[id]; ok {
+		return value, nil
+	}
+	styles := r.source.Styles
+	if id < 0 || id >= len(styles.CellXfs.Xf) {
+		return "", patchInvalid
+	}
+	xf := styles.CellXfs.Xf[id]
+	parentID := 0
+	if xf.XfID != nil {
+		parentID = *xf.XfID
+	}
+	if parentID < 0 || parentID >= len(styles.CellStyleXfs.Xf) {
+		return "", patchInvalid
+	}
+	base := styles.CellStyleXfs.Xf[parentID]
+	if base.XfID != nil {
+		return "", patchInvalid // Named-style XFs do not form an inheritance graph.
+	}
+	var err error
+	if xf.FontID, err = workbookInheritedStyleID(xf.FontID, base.FontID, xf.ApplyFont, base.ApplyFont, len(styles.Fonts.Font), func(a, b int) bool { return reflect.DeepEqual(styles.Fonts.Font[a], styles.Fonts.Font[b]) }); err != nil {
+		return "", err
+	}
+	if xf.FillID, err = workbookInheritedStyleID(xf.FillID, base.FillID, xf.ApplyFill, base.ApplyFill, len(styles.Fills.Fill), func(a, b int) bool { return reflect.DeepEqual(styles.Fills.Fill[a], styles.Fills.Fill[b]) }); err != nil {
+		return "", err
+	}
+	if xf.BorderID, err = workbookInheritedStyleID(xf.BorderID, base.BorderID, xf.ApplyBorder, base.ApplyBorder, len(styles.Borders.Border), func(a, b int) bool { return reflect.DeepEqual(styles.Borders.Border[a], styles.Borders.Border[b]) }); err != nil {
+		return "", err
+	}
+	if xf.NumFmtID, err = workbookInheritedStyleID(xf.NumFmtID, base.NumFmtID, xf.ApplyNumberFormat, base.ApplyNumberFormat, -1, func(a, b int) bool { return a == b }); err != nil {
+		return "", err
+	}
+	if xf.ApplyAlignment == nil || !*xf.ApplyAlignment {
+		// Excelize emits an empty alignment element for an ordinary NewStyle.
+		// Its zero-valued properties equal the absent default, not an override.
+		localDefault := xf.Alignment == nil || reflect.ValueOf(xf.Alignment).Elem().IsZero()
+		parentDefault := base.Alignment == nil || reflect.ValueOf(base.Alignment).Elem().IsZero()
+		if base.ApplyAlignment != nil && !*base.ApplyAlignment || xf.Alignment != nil && !reflect.DeepEqual(xf.Alignment, base.Alignment) && !(localDefault && parentDefault) {
+			return "", patchInvalid
+		}
+		xf.Alignment = base.Alignment
+	}
+	if xf.ApplyProtection == nil || !*xf.ApplyProtection {
+		defaultValues := func(hidden, locked *bool) bool { return (hidden == nil || !*hidden) && (locked == nil || *locked) }
+		localDefault := xf.Protection == nil || defaultValues(xf.Protection.Hidden, xf.Protection.Locked)
+		parentDefault := base.Protection == nil || defaultValues(base.Protection.Hidden, base.Protection.Locked)
+		if base.ApplyProtection != nil && !*base.ApplyProtection || xf.Protection != nil && !reflect.DeepEqual(xf.Protection, base.Protection) && !(localDefault && parentDefault) {
+			return "", patchInvalid
+		}
+		xf.Protection = base.Protection
+	}
+	if xf.Protection != nil && xf.Protection.Locked == nil {
+		// Excel treats omitted locked as true, including an empty protection
+		// element. Excelize's decoder otherwise turns that element into false.
+		protection := *xf.Protection
+		locked := true
+		protection.Locked = &locked
+		xf.Protection = &protection
+	}
+	// These flags belong only to the in-memory decoder projection. They expose
+	// every resolved component to GetStyle; the real cell-XF and output remain
+	// intact. Charset presence/value and every other public Font field are kept.
+	apply := true
+	xf.ApplyFont, xf.ApplyFill, xf.ApplyBorder = &apply, &apply, &apply
+	xf.ApplyAlignment, xf.ApplyProtection, xf.ApplyNumberFormat = &apply, &apply, &apply
+	r.projection.Styles.CellXfs.Xf[id] = xf
+	s, e := r.projection.GetStyle(id)
 	if e != nil {
 		return "", patchInvalid
 	}
@@ -657,7 +1104,7 @@ func workbookSemanticStyle(f *excelize.File, id int) (string, error) {
 		s.Protection = &excelize.Protection{Locked: true}
 	}
 	if s.Font != nil {
-		color := f.GetBaseColor(s.Font.Color, s.Font.ColorIndexed, s.Font.ColorTheme)
+		color := r.source.GetBaseColor(s.Font.Color, s.Font.ColorIndexed, s.Font.ColorTheme)
 		if color != "" {
 			color = excelize.ThemeColor(color, s.Font.ColorTint)
 			if len(color) == 8 {
@@ -682,7 +1129,19 @@ func workbookSemanticStyle(f *excelize.File, id int) (string, error) {
 	s.Border = borders
 	sort.Slice(s.Border, func(i, j int) bool { return s.Border[i].Type < s.Border[j].Type })
 	raw, e := json.Marshal(s)
+	if e == nil {
+		r.cache[id] = string(raw)
+	}
 	return string(raw), e
+}
+
+func workbookSemanticStyle(f *excelize.File, id int) (string, error) {
+	resolver, err := newWorkbookStyleResolver(f)
+	if err != nil {
+		return "", err
+	}
+	defer resolver.projection.Close()
+	return resolver.semantic(id)
 }
 func workbookCellSemantic(f *excelize.File, sheet, address string) (string, error) {
 	formula, e := f.GetCellFormula(sheet, address)
@@ -914,6 +1373,16 @@ func workbookCalculationSettings(ctx context.Context, f *excelize.File, body []b
 }
 
 func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.File, original, candidate []byte, scope office.WorkbookSelection) error {
+	beforeStyles, err := newWorkbookStyleResolver(before)
+	if err != nil {
+		return err
+	}
+	defer beforeStyles.projection.Close()
+	afterStyles, err := newWorkbookStyleResolver(after)
+	if err != nil {
+		return err
+	}
+	defer afterStyles.projection.Close()
 	calcBefore, e1 := workbookCalculationSettings(ctx, before, original)
 	calcAfter, e2 := workbookCalculationSettings(ctx, after, candidate)
 	if e1 != nil || e2 != nil || !reflect.DeepEqual(calcBefore, calcAfter) {
@@ -937,7 +1406,7 @@ func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.Fil
 	}
 	for i, left := range a {
 		right := b[i]
-		if left.Name != right.Name || left.ID != right.ID || left.State != right.State || left.CodeName != right.CodeName || left.Filter != right.Filter || left.ZeroHeight != right.ZeroHeight || !reflect.DeepEqual(left.Merges, right.Merges) || !workbookSameExplicitSettings(left.Settings, right.Settings) {
+		if left.Name != right.Name || left.ID != right.ID || left.State != right.State || left.CodeName != right.CodeName || left.Filter != right.Filter || left.ZeroHeight != right.ZeroHeight || left.DefaultRowHeight != right.DefaultRowHeight || !reflect.DeepEqual(left.Merges, right.Merges) || !workbookSameExplicitSettings(left.Settings, right.Settings) {
 			return patchInvalid
 		}
 		p1, e1 := before.GetPanes(left.Name)
@@ -963,15 +1432,24 @@ func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.Fil
 			if ctx.Err() != nil {
 				return patchInvalid
 			}
-			h1, e1 := before.GetRowHeight(left.Name, r)
-			h2, e2 := after.GetRowHeight(left.Name, r)
+			// GetRowHeight ignores sheet defaults unless customHeight=true.
+			// Compare the actual declared default and optional row override so
+			// native export materializing the same height stays equivalent.
+			h1, ok := left.RowHeights[r]
+			if !ok {
+				h1 = left.DefaultRowHeight
+			}
+			h2, ok := right.RowHeights[r]
+			if !ok {
+				h2 = right.DefaultRowHeight
+			}
 			v1, e3 := before.GetRowVisible(left.Name, r)
 			v2, e4 := after.GetRowVisible(left.Name, r)
 			o1, e5 := before.GetRowOutlineLevel(left.Name, r)
 			o2, e6 := after.GetRowOutlineLevel(left.Name, r)
-			s1, e7 := workbookSemanticStyle(before, left.Rows[r])
-			s2, e8 := workbookSemanticStyle(after, right.Rows[r])
-			if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil || e6 != nil || e7 != nil || e8 != nil || h1 != h2 || v1 != v2 || o1 != o2 || s1 != s2 {
+			s1, e7 := beforeStyles.semantic(left.Rows[r])
+			s2, e8 := afterStyles.semantic(right.Rows[r])
+			if e3 != nil || e4 != nil || e5 != nil || e6 != nil || e7 != nil || e8 != nil || h1 != h2 || v1 != v2 || o1 != o2 || s1 != s2 {
 				return patchInvalid
 			}
 		}
@@ -991,8 +1469,8 @@ func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.Fil
 			o2, e6 := after.GetColOutlineLevel(left.Name, name)
 			id1, e7 := before.GetColStyle(left.Name, name)
 			id2, e8 := after.GetColStyle(left.Name, name)
-			s1, e9 := workbookSemanticStyle(before, id1)
-			s2, e10 := workbookSemanticStyle(after, id2)
+			s1, e9 := beforeStyles.semantic(id1)
+			s2, e10 := afterStyles.semantic(id2)
 			if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil || e6 != nil || e7 != nil || e8 != nil || e9 != nil || e10 != nil || w1 != w2 || v1 != v2 || o1 != o2 || s1 != s2 {
 				return patchInvalid
 			}
@@ -1007,8 +1485,8 @@ func verifyWorkbookOutsideScope(ctx context.Context, before, after *excelize.Fil
 			col, row, _ := excelize.CellNameToCoordinates(address)
 			id1, e1 := before.GetCellStyle(left.Name, address)
 			id2, e2 := after.GetCellStyle(left.Name, address)
-			s1, e3 := workbookSemanticStyle(before, id1)
-			s2, e4 := workbookSemanticStyle(after, id2)
+			s1, e3 := beforeStyles.semantic(id1)
+			s2, e4 := afterStyles.semantic(id2)
 			if e1 != nil || e2 != nil || e3 != nil || e4 != nil || s1 != s2 {
 				return patchInvalid
 			}
