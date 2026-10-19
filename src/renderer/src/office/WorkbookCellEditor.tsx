@@ -5,7 +5,7 @@ import { Check, Info, Save, Trash2 } from '../design/AnalytixUiIcons'
 import { WorkspaceViewerIconButton, WorkspaceViewerMenu } from '../components/workbench/WorkspaceViewerHeader'
 import { useAnchoredPanel } from '../components/chat/presentation/useAnchoredPanel'
 import styles from './workbook-cell-editor.module.css'
-import {useNativeOfficeStore,nativeWorkbookDraftKey,nativeOfficeTargetKey,nativeWorkbookDraftUnsettled,nativeWorkbookDraftCellMatches,type NativeWorkbookCellDraft} from './native-office-store'
+import {useNativeOfficeStore,nativeWorkbookDraftKey,nativeOfficeTargetKey,nativeWorkbookDraftUnsettled,nativeWorkbookDraftCellMatches,nativeOfficeHasUnresolvedChange,type NativeWorkbookCellDraft} from './native-office-store'
 import {registerWriteShutdownInput} from '../write/write-shutdown'
 
 let workbookShutdownRegistered = false
@@ -25,6 +25,14 @@ export function ensureNativeWorkbookDraftShutdownGuard() {
 
 type CellSelection = Extract<NativeOfficeSelection, {kind:'cells'}>
 type CellEdit = Extract<NativeOfficeRequest, {action:'editWorkbookCell'}>['edit']
+type InputMode = NonNullable<NativeWorkbookCellDraft['inputMode']>
+export type WorkbookCellContextActions={
+  owner:string;objectId:string;revision:string;changeSequence:number;selectionToken:string
+  actions:ReadonlyArray<{id:string;label:string;enabled:boolean;run:()=>void}>
+}
+const decimalValue=/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+const inputModes:ReadonlyArray<{value:InputMode;label:string}>=[{value:'auto',label:'自动识别'},{value:'text',label:'文本'},
+  {value:'number',label:'数值'},{value:'formula',label:'公式'},{value:'empty',label:'清空'}]
 const column = (value:number):string => { let label = ''; for (value++; value; value = Math.floor((value - 1) / 26)) label = String.fromCharCode(65 + (value - 1) % 26) + label; return label }
 
 /** Cached native results are display data, never a replacement formula evaluator. */
@@ -64,9 +72,18 @@ export function workbookDraftEdit(type:CellEdit['type'], value:string):CellEdit 
   if (type === 'empty') return {type:'empty'}
   if (type === 'text') return value.length > 0 && value.length <= 4096 ? {type:'text',text:value} : null
   if (type === 'formula') return value.startsWith('=') && value.length > 1 && value.length <= 1024 ? {type:'formula',formula:value} : null
-  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim())) return null
+  if (!decimalValue.test(value.trim())) return null
   const number = Number(value)
   return Number.isFinite(number) ? {type:'number',value:number} : null
+}
+/** Conservative input intent only; native validation and receipts retain file authority. */
+export function workbookAutoInputType(value:string):CellEdit['type'] {
+  if (value === '') return 'empty'
+  if (value.startsWith('=')) return 'formula'
+  const digits=value.split(/[eE]/)[0].replace(/\D/g,'').replace(/^0+/,'')
+  const number=Number(value)
+  return decimalValue.test(value) && !/^[+-]?0\d/.test(value) && digits.length <= 15 && Number.isFinite(number) &&
+    (number !== 0 || !/[1-9]/.test(digits)) ? 'number' : 'text'
 }
 function savedReceipt(response:NativeOfficeResponse | undefined, before:NativeOfficeView, threadId:string):NativeOfficeView | null {
   const next = response?.view, change = next?.recovery?.current
@@ -79,9 +96,10 @@ const saveError = (error:string | undefined):string => error === 'stale_selectio
   ? '选区或文件版本已变化，请重新选择。' : error === 'unsupported_selection' || error === 'invalid_request'
     ? '此输入或公式不受支持；请检查类型与公式范围。' : '保存结果尚未确认，请通过“查询结果”核实。'
 
-export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspace='',path=view.path,toolbarTarget}:{
+export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspace='',path=view.path,toolbarTarget,onContextActionsChange}:{
   view:NativeOfficeView; threadId:string | null; active:boolean; busy:boolean; workspace?:string; path?:string
   toolbarTarget?:HTMLElement | null
+  onContextActionsChange?:(context:WorkbookCellContextActions|null)=>void
   onRequest:(request:NativeOfficeRequest) => Promise<NativeOfficeResponse | undefined>
 }) {
   const preferredDraftKey=nativeWorkbookDraftKey(workspace,path,threadId)
@@ -99,6 +117,8 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
   const input=useRef<HTMLInputElement>(null),lastIntent=useRef('')
   const latest=useRef({view,threadId,active});latest.current={view,threadId,active}
   const pending=!!draft?.pending,unresolved=[view.recovery?.pending,view.recovery?.current].some(change=>['prepared','unknown','conflict'].includes(change?.status ?? ''))
+  const transitioning=view.kind === 'xlsx' && (view.status !== 'ready' || !!view.saving || nativeOfficeHasUnresolvedChange(view,null))
+  const inputBlocked=busy || transitioning
   const available=!!(active && threadId && view.kind === 'xlsx' && view.status === 'ready' && !view.protectedPresent &&
     view.workbookEditing?.editable && cell && !view.dirty && !view.saving && !unresolved)
   // A draft's identity is the original cell and revision. A fresh native token
@@ -106,36 +126,72 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
   // these words. Lost authority disables Save without erasing the user's input.
   const sameTarget=!!(!draft || draft.threadId === threadId && draft.objectId === view.objectId && draft.revision === view.revision &&
     bounded?.sheetName === draft.sheetName && cell && nativeWorkbookDraftCellMatches(cell,draft.cell))
-  const editable=active && !busy && !pending && !frozen && !closing && !draft?.unconfirmed && (!!draft || available)
+  const editable=active && !inputBlocked && !pending && !frozen && !closing && !draft?.unconfirmed && (!!draft || available)
   const canSave=available && sameTarget && editable && !draft?.unconfirmed
   const form=draft ?? initialValue(cell),change=workbookDraftEdit(form.type,form.value)
+  const inputMode:InputMode=draft ? draft.inputMode ?? draft.type : 'auto'
   const changed=!!draft?.changed
   const owner=draft?.id ?? JSON.stringify([draftKey,view.objectId,view.revision,cell?.sheet,cell?.column,cell?.row])
+  const contextCell=JSON.stringify([bounded?.sheetName,cell])
+  const contextOwner=JSON.stringify([owner,workspace,path,threadId,view.objectId,view.revision,view.changeSequence ?? 0,selection?.token,contextCell,inputMode,form.value])
+  const currentContext=useRef<string|null>(contextOwner);currentContext.current=active && editable && sameTarget ? contextOwner : null
+  const applyContextMode=useRef<(mode:InputMode)=>void>(()=>{})
   const feedbackPanel=useAnchoredPanel<HTMLSpanElement>({enabled:active && toolbarTarget !== null,ownerKey:owner})
+  const typeMenu=useAnchoredPanel<HTMLSpanElement>({enabled:editable,ownerKey:contextOwner})
+  useEffect(()=>{
+    const panel=typeMenu.panelRef.current
+    if (typeMenu.open) (panel?.querySelector<HTMLButtonElement>('button[aria-checked="true"]:not(:disabled)') ?? panel?.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus()
+  },[typeMenu.open,typeMenu.panelRef])
   const address=draft ? `${draft.sheetName}!${column(draft.cell.column)}${draft.cell.row+1}`
     : selection?.ranges.map(range=>`${range.sheetName}!${column(range.startColumn)}${range.startRow+1}${range.endColumn === range.startColumn && range.endRow === range.startRow ? '' : `:${column(range.endColumn)}${range.endRow+1}`}`).join('；')
-  useLayoutEffect(()=>{ensureNativeWorkbookDraftShutdownGuard();return ()=>{useNativeOfficeStore.setState({workbookDraftComposing:false})}},[])
+  useLayoutEffect(()=>{ensureNativeWorkbookDraftShutdownGuard();return ()=>{currentContext.current=null;useNativeOfficeStore.setState({workbookDraftComposing:false})}},[])
   useEffect(()=>{
     const intent=selection?.editIntent,identity=JSON.stringify([owner,intent])
     if (!intent || lastIntent.current === identity || !editable || !sameTarget) return
     lastIntent.current=identity;input.current?.focus();input.current?.select()
   },[owner,selection?.editIntent,editable,sameTarget])
-  const update=(type:CellEdit['type'],value:string)=>{
+  const update=(mode:InputMode,value:string)=>{
     if (!editable || !threadId || !draft && (!cell || !bounded)) return
+    const type=mode === 'auto' ? workbookAutoInputType(value) : mode
     const base=draft ?? {id:crypto.randomUUID(),workspace,path,threadId,objectId:view.objectId,revision:view.revision,
       sheetName:bounded!.sheetName,cell:structuredClone(cell!),...initialValue(cell),changed:false}
     const original=initialValue(base.cell),edit=workbookDraftEdit(type,value)
     const originalEdit=workbookDraftEdit(base.cell.valueType,base.cell.valueType === 'formula' ? base.cell.formula : base.cell.valueType === 'number' ? String(base.cell.value) : base.cell.text)
-    const next:NativeWorkbookCellDraft={...base,type,value,changed:(type !== original.type || value !== original.value) && (!edit || JSON.stringify(edit) !== JSON.stringify(originalEdit))}
+    const next:NativeWorkbookCellDraft={...base,type,value,inputMode:mode,changed:(type !== original.type || value !== original.value) && (!edit || JSON.stringify(edit) !== JSON.stringify(originalEdit))}
     useNativeOfficeStore.getState().setWorkbookDraft(draftKey,next,draft?.id);setNotice(null)
   }
+  const openTypeMenu=()=>{
+    if (!editable || useNativeOfficeStore.getState().workbookDraftComposing) return false
+    input.current?.focus({preventScroll:true});typeMenu.setOpen(true);return true
+  }
+  applyContextMode.current=mode=>{update(mode,form.value);typeMenu.setOpen(false);input.current?.focus({preventScroll:true})}
+  useEffect(()=>{
+    if (!onContextActionsChange) return
+    if (!editable || !sameTarget || !selection?.token) {onContextActionsChange(null);return}
+    const context:WorkbookCellContextActions={owner:contextOwner,objectId:view.objectId,revision:view.revision,
+      changeSequence:view.changeSequence ?? 0,selectionToken:selection.token,actions:inputModes.map(mode=>({
+        id:`workbook-input-${mode.value}`,label:mode.label,enabled:true,run:()=>{
+          const state=useNativeOfficeStore.getState()
+          const live=state.view,selected=live && currentSelection(live),liveCells=selected && nativeTypedWorkbookSelection(selected)
+          if (currentContext.current !== contextOwner || state.workbookDraftInputFrozen || state.workbookDraftComposing ||
+            state.workbookClosing[nativeOfficeTargetKey({workspace,path})] || state.workbookDrafts[draftKey] !== draft ||
+            !live || live.kind !== 'xlsx' || live.protectedPresent || live.status !== 'ready' || live.saving || nativeOfficeHasUnresolvedChange(live,state.error) ||
+            live.objectId !== context.objectId || live.revision !== context.revision ||
+            (live.changeSequence ?? 0) !== context.changeSequence || selected?.token !== context.selectionToken ||
+            !liveCells || liveCells.cells.length !== 1 || JSON.stringify([liveCells.sheetName,liveCells.cells[0]]) !== contextCell) return
+          applyContextMode.current(mode.value)
+        }
+      }))}
+    onContextActionsChange(context)
+    return ()=>onContextActionsChange(null)
+  },[onContextActionsChange,editable,sameTarget,selection?.token,contextOwner,contextCell,view.objectId,view.revision,view.changeSequence,workspace,path,draftKey,draft])
   const discard=()=>{
-    if (!draft || pending || frozen) return
+    if (!draft || pending || frozen || inputBlocked) return
     useNativeOfficeStore.getState().setWorkbookDraft(draftKey,null,draft.id)
     setNotice({owner:JSON.stringify([draftKey,view.objectId,view.revision,cell?.sheet,cell?.column,cell?.row]),text:'本地草稿已放弃。',error:false})
   }
   const keep=()=>{
-    if (!draft || pending || frozen) return
+    if (!draft || pending || frozen || inputBlocked) return
     useNativeOfficeStore.getState().setWorkbookDraft(draftKey,{...draft,closeRequested:false},draft.id)
     setNotice({owner:draft.id,text:'草稿已保留；切换文档不会丢失，保存仍需原单元格和原版本的有效选区。',error:false})
   }
@@ -182,14 +238,8 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
     <WorkspaceViewerIconButton label={pending ? '保存中…' : '保存'} tone={canSave && changed && change ? 'commit' : undefined}
       disabled={!canSave || !changed || !change} onClick={()=>void save()}><Save aria-hidden="true" /></WorkspaceViewerIconButton>
     <WorkspaceViewerMenu label="单元格编辑选项" ownerKey={owner} enabled={active}>
-      <label className={styles.type}>单元格输入类型
-        <select aria-label="单元格输入类型" value={form.type} disabled={!editable} onChange={event=>{
-          const type=event.target.value as CellEdit['type'];update(type,form.value)
-          if (type !== 'empty') input.current?.focus()
-        }}><option value="text">文本</option><option value="number">数值</option><option value="formula">公式</option><option value="empty">清空</option></select>
-      </label>
-      <button type="button" role="menuitem" aria-label="放弃草稿" disabled={!draft || pending || frozen} onClick={discard}><Trash2 aria-hidden="true" />放弃草稿</button>
-      {draft ? <button type="button" role="menuitem" aria-label="保留草稿" disabled={pending || frozen} onClick={keep}><Check aria-hidden="true" />保留草稿</button> : null}
+      <button type="button" role="menuitem" aria-label="放弃草稿" disabled={!draft || pending || frozen || inputBlocked} onClick={discard}><Trash2 aria-hidden="true" />放弃草稿</button>
+      {draft ? <button type="button" role="menuitem" aria-label="保留草稿" disabled={pending || frozen || inputBlocked} onClick={keep}><Check aria-hidden="true" />保留草稿</button> : null}
     </WorkspaceViewerMenu>
     <span ref={feedbackPanel.rootRef} className={styles.feedbackAnchor} data-feedback-error={feedbackError || undefined}>
       <WorkspaceViewerIconButton ref={feedbackPanel.triggerRef} label={feedbackText} className={styles.feedbackButton}
@@ -207,16 +257,41 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
     <div className={styles.controls}>
       <span className={styles.address} title={address} aria-label="工作簿选区">{address || '未选择单元格'}{partial ? '（部分捕获）' : ''}</span>
       <span className={styles.fx} aria-hidden="true">fx</span>
-      <input ref={input} data-workbook-cell-input aria-label="单元格值或公式" className={styles.value} disabled={!editable || form.type === 'empty'}
-        value={form.type === 'empty' ? '' : form.value} maxLength={form.type === 'formula' ? 1024 : 4096}
+      <span ref={typeMenu.rootRef} className={styles.valueWrap} onBlurCapture={event=>{
+        const next=event.relatedTarget
+        if (next instanceof Node && (typeMenu.rootRef.current?.contains(next) || typeMenu.panelRef.current?.contains(next))) return
+        typeMenu.setOpen(false)
+      }}>
+      <input ref={input} data-workbook-cell-input aria-label="单元格值或公式" className={styles.value} disabled={!editable} readOnly={inputMode === 'empty'}
+        value={form.type === 'empty' ? '' : form.value} maxLength={inputMode !== 'auto' && form.type === 'formula' ? 1024 : 4096}
+        aria-haspopup="menu" aria-expanded={typeMenu.open} aria-controls={typeMenu.id}
         placeholder={form.type === 'formula' ? '=SUM(A1:A2)' : form.type === 'number' ? '输入有限数值' : '输入文本'}
-        onChange={event=>update(form.type,event.target.value)}
+        onChange={event=>update(inputMode,event.target.value)}
+        onContextMenu={event=>{if (openTypeMenu()) event.preventDefault()}}
         onCompositionStart={()=>useNativeOfficeStore.setState({workbookDraftComposing:true})} onCompositionEnd={()=>useNativeOfficeStore.setState({workbookDraftComposing:false})}
         onKeyDown={event=>{
           if (event.nativeEvent.isComposing) return
-          if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 's') {event.preventDefault();void save()}
+          if (!event.ctrlKey && !event.metaKey && !event.altKey && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
+            if (openTypeMenu()) {event.preventDefault();event.stopPropagation()}
+          } else if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 's') {event.preventDefault();void save()}
           else if (event.key === 'Escape') {event.preventDefault();keep()}
         }} />
+      {typeMenu.open ? createPortal(<div ref={typeMenu.panelRef} id={typeMenu.id} role="menu" aria-label="单元格输入类型"
+        className={styles.typeMenu} style={typeMenu.style} onKeyDown={event=>{
+          if (event.nativeEvent.isComposing) return
+          if (event.key === 'Escape') {event.preventDefault();event.stopPropagation();typeMenu.setOpen(false);input.current?.focus({preventScroll:true});return}
+          if (!['ArrowDown','ArrowUp','Home','End'].includes(event.key)) return
+          const items=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+          if (!items.length) return
+          event.preventDefault();event.stopPropagation()
+          const current=items.indexOf(document.activeElement as HTMLButtonElement)
+          const next=event.key === 'Home' ? 0 : event.key === 'End' ? items.length-1 : (current+(event.key === 'ArrowUp' ? -1 : 1)+items.length)%items.length
+          items[next].focus()
+        }}>{inputModes.map(mode=><button key={mode.value} type="button" role="menuitemradio" aria-label={mode.label}
+          aria-checked={inputMode === mode.value} data-workbook-input-mode={mode.value} onClick={()=>{
+            update(mode.value,form.value);typeMenu.setOpen(false);input.current?.focus({preventScroll:true})
+          }}>{mode.label}{inputMode === mode.value ? <Check aria-hidden="true" /> : null}</button>)}</div>,document.body) : null}
+      </span>
       {toolbarTarget ? createPortal(actions,toolbarTarget) : toolbarTarget === undefined ? <span className={styles.fallbackActions}>{actions}</span> : null}
     </div>
   </div>

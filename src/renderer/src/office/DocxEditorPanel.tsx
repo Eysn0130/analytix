@@ -378,7 +378,7 @@ export function DocxEditorPanel({view,visible,onSubmitPrompt,onPrepareDraft,file
           disabled={!ready||working||view.phase!=='editing'||!!view.scope||applyFailed} onClick={()=>void exclusive(async()=>{
             const sd=instance.current;if(sd?.ui.commands.get('undo')?.getState().enabled){await sd.ui.commands.executeAsync('undo');localVersion.current++;await request({action:'changed',editorId:view.editorId,version:localVersion.current})}
           })}><Undo2 aria-hidden="true" /></WorkspaceViewerIconButton>
-        {!fileActions ? <WorkspaceViewerIconButton label="另存为" disabled={!ready||working} onClick={()=>void exclusive(exportCurrent)}><Download aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        {!fileActions ? <WorkspaceViewerIconButton shape="pill" label="另存为" disabled={!ready||working} onClick={()=>void exclusive(exportCurrent)}><Download aria-hidden="true" /></WorkspaceViewerIconButton> : null}
         <WorkspaceViewerMenu label="更多 Word 操作" ownerKey={ownerKey(view)} enabled={visible}>
           <button type="button" role="menuitem" disabled={working} onClick={()=>void exclusive(async()=>{
             const tabId=useWorkspaceTabsStore.getState().activeTabId

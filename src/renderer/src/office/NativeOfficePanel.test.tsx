@@ -60,12 +60,12 @@ describe('bounded workbook manual controls',()=>{
     ranges:[{sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}],
     cells:[editableCell]}
   const workbook:NativeOfficeView = {...view,path:'/synthetic/book.xlsx',kind:'xlsx',workbookEditing:{editable:true},selection:cells}
-  async function renderWorkbook(next:NativeOfficeView = workbook,path=next.path) {
+  async function renderWorkbook(next:NativeOfficeView = workbook,path=next.path,props:Partial<Parameters<typeof NativeOfficePanel>[0]>={}) {
     request.mockImplementation(async()=>({ok:true,view:next}))
     await act(async()=>{
       const target={workspace:'/synthetic',path},identity=nativeOfficeTargetKey(target)
       useNativeOfficeStore.setState(state=>({target,view:next,error:null,engineViews:{...state.engineViews,[identity]:next},views:{...state.views,[identity]:next}}))
-      root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread'}))
+      root!.render(createElement(NativeOfficePanel,{visible:true,threadId:'thread',...props}))
     })
   }
   async function fillCell(value:string) {
@@ -101,6 +101,32 @@ describe('bounded workbook manual controls',()=>{
     expect(request.mock.calls.filter(([input])=>input.action==='saveStatus')).toEqual([[{action:'saveStatus',objectId:view.objectId}]])
     expect(request.mock.calls.filter(([input])=>input.action==='editWorkbookCell')).toHaveLength(1)
   })
+  it.each(['saving','loading','unknown'] as const)('keeps Agent before/after visible and blocks proposal actions and Undo while %s',async phase=>{
+    const proposalId='c'.repeat(48)
+    const scope:NonNullable<NativeOfficeView['scope']>={scopeId:'d'.repeat(48),threadId:'thread',selectionToken:cells.token!,
+      baseRevision:workbook.revision,changeSequence:0,editable:true,parts:[],workbook:{...cells.ranges[0],cells:[editableCell]}}
+    const proposal:NonNullable<NativeOfficeView['proposals']>[number]={proposalId,status:'proposed',parts:[{kind:'literal',text:'2'}],workbook:{kind:'number',value:2}}
+    const review:NonNullable<NativeOfficeView['localReviews']>[number]={proposalId,beforeText:'Sheet1!A1: 1',afterText:'Sheet1!A1: 2'}
+    const ready:NativeOfficeView={...workbook,editing:true,scope,proposals:[proposal],localReviews:[review],canUndo:true}
+    const onSubmitPrompt=vi.fn()
+    await renderWorkbook(ready,ready.path,{onSubmitPrompt})
+    const next:NativeOfficeView={...ready,...(phase==='saving'?{saving:true}:phase==='loading'?{status:'loading' as const}:{error:'unknown' as const})}
+    await act(async()=>useNativeOfficeStore.setState({view:next,error:phase==='unknown'?'unknown':null}))
+    expect(container.querySelector('del[aria-label="修改前"]')?.textContent).toBe(review.beforeText)
+    expect(container.querySelector('ins[aria-label="修改后"]')?.textContent).toBe(review.afterText)
+    for(const label of ['应用修改','拒绝','nativeOfficeRegenerate','撤销修改']) expect(namedButton(label).disabled).toBe(true)
+    await clickNamed('应用修改');await clickNamed('拒绝');await clickNamed('nativeOfficeRegenerate');await clickNamed('撤销修改')
+    expect(request.mock.calls.some(([input])=>['acceptProposal','rejectProposal','undoChange'].includes(input.action))).toBe(false)
+    expect(onSubmitPrompt).not.toHaveBeenCalled()
+    await act(async()=>useNativeOfficeStore.setState({view:{...next,appliedProposals:[proposalId]}}))
+    const pending=container.querySelector('[aria-label="原生修改提案"]')!
+    expect(pending.textContent).toContain('正在更新，结果待确认')
+    expect(pending.textContent).not.toContain('已更新');expect(pending.textContent).not.toContain('修改已处理')
+    expect(pending.querySelector('del')?.textContent).toBe(review.beforeText)
+    await act(async()=>useNativeOfficeStore.setState({view:ready,error:null}))
+    expect(namedButton('应用修改').disabled).toBe(false);expect(namedButton('拒绝').disabled).toBe(false)
+    expect(namedButton('nativeOfficeRegenerate').disabled).toBe(false);expect(namedButton('撤销修改').disabled).toBe(false)
+  })
   it('passes the workspace target path into retained drafts and exposes explicit close choices',async()=>{
     await renderWorkbook(workbook,'book.xlsx');await fillCell('2')
     const key=nativeWorkbookDraftKey('/synthetic','book.xlsx','thread')
@@ -117,6 +143,42 @@ describe('bounded workbook manual controls',()=>{
     expect(useNativeOfficeStore.getState().workbookDrafts[key]).toBeUndefined()
     expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('1')
     expect(request.mock.calls.some(([input])=>['editWorkbookCell','close'].includes(input.action))).toBe(false)
+  })
+  it('offers renderer-owned workbook input modes through the existing non-pointer native menu',async()=>{
+    let menuRequested!:(target:NativeOfficeMenuTarget)=>void,choose!:(choice:{actionId:string|null})=>void
+    window.analytix.office.onMenuRequested=handler=>{menuRequested=handler;return()=>{}}
+    const menu=vi.fn((_input:NativeOfficeActionMenu)=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}))
+    window.analytix.office.showActionMenu=menu
+    await renderWorkbook();await fillCell('002')
+    await act(async()=>menuRequested({objectId:workbook.objectId,revision:workbook.revision,expectedChangeSequence:0}))
+    expect(menu).toHaveBeenCalledOnce()
+    const offered=menu.mock.calls[0][0] as NativeOfficeActionMenu
+    expect(nativeOfficeActionMenuSchema.safeParse(offered).success).toBe(true)
+    expect(offered.pointer).toBeUndefined();expect(offered.formatting).toBeUndefined()
+    expect(offered.actions.filter(action=>action.id.startsWith('workbook-input-')).map(({id,enabled})=>({id,enabled}))).toEqual([
+      'auto','text','number','formula','empty'
+    ].map(mode=>({id:`workbook-input-${mode}`,enabled:true})))
+    await act(async()=>choose({actionId:'workbook-input-text'}))
+    const draft=useNativeOfficeStore.getState().workbookDrafts[nativeWorkbookDraftKey('/synthetic',workbook.path,'thread')]
+    expect(draft).toMatchObject({inputMode:'text',value:'002'})
+    expect(container.querySelector<HTMLInputElement>('[data-workbook-cell-input]')!.value).toBe('002')
+    expect(request.mock.calls.some(([input])=>['editWorkbookCell','save','format','beginManualEdit'].includes(input.action))).toBe(false)
+  })
+  it.each(['input','selection','hide'] as const)('rejects a delayed native workbook mode choice after %s changes',async change=>{
+    let menuRequested!:(target:NativeOfficeMenuTarget)=>void,choose!:(choice:{actionId:string|null})=>void
+    window.analytix.office.onMenuRequested=handler=>{menuRequested=handler;return()=>{}}
+    window.analytix.office.showActionMenu=vi.fn((_input:NativeOfficeActionMenu)=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}))
+    await renderWorkbook();await fillCell('002')
+    await act(async()=>menuRequested({objectId:workbook.objectId,revision:workbook.revision,expectedChangeSequence:0}))
+    expect(choose).toBeDefined()
+    if(change==='input')await fillCell('003')
+    else if(change==='selection')await renderWorkbook({...workbook,selection:{...cells,token:'new-cell-token'}})
+    else await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:false,threadId:'thread'})))
+    await act(async()=>choose({actionId:'workbook-input-text'}))
+    const draft=useNativeOfficeStore.getState().workbookDrafts[nativeWorkbookDraftKey('/synthetic',workbook.path,'thread')]
+    expect(draft.value).toBe(change==='input'?'003':'002')
+    expect(draft.inputMode??'auto').toBe('auto')
+    expect(request.mock.calls.some(([input])=>['editWorkbookCell','save','format','beginManualEdit'].includes(input.action))).toBe(false)
   })
   it('routes typed workbook recovery cancellation through the existing cancelChange owner',async()=>{
     const selected={...cells.ranges[0],cells:[editableCell]}
@@ -207,6 +269,10 @@ describe('native preview dock geometry', () => {
     await render(true)
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('nativeOfficeOperationFailed')
     const retry = container.querySelector<HTMLButtonElement>('[aria-label="nativeOfficeRetry"]')!
+    expect(container.querySelectorAll('[aria-label="nativeOfficeRetry"]')).toHaveLength(1)
+    expect(container.querySelector('[data-workspace-viewer-header]')!.contains(retry)).toBe(true)
+    expect(container.querySelector('[data-native-office-state]')!.contains(retry)).toBe(false)
+    expect(retry.querySelector('svg')).not.toBeNull();expect(retry.textContent).toBe('')
     await act(async () => retry.click())
     expect(request.mock.calls.filter(call => call[0].action === 'open')).toHaveLength(2)
     expect(container.querySelector('[role="alert"]')).toBeNull()
@@ -369,7 +435,7 @@ describe('native document annotation workflow', () => {
   it('rejects a pointer intent for a stale token and a choice after the live native selection changes',async()=>{
     let menuRequested!:(target:any)=>void,choose!:(choice:{actionId:string|null})=>void
     window.analytix.office.onMenuRequested=handler=>{menuRequested=handler;return ()=>{}}
-    const menu=vi.fn(()=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}));window.analytix.office.showActionMenu=menu
+    const menu=vi.fn((_input:NativeOfficeActionMenu)=>new Promise<{actionId:string|null}>(resolve=>{choose=resolve}));window.analytix.office.showActionMenu=menu
     await renderAnnotation(annotationView)
     const target={objectId:view.objectId,revision:view.revision,expectedChangeSequence:0,pointer:{interactionId:'interaction_id',selectionToken:'wrong_token'}}
     await act(async()=>menuRequested(target));expect(menu).not.toHaveBeenCalled()
@@ -1162,7 +1228,11 @@ describe('native PPT playback in the existing view toolbar', () => {
     await act(async () => useNativeOfficeStore.setState({view:{...f.current,status:'error',error:'presentation_failed'},error:null}))
     expect(container.querySelector('[data-native-playback-state][role="alert"]')!.textContent).toContain('请重新打开预览')
     expect(namedButton('刷新放映状态')).toBeUndefined()
-    expect(namedButton('nativeOfficeRetry')).toBeDefined()
+    const retry=namedButton('nativeOfficeRetry')
+    expect(retry).toBeDefined()
+    expect(container.querySelectorAll('[aria-label="nativeOfficeRetry"]')).toHaveLength(1)
+    expect(container.querySelector('[data-workspace-viewer-header]')!.contains(retry)).toBe(true)
+    expect(container.querySelector('[data-native-office-state]')!.querySelector('button')).toBeNull()
     request.mockClear()
     await clickNamed('nativeOfficeRetry')
     expect(request.mock.calls.some(([input]) => input.action === 'open')).toBe(true)
@@ -1982,4 +2052,64 @@ it('deactivates retained Native viewer controls and notes while hidden, then res
   expect(container.querySelector('[aria-label="nativeOfficeEditor"]')).toBe(surface)
   expect(document.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(1)
   expect(document.querySelector('[role="dialog"][aria-label="文档标注"]')).toBeNull()
+})
+
+
+it.each([
+  {kind:'xlsx',failure:'unknown',label:'查询结果',action:'saveStatus'},
+  {kind:'xlsx',failure:'save_failed',label:'查询结果',action:'saveStatus'},
+  {kind:'pptx',failure:'unknown',label:'查询结果',action:'saveStatus'},
+  {kind:'pptx',failure:'save_failed',label:'重试',action:'save'}
+] as const)('keeps $kind $failure recovery in the existing icon header',async({kind,failure,label,action})=>{
+  const failed={...annotationView,kind,path:`/synthetic/report.${kind}`,dirty:true,saving:failure==='unknown',error:failure}
+  await renderAnnotation(failed)
+  await act(async()=>useNativeOfficeStore.setState({view:failed,error:failure}))
+  const header=container.querySelector('[data-workspace-viewer-header]')!
+  const surface=container.querySelector('[aria-label="nativeOfficeEditor"]')!
+  const host=surface.parentElement!.parentElement!
+  const recovery=namedButton(label)
+  expect(recovery).toBeDefined();expect(header.contains(recovery)).toBe(true)
+  expect(recovery.querySelector('svg')).not.toBeNull();expect(recovery.textContent).toBe('')
+  expect(recovery.disabled).toBe(false)
+  expect(header.querySelector('[role="alert"]')?.textContent).toContain(failure==='unknown'?'修改结果尚未确认':'更新未完成')
+  expect([...host.children].some(element=>element.getAttribute('role')==='alert')).toBe(false)
+  expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+  await clickNamed(label)
+  const recoveryRequests=request.mock.calls.map(([input])=>input).filter(input=>input.action==='saveStatus'||input.action==='save')
+  expect(recoveryRequests).toEqual([action==='saveStatus'?{action:'saveStatus',objectId:view.objectId}:{action:'save',objectId:view.objectId,revision:view.revision,expectedChangeSequence:0}])
+})
+
+it('places supplied file commands to the right of the filename without creating another operation row',async()=>{
+  const openFile=vi.fn(),download=vi.fn()
+  await renderAnnotation(annotationView,{
+    titleControl:createElement('button',{'data-file-title':true,onClick:openFile},'report.docx'),
+    fileActions:createElement('button',{'data-native-office-download':true,'aria-label':'下载',onClick:download},createElement('svg',{'aria-hidden':true}))
+  })
+  const header=container.querySelector('[data-workspace-viewer-header]')!
+  const title=header.querySelector<HTMLButtonElement>('[data-file-title]')!
+  const command=header.querySelector<HTMLButtonElement>('[data-native-office-download]')!
+  expect(title.parentElement!.contains(command)).toBe(false)
+  expect(header.contains(command)).toBe(true)
+  expect(title.compareDocumentPosition(command)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+  await act(async()=>{title.click();command.click()})
+  expect(openFile).toHaveBeenCalledOnce();expect(download).toHaveBeenCalledOnce()
+})
+
+
+it('keeps protected Present reopen in the single header and preserves its selector request',async()=>{
+  const protectedPresent={threadId:'thread-a',turnId:'turn-a',callId:'call_host_'+'a'.repeat(64),resultItemId:'item_result_'+'b'.repeat(64),viewId:'11111111-1111-4111-8111-111111111111',snapshotDigest:'c'.repeat(64),index:0}
+  const preview={...view,protectedPresent}
+  useNativeOfficeStore.setState({target:{workspace:'/synthetic',path:view.path,protectedPresent},view:preview,error:null})
+  request.mockImplementation(async()=>({ok:true,view:preview}))
+  await act(async()=>root!.render(createElement(NativeOfficePanel,{visible:true,presentSelector:protectedPresent})))
+  await act(async()=>useNativeOfficeStore.setState({view:{...preview,status:'error',error:'engine_unavailable'},error:'engine_unavailable'}))
+  const retry=namedButton('nativeOfficeRetry')
+  expect(retry).toBeDefined()
+  expect(container.querySelectorAll('[aria-label="nativeOfficeRetry"]')).toHaveLength(1)
+  expect(container.querySelector('[data-workspace-viewer-header]')!.contains(retry)).toBe(true)
+  expect(container.querySelector('[data-native-office-state]')!.querySelector('button')).toBeNull()
+  request.mockClear();await clickNamed('nativeOfficeRetry')
+  expect(request.mock.calls.filter(([input])=>input.action==='openPresent')).toEqual([[{action:'openPresent',protectedPresent,bounds:rect,appearance}]])
+  expect(request.mock.calls.some(([input])=>['open','save','editWorkbookCell','format'].includes(input.action))).toBe(false)
 })

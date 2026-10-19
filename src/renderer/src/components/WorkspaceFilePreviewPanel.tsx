@@ -595,7 +595,7 @@ export function WorkspaceFilePreviewPanel({
             label={markdownRendered ? t('filePreviewShowSource') : t('filePreviewRenderMarkdown')} aria-pressed={markdownRendered}>
             {markdownRendered ? <Code2 aria-hidden="true" /> : <Eye aria-hidden="true" />}
           </WorkspaceViewerIconButton> : null}
-          {target && (target.protectedPresent || !sourceOnly) ? <WorkspaceViewerIconButton onClick={() => void downloadFile()}
+          {target && (target.protectedPresent || !sourceOnly) ? <WorkspaceViewerIconButton shape="pill" onClick={() => void downloadFile()}
             disabled={download === 'saving'} aria-busy={download === 'saving'} label={t('generatedFileDownload')}>
             {download === 'saving' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Download aria-hidden="true" />}
           </WorkspaceViewerIconButton> : null}

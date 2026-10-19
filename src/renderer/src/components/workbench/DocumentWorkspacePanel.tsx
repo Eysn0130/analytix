@@ -144,7 +144,7 @@ export function DocumentWorkspacePanel({threadId,activeTab,visible,onSubmitPromp
       if (current()) setSaveState({ owner: fileOwner, sequence, phase: 'unavailable' })
     } finally { if (savePending.current === sequence) savePending.current = null }
   }
-  const downloadButton = (download:()=>void) => <WorkspaceViewerIconButton data-native-office-download label={t('generatedFileDownload')}
+  const downloadButton = (download:()=>void) => <WorkspaceViewerIconButton data-native-office-download shape="pill" label={t('generatedFileDownload')}
     disabled={!displayedPath || savePhase === 'saving'} aria-busy={savePhase === 'saving'} onClick={download}>
     {savePhase === 'saving' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Download aria-hidden="true" />}
   </WorkspaceViewerIconButton>
@@ -154,8 +154,7 @@ export function DocumentWorkspacePanel({threadId,activeTab,visible,onSubmitPromp
     <span role="status" tabIndex={0} data-file-download-status data-native-office-file-status className="document-workspace-status">
       <Info aria-hidden="true" /><span className="sr-only">{downloadMessage}</span>
     </span></Tooltip> : null
-  const renderFileActions = (beforeOpen?:(open:()=>void)=>void,exportCurrent?:()=>void) => <>
-    <WorkspaceViewerMenu label="打开" title={displayedPath?.split('/').at(-1) || t('filePreviewTitle')}
+  const renderFileTitle = (beforeOpen?:(open:()=>void)=>void,exportCurrent?:()=>void) => <WorkspaceViewerMenu label="打开" title={displayedPath?.split('/').at(-1) || t('filePreviewTitle')}
       triggerRef={fileActionsSelect} ownerKey={fileOwner} enabled={visible}>
       <ActionMenuItem icon={<ExternalLink />} label="用默认应用打开" onClick={()=>{
         if(beforeOpen)beforeOpen(()=>openFile('system'));else openFile('system')
@@ -167,10 +166,14 @@ export function DocumentWorkspacePanel({threadId,activeTab,visible,onSubmitPromp
       <ActionMenuItem icon={<Download />} label={t('generatedFileDownload')} disabled={!displayedPath || savePhase === 'saving'}
         onClick={exportCurrent ?? (()=>{void downloadFile()})} />
     </WorkspaceViewerMenu>
+  const renderFileCommands = (exportCurrent?:()=>void) => <>
     {downloadButton(exportCurrent ?? (()=>{void downloadFile()}))}
     {downloadStatus}
     {fileActionError ? <Tooltip label="打开失败，请重试。" side="bottom" portal><span role="alert" tabIndex={0}
       data-native-office-file-status className="document-workspace-status"><Info aria-hidden="true" /><span className="sr-only">打开失败，请重试。</span></span></Tooltip> : null}
+  </>
+  const renderFileActions = (beforeOpen?:(open:()=>void)=>void,exportCurrent?:()=>void) => <>
+    {renderFileTitle(beforeOpen,exportCurrent)}{renderFileCommands(exportCurrent)}
   </>
   // Tab selection precedes async native hide/select; old captures stay hidden.
   const nativeTabReady = !activeTab || !!(nativeTarget && activeTab.path && activeTab.workspaceRoot &&
@@ -247,7 +250,7 @@ export function DocumentWorkspacePanel({threadId,activeTab,visible,onSubmitPromp
         <button type="button" onClick={()=>useChatStore.getState().setRoute('plugins')}>检查 Documents 插件</button></div>:null}
     {docxActive || !displayedPath || !nativeActive && !visible ? null : nativeActive ? <div className="relative flex min-h-0 flex-1">
       {filesOpen && visible ? <div className="document-workspace-files relative w-52 shrink-0 border-r border-ds-border bg-ds-card">{fileBrowser}</div> : null}
-      <NativeOfficePanel viewerControls={viewerControls} fileActions={renderFileActions()} quickActions={quickActions} threadId={threadId} visible={visible && nativeTabReady}
+      <NativeOfficePanel viewerControls={viewerControls} titleControl={renderFileTitle()} fileActions={renderFileCommands()} quickActions={quickActions} threadId={threadId} visible={visible && nativeTabReady}
         onFocusConversation={onFocusConversation} onSubmitPrompt={onSubmitPrompt} onPrepareDraft={onPrepareDraft} />
     </div> : retainedDraft ? <LegacyDocumentRecovery key={fileOwner} root={displayedRoot} path={displayedPath} visible={visible} />
       : <Suspense fallback={<p role="status">{t('loading')}</p>}><FilePreview target={{path:displayedPath,workspaceRoot:displayedRoot,preview:activeTab?.preview === 'source' ? 'source' : undefined,protectedRead:activeTab?.protectedRead,protectedPresent:activeTab?.protectedPresent,line:activeTab?.sourceLine}}

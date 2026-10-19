@@ -13,11 +13,11 @@ export type WorkspaceViewerControls = {
   onCollapse: () => void
 }
 
-export function WorkspaceViewerIconButton({ label, children, className = '', tone, compact, ...props }:
-  ButtonHTMLAttributes<HTMLButtonElement> & { label: string; children: ReactNode; tone?: 'commit'; compact?: boolean; ref?: Ref<HTMLButtonElement> }): ReactElement {
+export function WorkspaceViewerIconButton({ label, children, className = '', tone, compact, shape, ...props }:
+  ButtonHTMLAttributes<HTMLButtonElement> & { label: string; children: ReactNode; tone?: 'commit'; compact?: boolean; shape?: 'pill'; ref?: Ref<HTMLButtonElement> }): ReactElement {
   return <Tooltip label={label} side="bottom" portal>
     <button {...props} type={props.type ?? 'button'} aria-label={label} className={`${styles.action} ${className}`}
-      data-tone={tone} data-compact={compact || undefined}>{children}</button>
+      data-tone={tone} data-compact={compact || undefined} data-shape={shape}>{children}</button>
   </Tooltip>
 }
 
@@ -34,7 +34,12 @@ export function WorkspaceViewerMenu({ label, title, ownerKey, enabled = true, ch
     if (typeof triggerRef === 'function') triggerRef(element)
     else if (triggerRef) triggerRef.current = element
   }
-  return <span ref={menu.rootRef} className={styles.menuAnchor}>
+  return <span ref={menu.rootRef} className={styles.menuAnchor} onBlur={event => {
+    // The portal is part of the same interaction even though it is outside
+    // the trigger's DOM subtree. Leaving both must not retain a stale menu.
+    const next = event.relatedTarget
+    if (!(next instanceof Node) || !menu.rootRef.current?.contains(next) && !menu.panelRef.current?.contains(next)) menu.setOpen(false)
+  }}>
     <WorkspaceViewerIconButton ref={assignTrigger} label={label} disabled={!enabled}
       className={title ? styles.titleButton : ''} aria-haspopup="menu" aria-expanded={menu.open} aria-controls={menu.id}
       onClick={() => menu.setOpen(!menu.open)}>

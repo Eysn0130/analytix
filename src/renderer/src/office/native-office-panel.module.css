@@ -12,6 +12,7 @@
 .toolbar { flex: none; min-width: 0; }
 .toolbarActions { display: flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; max-width: max(36px, calc(100cqw - 140px)); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .toolbarActions::-webkit-scrollbar { display: none; }
+.fileActions { display: inline-flex; flex: none; align-items: center; gap: 6px; flex-wrap: nowrap; }
 .workbookActions { display: flex; flex: none; align-items: center; gap: 6px; }
 .notesAnchor { display: inline-flex; flex: none; }
 .feedback { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 28px; color: var(--ds-text-muted); }

@@ -40,7 +40,7 @@ test('only a matching Main IPC transfers the port; page facade is typed and sing
   port.onmessage({data:replace});expect(events.at(-1).command).toBe('replace')
   const cell={sheet:0,column:0,row:0,text:'1',formula:'1',value:1,valueType:'number',numberFormat:0,rowVisible:true,columnVisible:true,merged:false}
   const before={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0,cells:[cell]}
-  const typed={channel:'channel',command:'replaceCells',operationId:'typed_replace',documentId:'doc',version:'v1',selectionToken:'selection',expectedChangeSequence:0,workbook:{before,after:{...before,cells:[{...cell,value:2,text:'2',formula:'2'}]},results:['']}}
+  const typed={channel:'channel',command:'replaceCells',operationId:'typed_replace',documentId:'doc',version:'a'.repeat(64),selectionToken:'selection',expectedChangeSequence:0,workbook:{before,after:{...before,cells:[{...cell,value:2,text:'2',formula:'2'}]},results:['']},candidate:{changeId:'b'.repeat(64),saveOperationId:'save_workbook_01',baseRevision:'a'.repeat(64)}}
   port.onmessage({data:typed});expect(events.at(-1)).toEqual(typed)
   const typedCount=events.length;port.onmessage({data:{...typed,path:'/private'}});expect(events.length).toBe(typedCount)
   const acceptedCount=events.length

@@ -48,6 +48,49 @@ it('keeps disabled commands inert and exposes the icon label on keyboard focus',
   expect(host.querySelector('#workbench-workspace-collapse')).toBeNull()
 })
 
+it('marks the download pill without changing its action or accessible label', async () => {
+  const download = vi.fn()
+  await act(async () => root.render(createElement(WorkspaceViewerIconButton, {
+    label: 'Download', shape: 'pill', onClick: download, children: createElement(Download)
+  })))
+  const button = host.querySelector('button')!
+  expect(button.dataset.shape).toBe('pill')
+  expect(button.getAttribute('aria-label')).toBe('Download')
+  expect(button.querySelector('svg')).not.toBeNull()
+  await act(async () => button.click())
+  expect(download).toHaveBeenCalledTimes(1)
+})
+
+it('closes on focusout beyond the trigger and portal without stealing destination focus', async () => {
+  const outside = document.createElement('button'); document.body.append(outside)
+  try {
+    await act(async () => root.render(createElement(WorkspaceViewerMenu, { label: 'Options', ownerKey: 'a',
+      children: [createElement('input', { key: 'value', 'aria-label': 'Value' }),
+        createElement('button', { key: 'run', role: 'menuitem' }, 'Run')] })))
+    const trigger = host.querySelector<HTMLButtonElement>('button')!
+    await act(async () => { trigger.focus(); trigger.click() })
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Value"]')!
+    expect(document.activeElement).toBe(input)
+    expect(document.querySelector('[role="menu"]')).not.toBeNull()
+    await act(async () => trigger.focus())
+    expect(document.querySelector('[role="menu"]')).not.toBeNull()
+    await act(async () => input.focus())
+    expect(document.querySelector('[role="menu"]')).not.toBeNull()
+    await act(async () => outside.focus())
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(outside)
+  } finally { outside.remove() }
+})
+
+it('closes a focused menu when focus leaves the document', async () => {
+  await act(async () => root.render(createElement(WorkspaceViewerMenu, { label: 'Options', ownerKey: 'a',
+    children: createElement('button', { role: 'menuitem' }, 'Run') })))
+  const trigger = host.querySelector<HTMLButtonElement>('button')!
+  await act(async () => { trigger.focus(); trigger.click() })
+  await act(async () => document.activeElement!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null })))
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+})
+
 it('provides keyboard menu navigation and Escape focus without clearing an enclosing editor selection', async () => {
   const outerKey = vi.fn(), run = vi.fn()
   await act(async () => root.render(createElement('div', { onKeyDown: outerKey }, createElement(WorkspaceViewerMenu, {

@@ -1,4 +1,4 @@
-import { app, MessageChannelMain, session, WebContentsView, type BrowserWindow, type MessagePortMain, type Rectangle, type Session } from 'electron'
+import { app, MessageChannelMain, session, WebContentsView, type BrowserWindow, type Input, type MessagePortMain, type Rectangle, type Session } from 'electron'
 import { logNativeOfficeFailure, type NativeOfficeDiagnosticErrorCode, type NativeOfficeDiagnosticStage } from '../logger'
 import type { NativeOfficeActionMenu, NativeOfficeAppearance, NativeOfficeFormatting, NativeOfficeFormatChoice } from '../../shared/native-office'
 import { nativeWorkspaceCommandFromInput } from '../../shared/native-office'
@@ -44,6 +44,18 @@ export class NativeOfficeSurface {
   private selectionFormatting?: Pick<NativeOfficeFormatting,'rangeLease'|'formatState'>
   private pointerSelection?: Record<string,unknown>
   private selectionManual?: OfficeState['manual']
+  private menuControlDown = false
+  private menuMouseButton?: 'left' | 'right'
+  private menuInputObserved = false
+  private canRequestMenu(): boolean {
+    return !this.options.protectedPresent && !this.destroyed && this.ready && this.visible && this.attached &&
+      !!this.current && !this.pending && !this.options.owner.isDestroyed()
+  }
+  private readonly observeMenuInput = (_event: unknown, input: Input): void => {
+    if (input.type === 'keyDown' || input.type === 'keyUp') this.menuControlDown = !this.destroyed && this.ready && this.visible &&
+      this.attached && !this.options.owner.isDestroyed() && input.control === true
+  }
+  private readonly clearMenuInput = (): void => { this.menuControlDown = false; this.menuMouseButton = undefined }
   private acceptPointerSelection(selection:Record<string,unknown>): void {
     const token = typeof selection.token === 'string' ? selection.token : undefined
     const sample = selection.kind === 'text' && isOfficeRangeLease(selection.rangeLease) && isOfficeFormatState(selection.formatState) &&
@@ -177,7 +189,7 @@ export class NativeOfficeSurface {
     if (previous) await contents.removeInsertedCSS(previous)
   }
 
-  hide(): void { this.visible = false; this.dismissPointerActions(); this.visibilityEpoch++; if (!this.destroyed) this.view?.setVisible(false) }
+  hide(): void { this.visible = false; this.clearMenuInput(); this.dismissPointerActions(); this.visibilityEpoch++; if (!this.destroyed) this.view?.setVisible(false) }
 
   async request(input: OfficeRequestInput): Promise<OfficeResult> {
     if (!officeRecord(input) || Object.hasOwn(input, 'channel')) throw failure('office-invalid-request')
@@ -246,14 +258,38 @@ export class NativeOfficeSurface {
       const contents = this.view.webContents
       if (this.options.protectedPresent) contents.setIgnoreMenuShortcuts(true)
       const requestMenu = () => {
-        if (this.options.protectedPresent) return
+        if (!this.canRequestMenu()) return
         this.dismissPointerActions()
-        if (!this.attached || !this.current || this.options.owner.isDestroyed()) return
         this.options.owner.webContents.send('office:menu-requested', {
-          objectId:this.current.documentId, revision:this.current.version, expectedChangeSequence:this.current.changeSequence
+          objectId:this.current!.documentId, revision:this.current!.version, expectedChangeSequence:this.current!.changeSequence
         })
       }
+      // Electron 41's mouse converter omits modifiers. Observe the two owned
+      // keyboard streams so macOS Control-click also works across internal focus.
+      this.options.owner.webContents.on('before-input-event', this.observeMenuInput)
+      this.options.owner.on('blur', this.clearMenuInput)
+      this.menuInputObserved = true
+      contents.on('before-mouse-event', (event, mouse) => {
+        const contextButton = mouse.button === 'right' || process.platform === 'darwin' && mouse.button === 'left' &&
+          (this.menuControlDown || mouse.modifiers?.some(modifier => modifier === 'control' || modifier === 'ctrl'))
+        if (mouse.type === 'contextMenu') { event.preventDefault(); return }
+        if (mouse.type === 'mouseUp') {
+          if (contextButton || mouse.button === this.menuMouseButton) {
+            event.preventDefault()
+            if (mouse.button === this.menuMouseButton) this.menuMouseButton = undefined
+          }
+          return
+        }
+        if (mouse.type !== 'mouseDown') return
+        if (!contextButton) { this.menuMouseButton = undefined; return }
+        // Keep these events out of Qt, including a left release after Control
+        // is released first. Only the press emits; subsequent context events do not.
+        event.preventDefault()
+        this.menuMouseButton = mouse.button as 'left' | 'right'
+        requestMenu()
+      })
       contents.on('before-input-event', (event, input) => {
+        this.observeMenuInput(event, input)
         if (this.options.protectedPresent && (input.control || input.meta) && ['c','x'].includes(input.key.toLowerCase())) { event.preventDefault(); return }
         if (input.type !== 'keyDown' || input.isAutoRepeat || !this.current) return
         if (!input.isComposing && !input.control && !input.meta && !input.alt &&
@@ -271,7 +307,7 @@ export class NativeOfficeSurface {
       contents.on('will-frame-navigate', event => event.preventDefault())
       contents.on('will-redirect', event => event.preventDefault())
       contents.on('will-attach-webview', event => event.preventDefault())
-      contents.on('context-menu', event => { event.preventDefault(); requestMenu() })
+      contents.on('context-menu', event => event.preventDefault())
       contents.on('will-prevent-unload', event => event.preventDefault())
       contents.on('render-process-gone', () => this.fail('office-engine-closed-unknown'))
       contents.on('destroyed', () => { if (!this.destroyed) this.fail('office-engine-closed-unknown') })
@@ -399,6 +435,12 @@ export class NativeOfficeSurface {
   private dispose(code: string): void {
     if (this.destroyed) return
     this.visible = false; this.dismissPointerActions(); this.selectionToken = undefined; this.selectionFormatting = undefined; this.pointerSelection = undefined; this.selectionManual = undefined
+    this.clearMenuInput()
+    if (this.menuInputObserved) {
+      this.options.owner.webContents.removeListener('before-input-event', this.observeMenuInput)
+      this.options.owner.removeListener('blur', this.clearMenuInput)
+      this.menuInputObserved = false
+    }
     this.destroyed = true; this.ready = false; this.terminalCode = code
     this.options.owner.removeListener('closed', this.ownerClosed)
     if (this.readyTimer) clearTimeout(this.readyTimer)

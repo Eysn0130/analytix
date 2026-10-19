@@ -48,7 +48,7 @@ export type GoRuntimeStartupFailureClass = typeof GO_RUNTIME_STARTUP_FAILURE_CLA
 export const NATIVE_OFFICE_DIAGNOSTIC_STAGES = [
   'ipc_admission', 'ipc_resolve_present', 'ipc_controller_open',
   'controller_validation', 'controller_package', 'controller_open_object', 'controller_content',
-  'controller_surface_create', 'controller_surface_attach', 'controller_surface_open', 'controller_recovery', 'controller_manual_begin',
+  'controller_surface_create', 'controller_surface_attach', 'controller_surface_open', 'controller_recovery', 'controller_manual_begin', 'controller_save_failure',
   'controller_surface_open_guard_before', 'controller_surface_open_guard_after',
   'controller_surface_open_guard_final', 'controller_surface_open_current_final',
   'surface_admission', 'surface_preload', 'surface_assets', 'surface_asset_server',
@@ -72,6 +72,18 @@ export type NativeOfficeManualBeginFailureState = {
   pendingRecovery: boolean
   pendingManualCancel: boolean
 }
+const NATIVE_OFFICE_SAVE_PHASES = ['prepare', 'replace', 'export', 'commit', 'ack', 'query', 'recovery'] as const
+const NATIVE_OFFICE_SAVE_RECEIPT_STATUSES = ['committed', 'conflict', 'unknown', 'pending'] as const
+/** Closed failure facts only. Schema/receipt facts describe the last Core
+ * response checked in this attempt; native operations do not invent one. */
+export type NativeOfficeSaveFailureState = Pick<NativeOfficeManualBeginFailureState, 'outerCode' | 'innerCode'> & {
+  phase: typeof NATIVE_OFFICE_SAVE_PHASES[number]
+  outerSchemaAccepted: boolean | null
+  innerSchemaAccepted: boolean | null
+  receiptPresent: boolean | null
+  receiptStatus: typeof NATIVE_OFFICE_SAVE_RECEIPT_STATUSES[number] | null
+}
+const NATIVE_OFFICE_SAVE_FAILURE_KEYS = ['phase', 'outerSchemaAccepted', 'innerSchemaAccepted', 'outerCode', 'innerCode', 'receiptPresent', 'receiptStatus'] as const
 const NATIVE_OFFICE_MANUAL_BEGIN_OUTER_CODES = {
   unavailable: true, invalid_request: true, identity_invalid: true, package_not_found: true,
   conflict: true, disabled: true, adapter_unavailable: true, persistence_failure: true
@@ -388,6 +400,22 @@ function projectFixedDetail(value: unknown, category: string): FixedLogDetail | 
     if (typeof stage !== 'string' || !NATIVE_OFFICE_DIAGNOSTIC_STAGE_SET.has(stage) ||
         typeof errorCode !== 'string' || !NATIVE_OFFICE_DIAGNOSTIC_ERROR_CODE_SET.has(errorCode) ||
         typeof protectedPresent !== 'boolean') return undefined
+    if (stage === 'controller_save_failure' || Object.hasOwn(value, 'saveFailure')) {
+      const state = (value as Record<string, unknown>).saveFailure
+      if (stage !== 'controller_save_failure' || protectedPresent || Object.hasOwn(value, 'openState') || Object.hasOwn(value, 'manualBegin') ||
+          !state || typeof state !== 'object' || Array.isArray(state) ||
+          !NATIVE_OFFICE_SAVE_FAILURE_KEYS.every(key => Object.hasOwn(state, key))) return undefined
+      const { phase, outerSchemaAccepted, innerSchemaAccepted, outerCode, innerCode, receiptPresent, receiptStatus } = state as Record<string, unknown>
+      if (typeof phase !== 'string' || !NATIVE_OFFICE_SAVE_PHASES.some(allowed => allowed === phase) ||
+          outerSchemaAccepted !== null && typeof outerSchemaAccepted !== 'boolean' ||
+          innerSchemaAccepted !== null && typeof innerSchemaAccepted !== 'boolean' ||
+          outerCode !== null && (typeof outerCode !== 'string' || !Object.hasOwn(NATIVE_OFFICE_MANUAL_BEGIN_OUTER_CODES, outerCode)) ||
+          innerCode !== null && (typeof innerCode !== 'string' || !Object.hasOwn(NATIVE_OFFICE_MANUAL_BEGIN_INNER_CODES, innerCode)) ||
+          receiptPresent !== null && typeof receiptPresent !== 'boolean' ||
+          receiptStatus !== null && (typeof receiptStatus !== 'string' || !NATIVE_OFFICE_SAVE_RECEIPT_STATUSES.some(allowed => allowed === receiptStatus)) ||
+          receiptStatus !== null && receiptPresent !== true) return undefined
+      return { stage, errorCode, protectedPresent, phase, outerSchemaAccepted, innerSchemaAccepted, outerCode, innerCode, receiptPresent, receiptStatus }
+    }
     if (stage === 'controller_manual_begin' || Object.hasOwn(value, 'manualBegin')) {
       const state = (value as Record<string, unknown>).manualBegin
       if (stage !== 'controller_manual_begin' || protectedPresent || Object.hasOwn(value, 'openState') ||
@@ -507,6 +535,10 @@ export function logNativeOfficeFailure(stage: NativeOfficeDiagnosticStage, error
 
 export function logNativeOfficeManualBeginFailure(errorCode: NativeOfficeDiagnosticErrorCode, state: NativeOfficeManualBeginFailureState): void {
   logWarn('native-office', '', { stage: 'controller_manual_begin', errorCode, protectedPresent: false, manualBegin: state })
+}
+
+export function logNativeOfficeSaveFailure(errorCode: NativeOfficeDiagnosticErrorCode, state: NativeOfficeSaveFailureState): void {
+  logWarn('native-office', '', { stage: 'controller_save_failure', errorCode, protectedPresent: false, saveFailure: state })
 }
 
 export function logNativeOfficeManualBeginPhaseV1(frame: NativeManualBeginPhaseV1): void {

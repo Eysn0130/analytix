@@ -20,8 +20,8 @@ vi.mock('react-i18next',async importOriginal=>({
 vi.mock('../../office/DocxEditorPanel',()=>({DocxEditorPanel:(props:{visible:boolean;viewerControls?:WorkspaceViewerControls;fileActions?:(beforeOpen:(open:()=>void)=>void,exportCurrent:()=>void)=>ReactNode})=>{
   leaves.docx(props);return createElement('div',{'data-testid':'docx-panel','data-visible':String(props.visible)},props.fileActions?.(leaves.beforeOpen,leaves.exportCurrent))
 }}))
-vi.mock('../../office/NativeOfficePanel',()=>({NativeOfficePanel:(props:{fileActions:ReactNode;visible:boolean;viewerControls?:WorkspaceViewerControls;onPrepareDraft?:(value:string,references:never[])=>boolean})=>{
-  leaves.native(props);return createElement('div',{'data-testid':'native-panel','data-visible':String(props.visible),role:'toolbar'},props.fileActions,createElement('button',{'data-testid':'request-modify',onClick:()=>props.onPrepareDraft?.('Suggest a change',[])},'Request Modify'))
+vi.mock('../../office/NativeOfficePanel',()=>({NativeOfficePanel:(props:{fileActions:ReactNode;titleControl?:ReactNode;visible:boolean;viewerControls?:WorkspaceViewerControls;onPrepareDraft?:(value:string,references:never[])=>boolean})=>{
+  leaves.native(props);return createElement('div',{'data-testid':'native-panel','data-visible':String(props.visible),role:'toolbar'},createElement('div',{'data-testid':'native-file-title'},props.titleControl),createElement('div',{'data-testid':'native-file-actions'},props.fileActions),createElement('button',{'data-testid':'request-modify',onClick:()=>props.onPrepareDraft?.('Suggest a change',[])},'Request Modify'))
 }}))
 vi.mock('../WorkspaceFilePreviewPanel',()=>({WorkspaceFilePreviewPanel:(props:unknown)=>{leaves.preview(props);return createElement('div',{'data-testid':'file-preview'})}}))
 vi.mock('../write/WriteConflictReview',()=>({WriteConflictReview:()=>createElement('div',{'data-testid':'conflict-recovery'})}))
@@ -250,4 +250,21 @@ it.each(['docx','xlsx','md'] as const)('passes the workspace viewer controls unc
   await act(async()=>{received.onToggleFocus();received.onCollapse()})
   expect(controls.onToggleFocus).toHaveBeenCalledOnce();expect(controls.onCollapse).toHaveBeenCalledOnce()
   expect(onSubmitPrompt).not.toHaveBeenCalled();expect(onPrepareDraft).not.toHaveBeenCalled();expect(saveAs).not.toHaveBeenCalled()
+})
+
+
+it('keeps the Native file title separate from right-side download and its receipt',async()=>{
+  await render()
+  const title=container.querySelector('[data-testid="native-file-title"]')!
+  const actions=container.querySelector('[data-testid="native-file-actions"]')!
+  expect(title.querySelector('button[aria-label="打开"]')).not.toBeNull()
+  expect(title.textContent).toBe('report.xlsx')
+  expect(title.querySelector('[data-native-office-download]')).toBeNull()
+  expect(actions.querySelector('[data-native-office-download]')).not.toBeNull()
+  expect(actions.querySelector('button[aria-label="打开"]')).toBeNull()
+  await act(async()=>actions.querySelector<HTMLButtonElement>('[data-native-office-download]')!.click())
+  expect(saveAs).toHaveBeenCalledExactlyOnceWith({sourcePath:path,workspaceRoot:'/synthetic'})
+  expect(actions.querySelector('[data-file-download-status]')?.textContent).toBe('generatedFileSaved')
+  expect(title.querySelector('[data-file-download-status]')).toBeNull()
+  expect(container.querySelectorAll('[role="toolbar"]')).toHaveLength(1)
 })
