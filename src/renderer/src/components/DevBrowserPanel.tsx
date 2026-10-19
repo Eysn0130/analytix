@@ -448,8 +448,8 @@ export function DevBrowserPanel({
     >
       <div className="shrink-0 bg-ds-canvas">
         <form onSubmit={submitUrl} className="ds-browser-addressbar">
-          <WorkspaceViewerHeader title={tabLabel} viewerControls={visible ? viewerControls : undefined} status={pageTitle || undefined}
-            leading={<div className="ds-browser-history flex shrink-0 items-center gap-1">
+          <WorkspaceViewerHeader className="ds-browser-workspace-toolbar" title={tabLabel} viewerControls={visible ? viewerControls : undefined} status={pageTitle || undefined}
+            leading={<div className="ds-browser-history ds-browser-history-inline flex shrink-0 items-center gap-1">
               <WorkspaceViewerIconButton compact onClick={goBack} disabled={!canNavigateBack} label={t('browserBack')}>
                 <ArrowLeft aria-hidden="true" />
               </WorkspaceViewerIconButton>
@@ -471,21 +471,11 @@ export function DevBrowserPanel({
               <WorkspaceViewerIconButton compact type="submit" className="ds-browser-open-inline" label={t('browserOpen')}>
                 <Send aria-hidden="true" />
               </WorkspaceViewerIconButton>
+              {useElectronWebview ? <WorkspaceViewerIconButton compact onClick={() => void captureSelection()}
+                disabled={!visible || capturingSelection} label={t('browserQuoteSelection')}>
+                <MessageSquarePlus aria-hidden="true" />
+              </WorkspaceViewerIconButton> : null}
               <WorkspaceViewerMenu label={t('browserMore')} ownerKey={JSON.stringify([activeUrl, useChatStore.getState().activeThreadId, useChatStore.getState().workspaceRoot])} enabled={visible}>
-                <div className="ds-browser-compact-actions !flex flex-col gap-1">
-                  <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={goBack} disabled={!canNavigateBack} label={t('browserBack')}>
-                    <ArrowLeft aria-hidden="true" /><span>{t('browserBack')}</span>
-                  </WorkspaceViewerIconButton>
-                  <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={goForward} disabled={!canNavigateForward} label={t('browserForward')}>
-                    <ArrowRight aria-hidden="true" /><span>{t('browserForward')}</span>
-                  </WorkspaceViewerIconButton>
-                  <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={reload} disabled={!activeUrl} label={t('browserReload')}>
-                    <RefreshCw aria-hidden="true" /><span>{t('browserReload')}</span>
-                  </WorkspaceViewerIconButton>
-                  <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={() => loadUrl(draftUrl)} label={t('browserOpen')}>
-                    <Send aria-hidden="true" /><span>{t('browserOpen')}</span>
-                  </WorkspaceViewerIconButton>
-                </div>
                 {detectedUrls.map(url => <WorkspaceViewerIconButton key={url} role="menuitem" className="!w-full !justify-start"
                   data-browser-detected-url={url} label={url} onClick={() => loadUrl(url, { keepAutoFollow: url === latestDetectedUrl })}>
                   <Globe2 aria-hidden="true" /><span className="min-w-0 truncate">{formatDevPreviewUrlLabel(url)}</span>
@@ -500,10 +490,6 @@ export function DevBrowserPanel({
                 <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={openExternal} disabled={!activeUrl} label={t('browserOpenExternal')}>
                   <ExternalLink aria-hidden="true" /><span>{t('browserOpenExternal')}</span>
                 </WorkspaceViewerIconButton>
-                {useElectronWebview ? <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={() => void captureSelection()}
-                  disabled={capturingSelection} label={t('browserQuoteSelection')}>
-                  <MessageSquarePlus aria-hidden="true" /><span>{t('browserQuoteSelection')}</span>
-                </WorkspaceViewerIconButton> : null}
                 {useElectronWebview && onSubmitPrompt ? <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={() => void captureSelection(t('browserExplainPrompt'))}
                   disabled={capturingSelection} label={t('browserExplainSelection')}>
                   <Sparkles aria-hidden="true" /><span>{t('browserExplainSelection')}</span>

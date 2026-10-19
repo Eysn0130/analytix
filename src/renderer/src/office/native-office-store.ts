@@ -51,6 +51,8 @@ export type NativeWorkbookCellDraft = {
   id:string; workspace:string; path:string; threadId:string; objectId:string; revision:string
   sheetName:string; cell:NativeWorkbookSelection['cells'][number]
   type:NativeWorkbookManualEdit['type']; value:string; changed:boolean
+  /** Renderer input intent; absent retained drafts keep their original explicit type. */
+  inputMode?:'auto' | NativeWorkbookManualEdit['type']
   pending?:boolean; unconfirmed?:boolean; closeRequested?:boolean
   submitted?:{edit:NativeWorkbookManualEdit;changeId?:string;saveOperationId?:string}
 }
@@ -141,7 +143,7 @@ export const useNativeOfficeStore = create<{
       if (expectedId && state.workbookDrafts[identity]?.id !== expectedId) return {}
       const previous=state.workbookDrafts[identity]
       if (draft && (state.workbookDraftInputFrozen || state.workbookClosing[key(draft.workspace,draft.path)]) &&
-        (!previous || previous.id !== draft.id || previous.type !== draft.type || previous.value !== draft.value)) return {}
+        (!previous || previous.id !== draft.id || previous.type !== draft.type || previous.value !== draft.value || previous.inputMode !== draft.inputMode)) return {}
       const workbookDrafts={...state.workbookDrafts}
       if (draft) workbookDrafts[identity]=draft
       else delete workbookDrafts[identity]

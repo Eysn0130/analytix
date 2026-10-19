@@ -124,6 +124,8 @@ describe('DevBrowserPanel shared operation row', () => {
   }
 
   async function button(key: string) {
+    const inline = element.querySelector<HTMLButtonElement>(`[data-workspace-viewer-header] button[aria-label="${key}"]`)
+    if (inline) return inline
     const panel = await menu()
     const result = panel.querySelector<HTMLButtonElement>(`button[aria-label="${key}"]`)
     expect(result, key).not.toBeNull()
@@ -142,6 +144,7 @@ describe('DevBrowserPanel shared operation row', () => {
     expect(element.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
     expect(header.closest('form')).toBe(element.querySelector('form'))
     expect(header.querySelector('input[aria-label="browserAddressPlaceholder"]')).not.toBeNull()
+    expect(header.querySelector('[aria-label="browserQuoteSelection"]')).toBeNull()
     for (const label of ['browserBack', 'browserForward', 'browserReload', 'browserOpen', 'browserMore', 'workbenchFocus', 'workbenchCollapse']) {
       expect(header.querySelector(`button[aria-label="${label}"] svg`), label).not.toBeNull()
     }
@@ -149,6 +152,23 @@ describe('DevBrowserPanel shared operation row', () => {
     await act(async () => header.querySelector<HTMLButtonElement>('[aria-label="workbenchCollapse"]')!.click())
     expect(focus).toHaveBeenCalledTimes(1); expect(close).toHaveBeenCalledTimes(1)
     expect((await menu()).querySelector('[aria-label="browserCloseTab"]')).toBeNull()
+  })
+
+  it('keeps native quote beside address and navigation without duplicating those actions in More', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Electron/41.10.3')
+    await render({ onSubmitPrompt: vi.fn() })
+    const header = element.querySelector('[data-workspace-viewer-header]')!
+    expect(header.classList.contains('ds-browser-workspace-toolbar')).toBe(true)
+    expect(header.querySelector('.ds-browser-history-inline')).not.toBeNull()
+    const inlineLabels = ['browserBack', 'browserForward', 'browserReload', 'browserOpen', 'browserQuoteSelection']
+    for (const label of inlineLabels) {
+      expect(header.querySelectorAll(`button[aria-label="${label}"]`), label).toHaveLength(1)
+      expect(header.querySelector(`button[aria-label="${label}"] svg[aria-hidden="true"]`), label).not.toBeNull()
+    }
+    const panel = await menu()
+    for (const label of inlineLabels) expect(panel.querySelector(`button[aria-label="${label}"]`), label).toBeNull()
+    expect(panel.querySelector('[aria-label="browserExplainSelection"]')).not.toBeNull()
+    expect(document.querySelectorAll('[aria-label="browserQuoteSelection"]')).toHaveLength(1)
   })
 
   it('keeps address submission and iframe history attached to the existing handlers', async () => {
@@ -228,9 +248,9 @@ describe('DevBrowserPanel shared operation row', () => {
 
   it('closes the menu on Escape and when the retained browser stops being visible', async () => {
     await render()
-    const reload = await button('browserReload')
-    await act(async () => reload.focus())
-    await act(async () => reload.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    const autoFollow = await button('browserAutoFollow')
+    await act(async () => autoFollow.focus())
+    await act(async () => autoFollow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(document.querySelector('[role="menu"]')).toBeNull()
     expect(document.activeElement).toBe(element.querySelector('[aria-label="browserMore"]'))
     await menu()

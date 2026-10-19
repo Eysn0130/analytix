@@ -197,6 +197,16 @@ function workbookDraft(overrides:Partial<NativeWorkbookCellDraft>={}):NativeWork
   return {id:'local-draft',workspace:'/workspace',path:book.path,threadId:'thread-a',objectId:book.objectId,revision:book.revision,
     sheetName:'Sheet1',cell:bookCell,type:'text',value:'001',changed:true,...overrides}
 }
+it.each(['frozen','closing'] as const)('workbook input mode intent is retained and cannot change while %s',state=>{
+  const store=useNativeOfficeStore.getState(),draft=workbookDraft({inputMode:'auto'})
+  store.setWorkbookDraft(bookDraftKey,draft)
+  useNativeOfficeStore.setState(state === 'frozen' ? {workbookDraftInputFrozen:true} : {workbookClosing:{[nativeOfficeTargetKey({workspace:'/workspace',path:book.path})]:true}})
+  store.setWorkbookDraft(bookDraftKey,{...draft,inputMode:'text'},draft.id)
+  expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toBe(draft)
+  useNativeOfficeStore.setState({workbookDraftInputFrozen:false,workbookClosing:{}})
+  store.setWorkbookDraft(bookDraftKey,{...draft,inputMode:'text'},draft.id)
+  expect(useNativeOfficeStore.getState().workbookDrafts[bookDraftKey]).toMatchObject({inputMode:'text',type:'text',value:'001'})
+})
 type WorkbookChange=Extract<NonNullable<NonNullable<NativeOfficeView['recovery']>['current']>,{version:3}>
 function workbookChange(overrides:Partial<WorkbookChange>={}):WorkbookChange {
   const bounds={sheet:0,sheetName:'Sheet1',startColumn:0,endColumn:0,startRow:0,endRow:0}

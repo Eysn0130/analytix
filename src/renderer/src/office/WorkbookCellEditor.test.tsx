@@ -3,7 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeOfficeRequest, NativeOfficeResponse, NativeOfficeSelection, NativeOfficeView } from '@shared/native-office'
-import { WorkbookCellEditor, workbookDraftEdit, workbookSelectionSum } from './WorkbookCellEditor'
+import { WorkbookCellEditor, workbookAutoInputType, workbookDraftEdit, workbookSelectionSum, type WorkbookCellContextActions } from './WorkbookCellEditor'
 import { nativeOfficeTargetKey, nativeWorkbookDraftKey, useNativeOfficeStore, type NativeWorkbookCellDraft } from './native-office-store'
 import { createWriteShutdownHandler, isWriteShutdownFrozen } from '../write/write-shutdown'
 
@@ -28,14 +28,14 @@ function receipt(type:'number'|'text'='text',value='001'):NativeOfficeView {
 }
 let root:Root|null, container:HTMLDivElement, toolbarTarget:HTMLDivElement
 let request:ReturnType<typeof vi.fn<(input:NativeOfficeRequest)=>Promise<NativeOfficeResponse | undefined>>>
-async function render(next:NativeOfficeView = view,active = true,context:{workspace?:string;path?:string;threadId?:string;toolbar?:boolean|null}={}) {
+async function render(next:NativeOfficeView = view,active = true,context:{workspace?:string;path?:string;threadId?:string;toolbar?:boolean|null;onContextActionsChange?:(value:WorkbookCellContextActions|null)=>void}={}) {
   await act(async()=>root!.render(createElement(WorkbookCellEditor,{view:next,threadId:context.threadId??threadId,
-    workspace:context.workspace??workspace,path:context.path??next.path,active,busy:false,onRequest:request,toolbarTarget:context.toolbar === null ? null : context.toolbar === false ? undefined : toolbarTarget})))
+    workspace:context.workspace??workspace,path:context.path??next.path,active,busy:false,onRequest:request,toolbarTarget:context.toolbar === null ? null : context.toolbar === false ? undefined : toolbarTarget,onContextActionsChange:context.onContextActionsChange})))
 }
 const input = () => container.querySelector<HTMLInputElement>('[aria-label="单元格值或公式"]')!
 const button = (label:string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.getAttribute('aria-label')===label || item.textContent===label)!
 async function openOptions() {
-  if (!document.querySelector('[aria-label="单元格输入类型"]')) await act(async()=>button('单元格编辑选项').click())
+  if (button('单元格编辑选项').getAttribute('aria-expanded') !== 'true') await act(async()=>button('单元格编辑选项').click())
 }
 async function clickButton(label:string) {
   if (!button(label)) await openOptions()
@@ -47,12 +47,12 @@ async function fill(value:string) {
     input().dispatchEvent(new Event('input',{bubbles:true}))
   })
 }
+async function openTypes() {
+  if (!document.querySelector('[role="menu"][aria-label="单元格输入类型"]')) await act(async()=>input().dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})))
+}
 async function choose(type:string) {
-  await openOptions()
-  await act(async()=>{
-    const select = document.querySelector<HTMLSelectElement>('[aria-label="单元格输入类型"]')!
-    select.value=type;select.dispatchEvent(new Event('change',{bubbles:true}))
-  })
+  await openTypes()
+  await act(async()=>document.querySelector<HTMLButtonElement>(`[data-workbook-input-mode="${type}"]`)!.click())
 }
 async function shutdown(handler:ReturnType<typeof createWriteShutdownHandler>,requestId:string,phase:'prepare'|'cancel') {
   let result!:Awaited<ReturnType<typeof handler>>
@@ -82,6 +82,132 @@ afterEach(async()=>{
 })
 
 describe('typed workbook cell drafts',()=>{
+  it('auto input preserves leading zeros, long identifiers, whitespace and numeric underflow as text',()=>{
+    for (const value of ['001','-001','00.5','1234567890123456','0.1234567890123456',' 12 ','12 ',' ','1e999','1e-999','0x10','12 apples','2026-10-20'])
+      expect(workbookAutoInputType(value),value).toBe('text')
+    for (const value of ['0','-12.5','.5','1e3','0e-999']) expect(workbookAutoInputType(value),value).toBe('number')
+    expect(workbookAutoInputType('')).toBe('empty')
+    expect(workbookAutoInputType('=SUM(A1:A2)')).toBe('formula')
+    expect(workbookAutoInputType('=')).toBe('formula')
+    expect(workbookDraftEdit('formula','=')).toBeNull()
+  })
+  it.each(['empty','text','number','formula'] as const)('auto input chooses a number independently of the original %s cell type',async valueType=>{
+    const cell={...editableCell,valueType,text:valueType === 'text' ? 'before' : valueType === 'empty' ? '' : '12',
+      formula:valueType === 'formula' ? '=6*2' : valueType === 'empty' ? '' : '12',value:valueType === 'empty' || valueType === 'text' ? 0 : 12}
+    await render({...view,selection:{...selection,cells:[cell]}});await fill('37')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({inputMode:'auto',type:'number',value:'37'})
+    expect(request).not.toHaveBeenCalled()
+    await act(async()=>button('保存').click())
+    expect(request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({action:'editWorkbookCell',edit:{type:'number',value:37}}))
+  })
+  it('auto input sends formula and text intent while keeping invalid formula input local',async()=>{
+    await render();await fill('=')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({inputMode:'auto',type:'formula',value:'='})
+    expect(button('保存').disabled).toBe(true);expect(request).not.toHaveBeenCalled()
+    await fill('=SUM(A1:A2)')
+    expect(button('保存').disabled).toBe(false)
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({inputMode:'auto',type:'formula'})
+    await fill('hello');await act(async()=>button('保存').click())
+    expect(request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({edit:{type:'text',text:'hello'}}))
+  })
+  it('auto input clears a cell without disabling further input before an explicit save',async()=>{
+    await render();await fill('')
+    expect(input().disabled).toBe(false);expect(input().readOnly).toBe(false)
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({inputMode:'auto',type:'empty'})
+    await fill('38')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({inputMode:'auto',type:'number',value:'38'})
+    await fill('');await act(async()=>button('保存').click())
+    expect(request).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({edit:{type:'empty'}}))
+  })
+  it('type context menu supports keyboard entry, Escape and focus-out without saving or stealing focus',async()=>{
+    await render();await fill('37')
+    await act(async()=>input().focus())
+    const event=new KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true})
+    await act(async()=>input().dispatchEvent(event))
+    expect(event.defaultPrevented).toBe(true)
+    expect(document.activeElement?.getAttribute('data-workbook-input-mode')).toBe('auto')
+    await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true})))
+    expect(document.activeElement?.getAttribute('data-workbook-input-mode')).toBe('text')
+    await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})))
+    expect(document.querySelector('[role="menu"][aria-label="单元格输入类型"]')).toBeNull()
+    expect(document.activeElement).toBe(input())
+    await openTypes()
+    const outside=document.createElement('button');document.body.append(outside)
+    try {
+      await act(async()=>outside.focus())
+      expect(document.querySelector('[role="menu"][aria-label="单元格输入类型"]')).toBeNull()
+      expect(document.activeElement).toBe(outside)
+    } finally {outside.remove()}
+    expect(request).not.toHaveBeenCalled()
+  })
+  it('type context menu retains explicit override across remount and can restore auto from explicit empty',async()=>{
+    await render();await choose('text');await fill('123')
+    await act(async()=>root!.unmount());root=createRoot(container);await render()
+    await fill('124')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({inputMode:'text',type:'text',value:'124'})
+    await choose('empty')
+    expect(input().disabled).toBe(false);expect(input().readOnly).toBe(true)
+    await choose('auto')
+    expect(input().readOnly).toBe(false)
+    await fill('125')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({inputMode:'auto',type:'number',value:'125'})
+    expect(request).not.toHaveBeenCalled()
+  })
+  it('input mode preserves legacy retained draft type when no mode field exists',async()=>{
+    useNativeOfficeStore.getState().setWorkbookDraft(draftKey,{id:'legacy',workspace,path:view.path,threadId,objectId:view.objectId,
+      revision:view.revision,sheetName:'Sheet1',cell:structuredClone(editableCell),type:'text',value:'123',changed:true})
+    await render();await fill('124')
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({id:'legacy',inputMode:'text',type:'text',value:'124'})
+    expect(request).not.toHaveBeenCalled()
+  })
+  it('type context menu retires on selection or visibility changes and respects IME composition',async()=>{
+    await render();await fill('37');await openTypes()
+    await render({...view,selection:{...selection,token:'new-selection'}})
+    expect(document.querySelector('[role="menu"][aria-label="单元格输入类型"]')).toBeNull()
+    await openTypes();await render(view,false)
+    expect(document.querySelector('[role="menu"][aria-label="单元格输入类型"]')).toBeNull()
+    await render()
+    await act(async()=>input().dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true,data:'中'})))
+    const event=new MouseEvent('contextmenu',{bubbles:true,cancelable:true})
+    await act(async()=>input().dispatchEvent(event))
+    expect(event.defaultPrevented).toBe(false)
+    expect(document.querySelector('[role="menu"][aria-label="单元格输入类型"]')).toBeNull()
+    await act(async()=>input().dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中'})))
+    expect(input().value).toBe('37');expect(request).not.toHaveBeenCalled()
+  })
+  it('context type actions fence live store selection, input state and lifecycle before applying local intent',async()=>{
+    const offered:{current:WorkbookCellContextActions|null}={current:null}
+    const publish=(next:WorkbookCellContextActions|null)=>{offered.current=next}
+    await render(view,true,{onContextActionsChange:publish});await fill('37')
+    const context=offered.current!,draft=useNativeOfficeStore.getState().workbookDrafts[draftKey]
+    const text=context.actions.find(action=>action.id === 'workbook-input-text')!
+    expect(context.selectionToken).toBe(selection.token)
+    const moved={...selection,token:'moved',ranges:[{...selection.ranges[0],startColumn:1,endColumn:1}],cells:[{...editableCell,column:1}]}
+    const invalidStates=[{view:{...view,selection:{...selection,token:'renewed'}}},{view:{...view,selection:moved}},
+      {view:{...view,revision:'e'.repeat(64)}},{view:{...view,changeSequence:1}},
+      {workbookDraftInputFrozen:true},{workbookDraftComposing:true},{workbookClosing:{[targetKey]:true as const}}]
+    for (const invalid of invalidStates) {
+      await act(async()=>{useNativeOfficeStore.setState(invalid);text.run()})
+      expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBe(draft)
+      await act(async()=>useNativeOfficeStore.setState({view,workbookDraftInputFrozen:false,workbookDraftComposing:false,workbookClosing:{}}))
+    }
+    const newer={...draft,value:'38'}
+    await act(async()=>{useNativeOfficeStore.getState().setWorkbookDraft(draftKey,newer,draft.id);text.run()})
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBe(newer)
+    await act(async()=>useNativeOfficeStore.getState().setWorkbookDraft(draftKey,draft,draft.id))
+    await act(async()=>text.run())
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toMatchObject({inputMode:'text',type:'text',value:'37'})
+    const current=offered.current!,retained=useNativeOfficeStore.getState().workbookDrafts[draftKey]
+    await render({...view,selection:moved},true,{onContextActionsChange:publish})
+    expect(offered.current).toBeNull()
+    await act(async()=>current.actions[0].run())
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBe(retained)
+    await render(view,false,{onContextActionsChange:publish});expect(offered.current).toBeNull()
+    await act(async()=>root!.unmount());root=null
+    await act(async()=>current.actions[0].run())
+    expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toBe(retained)
+    expect(request).not.toHaveBeenCalled()
+  })
   it('portals actions into the existing viewer row and keeps the formula row for content only',async()=>{
     await render()
     expect(toolbarTarget.contains(button('保存'))).toBe(true)
@@ -93,13 +219,13 @@ describe('typed workbook cell drafts',()=>{
     await fill('13')
     expect(button('保存').disabled).toBe(false)
     expect(button('保存').getAttribute('data-tone')).toBe('commit')
-    await fill('not a number')
+    await fill('=')
     expect(button('保存').disabled).toBe(true)
     expect(button('保存').getAttribute('data-tone')).toBeNull()
     expect(document.querySelector('[aria-label="单元格输入类型"]')).toBeNull()
     await openOptions()
-    expect(document.querySelector('[role="menu"] [aria-label="单元格输入类型"]')).not.toBeNull()
-    expect(document.querySelector<HTMLSelectElement>('[aria-label="单元格输入类型"]')?.value).toBe('number')
+    expect(document.querySelector('[role="menu"][aria-label="单元格输入类型"]')).toBeNull()
+    expect(document.querySelector('[data-workbook-input-mode]')).toBeNull()
     expect(request).not.toHaveBeenCalled()
   })
   it('uses the same content row for reachable standalone fallback actions',async()=>{
@@ -237,8 +363,8 @@ describe('typed workbook cell drafts',()=>{
     expect(useNativeOfficeStore.getState().workbookDrafts[draftKey]).toEqual(original)
     root=createRoot(container);await render()
     expect(input().value).toBe('retained words')
-    await openOptions()
-    expect(document.querySelector<HTMLSelectElement>('[aria-label="单元格输入类型"]')!.value).toBe('text')
+    await openTypes()
+    expect(document.querySelector('[data-workbook-input-mode="text"]')?.getAttribute('aria-checked')).toBe('true')
     expect(button('保存').disabled).toBe(false)
     expect(request).not.toHaveBeenCalled()
   })
