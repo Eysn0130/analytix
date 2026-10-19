@@ -64,8 +64,8 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
    不把消费副本当无效代码删除，也不借此恢复 dormant MCP。
 2. upstream、QA、benchmark 多份日期报告使用 `final`、`closure`、`passed`
    命名。保留原始证据，但引用必须经过目录 README 的 currentness 规则。
-3. `docs/legacy/kun` 包含中英文历史材料。已增加 `docs/legacy/README.md`，
-   不再让搜索结果看起来像当前 Analytix 规范。
+3. [Kun 历史指针](../legacy/kun/README.md) 取代中英文旧手册正文，原文从固定
+   Git 提交恢复；[legacy index](../legacy/README.md) 保留历史检索边界。
 4. `.agents`、`.claude`、`.cursor` 内的 Markdown 属于工具/工作流
    配置，不应并入产品规范。
 5. 包内 `node_modules` 的 README/LICENSE 是依赖材料，不纳入产品文档数量和

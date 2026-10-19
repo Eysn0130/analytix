@@ -175,7 +175,7 @@ identity:
 | `src/renderer/src/plan/plan-prompts.ts` | Isolated legacy prompt recognition. | May recognize old internal plan prompt strings so they do not become user requests. |
 | provider/model DeepSeek files | Provider support. | DeepSeek may remain as a provider/model name, never as app identity. |
 | Connect Phone `claw` internals | First-stage internal module name. | User-visible copy must say Connect Phone/analytix. |
-| `docs/legacy/kun/` and `release/legacy/` | Historical archive. | Must remain clearly marked historical and not linked as current architecture guidance. |
+| [Kun history pointer](../../legacy/kun/README.md) and [release history pointer](../../../release/legacy/README.md) | Historical Git recovery pointers. | Must remain clearly marked historical and not linked as current architecture guidance. |
 
 Any old naming outside these boundaries is a current-product bug unless another
 spec explicitly allowlists it.
