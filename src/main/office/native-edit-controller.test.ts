@@ -35,7 +35,7 @@ function setup(typed = false, presentation = false) {
     async packageHost(r):Promise<any>{
       if(r.action==='list')return {ok:true,packages:[pkg]}
       if(r.action!=='invoke')throw Error('not authorized')
-      if(r.operation==='open-object'){await openGate;return {ok:true,output:{ok:true,document:{objectId,sessionId,path:presentation?'/workspace/a.pptx':typed?'/workspace/a.xlsx':'/workspace/a.docx',revision:saved,content:Buffer.from(corruptReload?original:corruptOpen?edited:saved===revision?original:edited).toString('base64')}}}}
+      if(r.operation==='open-object'){await openGate;return {ok:true,output:{ok:true,document:{objectId,sessionId,path:presentation?'/workspace/a.pptx':typed?'/workspace/a.xlsx':'/workspace/a.docx',revision:saved,content:Buffer.from(corruptReload?original:corruptOpen?edited:saved===revision?original:edited).toString('base64')},...(typed?{workbookEditing:{editable:true}}:{})}}}
       if(r.operation==='capture-selection'){selectionCalls.push(r.operation);scope={...r.input,scopeId,parts:[{kind:'literal',text:'selected'}],...scopeOverride};delete scope.text;return {ok:true,output:{ok:true,scope}}}
       if(r.operation==='selection-read'){selectionCalls.push(r.operation);return {ok:true,output:selectionReadError?{ok:false,code:'scope_invalid',message:'stale'}:{ok:true,scope:{...scope,...scopeOverride}}}}
       if(r.operation==='proposal-read')return {ok:true,output:{ok:true,proposals:[{proposalId,status:'proposed',parts:[{kind:'literal',text:'proposed'}]}],localReviews:[{proposalId,beforeText:'selected raw field',afterText:'proposed raw field'}]}}
