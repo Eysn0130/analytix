@@ -28,6 +28,7 @@ type ThreadEventStore struct {
 	ValidateAcceptedFinalDelivery func(domainevent.AcceptedFinalDeliveryBatchV2) error
 	PreflightPublic               func(threadID string) string
 	ProjectPublic                 func(threadID string, event map[string]any) (map[string]any, bool, string)
+	FinishPublicReplay            func(threadID string) string
 }
 
 type ThreadEventsHandler struct {
@@ -56,6 +57,15 @@ func (h ThreadEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, t
 		return
 	}
 	events, setupErr, revocationCode := h.replay(r.Context(), threadID, sinceSeq)
+	if r.Context().Err() != nil {
+		return
+	}
+	if setupErr == nil && revocationCode == "" && h.Store.FinishPublicReplay != nil {
+		revocationCode = normalizeProjectionRevocationCode(h.Store.FinishPublicReplay(threadID))
+	}
+	if r.Context().Err() != nil {
+		return
+	}
 	finishResponseWrite := h.ReplayDiagnostics.Begin(ReplayResponseWrite)
 	if revocationCode != "" {
 		h.writeProjectionRevokedResponse(w, threadID, revocationCode)
@@ -146,7 +156,11 @@ func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID strin
 		return nil, nil, casePublicAuthorityRejectedCode
 	}
 	finishAcceptedFinalGroups := h.ReplayDiagnostics.Begin(ReplayAcceptedFinalGroups)
-	deliveryUnits, err := acceptedFinalDeliveryUnits(threadID, events, h.Store.SealAcceptedFinalDelivery)
+	deliveryContext := context.Background()
+	if snapshotLimit == 0 {
+		deliveryContext = ctx
+	}
+	deliveryUnits, err := acceptedFinalDeliveryUnitsContext(deliveryContext, threadID, events, h.Store.SealAcceptedFinalDelivery)
 	finishAcceptedFinalGroups(len(deliveryUnits))
 	if err != nil {
 		return nil, nil, casePublicAuthorityRejectedCode
@@ -168,7 +182,13 @@ func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID strin
 		})}, nil, ""
 	}
 	finishProjectPublic := h.ReplayDiagnostics.Begin(ReplayProjectPublic)
-	public, revocationCode := h.publicEvents(threadID, deliveryUnits)
+	var public []map[string]any
+	var revocationCode string
+	if snapshotLimit == 0 {
+		public, revocationCode = h.publicEventsContext(ctx, threadID, deliveryUnits)
+	} else {
+		public, revocationCode = h.publicEvents(threadID, deliveryUnits)
+	}
 	finishProjectPublic(len(public))
 	if revocationCode != "" {
 		return nil, nil, revocationCode
@@ -410,8 +430,15 @@ func (h ThreadEventsHandler) serveLive(w http.ResponseWriter, r *http.Request, t
 }
 
 func (h ThreadEventsHandler) publicEvents(threadID string, events []map[string]any) ([]map[string]any, string) {
+	return h.publicEventsContext(context.Background(), threadID, events)
+}
+
+func (h ThreadEventsHandler) publicEventsContext(ctx context.Context, threadID string, events []map[string]any) ([]map[string]any, string) {
 	out := make([]map[string]any, 0, len(events))
 	for start := 0; start < len(events); {
+		if ctx.Err() != nil {
+			return nil, casePublicAuthorityUnavailableCode
+		}
 		event := events[start]
 		if domainevent.GeneralTerminalDeliveryMarkerPresentV1(event) {
 			commitID := strings.TrimSpace(contracts.StringField(event, "generalTerminalCommitId"))
@@ -419,7 +446,7 @@ func (h ThreadEventsHandler) publicEvents(threadID string, events []map[string]a
 			for end < len(events) && strings.TrimSpace(contracts.StringField(events[end], "generalTerminalCommitId")) == commitID {
 				end++
 			}
-			batch, revocationCode := h.publicGeneralTerminalBatch(threadID, events[start:end])
+			batch, revocationCode := h.publicGeneralTerminalBatchContext(ctx, threadID, events[start:end])
 			if revocationCode != "" {
 				return nil, revocationCode
 			}
@@ -427,7 +454,7 @@ func (h ThreadEventsHandler) publicEvents(threadID string, events []map[string]a
 			start = end
 			continue
 		}
-		public, visible, revocationCode := h.publicEvent(threadID, event)
+		public, visible, revocationCode := h.publicEventContext(ctx, threadID, event)
 		if revocationCode != "" {
 			return nil, revocationCode
 		}
@@ -452,8 +479,15 @@ func (h ThreadEventsHandler) cursorAdvancedEvent(threadID string, seq int) map[s
 }
 
 func (h ThreadEventsHandler) publicEvent(threadID string, event map[string]any) (map[string]any, bool, string) {
+	return h.publicEventContext(context.Background(), threadID, event)
+}
+
+func (h ThreadEventsHandler) publicEventContext(ctx context.Context, threadID string, event map[string]any) (map[string]any, bool, string) {
+	if ctx.Err() != nil {
+		return nil, false, casePublicAuthorityUnavailableCode
+	}
 	if contracts.StringField(event, "kind") == domainevent.AcceptedFinalDeliveryBatchKind {
-		return h.publicAcceptedFinalBatch(threadID, event)
+		return h.publicAcceptedFinalBatchContext(ctx, threadID, event)
 	}
 	// Accepted-final publication fields are never authoritative as a standalone
 	// live event. Durable replay groups them before this point, and the only live
@@ -471,20 +505,33 @@ func (h ThreadEventsHandler) publicEvent(threadID string, event map[string]any) 
 		return nil, false, casePublicAuthorityUnavailableCode
 	}
 	projected, visible, code := h.Store.ProjectPublic(threadID, public)
+	if ctx.Err() != nil {
+		return nil, false, casePublicAuthorityUnavailableCode
+	}
 	return projected, visible, normalizeProjectionRevocationCode(code)
 }
 
 func (h ThreadEventsHandler) publicGeneralTerminalBatch(threadID string, rawEvents []map[string]any) (map[string]any, string) {
+	return h.publicGeneralTerminalBatchContext(context.Background(), threadID, rawEvents)
+}
+
+func (h ThreadEventsHandler) publicGeneralTerminalBatchContext(ctx context.Context, threadID string, rawEvents []map[string]any) (map[string]any, string) {
 	if domainevent.ValidateGeneralTerminalDeliveryEventsV1(rawEvents) != nil || h.Store.ProjectPublic == nil {
 		return nil, casePublicAuthorityRejectedCode
 	}
 	projectedEvents := make([]map[string]any, 0, len(rawEvents))
 	for _, raw := range rawEvents {
+		if ctx.Err() != nil {
+			return nil, casePublicAuthorityUnavailableCode
+		}
 		public, visible := publicEvent(raw)
 		if !visible || public == nil {
 			return nil, casePublicAuthorityRejectedCode
 		}
 		projected, projectedVisible, code := h.Store.ProjectPublic(threadID, public)
+		if ctx.Err() != nil {
+			return nil, casePublicAuthorityUnavailableCode
+		}
 		if normalized := normalizeProjectionRevocationCode(code); normalized != "" {
 			return nil, normalized
 		}
@@ -501,6 +548,13 @@ func (h ThreadEventsHandler) publicGeneralTerminalBatch(threadID string, rawEven
 }
 
 func (h ThreadEventsHandler) publicAcceptedFinalBatch(threadID string, event map[string]any) (map[string]any, bool, string) {
+	return h.publicAcceptedFinalBatchContext(context.Background(), threadID, event)
+}
+
+func (h ThreadEventsHandler) publicAcceptedFinalBatchContext(ctx context.Context, threadID string, event map[string]any) (map[string]any, bool, string) {
+	if ctx.Err() != nil {
+		return nil, false, casePublicAuthorityUnavailableCode
+	}
 	batch, err := domainevent.ParseAcceptedFinalDeliveryBatchV2(event)
 	if err != nil || batch.ThreadID != threadID || h.Store.ValidateAcceptedFinalDelivery == nil ||
 		h.Store.ValidateAcceptedFinalDelivery(batch) != nil {
@@ -508,11 +562,17 @@ func (h ThreadEventsHandler) publicAcceptedFinalBatch(threadID string, event map
 	}
 	projectedEvents := make([]map[string]any, 0, len(batch.Events))
 	for _, nested := range batch.Events {
+		if ctx.Err() != nil {
+			return nil, false, casePublicAuthorityUnavailableCode
+		}
 		public, visible := publicEvent(nested)
 		if !visible || public == nil || h.Store.ProjectPublic == nil {
 			return nil, false, casePublicAuthorityRejectedCode
 		}
 		projected, visible, code := h.Store.ProjectPublic(threadID, public)
+		if ctx.Err() != nil {
+			return nil, false, casePublicAuthorityUnavailableCode
+		}
 		code = normalizeProjectionRevocationCode(code)
 		if code != "" {
 			return nil, false, code
@@ -534,6 +594,18 @@ func acceptedFinalDeliveryUnits(
 	events []map[string]any,
 	seal func([]map[string]any) (domainevent.AcceptedFinalDeliverySealV1, error),
 ) ([]map[string]any, error) {
+	return acceptedFinalDeliveryUnitsContext(context.Background(), threadID, events, seal)
+}
+
+func acceptedFinalDeliveryUnitsContext(
+	ctx context.Context,
+	threadID string,
+	events []map[string]any,
+	seal func([]map[string]any) (domainevent.AcceptedFinalDeliverySealV1, error),
+) ([]map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	groups, err := preflightAcceptedFinalDeliveryGroupsV1(threadID, events)
 	if err != nil {
 		return nil, err
@@ -541,6 +613,9 @@ func acceptedFinalDeliveryUnits(
 	units := make([]map[string]any, 0, len(events))
 	groupIndex := 0
 	for start := 0; start < len(events); {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if groupIndex >= len(groups) || groups[groupIndex].start != start {
 			units = append(units, events[start])
 			start++
@@ -551,6 +626,9 @@ func acceptedFinalDeliveryUnits(
 			return nil, errors.New("accepted final delivery authority is unavailable")
 		}
 		deliverySeal, err := seal(events[group.start:group.end])
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if err != nil {
 			return nil, err
 		}

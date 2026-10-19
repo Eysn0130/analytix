@@ -2,6 +2,7 @@ package turnterminal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -68,6 +69,13 @@ func AppendGeneralTerminalPublicationArchiveV1(
 }
 
 func ValidateGeneralTerminalPublicationArchiveV1(archive GeneralTerminalPublicationArchiveV1) error {
+	return validateGeneralTerminalPublicationArchiveContextV1(context.Background(), archive)
+}
+
+func validateGeneralTerminalPublicationArchiveContextV1(ctx context.Context, archive GeneralTerminalPublicationArchiveV1) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if archive.SchemaVersion != GeneralTerminalPublicationArchiveV1SchemaVersion ||
 		archive.Purpose != GeneralTerminalPublicationArchiveV1Purpose || archive.Commits == nil ||
 		!domainsecurity.IsSHA256Hex(archive.ArchiveDigest) || archive.ArchiveDigest != generalTerminalPublicationArchiveDigestV1(archive) {
@@ -76,6 +84,9 @@ func ValidateGeneralTerminalPublicationArchiveV1(archive GeneralTerminalPublicat
 	seenTurns := map[string]bool{}
 	seenCommits := map[string]bool{}
 	for _, commit := range archive.Commits {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if ValidateGeneralTerminalPublicationCommitV1(commit) != nil || seenTurns[commit.TurnID] || seenCommits[commit.CommitID] {
 			return errors.New("general terminal publication archive contains an invalid or duplicate commit")
 		}
@@ -86,6 +97,13 @@ func ValidateGeneralTerminalPublicationArchiveV1(archive GeneralTerminalPublicat
 }
 
 func ParseGeneralTerminalPublicationArchiveV1(value any) (GeneralTerminalPublicationArchiveV1, error) {
+	return parseGeneralTerminalPublicationArchiveContextV1(context.Background(), value)
+}
+
+func parseGeneralTerminalPublicationArchiveContextV1(ctx context.Context, value any) (GeneralTerminalPublicationArchiveV1, error) {
+	if err := ctx.Err(); err != nil {
+		return GeneralTerminalPublicationArchiveV1{}, err
+	}
 	body, err := json.Marshal(value)
 	if err != nil {
 		return GeneralTerminalPublicationArchiveV1{}, err
@@ -100,7 +118,7 @@ func ParseGeneralTerminalPublicationArchiveV1(value any) (GeneralTerminalPublica
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return GeneralTerminalPublicationArchiveV1{}, errors.New("general terminal publication archive contains trailing JSON")
 	}
-	if err := ValidateGeneralTerminalPublicationArchiveV1(archive); err != nil {
+	if err := validateGeneralTerminalPublicationArchiveContextV1(ctx, archive); err != nil {
 		return GeneralTerminalPublicationArchiveV1{}, err
 	}
 	return cloneGeneralTerminalPublicationArchiveV1(archive), nil

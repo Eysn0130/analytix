@@ -201,44 +201,48 @@ func (h *runtimeServerHandler) handleThreadEvents(w http.ResponseWriter, r *http
 		httpapi.WriteJSON(w, http.StatusNotFound, map[string]any{"code": "not_found", "message": "thread not found"})
 		return
 	}
-	inboundsse.ThreadEventsHandler{
-		Store: inboundsse.ThreadEventStore{
-			HighestSeq: h.store.HighestSeq,
-			LoadEventsSince: func(threadID string, afterSeq int) ([]map[string]any, error) {
-				result, err := h.store.LoadEventsSince(threadID, afterSeq)
-				if err != nil {
-					return nil, err
-				}
-				return result.Events, nil
-			},
-			LoadEventsSinceContext: func(ctx context.Context, threadID string, afterSeq int) ([]map[string]any, error) {
-				result, err := h.store.LoadEventsSinceContext(ctx, threadID, afterSeq)
-				if err != nil {
-					return nil, err
-				}
-				return result.Events, nil
-			},
-			LoadPublicEventsSince: func(threadID string, afterSeq int) ([]map[string]any, error) {
-				result, err := h.store.LoadPublicEventsSince(threadID, afterSeq)
-				if err != nil {
-					return nil, err
-				}
-				return result.Events, nil
-			},
-			LoadPublicEventsSinceContext: func(ctx context.Context, threadID string, afterSeq int) ([]map[string]any, error) {
-				result, err := h.store.LoadPublicEventsSinceContext(ctx, threadID, afterSeq)
-				if err != nil {
-					return nil, err
-				}
-				return result.Events, nil
-			},
-			SubscribeEvents:               h.store.SubscribeEvents,
-			InitialGoalActivation:         h.initialGoalActivationV1,
-			SealAcceptedFinalDelivery:     threadapp.NewAcceptedFinalDeliverySealer(r.Context(), h.publicProjector),
-			ValidateAcceptedFinalDelivery: threadapp.NewAcceptedFinalDeliveryValidator(r.Context(), h.publicProjector),
-			PreflightPublic:               threadapp.NewPublicProjectionPreflight(h.store, h.publicProjector),
-			ProjectPublic:                 threadapp.NewPublicEventProjector(h.store, h.publicProjector),
+	store := inboundsse.ThreadEventStore{
+		HighestSeq: h.store.HighestSeq,
+		LoadEventsSince: func(threadID string, afterSeq int) ([]map[string]any, error) {
+			result, err := h.store.LoadEventsSince(threadID, afterSeq)
+			if err != nil {
+				return nil, err
+			}
+			return result.Events, nil
 		},
+		LoadEventsSinceContext: func(ctx context.Context, threadID string, afterSeq int) ([]map[string]any, error) {
+			result, err := h.store.LoadEventsSinceContext(ctx, threadID, afterSeq)
+			if err != nil {
+				return nil, err
+			}
+			return result.Events, nil
+		},
+		LoadPublicEventsSince: func(threadID string, afterSeq int) ([]map[string]any, error) {
+			result, err := h.store.LoadPublicEventsSince(threadID, afterSeq)
+			if err != nil {
+				return nil, err
+			}
+			return result.Events, nil
+		},
+		LoadPublicEventsSinceContext: func(ctx context.Context, threadID string, afterSeq int) ([]map[string]any, error) {
+			result, err := h.store.LoadPublicEventsSinceContext(ctx, threadID, afterSeq)
+			if err != nil {
+				return nil, err
+			}
+			return result.Events, nil
+		},
+		SubscribeEvents:               h.store.SubscribeEvents,
+		InitialGoalActivation:         h.initialGoalActivationV1,
+		SealAcceptedFinalDelivery:     threadapp.NewAcceptedFinalDeliverySealer(r.Context(), h.publicProjector),
+		ValidateAcceptedFinalDelivery: threadapp.NewAcceptedFinalDeliveryValidator(r.Context(), h.publicProjector),
+		PreflightPublic:               threadapp.NewPublicProjectionPreflight(h.store, h.publicProjector),
+		ProjectPublic:                 threadapp.NewPublicEventProjector(h.store, h.publicProjector),
+	}
+	if !inboundsse.WantsLive(r) {
+		store.ProjectPublic, store.FinishPublicReplay = threadapp.NewFinitePublicEventProjector(r.Context(), h.store, h.publicProjector)
+	}
+	inboundsse.ThreadEventsHandler{
+		Store:             store,
 		HeartbeatInterval: h.heartbeatInterval,
 		SanitizeError:     apploop.SanitizeProviderRetryMessage,
 		ReplayDiagnostics: replayDiagnostics,

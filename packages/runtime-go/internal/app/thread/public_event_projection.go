@@ -42,6 +42,10 @@ func projectPublicThreadEvent(routeThreadID string, thread, event map[string]any
 }
 
 func projectPublicThreadEventWithRetainedFactsV1(routeThreadID string, thread, event map[string]any, trusted *gateprojection.TrustedFinalProjectionIndex, caseThreads CaseThreadAuthority, currentAuthority CurrentCaseThreadAuthorityValidator, primaryCAS finalauthorityport.AcceptedFinalCASReader, retained map[string]bool) (map[string]any, bool, error) {
+	return projectPublicThreadEventWithOrdinaryValidatorV1(routeThreadID, thread, event, trusted, caseThreads, currentAuthority, primaryCAS, retained, nil)
+}
+
+func projectPublicThreadEventWithOrdinaryValidatorV1(routeThreadID string, thread, event map[string]any, trusted *gateprojection.TrustedFinalProjectionIndex, caseThreads CaseThreadAuthority, currentAuthority CurrentCaseThreadAuthorityValidator, primaryCAS finalauthorityport.AcceptedFinalCASReader, retained map[string]bool, validateOrdinary func(map[string]any, map[string]any) (bool, bool, error)) (map[string]any, bool, error) {
 	if event["kind"] == "message_feedback_put" || event["kind"] == "message_feedback_delete" {
 		return nil, false, nil
 	}
@@ -59,7 +63,10 @@ func projectPublicThreadEventWithRetainedFactsV1(routeThreadID string, thread, e
 	classifiedCase := caseSensitive
 	caseSensitive = caseSensitive || indexedCase
 	if !caseSensitive {
-		governed, valid, validationErr := domainturnterminal.ValidateGeneralTerminalPublicEventV1(thread, event)
+		if validateOrdinary == nil {
+			validateOrdinary = domainturnterminal.ValidateGeneralTerminalPublicEventV1
+		}
+		governed, valid, validationErr := validateOrdinary(thread, event)
 		if validationErr != nil {
 			return nil, false, validationErr
 		}

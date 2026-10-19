@@ -1,6 +1,8 @@
 package turnterminal
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -10,6 +12,73 @@ import (
 )
 
 const GeneralTerminalPublicationArchiveFieldV1 = "generalTerminalPublicationArchive"
+
+// GeneralTerminalReplayArchiveV1 owns only pure parsed data for one finite
+// replay. It never retains a turn winner, visibility or authorization decision.
+type GeneralTerminalReplayArchiveV1 struct {
+	ctx                         context.Context
+	threadID                    string
+	initialized, present, dirty bool
+	source                      []byte
+	commits                     map[string]GeneralTerminalPublicationCommitV1
+	parse                       func(context.Context, any) (GeneralTerminalPublicationArchiveV1, error)
+}
+
+func NewGeneralTerminalReplayArchiveV1(ctx context.Context) *GeneralTerminalReplayArchiveV1 {
+	return &GeneralTerminalReplayArchiveV1{ctx: ctx, parse: parseGeneralTerminalPublicationArchiveContextV1}
+}
+
+func (prepared *GeneralTerminalReplayArchiveV1) ValidateEvent(thread, event map[string]any) (bool, bool, error) {
+	if prepared == nil || prepared.ctx == nil {
+		return true, false, errors.New("finite replay context is required")
+	}
+	if err := prepared.ctx.Err(); err != nil {
+		return true, false, err
+	}
+	threadID := generalTerminalString(thread, "id")
+	value, present := thread[GeneralTerminalPublicationArchiveFieldV1]
+	var source []byte
+	var err error
+	if present {
+		source, err = json.Marshal(value)
+	}
+	if err != nil {
+		return true, false, err
+	}
+	if prepared.initialized && (prepared.threadID != threadID || prepared.present != present || !bytes.Equal(prepared.source, source)) {
+		prepared.dirty = true
+	}
+	if prepared.dirty {
+		return true, false, errors.New("finite replay archive changed")
+	}
+	if !prepared.initialized {
+		commits := map[string]GeneralTerminalPublicationCommitV1{}
+		if present {
+			archive, parseErr := prepared.parse(prepared.ctx, json.RawMessage(source))
+			if err := prepared.ctx.Err(); err != nil {
+				return true, false, err
+			}
+			if parseErr != nil || threadID == "" {
+				return true, false, errors.New("ordinary projection terminal archive is invalid")
+			}
+			for _, commit := range archive.Commits {
+				if err := prepared.ctx.Err(); err != nil {
+					return true, false, err
+				}
+				if commit.ThreadID != threadID {
+					return true, false, errors.New("ordinary projection terminal archive contains a foreign thread")
+				}
+				commits[commit.TurnID] = commit
+			}
+		}
+		prepared.threadID, prepared.present, prepared.source, prepared.commits = threadID, present, source, commits
+		prepared.initialized = true
+	}
+	if err := prepared.ctx.Err(); err != nil {
+		return true, false, err
+	}
+	return validateGeneralTerminalPublicEventWithArchiveV1(thread, event, prepared.commits)
+}
 
 var generalTerminalProjectionMarkerFieldsV1 = []string{
 	"generalTerminalCommitId",
@@ -188,6 +257,10 @@ func ValidateGeneralTerminalPublicEventV1(thread, event map[string]any) (bool, b
 	if err != nil {
 		return true, false, err
 	}
+	return validateGeneralTerminalPublicEventWithArchiveV1(thread, event, archive)
+}
+
+func validateGeneralTerminalPublicEventWithArchiveV1(thread, event map[string]any, archive map[string]GeneralTerminalPublicationCommitV1) (bool, bool, error) {
 	turnID := generalTerminalString(event, "turnId")
 	commit, archived := archive[turnID]
 	turn, present := rawGeneralTerminalTurnByIDV1(thread, turnID)

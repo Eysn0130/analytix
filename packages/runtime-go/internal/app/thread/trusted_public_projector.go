@@ -1,6 +1,7 @@
 package thread
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	domainprivacy "analytix.local/runtime-go/internal/domain/privacyprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainstartup "analytix.local/runtime-go/internal/domain/startup"
+	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 	finalauthorityport "analytix.local/runtime-go/internal/ports/finalauthority"
 )
 
@@ -83,6 +85,9 @@ type TrustedPublicProjector struct {
 	// Set only on a private, synchronous hydration copy; never shared or cached.
 	retainedProjectionThread map[string]any
 	retainedProjectionFacts  map[string]bool
+	// Set only on a request-private finite replay copy. This caches pure archive
+	// parsing, never classification, authority or the result of ProjectEvent.
+	ordinaryReplayValidator func(map[string]any, map[string]any) (bool, bool, error)
 }
 
 func NewTrustedPublicProjector(index *gateprojection.TrustedFinalProjectionIndex) *TrustedPublicProjector {
@@ -259,7 +264,7 @@ func (projector *TrustedPublicProjector) ProjectEvent(routeThreadID string, thre
 	if err != nil {
 		return nil, false, err
 	}
-	projected, visible, err := projectPublicThreadEventWithRetainedFactsV1(routeThreadID, thread, event, projector.index, projector.caseThreads, projector.currentAuthority, projector.primaryCAS, retained)
+	projected, visible, err := projectPublicThreadEventWithOrdinaryValidatorV1(routeThreadID, thread, event, projector.index, projector.caseThreads, projector.currentAuthority, projector.primaryCAS, retained, projector.ordinaryReplayValidator)
 	if err == nil && visible {
 		err = projector.verifyRetainedFactsV1(thread, originals)
 	}
@@ -741,4 +746,114 @@ func NewPublicEventProjector(reader PublicThreadReader, projector PublicProjecto
 		}
 		return projected, visible, ""
 	}
+}
+
+// NewFinitePublicEventProjector keeps the mandatory fresh reader and projector
+// chain. Only an ordinary request-private copy may reuse pure archive parsing.
+// finish must run before writing the buffered finite response.
+func NewFinitePublicEventProjector(ctx context.Context, reader PublicThreadReader, projector PublicProjector) (func(string, map[string]any) (map[string]any, bool, string), func(string) string) {
+	var route string
+	var source []byte
+	var initialized, ordinary, dirty bool
+	trusted, supported := projector.(*TrustedPublicProjector)
+	active := projector
+	var prepared TrustedPublicProjector
+	if supported && trusted != nil {
+		prepared = *trusted
+		archive := domainturnterminal.NewGeneralTerminalReplayArchiveV1(ctx)
+		prepared.ordinaryReplayValidator = archive.ValidateEvent
+	}
+	ordinaryNow := func(threadID string, thread map[string]any) bool {
+		if !supported || trusted == nil {
+			return false
+		}
+		classified, err := domainsecurity.ClassifyCaseSensitiveThread(thread)
+		return err == nil && !classified && !trusted.index.ContainsThread(threadID) && !caseThreadKnown(trusted.caseThreads, threadID)
+	}
+	read := func(threadID string) (map[string]any, string) {
+		if dirty {
+			return nil, CasePublicAuthorityRejectedCode
+		}
+		if ctx == nil || ctx.Err() != nil || reader == nil || projector == nil {
+			return nil, CasePublicAuthorityUnavailableCode
+		}
+		thread, err := reader.GetThread(threadID)
+		if ctx.Err() != nil || err != nil || thread == nil {
+			return nil, CasePublicAuthorityUnavailableCode
+		}
+		if contracts.StringField(thread, "id") != threadID || route != "" && route != threadID {
+			dirty = true
+			return nil, CasePublicAuthorityRejectedCode
+		}
+		if !initialized {
+			route = threadID
+			_, hasArchive := thread[domainturnterminal.GeneralTerminalPublicationArchiveFieldV1]
+			ordinary = hasArchive && ordinaryNow(threadID, thread)
+			if ordinary {
+				active = &prepared
+			}
+			initialized = true
+		}
+		if ordinary {
+			body, err := json.Marshal(thread)
+			if err != nil || !ordinaryNow(threadID, thread) || source != nil && !bytes.Equal(source, body) {
+				dirty = true
+				return nil, CasePublicAuthorityRejectedCode
+			}
+			if source == nil {
+				source = body
+			}
+		}
+		return thread, ""
+	}
+	project := func(threadID string, event map[string]any) (map[string]any, bool, string) {
+		threadID = strings.TrimSpace(threadID)
+		thread, code := read(threadID)
+		if code != "" {
+			return nil, false, code
+		}
+		projected, visible, err := active.ProjectEvent(threadID, thread, event)
+		if ctx.Err() != nil {
+			return nil, false, CasePublicAuthorityUnavailableCode
+		}
+		if err != nil {
+			return nil, false, CasePublicAuthorityRejectedCode
+		}
+		return projected, visible, ""
+	}
+	finish := func(threadID string) string {
+		threadID = strings.TrimSpace(threadID)
+		thread, code := read(threadID)
+		if code != "" {
+			return code
+		}
+		before, err := json.Marshal(thread)
+		if err != nil {
+			dirty = true
+			return CasePublicAuthorityRejectedCode
+		}
+		// Use the original projector, including current authority and post-witness
+		// epoch checks. A content comparison is never an authorization token.
+		projected, err := projector.ProjectThread(thread)
+		if ctx.Err() != nil {
+			return CasePublicAuthorityUnavailableCode
+		}
+		if err != nil || projected == nil || contracts.StringField(projected, "id") != threadID {
+			return CasePublicAuthorityRejectedCode
+		}
+		after, code := read(threadID)
+		if code != "" {
+			return code
+		}
+		afterBody, err := json.Marshal(after)
+		if ctx.Err() != nil {
+			return CasePublicAuthorityUnavailableCode
+		}
+		if err != nil || !bytes.Equal(before, afterBody) {
+			dirty = true
+			return CasePublicAuthorityRejectedCode
+		}
+		return ""
+	}
+	return project, finish
 }
