@@ -1,12 +1,11 @@
 import type { WorkspaceFileReadResult, WorkspaceFileTarget, WorkspaceImageReadResult, WorkspacePdfReadResult, WorkspaceExcelReadResult } from '@shared/workspace-file'
 import { ImagePreview } from './chat/presentation/ImagePreview'
 import { WritePdfViewer } from './write/WritePdfViewer'
+import { WorkspaceViewerHeader, WorkspaceViewerIconButton, WorkspaceViewerMenu, type WorkspaceViewerControls } from './workbench/WorkspaceViewerHeader'
 import { LazyExcelBody } from './file-preview/excel/LazyExcelBody'
 import previewStyles from './file-preview/excel/ExcelBody.module.css'
 import {
   Check,
-  ChevronRight,
-  ChevronDown,
   Code2,
   Copy,
   Download,
@@ -58,6 +57,8 @@ type Props = {
   onSelectTarget?: (target: WorkspaceFileTarget) => void
   onCloseTarget?: (target: WorkspaceFileTarget) => void
   onClose: () => void
+  viewerControls?: WorkspaceViewerControls
+  visible?: boolean
 }
 
 function WorkspaceHtmlBody({ path, workspaceRoot, control, protectedPresent }: {
@@ -108,19 +109,6 @@ function formatBytes(bytes: number): string {
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).filter(Boolean).pop() ?? path
-}
-
-function splitPath(path: string): string[] {
-  return path.split(/[/\\]/).filter(Boolean)
-}
-
-function relativePathSegments(path: string, workspaceRoot: string): string[] {
-  const normalizedPath = path.replaceAll('\\', '/')
-  const normalizedRoot = workspaceRoot.replaceAll('\\', '/').replace(/\/+$/, '')
-  if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)) {
-    return splitPath(normalizedPath.slice(normalizedRoot.length + 1))
-  }
-  return [fileNameFromPath(path)]
 }
 
 function extensionBadge(path: string, language: string): string {
@@ -216,7 +204,9 @@ export function WorkspaceFilePreviewPanel({
   className,
   onSelectTarget,
   onCloseTarget,
-  onClose
+  onClose,
+  viewerControls,
+  visible = true
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const [readAttempt, setReadAttempt] = useState(0)
@@ -300,15 +290,6 @@ export function WorkspaceFilePreviewPanel({
     : renderFallbackCodeHtml(displayContent), [highlightState, result, displayContent])
   const scrollRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLElement>(null)
-  const fileMenuRef = useRef<HTMLDetailsElement>(null)
-  useEffect(() => {
-    const dismissFileMenu = (event: PointerEvent) => {
-      const menu = fileMenuRef.current
-      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false
-    }
-    document.addEventListener('pointerdown', dismissFileMenu)
-    return () => document.removeEventListener('pointerdown', dismissFileMenu)
-  }, [])
   // Protected navigation exposes source locally. Transfers use explicit fresh
   // protected effects; the browser preview never copies or drags raw content.
   useEffect(() => {
@@ -415,13 +396,7 @@ export function WorkspaceFilePreviewPanel({
   const isHtmlFile = /\.html?$/i.test(result?.ok ? result.path : target?.path ?? '')
   const isMarkdownFile = isMarkdownPreviewPath(result?.ok ? result.path : target?.path ?? '')
   const lines = useMemo(() => (result?.ok ? displayContent.split('\n') : []), [result, displayContent])
-  const breadcrumbSegments = useMemo(() => {
-    const path = previewResult?.ok ? previewResult.path : target?.path ?? ''
-    if (!path) return []
-    return relativePathSegments(path, target?.workspaceRoot ?? workspaceRoot)
-  }, [previewResult, target, workspaceRoot])
   const currentFileName = displayPath ? fileNameFromPath(displayPath) : t('filePreviewTitle')
-  const badge = extensionBadge(previewResult?.ok ? previewResult.path : target?.path ?? '', language)
   const activeLine = result?.ok && result.line && result.line >= 1 && result.line <= lines.length
     ? result.line
     : null
@@ -560,223 +535,73 @@ export function WorkspaceFilePreviewPanel({
   }
   const downloadStatus = download ? t(download === 'saving' ? 'generatedFileSaving'
     : download === 'saved' ? 'generatedFileSaved' : download === 'canceled' ? 'userInputCancelled' : 'generatedFileSaveFailed') : null
-  const downloadStatusElement = downloadStatus ? <span role="status" data-file-download-status
-    className="ds-file-viewer-status" title={downloadStatus}>{downloadStatus}</span> : null
-
-  const openButton = (
-    <button
-      type="button"
-      onClick={openInEditor}
-      disabled={sourceOnly && !target?.protectedPresent || !target || presentOpen === 'opening'}
-      className="ds-code-sidebar-icon-button"
-      title={t(target?.protectedPresent ? 'dshPresent.open' : 'filePreviewOpenEditor')}
-      aria-label={t(target?.protectedPresent ? 'dshPresent.open' : 'filePreviewOpenEditor')}
-    >
-      <ExternalLink className="h-4 w-4" strokeWidth={1.75} />
-    </button>
-  )
   const excelStatus = excelCopy ? t(excelCopy === 'copied' ? 'copySuccess' : 'protectedToolUnavailable')
     : presentOpen ? t('dshPresent.' + presentOpen) : null
+  const viewerStatus = [downloadStatus, excelStatus].filter((value, index, all) => value && all.indexOf(value) === index).join(' · ') || undefined
+  const fileMetadata = [displayPath || currentFileName,
+    previewResult?.ok ? formatBytes(previewResult.size) : '', language].filter(Boolean).join(' · ')
+  const sharedViewerControls = visible && viewerControls ? { ...viewerControls, onCollapse: () => { stopHtml(); viewerControls.onCollapse() } } : undefined
 
   return (
     <aside ref={rootRef} data-protected-source-preview={sourceOnly || undefined}
       className={`ds-no-drag ds-code-sidebar flex min-h-0 flex-col border-l border-ds-border-muted ${className ?? ''}`}
     >
-      <div className="ds-code-sidebar-topbar ds-file-viewer-header">
-        {tabbedWorkspace && target ? <div className="ds-file-viewer-identity">
-          <details ref={fileMenuRef} className="ds-file-viewer-menu" key={activeTargetKey}
-            onKeyDown={event => {
-              if (event.key !== 'Escape' || !event.currentTarget.open) return
-              event.preventDefault()
-              event.stopPropagation()
-              event.currentTarget.open = false
-              event.currentTarget.querySelector('summary')?.focus()
-            }}>
-            <summary title={currentFileName}>
-              <span>{currentFileName}</span><ChevronDown size={16} aria-hidden="true" />
-            </summary>
-            <div className="ds-file-viewer-menu-content">
-              <button type="button" onClick={openInEditor} aria-label={t(target.protectedPresent ? 'dshPresent.open' : 'filePreviewOpenEditor')}
-                disabled={sourceOnly && !target.protectedPresent || presentOpen === 'opening'}>
-                <ExternalLink aria-hidden="true" />{t(target.protectedPresent ? 'dshPresent.open' : 'filePreviewOpenEditor')}
-              </button>
-              {!excelPreviewTarget ? <button type="button" onClick={() => void copyContent()} disabled={sourceOnly || !result?.ok}>
-                <Copy aria-hidden="true" />{t('filePreviewCopyContent')}
-              </button> : null}
-              {target.protectedPresent || !sourceOnly ? <button type="button" onClick={() => void downloadFile()}
-                aria-label={t('generatedFileDownload')} disabled={download === 'saving'} aria-busy={download === 'saving'}>
-                <Download aria-hidden="true" />{t(download === 'saving' ? 'generatedFileSaving' : 'generatedFileDownload')}
-              </button> : null}
-            </div>
-          </details>
-          {excelPreviewTarget && excelStatus ? <span role="status" className="ds-file-viewer-status">{excelStatus}</span> : null}
-          {downloadStatusElement}
-        </div> : null}
-        {!tabbedWorkspace ? <div className="ds-code-sidebar-tabs" role="tablist" aria-label={t('filePreviewOpenFiles')}>
-          {(openTargets.length ? openTargets : target ? [target] : []).map((item) => {
-            const active = targetKey(item) === activeTargetKey
-            const itemPath = item.path
-            const itemRoot = item.workspaceRoot ?? workspaceRoot
-            const itemLabel = fileNameFromPath(itemPath)
-            const itemBadge = extensionBadge(itemPath, languageFromFilePath(itemPath))
-            const itemTitle = formatFilePathForDisplay(itemPath, itemRoot) ?? itemPath
-            return (
-              <div
-                key={targetKey(item)}
-                role="tab"
-                tabIndex={0}
-                aria-selected={active}
-                onDoubleClick={openInEditor}
-                onClick={() => { if (item !== target) stopHtml(); onSelectTarget?.(item) }}
-                className={`ds-code-sidebar-tab ${active ? 'is-active' : ''}`}
-                title={itemTitle}
-                onKeyDown={(event) => {
+      <WorkspaceViewerHeader title={currentFileName} status={viewerStatus} viewerControls={sharedViewerControls}
+        titleControl={<WorkspaceViewerMenu label={fileMetadata} title={currentFileName}
+          ownerKey={JSON.stringify([target, workspaceRoot])} enabled={visible && Boolean(target)}>
+          {!tabbedWorkspace && openTargets.length > 1 ? <div className="ds-code-sidebar-tabs !max-w-full !flex-col !items-stretch" role="tablist" aria-label={t('filePreviewOpenFiles')}>
+            {openTargets.map(item => {
+              const active = targetKey(item) === activeTargetKey
+              const itemLabel = fileNameFromPath(item.path)
+              const itemTitle = formatFilePathForDisplay(item.path, item.workspaceRoot ?? workspaceRoot) ?? item.path
+              return <div key={targetKey(item)} role="tab" tabIndex={0} aria-selected={active}
+                className={`ds-code-sidebar-tab ${active ? 'is-active' : ''}`} title={itemTitle}
+                onDoubleClick={openInEditor} onClick={() => { if (item !== target) stopHtml(); onSelectTarget?.(item) }}
+                onKeyDown={event => {
                   if (event.key !== 'Enter' && event.key !== ' ') return
-                  event.preventDefault()
-                  if (item !== target) stopHtml()
-                  onSelectTarget?.(item)
-                }}
-              >
-                <span className="ds-code-sidebar-file-badge">{itemBadge}</span>
+                  event.preventDefault(); if (item !== target) stopHtml(); onSelectTarget?.(item)
+                }}>
+                <span className="ds-code-sidebar-file-badge">{extensionBadge(item.path, languageFromFilePath(item.path))}</span>
                 <span className="min-w-0 truncate">{itemLabel}</span>
-                {onCloseTarget ? (
-                  <button
-                    type="button"
-                    aria-label={t('filePreviewCloseTab', { file: itemLabel })}
-                    title={t('filePreviewCloseTab', { file: itemLabel })}
-                    className="ds-code-sidebar-tab-close"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      if (item === target) stopHtml()
-                      onCloseTarget(item)
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter' && event.key !== ' ') return
-                      event.preventDefault()
-                      event.stopPropagation()
-                      if (item === target) stopHtml()
-                      onCloseTarget(item)
-                    }}
-                  >
-                    <X className="h-3 w-3" strokeWidth={2} />
-                  </button>
-                ) : null}
+                {onCloseTarget ? <WorkspaceViewerIconButton compact label={t('filePreviewCloseTab', { file: itemLabel })}
+                  className="ds-code-sidebar-tab-close" onClick={event => {
+                    event.stopPropagation(); if (item === target) stopHtml(); onCloseTarget(item)
+                  }} onKeyDown={event => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault(); event.stopPropagation(); if (item === target) stopHtml(); onCloseTarget(item)
+                  }}><X aria-hidden="true" /></WorkspaceViewerIconButton> : null}
               </div>
-            )
-          })}
-          {!openTargets.length && !target ? (
-            <div
-              role="tab"
-              aria-selected="false"
-              className="ds-code-sidebar-tab"
-              title={t('filePreviewEmpty')}
-            >
-              <span className="ds-code-sidebar-file-badge">{badge}</span>
-              <span className="truncate">{currentFileName}</span>
-            </div>
-          ) : null}
-        </div> : null}
-
-        <div className="ds-code-sidebar-actions">
-          {!tabbedWorkspace ? downloadStatusElement : null}
-          {excelPreviewTarget && !tabbedWorkspace && excelStatus ? <span role="status" className="ds-file-viewer-status">{excelStatus}</span> : null}
+            })}
+          </div> : null}
+          <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" label={t(target?.protectedPresent ? 'dshPresent.open' : 'filePreviewOpenEditor')}
+            onClick={openInEditor} disabled={sourceOnly && !target?.protectedPresent || !target || presentOpen === 'opening'}>
+            <ExternalLink aria-hidden="true" /><span>{t(target?.protectedPresent ? 'dshPresent.open' : 'filePreviewOpenEditor')}</span>
+          </WorkspaceViewerIconButton>
+          {!excelPreviewTarget ? <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start"
+            label={copied ? t('copySuccess') : t('filePreviewCopyContent')} onClick={() => void copyContent()} disabled={sourceOnly || !result?.ok}>
+            {copied ? <Check className="text-emerald-600" aria-hidden="true" /> : <Copy aria-hidden="true" />}<span>{copied ? t('copySuccess') : t('filePreviewCopyContent')}</span>
+          </WorkspaceViewerIconButton> : null}
+        </WorkspaceViewerMenu>}
+        actions={<>
           {excelPreviewTarget || media?.kind === 'pdf' && media.value.ok ? <div key={activeTargetKey} ref={setZoomControlTarget}
             data-excel-preview-controls={excelPreviewTarget || undefined} data-pdf-preview-controls={media?.kind === 'pdf' || undefined}
             className={`ds-file-viewer-controls ${excelPreviewTarget ? previewStyles.zoomTarget : ''}`} /> : null}
-          {isHtmlFile && canRunHtml ? <button
-            type="button" className="ds-code-sidebar-icon-button" disabled={!result?.ok}
-            aria-label={htmlRunning ? t('filePreviewShowSource') : t('writeHtmlEmbedRun')}
-            title={htmlRunning ? t('filePreviewShowSource') : t('writeHtmlEmbedRun')}
-            aria-pressed={htmlRunning}
-            onClick={() => { if (htmlRunning) stopHtml(); else if (target) setHtmlOwner({ target, root: htmlRoot, identity: htmlIdentity }) }}
-          >{htmlRunning ? <Code2 className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button> : null}
-          {isMarkdownFile && !sourceOnly ? (
-            <button
-              type="button"
-              onClick={() => setMarkdownRendered((value) => !value)}
-              disabled={!result?.ok}
-              className="ds-code-sidebar-icon-button"
-              title={markdownRendered ? t('filePreviewShowSource') : t('filePreviewRenderMarkdown')}
-              aria-label={markdownRendered ? t('filePreviewShowSource') : t('filePreviewRenderMarkdown')}
-              aria-pressed={markdownRendered}
-            >
-              {markdownRendered ? (
-                <Code2 className="h-4 w-4" strokeWidth={1.75} />
-              ) : (
-                <Eye className="h-4 w-4" strokeWidth={1.75} />
-              )}
-            </button>
-          ) : null}
-          {!tabbedWorkspace ? openButton : null}
-          {!tabbedWorkspace && !excelPreviewTarget ? (
-            <button
-            type="button"
-            onClick={() => void copyContent()}
-            disabled={sourceOnly || !result?.ok}
-            className="ds-code-sidebar-icon-button"
-            title={copied ? t('copySuccess') : t('filePreviewCopyContent')}
-            aria-label={copied ? t('copySuccess') : t('filePreviewCopyContent')}
-          >
-            {copied ? (
-              <Check className="h-4 w-4 text-emerald-600" strokeWidth={2} />
-            ) : (
-              <Copy className="h-4 w-4" strokeWidth={1.75} />
-            )}
-          </button>
-          ) : null}
-          {!tabbedWorkspace && target && (target.protectedPresent || !sourceOnly) ? <button
-            type="button"
-            onClick={() => void downloadFile()}
-            disabled={download === 'saving'}
-            aria-busy={download === 'saving'}
-            className="ds-code-sidebar-icon-button"
-            title={t(download === 'saving' ? 'generatedFileSaving' : 'generatedFileDownload')}
-            aria-label={t('generatedFileDownload')}
-          >
-            {download === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} aria-hidden="true" />
-              : <Download className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />}
-          </button> : null}
-          {!tabbedWorkspace ? <button
-            type="button"
-            onClick={() => { stopHtml(); onClose() }}
-            className="ds-code-sidebar-icon-button ds-file-viewer-close"
-            title={t('rightPanelCollapse')}
-            aria-label={t('rightPanelCollapse')}
-          >
-            <PanelRightClose className="h-4 w-4" strokeWidth={1.85} />
-          </button> : null}
-        </div>
-      </div>
-
-      {!excelPreviewTarget && presentOpen ? <span role="status" className="px-3 py-1 text-xs text-ds-muted">{t('dshPresent.' + presentOpen)}</span> : null}
-      {!excelPreviewTarget ? <div className="ds-code-sidebar-breadcrumbs">
-        <div className="min-w-0 flex flex-1 items-center gap-1 overflow-hidden">
-          {breadcrumbSegments.length ? breadcrumbSegments.map((segment, index) => (
-            <span key={`${segment}-${index}`} className="contents">
-              {index > 0 ? (
-                <ChevronRight className="h-3 w-3 shrink-0 text-ds-faint/70" strokeWidth={1.8} />
-              ) : null}
-              <span
-                className={[
-                  'truncate',
-                  index === breadcrumbSegments.length - 1 ? 'text-ds-ink' : 'text-ds-muted'
-                ].join(' ')}
-                title={segment}
-              >
-                {segment}
-              </span>
-            </span>
-          )) : (
-            <span className="truncate text-ds-muted">{t('filePreviewEmpty')}</span>
-          )}
-        </div>
-        {previewResult?.ok ? (
-          <span className="shrink-0 font-mono text-[10px] text-ds-faint">
-            {formatBytes(previewResult.size)}
-            {language ? ` · ${language}` : ''}
-          </span>
-        ) : null}
-      </div> : null}
+          {isHtmlFile && canRunHtml ? <WorkspaceViewerIconButton disabled={!result?.ok}
+            label={htmlRunning ? t('filePreviewShowSource') : t('writeHtmlEmbedRun')} aria-pressed={htmlRunning}
+            onClick={() => { if (htmlRunning) stopHtml(); else if (target) setHtmlOwner({ target, root: htmlRoot, identity: htmlIdentity }) }}>
+            {htmlRunning ? <Code2 aria-hidden="true" /> : <Eye aria-hidden="true" />}
+          </WorkspaceViewerIconButton> : null}
+          {isMarkdownFile && !sourceOnly ? <WorkspaceViewerIconButton onClick={() => setMarkdownRendered(value => !value)} disabled={!result?.ok}
+            label={markdownRendered ? t('filePreviewShowSource') : t('filePreviewRenderMarkdown')} aria-pressed={markdownRendered}>
+            {markdownRendered ? <Code2 aria-hidden="true" /> : <Eye aria-hidden="true" />}
+          </WorkspaceViewerIconButton> : null}
+          {target && (target.protectedPresent || !sourceOnly) ? <WorkspaceViewerIconButton onClick={() => void downloadFile()}
+            disabled={download === 'saving'} aria-busy={download === 'saving'} label={t('generatedFileDownload')}>
+            {download === 'saving' ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Download aria-hidden="true" />}
+          </WorkspaceViewerIconButton> : null}
+          {!tabbedWorkspace && !viewerControls ? <WorkspaceViewerIconButton onClick={() => { stopHtml(); onClose() }}
+            className="ds-file-viewer-close" label={t('rightPanelCollapse')}><PanelRightClose aria-hidden="true" /></WorkspaceViewerIconButton> : null}
+        </>} />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {!target ? (

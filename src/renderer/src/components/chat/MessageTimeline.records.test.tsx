@@ -12,6 +12,7 @@ import { writeWorkDetailsPreference } from '../../lib/chat-presentation-preferen
 import i18n from '../../i18n'
 import { toolResultLocalDisplaySchemaV1, type ToolResultLocalDisplayV1 } from '../../../../../packages/runtime/src/contracts/tool-result-local-display'
 import { MessageTimeline } from './MessageTimeline'
+import { SessionHeaderTabsSeat } from '../SessionHeader'
 import { GateResponseContext } from './message-timeline-bubbles'
 import type { TrajectoryPanelProps } from '../trajectory/TrajectoryPanel'
 import type { TrajectoryToolIdentity } from '../trajectory/trajectory-adapter'
@@ -80,6 +81,22 @@ const draw = async (blocks: ChatBlock[] = [user, tool()], activeThreadId: string
   await act(async () => root.render(createElement(MessageTimeline, { blocks, live: '', activeThreadId, runtimeConnection: 'ready',
     onRetryConnection() {}, onOpenSettings() {}, conversationUsage: null,
     runtimeStateOverride: { busy: false, currentTurnId: null, currentTurnUserId: null, authoritativeTurnTimings: {}, authoritativeTurnStatuses: { turn: 'completed' } }, ...overrides })))
+}
+function ResidentTimeline(props: ComponentProps<typeof MessageTimeline>) {
+  const route = useChatStore(state => state.route)
+  const [target, setTarget] = useState<HTMLDivElement | null>(null)
+  return <>
+    {route === 'chat' ? <SessionHeaderTabsSeat seatRef={setTarget} /> : null}
+    <MessageTimeline {...props} conversationTabsTarget={route === 'chat' ? target : undefined} />
+  </>
+}
+const drawResident = async (blocks: ChatBlock[] = [user, tool()], activeThreadId: string | null = 'thread', overrides: Partial<ComponentProps<typeof MessageTimeline>> = {}) => {
+  await act(async () => {
+    useChatStore.setState({ activeThreadId })
+    root.render(createElement(ResidentTimeline, { blocks, live: '', activeThreadId, runtimeConnection: 'ready',
+      onRetryConnection() {}, onOpenSettings() {}, conversationUsage: null,
+      runtimeStateOverride: { busy: false, currentTurnId: null, currentTurnUserId: null, authoritativeTurnTimings: {}, authoritativeTurnStatuses: { turn: 'completed' } }, ...overrides }))
+  })
 }
 const flushFrames = async () => { for (let count = 0; frames.size && count < 8; count++) await act(async () => { const work = [...frames.values()]; frames.clear(); for (const run of work) run(performance.now()) }) }
 const click = async (label: string) => {
@@ -273,7 +290,7 @@ describe('production conversation Inspect handoff', () => {
     const row = container.querySelector<HTMLButtonElement>('[data-conversation-call-key]')!
     await act(async () => row.click()); await flushFrames()
     expect(container.querySelectorAll('[data-tool-result-inspector]')).toHaveLength(1)
-    expect([...container.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(['Summary', 'Result'])
+    expect([...container.querySelectorAll('[data-tool-result-inspector] [role="tab"]')].map(tab => tab.textContent)).toEqual(['Summary', 'Result'])
     expect(container.querySelector('[data-tool-result-inspector]')?.closest('[data-protected-tool-result]')).toBeNull()
     await click('Result')
     expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain('list')
@@ -293,7 +310,7 @@ describe('production conversation Inspect handoff', () => {
     expect(container.textContent).not.toContain('PRIVATE_')
     await draw([user, tool({ toolName: 'list_jobs' })]); await flushFrames()
     expect(container.querySelector('[data-conversation-call-key][aria-pressed="true"]')?.getAttribute('data-call-item-id')).toBe('real-call-item')
-    expect([...container.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(['Summary', 'Result'])
+    expect([...container.querySelectorAll('[data-tool-result-inspector] [role="tab"]')].map(tab => tab.textContent)).toEqual(['Summary', 'Result'])
     expect(api.openToolResultLocalDisplay).toHaveBeenCalledTimes(before)
     expect(container.textContent).not.toContain('PRIVATE_')
   })
@@ -399,6 +416,97 @@ describe('production conversation Inspect handoff', () => {
 })
 
 
+describe('resident conversation header tabs', () => {
+  const tabs = () => [...container.querySelectorAll<HTMLButtonElement>('[data-analytix-session-header-tabs] [role="tab"]')]
+  const selected = () => tabs().filter(tab => tab.getAttribute('aria-selected') === 'true').map(tab => tab.textContent)
+  it('mounts one tablist outside the scrollport and routes keyboard selection through the existing views', async () => {
+    await drawResident(); await flushFrames()
+    const header = container.querySelector<HTMLElement>('[data-analytix-session-header-tabs]')!
+    const viewport = container.querySelector<HTMLElement>('[data-analytix-message-timeline-scroller]')!
+    expect(header.querySelectorAll('[role="tablist"]')).toHaveLength(1)
+    expect(viewport.querySelector('[data-conversation-tabs]')).toBeNull()
+    expect(container.querySelectorAll('[data-conversation-tabs]')).toHaveLength(1)
+    expect(tabs().map(tab => tab.textContent)).toEqual(['Conversation', 'Records', 'Trajectory'])
+    expect(tabs().map(tab => tab.tabIndex)).toEqual([0, -1, -1])
+    await act(async () => tabs()[0].focus())
+    const right = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+    await act(async () => tabs()[0].dispatchEvent(right)); await flushFrames()
+    expect(right.defaultPrevented).toBe(true)
+    expect(selected()).toEqual(['Records'])
+    expect(document.activeElement).toBe(tabs()[1])
+    expect(container.querySelector('[data-conversation-record-turn]')).not.toBeNull()
+    const end = new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })
+    await act(async () => tabs()[1].dispatchEvent(end)); await flushFrames()
+    expect(selected()).toEqual(['Trajectory'])
+    expect(document.activeElement).toBe(tabs()[2])
+    expect(container.querySelector('[data-trajectory-shell-fixture]')).not.toBeNull()
+    const backwardsTab = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
+    await act(async () => tabs()[2].dispatchEvent(backwardsTab))
+    expect(backwardsTab.defaultPrevented).toBe(false)
+    const home = new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })
+    await act(async () => tabs()[2].dispatchEvent(home)); await flushFrames()
+    expect(selected()).toEqual(['Conversation'])
+    expect(tabs().map(tab => tab.tabIndex)).toEqual([0, -1, -1])
+    expect(container.querySelector('[data-analytix-message-timeline-scroller]')).toBe(viewport)
+  })
+  it('retires the original private view and old thread tabs without copying state into the header', async () => {
+    await drawResident(); await inspectFromConversation()
+    const lease = api.openToolResultLocalDisplay.mock.calls.at(-1)![0].viewId
+    await click('Result'); await expandInspectorJSON()
+    expect(container.textContent).toContain('PRIVATE_BOUND_OBJECTIVE')
+    await click('Trajectory'); await flushFrames()
+    expect(api.closeToolResultLocalDisplay).toHaveBeenCalledWith(lease)
+    expect(container.querySelector('[data-tool-result-inspector]')).toBeNull()
+    expect(container.textContent).not.toContain('PRIVATE_BOUND_OBJECTIVE')
+    const oldTrajectory = tabs()[2]
+    await drawResident([], 'replacement-thread'); await flushFrames()
+    expect(selected()).toEqual(['Conversation'])
+    expect(oldTrajectory.isConnected).toBe(false)
+    await act(async () => oldTrajectory.click())
+    expect(selected()).toEqual(['Conversation'])
+    expect(container.querySelector('[data-trajectory-shell-fixture]')).toBeNull()
+    await act(async () => useChatStore.setState({ route: 'write' }))
+    expect(container.querySelector('[data-analytix-session-header-tabs]')).toBeNull()
+    await act(async () => root.render(null))
+    expect(container.querySelector('[data-conversation-tabs]')).toBeNull()
+  })
+  it('leaves the resident seat empty and collapsible before a thread exists', async () => {
+    await drawResident([], null)
+    const header = container.querySelector<HTMLElement>('[data-analytix-session-header-tabs]')!
+    expect(header.childElementCount).toBe(0)
+    expect(header.classList.contains('empty:hidden')).toBe(true)
+    expect(container.querySelector('[data-conversation-tabs]')).toBeNull()
+  })
+  it('keeps an existing blank thread header empty through hero and settling, then uses the active request scope', async () => {
+    for (const conversationPhase of ['hero', 'settling'] as const) {
+      await drawResident([], 'thread', { conversationPhase }); await flushFrames()
+      expect(container.querySelector('[data-analytix-session-header-tabs]')?.childElementCount).toBe(0)
+      expect(container.querySelector('[data-conversation-tabs]')).toBeNull()
+      expect(api.openToolResultLocalDisplay).not.toHaveBeenCalled()
+    }
+    await drawResident([user, tool()], 'thread', { conversationPhase: 'active' }); await flushFrames()
+    expect(selected()).toEqual(['Conversation'])
+    expect(tabs()).toHaveLength(3)
+    await inspectFromConversation()
+    expect(api.openToolResultLocalDisplay.mock.calls.at(-1)?.[0]).toMatchObject({
+      threadId: 'thread', turnId: 'turn', callId, resultItemId: resultId
+    })
+    const lease = api.openToolResultLocalDisplay.mock.calls.at(-1)![0].viewId
+    const requests = api.openToolResultLocalDisplay.mock.calls.length
+    const oldRecords = tabs()[1]
+    await drawResident([], 'replacement-thread', { conversationPhase: 'settling' }); await flushFrames()
+    expect(api.closeToolResultLocalDisplay).toHaveBeenCalledWith(lease)
+    expect(container.querySelector('[data-conversation-tabs]')).toBeNull()
+    expect(container.querySelector('[data-tool-result-inspector]')).toBeNull()
+    expect(oldRecords.isConnected).toBe(false)
+    await drawResident([], 'replacement-thread', { conversationPhase: 'active' }); await flushFrames()
+    await act(async () => oldRecords.click())
+    expect(selected()).toEqual(['Conversation'])
+    expect(container.querySelector('[data-tool-result-inspector]')).toBeNull()
+    expect(api.openToolResultLocalDisplay).toHaveBeenCalledTimes(requests)
+  })
+})
+
 describe('current-conversation Trajectory shell', () => {
   const identity = (patch: Partial<TrajectoryToolIdentity> = {}): TrajectoryToolIdentity => ({
     threadId: 'thread', turnId: 'turn', callId, toolCallItemId: 'real-call-item', toolResultItemId: resultId, ...patch
@@ -407,7 +515,7 @@ describe('current-conversation Trajectory shell', () => {
   const expectMode = (mode: 'Conversation' | 'Records' | 'Trajectory') => {
     const buttons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => ['Conversation', 'Records', 'Trajectory'].includes(button.textContent?.trim() ?? ''))
     expect(buttons).toHaveLength(3)
-    expect(buttons.filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.textContent)).toEqual([mode])
+    expect(buttons.filter(button => button.getAttribute('aria-selected') === 'true').map(button => button.textContent)).toEqual([mode])
   }
   it('offers the third mode for a real empty thread and resets it on thread replacement', async () => {
     await draw([], null)
@@ -572,8 +680,9 @@ describe('current-conversation Trajectory shell', () => {
     expect(container.querySelector('[data-tool-result-inspector]')).toBe(inspectorB)
     expect(api.closeToolResultLocalDisplay).toHaveBeenCalledWith(leaseA)
   })
-  it('retains each mode viewport without sampling trajectory scroll into the chat position', async () => {
-    await draw()
+  it.each([false, true])('retains each mode viewport without sampling trajectory scroll into chat, resident=%s', async resident => {
+    const render = resident ? drawResident : draw
+    await render()
     const viewport = scroller()
     Object.defineProperty(viewport, 'scrollHeight', { configurable: true, get: () => 5_000 })
     Object.defineProperty(viewport, 'clientHeight', { configurable: true, get: () => 600 })
@@ -584,7 +693,7 @@ describe('current-conversation Trajectory shell', () => {
     expect(viewport.scrollTop).toBe(0)
     viewport.scrollTop = 180
     await act(async () => viewport.dispatchEvent(new Event('scroll')))
-    await draw([user, tool(), { kind: 'assistant', id: 'new-public-answer', text: 'NEW_ADMITTED_ANSWER', meta: { turnId: 'turn' } }])
+    await render([user, tool(), { kind: 'assistant', id: 'new-public-answer', text: 'NEW_ADMITTED_ANSWER', meta: { turnId: 'turn' } }])
     await flushFrames()
     expect(viewport.scrollTop).toBe(180)
     await click('Conversation'); await flushFrames()
@@ -592,7 +701,7 @@ describe('current-conversation Trajectory shell', () => {
     expect(viewport.scrollTop).toBe(430)
     await click('Trajectory'); await flushFrames()
     expect(viewport.scrollTop).toBe(180)
-    await draw([], 'replacement-thread'); await flushFrames()
+    await render([], 'replacement-thread'); await flushFrames()
     expectMode('Conversation')
     expect(container.querySelector('[data-trajectory-shell-fixture]')).toBeNull()
   })

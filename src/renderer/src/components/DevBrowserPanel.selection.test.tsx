@@ -13,6 +13,7 @@ const initial = useChatStore.getInitialState()
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
   vi.resetAllMocks(); localStorage.clear()
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Electron/41.10.3')
   Object.assign(window, { analytix: { app: { openExternal: vi.fn() }, browserSelection: { request } } })
   useChatStore.setState({ ...initial, activeThreadId: scope.threadId, workspaceRoot: scope.workspace }, true)
@@ -22,8 +23,11 @@ beforeEach(async () => {
   await act(async () => root.render(createElement(DevBrowserPanel, { preferredUrl: 'http://localhost:3000/', onCollapse: vi.fn(), onSubmitPrompt: submit })))
   Object.assign(element.querySelector('webview')!, { getWebContentsId: () => 17 })
 })
-afterEach(async () => { await act(async () => root.unmount()); element.remove(); useChatStore.setState(initial, true); vi.restoreAllMocks() })
-async function click(key: string) { await act(async () => { Array.from(element.querySelectorAll('button')).find(button => button.textContent === key)!.click() }) }
+afterEach(async () => { await act(async () => root.unmount()); element.remove(); useChatStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+async function click(key: string) {
+  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="browserMore"]')!.click())
+  await act(async () => document.querySelector<HTMLButtonElement>(`[role="menu"] button[aria-label="${key}"]`)!.click())
+}
 test('passive quote stores only the opaque scope and never submits', async () => {
   await click('browserQuoteSelection')
   expect(submit).not.toHaveBeenCalled()

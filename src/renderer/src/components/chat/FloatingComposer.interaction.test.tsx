@@ -261,14 +261,17 @@ describe('ordinary composer keyboard submission and busy follow-ups', () => {
     { attachments: [{ id: 'attachment', name: 'fixture.png', mimeType: 'image/png' }] },
     { documentReferenceCount: 1 },
     { fileReferences: [{ relativePath: 'fixture.txt', path: '/workspace/fixture/fixture.txt', name: 'fixture.txt' }] }
-  ])('submits supported reference-only busy follow-ups without interrupting: %j', async references => {
+  ])('uses one primary action for reference-only follow-ups and empty Stop: %j', async references => {
     const onSend = vi.fn(), onInterrupt = vi.fn()
     await act(async () => root.render(floatingElement(true, false, { ...references, onSend, onInterrupt })))
     await key(editor(), 'Enter'); expect(onSend).toHaveBeenCalledOnce(); expect(onInterrupt).not.toHaveBeenCalled()
     const send = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('common:composerSteerSend')}"]`)!
-    const stop = host.querySelector<HTMLButtonElement>('.ds-composer-secondary-stop')!
-    expectConversationGlyph(send, 'send'); expectConversationGlyph(stop, 'stop')
+    expect(host.querySelector('.ds-composer-secondary-stop')).toBeNull()
+    expectConversationGlyph(send, 'send')
     await act(async () => send.click()); expect(onSend).toHaveBeenCalledTimes(2); expect(onInterrupt).not.toHaveBeenCalled()
+    await act(async () => root.render(floatingElement(true, false, { onSend, onInterrupt })))
+    const stop = host.querySelector<HTMLButtonElement>('.ds-composer-primary-action-button')!
+    expectConversationGlyph(stop, 'stop')
     await act(async () => stop.click()); expect(onInterrupt).toHaveBeenCalledOnce(); expect(onSend).toHaveBeenCalledTimes(2)
   })
   it.each(['compact', 'secondary', 'claw'] as const)('keeps the existing primary glyph outside the main chat composer: %s', async owner => {
@@ -280,6 +283,25 @@ describe('ordinary composer keyboard submission and busy follow-ups', () => {
     const primary = host.querySelector<HTMLButtonElement>('.ds-composer-primary-action-button')!
     expect(primary.hasAttribute('data-analytix-chat-token-scope')).toBe(false)
     expect(primary.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 24 24')
+  })
+  it.each(['executionSettingsApplying', 'executionSettingsUnavailable'] as const)('keeps a blocked draft as Send and preserves empty Stop during %s', async policyState => {
+    const onSend = vi.fn(), onInterrupt = vi.fn()
+    await act(async () => root.render(floatingElement(true, false, { input: 'Retained draft', [policyState]: true, onSend, onInterrupt })))
+    const send = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('common:composerSteerSend')}"]`)!
+    expect(send).not.toBeNull()
+    expect(send.disabled).toBe(true)
+    expect(host.querySelector(`button[aria-label="${i18n.t('common:interrupt')}"]`)).toBeNull()
+    await key(editor(), 'Enter')
+    await act(async () => send.click())
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onInterrupt).not.toHaveBeenCalled()
+    expect(editor().textContent).toBe('Retained draft')
+    await act(async () => root.render(floatingElement(true, false, { [policyState]: true, onSend, onInterrupt })))
+    const stop = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('common:interrupt')}"]`)!
+    expect(stop.disabled).toBe(false)
+    await act(async () => stop.click())
+    expect(onInterrupt).toHaveBeenCalledOnce()
+    expect(onSend).not.toHaveBeenCalled()
   })
   it('selects a busy slash command before submitting and ignores held Enter', async () => {
     const onSend = vi.fn(), onInterrupt = vi.fn(), onNewCommand = vi.fn()
@@ -373,8 +395,7 @@ describe('actual floating Goal lifecycle controls', () => {
   const goal = { threadId: 'menu-fixture', id: 'goal-a', revision: 2, objective: 'Actual counted objective',
     status: 'active' as const, maxGoalRounds: 8, roundsStarted: 3, tokensUsed: 0, timeUsedSeconds: 0,
     createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:01:00Z' }
-  const goalMenu = () => [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
-    .find(button => button.textContent!.includes(i18n.t('common:composerMenuPursueGoal')))!
+  const goalMenu = () => menu()!.querySelector<HTMLButtonElement>('[data-command-id="goal"]')!
   it.each(['armed', 'disarmed', 'unknown', 'mismatched', 'legacy'] as const)('uses actual %s activation consistently in menu, row and panel', async state => {
     const action = vi.fn(async (_status: ThreadGoalStatus) => true)
     const current = state === 'legacy' ? { ...goal, id: undefined, revision: undefined, maxGoalRounds: undefined, roundsStarted: undefined } : goal
@@ -1076,7 +1097,7 @@ describe('real InputBar anchored capacity panel', () => {
     // InputBar, its owner subscription and anchored panel remain real.
     await act(async () => root.render(null))
     const voice: ReturnType<typeof voiceDictation.useVoiceDictation> = { status: 'idle', error: null,
-      startedAtMs: Date.now(), start: vi.fn(), stop: vi.fn(), toggle: vi.fn(), getLevel: () => 0 }
+      startedAtMs: Date.now(), start: vi.fn(), stop: vi.fn(), cancel: vi.fn(), toggle: vi.fn(), getLevel: () => 0 }
     vi.spyOn(voiceDictation, 'useVoiceDictation').mockImplementation(() => ({ ...voice }))
     await act(async () => root.render(floatingElement(false, false, capacityProps)))
     await act(async () => ring().click())

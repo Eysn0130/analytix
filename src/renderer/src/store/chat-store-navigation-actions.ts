@@ -1002,7 +1002,9 @@ export function createNavigationActions(
 	    const loadOwner = Symbol('case-project-load')
       caseProjectLoadOwners.set(projectId, loadOwner)
       const connectionState = get().runtimeConnection
+      const metadataGeneration = binding.threadMetadataGeneration
       const isCurrent = () => caseProjectLoadOwners.get(projectId) === loadOwner &&
+        binding.threadMetadataGeneration === metadataGeneration &&
         options.isCurrent?.() !== false && getProvider() === p && get().runtimeConnection === connectionState
       set((s) => ({
 	      caseProjectLoadingById: { ...s.caseProjectLoadingById, [projectId]: true },
@@ -1077,11 +1079,13 @@ export function createNavigationActions(
 	  refreshThreads: async (options = {}) => {
       if (options.isCurrent?.() === false) return
       const generation = ++threadRefreshGeneration
+      const metadataGeneration = binding.threadMetadataGeneration
       const connectionState = get().runtimeConnection
       const searchQuery = get().threadSearch.trim()
       const showArchived = get().showArchivedThreads
       const p = getProvider()
       const isCurrent = () => generation === threadRefreshGeneration && options.isCurrent?.() !== false &&
+        binding.threadMetadataGeneration === metadataGeneration &&
         get().runtimeConnection === connectionState && get().threadSearch.trim() === searchQuery &&
         get().showArchivedThreads === showArchived && getProvider() === p
 	    try {

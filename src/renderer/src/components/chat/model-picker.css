@@ -1,30 +1,206 @@
-/* Measured reference reveal; selection and Escape remain immediately available. */
-.ds-model-menu {
-  opacity: 1;
-  transform: scale(1);
-  transform-origin: right top;
-  transition: opacity 320ms cubic-bezier(.23, 1, .32, 1) 30ms,
-    transform 320ms cubic-bezier(.23, 1, .32, 1) 30ms;
+/* Composer picker presentation adapted from DeepSeek Harness 687f282e8625c6b8d11ff58211a90524be2e4317:
+ * ui-model-selection/ModelSelect, ui-permission-presets/PermissionSelect and ui-primitives/Menu.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md.
+ * Analytix keeps its own model catalog, next-turn permission pairs and callbacks. */
+.ds-composer-model-picker {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
-@starting-style {
-  .ds-model-menu { opacity: 0; transform: scale(.98); }
+.ds-model-picker-stretch { flex: 1 1 auto; justify-content: flex-end; }
+
+.ds-composer-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px 0 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
 }
 
-.ds-composer-model-picker button,
-.ds-model-menu button {
-  transition-property: color, background-color, border-color, box-shadow;
-  transition-duration: 150ms;
+.ds-composer-picker-trigger:hover:not(:disabled),
+.ds-picker-trigger-open { background: var(--dsw-alias-interactive-bg-hover); }
+.ds-composer-picker-trigger:focus-visible { box-shadow: 0 0 0 2px var(--dsw-focus-ring-color); }
+.ds-composer-picker-trigger:disabled { color: var(--dsw-alias-label-dimmed, var(--dsw-alias-label-tertiary)); cursor: default; }
+.ds-execution-trigger { max-width: 220px; font-weight: 500; }
+.ds-model-trigger { max-width: min(360px, 45cqw); font-weight: 400; }
+.ds-execution-trigger-label,
+.ds-model-trigger-label,
+.ds-model-trigger-effort {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.ds-model-trigger-effort { flex-shrink: 1000; color: var(--dsw-alias-label-caption); }
+.ds-execution-trigger-icon { flex: none; width: 14px; height: 14px; }
+.ds-model-trigger-icon { display: none; flex: none; width: 16px; height: 16px; }
+.ds-picker-chevron { flex: none; width: 12px; height: 12px; color: var(--dsw-alias-label-caption); transition: transform 120ms ease; }
+.ds-picker-chevron-open { transform: rotate(180deg); }
+.ds-picker-spinner { flex: none; width: 14px; height: 14px; animation: ds-picker-spin 900ms linear infinite; }
+@keyframes ds-picker-spin { to { transform: rotate(360deg); } }
 
+.ds-composer-picker-menu {
+  --dsw-specific-menu: rgba(248, 249, 250, .94);
+  --dsw-menu-backdrop-filter: blur(40px) saturate(150%);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  --dsw-elevation-prominent: 0 0 0 .5px var(--dsw-elevation-stroke-color), 0 3px 8px rgba(0, 0, 0, .04), 0 0 20px rgba(0, 0, 0, .05);
+  position: fixed;
+  z-index: 1100;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 24px);
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  color: var(--dsw-alias-label-primary);
+  box-shadow: var(--dsw-elevation-prominent, var(--ax-shadow-popover));
+}
+[data-theme='dark'] .ds-composer-picker-menu { --dsw-specific-menu: rgba(48, 49, 54, .94); }
+.ds-execution-menu { overflow-y: auto; }
+
+.ds-model-cell,
+.ds-model-option,
+.ds-execution-option {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  outline: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.ds-model-cell:hover,
+.ds-model-cell:focus-visible,
+.ds-model-option:hover:not(:disabled),
+.ds-model-option:focus-visible,
+.ds-model-option[data-highlighted]:not(:disabled),
+.ds-execution-option:hover,
+.ds-execution-option:focus-visible { background: var(--dsw-alias-interactive-bg-hover); }
+.ds-model-option:disabled { color: var(--dsw-alias-label-dimmed, var(--dsw-alias-label-tertiary)); cursor: default; }
+.ds-model-cell > svg { flex: none; width: 12px; height: 12px; color: var(--dsw-alias-menu-icon); }
+.ds-model-cell > span:first-child { flex: none; }
+.ds-model-cell-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ds-model-option-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ds-model-check { display: grid; place-items: center; flex: 0 0 14px; }
+.ds-model-check > svg { width: 14px; height: 14px; }
+.ds-execution-option-icon { flex: none; width: 14px; height: 14px; color: var(--dsw-alias-menu-icon); }
+
+.ds-model-groups { min-height: 0; overflow-y: auto; }
+.ds-model-group-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  overflow: hidden;
+  padding: 5px 7px 3px;
+  background: var(--dsw-specific-menu);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ds-model-search-row { position: relative; flex: none; margin: 2px 0 3px; }
+.ds-model-search {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 5px 32px 5px 7px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+}
+.ds-model-search::placeholder { color: var(--dsw-alias-label-caption); }
+.ds-model-search-clear {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.ds-model-search-clear > svg { width: 14px; height: 14px; }
+.ds-model-search-clear:hover,
+.ds-model-search-clear:focus-visible { outline: none; background: var(--dsw-alias-interactive-bg-hover); }
+.ds-model-status { flex: none; padding: 8px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+.ds-model-load-error { display: flex; flex: none; align-items: start; justify-content: space-between; gap: 6px; margin-bottom: 3px; padding: 6px 7px; border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover-danger); color: var(--dsw-alias-state-error-primary); font-size: 11px; line-height: 16px; }
+.ds-model-load-error button { flex: none; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+.ds-model-reload { flex: none; padding: 6px 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: var(--dsw-alias-label-secondary); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.ds-model-reload:hover,
+.ds-model-reload:focus-visible { outline: none; background: var(--dsw-alias-interactive-bg-hover); }
+
+.ds-model-menu { opacity: 1; transform: scale(1); transform-origin: right bottom; transition: opacity 120ms ease, transform 120ms ease; }
+@starting-style { .ds-model-menu { opacity: 0; transform: scale(.98); } }
+
+@container (max-width: 460px) {
+  .ds-execution-trigger-label { display: none; }
+}
+@container (max-width: 360px) {
+  .ds-model-trigger-label,
+  .ds-model-trigger-effort { display: none; }
+  .ds-model-trigger-icon { display: block; }
+  .ds-model-trigger { max-width: none; }
+}
 :root[data-motion-reduced='true'] .ds-model-menu,
-:root[data-motion-reduced='true'] .ds-model-menu button,
-:root[data-motion-reduced='true'] .ds-composer-model-picker button {
-  transition: none;
-}
-
+:root[data-motion-reduced='true'] .ds-picker-chevron { transition: none; }
+:root[data-motion-reduced='true'] .ds-picker-spinner { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .ds-model-menu,
-  .ds-model-menu button,
-  .ds-composer-model-picker button { transition: none; }
+  .ds-picker-chevron { transition: none; }
+  .ds-picker-spinner { animation: none; }
 }

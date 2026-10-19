@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, inject, it, vi } from 'vitest'
-import type { AgentProvider, ChatBlock, NormalizedThread, ThreadEventSink, ThreadGoal, ThreadUsageSnapshot } from '../agent/types'
+import type { AgentProvider, ChatBlock, NormalizedThread, ThreadEventSink, ThreadExecutionPolicy, ThreadGoal, ThreadUsageSnapshot } from '../agent/types'
 import type { ChatState, ChatStoreGet, ChatStoreSet, GuiPlanMessageContext, QueuedUserMessage, ThreadSelectionReceipt } from './chat-store-types'
 import type { ThreadHandoffOperation } from '@shared/thread-handoff'
 import { AnalytixRuntimeProvider } from '../agent/analytix-runtime'
@@ -10,6 +10,8 @@ import { defaultAnalytixRuntimeSettings, type AppSettingsV1 } from '@shared/app-
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { formatRuntimeError } from '../lib/format-runtime-error'
+import { invalidateThreadDetailCache } from '../lib/thread-detail-cache'
+import { getDefaultThreadTitle } from '../lib/thread-title'
 import { projectPublicRuntimeHTTPError, runtimeErrorToError } from '@shared/runtime-error'
 import i18n from '../i18n'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
@@ -3382,4 +3384,219 @@ describe('local Word Core ownership',()=>{
     await actions.createThread({workspaceRoot:'/workspace/analytix'})
     expect(state.activeThreadId).toBeNull();expect(provider.connect).not.toHaveBeenCalled();expect(provider.createThread).not.toHaveBeenCalled()
   })
+})
+
+describe('thread policy authority at public thread actions', () => {
+  const full: ThreadExecutionPolicy = { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }
+  const readOnly: ThreadExecutionPolicy = { approvalPolicy: 'never', sandboxMode: 'read-only' }
+  const harnesses: ReturnType<typeof buildHarness>[] = []
+  type Detail = Awaited<ReturnType<AgentProvider['getThreadDetail']>>
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(accept => { resolve = accept })
+    return { promise, resolve }
+  }
+
+  function policyHarness(realAdapter = false) {
+    const h = buildHarness()
+    harnesses.push(h)
+    Object.assign(h.state, { busy: false, workspaceRoot: '/workspace/analytix', composerDrafts: {},
+      threads: [{ ...thread('thr_existing'), status: 'idle', executionPolicyVersion: 2, ...full }] })
+    const settings = { workspaceRoot: '/workspace/analytix', runtime: defaultAnalytixRuntimeSettings(), codePromptPrefix: '' } as AppSettingsV1
+    const getSettings = vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue(settings)
+    const runtimeRequest = vi.fn(async (_path: string, _method?: string, _body?: string) => ({ ok: true, status: 202,
+      body: JSON.stringify({ threadId: 'thr_existing', turnId: 'turn_policy', userMessageItemId: 'user_policy' }) }))
+    vi.stubGlobal('window', { analytix: { runtime: { runtimeRequest }, logs: { error: vi.fn(async () => undefined) } } })
+    const provider = {
+      createThread: vi.fn(),
+      sendUserMessage: vi.fn<AgentProvider['sendUserMessage']>(async id => ({ threadId: id, turnId: 'turn_policy', userMessageItemId: 'user_policy' })),
+      subscribeThreadEvents: vi.fn((_id: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) => new Promise<void>(() => undefined)),
+      getThreadDetail: vi.fn<AgentProvider['getThreadDetail']>(async id => ({
+        thread: h.state.threads.find(item => item.id === id), blocks: [], latestSeq: 0, threadStatus: 'idle'
+      })),
+      updateThreadExecutionPolicy: vi.fn(async (id: string, policy: ThreadExecutionPolicy): Promise<NormalizedThread> => ({
+        ...thread(id), ...policy, status: 'idle', executionPolicyVersion: 2, updatedAt: '2026-10-20T00:01:00Z'
+      }))
+    }
+    if (realAdapter) {
+      const adapter = new AnalytixRuntimeProvider()
+      provider.sendUserMessage.mockImplementation((id, text, options) => {
+        const { mode, ...request } = options ?? {}
+        if (mode !== undefined && mode !== 'agent' && mode !== 'plan') throw new Error('Unsupported fixture thread mode')
+        return adapter.sendUserMessage(id, text, { ...request, mode })
+      })
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const set: ChatStoreSet = partial => Object.assign(h.state, typeof partial === 'function' ? partial(h.state) : partial)
+    const maintenance = createMaintenanceActions({ set, get: () => h.state, sseAbortRef: h.sseAbortRef })
+    return { ...h, provider, maintenance, settings, getSettings, runtimeRequest }
+  }
+
+  beforeEach(() => {
+    registryMock.getProvider.mockReset()
+    rendererRuntimeClient.invalidateSettings()
+    invalidateThreadDetailCache()
+    vi.stubGlobal('localStorage', memoryStorage())
+  })
+  afterEach(() => {
+    for (const h of harnesses.splice(0)) h.sseAbortRef.current?.abort()
+    clearActiveStream(); clearBusyWatchdog(); clearWatchedCompletionNotifications()
+    invalidateThreadDetailCache(); rendererRuntimeClient.invalidateSettings()
+    vi.restoreAllMocks(); vi.unstubAllGlobals()
+  })
+
+  it.each([full, readOnly, { approvalPolicy: 'untrusted', sandboxMode: 'read-only' }] satisfies ThreadExecutionPolicy[])(
+    'keeps the exact sealed $approvalPolicy/$sandboxMode pair through the real send adapter', async policy => {
+      const h = policyHarness(true)
+      h.state.threads = [{ ...thread('thr_existing'), executionPolicyVersion: 2, ...policy }]
+      await expect(h.actions.sendMessage('use this thread policy', 'agent')).resolves.toBe(true)
+      expect(h.runtimeRequest).toHaveBeenCalledOnce()
+      const [path, method, payload] = h.runtimeRequest.mock.calls[0]!
+      expect(path).toBe('/v1/threads/thr_existing/turns'); expect(method).toBe('POST')
+      const body = JSON.parse(payload!)
+      expect(body).toMatchObject(policy)
+      expect(body).not.toHaveProperty('executionPolicy')
+      expect(body).not.toHaveProperty('executionPolicyVersion')
+      expect(body).not.toHaveProperty('submissionIsCurrent')
+    }
+  )
+
+  it.each([
+    { name: 'legacy full access', metadata: full },
+    { name: 'missing approval', metadata: { executionPolicyVersion: 2, sandboxMode: 'read-only' } },
+    { name: 'missing sandbox', metadata: { executionPolicyVersion: 2, approvalPolicy: 'never' } },
+    { name: 'missing pair', metadata: { executionPolicyVersion: 2 } }
+  ] satisfies Array<{ name: string; metadata: Partial<NormalizedThread> }>)(
+    'leaves $name policy resolution to Core rather than promoting global defaults', async ({ metadata }) => {
+      const h = policyHarness(true)
+      h.state.threads = [{ ...thread('thr_existing'), ...metadata }]
+      await expect(h.actions.sendMessage('retain Core authority')).resolves.toBe(true)
+      expect(h.runtimeRequest).toHaveBeenCalledOnce()
+      const body = JSON.parse(h.runtimeRequest.mock.calls[0]![2]!)
+      expect(body).not.toHaveProperty('approvalPolicy'); expect(body).not.toHaveProperty('sandboxMode')
+    }
+  )
+
+  it('reads policy at actual queue dispatch after a real policy mutation', async () => {
+    const h = policyHarness(true)
+    h.state.busy = true; h.state.currentTurnId = 'previous_turn'
+    await expect(h.actions.sendMessage('queued follow-up', 'agent', { deliveryIntent: 'queue' })).resolves.toBe(true)
+    const queued = h.state.queuedMessages[0]!
+    expect(queued).not.toHaveProperty('executionPolicy')
+    expect(await h.maintenance.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(true)
+    h.state.busy = false; h.state.currentTurnId = null
+    await expect(h.actions.sendQueuedMessageNow('thr_existing', queued.id)).resolves.toBe(true)
+    expect(JSON.parse(h.runtimeRequest.mock.calls[0]![2]!)).toMatchObject(readOnly)
+    expect(h.state.queuedMessages).toEqual([])
+  })
+
+  it.each(['pending', 'uncertain'] as const)('refuses %s target policy without consuming a draft or queue entry', async phase => {
+    const h = policyHarness()
+    const key = composerDraftKey('/workspace/analytix', 'thr_existing')
+    const draft = { ...emptyComposerDraft, input: 'keep this draft', inputRevision: 4 }
+    const queued: QueuedUserMessage = { threadId: 'thr_existing', id: 'q_policy', text: 'keep this queued follow-up' }
+    h.state.composerDrafts = { [key]: draft }; h.state.queuedMessages = [queued]
+    if (phase === 'pending') getThreadBinding(h.sseAbortRef).threadPolicyPending.add('thr_existing')
+    else h.state.threads[0] = { ...h.state.threads[0]!, executionPolicyUncertain: true }
+    await expect(h.actions.sendMessage(draft.input)).resolves.toBe(false)
+    await expect(h.actions.sendQueuedMessageNow('thr_existing', queued.id)).resolves.toBe(false)
+    expect(h.state.composerDrafts[key]).toBe(draft)
+    expect(h.state.queuedMessages).toEqual([queued]); expect(h.state.blocks).toEqual([])
+    expect(h.state.busy).toBe(false)
+    expect(h.provider.sendUserMessage).not.toHaveBeenCalled(); expect(h.getSettings).not.toHaveBeenCalled()
+  })
+
+  it('does not block a send because another thread policy is unknown or pending', async () => {
+    const h = policyHarness(true)
+    h.state.threads.push({ ...thread('thr_other'), executionPolicyUncertain: true })
+    getThreadBinding(h.sseAbortRef).threadPolicyPending.add('thr_other')
+    await expect(h.actions.sendMessage('send only to the current owner')).resolves.toBe(true)
+    expect(h.runtimeRequest.mock.calls[0]![0]).toBe('/v1/threads/thr_existing/turns')
+  })
+
+  it.each(['epoch', 'pending', 'uncertain'] as const)(
+    'fences an ordinary unguarded send at the actual POST after %s changes during adapter settings', async change => {
+      const h = policyHarness(true), settingsWait = deferred<AppSettingsV1>()
+      const key = composerDraftKey('/workspace/analytix', 'thr_existing')
+      const draft = { ...emptyComposerDraft, input: 'preserve this unsent text', inputRevision: 7 }
+      h.state.composerDrafts = { [key]: draft }
+      h.getSettings.mockResolvedValueOnce(h.settings).mockReturnValueOnce(settingsWait.promise)
+      const pending = h.actions.sendMessage(draft.input, 'agent')
+      await waitForAssertion(() => expect(h.getSettings).toHaveBeenCalledTimes(2))
+      expect(h.provider.sendUserMessage.mock.calls[0]![2]?.submissionIsCurrent).toBeTypeOf('function')
+      const binding = getThreadBinding(h.sseAbortRef)
+      if (change === 'epoch') {
+        expect(await h.maintenance.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(true)
+      } else if (change === 'pending') binding.threadPolicyPending.add('thr_existing')
+      else h.state.threads[0] = { ...h.state.threads[0]!, executionPolicyUncertain: true }
+      settingsWait.resolve(h.settings)
+      await expect(pending).resolves.toBe(false)
+      expect(h.runtimeRequest).not.toHaveBeenCalled()
+      expect(h.state.composerDrafts[key]).toBe(draft); expect(h.state.blocks).toEqual([])
+      expect(h.state.busy).toBe(false)
+    }
+  )
+
+  it('preserves pending B selection when only A policy metadata changes', async () => {
+    const h = policyHarness(), detail = deferred<Detail>()
+    const b = { ...thread('thr_policy_b'), status: 'idle' }
+    h.state.threads.push(b)
+    h.provider.getThreadDetail.mockReturnValueOnce(detail.promise)
+    const onSelected = vi.fn()
+    const selection = h.actions.selectThread(b.id, { onSelected })
+    await waitForAssertion(() => expect(h.provider.getThreadDetail).toHaveBeenCalledWith(b.id))
+    expect(await h.maintenance.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(true)
+    detail.resolve({ thread: b, blocks: [{ kind: 'user', id: 'b_history', text: 'B history' }], latestSeq: 2, threadStatus: 'idle' })
+    await selection
+    expect(h.state.activeThreadId).toBe(b.id)
+    expect(h.state.blocks.map(block => block.id)).toEqual(['b_history'])
+    expect(onSelected).toHaveBeenCalledOnce()
+  })
+
+  it('retires old A detail after policy mutation and permits a fresh A selection', async () => {
+    const h = policyHarness(), oldDetail = deferred<Detail>()
+    const oldA = h.state.threads[0]!, b = { ...thread('thr_policy_b'), status: 'idle' }
+    h.state.threads.push(b); h.state.activeThreadId = b.id
+    h.provider.getThreadDetail.mockReturnValueOnce(oldDetail.promise)
+    const staleSelected = vi.fn()
+    const selection = h.actions.selectThread(oldA.id, { onSelected: staleSelected })
+    await waitForAssertion(() => expect(h.provider.getThreadDetail).toHaveBeenCalledWith(oldA.id))
+    expect(await h.maintenance.updateThreadExecutionPolicy(oldA.id, readOnly)).toBe(true)
+    oldDetail.resolve({ thread: oldA, blocks: [{ kind: 'user', id: 'stale_a', text: 'Old A' }], latestSeq: 1, threadStatus: 'idle' })
+    await selection
+    expect(h.state.activeThreadId).toBe(b.id); expect(staleSelected).not.toHaveBeenCalled()
+    expect(h.provider.subscribeThreadEvents).not.toHaveBeenCalled()
+    const currentA = h.state.threads.find(item => item.id === oldA.id)!
+    h.provider.getThreadDetail.mockResolvedValueOnce({ thread: currentA,
+      blocks: [{ kind: 'user', id: 'fresh_a', text: 'Fresh A' }], latestSeq: 2, threadStatus: 'idle' })
+    await h.actions.selectThread(oldA.id)
+    expect(h.provider.getThreadDetail).toHaveBeenCalledTimes(2)
+    expect(h.state.activeThreadId).toBe(oldA.id)
+    expect(h.state.blocks.map(block => block.id)).toEqual(['fresh_a'])
+    expect(h.state.threads.find(item => item.id === oldA.id)).toMatchObject({ ...readOnly, executionPolicyVersion: 2 })
+  })
+
+  it.each(['denied', 'retired', 'accepted'] as const)(
+    'applies %s materialize admission to the real reusable thread before selection', async decision => {
+      const h = policyHarness()
+      const reusable = { ...thread('thr_reusable_policy'), title: getDefaultThreadTitle(), status: 'idle', workspace: '/workspace/analytix' }
+      h.state.threads.push(reusable)
+      const selectThread = vi.fn<ChatState['selectThread']>(async () => undefined)
+      h.state.selectThread = selectThread
+      let current = true
+      const beforeSelect = vi.fn(() => {
+        if (decision === 'retired') current = false
+        return decision !== 'denied'
+      })
+      await h.actions.createThread({ workspaceRoot: '/workspace/analytix', materialize: true,
+        beforeSelect, isCurrent: () => current })
+      expect(h.provider.getThreadDetail).toHaveBeenCalledExactlyOnceWith(reusable.id)
+      expect(beforeSelect).toHaveBeenCalledExactlyOnceWith({ threadId: reusable.id, workspace: reusable.workspace })
+      expect(h.provider.createThread).not.toHaveBeenCalled()
+      if (decision === 'accepted') expect(selectThread).toHaveBeenCalledExactlyOnceWith(reusable.id,
+        { onSelected: undefined, isCurrent: expect.any(Function) })
+      else expect(selectThread).not.toHaveBeenCalled()
+      expect(h.state.activeThreadId).toBe('thr_existing')
+    }
+  )
 })

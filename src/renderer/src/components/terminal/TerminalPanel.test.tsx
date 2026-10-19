@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '../../i18n'
 import { TerminalWorkspacePanel } from '../workbench/RightPanelIslands'
+import { TerminalPanel } from './TerminalPanel'
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(), dispose: vi.fn(), resize: vi.fn(), write: vi.fn(),
@@ -59,6 +60,15 @@ const closeAll = async () => {
   const button = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === i18n.t('common:terminalCloseAllTabs'))!
   await act(async () => button.click())
 }
+const action = (key: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t(`common:${key}`)}"]`)!
+const menuItem = (key: string) => document.querySelector<HTMLButtonElement>(`button[role="menuitem"][aria-label="${i18n.t(`common:${key}`)}"]`)!
+const openActions = async () => {
+  await act(async () => {
+    const button = action('terminalTabMenuTitle')
+    button.focus()
+    button.click()
+  })
+}
 
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -86,7 +96,138 @@ afterEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: false })
 })
 
+describe('shared terminal viewer header', () => {
+  it('keeps the session strip and SVG actions in one header with workspace controls and shared tooltips', async () => {
+    const onToggleFocus = vi.fn(), onCollapse = vi.fn()
+    await act(async () => root.render(createElement(TerminalPanel, {
+      workspaceRoot: '/synthetic/terminal', onCollapse,
+      viewerControls: { focused: false, onToggleFocus, onCollapse }
+    })))
+    await flushFrames()
+    const headers = host.querySelectorAll('[data-workspace-viewer-header]')
+    expect(headers).toHaveLength(1)
+    expect(headers[0].querySelector('[role="tablist"]')).toBe(host.querySelector('[role="tablist"]'))
+    expect(headers[0].querySelectorAll('[role="tab"]')).toHaveLength(1)
+    for (const key of ['terminalNewTab', 'terminalRestart', 'terminalTabMenuTitle', 'workbenchFocus', 'workbenchCollapse']) {
+      const button = action(key)
+      expect(headers[0].contains(button)).toBe(true)
+      expect(button.querySelector('svg')).not.toBeNull()
+      expect(button.hasAttribute('title')).toBe(false)
+    }
+    const restart = action('terminalRestart')
+    await act(async () => restart.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+    const tooltip = document.querySelector('[role="tooltip"][data-portal]')!
+    expect(tooltip.textContent).toBe(i18n.t('common:terminalRestart'))
+    expect(host.contains(tooltip)).toBe(false)
+    await act(async () => restart.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
+    await act(async () => action('workbenchFocus').click())
+    await act(async () => action('workbenchCollapse').click())
+    expect(onToggleFocus).toHaveBeenCalledTimes(1)
+    expect(onCollapse).toHaveBeenCalledTimes(1)
+    expect(mocks.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sessionId: 'main' }))
+    expect(mocks.dispose).not.toHaveBeenCalled()
+  })
+
+  it('returns keyboard menu focus and routes rename through the existing session without creating a PTY', async () => {
+    await render(true, true)
+    const trigger = action('terminalTabMenuTitle')
+    await openActions()
+    const menu = document.querySelector('[role="menu"]')!
+    expect(host.contains(menu)).toBe(false)
+    expect(document.activeElement).toBe(menuItem('terminalRenameTab'))
+    expect(document.activeElement?.closest('[data-workbench-terminal-menu]')).not.toBeNull()
+    expect(menuItem('terminalCloseOtherTabs').disabled).toBe(true)
+    await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+    await openActions()
+    await act(async () => menuItem('terminalRenameTab').click())
+    await flushFrames()
+    const input = host.querySelector<HTMLInputElement>(`input[aria-label="${i18n.t('common:terminalRenameTab')}"]`)!
+    expect(document.activeElement).toBe(input)
+    expect(input.value).toBe(i18n.t('common:terminalTabTitle', { index: 1 }))
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Build logs')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    expect(host.querySelector('[role="tab"]')!.textContent).toBe('Build logs')
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+    expect(mocks.dispose).not.toHaveBeenCalled()
+  })
+
+  it('retires the header menu when hidden or switching sessions while retaining the PTYs', async () => {
+    await render(true, true)
+    await openActions()
+    await render(true, false)
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(action('terminalTabMenuTitle').disabled).toBe(true)
+    await render(true, true)
+    await act(async () => action('terminalNewTab').click())
+    await openActions()
+    const firstTab = host.querySelector<HTMLButtonElement>('[role="tab"]')!
+    await act(async () => firstTab.click())
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(firstTab.getAttribute('aria-selected')).toBe('true')
+    expect(mocks.create.mock.calls.map(([request]) => request.sessionId)).toEqual([
+      'main', expect.stringMatching(/^tab-/), 'main'
+    ])
+    expect(mocks.dispose).not.toHaveBeenCalled()
+  })
+
+  it('uses the active session for shared-menu close-others and captures close-all before collapsing', async () => {
+    const collapse = vi.fn()
+    function Harness() {
+      const [visible, setVisible] = useState(true)
+      return createElement(Suspense, { fallback: null }, createElement(TerminalWorkspacePanel, {
+        opened: true, visible, workspaceRoot: '/synthetic/terminal',
+        onCollapse: () => { collapse(); setVisible(false) }
+      }))
+    }
+    await act(async () => root.render(createElement(Harness)))
+    await act(async () => { await vi.dynamicImportSettled() })
+    await flushFrames()
+    await act(async () => action('terminalNewTab').click())
+    const activeId = mocks.create.mock.calls[1][0].sessionId
+    await openActions()
+    expect(menuItem('terminalCloseOtherTabs').disabled).toBe(false)
+    await act(async () => menuItem('terminalCloseOtherTabs').click())
+    expect(mocks.dispose).toHaveBeenCalledExactlyOnceWith('main')
+    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(1)
+    expect(mocks.create).toHaveBeenCalledTimes(2)
+    await openActions()
+    const close = menuItem('terminalCloseAllTabs')
+    await act(async () => close.focus())
+    expect(document.activeElement?.closest('[data-workbench-terminal-menu]')).not.toBeNull()
+    await act(async () => close.click())
+    expect(mocks.dispose.mock.calls.map(([sessionId]) => sessionId)).toEqual(['main', activeId])
+    expect(collapse).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(host.querySelector<HTMLElement>('#workbench-workspace-terminal')!.hidden).toBe(true)
+    expect(mocks.create).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('retained workspace terminal lifecycle', () => {
+  it('retires workspace controls while retaining a hidden renderer and restores a single control on presentation', async () => {
+    const viewerControls = { focused: false, onToggleFocus: vi.fn(), onCollapse: vi.fn() }
+    const draw = async (visible: boolean) => {
+      await act(async () => root.render(createElement(Suspense, { fallback: null },
+        createElement(TerminalWorkspacePanel, { opened: true, visible, viewerControls, workspaceRoot: '/synthetic/terminal', onCollapse: vi.fn() }))))
+      await act(async () => { await vi.dynamicImportSettled() })
+      await flushFrames()
+    }
+    await draw(true)
+    const renderer = mocks.renderers[0]
+    expect(host.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(1)
+    await draw(false)
+    expect(host.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(0)
+    expect(renderer.dispose).not.toHaveBeenCalled()
+    await draw(true)
+    expect(host.querySelectorAll('#workbench-workspace-collapse')).toHaveLength(1)
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+  })
   it('creates once, keeps live output through switching, folding, closing and reopening, and refocuses the existing renderer', async () => {
     await render(false, false)
     expect(mocks.create).not.toHaveBeenCalled()

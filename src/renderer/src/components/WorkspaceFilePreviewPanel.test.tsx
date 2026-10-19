@@ -36,6 +36,7 @@ const savePresent = vi.fn(async (_request: unknown): Promise<ToolResultLocalEffe
 const open = vi.fn(async (_request: unknown): Promise<{ ok: boolean; code?: string }> => ({ ok: false, code: 'unsupported' }))
 const read = vi.fn(async () => ({ ok: true, path: '/synthetic/current.md', content: 'Current file source', size: 19, truncated: false }))
 beforeEach(async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); await i18n.changeLanguage('en'); open.mockReset(); read.mockReset(); read.mockResolvedValue({ ok: true, path: '/synthetic/current.md', content: 'Current file source', size: 19, truncated: false }); readImage.mockReset(); readPdf.mockReset(); readExcel.mockReset(); readExcel.mockResolvedValue(excelReceipt); copy.mockReset(); copy.mockResolvedValue({ ok: false, code: 'unsupported' }); excelRender.mockClear(); nativeClipboard.mockClear(); pdfRender.mockClear(); ordinaryOpen.mockClear(); writeFile.mockClear(); saveFile.mockReset(); saveFile.mockResolvedValue({ ok: true, path: '/synthetic/saved.xlsx' }); savePresent.mockReset(); savePresent.mockResolvedValue({ ok: true })
   readImage.mockResolvedValue({ ok: true, path: '/synthetic/current.png', dataUrl: 'data:image/png;base64,AQAC', mimeType: 'image/png', size: 3 })
   readPdf.mockResolvedValue({ ok: true, path: '/synthetic/current.pdf', dataBase64: 'JVBERg==', mimeType: 'application/pdf', size: 4, mtimeMs: 12 })
@@ -48,6 +49,16 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); document.getSelection()?.removeAllRanges(); if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor); else Reflect.deleteProperty(navigator, 'clipboard'); vi.unstubAllGlobals() })
 async function draw(target: WorkspaceFileTarget | null, tabbedWorkspace = false, workspaceRoot = '/synthetic') {
   await act(async () => root.render(createElement(WorkspaceFilePreviewPanel, { target, tabbedWorkspace, workspaceRoot, onClose: () => undefined })))
+}
+async function fileMenu(): Promise<HTMLElement> {
+  if (!document.querySelector('[role="menu"]')) {
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-workspace-viewer-header] button[aria-haspopup="menu"]')!.click())
+  }
+  return document.querySelector<HTMLElement>('[role="menu"]')!
+}
+async function menuButton(label: string): Promise<HTMLButtonElement> {
+  const menu = await fileMenu()
+  return menu.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!
 }
 it('retries the current file read once and keeps close available while loading', async () => {
   let finish!: (value: Awaited<ReturnType<typeof read>>) => void
@@ -103,20 +114,22 @@ it('uses protected current source and reports unavailable native open visibly wi
   await draw(target)
   expect(read).toHaveBeenCalledWith({ ...target, workspaceRoot: '/synthetic' })
   expect(container.textContent).toContain('Current file source')
-  const button = container.querySelector<HTMLButtonElement>('button[aria-label="Open"]')!
+  const button = await menuButton('Open')
   expect(button).not.toBeNull(); await act(async () => button.click())
   expect(open).toHaveBeenCalledExactlyOnceWith(ref)
   const status = container.querySelector<HTMLElement>('[role="status"]')!
   expect(status?.textContent).toBe('Could not open this file'); expect(status?.className).not.toContain('sr-only')
-  expect(container.querySelector<HTMLButtonElement>('button[aria-label="Copy content"]')?.disabled).toBe(true)
+  expect((await menuButton('Copy content')).disabled).toBe(true)
 })
 it('prevents repeated open and masks late completion after the preview owner changes', async () => {
   let finish!: (value: { ok: boolean }) => void
   open.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   await draw({ path: 'first.md', preview: 'source', protectedPresent: ref })
-  const button = container.querySelector<HTMLButtonElement>('button[aria-label="Open"]')!
-  await act(async () => button.click()); expect(button.disabled).toBe(true)
-  button.click(); expect(open).toHaveBeenCalledOnce()
+  const button = await menuButton('Open')
+  await act(async () => button.click())
+  const pendingButton = await menuButton('Open')
+  expect(pendingButton.disabled).toBe(true)
+  await act(async () => pendingButton.click()); expect(open).toHaveBeenCalledOnce()
   await draw({ path: 'second.md', preview: 'source', protectedPresent: { ...ref, index: 1 } })
   await act(async () => finish({ ok: true }))
   expect(container.querySelector('[role="status"]')).toBeNull()
@@ -142,7 +155,7 @@ it.each(['image', 'pdf'] as const)('Present %s uses the passive viewer and keeps
   for (const type of ['copy', 'cut', 'dragstart', 'contextmenu']) {
     const event = new Event(type, { bubbles: true, cancelable: true }); currentBody.dispatchEvent(event); expect(event.defaultPrevented).toBe(true)
   }
-  expect(container.querySelector<HTMLButtonElement>('button[aria-label="Copy content"]')?.disabled).toBe(true)
+  expect((await menuButton('Copy content')).disabled).toBe(true)
   expect(open).not.toHaveBeenCalled(); expect(ordinaryOpen).not.toHaveBeenCalled(); expect(writeFile).not.toHaveBeenCalled(); expect(saveFile).not.toHaveBeenCalled()
   await draw(null); expect(container.querySelector('[data-present-media-preview]')).toBeNull()
 })
@@ -242,7 +255,7 @@ it('keeps protected DOM transfer blocked while allowing the spreadsheet context 
   }
   const menu = new Event('contextmenu', { bubbles: true, cancelable: true }); body.dispatchEvent(menu)
   expect(menu.defaultPrevented).toBe(false)
-  expect(container.querySelector('button[aria-label="Copy content"]')).toBeNull()
+  expect((await fileMenu()).querySelector('button[aria-label="Copy content"]')).toBeNull()
   expect(nativeClipboard).not.toHaveBeenCalled(); expect(copy).not.toHaveBeenCalled()
 })
 
@@ -366,47 +379,59 @@ it('copies only sealed identities and range coordinates even when the selection 
 })
 
 
-it('keeps the Excel file identity and native zoom anchor in the existing shared toolbar', async () => {
+it('keeps Excel identity, direct download and native zoom anchor in the single shared operation row', async () => {
   await draw(excelTarget(), true)
-  const target = container.querySelector<HTMLElement>('[data-excel-preview-controls]')
-  expect(target).not.toBeNull()
-  expect(excelProps().zoomControlTarget).toBe(target)
-  const fileMenu = container.querySelector('details')!
-  expect(fileMenu.querySelector('summary')?.textContent).toBe('workbook.xlsx')
-  expect(fileMenu.querySelector<HTMLButtonElement>('button[aria-label="Download"]')?.disabled).toBe(false)
-  expect(fileMenu.querySelector<HTMLButtonElement>('button[aria-label="Open"]')?.disabled).toBe(false)
-  const summary = fileMenu.querySelector('summary')!
-  fileMenu.open = true
-  summary.focus()
+  const zoom = container.querySelector<HTMLElement>('[data-excel-preview-controls]')
+  const header = container.querySelector<HTMLElement>('[data-workspace-viewer-header]')!
+  expect(zoom).not.toBeNull(); expect(excelProps().zoomControlTarget).toBe(zoom)
+  expect(container.querySelectorAll('header')).toHaveLength(1)
+  expect(header.querySelector('button[aria-haspopup="menu"]')?.textContent).toBe('workbook.xlsx')
+  expect(header.querySelector<HTMLButtonElement>('button[aria-label="Download"]')?.disabled).toBe(false)
+  expect(header.contains(zoom)).toBe(true)
+  const menu = await fileMenu()
+  expect(container.contains(menu)).toBe(false)
+  expect(menu.querySelector<HTMLButtonElement>('button[aria-label="Open"]')?.disabled).toBe(false)
+  expect(menu.querySelector('button[aria-label="Copy content"]')).toBeNull()
+  expect(menu.querySelector('button[aria-label="Download"]')).toBeNull()
+  const trigger = header.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!
+  await act(async () => menu.querySelector<HTMLButtonElement>('button:not(:disabled)')!.focus())
   const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
-  summary.dispatchEvent(escape)
+  await act(async () => menu.dispatchEvent(escape))
   expect(escape.defaultPrevented).toBe(true)
-  expect(fileMenu.open).toBe(false)
-  expect(document.activeElement).toBe(summary)
-  fileMenu.open = true
-  document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
-  expect(fileMenu.open).toBe(false)
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  expect(document.activeElement).toBe(trigger)
+  await fileMenu()
+  await act(async () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })))
+  expect(document.querySelector('[role="menu"]')).toBeNull()
   expect(container.querySelector('.ds-code-sidebar-breadcrumbs')).toBeNull()
-  expect(container.querySelector('button[aria-label="Copy content"]')).toBeNull()
   expect(nativeClipboard).not.toHaveBeenCalled(); expect(saveFile).not.toHaveBeenCalled()
   await draw(null)
   expect(container.querySelector('[data-excel-preview-controls]')).toBeNull()
 })
 
-
-it('preserves the existing file tab navigation when no shared desktop tab row is supplied', async () => {
-  await draw(excelTarget())
-  expect(container.querySelector('.ds-code-sidebar-tabs [role="tab"]')).not.toBeNull()
-  expect(container.querySelector('details')).toBeNull()
-  expect(container.querySelector('button[aria-label="Open"]')).not.toBeNull()
+it('preserves standalone multi-file navigation and close callbacks inside the filename menu', async () => {
+  const first = excelTarget(), second = { path: '/synthetic/second.csv' }
+  const onSelectTarget = vi.fn(), onCloseTarget = vi.fn()
+  await act(async () => root.render(createElement(WorkspaceFilePreviewPanel, {
+    target: first, openTargets: [first, second], workspaceRoot: '/synthetic', onClose: () => undefined, onSelectTarget, onCloseTarget
+  })))
+  const menu = await fileMenu()
+  const tabs = menu.querySelectorAll<HTMLElement>('[role="tab"]')
+  expect(tabs).toHaveLength(2)
+  expect(tabs[0].getAttribute('aria-selected')).toBe('true')
+  await act(async () => tabs[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+  expect(onSelectTarget).toHaveBeenCalledExactlyOnceWith(second)
+  const close = tabs[1].querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t('common:filePreviewCloseTab', { file: 'second.csv' })}"]`)!
+  await act(async () => close.click())
+  expect(onCloseTarget).toHaveBeenCalledExactlyOnceWith(second)
+  expect(onSelectTarget).toHaveBeenCalledTimes(1)
+  expect(container.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+  expect(container.querySelector('.ds-code-sidebar-tabs')).toBeNull()
 })
 
-
-function downloadStatus(): string | null { return container.querySelector('[data-file-download-status]')?.textContent ?? null }
+function downloadStatus(): string | null { return container.querySelector('[data-workspace-viewer-header] [role="status"]')?.textContent ?? null }
 async function clickDownload(): Promise<HTMLButtonElement> {
-  const menu = container.querySelector<HTMLDetailsElement>('details.ds-file-viewer-menu')
-  if (menu) await act(async () => { menu.open = true })
-  const button = container.querySelector<HTMLButtonElement>('button[aria-label="Download"]')!
+  const button = container.querySelector<HTMLButtonElement>('[data-workspace-viewer-header] button[aria-label="Download"]')!
   expect(button).not.toBeNull()
   await act(async () => button.click())
   return button
@@ -418,7 +443,7 @@ it('downloads an ordinary original file through existing Save As using its targe
   expect(saveFile).toHaveBeenCalledExactlyOnceWith({ sourcePath: 'original.csv', workspaceRoot: '/synthetic/owner' })
   expect(savePresent).not.toHaveBeenCalled(); expect(writeFile).not.toHaveBeenCalled(); expect(nativeClipboard).not.toHaveBeenCalled()
   expect(downloadStatus()).toBe('Saved')
-  expect(container.querySelector('[data-file-download-status]')?.closest('.ds-code-sidebar-actions')).toBeNull()
+  expect(container.querySelector('[data-workspace-viewer-header] [role="status"]')).not.toBeNull()
 })
 
 it('saves Present original bytes through exactly seven cloned identity fields without any ordinary fallback', async () => {
@@ -694,7 +719,53 @@ it('leaves workspace collapse and tab close to the shared strip while preserving
   expect(container.querySelector('.ds-file-viewer-close')).toBeNull()
   expect(container.querySelector('button[aria-label="Collapse right sidebar"]')).toBeNull()
   expect(container.querySelector('.ds-code-sidebar-tabs')).toBeNull()
-  expect(container.querySelector('details summary')?.textContent).toBe('report.csv')
+  expect(container.querySelector('[data-workspace-viewer-header] button[aria-haspopup="menu"]')?.textContent).toBe('report.csv')
   await draw({ path: 'report.csv' }, false)
   expect(container.querySelector('button[aria-label="Collapse right sidebar"]')).not.toBeNull()
+})
+
+
+it('keeps direct download, view mode and workspace controls in one row without duplicate collapse or metadata rows', async () => {
+  const onToggleFocus = vi.fn(), onCollapse = vi.fn(), onClose = vi.fn()
+  await act(async () => root.render(createElement(WorkspaceFilePreviewPanel, {
+    target: { path: '/synthetic/current.md' }, workspaceRoot: '/synthetic', tabbedWorkspace: true, onClose,
+    viewerControls: { focused: false, onToggleFocus, onCollapse }
+  })))
+  const header = container.querySelector<HTMLElement>('[data-workspace-viewer-header]')!
+  expect(container.querySelectorAll('header')).toHaveLength(1)
+  expect(container.querySelector('.ds-code-sidebar-breadcrumbs')).toBeNull()
+  expect(container.querySelector('.ds-file-viewer-close')).toBeNull()
+  const download = header.querySelector<HTMLButtonElement>('button[aria-label="Download"]')!
+  expect(download.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
+  expect(download.textContent).toBe('')
+  const filename = header.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!
+  expect(filename.textContent).toBe('current.md')
+  expect(filename.getAttribute('aria-label')).toContain('19 B')
+  expect(filename.getAttribute('aria-label')).toContain('text')
+  const source = header.querySelector<HTMLButtonElement>(`[aria-label="${i18n.t('common:filePreviewShowSource')}"]`)!
+  expect(source.querySelector('svg')).not.toBeNull()
+  await act(async () => source.click())
+  expect(header.querySelector(`[aria-label="${i18n.t('common:filePreviewRenderMarkdown')}"]`)).not.toBeNull()
+  await act(async () => header.querySelector<HTMLButtonElement>(`[aria-label="${i18n.t('common:workbenchFocus')}"]`)!.click())
+  await act(async () => header.querySelector<HTMLButtonElement>(`[aria-label="${i18n.t('common:workbenchCollapse')}"]`)!.click())
+  expect(onToggleFocus).toHaveBeenCalledTimes(1); expect(onCollapse).toHaveBeenCalledTimes(1); expect(onClose).not.toHaveBeenCalled()
+  expect(container.querySelector('button[aria-label="Collapse right sidebar"]')).toBeNull()
+})
+
+
+it('retires the filename portal when a retained preview becomes hidden without changing its read owner', async () => {
+  const target = { path: '/synthetic/current.md' }, onClose = vi.fn()
+  const render = async (visible: boolean) => act(async () => root.render(createElement(WorkspaceFilePreviewPanel, {
+    target, workspaceRoot: '/synthetic', tabbedWorkspace: true, visible, onClose
+  })))
+  await render(true)
+  await fileMenu()
+  expect(document.querySelector('[role="menu"]')).not.toBeNull()
+  expect(read).toHaveBeenCalledTimes(1)
+  await render(false)
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  expect(container.querySelector<HTMLButtonElement>('[data-workspace-viewer-header] button[aria-haspopup="menu"]')!.disabled).toBe(true)
+  expect(container.textContent).toContain('Current file source')
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(open).not.toHaveBeenCalled(); expect(saveFile).not.toHaveBeenCalled(); expect(savePresent).not.toHaveBeenCalled()
 })

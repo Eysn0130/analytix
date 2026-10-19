@@ -623,10 +623,14 @@ export function createThreadActions(
           )
       if (!creationCurrent()) return
       if (reusableThreadId) {
+        const reusableThread = get().threads.find(thread => thread.id === reusableThreadId)
+        const selectReusable = options.beforeSelect?.({ threadId: reusableThreadId, workspace: reusableThread?.workspace || workspaceRoot }) !== false
+        if (!selectReusable || !creationCurrent()) return
         if (get().activeThreadId !== reusableThreadId || options.localDocument) {
           await get().selectThread(reusableThreadId, { onSelected: options.onSelected,
-            ...(options.localDocument ? { localDocument: true, isCurrent: options.isCurrent } : {}) })
-          if (!navigationCurrent()) return
+            ...(options.localDocument ? { localDocument: true } : {}),
+            ...(options.isCurrent ? { isCurrent: options.isCurrent } : {}) })
+          if (!creationCurrent()) return
         } else {
           set({ error: null })
         }
@@ -890,9 +894,11 @@ export function createThreadActions(
     const requestGeneration = ++selectionGeneration
     const requestBindingGeneration = binding.generation
     const requestSubmissionGeneration = binding.submissionGeneration
+    const requestMetadataGeneration = binding.threadMetadataGenerationById.get(id) ?? 0
     const requestGoalEpoch = get().goalStateEpoch
     const p = getProvider()
     const selectionCurrent = (): boolean => navigationCurrent() && options?.isCurrent?.() !== false && requestGeneration === selectionGeneration &&
+      (binding.threadMetadataGenerationById.get(id) ?? 0) === requestMetadataGeneration &&
       requestBindingGeneration === binding.generation && requestSubmissionGeneration === binding.submissionGeneration &&
       getProvider() === p
     let localCoreConnected = false
@@ -904,6 +910,7 @@ export function createThreadActions(
       }
       const threadSnap = get().threads.find((thread) => thread.id === id) ?? null
       const rawDetail = await loadThreadDetailWithCache(p, id, threadSnap)
+      if (!selectionCurrent()) return
       const {
         thread: detailThread,
         blocks: rawBlocks,
@@ -1023,6 +1030,7 @@ export function createThreadActions(
           : {})
       })
     } finally {
+      if ((binding.threadMetadataGenerationById.get(id) ?? 0) !== requestMetadataGeneration) historyAbort.abort()
       if (selectionAbort === historyAbort) selectionAbort = null
     }
   }),
@@ -1433,6 +1441,13 @@ export function createThreadActions(
     const requestedSkillIds = [...(overrides?.queued?.requestedSkillIds ?? overrides?.requestedSkillIds ?? [])]
     if (!trimmedText) return false
     if (overrides?.queued && (overrides.queued.threadId !== get().activeThreadId || !get().queuedMessages.includes(overrides.queued))) return false
+    if (binding.threadPolicyPending.has(get().activeThreadId ?? '') ||
+      get().threads.find(thread => thread.id === get().activeThreadId)?.executionPolicyUncertain) {
+      set({ error: i18n.t('common:composerExecutionPolicyUnavailable', {
+        defaultValue: 'Thread execution policy is unavailable. Select it again before sending.'
+      }) })
+      return false
+    }
     if (get().runtimeConnection !== 'ready') {
       set({ error: i18n.t('common:runtimeActionNeedsConnection') })
       return false
@@ -1823,9 +1838,22 @@ export function createThreadActions(
           return false
         }
       }
+      const executionThread = get().threads.find(thread => thread.id === activeThreadId)
+      const executionPolicyGeneration = binding.threadMetadataGenerationById.get(activeThreadId) ?? 0
+      if (binding.threadPolicyPending.has(activeThreadId) || executionThread?.executionPolicyUncertain) {
+        const ownsPolicySubmission = ownsRunningReceipt()
+        cancelPreparedSubmission()
+        if (ownsPolicySubmission) set({ error: i18n.t('common:composerExecutionPolicyUnavailable', {
+          defaultValue: 'Thread execution policy is unavailable. Select it again before sending.'
+        }) })
+        return false
+      }
       const { turnId, userMessageItemId } = await p.sendUserMessage(activeThreadId, runtimeText, {
         requestedSkillIds,
         mode,
+        ...(executionThread?.executionPolicyVersion === 2 && executionThread.approvalPolicy && executionThread.sandboxMode
+          ? { executionPolicy: { approvalPolicy: executionThread.approvalPolicy, sandboxMode: executionThread.sandboxMode } }
+          : {}),
         ...(composerModel ? { model: composerModel } : {}),
         ...(!channel && composerProviderId ? { providerId: composerProviderId } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
@@ -1834,7 +1862,10 @@ export function createThreadActions(
         ...(attachmentIds.length ? { attachmentIds } : {}),
         ...(workspaceCheckpointId ? { workspaceCheckpointId } : {}),
         ...(fileReferences.length ? { fileReferences } : {}),
-        ...(submissionGuard ? { submissionIsCurrent: () => submissionGuard.isCurrent() && ownsRunningReceipt() } : {})
+        submissionIsCurrent: () => ownsRunningReceipt() && (!submissionGuard || submissionGuard.isCurrent()) &&
+          (binding.threadMetadataGenerationById.get(activeThreadId) ?? 0) === executionPolicyGeneration &&
+          !binding.threadPolicyPending.has(activeThreadId) &&
+          !get().threads.find(thread => thread.id === activeThreadId)?.executionPolicyUncertain
       })
       acknowledged = true
       const receipt = { turnId, userMessageItemId }

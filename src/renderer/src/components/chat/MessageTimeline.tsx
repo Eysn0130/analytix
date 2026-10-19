@@ -13,6 +13,7 @@ import { useTurnTiming } from './presentation/chat/use-turn-timing'
 import { GateResponseContext } from './message-timeline-bubbles'
 import type { ProfilerOnRenderCallback, ReactElement, RefObject } from 'react'
 import { Profiler, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { ChatBlock, RuntimeConnectionStatus, ThreadUsageSnapshot } from '../../agent/types'
 import { useChatStore } from '../../store/chat-store'
@@ -122,6 +123,8 @@ type Props = {
   focusRequestId?: string | null
   onRequestFocused?: () => void
   onReturnToBottomStateChange?: (state: TimelineReturnToBottomState | null) => void
+  /** Undefined retains the local toolbar; null waits for its resident header seat. */
+  conversationTabsTarget?: HTMLElement | null
 }
 
 const TURN_PAGE_SIZE = 18
@@ -231,6 +234,7 @@ export function MessageTimeline({
   conversationUsage: suppliedConversationUsage,
   processPaneRoute,
   onReturnToBottomStateChange,
+  conversationTabsTarget,
   focusRequestId,
   onRequestFocused
 }: Props): ReactElement {
@@ -423,6 +427,12 @@ export function MessageTimeline({
     retireRecordRequest()
     setRecordsState({ scope: recordScope, mode, request: null, applied: null })
   }, [activeThreadId, viewMode, recordScope, visibleRecordsRoot, captureViewScroll, retireRecordRequest, viewGeneration])
+  const mainConversation = route === 'chat' && !secondaryProcessContext && activeThreadId === mainThreadId
+  const hideBlankMainTabs = mainConversation && (conversationPhase === 'hero' || conversationPhase === 'settling')
+  const viewToolbar = activeThreadId && !hideBlankMainTabs ? <ConversationRecordsToolbar key={recordScope} mode={viewMode}
+    pending={recordRequest && !selectedRecord ? locatedRecord?.kind === 'ambiguous' ? 'ambiguous' : 'missing' : undefined}
+    onModeChange={changeConversationView} /> : null
+  const residentTabsTarget = mainConversation ? conversationTabsTarget : undefined
   const inspectTrajectoryCall = useCallback((identity: TrajectoryToolIdentity) => {
     if (currentViewMode.current !== 'trajectory' || viewSeat.current.generation !== viewGeneration || currentRecordScope.current !== recordScope || identity.threadId !== activeThreadId || !identity.toolResultItemId || !visibleRecordsRoot()) return
     const found = locateConversationCall(currentRecords.current, identity)
@@ -1052,6 +1062,7 @@ export function MessageTimeline({
     <Profiler id="message-timeline" onRender={recordReactCommit}>
       <InjectedMemoryLookupProvider workspaceRoot={workspaceRoot}>
       <ProtectedToolInspectorSelection scopeKey={recordScope + ':' + viewMode}>
+      {residentTabsTarget ? createPortal(viewToolbar, residentTabsTarget, recordScope) : null}
       <div
         ref={containerRef}
         data-analytix-message-timeline-scroller
@@ -1076,9 +1087,7 @@ export function MessageTimeline({
         goalTimelinePaddingClass(heroRoute, Boolean(activeThreadGoal))
       }`}
       >
-        {activeThreadId ? <ConversationRecordsToolbar mode={viewMode}
-          pending={recordRequest && !selectedRecord ? locatedRecord?.kind === 'ambiguous' ? 'ambiguous' : 'missing' : undefined}
-          onModeChange={changeConversationView} /> : null}
+        {residentTabsTarget === undefined ? viewToolbar : null}
         {trajectoryMode && activeThreadId ? <TrajectoryPanel threadId={activeThreadId} onInspectTool={inspectTrajectoryCall} renderToolInspector={renderTrajectoryInspector} /> : <>
         {virtualizerEnabled && virtualWindow.beforeHeight > 0 ? (
           <div aria-hidden style={{ height: virtualWindow.beforeHeight }} className="w-full shrink-0" />

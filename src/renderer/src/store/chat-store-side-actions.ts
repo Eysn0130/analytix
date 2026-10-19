@@ -1,3 +1,4 @@
+import { getThreadBinding } from './chat-store-thread-binding'
 import type {
   AcceptedFinalProjectionBatch,
   AgentProvider,
@@ -54,6 +55,7 @@ type SideContext = {
   set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void
   get: () => ChatState
   getProvider: () => AgentProvider
+  threadBindingOwner?: { current: AbortController | null }
   /** i18n reference (kept loose; the host already imports the default). */
   t: (key: string) => string
   formatRuntimeError: (error: unknown) => string
@@ -1498,6 +1500,9 @@ export function createSideActions(ctx: SideContext): Pick<
   | 'discardSideConversation'
   | 'promoteSideConversation'
 > {
+  const binding = ctx.threadBindingOwner ? getThreadBinding(ctx.threadBindingOwner) : undefined
+  const policyAvailable = (threadId: string): boolean => !binding?.threadPolicyPending.has(threadId) &&
+    !ctx.get().threads.find(thread => thread.id === threadId)?.executionPolicyUncertain
   const actions: Pick<
     ChatState,
     | 'spawnSideConversation'
@@ -1596,8 +1601,14 @@ export function createSideActions(ctx: SideContext): Pick<
       if (side.busy) return false
       const trimmed = text.trim()
       if (!trimmed) return false
+      if (!policyAvailable(sideId)) {
+        ctx.set(s => patchSide(s, sideId, current => ({ ...current,
+          error: ctx.t('common:composerExecutionPolicyUnavailable') })))
+        return false
+      }
       sidePromotionRequests.delete(sideId)
       const provider = ctx.getProvider()
+      const executionPolicyGeneration = binding?.threadMetadataGenerationById.get(sideId) ?? 0
       const reasoningEffort = sideReasoningEffortRequestValue(side.reasoningEffort)
       const optimisticUserId = createSideClientUserMessageId()
       const provisionalTurnId = pendingActiveStreamTurnId(sideId, optimisticUserId)
@@ -1626,7 +1637,10 @@ export function createSideActions(ctx: SideContext): Pick<
       try {
         const { turnId, userMessageItemId } = await provider.sendUserMessage(sideId, trimmed, {
           model: side.model,
-          ...(reasoningEffort ? { reasoningEffort } : {})
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+          submissionIsCurrent: () => ctx.getProvider() === provider && policyAvailable(sideId) &&
+            (binding?.threadMetadataGenerationById.get(sideId) ?? 0) === executionPolicyGeneration &&
+            ctx.get().sideConversations[sideId]?.turnId === provisionalTurnId
         })
         const currentTurnId = ctx.get().sideConversations[sideId]?.turnId
         if (currentTurnId && currentTurnId !== turnId) {

@@ -2,13 +2,21 @@
  * Never persisted or sent across the desktop bridge. Natural EOF keeps the
  * generation. New submissions advance a separate counter even when reusing a
  * healthy stream; replacement and explicit cancellation revoke pending HTTP work. */
-type ThreadBinding = { generation: number; submissionGeneration: number; interruptionGeneration: number; naturallyRetired: WeakSet<AbortController> }
+type ThreadBinding = {
+  generation: number; submissionGeneration: number; interruptionGeneration: number
+  /** Metadata writes retire index/detail reads without touching stream authority. */
+  threadMetadataGeneration: number
+  threadMetadataGenerationById: Map<string, number>
+  threadPolicyPending: Set<string>
+  naturallyRetired: WeakSet<AbortController>
+}
 const bindings = new WeakMap<object, ThreadBinding>()
 
 export function getThreadBinding(owner: { current: AbortController | null }): ThreadBinding {
   let binding = bindings.get(owner)
   if (!binding) {
-    binding = { generation: 0, submissionGeneration: 0, interruptionGeneration: 0, naturallyRetired: new WeakSet<AbortController>() }
+    binding = { generation: 0, submissionGeneration: 0, interruptionGeneration: 0,
+      threadMetadataGeneration: 0, threadMetadataGenerationById: new Map(), threadPolicyPending: new Set(), naturallyRetired: new WeakSet<AbortController>() }
     bindings.set(owner, binding)
   }
   return binding

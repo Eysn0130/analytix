@@ -3,10 +3,11 @@ import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
 import { AttachmentPublicMetadata } from '../../../../packages/runtime/src/contracts/attachments.js'
 import { UserInputActionSelectorSchemaV1 } from '../../../../packages/runtime/src/contracts/approvals.js'
 import { countedGoalRefV1 } from '../../../../packages/runtime/src/contracts/threads.js'
+import { ApprovalPolicySchema, SandboxModeSchema } from '../../../../packages/runtime/src/contracts/policy.js'
 import { projectAttachmentReferencesForPublicSurfaces } from '../agent/attachment-public'
 import { getThreadBinding } from './chat-store-thread-binding'
 import { withImageThreadNavigation } from '../write/image-thread-navigation'
-import type { ChatBlock, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus, UserInputAnswer, UserInputSubmission } from '../agent/types'
+import type { ChatBlock, NormalizedThread, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus, UserInputAnswer, UserInputSubmission } from '../agent/types'
 import { getProvider } from '../agent/registry'
 import { restoreThreadDisplayHistory } from '../agent/analytix-runtime'
 import { mergeGoalHistoryBlocks, reconcileTurnUsageById } from '../agent/analytix-mapper'
@@ -17,6 +18,7 @@ import { applyTheme, applyUiFontScale } from '../lib/apply-theme'
 import { confirmDialog } from '../lib/confirm-dialog'
 import { formatWorkspacePickerError } from '../lib/format-workspace-picker-error'
 import { formatRuntimeError } from '../lib/format-runtime-error'
+import { invalidateThreadDetailCache } from '../lib/thread-detail-cache'
 import {
   getDefaultThreadTitle,
   shouldAutoTitleThread
@@ -241,10 +243,11 @@ function submittedUserInputDisplay(
 
 export function createMaintenanceActions(
   { set, get, sseAbortRef }: StoreActionContext
-): Pick<ChatState, 'renameActiveThread' | 'renameThread' | 'archiveThread' | 'compactActiveThread' | 'forkActiveThread' | 'forkThreadFromTurn' | 'setActiveThreadGoal' | 'setActiveThreadGoalStatus' | 'clearActiveThreadGoal' | 'setActiveThreadTodoStatus' | 'clearActiveThreadTodos' | 'syncPlanTodosFromMarkdown' | 'resumeSessionIntoThread' | 'deleteThread' | 'rewindAndResend' | 'rollbackWorkspaceToCheckpoint' | 'resolveApproval' | 'resolveUserInput' | 'interrupt'> {
+): Pick<ChatState, 'renameActiveThread' | 'renameThread' | 'updateThreadExecutionPolicy' | 'archiveThread' | 'compactActiveThread' | 'forkActiveThread' | 'forkThreadFromTurn' | 'setActiveThreadGoal' | 'setActiveThreadGoalStatus' | 'clearActiveThreadGoal' | 'setActiveThreadTodoStatus' | 'clearActiveThreadTodos' | 'syncPlanTodosFromMarkdown' | 'resumeSessionIntoThread' | 'deleteThread' | 'rewindAndResend' | 'rollbackWorkspaceToCheckpoint' | 'resolveApproval' | 'resolveUserInput' | 'interrupt'> {
   const binding = getThreadBinding(sseAbortRef)
   const resolvingGates = new Set<string>()
   const renameOwners = new Map<string, number>()
+  const policyOwners = new Map<string, symbol>()
   let renameGeneration = 0
   let editInFlight = false
   let goalMutationInFlight = false
@@ -455,6 +458,99 @@ export function createMaintenanceActions(
   })
 
   return {
+  updateThreadExecutionPolicy: async (threadId, policy) => {
+    const targetId = threadId.trim()
+    if (!targetId || policyOwners.has(targetId)) return false
+    const p = getProvider()
+    const { activeThreadId, route, error: originalError } = get()
+    const generation = binding.generation, submissionGeneration = binding.submissionGeneration
+    const owner = Symbol('thread-execution-policy')
+    const ownsOperation = (): boolean => policyOwners.get(targetId) === owner && getProvider() === p &&
+      get().runtimeConnection === 'ready' && get().threads.some(thread => thread.id === targetId)
+    const ownsUi = (): boolean => ownsOperation() && activeThreadId === targetId && get().activeThreadId === activeThreadId && get().route === route &&
+      binding.generation === generation && binding.submissionGeneration === submissionGeneration
+    const recordError = (error: unknown): void => {
+      if (ownsUi() && get().error === originalError) set({ error: formatRuntimeError(error) })
+    }
+    policyOwners.set(targetId, owner)
+    let metadataWriteStarted = false
+    const retireMetadataReads = (): void => {
+      binding.threadMetadataGeneration += 1
+      binding.threadMetadataGenerationById.set(targetId, (binding.threadMetadataGenerationById.get(targetId) ?? 0) + 1)
+    }
+    try {
+      if (!ownsOperation()) {
+        if (get().activeThreadId === targetId) set({ error: i18n.t('common:ownedThreadUnavailable') })
+        return false
+      }
+      if (!p.updateThreadExecutionPolicy) {
+        recordError(new Error(i18n.t('common:runtimeFeatureUnsupported')))
+        return false
+      }
+      if (!ApprovalPolicySchema.safeParse(policy.approvalPolicy).success || !SandboxModeSchema.safeParse(policy.sandboxMode).success) {
+        recordError(new Error('Thread execution policy is invalid.'))
+        return false
+      }
+      const requested = { approvalPolicy: policy.approvalPolicy, sandboxMode: policy.sandboxMode }
+      let readbackObserved = false
+      const applyReadback = (snapshot: NormalizedThread | undefined): boolean => {
+        if (!ownsOperation() || !snapshot || snapshot.id !== targetId ||
+          !ApprovalPolicySchema.safeParse(snapshot.approvalPolicy).success || !SandboxModeSchema.safeParse(snapshot.sandboxMode).success) return false
+        readbackObserved = true
+        // This mutation owns policy metadata only. A late response must not
+        // replace a newer title, goal, running turn or active selection.
+        const metadata = { approvalPolicy: snapshot.approvalPolicy, sandboxMode: snapshot.sandboxMode,
+          executionPolicyVersion: snapshot.executionPolicyVersion, executionPolicyUncertain: false, updatedAt: snapshot.updatedAt }
+        set(state => ({
+          threads: state.threads.map(thread => thread.id === targetId ? { ...thread, ...metadata } : thread),
+          threadSearchResults: state.threadSearchResults ? { ...state.threadSearchResults,
+            threads: state.threadSearchResults.threads.map(thread => thread.id === targetId ? { ...thread, ...metadata } : thread)
+          } : state.threadSearchResults
+        }))
+        return snapshot.executionPolicyVersion === 2 && snapshot.approvalPolicy === requested.approvalPolicy &&
+          snapshot.sandboxMode === requested.sandboxMode
+      }
+      invalidateThreadDetailCache(targetId)
+      metadataWriteStarted = true
+      binding.threadPolicyPending.add(targetId)
+      retireMetadataReads()
+      let confirmed = false
+      try {
+        confirmed = applyReadback(await p.updateThreadExecutionPolicy(targetId, requested))
+      } catch (error) {
+        if (!ownsOperation()) return false
+        // An error cannot prove the PATCH did not commit. Read the real owner
+        // directly rather than rolling the UI back to a guessed previous pair.
+        try { confirmed = applyReadback((await p.getThreadDetail(targetId)).thread) } catch { /* Keep the unknown outcome visible. */ }
+        if (!confirmed) {
+          if (!readbackObserved && ownsOperation()) {
+            // No authority can be inferred from a lost acknowledgement and an
+            // unreadable owner. Keep the displayed pair, but block new sends.
+            const uncertain = (thread: NormalizedThread): NormalizedThread => thread.id === targetId
+              ? { ...thread, executionPolicyUncertain: true } : thread
+            set(state => ({ threads: state.threads.map(uncertain), threadSearchResults: state.threadSearchResults
+              ? { ...state.threadSearchResults, threads: state.threadSearchResults.threads.map(uncertain) } : state.threadSearchResults }))
+          }
+          recordError(error)
+          return false
+        }
+      }
+      if (!confirmed) {
+        recordError(new Error('Thread execution policy could not be confirmed for future turns.'))
+        return false
+      }
+      if (ownsUi() && get().error === originalError) set({ error: null })
+      return true
+    } finally {
+      if (metadataWriteStarted) {
+        retireMetadataReads()
+        binding.threadPolicyPending.delete(targetId)
+      }
+      invalidateThreadDetailCache(targetId)
+      if (policyOwners.get(targetId) === owner) policyOwners.delete(targetId)
+    }
+  },
+
   renameActiveThread: async (title) => {
     const { activeThreadId } = get()
     if (!activeThreadId) return

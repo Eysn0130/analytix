@@ -14,16 +14,14 @@ import type { CSSProperties, ReactElement } from 'react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowDown, FileText, Globe, ImageIcon, Info, Shapes } from '../design/AnalytixUiIcons'
+import { FileText, Globe, ImageIcon, Info, Shapes } from '../design/AnalytixUiIcons'
 import { createPortal } from 'react-dom'
 import { ComposerReferenceChip } from './chat/ComposerReferenceChip'
 import { useAnchoredPanel } from './chat/presentation/useAnchoredPanel'
 import panelCss from './chat/presentation/AnchoredPanel.module.css'
 import {
   modelSupportsImageInput,
-  type ApprovalPolicy,
-  type ModelProviderModelProfileV1,
-  type SandboxMode
+  type ModelProviderModelProfileV1
 } from '@shared/app-settings'
 import { parseClawCommand } from '@shared/claw-commands'
 import { DEFAULT_COMPOSER_MODEL_IDS } from '@shared/default-composer-models'
@@ -47,7 +45,6 @@ import type {
 } from '../agent/analytix-contract'
 import { getProvider } from '../agent/registry'
 import { isOrdinaryDisplayHistoryBlock } from '../agent/analytix-mapper'
-import { rendererRuntimeClient } from '../agent/runtime-client'
 import { isPublicProjectionRevoked } from '../lib/public-projection-revocation'
 import { invalidateSharedThreadSummary, querySharedThreadSummary } from './summary/thread-summary-resource'
 import { ThreadSummarySurface, THREAD_SUMMARY_TITLE_ID, THREAD_SUMMARY_TRIGGER_ID } from './summary/ThreadSummarySurface'
@@ -70,7 +67,7 @@ import { useNativeOfficeStore, nativeOfficeTargetMatches, nativeOfficeCreateErro
 import { WorkspaceTabs, WorkspaceToolSelector, workspacePanelDomId, workspaceTabDomId } from './workbench/WorkspaceTabs'
 import { openTaskDetail } from './workbench-schedule-controller'
 import { preloadAssistantMarkdownRenderer } from './chat/AssistantMarkdown'
-import type { ComposerExecutionSettings } from './chat/FloatingComposerExecutionPicker'
+import { useComposerExecutionPolicy } from './chat/use-composer-execution-policy'
 import type { ComposerFileReference } from '../lib/composer-file-references'
 import { ChatFileTreePanel, type ChatFileTreeReference } from './chat/ChatFileTreePanel'
 import {
@@ -82,7 +79,8 @@ import { SideConversationPanel } from './chat/SideConversationPanel'
 import { ConversationWidthControls, conversationPresentationPhase } from './chat/ConversationWidthControls'
 import { isImageThreadNavigationFrozen, subscribeImageThreadNavigation } from '../write/image-thread-navigation'
 import { requestUserInputLocalReopen } from './chat/presentation/chat/useUserInputLocalDisplay'
-import { SessionHeader } from './SessionHeader'
+import { SessionHeader, SessionHeaderTabsSeat } from './SessionHeader'
+import { DshChevronDownOutlineRegular } from './chat/presentation/DshToolIcons'
 import { ShellNavigationControls } from './shell/ShellNavigationControls'
 import { prepareWorkbenchDocumentMessage, workbenchEmptyMessageKeys } from '../write/workbench-document-message'
 import { resolveWriteAgentPreset } from '../write/agent-presets'
@@ -223,22 +221,14 @@ function ComposerReturnToBottomButton({
     <button
       type="button"
       data-analytix-return-to-bottom-button
-      className={`absolute bottom-[calc(100%+1.5rem)] left-1/2 z-30 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-white/60 bg-white/65 bg-clip-padding text-ds-ink shadow-[0_12px_30px_rgba(48,72,104,0.18)] backdrop-blur-2xl backdrop-saturate-150 transition-[opacity,background-color,border-color,box-shadow] duration-150 ease-in-out hover:border-white/75 hover:bg-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 dark:border-white/10 dark:bg-ds-elevated/70 dark:text-ds-ink dark:shadow-[0_18px_40px_rgba(0,0,0,0.32)] dark:hover:bg-ds-elevated/85 ${visibilityClass}`}
+      className={`dsh-composer-return-to-bottom absolute bottom-[calc(100%+16px)] left-1/2 z-30 flex h-[34px] w-[34px] -translate-x-1/2 items-center justify-center rounded-full transition-opacity duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${visibilityClass}`}
       title={label}
       aria-label={label}
       aria-hidden={!show}
       tabIndex={show ? 0 : -1}
       onClick={show ? state?.onClick : undefined}
     >
-      {state?.hasLiveActivity ? (
-        <span aria-hidden className="flex items-center justify-center gap-1">
-          <span className="motion-safe:animate-bounce h-1 w-1 rounded-full bg-current opacity-75 [animation-delay:-0.16s]" />
-          <span className="motion-safe:animate-bounce h-1 w-1 rounded-full bg-current opacity-75 [animation-delay:-0.08s]" />
-          <span className="motion-safe:animate-bounce h-1 w-1 rounded-full bg-current opacity-75" />
-        </span>
-      ) : (
-        <ArrowDown className="h-4 w-4" aria-hidden />
-      )}
+      <DshChevronDownOutlineRegular size={16} />
     </button>
   )
 }
@@ -655,6 +645,7 @@ export function Workbench(): ReactElement {
     composerProviderId,
     composerPickList,
     composerModelGroups,
+    loadComposerModels,
     disabledSkillIds,
     setComposerModel,
 	    setThreadSearch,
@@ -717,6 +708,7 @@ export function Workbench(): ReactElement {
       composerProviderId: s.composerProviderId,
       composerPickList: s.composerPickList,
       composerModelGroups: s.composerModelGroups,
+      loadComposerModels: s.loadComposerModels,
       disabledSkillIds: s.disabledSkillIds,
       setComposerModel: s.setComposerModel,
 	      setThreadSearch: s.setThreadSearch,
@@ -749,9 +741,7 @@ export function Workbench(): ReactElement {
   const [runtimeInfo, setRuntimeInfo] = useState<CoreRuntimeInfoJson | null>(null)
   const [runtimeSkills, setRuntimeSkills] = useState<CoreRuntimeSkillJson[]>([])
   const [skillDiscoveryIncomplete, setSkillDiscoveryIncomplete] = useState(false)
-  const [composerExecutionSettings, setComposerExecutionSettings] =
-    useState<ComposerExecutionSettings | null>(null)
-  const [composerExecutionApplying, setComposerExecutionApplying] = useState(false)
+  const composerExecutionPolicy = useComposerExecutionPolicy()
   const attachmentUploads = composerDraft.attachmentUploads ?? []
   const attachmentUploadBusy = (composerDraft.pendingAttachmentUploads ?? 0) > 0 || attachmentUploads.some(item => item.status === 'uploading')
   const attachmentUploadError = composerDraft.attachmentUploadError ?? null
@@ -762,6 +752,7 @@ export function Workbench(): ReactElement {
   const [planPanelOverlayPreferred, setPlanPanelOverlayPreferred] = useState(false)
   const [timelineReturnToBottomState, setTimelineReturnToBottomState] =
     useState<TimelineReturnToBottomState | null>(null)
+  const [conversationTabsTarget, setConversationTabsTarget] = useState<HTMLDivElement | null>(null)
   const [ownedRequestNavigation, setOwnedRequestNavigation] = useState<{ threadId: string; requestId: string | null; returnThreadId: string | null } | null>(null)
   const writeAssistantOpen = useWriteWorkspaceStore((s) => s.assistantOpen)
   const writeAssistantModel = useWriteWorkspaceStore((s) => s.assistantModel)
@@ -1504,44 +1495,6 @@ export function Workbench(): ReactElement {
     useChatStore.getState().openSideConversationDraft()
   }, [currentSideConversations, selectSideConversation, setSidePanelOpen])
 
-  useEffect(() => {
-    let cancelled = false
-    void rendererRuntimeClient.getSettings()
-      .then((settings) => {
-        if (cancelled) return
-        setComposerExecutionSettings({
-          approvalPolicy: settings.runtime.approvalPolicy,
-          sandboxMode: settings.runtime.sandboxMode
-        })
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const updateComposerExecutionSettings = (patch: Partial<ComposerExecutionSettings>): void => {
-    if (!composerExecutionSettings || composerExecutionApplying) return
-    const previous = composerExecutionSettings
-    const next = { ...previous, ...patch }
-    setComposerExecutionSettings(next)
-    setComposerExecutionApplying(true)
-    void rendererRuntimeClient.setSettings({
-      runtime: {
-        ...(patch.approvalPolicy ? { approvalPolicy: patch.approvalPolicy as ApprovalPolicy } : {}),
-        ...(patch.sandboxMode ? { sandboxMode: patch.sandboxMode as SandboxMode } : {})
-      }
-    }).then((settings) => {
-      setComposerExecutionSettings({
-        approvalPolicy: settings.runtime.approvalPolicy,
-        sandboxMode: settings.runtime.sandboxMode
-      })
-      void probeRuntime('background')
-    }).catch((error: unknown) => {
-      setComposerExecutionSettings(previous)
-      setError(error instanceof Error ? error.message : String(error))
-    }).finally(() => setComposerExecutionApplying(false))
-  }
 
   const codeThreads = useMemo(
     () => threads.filter((thread) =>
@@ -3286,6 +3239,17 @@ export function Workbench(): ReactElement {
     isVisible: rightPanelDockedVisible,
     size: rightSidebarWidth
   })
+  const workspaceViewerPresented = workspaceRoutePresented && rightPanelDockedVisible && !workspaceSelectorOpen && currentDockedRightPanelMode !== null &&
+    ['documents', 'terminal', 'browser', 'file'].includes(currentDockedRightPanelMode)
+  const toggleWorkspaceViewerFocus = (): void => {
+    if (rightWorkspaceAutoOverlay) closeRightPanel()
+    else setDocumentFocused(value => !value)
+  }
+  const workspaceViewerControls = workspaceViewerPresented ? {
+    focused: documentFocused || rightWorkspaceAutoOverlay,
+    onToggleFocus: toggleWorkspaceViewerFocus,
+    onCollapse: closeRightPanel
+  } : undefined
   const [rightPanelRenderMode, setRightPanelRenderMode] =
     useState<DockedRightPanelRenderMode | null>(currentDockedRightPanelMode)
   useEffect(() => {
@@ -3451,6 +3415,7 @@ export function Workbench(): ReactElement {
     if (!rightPanelDockedVisible && !rightPanelMotion.isMounted && !rightPanelRetained && !documentsMounted) return null
     const panelMode = rightPanelDockedVisible ? currentDockedRightPanelMode : rightPanelRenderMode
     const terminalPresented = workspaceRoutePresented && rightPanelDockedVisible && !workspaceSelectorOpen && panelMode === 'terminal'
+    const browserPresented = workspaceRoutePresented && rightPanelDockedVisible && !workspaceSelectorOpen && panelMode === 'browser'
 
     return (
       <aside
@@ -3523,7 +3488,7 @@ export function Workbench(): ReactElement {
             <Suspense fallback={<WorkbenchLoadingFallback surface="sidebar" />}>
               {documentsMounted ? (
                 <div className="h-full min-h-0" hidden={panelMode !== 'documents'}>
-                  <DocumentWorkspacePanel threadId={activeThreadId} activeTab={workspaceActiveTab} visible={route !== 'plugins' && route !== 'settings' && panelMode === 'documents' && rightPanelVisible && !workspaceSelectorOpen} onSubmitPrompt={sendWritePrompt} onPrepareDraft={prepareNativeDraft}
+                  <DocumentWorkspacePanel viewerControls={panelMode === 'documents' ? workspaceViewerControls : undefined} threadId={activeThreadId} activeTab={workspaceActiveTab} visible={workspaceRoutePresented && rightPanelDockedVisible && !workspaceSelectorOpen && panelMode === 'documents'} onSubmitPrompt={sendWritePrompt} onPrepareDraft={prepareNativeDraft}
                     fileBrowser={renderFileTreeSidePanel(workspaceActiveTab?.workspaceRoot || textDocumentRoot || fileTreeWorkspaceRoot)}
                     onFocusConversation={() => {
                       setDocumentFocused(false)
@@ -3533,11 +3498,11 @@ export function Workbench(): ReactElement {
                 </div>
               ) : null}
               <TerminalWorkspacePanel opened={workspaceTabs.some(tab => tab.mode === 'terminal')}
-                visible={terminalPresented}
+                visible={terminalPresented} viewerControls={terminalPresented ? workspaceViewerControls : undefined}
                 workspaceRoot={workspaceRoot} focusRequest={terminalFocusRequest} onCollapse={closeRightPanel} />
               {workspaceTabs.some((tab) => tab.mode === 'browser') ? (
                 <div className="h-full min-h-0" hidden={panelMode !== 'browser'} inert={panelMode !== 'browser' || !rightPanelVisible}>
-                  <DevBrowserPanelIsland onSubmitPrompt={sendWritePrompt} preferredUrl={latestDevPreviewUrl} className="h-full max-h-full w-full flex-col" onCollapse={closeRightPanel} />
+                  <DevBrowserPanelIsland visible={browserPresented} viewerControls={browserPresented ? workspaceViewerControls : undefined} onSubmitPrompt={sendWritePrompt} preferredUrl={latestDevPreviewUrl} className="h-full max-h-full w-full flex-col" onCollapse={closeRightPanel} />
                 </div>
               ) : null}
               {panelMode === 'schedule-task' && workspaceActiveTab?.scheduleTaskId ? (
@@ -3627,6 +3592,7 @@ export function Workbench(): ReactElement {
                 renderPlanPanel('h-full max-h-full w-full', rightPanelDockedVisible && !workspaceSelectorOpen && rightPanelMode === 'plan')
               ) : panelMode === 'file' ? (
                 <WorkspaceFilePreviewPanel
+                  viewerControls={panelMode === 'file' ? workspaceViewerControls : undefined}
                   target={filePreviewTarget}
                   tabbedWorkspace
                   workspaceRoot={workspaceRoot}
@@ -3717,13 +3683,10 @@ export function Workbench(): ReactElement {
             data-open={rightPanelDockedVisible ? 'true' : 'false'}
             style={{ width: rightWorkspaceAutoOverlay ? 'auto' : rightPanelMotion.animatedSize, flex: rightWorkspaceAutoOverlay ? '1 1 0' : undefined, opacity: rightPanelMotion.opacity }}>
             <div ref={rightTabsContentRef} style={{ width: rightWorkspaceAutoOverlay ? '100%' : rightSidebarWidth, minWidth: rightWorkspaceAutoOverlay ? 0 : rightSidebarWidth }}>
-            <WorkspaceTabs tabs={workspaceTabs} activeTabId={workspaceActiveTabId} selectorOpen={workspaceSelectorOpen}
+            <WorkspaceTabs viewerControlsInHeader={workspaceViewerPresented} tabs={workspaceTabs} activeTabId={workspaceActiveTabId} selectorOpen={workspaceSelectorOpen}
               focused={documentFocused || rightWorkspaceAutoOverlay} onSelect={activateWorkspaceTab} onClose={closeWorkspaceTab}
               onReorder={useWorkspaceTabsStore.getState().reorderTab} onAdd={useWorkspaceTabsStore.getState().showSelector}
-              onToggleFocus={() => {
-                if (rightWorkspaceAutoOverlay) closeRightPanel()
-                else setDocumentFocused((value) => !value)
-              }} onCollapse={closeRightPanel} />
+              onToggleFocus={toggleWorkspaceViewerFocus} onCollapse={closeRightPanel} />
             </div>
           </div>
         ) : null}
@@ -3855,6 +3818,7 @@ export function Workbench(): ReactElement {
                     <div ref={setConversationBody} data-analytix-conversation-body data-phase={conversationPhase} data-conversation-route={route === 'claw' ? 'claw' : 'chat'}
                       style={{ paddingInlineEnd: summaryReservedInlineEnd, '--ax-thread-summary-reserve': `${summaryReservedInlineEnd}px` } as CSSProperties}
                       className={`${stageInsetClass} relative flex min-h-0 min-w-0 flex-1 flex-col`}>
+                      {route === 'chat' ? <SessionHeaderTabsSeat seatRef={setConversationTabsTarget} /> : null}
                       <div data-analytix-conversation-view className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                         {ownedRequestNavigation?.threadId === activeThreadId && ownedRequestNavigation.returnThreadId && ownedRequestNavigation.returnThreadId !== activeThreadId ? (
                           <div className="ds-no-drag flex shrink-0 items-center justify-between gap-3 border-b border-ds-border-muted px-5 py-2 text-xs text-ds-muted">
@@ -3866,6 +3830,7 @@ export function Workbench(): ReactElement {
                           </div>
                         ) : null}
                         <ChatTimelineIsland
+                          conversationTabsTarget={route === 'chat' ? conversationTabsTarget : undefined}
                           conversationPhase={route === 'chat' ? conversationPhase : undefined}
                           focusRequestId={ownedRequestNavigation?.threadId === activeThreadId ? ownedRequestNavigation.requestId : null}
                           onRequestFocused={() => setOwnedRequestNavigation(current => current ? { ...current, requestId: null } : null)}
@@ -3937,6 +3902,7 @@ export function Workbench(): ReactElement {
                             onComposerModelChange={handleComposerModelChange}
                             onComposerReasoningEffortChange={route === 'chat' || route === 'claw' ? setComposerReasoningEffort : undefined}
                             onConfigureProviders={() => openSettings('providers')}
+                            onReloadComposerModels={loadComposerModels}
                             onOpenPermissionSettings={() => openSettings('permissions')}
                             onSend={handleSend}
                             documentReferenceCount={documentQuotes.length + nativeReferences.filter(reference => reference.threadId === activeThreadId).length}
@@ -3950,8 +3916,10 @@ export function Workbench(): ReactElement {
                             fileReferenceEnabled={route === 'chat' && !activeSddDraft && !activeDataAnalysis}
                             fileReferences={composerFileReferences}
                             webAccessAvailable={webAccessAvailable}
-                            executionSettings={composerExecutionSettings}
-                            executionSettingsApplying={composerExecutionApplying}
+                            executionSettings={route === 'chat' ? composerExecutionPolicy.value : null}
+                            executionSettingsLegacy={composerExecutionPolicy.legacy}
+                            executionSettingsUnavailable={composerExecutionPolicy.unavailable}
+                            executionSettingsApplying={composerExecutionPolicy.applying}
                             skillCommands={runtimeSkills}
                             disabledSkillIds={disabledSkillIds}
                             onPickAttachments={(files) => void handlePickAttachments(files)}
@@ -3977,7 +3945,7 @@ export function Workbench(): ReactElement {
                               })
                             }}
                             onReviewCommand={(target) => void reviewActiveThread(target)}
-                            onExecutionSettingsChange={updateComposerExecutionSettings}
+                            onExecutionSettingsChange={route === 'chat' ? composerExecutionPolicy.onChange : undefined}
                             onOpenChanges={() => setRightPanelMode('changes')}
                             onReviewChanges={() => void reviewActiveThread({ kind: 'uncommittedChanges' })}
                             reviewChangesDisabled={busy || runtimeConnection !== 'ready'}

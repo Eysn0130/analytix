@@ -1,5 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { nativeTypedWorkbookSelection, type NativeOfficeRequest, type NativeOfficeResponse, type NativeOfficeSelection, type NativeOfficeView } from '@shared/native-office'
+import { Check, Info, Save, Trash2 } from '../design/AnalytixUiIcons'
+import { WorkspaceViewerIconButton, WorkspaceViewerMenu } from '../components/workbench/WorkspaceViewerHeader'
+import { useAnchoredPanel } from '../components/chat/presentation/useAnchoredPanel'
 import styles from './workbook-cell-editor.module.css'
 import {useNativeOfficeStore,nativeWorkbookDraftKey,nativeOfficeTargetKey,nativeWorkbookDraftUnsettled,nativeWorkbookDraftCellMatches,type NativeWorkbookCellDraft} from './native-office-store'
 import {registerWriteShutdownInput} from '../write/write-shutdown'
@@ -75,8 +79,9 @@ const saveError = (error:string | undefined):string => error === 'stale_selectio
   ? '选区或文件版本已变化，请重新选择。' : error === 'unsupported_selection' || error === 'invalid_request'
     ? '此输入或公式不受支持；请检查类型与公式范围。' : '保存结果尚未确认，请通过“查询结果”核实。'
 
-export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspace='',path=view.path}:{
+export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspace='',path=view.path,toolbarTarget}:{
   view:NativeOfficeView; threadId:string | null; active:boolean; busy:boolean; workspace?:string; path?:string
+  toolbarTarget?:HTMLElement | null
   onRequest:(request:NativeOfficeRequest) => Promise<NativeOfficeResponse | undefined>
 }) {
   const preferredDraftKey=nativeWorkbookDraftKey(workspace,path,threadId)
@@ -106,6 +111,7 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
   const form=draft ?? initialValue(cell),change=workbookDraftEdit(form.type,form.value)
   const changed=!!draft?.changed
   const owner=draft?.id ?? JSON.stringify([draftKey,view.objectId,view.revision,cell?.sheet,cell?.column,cell?.row])
+  const feedbackPanel=useAnchoredPanel<HTMLSpanElement>({enabled:active && toolbarTarget !== null,ownerKey:owner})
   const address=draft ? `${draft.sheetName}!${column(draft.cell.column)}${draft.cell.row+1}`
     : selection?.ranges.map(range=>`${range.sheetName}!${column(range.startColumn)}${range.startRow+1}${range.endColumn === range.startColumn && range.endRow === range.startRow ? '' : `:${column(range.endColumn)}${range.endRow+1}`}`).join('；')
   useLayoutEffect(()=>{ensureNativeWorkbookDraftShutdownGuard();return ()=>{useNativeOfficeStore.setState({workbookDraftComposing:false})}},[])
@@ -163,13 +169,44 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
           : unresolved || view.dirty || view.saving ? '修改结果待确认；请先核实已有修改。' : form.type === 'formula' ? '公式仅支持同表有界引用；不支持跨表或整列公式。'
             : form.type === 'empty' ? '保存后清空当前单元格。' : '本地草稿；点击绿色“保存”后写入文件。'
   const currentNotice=notice && (notice.owner === owner || notice.owner === JSON.stringify([draftKey,view.objectId]) && notice.revisions?.includes(view.revision)) ? notice : null
+  const feedback=pending ? '正在保存；等待文件回执。' : draft?.closeRequested ? hint : currentNotice?.text ?? (changed && !change ? form.type === 'number' ? '请输入有限数值；文本请明确选择“文本”类型。'
+    : form.type === 'text' ? '空文本请明确选择清空类型。' : '公式须以 = 开头，且不超过 1024 个字符。' : hint)
+  const feedbackText=`${sum !== null ? `求和 ${sum.toLocaleString(undefined,{maximumSignificantDigits:15})} · ` : ''}${feedback}${partial ? ' 当前引用保留原始范围，捕获内容不完整，不显示整区求和。' : ''}`
+  const feedbackError=!!(currentNotice?.error || draft?.closeRequested)
+  const {setOpen:setFeedbackOpen}=feedbackPanel
+  // Errors and close vetoes remain visible immediately, in an anchored surface
+  // rather than a permanent second toolbar row. Regular status stays available
+  // through the same labelled icon and its hover/focus explanation.
+  useEffect(()=>{if (feedbackError) setFeedbackOpen(true)},[feedbackError,feedbackText,setFeedbackOpen])
+  const actions=<>
+    <WorkspaceViewerIconButton label={pending ? '保存中…' : '保存'} tone={canSave && changed && change ? 'commit' : undefined}
+      disabled={!canSave || !changed || !change} onClick={()=>void save()}><Save aria-hidden="true" /></WorkspaceViewerIconButton>
+    <WorkspaceViewerMenu label="单元格编辑选项" ownerKey={owner} enabled={active}>
+      <label className={styles.type}>单元格输入类型
+        <select aria-label="单元格输入类型" value={form.type} disabled={!editable} onChange={event=>{
+          const type=event.target.value as CellEdit['type'];update(type,form.value)
+          if (type !== 'empty') input.current?.focus()
+        }}><option value="text">文本</option><option value="number">数值</option><option value="formula">公式</option><option value="empty">清空</option></select>
+      </label>
+      <button type="button" role="menuitem" aria-label="放弃草稿" disabled={!draft || pending || frozen} onClick={discard}><Trash2 aria-hidden="true" />放弃草稿</button>
+      {draft ? <button type="button" role="menuitem" aria-label="保留草稿" disabled={pending || frozen} onClick={keep}><Check aria-hidden="true" />保留草稿</button> : null}
+    </WorkspaceViewerMenu>
+    <span ref={feedbackPanel.rootRef} className={styles.feedbackAnchor} data-feedback-error={feedbackError || undefined}>
+      <WorkspaceViewerIconButton ref={feedbackPanel.triggerRef} label={feedbackText} className={styles.feedbackButton}
+        aria-haspopup="dialog" aria-expanded={feedbackPanel.open} aria-controls={feedbackPanel.id}
+        onClick={()=>setFeedbackOpen(!feedbackPanel.open)}><Info aria-hidden="true" /></WorkspaceViewerIconButton>
+      <span className={styles.srOnly} aria-hidden={feedbackPanel.open || undefined} role={feedbackPanel.open ? undefined : feedbackError ? 'alert' : 'status'}>{feedbackText}</span>
+      {feedbackPanel.open ? createPortal(<div ref={feedbackPanel.panelRef} id={feedbackPanel.id} role="dialog" aria-label="单元格编辑状态"
+        className={styles.feedback} style={feedbackPanel.style}>
+        <p role={feedbackError ? 'alert' : 'status'}>{sum !== null ? <output className={styles.sum} aria-label="完整选区求和">求和 {sum.toLocaleString(undefined,{maximumSignificantDigits:15})} · </output> : null}
+          {feedback}{partial ? ' 当前引用保留原始范围，捕获内容不完整，不显示整区求和。' : ''}</p>
+      </div>,document.body) : null}
+    </span>
+  </>
   return <div className={styles.editor} data-workbook-cell-editor data-workbook-draft-dirty={changed || pending || !!draft?.unconfirmed || undefined}>
     <div className={styles.controls}>
       <span className={styles.address} title={address} aria-label="工作簿选区">{address || '未选择单元格'}{partial ? '（部分捕获）' : ''}</span>
-      <select aria-label="单元格输入类型" value={form.type} disabled={!editable} onChange={event=>{
-        const type=event.target.value as CellEdit['type'];update(type,form.value)
-        if (type !== 'empty') input.current?.focus()
-      }}><option value="text">文本</option><option value="number">数值</option><option value="formula">公式</option><option value="empty">清空</option></select>
+      <span className={styles.fx} aria-hidden="true">fx</span>
       <input ref={input} data-workbook-cell-input aria-label="单元格值或公式" className={styles.value} disabled={!editable || form.type === 'empty'}
         value={form.type === 'empty' ? '' : form.value} maxLength={form.type === 'formula' ? 1024 : 4096}
         placeholder={form.type === 'formula' ? '=SUM(A1:A2)' : form.type === 'number' ? '输入有限数值' : '输入文本'}
@@ -180,15 +217,7 @@ export function WorkbookCellEditor({view,threadId,active,busy,onRequest,workspac
           if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 's') {event.preventDefault();void save()}
           else if (event.key === 'Escape') {event.preventDefault();keep()}
         }} />
-      <button type="button" className={styles.save} disabled={!canSave || !changed || !change} onClick={()=>void save()}>{pending ? '保存中…' : '保存'}</button>
-      <button type="button" className={styles.cancel} disabled={!draft || pending || frozen} onClick={discard}>放弃草稿</button>
-      {draft ? <button type="button" className={styles.cancel} disabled={pending || frozen} onClick={keep}>保留草稿</button> : null}
-    </div>
-    <div className={styles.feedback} role={currentNotice?.error || draft?.closeRequested ? 'alert' : 'status'}>
-      {sum !== null ? <output className={styles.sum} aria-label="完整选区求和">求和 {sum.toLocaleString(undefined,{maximumSignificantDigits:15})} · </output> : null}
-      {pending ? '正在保存；等待文件回执。' : draft?.closeRequested ? hint : currentNotice?.text ?? (changed && !change ? form.type === 'number' ? '请输入有限数值；文本请明确选择“文本”类型。'
-        : form.type === 'text' ? '空文本请明确选择清空类型。' : '公式须以 = 开头，且不超过 1024 个字符。' : hint)}
-      {partial ? ' 当前引用保留原始范围，捕获内容不完整，不显示整区求和。' : ''}
+      {toolbarTarget ? createPortal(actions,toolbarTarget) : toolbarTarget === undefined ? <span className={styles.fallbackActions}>{actions}</span> : null}
     </div>
   </div>
 }

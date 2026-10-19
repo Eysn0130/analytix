@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import maintenanceActionsSource from './chat-store-maintenance-actions.ts?raw'
-import type { ThreadUsageSnapshot, TurnUsageById, ChatBlock, NormalizedThread, ThreadEventSink, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
+import type { AgentProvider, ThreadUsageSnapshot, TurnUsageById, ChatBlock, NormalizedThread, ThreadEventSink, ThreadExecutionPolicy, ThreadGoal, ThreadGoalStatus, ThreadTodoList, ThreadTodoStatus } from '../agent/types'
 import type { SseEventPayload, SseEndPayload, SseErrorPayload } from '@shared/analytix-api'
 import { ThreadDetailResponseV1Schema } from '../../../../packages/runtime/src/contracts/thread-detail.js'
 import type { ChatState, ChatStoreGet, ChatStoreSet, SendMessageOverrides, TurnForkSource, TurnForkSnapshot } from './chat-store-types'
 import { readThreadForkRegistry } from '../lib/thread-fork-registry'
 import i18n from '../i18n'
 import { getThreadBinding } from './chat-store-thread-binding'
+import { hasFreshThreadDetailCache, invalidateThreadDetailCache, loadThreadDetailWithCache } from '../lib/thread-detail-cache'
 import { queuedMessagesForThread, queuedPauseReason } from './chat-store-queue'
 import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
 import { clearActiveStream, getActiveStreamSnapshotFor, resetActiveStream } from '../thread/streaming/active-stream-store'
@@ -45,6 +46,7 @@ type Harness = {
   get: ChatStoreGet
   provider: {
     renameThread: ReturnType<typeof vi.fn>
+    updateThreadExecutionPolicy: ReturnType<typeof vi.fn>
     archiveThread: ReturnType<typeof vi.fn>
     deleteThread: ReturnType<typeof vi.fn>
     forkThread: ReturnType<typeof vi.fn>
@@ -157,6 +159,8 @@ function buildHarness(options: {
 
   const provider = {
     renameThread: vi.fn(async (_threadId: string, _title: string) => undefined),
+    updateThreadExecutionPolicy: vi.fn(async (threadId: string, policy: ThreadExecutionPolicy) => ({ ...thread(threadId), ...policy,
+      executionPolicyVersion: 2 as const, updatedAt: '2026-10-20T00:01:00Z' })),
     archiveThread: vi.fn(async () => undefined),
     deleteThread: vi.fn(async () => undefined),
     forkThread: vi.fn(async (threadId: string, _options?: { turnId?: string; endSeq?: number }) => ({
@@ -277,6 +281,130 @@ function sourceForkFixture(): { source: TurnForkSource; snapshot: TurnForkSnapsh
     isCurrent: () => current, getSnapshot: () => snapshot
   } }
 }
+
+describe('thread execution policy metadata mutation', () => {
+  const readOnly: ThreadExecutionPolicy = { approvalPolicy: 'never', sandboxMode: 'read-only' }
+  const full: ThreadExecutionPolicy = { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }
+  const observed = (id: string, policy = readOnly, executionPolicyVersion: 2 | null = 2): NormalizedThread => ({
+    ...thread(id), ...policy, executionPolicyVersion: executionPolicyVersion ?? undefined, updatedAt: '2026-10-20T00:01:00Z'
+  })
+  beforeEach(() => { registryMock.getProvider.mockReset(); invalidateThreadDetailCache(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => { invalidateThreadDetailCache(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  it('waits for exact metadata, invalidates cached detail and preserves a running turn', async () => {
+    const h = buildHarness(), response = deferred<NormalizedThread>()
+    h.state.threads = [observed('thr_existing', full)]
+    h.provider.getThreadDetail.mockResolvedValueOnce({ blocks: [], latestSeq: 1, thread: h.state.threads[0] })
+    await loadThreadDetailWithCache(h.provider as unknown as AgentProvider, 'thr_existing', h.state.threads[0])
+    expect(hasFreshThreadDetailCache(h.state.threads[0]!)).toBe(true)
+    h.state.busy = true; h.state.currentTurnId = 'frozen-turn'; h.state.currentTurnUserId = 'frozen-user'
+    const blocks = h.state.blocks, controller = new AbortController(); h.sseAbortRef.current = controller
+    const binding = getThreadBinding(h.sseAbortRef)
+    const streamGeneration = binding.generation, submissionGeneration = binding.submissionGeneration
+    h.provider.updateThreadExecutionPolicy.mockImplementationOnce(() => response.promise)
+    const pending = h.actions.updateThreadExecutionPolicy('thr_existing', readOnly)
+    expect(h.state.threads[0]).toMatchObject(full)
+    expect(binding.threadPolicyPending.has('thr_existing')).toBe(true)
+    expect(hasFreshThreadDetailCache(h.state.threads[0]!)).toBe(false)
+    expect(await h.actions.updateThreadExecutionPolicy('thr_existing', full)).toBe(false)
+    response.resolve(observed('thr_existing'))
+    expect(await pending).toBe(true)
+    expect(h.provider.updateThreadExecutionPolicy).toHaveBeenCalledExactlyOnceWith('thr_existing', readOnly)
+    expect(h.provider.getThreadDetail).toHaveBeenCalledOnce()
+    expect(h.state.threads[0]).toMatchObject({ ...readOnly, executionPolicyVersion: 2, executionPolicyUncertain: false })
+    expect(h.state.busy).toBe(true); expect(h.state.currentTurnId).toBe('frozen-turn'); expect(h.state.blocks).toBe(blocks)
+    expect(controller.signal.aborted).toBe(false)
+    expect(binding.generation).toBe(streamGeneration); expect(binding.submissionGeneration).toBe(submissionGeneration)
+    expect(binding.threadPolicyPending.has('thr_existing')).toBe(false)
+    expect(binding.threadMetadataGeneration).toBe(2); expect(binding.threadMetadataGenerationById.get('thr_existing')).toBe(2)
+    expect(binding.threadMetadataGenerationById.has('thr_other')).toBe(false)
+  })
+
+  it.each([true, false])('reads the actual owner after an uncertain PATCH and confirms only the exact pair (matches=%s)', async matches => {
+    const h = buildHarness()
+    h.state.threads = [observed('thr_existing', full)]
+    h.provider.updateThreadExecutionPolicy.mockRejectedValueOnce(new Error('Synthetic lost acknowledgement'))
+    h.provider.getThreadDetail.mockResolvedValueOnce({ blocks: [], latestSeq: 1,
+      thread: observed('thr_existing', matches ? readOnly : full) })
+    expect(await h.actions.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(matches)
+    expect(h.provider.getThreadDetail).toHaveBeenCalledExactlyOnceWith('thr_existing')
+    expect(h.state.threads[0]).toMatchObject({ ...(matches ? readOnly : full), executionPolicyUncertain: false })
+    expect(h.state.error === null).toBe(matches)
+  })
+
+  it.each(['PATCH', 'GET'] as const)('does not confirm an unchanged legacy full-access pair from %s without the marker', async seam => {
+    const h = buildHarness()
+    h.state.threads = [observed('thr_existing', full, null)]
+    if (seam === 'PATCH') h.provider.updateThreadExecutionPolicy.mockResolvedValueOnce(observed('thr_existing', full, null))
+    else {
+      h.provider.updateThreadExecutionPolicy.mockRejectedValueOnce(new Error('Synthetic lost acknowledgement'))
+      h.provider.getThreadDetail.mockResolvedValueOnce({ blocks: [], latestSeq: 1, thread: observed('thr_existing', full, null) })
+    }
+    expect(await h.actions.updateThreadExecutionPolicy('thr_existing', full)).toBe(false)
+    expect(h.state.threads[0]?.executionPolicyVersion).toBeUndefined()
+    expect(h.state.error).not.toBeNull()
+  })
+
+  it('retains the displayed pair and blocks authority after both PATCH and readback fail, then permits a real retry', async () => {
+    const h = buildHarness()
+    h.state.threads = [observed('thr_existing', full)]
+    h.provider.updateThreadExecutionPolicy.mockRejectedValueOnce(new Error('Synthetic PATCH outcome unavailable'))
+    h.provider.getThreadDetail.mockRejectedValueOnce(new Error('Synthetic readback unavailable'))
+    expect(await h.actions.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(false)
+    expect(h.state.threads[0]).toMatchObject({ ...full, executionPolicyUncertain: true })
+    expect(await h.actions.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(true)
+    expect(h.state.threads[0]).toMatchObject({ ...readOnly, executionPolicyUncertain: false })
+  })
+
+  it('rejects the wrong readback owner rather than clearing an unknown policy', async () => {
+    const h = buildHarness()
+    h.provider.updateThreadExecutionPolicy.mockRejectedValueOnce(new Error('Synthetic PATCH outcome unavailable'))
+    h.provider.getThreadDetail.mockResolvedValueOnce({ blocks: [], latestSeq: 1, thread: observed('thr_other') })
+    expect(await h.actions.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(false)
+    expect(h.state.threads[0]?.executionPolicyUncertain).toBe(true)
+    expect(h.state.threads).toHaveLength(1)
+  })
+
+  it('updates only A metadata when its acknowledgement arrives after selecting B', async () => {
+    const h = buildHarness(), response = deferred<NormalizedThread>()
+    h.state.threads = [observed('thr_existing', full), observed('thr_other', full)]
+    h.provider.updateThreadExecutionPolicy.mockImplementationOnce(() => response.promise)
+    const pending = h.actions.updateThreadExecutionPolicy('thr_existing', readOnly)
+    h.state.activeThreadId = 'thr_other'; h.state.error = 'B keeps this error'
+    getThreadBinding(h.sseAbortRef).generation += 1
+    response.resolve(observed('thr_existing'))
+    expect(await pending).toBe(true)
+    expect(h.state.threads[0]).toMatchObject(readOnly); expect(h.state.threads[1]).toMatchObject(full)
+    expect(h.state.activeThreadId).toBe('thr_other'); expect(h.state.error).toBe('B keeps this error')
+  })
+
+  it('does not write B error when A policy is changed from the B view', async () => {
+    const h = buildHarness()
+    h.state.threads = [observed('thr_existing', full), observed('thr_other', full)]
+    h.state.activeThreadId = 'thr_other'; h.state.error = 'B keeps this error'
+    h.provider.updateThreadExecutionPolicy.mockRejectedValueOnce(new Error('Synthetic A PATCH error'))
+    h.provider.getThreadDetail.mockRejectedValueOnce(new Error('Synthetic A readback error'))
+    expect(await h.actions.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(false)
+    expect(h.state.error).toBe('B keeps this error')
+    expect(h.state.threads[0]?.executionPolicyUncertain).toBe(true)
+    expect(h.state.threads[1]?.executionPolicyUncertain).not.toBe(true)
+    expect(getThreadBinding(h.sseAbortRef).threadPolicyPending.size).toBe(0)
+  })
+
+  it('does not overwrite a replacement A view error after A to B to A', async () => {
+    const h = buildHarness(), response = deferred<NormalizedThread>()
+    h.provider.updateThreadExecutionPolicy.mockImplementationOnce(() => response.promise)
+    const pending = h.actions.updateThreadExecutionPolicy('thr_existing', readOnly)
+    h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation += 1
+    h.state.activeThreadId = 'thr_existing'; getThreadBinding(h.sseAbortRef).generation += 1
+    h.state.error = 'Replacement A keeps this error'
+    h.provider.getThreadDetail.mockRejectedValueOnce(new Error('Synthetic readback unavailable'))
+    response.reject(new Error('Synthetic stale PATCH error'))
+    expect(await pending).toBe(false)
+    expect(h.state.error).toBe('Replacement A keeps this error')
+    expect(h.state.threads[0]?.executionPolicyUncertain).toBe(true)
+  })
+})
 
 describe('chat-store-maintenance-actions goal actions', () => {
   it('keeps the captured E when the source thread cursor advances', async () => {
