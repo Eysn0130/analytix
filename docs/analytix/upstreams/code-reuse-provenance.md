@@ -41,6 +41,7 @@ provenance and admission checks; the rule grants no additional reuse rights.
 
 | Item | Admission scope | Source id | Evidence | Current disposition | Required closure |
 | --- | --- | --- | --- | --- | --- |
+| DeepSeek Harness @ candidate menu shared presentation | `artifact-entering` | `deepseek-harness` | [Two fixed menu objects and the existing shared consumer](#dsh-mention-candidate-menu-follow-up) | `candidate` | Shared candidate implemented with existing mention identities; focused local checks pass; combined native acceptance and current CI remain pending. |
 | DeepSeek Harness user message CSS and shared calendar destinations | `artifact-entering` | `deepseek-harness` | [Existing pinned objects and updated destination map](#dsh-user-message-destination-update--2026-10-15-utc) | `candidate` | Preserve existing MIT notice and native editing/privacy contracts; combined regression and rendered acceptance remain pending. |
 | DeepSeek Harness independent public trajectory v2 | `artifact-entering` | `deepseek-harness` | [Ten pinned presentation sources and v2 destinations](#deepseek-harness-independent-public-trajectory-source-intake--2026-10-15-utc) | `candidate` | Preserve existing MIT notice, public projection and protected Inspect ownership; candidate application and coordinated execution acceptance remain pending. |
 | DeepSeek Harness Markdown, protected-local Shell/Read, central composition and inline process/work-details policy | `artifact-entering` | `deepseek-harness` | [Pinned source objects, retained MIT notice and scoped 2100397 integration](deepseek-harness-presentation-sync.md#2026-10-10--scoped-source-admission-at-2100397) | `approved` for the listed source objects and adaptations only | Source admission is checked at candidate `210039729892bf80fb8e0e9a7c909b70266ec6bc`; all listed source path/blob pairs match fixed pin `5badb150…`. Earlier `0ac4f84d…` and subsequent source freezes retain their historical test/environment bounds. Existing protected-local authority, explicit Footer Fork semantic adaptation, selected Browse three-path artwork and full MIT notice are preserved. Full DSH parity, native/installed behavior, current CI/main, packaged distribution and release remain OPEN. |
@@ -1995,9 +1996,49 @@ without Electron, a live Provider or mutable user state. Original user-supplied
 DSH image pixels were not available to this writer, so source-based geometry
 review and these screenshots do not establish pixel equivalence.
 
-Thread policy confirmation remains a cross-layer gap: the renderer requires an
-actual version-2 PATCH/readback and refuses an unconfirmed legacy same-pair
-response. The Core patch owner does not yet seal explicit complete-pair choices;
-no Go source, public schema or migration rule was changed in this candidate.
-Combined native acceptance, DSH parity, whole-product, packaging and release
-acceptance are not claimed.
+At this candidate snapshot, thread policy confirmation remained a cross-layer
+gap: the renderer required an actual version-2 PATCH/readback and refused an
+unconfirmed legacy same-pair response. The Core patch owner did not yet seal
+explicit complete-pair choices; no Go source, public schema or migration rule
+was changed in that candidate.
+
+Currentness update: PR66 landed that Core fix on `main` at
+`34af71e25bdfa6f44642ab9e78bae3a3e9efeaf8`.
+[The current lifecycle owner](../../../packages/runtime-go/internal/app/thread/lifecycle.go)
+canonicalizes a complete explicit valid pair and derives version 2, including
+same-value and legal custom choices, while preserving future versions and
+rejecting invalid public policy fields or a client-supplied version marker.
+This supersedes the historical Core-gap statement, not the candidate's recorded
+verification bounds. Combined native acceptance, DSH parity, whole-product,
+packaging and release acceptance are not claimed by the snapshot above.
+
+## DSH mention candidate menu follow-up
+
+Disposition: `candidate`; reuse mode: `port-and-adapt`. Fixed source: DeepSeek
+Harness `5badb15009ae1756c3afe0ae0cef1faafc290ccc`. Both objects below were
+read with `git show` at that pin and match the existing composer-family menu
+objects above. Root MIT license blob `c1f7a78e89e4e4dc7b86664c3b3c76eb5eee1785`
+and the complete DeepSeek notice in `THIRD_PARTY_NOTICES.md` remain applicable;
+no nearer package license exception was found. Reviewer: coordinating @ menu
+owner with this fixed-object provenance review.
+
+| Exact source path | Git blob | Candidate destination/adaptation |
+| --- | --- | --- |
+| `packages/client/ui-input-trigger/src/client/MenuView.module.css` | `fff3fc78816d9e00bc96f8e6e985944f49ce99f5` | Reuse the shared menu presentation in `src/renderer/src/styles/base-shell.css` for @ candidates. |
+| `packages/client/ui-input-trigger/src/client/MenuView.tsx` | `da6dccdbadace7d5f0b03349562db90c1c9588a8` | Reuse `src/renderer/src/components/chat/FloatingComposerCommandMenu.tsx` through the existing @ consumer in `src/renderer/src/components/chat/InputBar.tsx`; Analytix keeps mention identities, insertion and editor ownership. |
+
+Scope is the @ candidate display over the existing shared menu. The adapter
+retains the original suggestion/reference, eight-item budget, insertion handler,
+IME/draft lifecycle and thread/workspace revision gate. No upstream trigger
+service, store or editor is imported.
+
+This follow-up's macOS candidate verification used the repository cache helper
+and an isolated dependency overlay: the 36 real InputBar command tests and 20
+shared-menu tests passed after test-fixture corrections; the unchanged ordinary
+composer suite passed all 68 tests. Full web/node TypeScript and affected TS/TSX
+ESLint passed. The real InputBar/CSS browser fixture verified equal anchor width,
+4px gap, 34px rows, nearest scrolling, one pointer/keyboard highlight, Escape
+retaining the draft and Tab preserving the original file reference at 900×360
+(light/Chinese) and 390×420 (dark/English). All bridge data was synthetic.
+Combined native acceptance and current CI remain pending; these checks do not
+claim full DSH pixel parity, screen-reader, packaging or release acceptance.

@@ -104,7 +104,7 @@ import {
   type SlashCommand,
   type SlashCommandId
 } from './floating-composer-commands'
-import { FloatingComposerCommandMenu, composerCommandOptionId } from './FloatingComposerCommandMenu'
+import { FloatingComposerCommandMenu } from './FloatingComposerCommandMenu'
 export { buildResearchPrompt, parseBtwCommand, parseCompactCommand, parseGoalCommand, parseNewCommand, parseResearchCommand, parseReviewCommand } from './floating-composer-commands'
 import { useThreadUsageState } from '../../hooks/use-thread-usage'
 import { buildContextCapacity } from '../../lib/context-capacity'
@@ -1429,12 +1429,6 @@ export function InputBar({
   }, [slashQuery])
 
   useEffect(() => {
-    if (slashQuery == null || !highlightedSlashCommand) return
-    document.getElementById(composerCommandOptionId(`${composerMenuId}-slash`, highlightedSlashCommand.id))
-      ?.scrollIntoView?.({ block: 'nearest' })
-  }, [composerMenuId, highlightedSlashCommand, slashQuery])
-
-  useEffect(() => {
     if (slashQuery == null) return
     const dismissOutside = (event: PointerEvent | FocusEvent) => {
       if (event.target instanceof Node && !composerRootRef.current?.contains(event.target)) setDismissedSlashKey(slashOwnerKey)
@@ -2175,51 +2169,34 @@ export function InputBar({
       Array.from(transfer.items ?? []).some(item => item.kind === 'file' && item.type === 'application/pdf'))
   }, [canPickAttachment, canPickLocalFileReference, composerOwnerRevision])
 
-  const renderMentionIcon = (suggestion: ComposerMentionSuggestion, active: boolean): ReactElement => {
-    const iconFrameClass = `flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-[10px] ${
-      active ? 'bg-white text-accent shadow-sm dark:bg-ds-card' : 'bg-ds-hover text-ds-muted'
-    }`
+  const renderMentionIcon = (suggestion: ComposerMentionSuggestion): ReactElement => {
     if (suggestion.kind === 'plugin') {
       if (suggestion.iconUrl) {
         return (
-          <span className={iconFrameClass}>
-            <img
-              src={suggestion.iconUrl}
-              alt=""
-              className="h-full w-full object-contain"
-              onError={(event) => {
-                event.currentTarget.style.display = 'none'
-              }}
-            />
-          </span>
+          <img
+            src={suggestion.iconUrl}
+            alt=""
+            className="h-3.5 w-3.5 object-contain"
+            onError={event => { event.currentTarget.style.display = 'none' }}
+          />
         )
       }
-      return (
-        <span
-          className={iconFrameClass}
-          style={suggestion.brandColor ? { backgroundColor: suggestion.brandColor, color: '#fff' } : undefined}
-        >
-          <Plug className="h-4 w-4" strokeWidth={1.8} />
-        </span>
-      )
+      return <Plug strokeWidth={1.8} style={suggestion.brandColor ? { color: suggestion.brandColor } : undefined} />
     }
-    if (suggestion.kind === 'skill') {
-      return (
-        <span className={iconFrameClass}>
-          <Sparkles className="h-4 w-4" strokeWidth={1.8} />
-        </span>
-      )
-    }
-    return (
-      <span className={iconFrameClass}>
-        {isComposerDirectoryReference(suggestion.reference) ? (
-          <Folder className="h-4 w-4" strokeWidth={1.8} />
-        ) : (
-          <FileText className="h-4 w-4" strokeWidth={1.8} />
-        )}
-      </span>
-    )
+    if (suggestion.kind === 'skill') return <Sparkles strokeWidth={1.8} />
+    return isComposerDirectoryReference(suggestion.reference) ? <Folder strokeWidth={1.8} /> : <FileText strokeWidth={1.8} />
   }
+
+  const mentionMenuItems = mentionSections.flatMap(section => section.items.map(suggestion => ({
+    id: suggestion.key,
+    title: suggestion.title,
+    description: suggestion.description,
+    icon: renderMentionIcon(suggestion),
+    canonicalName: suggestion.kind === 'file' ? suggestion.title : suggestion.badge,
+    section: section.key,
+    sectionLabel: section.title,
+    suggestion
+  })))
 
   // Preserve the feedback toast DOM anchor; InputBar owns the actual presentation.
   return (
@@ -2322,59 +2299,17 @@ export function InputBar({
         ) : null}
 
         {showAtMentionMenu ? (
-          <div className="ds-card-strong absolute bottom-full left-1/2 z-30 mb-2 w-[calc(100%_-_1rem)] max-w-[680px] -translate-x-1/2 overflow-hidden rounded-[16px] p-1.5 shadow-[0_18px_46px_rgba(20,47,95,0.14)]">
-            <div className="flex h-7 items-center gap-2 px-2.5 text-[11.5px] font-semibold text-ds-muted">
-              <Plug className="h-3.5 w-3.5 text-ds-faint" strokeWidth={1.9} />
-              <span>{t('composerAtMentionMenuTitle')}</span>
-              {atMentionLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-ds-faint" strokeWidth={1.9} />
-              ) : null}
-            </div>
-            {flatMentionSuggestions.length > 0 ? (
-              <div className="flex max-h-[min(300px,calc(100vh-260px))] flex-col gap-1 overflow-y-auto pr-1">
-                {mentionSections.map((section) => (
-                  <div key={section.key} className="flex flex-col gap-0.5">
-                    <div className="px-2.5 pt-1 text-[10.5px] font-semibold text-ds-faint">
-                      {section.title}
-                    </div>
-                    {section.items.map((suggestion) => {
-                      const active = highlightedMention?.key === suggestion.key
-                      return (
-                        <button
-                          key={suggestion.key}
-                          type="button"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => applyMentionSuggestion(suggestion)}
-                          className={`flex min-h-[46px] w-full items-center gap-2.5 rounded-[12px] px-2.5 py-2 text-left transition ${
-                            active
-                              ? 'bg-ds-hover text-ds-ink shadow-[inset_0_0_0_1px_rgba(20,47,95,0.06)]'
-                              : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
-                          }`}
-                        >
-                          {renderMentionIcon(suggestion, active)}
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[13.5px] font-semibold leading-5 text-inherit">
-                              {suggestion.title}
-                            </span>
-                            <span className="mt-0.5 block truncate text-[12px] leading-4 text-ds-faint">
-                              {suggestion.description}
-                            </span>
-                          </span>
-                          <span className="hidden max-w-[190px] shrink-0 truncate rounded-full border border-ds-border-muted px-2 py-0.5 text-[10.5px] font-semibold leading-4 text-ds-faint sm:block">
-                            {suggestion.badge}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-[12px] border border-dashed border-ds-border-muted px-3 py-3 text-[12px] text-ds-faint">
-                {atMentionLoading ? t('composerAtMentionLoading') : t('composerAtMentionEmpty')}
-              </div>
-            )}
-          </div>
+          <FloatingComposerCommandMenu
+            id={`${composerMenuId}-mention`}
+            role="listbox"
+            items={mentionMenuItems}
+            selectedIndex={Math.min(selectedMentionIndex, mentionMenuItems.length - 1)}
+            ariaLabel={t('composerAtMentionMenuTitle')}
+            emptyLabel={atMentionLoading ? t('composerAtMentionLoading') : t('composerAtMentionEmpty')}
+            loading={atMentionLoading}
+            onHover={setSelectedMentionIndex}
+            onSelect={item => applyMentionSuggestion(item.suggestion)}
+          />
         ) : null}
 
         {goalPanelOpen && slashQuery == null ? (

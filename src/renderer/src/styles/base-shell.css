@@ -6198,7 +6198,7 @@ pre {
 .dsh-composer-command-section { flex: none; min-height: 23px; padding: 5px 8px 2px; color: var(--dsw-alias-label-tertiary); font-size: 11px; font-weight: 500; line-height: 16px; }
 .dsh-composer-command-section:not(:first-child) { margin-top: 3px; }
 .dsh-composer-command-item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 34px; padding: 6px 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; text-align: left; }
-.dsh-composer-command-item[data-active], .dsh-composer-command-item:hover:not(:disabled), .dsh-composer-command-item:focus-visible { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-composer-command-item[data-active], .dsh-input-menu[role='menu'] .dsh-composer-command-item:hover:not(:disabled), .dsh-input-menu[role='menu'] .dsh-composer-command-item:focus-visible { background: var(--dsw-alias-interactive-bg-hover); }
 .dsh-composer-command-item:focus-visible { outline: 1px solid var(--dsw-focus-ring-color); outline-offset: -1px; }
 .dsh-composer-command-item:disabled { cursor: not-allowed; opacity: .45; }
 .dsh-composer-command-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--dsw-alias-menu-icon); }

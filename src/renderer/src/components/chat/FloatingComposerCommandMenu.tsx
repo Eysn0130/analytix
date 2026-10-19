@@ -2,17 +2,32 @@
  * 687f282e8625c6b8d11ff58211a90524be2e4317, Copyright (c) 2026 DeepSeek, MIT.
  * See THIRD_PARTY_NOTICES.md and docs/analytix/upstreams/code-reuse-provenance.md.
  * Analytix keeps its command handlers, editor focus and disclosure state. */
-import { cloneElement, forwardRef, Fragment, useCallback, useId, useLayoutEffect, useRef, type KeyboardEventHandler, type ReactElement } from 'react'
+import { cloneElement, forwardRef, Fragment, useCallback, useId, useLayoutEffect, useRef, type ForwardedRef, type KeyboardEventHandler, type ReactElement, type RefAttributes } from 'react'
 import { DshCheckOutlineRegular } from './presentation/DshToolIcons'
-import type { ComposerCommandGroup, ComposerCommandRow, SlashCommand } from './floating-composer-commands'
+import type { ComposerCommandRow } from './floating-composer-commands'
 
-export type FloatingComposerCommandMenuProps = {
-  items: readonly ComposerCommandRow[]
+/** Presentation only: each composer owner retains its original item and action type. */
+export type FloatingComposerMenuItem = {
+  id: string
+  title: string
+  description: string
+  icon: ReactElement
+  canonicalName?: string
+  section?: string
+  sectionLabel?: string
+  disabled?: boolean
+  disabledReason?: string
+  checked?: boolean
+}
+
+export type FloatingComposerCommandMenuProps<Item extends FloatingComposerMenuItem = ComposerCommandRow> = {
+  items: readonly Item[]
   selectedIndex?: number
-  onSelect: (command: SlashCommand, index: number) => void
+  onSelect: (item: Item, index: number) => void
   onHover?: (index: number) => void
-  groupLabels: Record<ComposerCommandGroup, string>
+  groupLabels?: Partial<Record<string, string>>
   role?: 'menu' | 'listbox'
+  loading?: boolean
   id?: string
   ariaLabel: string
   emptyLabel: string
@@ -30,14 +45,14 @@ export function composerCommandMenuMaxHeight(anchorTop: number): number {
   return Number.isFinite(anchorTop) ? Math.max(0, Math.min(400, anchorTop - 12 - 4)) : 0
 }
 
-export const FloatingComposerCommandMenu = forwardRef<HTMLDivElement, FloatingComposerCommandMenuProps>(
-  function FloatingComposerCommandMenu({
+function FloatingComposerCommandMenuInner<Item extends FloatingComposerMenuItem>({
     items, selectedIndex = -1, onSelect, onHover, groupLabels,
-    role = 'menu', id, ariaLabel, emptyLabel, className, onKeyDown
-  }, ref) {
+    role = 'menu', loading = false, id, ariaLabel, emptyLabel, className, onKeyDown
+  }: FloatingComposerCommandMenuProps<Item>, ref: ForwardedRef<HTMLDivElement>) {
     const generatedId = useId()
     const menuId = id ?? generatedId
     const selected = items[selectedIndex]
+    const selectedId = selected?.id
     const menuRef = useRef<HTMLDivElement | null>(null)
     const setMenuRef = useCallback((element: HTMLDivElement | null) => {
       menuRef.current = element
@@ -65,12 +80,20 @@ export const FloatingComposerCommandMenu = forwardRef<HTMLDivElement, FloatingCo
         window.removeEventListener('scroll', place, true)
       }
     }, [])
+    // DSH MenuView (also present at 5badb15009ae1756c3afe0ae0cef1faafc290ccc):
+    // pointer and keyboard share one selected row, kept visible in the scroll viewport.
+    useLayoutEffect(() => {
+      if (selectedId == null) return
+      document.getElementById(composerCommandOptionId(menuId, selectedId))
+        ?.scrollIntoView?.({ block: 'nearest' })
+    }, [menuId, selectedId, selectedIndex])
     return (
       <div
         ref={setMenuRef}
         id={menuId}
         role={role}
         aria-label={ariaLabel}
+        aria-busy={loading || undefined}
         aria-activedescendant={role === 'listbox' && selected ? composerCommandOptionId(menuId, selected.id) : undefined}
         data-composer-menu=""
         data-composer-command-menu=""
@@ -88,7 +111,7 @@ export const FloatingComposerCommandMenu = forwardRef<HTMLDivElement, FloatingCo
               <Fragment key={item.id}>
                 {item.section && item.section !== items[index - 1]?.section ? (
                   <div className="dsh-composer-command-section" role="presentation" data-command-section={item.section}>
-                    {groupLabels[item.section]}
+                    {item.sectionLabel ?? groupLabels?.[item.section] ?? item.section}
                   </div>
                 ) : null}
                 <button
@@ -122,5 +145,7 @@ export const FloatingComposerCommandMenu = forwardRef<HTMLDivElement, FloatingCo
         </div>
       </div>
     )
-  }
-)
+}
+
+export const FloatingComposerCommandMenu = forwardRef(FloatingComposerCommandMenuInner) as
+  <Item extends FloatingComposerMenuItem = ComposerCommandRow>(props: FloatingComposerCommandMenuProps<Item> & RefAttributes<HTMLDivElement>) => ReactElement

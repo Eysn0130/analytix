@@ -3,6 +3,7 @@ import { act, createElement, useState, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HubAgentMarketplaceSyncResult, HubAgentPluginListItem } from '@shared/analytix-api'
+import type { WorkspaceEntry } from '@shared/workspace-file'
 import { analytixToolPermissionModeSettings } from '@shared/app-settings'
 import i18n from '../../i18n'
 import { useChatStore } from '../../store/chat-store'
@@ -37,6 +38,8 @@ let changeDraft: (value: string) => void
 let getDraft: () => string
 const geometry = ['getClientRects', 'getBoundingClientRect'] as const
 let rangeGeometry: Array<PropertyDescriptor | undefined>
+let previousScrollIntoView: PropertyDescriptor | undefined
+let scrollCalls: Array<{ element: HTMLElement; options?: boolean | ScrollIntoViewOptions }>
 
 function Harness({ initialInput = '', ...overrides }: Partial<InputBarProps> & { initialInput?: string }) {
   const [input, setInput] = useState(initialInput)
@@ -68,9 +71,29 @@ const commandMenu = () => host.querySelector<HTMLElement>('[data-composer-comman
 const commandItem = (id: string) => commandMenu()?.querySelector<HTMLButtonElement>(`[data-command-id="${id}"]`) ?? null
 const executionMenu = () => document.querySelector<HTMLElement>('[data-composer-execution-menu]')
 const modelMenu = () => document.querySelector<HTMLElement>('[data-model-picker-pane]')
-const mentionMenu = () => {
-  const heading = [...host.querySelectorAll('span')].find(node => node.textContent === i18n.t('common:composerAtMentionMenuTitle'))
-  return heading?.parentElement?.parentElement ?? null
+const mentionMenu = () => host.querySelector<HTMLElement>(`[role="listbox"][aria-label="${i18n.t('common:composerAtMentionMenuTitle')}"]`)
+const mentionOptions = () => [...(mentionMenu()?.querySelectorAll<HTMLButtonElement>('[role="option"][data-command-id]') ?? [])]
+function expectMentionHighlight(index: number) {
+  const options = mentionOptions()
+  expect(options[index]).toBeDefined()
+  expect(options.filter(option => option.dataset.active === 'true')).toEqual([options[index]])
+  expect(options.filter(option => option.getAttribute('aria-selected') === 'true')).toEqual([options[index]])
+  expect(mentionMenu()?.getAttribute('aria-activedescendant')).toBe(options[index].id)
+  return options[index]
+}
+function mentionFiles(workspaceRoot: string, prefix = 'long-note'): WorkspaceEntry[] {
+  return Array.from({ length: 8 }, (_, index) => {
+    const name = `${prefix}-${String(index + 1).padStart(2, '0')} details.md`
+    return { name, path: `${workspaceRoot}/${name}`, type: 'file', ext: '.md' }
+  })
+}
+function installMentionFileLookup(workspaceRoot: string, entries: WorkspaceEntry[] | Promise<WorkspaceEntry[]>) {
+  useChatStore.setState({ workspaceRoot })
+  const listDirectory = vi.fn(async ({ path }: { path: string }) => ({ ok: true, entries: path === workspaceRoot ? await entries : [] }))
+  Object.defineProperty(window, 'analytix', { configurable: true, value: {
+    ...window.analytix, files: { ...window.analytix.files, listDirectory }
+  } })
+  return listDirectory
 }
 async function flushFrames() {
   for (let pass = 0; pass < 3 && frames.size > 0; pass++) {
@@ -122,6 +145,10 @@ beforeEach(async () => {
   // jsdom has no layout; keep the real ProseMirror selection and paste/history handlers.
   Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] })
   Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() })
+  previousScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+  scrollCalls = []
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true,
+    value: function (this: HTMLElement, options?: boolean | ScrollIntoViewOptions) { scrollCalls.push({ element: this, options }) } })
   for (const callback of Object.values(callbacks)) callback.mockClear()
   previousStore = useChatStore.getState()
   useChatStore.setState({ activeThreadId: 'commands-thread', activeThreadGoal: null, activeGoalActivation: null,
@@ -146,6 +173,8 @@ afterEach(async () => {
     if (descriptor) Object.defineProperty(Range.prototype, name, descriptor)
     else Reflect.deleteProperty(Range.prototype, name)
   })
+  if (previousScrollIntoView) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previousScrollIntoView)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
   await i18n.changeLanguage(previousLanguage)
   vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
@@ -418,6 +447,162 @@ describe('real InputBar command dismissal and keyboard ownership', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('real InputBar shared mention menu', () => {
+  it('retains plugin, skill and file order within the existing eight-option limit', async () => {
+    const workspaceRoot = '/workspace/commands-mention-order'
+    const files = mentionFiles(workspaceRoot, 'fixture')
+    installMentionFileLookup(workspaceRoot, files)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: '@fixture' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionOptions().map(option => option.dataset.commandId)).toEqual([
+        'plugin:fixture-browser', 'skill:fixture-skill', ...files.slice(0, 6).map(file => `file:file:${file.name}`)
+      ])
+      expectMentionHighlight(0)
+      expectNoDispatch()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('scrolls all eight file options nearest during keyboard navigation and keeps one highlight after pointer movement', async () => {
+    const workspaceRoot = '/workspace/commands-mention-navigation'
+    const files = mentionFiles(workspaceRoot)
+    const onAddFileReference = vi.fn()
+    installMentionFileLookup(workspaceRoot, files)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: '@long-note', onAddFileReference })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionOptions().map(option => option.dataset.commandId)).toEqual(files.map(file => `file:file:${file.name}`))
+      expectMentionHighlight(0)
+      for (const index of [1, 2, 3, 4, 5, 6, 7, 0]) {
+        scrollCalls.length = 0
+        expect((await key(editor(), 'ArrowDown')).defaultPrevented).toBe(true)
+        const selected = expectMentionHighlight(index)
+        expect(scrollCalls.at(-1)).toEqual({ element: selected, options: { block: 'nearest' } })
+      }
+      scrollCalls.length = 0
+      expect((await key(editor(), 'ArrowUp')).defaultPrevented).toBe(true)
+      expect(scrollCalls.at(-1)).toEqual({ element: expectMentionHighlight(7), options: { block: 'nearest' } })
+      await act(async () => mentionOptions()[3].dispatchEvent(new MouseEvent('mousemove', { bubbles: true })))
+      expectMentionHighlight(3)
+      scrollCalls.length = 0
+      await key(editor(), 'ArrowUp')
+      expect(scrollCalls.at(-1)).toEqual({ element: expectMentionHighlight(2), options: { block: 'nearest' } })
+      expect(getDraft()).toBe('@long-note')
+      expect(onAddFileReference).not.toHaveBeenCalled()
+      expectNoDispatch()
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['Enter', 'Tab'])('inserts the highlighted original file reference and quoted token with %s', async acceptKey => {
+    const workspaceRoot = `/workspace/commands-mention-accept-${acceptKey.toLowerCase()}`
+    const files = mentionFiles(workspaceRoot)
+    const onAddFileReference = vi.fn()
+    installMentionFileLookup(workspaceRoot, files)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: '@long-note', onAddFileReference })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionOptions()).toHaveLength(8)
+      await key(editor(), 'Enter', { isComposing: true })
+      expect(onAddFileReference).not.toHaveBeenCalled()
+      expect(callbacks.onSend).not.toHaveBeenCalled()
+      // The synthetic composing key retains ProseMirror's native newline without accepting a mention.
+      expect(getDraft()).toBe('@long-note\n')
+      await setDraft('@long-note')
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      await flushFrames()
+      expect(mentionOptions()).toHaveLength(8)
+      await act(async () => mentionOptions()[5].dispatchEvent(new MouseEvent('mousemove', { bubbles: true })))
+      expectMentionHighlight(5)
+      await key(editor(), 'ArrowDown')
+      expectMentionHighlight(6)
+      const accepted = await key(editor(), acceptKey)
+      expect(accepted.defaultPrevented).toBe(true)
+      expect(onAddFileReference).toHaveBeenCalledExactlyOnceWith({
+        path: `${workspaceRoot}/long-note-07 details.md`, relativePath: 'long-note-07 details.md',
+        name: 'long-note-07 details.md', type: 'file'
+      })
+      expect(getDraft()).toBe('@"long-note-07 details.md" ')
+      expect(mentionMenu()).toBeNull()
+      expectNoDispatch()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('dismisses a highlighted file with Escape while preserving its controlled draft', async () => {
+    const workspaceRoot = '/workspace/commands-mention-file-escape'
+    const onAddFileReference = vi.fn()
+    installMentionFileLookup(workspaceRoot, mentionFiles(workspaceRoot))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: 'Retain text @long-note', onAddFileReference })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionOptions()).toHaveLength(8)
+      await key(editor(), 'ArrowUp')
+      expectMentionHighlight(7)
+      callbacks.setInput.mockClear()
+      expect((await key(editor(), 'Escape')).defaultPrevented).toBe(true)
+      expect(mentionMenu()).toBeNull()
+      expect(getDraft()).toBe('Retain text @long-note')
+      expect(editor().textContent).toBe('Retain text @long-note')
+      expect(callbacks.setInput).not.toHaveBeenCalled()
+      expect(onAddFileReference).not.toHaveBeenCalled()
+      expectNoDispatch()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('keeps loading and empty file lookup states outside the selectable options', async () => {
+    const workspaceRoot = '/workspace/commands-mention-file-empty'
+    let resolveFiles!: (entries: WorkspaceEntry[]) => void
+    const files = new Promise<WorkspaceEntry[]>(resolve => { resolveFiles = resolve })
+    installMentionFileLookup(workspaceRoot, files)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: '@unmatched-file-query' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionMenu()?.querySelector('[role="status"]')).not.toBeNull()
+      expect(mentionMenu()?.querySelector('[role="status"]')?.textContent).toBe(i18n.t('common:composerAtMentionLoading'))
+      expect(mentionOptions()).toHaveLength(0)
+      expect(mentionMenu()?.getAttribute('aria-activedescendant')).toBeNull()
+      await act(async () => resolveFiles([]))
+      expect(mentionMenu()?.querySelector('[role="status"]')).not.toBeNull()
+      expect(mentionMenu()?.querySelector('[role="status"]')?.textContent).toBe(i18n.t('common:composerAtMentionEmpty'))
+      expect(mentionOptions()).toHaveLength(0)
+      expect(mentionMenu()?.querySelector('[data-active="true"]')).toBeNull()
+      expectNoDispatch()
+    } finally { resolveFiles([]); vi.useRealTimers() }
+  })
+
+  it('does not revive or insert a late file lookup after switching threads', async () => {
+    const workspaceRoot = '/workspace/commands-mention-file-late-owner'
+    let resolveFiles!: (entries: WorkspaceEntry[]) => void
+    const files = new Promise<WorkspaceEntry[]>(resolve => { resolveFiles = resolve })
+    const listDirectory = installMentionFileLookup(workspaceRoot, files)
+    const onAddFileReference = vi.fn()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: '@long-note', onAddFileReference })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(listDirectory).toHaveBeenCalledExactlyOnceWith({ workspaceRoot, path: workspaceRoot })
+      expect(mentionOptions()).toHaveLength(0)
+      callbacks.setInput.mockClear()
+      await act(async () => useChatStore.setState({ activeThreadId: 'commands-file-next-thread' }))
+      await flushFrames()
+      expect(mentionMenu()).toBeNull()
+      await act(async () => resolveFiles(mentionFiles(workspaceRoot)))
+      await flushFrames()
+      expect(mentionMenu()).toBeNull()
+      expect(host.querySelector('[data-command-id^="file:"]')).toBeNull()
+      expect(getDraft()).toBe('@long-note')
+      expect(editor().textContent).toBe('@long-note')
+      expect(callbacks.setInput).not.toHaveBeenCalled()
+      expect(onAddFileReference).not.toHaveBeenCalled()
+      expectNoDispatch()
+    } finally { resolveFiles([]); vi.useRealTimers() }
   })
 })
 
