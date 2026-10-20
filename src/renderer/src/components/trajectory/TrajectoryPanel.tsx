@@ -2,6 +2,7 @@
  * active TrajectoryView/Toolbar. Copyright (c) 2026 DeepSeek. MIT; THIRD_PARTY_NOTICES.md. */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useTrajectoryDurationPreference, writeTrajectoryDurationPreference } from '../../lib/chat-presentation-preferences'
 import { trajectoryMatches, type TrajectoryRecord, type TrajectoryToolIdentity } from './trajectory-adapter'
 import { trajectorySource, type TrajectorySource } from './trajectory-source'
 import { TrajectoryTimeline } from './TrajectoryTimeline'
@@ -30,7 +31,8 @@ function TrajectoryPanelSeat({ threadId, onInspectTool, renderToolInspector, sou
   const getSnapshot = useCallback(() => source.getSnapshot(threadId), [source, threadId])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   const [limit, setLimit] = useState(50), [historyTailId, setHistoryTailId] = useState<string | null>(snapshot.records.at(-1)?.id ?? null)
-  const [query, setQuery] = useState(''), [duration, setDuration] = useState(false), [range, setRange] = useState<TrajectoryRange | null>(null)
+  const duration = useTrajectoryDurationPreference()
+  const [query, setQuery] = useState(''), [range, setRange] = useState<TrajectoryRange | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null), [inspecting, setInspecting] = useState<string | null>(null)
   const [collapsedTurns, setCollapsedTurns] = useState<ReadonlySet<string>>(new Set())
   const [collapsedModels, setCollapsedModels] = useState<ReadonlySet<string>>(new Set())
@@ -52,7 +54,7 @@ function TrajectoryPanelSeat({ threadId, onInspectTool, renderToolInspector, sou
   const coordinateEpoch = snapshot.records[0]?.id ?? ''
   const timeline = useMemo(() => deriveTrajectoryTimeline(resident, duration, sequenceOffset, snapshot.records), [resident, duration, sequenceOffset, snapshot.records])
   const groups = useMemo(() => trajectoryGroups(resident), [resident])
-  useEffect(() => { setRange(null) }, [coordinateEpoch])
+  useEffect(() => { setRange(null) }, [coordinateEpoch, duration])
   useEffect(() => {
     const full = trajectoryGroups(snapshot.records), allowed = new Set([...full.modelIds, ...full.callIds, ...groups.modelIds, ...groups.callIds])
     for (const update of [setCollapsedModels, setCollapsedCalls]) update(current => { const next = new Set([...current].filter(id => allowed.has(id))); return next.size === current.size ? current : next })
@@ -131,7 +133,7 @@ function TrajectoryPanelSeat({ threadId, onInspectTool, renderToolInspector, sou
     <header className={css.toolbar} role="toolbar" aria-label={label('controls', 'Trajectory controls')}>
       <div className={css.toolbarInner}><div className={css.toolbarActions}>
         <button type="button" className={css.toggle} aria-label={label('useActualDuration', 'Use actual duration')} aria-pressed={duration}
-          onClick={() => { setDuration(value => !value); setRange(null) }} title={duration ? label('useEqualWidth', 'Use equal-width operations') : label('useActualDuration', 'Use actual duration')}>
+          onClick={() => writeTrajectoryDurationPreference(!duration)} title={duration ? label('useEqualWidth', 'Use equal-width operations') : label('useActualDuration', 'Use actual duration')}>
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden><circle cx="8" cy="8" r="5.25" /><path d="M8 4.75V8l2.25 1.5" /></svg>{label('duration', 'Duration')}</button>
         <button type="button" className={css.toolbarAction} aria-pressed={allTurnsCollapsed} aria-label={allTurnsCollapsed ? label('expandTurns', 'Expand turns') : label('collapseTurns', 'Collapse turns')}
           title={allTurnsCollapsed ? label('expandTurns', 'Expand turns') : label('collapseTurns', 'Collapse turns')}

@@ -36,7 +36,7 @@ export function TrajectoryTimeline({ records, duration, range, onRangeChange, on
   const start = viewport ? clamp(viewport.start, model.start, model.end - width) : model.start
   const activeRange = draft ?? range
   const reset = () => { gesture.current = null; setDraft(null); setPanning(false); setViewport(null); onRangeChange(null) }
-  useEffect(() => { setViewport(null); setDraft(null); gesture.current = null }, [duration, coordinateEpoch])
+  useEffect(() => { setViewport(null); setDraft(null); setPanning(false); gesture.current = null }, [duration, coordinateEpoch])
   useEffect(() => {
     const key = `${selectedId}:${revealVersion}`
     if (revealed.current === key) return
