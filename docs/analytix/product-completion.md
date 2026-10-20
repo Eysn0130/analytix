@@ -1,6 +1,6 @@
 # Analytix product completion
 
-Status: Operational routing matrix, 2026-10-16 UTC. Accepted targets remain in
+Status: Operational routing matrix, 2026-10-20 UTC. Accepted targets remain in
 [the spec registry](specs/README.md) and scoped OpenSpec requirements. This page
 records candidate/evidence/gaps, not a reduced denominator or release verdict.
 Delivery order remains in [the execution plan](delivery-execution-plan.md).
@@ -8,13 +8,17 @@ Resume with the [canonical handover](handovers/README.md) and fresh Git state.
 
 ## Current candidate and evidence
 
-Local checkpoint: branch `codex/dsh-native-event-hookup`, HEAD
-`7dc52552f968cfc45523647eaa226417972a739a`, verified for this documentation update.
-The coordination handoff records roughly 360 uncommitted candidate paths and
-220 local commits awaiting remote synchronization. The coordinator directly
-observed remote main `c7d2a370` (2026-10-05 baseline), without those local repairs.
-Push/PR synchronization and current CI are not verified by this update; obtain
-fresh Git/remote evidence before claiming integration or merge readiness.
+Published integration baseline, rechecked on 2026-10-20 UTC: GitHub main
+[`a7a29264586b8f8d17822d771828b4f8e8bd1865`](https://github.com/Eysn0130/analytix/commit/a7a29264586b8f8d17822d771828b4f8e8bd1865),
+after merged [PR66](https://github.com/Eysn0130/analytix/pull/66) and
+[PR67](https://github.com/Eysn0130/analytix/pull/67).
+[Development CI367](https://github.com/Eysn0130/analytix/actions/runs/39338637016)
+completed with 52/52 successful jobs; the same commit's
+[CodeQL run](https://github.com/Eysn0130/analytix/actions/runs/39338636827)
+completed with 4/4 successful checks, for 56/56 successful checks in total.
+These are source CI results for that exact main commit. Canonical dirty files
+and later branch work require their own evidence; source CI does not establish
+complete-product, pixel, installed, live-Provider or release acceptance.
 
 Historical baseline: main `d469a7406d897a97ca7d74f3dbbb29bf635a6ccf`, tree
 `dff7a7727bd18182ba9f62ad2a51e75b484fd856`, was refreshed on 2026-10-02. Its
@@ -27,14 +31,16 @@ and [account-flow/page evidence](qa/account-flow-fidelity-cost-2026-10-02.md)
 remain historical, with their original source, synthetic/native bounds and failures.
 They do not establish current candidate CI, installed readiness or same-model gain.
 
-The three host-local receipts below were read and hash-checked for this update;
-their commands were not rerun. Sanitized receipt names and SHA-256 identify the
+Historical documentation checkpoint, 2026-10-16: `codex/dsh-native-event-hookup`
+at `7dc52552f968cfc45523647eaa226417972a739a`. The three host-local receipts
+below retain that checkpoint's read and hash checks; this update did not rerun
+their commands or recheck their bytes. Sanitized receipt names and SHA-256 identify the
 recorded inputs without publishing private host paths. These limited results do
 not accept the whole current worktree.
 
 | Capability / stage | Candidate / owner | Evidence | Gap / next validation |
 | --- | --- | --- | --- |
-| Ordinary Core, independent of Funds | Production Go Core, Electron boundary; local candidate above | Historical d469 source CI above; this governance repair adds no behavioral acceptance. Exact installed `7dc07bb` plus corrected `032b8a147` observer has two synthetic K10 runs, normal quit and zero residuals in [its dated record](qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md) | Matched startup attribution and applicable installed/live Provider recovery remain independent. Do not reopen the already closed 7dc quit symptom without new evidence. |
+| Ordinary Core, independent of Funds | Production Go Core, Electron boundary; published main above | Published main source CI above; this governance repair adds no native acceptance. Exact installed `7dc07bb` plus corrected `032b8a147` observer has two synthetic K10 runs, normal quit and zero residuals in [its dated record](qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md) | Matched startup attribution and applicable installed/live Provider recovery remain independent. Do not reopen the already closed 7dc quit symptom without new evidence. |
 | Chat native minimum | One development Electron session with synthetic Provider; public UI observations | `chat-native-original-route-v2/receipt.json`, SHA-256 `d531a5ae2831ef80b3bada27de0a38b255c7ee7979326d9f45fd13c82e5ddb7c`: edit cancel/resend, two centered pills and popovers, tool error, five-row trajectory/public Inspect, model tool-request stream Stop | Partial: does not cover cancellation of an executing tool or the full visual/journey scope below. No installed/live-Provider acceptance. |
 | Word manual formatting/save | One development Electron session; fixed synthetic 17-character ASCII DOCX | `word-read-coordination-native-v1/result.json`, SHA-256 `b253b7a45affb0bfbb20046a62a09a7e343c66a198e7c66d2bea2e7e98d7103c`: real selection, Liberation Sans 18 pt, bold/italic/underline and saved-byte proof; actually loaded surface SHA-256 `e87f4e41fb3b3dccdd75b2f439cd137c5458cfec203f8509dcda8f3825eb0daf` | Partial: final result includes independent saved-style proof after the earlier provisional PARTIAL; not full font/script fidelity, reopen, IME or packaged acceptance. |
 | DSH display retirement | Receipt-bound source candidate; two direct suites and four TSX lint targets | `dsh-display-retirement-2ncmyds9/result.json`, SHA-256 `b2c775886314415e28ec79438b908d807306fe453a02c83ba85c0c4e66cbf2c4`: 72/72 tests and lint pass | Focused source evidence only; no native, typecheck or build run. No transfer of earlier native acceptance to changed display inputs. |
@@ -75,7 +81,7 @@ snapshot](qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-product-333).
 
 | Accepted scope | Existing owner / required result | Evidence status on this candidate |
 | --- | --- | --- |
-| P0 identity, authority and security | Registry, privacy, public projection, caller review and current CodeQL | Historical d469 CodeQL/source CI only; current candidate security/product acceptance remains unverified, and historical finding mappings are not dismissals. |
+| P0 identity, authority and security | Registry, privacy, public projection, caller review and current CodeQL | Published main CodeQL/source CI above; broader security/product acceptance remains unverified, and historical finding mappings are not dismissals. |
 | P1 DOCX editing | Native range/structure guards, edit/export/reopen and non-target visual fidelity | Limited native format/save proof is recorded above; prior refusal/controls retain their original evidence. Full fidelity, export/reopen and installed acceptance remain unverified. |
 | P2 image collections | Stable regions, notes, shared budget, CAS, transforms and trusted pixel/metadata projection | Actual GUI/save/conflict/reopen and non-generate editing remain separate required seams. |
 | P2 Browser and PDF | Guest/document lease, isolated selection, opaque Core reference and actual lifecycle | Historical source/fixed-Electron partial checks do not prove current installed lifecycle. |
@@ -84,18 +90,18 @@ snapshot](qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-product-333).
 | P4 one conversation | Controlled tools, bounded retrieval, compaction, terminal and semantic history recovery | Preserve one production Core and existing UI; end-to-end authority/recovery remains an independent seam. |
 | P0 Rust correctness | Real `analysis_compute` query/results under its admitted controls | PR38 postmain pagination failure and PR39 repair retain their own evidence; the historical d469 source CI result remains candidate-bound. No broader native/model claim is inferred. |
 | P5 storage/install | Protected Provider Save, restart/history, upgrade/data compatibility, cleanup | Earlier candidate-specific proofs do not establish this candidate's installed journey. |
-| P5 integration/release | Exact source, CI/review/main, resources/licensing, signing/notarization and release qualification | Historical main integration/source CI only; current synchronization/CI, resources/licensing, installed and public-release qualification remain separate. |
+| P5 integration/release | Exact source, CI/review/main, resources/licensing, signing/notarization and release qualification | PR66/67 main integration and exact-main source CI are recorded above; resources/licensing, installed and public-release qualification remain separate. |
 
 ## Current acceptance exits
 
 | Exit | Status at this routing checkpoint |
 | --- | --- |
-| SourceReady | Not established for the local candidate; historical main CI and focused receipts do not establish complete-product SourceReady. |
-| PrivateCandidateReady | Not established for the local candidate. Historical `7dc07bb` installed evidence is bounded, synthetic and nonpublishable; it does not qualify this candidate. |
-| MergeReady | Not established for the local candidate; synchronization and current CI/review need fresh evidence. This page grants no merge permission. |
+| SourceReady | Published main source CI passed; complete-product SourceReady is not established by source CI and focused receipts. |
+| PrivateCandidateReady | Not established for published main. Historical `7dc07bb` installed evidence is bounded, synthetic and nonpublishable; it does not qualify this candidate. |
+| MergeReady | PR66/67 are merged. Any next branch needs its own current CI/review and applicable acceptance. This page grants no merge permission. |
 | PublicMacReleaseReady | Not established; no new Developer ID, notarization, release qualification or publication is claimed. |
 
-Current local HEAD and the reported remote checkpoint are distinct. Byte counts,
+Published main, canonical dirty files and later branches are distinct candidates. Byte counts,
 focused tests, synthetic Provider runs, package integrity, installed acceptance
 and public-release qualification remain separate. Old evidence may be reused only
 at its unchanged source/environment/contract seam, never by relabeling the artifact.

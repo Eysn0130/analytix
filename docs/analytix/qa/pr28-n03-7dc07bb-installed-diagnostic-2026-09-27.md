@@ -56,7 +56,7 @@ maximum observed Main event-loop lag was 1,017 ms. Submit-to-DOM commit was
 and must not be added. They are one external-cache-volume and observer-loaded
 sample, not a matched performance distribution or proof of a universal speedup.
 
-The prior exact `d244` diagnostic failed `normal_quit_target_stayed_open`;
+The [prior exact `d244` diagnostic](https://github.com/Eysn0130/analytix/blob/a7a29264586b8f8d17822d771828b4f8e8bd1865/docs/analytix/qa/pr28-n03-d244-diagnostic-2026-09-27.md) failed `normal_quit_target_stayed_open`;
 its source, app bytes and observation timing differed. This `7dc07bb`
 installed run closes that symptom on this candidate. It does not identify all
 cold-start causes, establish an acceptable latency percentile, or transfer to
