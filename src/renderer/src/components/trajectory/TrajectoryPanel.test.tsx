@@ -9,14 +9,21 @@ import { errorEvent, readyEvent, retryEvent, stepEvent, toolEvent, userEvent } f
 import { trajectoryStatusLabel } from './TrajectoryTimeline'
 import { TrajectoryTable, trajectoryGroups } from './TrajectoryTable'
 import type { TrajectoryRecord } from './trajectory-adapter'
+import { TRAJECTORY_DURATION_STORAGE_KEY, writeTrajectoryDurationPreference } from '../../lib/chat-presentation-preferences'
 let root: Root, host: HTMLDivElement
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  writeTrajectoryDurationPreference(false)
+  localStorage.removeItem(TRAJECTORY_DURATION_STORAGE_KEY)
   await i18n.changeLanguage('en')
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(async () => {
+  await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  writeTrajectoryDurationPreference(false)
+  localStorage.removeItem(TRAJECTORY_DURATION_STORAGE_KEY)
+})
 function sourceFixture() { const source = new TrajectorySource(); source.bindThread('trajectory-thread'); return source }
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === label)!
 const click = async (node: HTMLElement) => { await act(async () => node.click()) }
@@ -86,6 +93,90 @@ describe('independent trajectory working surface', () => {
       expect(control.getAttribute('aria-pressed')).toBe('false')
       expect(control.querySelector('[aria-hidden]')?.textContent).toBe('⊟')
     }
+  })
+  it('retains duration across view unmount and thread changes while retiring each Inspector', async () => {
+    const source = sourceFixture(), onInspectTool = vi.fn()
+    const props = { onInspectTool, renderToolInspector: () => <div data-test-protected-seat /> }
+    source.observe('trajectory-thread', [userEvent(1), toolEvent(false, 2), toolEvent(true, 3)])
+    const releaseOther = source.retainThread('other-thread')
+    source.observe('other-thread', [userEvent(1, 'other-thread', 'Other public request')])
+    const duration = () => host.querySelector<HTMLButtonElement>('[aria-label="Use actual duration"]')!
+    const inspectTool = async () => {
+      await click(host.querySelector<HTMLButtonElement>('button[data-record-id][data-lane="tool"]')!)
+      await click(button('Inspect tool'))
+      expect(host.querySelector('[data-test-protected-seat]')).not.toBeNull()
+    }
+    try {
+      await render(source, props)
+      await click(duration())
+      expect(localStorage.getItem(TRAJECTORY_DURATION_STORAGE_KEY)).toBe('true')
+      await inspectTool()
+      await act(async () => root.render(null))
+      await render(source, props)
+      expect(duration().getAttribute('aria-pressed')).toBe('true')
+      expect(host.querySelector('[aria-label="Inspector"]')).toBeNull()
+      expect(host.querySelector('[data-test-protected-seat]')).toBeNull()
+      await inspectTool()
+      await render(source, { ...props, threadId: 'other-thread' })
+      expect(duration().getAttribute('aria-pressed')).toBe('true')
+      expect(host.querySelector('[aria-label="Inspector"]')).toBeNull()
+      expect(host.querySelector('[data-test-protected-seat]')).toBeNull()
+      expect(host.textContent).toContain('Other public request')
+      expect(onInspectTool).toHaveBeenCalledTimes(2)
+      expect(onInspectTool).toHaveBeenLastCalledWith({ threadId: 'trajectory-thread', turnId: 'trajectory-turn', callId: 'trajectory-call', toolCallItemId: 'trajectory-tool', toolResultItemId: 'trajectory-result' })
+    } finally { releaseOther() }
+  })
+  it('clears the selected range for both toolbar and external duration changes', async () => {
+    const source = sourceFixture()
+    source.observe('trajectory-thread', Array.from({ length: 50 }, (_, index) => userEvent(index + 1)))
+    await render(source)
+    const selectRange = async () => {
+      const track = trackFixture()
+      await pointer(track, 'pointerdown', 200); await pointer(track, 'pointermove', 500); await pointer(track, 'pointerup', 500)
+      expect(host.querySelector('[data-dimmed="true"]')).not.toBeNull()
+    }
+    const duration = host.querySelector<HTMLButtonElement>('[aria-label="Use actual duration"]')!
+    await selectRange()
+    await click(duration)
+    expect(duration.getAttribute('aria-pressed')).toBe('true')
+    expect(host.querySelector('[data-dimmed="true"]')).toBeNull()
+    expect(host.querySelectorAll('[data-timeline-record]')).toHaveLength(50)
+    await selectRange()
+    localStorage.setItem(TRAJECTORY_DURATION_STORAGE_KEY, 'false')
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: TRAJECTORY_DURATION_STORAGE_KEY })))
+    expect(duration.getAttribute('aria-pressed')).toBe('false')
+    expect(host.querySelector('[data-dimmed="true"]')).toBeNull()
+    expect(host.querySelectorAll('[data-timeline-record]')).toHaveLength(50)
+  })
+  it('clears the grabbing cursor marker when external duration changes during a right drag', async () => {
+    const source = sourceFixture()
+    source.observe('trajectory-thread', Array.from({ length: 50 }, (_, index) => userEvent(index + 1)))
+    await render(source)
+    const track = trackFixture()
+    await pointer(track, 'pointerdown', 500, 2); await pointer(track, 'pointermove', 700, 2)
+    expect(track.getAttribute('data-panning')).toBe('true')
+    localStorage.setItem(TRAJECTORY_DURATION_STORAGE_KEY, 'true')
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: TRAJECTORY_DURATION_STORAGE_KEY })))
+    expect(host.querySelector('[aria-label="Use actual duration"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(track.hasAttribute('data-panning')).toBe(false)
+    await pointer(track, 'pointerup', 700, 2)
+    expect(track.hasAttribute('data-panning')).toBe(false)
+    await pointer(track, 'pointerdown', 600, 2)
+    expect(track.getAttribute('data-panning')).toBe('true')
+    await pointer(track, 'pointerup', 600, 2)
+    expect(track.hasAttribute('data-panning')).toBe(false)
+  })
+  it('keeps two mounted trajectory toolbars synchronized through shared and external choices', async () => {
+    const source = sourceFixture()
+    source.observe('trajectory-thread', [userEvent(1)])
+    await act(async () => root.render(<><TrajectoryPanel threadId="trajectory-thread" source={source} /><TrajectoryPanel threadId="trajectory-thread" source={source} /></>))
+    const controls = [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Use actual duration"]')]
+    expect(controls).toHaveLength(2)
+    await click(controls[0])
+    expect(controls.map(control => control.getAttribute('aria-pressed'))).toEqual(['true', 'true'])
+    localStorage.setItem(TRAJECTORY_DURATION_STORAGE_KEY, 'false')
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: TRAJECTORY_DURATION_STORAGE_KEY })))
+    expect(controls.map(control => control.getAttribute('aria-pressed'))).toEqual(['false', 'false'])
   })
   it.each(['en', 'zh'])('shows independent public retry/error details in %s without changing step identity', async language => {
     await i18n.changeLanguage(language)

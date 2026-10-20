@@ -6,17 +6,26 @@ import { presentationPolicyFor } from '../components/chat/presentation/chat/chat
 import { useDisclosure } from '../components/chat/presentation/chat/use-disclosure'
 
 let preferences: typeof import('./chat-presentation-preferences')
+let storageListeners: Set<EventListenerOrEventListenerObject>
 function selectEnvironment(environment: 'desktop' | 'browser-preview' | 'browser') {
   vi.stubGlobal('analytix', environment === 'browser' ? undefined : { app: { platform: 'darwin' } })
   if (environment === 'browser-preview') document.documentElement.dataset.bridge = 'browser-preview'
   else delete document.documentElement.dataset.bridge
 }
 beforeEach(async () => {
+  storageListeners = new Set()
+  const addEventListener = window.addEventListener.bind(window)
+  vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
+    if (type === 'storage') storageListeners.add(listener)
+    addEventListener(type, listener, options)
+  })
   vi.resetModules()
   preferences = await import('./chat-presentation-preferences')
 })
 afterEach(() => {
+  for (const listener of storageListeners) window.removeEventListener('storage', listener)
   localStorage.removeItem(preferences.WORK_DETAILS_STORAGE_KEY)
+  localStorage.removeItem(preferences.TRAJECTORY_DURATION_STORAGE_KEY)
   delete document.documentElement.dataset.bridge
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -108,4 +117,88 @@ it('synchronizes three mounted consumers in one window and handles external stor
     await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: null })))
     expect(host.textContent).toBe('standardstandardstandard')
   } finally { await act(async () => root.unmount()); host.remove() }
+})
+
+it('defaults missing and invalid trajectory duration values without correcting storage', () => {
+  const { TRAJECTORY_DURATION_STORAGE_KEY, readTrajectoryDurationPreference } = preferences
+  const write = vi.spyOn(Storage.prototype, 'setItem')
+  expect(readTrajectoryDurationPreference()).toBe(false)
+  expect(write).not.toHaveBeenCalled()
+  for (const value of ['', 'false', 'TRUE', '1', 'null', '{"duration":true}']) {
+    localStorage.setItem(TRAJECTORY_DURATION_STORAGE_KEY, value)
+    write.mockClear()
+    expect(readTrajectoryDurationPreference()).toBe(false)
+    expect(localStorage.getItem(TRAJECTORY_DURATION_STORAGE_KEY)).toBe(value)
+    expect(write).not.toHaveBeenCalled()
+  }
+})
+
+it('restores the trajectory duration choice after reloading the preference owner', async () => {
+  const { TRAJECTORY_DURATION_STORAGE_KEY, writeTrajectoryDurationPreference } = preferences
+  writeTrajectoryDurationPreference(true)
+  expect(localStorage.getItem(TRAJECTORY_DURATION_STORAGE_KEY)).toBe('true')
+  vi.resetModules()
+  const restored = await import('./chat-presentation-preferences')
+  expect(restored.readTrajectoryDurationPreference()).toBe(true)
+  restored.writeTrajectoryDurationPreference(false)
+  expect(localStorage.getItem(TRAJECTORY_DURATION_STORAGE_KEY)).toBe('false')
+  expect(restored.readTrajectoryDurationPreference()).toBe(false)
+})
+
+it('shares trajectory duration and observes storage changes while all consumers are unmounted', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const { TRAJECTORY_DURATION_STORAGE_KEY, useTrajectoryDurationPreference, writeTrajectoryDurationPreference } = preferences
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
+  function Probe({ surface }: { surface: string }) {
+    return createElement('span', { 'data-surface': surface }, String(useTrajectoryDurationPreference()))
+  }
+  const draw = async () => act(async () => root.render(createElement('div', {}, ['first', 'second'].map(surface => createElement(Probe, { key: surface, surface })))))
+  const values = () => [...host.querySelectorAll('span')].map(node => node.textContent)
+  try {
+    await draw()
+    expect(values()).toEqual(['false', 'false'])
+    await act(async () => writeTrajectoryDurationPreference(true))
+    expect(values()).toEqual(['true', 'true'])
+    localStorage.setItem(TRAJECTORY_DURATION_STORAGE_KEY, 'false')
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated.preference' })))
+    expect(values()).toEqual(['true', 'true'])
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: TRAJECTORY_DURATION_STORAGE_KEY })))
+    expect(values()).toEqual(['false', 'false'])
+    await act(async () => root.render(null))
+    localStorage.setItem(TRAJECTORY_DURATION_STORAGE_KEY, 'true')
+    window.dispatchEvent(new StorageEvent('storage', { key: TRAJECTORY_DURATION_STORAGE_KEY }))
+    await draw()
+    expect(values()).toEqual(['true', 'true'])
+    localStorage.removeItem(TRAJECTORY_DURATION_STORAGE_KEY)
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: null })))
+    expect(values()).toEqual(['false', 'false'])
+  } finally { await act(async () => root.unmount()); host.remove() }
+})
+
+it.each(['read-failure', 'unavailable-storage'] as const)('keeps trajectory duration usable in memory with %s', async failure => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const { TRAJECTORY_DURATION_STORAGE_KEY, useTrajectoryDurationPreference, writeTrajectoryDurationPreference } = preferences
+  writeTrajectoryDurationPreference(true)
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
+  function Probe() { return createElement('span', {}, String(useTrajectoryDurationPreference())) }
+  if (failure === 'read-failure') {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage read unavailable') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage write unavailable') })
+  } else {
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => { throw new Error('storage unavailable') })
+  }
+  try {
+    await act(async () => root.render(createElement(Probe)))
+    expect(host.textContent).toBe('true')
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: TRAJECTORY_DURATION_STORAGE_KEY })))
+    expect(host.textContent).toBe('true')
+    await act(async () => writeTrajectoryDurationPreference(false))
+    expect(host.textContent).toBe('false')
+    await act(async () => root.render(null))
+    await act(async () => root.render(createElement(Probe)))
+    expect(host.textContent).toBe('false')
+  } finally {
+    await act(async () => root.unmount()); host.remove()
+    vi.restoreAllMocks()
+  }
 })
