@@ -492,8 +492,14 @@ describe('Workbench Canvas consumer path', () => {
     vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames.delete(id) })
     const flushFrames = async () => {
       for (let pass = 0; pass < 3 && frames.size > 0; pass++) {
-        const pending = [...frames.values()]; frames.clear()
-        await act(async () => { for (const callback of pending) callback(0) })
+        const pending = [...frames.keys()]
+        await act(async () => {
+          for (const id of pending) {
+            const callback = frames.get(id)
+            frames.delete(id)
+            callback?.(0)
+          }
+        })
       }
     }
     try {
