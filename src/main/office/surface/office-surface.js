@@ -1061,7 +1061,7 @@ function installSurface() {
     if (!engine?.state || engine.failed || playing(engine.view)) return;
     if (engine.busy) { scheduleView(action); return; }
     try { await engine.localView(action); if (action !== 'read') scheduleRead(); }
-    catch { status.textContent = '只读预览 · 视图调整不可用'; }
+    catch { footer.dataset.error = 'true'; status.textContent = '只读预览 · 视图调整不可用'; }
   }
   function sameViewGeneration(documentId, version, opened, generation) {
     return !!engine?.state && engine.state.documentId === documentId && engine.state.version === version && engine.openOperationId === opened && engine.view?.playback?.generation === generation;

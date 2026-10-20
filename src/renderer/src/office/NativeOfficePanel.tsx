@@ -864,7 +864,7 @@ export function NativeOfficePanel({ visible: requestedVisible, presentSelector, 
   const previewStateVisible = !!(loading || playbackNeedsReopen || presentationError === 'presentation_start_timeout' ||
     error && !nativeActionError && !error.startsWith('presentation_') && !view?.editing && !view?.saving)
 
-  return <div className={styles.host} aria-busy={!!loading} onKeyDown={event => {
+  return <div className={styles.host} data-native-office-kind={view?.kind} aria-busy={!!loading} onKeyDown={event => {
     if (event.nativeEvent.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return
     if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')) return
     if (event.key === 'F2' && !event.shiftKey && view?.kind === 'xlsx') {
