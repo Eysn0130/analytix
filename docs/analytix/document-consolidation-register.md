@@ -73,6 +73,27 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 ## 5. 后续整理队列
 
+### 2026-10-20 请求缓存死叶清退
+
+基线 `e9122a9d5128f20c44eaa7825d1607abe4c9a706`。本批 P2 仅删除 renderer
+`data-analysis/features/flow/graph/model/flow-cache.ts` 与
+`data-analysis/features/analysis/model/stats-chart-request-model.ts`，共 91 行。
+全 tracked 文件的路径与导出符号核对未发现外部消费者；Vite 动态资源枚举、
+renderer 入口与 builder 配置均未将二者作为独立输入。
+
+保留现行 [flow-stats-link](../../src/renderer/src/data-analysis/services/analysis/flow-stats-link.ts)
+及其[行为测试](../../src/renderer/src/data-analysis/services/analysis/flow-stats-link.test.ts)：
+重复与并发 warm 请求独立，切换案件时取消旧请求；不恢复旧缓存或 inflight 去重。
+最小验证为引用复核、根 typecheck、该 focused 测试与文档链接/diff 检查；
+实际结果、候选与 CI 状态以对应 commit/PR 为准。出现新消费者或回归即停止删除，
+回滚使用普通 revert，不修改公共合同、隐私、authority、持久化或必需 CI。
+
+后续先在新 main 核定 `AnalysisRepository` 的稳定职责切口与验证基础设施的
+实际复用边界，再选下一批。Python 死 helper/import、未挂载字号控件与文档分类
+漂移是已识别 P2 候选，不各自强制形成一个 PR，也不因此关闭全仓治理目标。
+活跃大文件可按职责重构；体积本身不构成拆分或删除依据。以下日期记录与较早
+文档建议保留各自范围，不代表当前施工顺序或验收。
+
 ### 2026-10-03 普通维护 D1/D2/D3
 
 基线 `920417bd460df908d7ce5a0d56759d3c2e71b03c`，仅11个批准路径；
