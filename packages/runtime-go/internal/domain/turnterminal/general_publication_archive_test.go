@@ -80,3 +80,74 @@ func TestGeneralTerminalPublicationArchiveRejectsConflictUnknownAndTampering(t *
 		t.Fatal("archive accepted a duplicate commit")
 	}
 }
+
+func TestParseGeneralTerminalPublicationArchiveOwnsNestedValuesAndPreservesNumbers(t *testing.T) {
+	context, binding, drafts := generalTerminalPublicationFixture(t, domainevent.GeneralTerminalCompletedBoundaryTextV1)
+	commit, err := NewGeneralTerminalPublicationCommitV1(context, binding, "2026-07-15T00:00:00Z", drafts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := NewGeneralTerminalPublicationArchiveV1([]GeneralTerminalPublicationCommitV1{commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, inputKind := range []string{"map", "typed"} {
+		t.Run(inputKind, func(t *testing.T) {
+			inputArchive := cloneGeneralTerminalPublicationArchiveV1(canonical)
+			var input any = inputArchive
+			if inputKind == "map" {
+				input = GeneralTerminalPublicationArchiveV1Map(inputArchive)
+			}
+			encoded := func(value any) string {
+				t.Helper()
+				body, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(body)
+			}
+			inputBefore := encoded(input)
+			first, err := ParseGeneralTerminalPublicationArchiveV1(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := ParseGeneralTerminalPublicationArchiveV1(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, parsed := range []GeneralTerminalPublicationArchiveV1{first, second} {
+				if !reflect.DeepEqual(parsed, canonical) || parsed.ArchiveDigest != canonical.ArchiveDigest || encoded(parsed) != encoded(canonical) {
+					t.Fatal("parse changed the canonical archive or deterministic digest")
+				}
+				usage := parsed.Commits[0].UsageEvent["usage"].(map[string]any)
+				if number, ok := usage["totalTokens"].(json.Number); !ok || number.String() != "3" {
+					t.Fatalf("parse changed the nested exact number representation: %T", usage["totalTokens"])
+				}
+			}
+			first.Commits[0].UsageEvent["usage"].(map[string]any)["totalTokens"] = json.Number("9")
+			first.Commits[0].TerminalEvent["status"] = "aborted"
+			first.Commits[0].Events[0].Slot = "usage"
+			if encoded(input) != inputBefore || !reflect.DeepEqual(second, canonical) {
+				t.Fatal("parsed output shares nested maps or event slices with its input or another parse")
+			}
+			firstBefore := encoded(first)
+			switch source := input.(type) {
+			case map[string]any:
+				stored := source["commits"].([]any)[0].(map[string]any)
+				stored["usageEvent"].(map[string]any)["usage"].(map[string]any)["totalTokens"] = json.Number("12")
+				stored["terminalEvent"].(map[string]any)["status"] = "failed"
+				stored["events"].([]any)[0].(map[string]any)["slot"] = "terminal"
+			case GeneralTerminalPublicationArchiveV1:
+				source.Commits[0].UsageEvent["usage"].(map[string]any)["totalTokens"] = json.Number("12")
+				source.Commits[0].TerminalEvent["status"] = "failed"
+				source.Commits[0].Events[0].Slot = "terminal"
+			}
+			if encoded(first) != firstBefore || !reflect.DeepEqual(second, canonical) {
+				t.Fatal("input mutation changed a previously parsed archive")
+			}
+			if err := ValidateGeneralTerminalPublicationArchiveV1(second); err != nil {
+				t.Fatalf("isolated parse lost its canonical authority: %v", err)
+			}
+		})
+	}
+}

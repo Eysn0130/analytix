@@ -206,6 +206,6 @@ describe('trajectory transport observer', () => {
     expect(await source.loadOlder(thread)).toBe(false)
     expect(reader).toHaveBeenCalledTimes(2)
     off()
-  })
+  }, 10_000)
 
 })

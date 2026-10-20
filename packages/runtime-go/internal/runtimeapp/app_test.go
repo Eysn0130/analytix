@@ -308,7 +308,8 @@ func TestProductionUsageQueryIncludesTrustedEmptyConversationProjection(t *testi
 		}()
 	}
 	create := httptest.NewRecorder()
-	h.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/threads", strings.NewReader(`{"title":"synthetic usage assembly"}`)))
+	// Keep the workspace label independent of numeric TempDir paths checked for PII.
+	h.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/threads", strings.NewReader(`{"title":"synthetic usage assembly","workspace":"/synthetic/usage-workspace"}`)))
 	if create.Code != http.StatusCreated {
 		t.Fatalf("thread create status=%d body=%s", create.Code, create.Body.String())
 	}

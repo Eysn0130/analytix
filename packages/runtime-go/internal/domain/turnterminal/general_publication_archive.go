@@ -103,7 +103,8 @@ func ParseGeneralTerminalPublicationArchiveV1(value any) (GeneralTerminalPublica
 	if err := ValidateGeneralTerminalPublicationArchiveV1(archive); err != nil {
 		return GeneralTerminalPublicationArchiveV1{}, err
 	}
-	return cloneGeneralTerminalPublicationArchiveV1(archive), nil
+	// The decoder already owns this graph, including nested maps and slices.
+	return archive, nil
 }
 
 func GeneralTerminalPublicationArchiveV1Map(archive GeneralTerminalPublicationArchiveV1) map[string]any {

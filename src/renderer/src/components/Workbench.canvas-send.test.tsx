@@ -486,14 +486,30 @@ describe('Workbench Canvas consumer path', () => {
     Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] })
     Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() })
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} })
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0))
-    vi.stubGlobal('cancelAnimationFrame', (id: number) => window.clearTimeout(id))
+    const frames = new Map<number, FrameRequestCallback>()
+    let nextFrame = 0
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame })
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames.delete(id) })
+    const flushFrames = async () => {
+      for (let pass = 0; pass < 3 && frames.size > 0; pass++) {
+        const pending = [...frames.keys()]
+        await act(async () => {
+          for (const id of pending) {
+            const callback = frames.get(id)
+            frames.delete(id)
+            callback?.(0)
+          }
+        })
+      }
+    }
     try {
       io.realComposer = true
-      await act(async () => { composer().setMode('plan'); root.render(createElement(Workbench)); await new Promise(resolve => setTimeout(resolve, 20)) })
+      await act(async () => { composer().setMode('plan'); root.render(createElement(Workbench)) })
+      await flushFrames()
       const trigger = element.querySelector<HTMLButtonElement>('button[aria-label="composerMenuTitle"]')!
       expect(trigger).not.toBeNull()
-      await act(async () => { trigger.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
+      await act(async () => trigger.click())
+      await flushFrames()
       const menu = element.querySelector<HTMLElement>('[role="menu"][aria-label="composerMenuTitle"]')!
       expect(menu).not.toBeNull(); expect(menu.contains(document.activeElement)).toBe(true)
       const event = new KeyboardEvent('keydown', { ...options, bubbles: true, cancelable: true })
@@ -510,6 +526,7 @@ describe('Workbench Canvas consumer path', () => {
     } finally {
       io.realComposer = false
       await act(async () => root.render(createElement(Workbench)))
+      frames.clear()
       vi.unstubAllGlobals()
       if (rangeRects) Object.defineProperty(Range.prototype, 'getClientRects', rangeRects); else Reflect.deleteProperty(Range.prototype, 'getClientRects')
       if (rangeBounds) Object.defineProperty(Range.prototype, 'getBoundingClientRect', rangeBounds); else Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect')
