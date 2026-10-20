@@ -9,7 +9,6 @@
   --dsh-excel-secondary: rgb(97, 102, 107);
   --dsh-excel-radius: 8px;
   --dsh-excel-line: #e5e7eb;
-  --dsh-excel-selection: #2f6feb;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -20,6 +19,8 @@
 }
 
 .workbook {
+  /* This canvas stays white in both app themes; keep the existing light-surface focus color. */
+  --ax-border-focus: #3154db;
   position: relative;
   flex: 1;
   min-height: 0;
@@ -66,7 +67,7 @@
 .workbook :global(.luckysheet-sheet-area div.luckysheet-sheets-item:focus-visible),
 .workbook :global(.fortune-sheettab-button:focus-visible),
 .workbook :global(.fortune-sheettab-scroll:focus-visible) {
-  outline: 2px solid var(--dsh-excel-selection);
+  outline: 2px solid var(--ax-border-focus);
   outline-offset: -2px;
 }
 
@@ -97,18 +98,19 @@
 
 /* These are selection overlays, never cell fills or saved workbook formats. */
 .workbook :global(.luckysheet-cell-selected:not(.luckysheet-filter-selected)) {
-  border-color: var(--dsh-excel-selection);
-  background: rgb(47 111 235 / .06);
+  border-color: var(--ax-border-focus);
+  background: color-mix(in srgb, var(--ax-border-focus) 6%, transparent);
 }
 
 .workbook :global(.luckysheet-cell-selected-focus) {
-  background: rgb(47 111 235 / .04);
+  background: color-mix(in srgb, var(--ax-border-focus) 4%, transparent);
 }
 
 .workbook :global(.fortune-row-header-selected),
 .workbook :global(.fortune-col-header-selected) {
-  border-color: var(--dsh-excel-selection);
-  background: rgb(47 111 235 / .1);
+  border-color: var(--ax-border-focus);
+  /* Fortune writes a gray inline backgroundColor on these exact overlays. */
+  background-color: color-mix(in srgb, var(--ax-border-focus) 10%, transparent) !important;
 }
 
 .workbook :global(.fortune-row-header-hover),

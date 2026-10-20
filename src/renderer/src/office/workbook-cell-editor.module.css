@@ -1,4 +1,5 @@
-.editor { box-sizing: border-box; flex: none; min-width: 0; height: 40px; padding-inline: 12px; border-bottom: 1px solid #e5e7eb; background: #fff; color: #242424; color-scheme: light; }
+/* Match the existing light-surface focus token because this row stays white in both app themes. */
+.editor { --ax-border-focus: #3154db; box-sizing: border-box; flex: none; min-width: 0; height: 40px; padding-inline: 12px; border-bottom: 1px solid #e5e7eb; background: #fff; color: #242424; color-scheme: light; }
 .controls { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; }
 .address { flex: 0 1 150px; min-width: 70px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #6b7280; font-size: 12px; }
 .fx { flex: none; padding-inline: 4px; color: #6b7280; font-family: Georgia,serif; font-size: 16px; font-style: italic; }
@@ -6,7 +7,7 @@
 .value { box-sizing: border-box; width: 100%; min-width: 0; height: 30px; padding-inline: 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font-size: 12px; }
 .value:hover:not(:disabled) { border-color: #e5e7eb; }
 .value:disabled { cursor: default; opacity: .42; }
-.value:focus-visible { border-color: #3b82f6; outline: 1px solid #3b82f6; outline-offset: -1px; }
+.value:focus-visible { border-color: var(--ax-border-focus); outline: 1px solid var(--ax-border-focus); outline-offset: -1px; }
 .typeMenu button:focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -2px; }
 .typeMenu { position: fixed; z-index: 1100; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; width: 180px; max-width: calc(100vw - 24px); padding: 6px; overflow: auto; border: 1px solid var(--ds-border-muted); border-radius: 10px; background: var(--ds-surface-elevated); box-shadow: var(--ax-shadow-popover); color: var(--ds-text); font-size: 12px; line-height: 18px; }
 .typeMenu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; padding: 6px 8px; border-radius: 6px; text-align: left; }
