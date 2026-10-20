@@ -11,8 +11,8 @@ Status: Operational package reference。
 
 唯一生产 agent core 位于 `packages/runtime-go`。`analytix serve` 启动 Go
 `runtime-server`，同时保持公共 ready marker 和 CLI 边界稳定。
-`ANALYTIX_RUNTIME_BACKEND=typescript` 已退役，不能启动 TypeScript agent
-loop。
+Electron 会拒绝已退役的 `ANALYTIX_RUNTIME_BACKEND=typescript`；公共 launcher
+直接启动 Go。
 
 生产组合与 Go 内部结构见 [runtime-go/README.md](../runtime-go/README.md)。
 desktop settings、launcher parsing、同步配置与 Go 实际消费字段之间的区别见
@@ -49,8 +49,10 @@ src/
 npm run typecheck
 npm run test
 npm run build
-npm run serve -- --data-dir ~/.analytix/data
+npm run serve -- --data-dir /path/to/isolated-data
 ```
+
+运行 `serve` 前，按下文提供 runtime authentication，并使用隔离的数据目录。
 
 `npm run build` 只构建 TypeScript launcher/contracts 包，不编译或验证
 `packages/runtime-go`。Go 改动需要运行 focused Go tests：
@@ -79,29 +81,31 @@ analytix serve [options]
 
 | 参数 | 含义 | 默认值 |
 | --- | --- | --- |
-| `--config <path>` | launcher 支持的 serve/provider JSON 配置 | 存在时读取 `<data-dir>/config.json` |
+| `--config <path>` | launcher JSON 配置；其路径也传给 Go 供受支持的设置使用 | 存在时读取 `<data-dir>/config.json` |
 | `--host <host>` | runtime bind host | `127.0.0.1` |
 | `--port <port>` | runtime port | `8899` |
 | `--data-dir <path>` | runtime durable data root | `serve` 必填 |
-| `--runtime-token <token>` | `/v1/*` Bearer token | empty；local insecure 语义取决于启动模式 |
-| `--api-key <key>` | standalone provider API key | empty |
-| `--base-url <url>` | standalone 默认 provider base URL | `https://api.deepseek.com/beta`；GUI/managed provider 会覆盖 |
-| `--model-proxy-url <url>` | 上游模型 proxy | empty |
-| `--endpoint-format <format>` | `chat_completions`、`responses`、`messages` 或 `custom_endpoint` | `chat_completions` |
-| `--model <id>` | 默认 model id | `deepseek-v4-pro` |
 | `--approval-policy <policy>` | 默认 tool approval policy | `on-request` |
 | `--sandbox-mode <mode>` | 默认应用层 tool/path policy | `workspace-write` |
 | `--insecure` | 显式本地开发时关闭 Bearer auth | off |
 
-示例：
+argv 会拒绝 `--runtime-token` / `--runtimeToken` 与 `--api-key` / `--apiKey`。
+runtime Bearer token 通过 `ANALYTIX_RUNTIME_TOKEN` 提供；解析器仍兼容读取现有
+`serve.runtimeToken` 配置。除非显式选择 `--insecure`，否则必须提供 token。
+
+Provider 凭据使用本地 data-directory Registry / Secret Store。解析器拒绝非空白的
+`ANALYTIX_API_KEY` 或 `serve.apiKey`，以及 `ANALYTIX_MODEL_PROVIDERS` 或配置
+`modelProviders` 中 provider 条目上的任何 `apiKey` 字段。`--base-url`、
+`--model-proxy-url`、`--endpoint-format` 和 `--model` 仍保留为旧版 parse-only
+输入，不作为 Go Provider 配置转发。
+
+以下示例假设已通过环境提供 `ANALYTIX_RUNTIME_TOKEN`，并使用隔离的数据目录：
 
 ```bash
 analytix serve \
   --host 127.0.0.1 \
   --port 8899 \
-  --data-dir ~/.analytix/data \
-  --runtime-token dev-token \
-  --model deepseek-v4-pro
+  --data-dir /path/to/isolated-data
 ```
 
 桌面端通常由 Electron main 同步 GUI-managed config 后直接启动 Go binary。
@@ -120,8 +124,8 @@ scheduled-task turn 使用 `never` 加 `workspace-write`。
 
 不能从“schema 接受该字段”推断生产行为已经生效。
 
-- launcher 从 JSON config 解析 serve/provider 值和 `modelProviders`，并把适用
-  字段传给 Go。
+- launcher 从 JSON config 解析受支持的 serve options，并通过
+  `--mcp-config-path` 把配置路径传给 Go；旧版 Provider CLI 默认值不转发。
 - Electron main 同步 `<dataDir>/config.json`，再把路径传给 Go core，供当前已
   接线的 capability settings 使用。
 - Go production composition root 是
