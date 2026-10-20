@@ -4,7 +4,7 @@ Status: Reference / chronological batch ledger
 Applies to: 跨上游吸收批次；不证明当前实现、parity 或 superiority
 Source of truth for current behavior: current code, accepted specs, active
 OpenSpec tasks and fresh validation
-Current handover: [`../handovers/2026-07-25-first-stage-pause.md`](../handovers/2026-07-25-first-stage-pause.md)
+Current handover: [recovery entry](../handovers/README.md)
 
 Use this file when a change spans more than one upstream or affects the shared
 analytix architecture.

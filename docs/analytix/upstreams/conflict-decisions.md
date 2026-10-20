@@ -4,7 +4,7 @@ Status: Reference / chronological ADR ledger
 Applies to: 上游能力冲突和 Analytix 取舍
 Source of truth for current behavior: current code, accepted specs, active
 OpenSpec tasks and fresh validation
-Current handover: [`../handovers/2026-07-25-first-stage-pause.md`](../handovers/2026-07-25-first-stage-pause.md)
+Current handover: [recovery entry](../handovers/README.md)
 
 This file records durable decisions when Kun, Reasonix, CodexDesktop-Rebuild,
 or existing analytix behavior disagree.
