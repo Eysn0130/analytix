@@ -6,6 +6,7 @@ import {
   formatComposerPluginMentionToken,
   formatComposerSkillMentionToken,
   getComposerAtMentionAtCursor,
+  formatComposerDirectoryQuery,
   getComposerMentionDisplayPlan,
   getUserMessageDisplayParts,
   removeComposerMentionToken,
@@ -51,6 +52,14 @@ describe('composer mention helpers', () => {
         pluginId: 'analytix-fund-analysis'
       }
     ])
+  })
+
+  it.each(['notes]', 'notes)', 'notes@x', 'Project notes', `quote"folder`, `back\\folder`])('retains a drill query for directory %s and preserves the raw replacement span', directory => {
+    const token = formatComposerDirectoryQuery(directory)
+    const input = `ask ${token}`
+    const mention = getComposerAtMentionAtCursor(input, input.length)
+    expect(mention).toEqual({ start: 4, end: input.length, query: `${directory}/`, quoted: token.startsWith('@"') })
+    expect(replaceComposerAtMentionInInput(input + ' suffix', mention!, '@selected').input).toBe('ask @selected suffix')
   })
 
   it('formats and extracts skill mentions with Codex skill marker', () => {

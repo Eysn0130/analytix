@@ -90,6 +90,35 @@ describe('composer command menu available height', () => {
     })
     expect(measure).toHaveBeenCalledTimes(priorMeasurements)
   })
+
+  it('updates the overflow hint as the list scrolls and its available viewport resizes', async () => {
+    let notifyResize!: () => void
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { notifyResize = callback }
+      observe() {}
+      disconnect() {}
+    })
+    await render({ items: [row('plan'), row('goal')] })
+    const menu = host.querySelector<HTMLElement>('[data-composer-command-menu]')!
+    const viewport = host.querySelector<HTMLElement>('.dsh-composer-command-viewport')!
+    let height = 100
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, get: () => height },
+      scrollHeight: { configurable: true, value: 200 }
+    })
+    await act(async () => viewport.dispatchEvent(new Event('scroll', { bubbles: true })))
+    expect(menu.getAttribute('data-overflow-below')).toBe('true')
+    await act(async () => { viewport.scrollTop = 100; viewport.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    expect(menu.hasAttribute('data-overflow-below')).toBe(false)
+    await act(async () => { viewport.scrollTop = 0; viewport.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    expect(menu.getAttribute('data-overflow-below')).toBe('true')
+    height = 200
+    await act(async () => window.dispatchEvent(new Event('resize')))
+    expect(menu.hasAttribute('data-overflow-below')).toBe(false)
+    height = 80
+    await act(async () => notifyResize())
+    expect(menu.getAttribute('data-overflow-below')).toBe('true')
+  })
 })
 
 describe('shared composer command menu', () => {
@@ -158,6 +187,92 @@ describe('shared composer command menu', () => {
     await act(async () => option.click())
     expect(select).toHaveBeenCalledExactlyOnceWith(file, 0)
     expect(select.mock.calls[0]?.[0].reference).toBe(reference)
+  })
+
+  it('keeps pending rows visible but inert and uses skeletons only for pending sections without prior rows', async () => {
+    const previous = row('file', { title: 'Existing file', section: 'add' })
+    await render({ items: [previous], role: 'listbox', sections: [{ id: 'add', label: 'Files' }] })
+    const original = item('file')
+    await render({
+      items: [previous], role: 'listbox', loading: true,
+      sections: [{ id: 'add', label: 'Files', pending: true }, { id: 'skills', label: 'Skills', pending: true }]
+    })
+    expect(item('file')).toBe(original)
+    expect(item('file').textContent).toContain('Existing file')
+    expect(item('file').getAttribute('aria-disabled')).toBe('true')
+    expect(host.querySelectorAll('[role="option"]')).toHaveLength(1)
+    expect(host.querySelectorAll('.dsh-composer-command-skeleton-row')).toHaveLength(2)
+    const skeleton = host.querySelector<HTMLElement>('.dsh-composer-command-skeleton-row')!
+    expect(skeleton.previousElementSibling?.getAttribute('data-command-section')).toBe('skills')
+    expect(skeleton.getAttribute('aria-hidden')).toBe('true')
+    await act(async () => {
+      item('file').dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
+      item('file').click()
+    })
+    expect(onHover).not.toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
+    await render({ items: [previous], role: 'listbox', sections: [{ id: 'add', label: 'Files' }] })
+    expect(item('file').hasAttribute('aria-disabled')).toBe(false)
+    expect(host.querySelector('.dsh-composer-command-skeleton-row')).toBeNull()
+    await act(async () => item('file').click())
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(previous, 0)
+  })
+
+  it('places breadcrumb navigation outside the listbox and routes only ancestor picks without taking editor focus', async () => {
+    const onBreadcrumb = vi.fn()
+    await render({
+      items: [row('file', { section: 'add' })], role: 'listbox', selectedIndex: 0,
+      breadcrumbsLabel: 'File location', onBreadcrumb,
+      breadcrumbs: [{ label: 'Workspace', value: '' }, { label: 'Notes', value: 'notes', current: true }]
+    })
+    const navigation = host.querySelector<HTMLElement>('nav[aria-label="File location"]')!
+    const listbox = host.querySelector<HTMLElement>('[role="listbox"]')!
+    expect(listbox.contains(navigation)).toBe(false)
+    expect(navigation.closest('[role="listbox"]')).toBeNull()
+    expect(listbox.contains(item('file'))).toBe(true)
+    expect(listbox.id).toBe('commands')
+    expect(listbox.getAttribute('aria-activedescendant')).toBe(item('file').id)
+    const [ancestor, current] = navigation.querySelectorAll<HTMLButtonElement>('button')
+    expect(current.getAttribute('aria-current')).toBe('location')
+    const editor = document.createElement('textarea'); document.body.append(editor); editor.focus()
+    try {
+      const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+      await act(async () => { ancestor.dispatchEvent(down); ancestor.click(); current.click() })
+      expect(down.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(editor)
+      expect(onBreadcrumb).toHaveBeenCalledExactlyOnceWith('')
+      expect(onSelect).not.toHaveBeenCalled()
+    } finally { editor.remove() }
+  })
+
+  it('routes directory drill separately from reference selection while keeping focus with the editor', async () => {
+    const directory = { ...row('file', { title: 'Notes', section: 'add' }), drill: true }
+    const onDrill = vi.fn()
+    const sections = [{ id: 'add', label: 'Files' }]
+    await render({ items: [directory], role: 'listbox', sections, onDrill, drillLabel: 'Browse folder', drillHint: 'Open' })
+    const option = item('file')
+    const drill = option.querySelector<HTMLElement>('[role="button"][aria-label="Browse folder"]')!
+    expect(option.querySelector('kbd')?.textContent).toBe('Tab')
+    const editor = document.createElement('textarea'); document.body.append(editor); editor.focus()
+    try {
+      const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+      await act(async () => { drill.dispatchEvent(down); drill.click() })
+      expect(down.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(editor)
+      expect(onDrill).toHaveBeenCalledExactlyOnceWith(directory, 0)
+      expect(onSelect).not.toHaveBeenCalled()
+      onDrill.mockClear()
+      await render({ items: [directory], role: 'listbox', sections: [{ ...sections[0], pending: true }], onDrill, drillLabel: 'Browse folder' })
+      expect(drill.getAttribute('aria-disabled')).toBe('true')
+      await act(async () => drill.click())
+      expect(onDrill).not.toHaveBeenCalled()
+      expect(onSelect).not.toHaveBeenCalled()
+      await render({ items: [directory], role: 'listbox', sections, onDrill, drillLabel: 'Browse folder' })
+      await act(async () => option.click())
+      expect(onSelect).toHaveBeenCalledExactlyOnceWith(directory, 0)
+      expect(onDrill).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(editor)
+    } finally { editor.remove() }
   })
 
   it('keeps focus with the editor while selecting a real item and leaves dispatch to its owner', async () => {

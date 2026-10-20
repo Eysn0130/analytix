@@ -130,11 +130,14 @@ function TrajectoryPanelSeat({ threadId, onInspectTool, renderToolInspector, sou
   return <section className={css.panel} lang={i18n.resolvedLanguage ?? i18n.language} aria-label={label('title', 'Trajectory')} data-trajectory-thread={threadId} data-conversation-composer-overlay="">
     <header className={css.toolbar} role="toolbar" aria-label={label('controls', 'Trajectory controls')}>
       <div className={css.toolbarInner}><div className={css.toolbarActions}>
-        <button type="button" className={css.toggle} aria-pressed={duration} onClick={() => { setDuration(value => !value); setRange(null) }} title={label('duration', 'Duration')}>
+        <button type="button" className={css.toggle} aria-label={label('useActualDuration', 'Use actual duration')} aria-pressed={duration}
+          onClick={() => { setDuration(value => !value); setRange(null) }} title={duration ? label('useEqualWidth', 'Use equal-width operations') : label('useActualDuration', 'Use actual duration')}>
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden><circle cx="8" cy="8" r="5.25" /><path d="M8 4.75V8l2.25 1.5" /></svg>{label('duration', 'Duration')}</button>
         <button type="button" className={css.toolbarAction} aria-pressed={allTurnsCollapsed} aria-label={allTurnsCollapsed ? label('expandTurns', 'Expand turns') : label('collapseTurns', 'Collapse turns')}
+          title={allTurnsCollapsed ? label('expandTurns', 'Expand turns') : label('collapseTurns', 'Collapse turns')}
           onClick={() => setCollapsedTurns(allTurnsCollapsed ? new Set() : new Set(turns))}><span className={css.toolbarActionIcon} aria-hidden>{allTurnsCollapsed ? '⊞' : '⊟'}</span>{label('turns', 'Turns')}</button>
         <button type="button" className={css.toolbarAction} aria-pressed={allCallsCollapsed} aria-label={allCallsCollapsed ? label('expandCalls', 'Expand calls') : label('collapseCalls', 'Collapse calls')}
+          title={allCallsCollapsed ? label('expandCalls', 'Expand calls') : label('collapseCalls', 'Collapse calls')}
           onClick={() => setCollapsedCalls(allCallsCollapsed ? new Set() : new Set(callGroups))}><span className={css.toolbarActionIcon} aria-hidden>{allCallsCollapsed ? '⊞' : '⊟'}</span>{label('calls', 'Calls')}</button>
         {snapshot.historyWindow === 'older' ? <button type="button" className={css.toolbarAction} onClick={showLatest}>{label('latest', i18n.language.startsWith('zh') ? '返回最新轨迹' : 'Return to latest')}</button> : null}
       </div>

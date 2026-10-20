@@ -606,6 +606,139 @@ describe('real InputBar shared mention menu', () => {
   })
 })
 
+describe('real InputBar mention refinement', () => {
+  it.each([['ArrowDown', 0], ['ArrowUp', 1]] as const)('moves %s from the displayed highlight after candidates shrink', async (direction, expected) => {
+    const workspaceRoot = `/workspace/commands-refinement-${direction}`
+    const entries = Array.from({ length: 8 }, (_, index) => ({ name: `note-${index < 3 ? 'subset' : 'other'}-${index}.md`,
+      path: `${workspaceRoot}/note-${index < 3 ? 'subset' : 'other'}-${index}.md`, type: 'file' as const, ext: '.md' }))
+    installMentionFileLookup(workspaceRoot, entries)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: '@note' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      await key(editor(), 'ArrowUp')
+      expectMentionHighlight(7)
+      await setDraft('@subset')
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionOptions()).toHaveLength(3)
+      expectMentionHighlight(2)
+      await key(editor(), direction)
+      expectMentionHighlight(expected)
+      expectNoDispatch()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('dismisses a pending @ menu outside the composer and ignores its late reply', async () => {
+    const workspaceRoot = '/workspace/commands-mention-outside'
+    let settle!: (entries: WorkspaceEntry[]) => void
+    installMentionFileLookup(workspaceRoot, new Promise(resolve => { settle = resolve }))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: '@unmatched' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionMenu()).not.toBeNull()
+      await act(async () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })))
+      expect(mentionMenu()).toBeNull()
+      await act(async () => settle(mentionFiles(workspaceRoot, 'unmatched')))
+      expect(mentionMenu()).toBeNull()
+      expect(getDraft()).toBe('@unmatched')
+      expectNoDispatch()
+    } finally { settle([]); vi.useRealTimers() }
+  })
+})
+
+describe('real InputBar directory navigation', () => {
+  it('drills real directories with Tab and the chevron, blocks stale pending rows, and returns through pinned crumbs', async () => {
+    const workspaceRoot = '/workspace/commands-directory-drill'
+    const dir = (relative: string): WorkspaceEntry => ({ name: relative.split('/').at(-1)!, path: `${workspaceRoot}/${relative}`, type: 'directory', ext: '' })
+    const file = (relative: string): WorkspaceEntry => ({ name: relative.split('/').at(-1)!, path: `${workspaceRoot}/${relative}`, type: 'file', ext: '.md' })
+    let settleDirectory!: (entries: WorkspaceEntry[]) => void
+    const pending = new Promise<WorkspaceEntry[]>(resolve => { settleDirectory = resolve })
+    const listDirectory = vi.fn(async ({ path }: { path: string }) => ({ ok: true, entries:
+      path === workspaceRoot ? [dir('src'), file('top.md')] :
+      path === `${workspaceRoot}/src` ? [dir('src/nested'), file('src/note.md')] :
+      path === `${workspaceRoot}/src/nested` || path === 'src/nested' ? [file('src/nested/deep.md')] :
+      path === 'src' ? await pending : []
+    }))
+    useChatStore.setState({ workspaceRoot })
+    Object.defineProperty(window, 'analytix', { configurable: true, value: {
+      ...window.analytix, files: { ...window.analytix.files, listDirectory }
+    } })
+    const onAddFileReference = vi.fn()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: '@src', onAddFileReference })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expectMentionHighlight(0)
+      expect((await key(editor(), 'Tab')).defaultPrevented).toBe(true)
+      expect(getDraft()).toBe('@src/')
+      expect(onAddFileReference).not.toHaveBeenCalled()
+      expect(mentionOptions()[0].getAttribute('aria-disabled')).toBe('true')
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(listDirectory).toHaveBeenCalledWith({ workspaceRoot, path: 'src' })
+      const pendingDraft = getDraft()
+      await key(editor(), 'Enter'); await key(editor(), 'Tab')
+      await act(async () => mentionOptions()[0].click())
+      expect(getDraft()).toBe(pendingDraft)
+      expect(onAddFileReference).not.toHaveBeenCalled()
+      await act(async () => settleDirectory([dir('src/nested'), file('src/note.md')]))
+      const navigation = host.querySelector('nav')!
+      expect(navigation.closest('[role="listbox"]')).toBeNull()
+      expect([...navigation.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Workspace', 'src'])
+      expect(mentionOptions().map(option => option.dataset.commandId)).toEqual(['file:directory:src/nested', 'file:file:src/note.md'])
+      await act(async () => mentionOptions()[0].querySelector<HTMLElement>('[role="button"]')!.click())
+      await flushFrames()
+      expect(getDraft()).toBe('@src/nested/')
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionOptions()).toHaveLength(1)
+      expect(mentionOptions()[0].querySelector('[role="button"]')).toBeNull()
+      const crumbs = [...host.querySelectorAll<HTMLButtonElement>('nav button')]
+      await act(async () => crumbs[0].click())
+      await flushFrames()
+      expect(getDraft()).toBe('@')
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(mentionOptions().map(option => option.dataset.commandId)).toEqual(['file:directory:src', 'file:file:top.md'])
+      expect(host.querySelector('nav [aria-current="location"]')?.textContent).toBe('Workspace')
+      await key(editor(), 'Tab')
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      await key(editor(), 'ArrowDown')
+      await key(editor(), 'Tab')
+      expect(getDraft()).toBe('@src/note.md ')
+      expect(onAddFileReference).toHaveBeenCalledExactlyOnceWith({ path: `${workspaceRoot}/src/note.md`, relativePath: 'src/note.md', name: 'note.md', type: 'file' })
+      expect(mentionMenu()).toBeNull()
+      expect(callbacks.onSend).not.toHaveBeenCalled()
+    } finally { settleDirectory([]); vi.useRealTimers() }
+  })
+
+  it.each(['Project notes', 'notes]', 'notes)', 'notes@x', 'quote"folder'])('keeps directory query %s open and Enter selects the original reference', async directoryName => {
+    const workspaceRoot = `/workspace/commands-spaced-directory-${directoryName}`
+    useChatStore.setState({ workspaceRoot })
+    const directory: WorkspaceEntry = { name: directoryName, path: `${workspaceRoot}/${directoryName}`, type: 'directory', ext: '' }
+    const note: WorkspaceEntry = { name: 'note.md', path: `${directory.path}/note.md`, type: 'file', ext: '.md' }
+    Object.defineProperty(window, 'analytix', { configurable: true, value: {
+      ...window.analytix, files: { ...window.analytix.files, listDirectory: vi.fn(async ({ path }: { path: string }) => ({ ok: true,
+        entries: path === workspaceRoot ? [directory] : path === directory.path || path === directoryName ? [note] : []
+      })) }
+    } })
+    const onAddFileReference = vi.fn()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await render({ initialInput: `@${directoryName.split(/[^a-z]/iu)[0]}`, onAddFileReference })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      const directoryOption = mentionOptions().find(option => option.dataset.commandId === `file:directory:${directoryName}`)!
+      await act(async () => directoryOption.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })))
+      await key(editor(), 'Tab')
+      expect(getDraft()).toBe(`@"${directoryName.replaceAll('"', '\\"')}/`)
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      await key(editor(), 'Enter')
+      const expectedToken = /[\s"]/u.test(directoryName) ? `@"${directoryName.replaceAll('"', '\\"')}/note.md"` : `@${directoryName}/note.md`
+      expect(getDraft()).toBe(`${expectedToken} `)
+      expect(onAddFileReference).toHaveBeenCalledExactlyOnceWith({ path: note.path, relativePath: `${directoryName}/note.md`, name: note.name, type: 'file' })
+      expect(callbacks.onSend).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+})
+
 describe('real InputBar hero workspace accessory', () => {
   it('mounts the actual Workspace/Git seats only in hero and preserves the editor across hero → active', async () => {
     const getGitBranches = vi.fn(async () => ({ ok: true as const, repositoryRoot: '/workspace/commands',

@@ -53,6 +53,40 @@ async function renderTable(records: readonly TrajectoryRecord[], props: Partial<
     loading={false} historyStartSeq={0} reveal={null} onRevealed={vi.fn()} {...props} />))
 }
 describe('independent trajectory working surface', () => {
+  it.each([
+    ['en', 'Use actual duration', 'Use equal-width operations', 'Collapse turns', 'Expand turns', 'Collapse calls', 'Expand calls'],
+    ['zh', '使用实际时长', '使用等宽操作', '折叠轮次', '展开轮次', '折叠调用', '展开调用']
+  ])('keeps toolbar hover actions and fold icons aligned with their state in %s', async (language, actualDuration, equalWidth, collapseTurns, expandTurns, collapseCalls, expandCalls) => {
+    await i18n.changeLanguage(language)
+    const source = sourceFixture()
+    source.observe('trajectory-thread', [userEvent(1), toolEvent(false, 2)])
+    await render(source)
+    const [duration, turns, calls] = host.querySelectorAll<HTMLButtonElement>('[role="toolbar"] button')
+    expect(duration.getAttribute('aria-label')).toBe(actualDuration)
+    expect(duration.title).toBe(actualDuration)
+    expect(duration.getAttribute('aria-pressed')).toBe('false')
+    await click(duration)
+    expect(duration.getAttribute('aria-label')).toBe(actualDuration)
+    expect(duration.title).toBe(equalWidth)
+    expect(duration.getAttribute('aria-pressed')).toBe('true')
+    await click(duration)
+    expect(duration.title).toBe(actualDuration)
+    for (const [control, collapse, expand] of [[turns, collapseTurns, expandTurns], [calls, collapseCalls, expandCalls]] as const) {
+      expect(control.title).toBe(collapse)
+      expect(control.getAttribute('aria-label')).toBe(collapse)
+      expect(control.getAttribute('aria-pressed')).toBe('false')
+      expect(control.querySelector('[aria-hidden]')?.textContent).toBe('⊟')
+      await click(control)
+      expect(control.title).toBe(expand)
+      expect(control.getAttribute('aria-label')).toBe(expand)
+      expect(control.getAttribute('aria-pressed')).toBe('true')
+      expect(control.querySelector('[aria-hidden]')?.textContent).toBe('⊞')
+      await click(control)
+      expect(control.title).toBe(collapse)
+      expect(control.getAttribute('aria-pressed')).toBe('false')
+      expect(control.querySelector('[aria-hidden]')?.textContent).toBe('⊟')
+    }
+  })
   it.each(['en', 'zh'])('shows independent public retry/error details in %s without changing step identity', async language => {
     await i18n.changeLanguage(language)
     const source = sourceFixture()
@@ -340,7 +374,7 @@ describe('independent trajectory working surface', () => {
     ]
     expect(keys).toHaveLength(30)
     for (const key of [...keys, 'retry', 'error', 'retrySource', 'phase', 'attempt', 'maxAttempt', 'retryDelay', 'code', 'steps', 'messages', 'hiddenRecords', 'moreToolNames',
-      'emptyRecords', 'noTimingWithSequence', 'noTimelineEntries', 'latest', 'olderUnavailable', 'olderWindow',
+      'emptyRecords', 'noTimingWithSequence', 'noTimelineEntries', 'latest', 'olderUnavailable', 'olderWindow', 'useActualDuration', 'useEqualWidth',
       ...['provider_retry', 'transport_reconnect'].map(source => `retrySourceValue.${source}`),
       ...['scheduled', 'started', 'cancelled', 'setup', 'highest_seq', 'replay', 'live'].map(phase => `phaseValue.${phase}`),
       ...['ready', 'running', 'completed', 'failed', 'blocked', 'cancelled', 'unknown', 'recorded'].map(status => `state.${status}`)]) {

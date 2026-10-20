@@ -55,7 +55,7 @@ export const COMPOSER_PLUGIN_MENTION_PREFIX = 'plugin://'
 export const COMPOSER_SKILL_MENTION_PREFIX = 'skill://'
 
 const AT_MENTION_BOUNDARY = /(^|[\s([{，。；：、])@([^\s@"'\])]*)$/u
-const QUOTED_AT_MENTION_BOUNDARY = /(^|[\s([{，。；：、])@"([^"\n\r]*)$/u
+const QUOTED_AT_MENTION_BOUNDARY = /(^|[\s([{，。；：、])@"((?:\\[^\n\r]|[^"\\\n\r])*\\?)$/u
 // Keep escape pairs disjoint from ordinary URI characters, including for
 // incomplete user input that has no closing parenthesis.
 const COMPOSER_LINK_MENTION = /([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s\\])*)\)/gu
@@ -85,8 +85,9 @@ export function getComposerAtMentionAtCursor(input: string, cursor: number): Com
   const beforeCursor = input.slice(0, boundedCursor)
   const quoted = QUOTED_AT_MENTION_BOUNDARY.exec(beforeCursor)
   if (quoted) {
-    const query = quoted[2] ?? ''
-    const start = boundedCursor - query.length - 2
+    const rawQuery = quoted[2] ?? ''
+    const start = boundedCursor - rawQuery.length - 2
+    const query = rawQuery.replace(/\\(["\\])/gu, '$1')
     return { start, end: boundedCursor, query, quoted: true }
   }
 
@@ -95,6 +96,14 @@ export function getComposerAtMentionAtCursor(input: string, cursor: number): Com
   const query = plain[2] ?? ''
   const start = boundedCursor - query.length - 1
   return { start, end: boundedCursor, query, quoted: false }
+}
+
+/** An unfinished @ path for directory navigation; selecting a reference still closes the token. */
+export function formatComposerDirectoryQuery(directory: string, quoted = false): string {
+  const query = directory ? `${directory.replace(/\/+$/u, '')}/` : ''
+  return quoted || /[\s@"')\]]/u.test(query)
+    ? `@"${query.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}`
+    : `@${query}`
 }
 
 export function formatComposerPluginMentionToken(displayName: string, pluginId: string): string {

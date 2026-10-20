@@ -76,6 +76,7 @@ import {
   formatComposerPluginMentionToken,
   formatComposerSkillMentionToken,
   getComposerAtMentionAtCursor,
+  formatComposerDirectoryQuery,
   replaceComposerAtMentionInInput,
   type ComposerAtMention,
   type ComposerPluginMentionToken,
@@ -84,6 +85,8 @@ import {
 import {
   loadWorkspaceFileIndex,
   loadWorkspaceMentionPathSuggestions,
+  loadWorkspaceMentionDirectorySuggestions,
+  mentionQueryDirectory,
   mergeMentionCandidates
 } from '../../lib/workspace-file-index'
 import {
@@ -864,6 +867,8 @@ export function InputBar({
   const [agentPluginsLoading, setAgentPluginsLoading] = useState(false)
   const [fileMentionSuggestions, setFileMentionSuggestions] = useState<ComposerFileReference[]>([])
   const [fileMentionLoading, setFileMentionLoading] = useState(false)
+  const [fileMentionResultKey, setFileMentionResultKey] = useState<string | null>(null)
+  const [drilledMention, setDrilledMention] = useState<{ owner: string; start: number } | null>(null)
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null)
   const composerMenuId = useId()
@@ -1192,6 +1197,11 @@ export function InputBar({
     activeAtMentionKey !== dismissedMentionKey &&
     !composerMenuOpen &&
     !goalPanelOpen
+  const mentionDrilled = drilledMention?.owner === composerOwnerKey && drilledMention.start === activeAtMention?.start
+  const mentionDirectory = mentionDrilled ? mentionQueryDirectory(activeAtMention?.query ?? '') ?? '' : null
+  const fileMentionRequestKey = JSON.stringify([composerOwnerKey, activeAtMentionKey, mentionDirectory])
+  const fileMentionPending = showAtMentionMenu && fileReferenceEnabled && Boolean(effectiveWorkspaceRoot) &&
+    (fileMentionLoading || fileMentionResultKey !== fileMentionRequestKey)
   const mentionSections = useMemo<ComposerMentionSection[]>(() => {
     if (!activeAtMention) return []
     const query = activeAtMention.query
@@ -1206,7 +1216,7 @@ export function InputBar({
       sections.push({ ...section, items })
     }
 
-    const pluginItems = installedAgentPluginsForMentions
+    const pluginItems = (mentionDrilled ? [] : installedAgentPluginsForMentions)
       .map((plugin) => {
         const id = hubPluginMentionId(plugin)
         const title = hubPluginMentionDisplayName(plugin)
@@ -1255,7 +1265,7 @@ export function InputBar({
     })
 
     const disabledSkills = disabledSkillIdSet(disabledSkillIds)
-    const skillItems = queryIsEmpty
+    const skillItems = queryIsEmpty || mentionDrilled
       ? []
       : skillCommands
           .map((skill) => {
@@ -1324,6 +1334,7 @@ export function InputBar({
     disabledSkillIds,
     effectiveWorkspaceRoot,
     fileMentionSuggestions,
+    mentionDrilled,
     installedAgentPluginsForMentions,
     mentionedPluginIds,
     mentionedSkillIds,
@@ -1338,7 +1349,9 @@ export function InputBar({
     flatMentionSuggestions.length > 0
       ? flatMentionSuggestions[Math.min(selectedMentionIndex, flatMentionSuggestions.length - 1)]
       : null
-  const atMentionLoading = agentPluginsLoading || fileMentionLoading
+  const atMentionLoading = (!mentionDrilled && agentPluginsLoading) || fileMentionPending
+  const mentionPending = (suggestion: ComposerMentionSuggestion): boolean => suggestion.kind === 'file'
+    ? fileMentionPending : suggestion.kind === 'plugin' && agentPluginsLoading
   const pluginMentionChips = useMemo<ComposerPluginMentionChip[]>(() => {
     const pluginById = new Map(
       installedAgentPluginsForMentions.map((plugin) => [hubPluginMentionId(plugin).toLowerCase(), plugin])
@@ -1429,9 +1442,11 @@ export function InputBar({
   }, [slashQuery])
 
   useEffect(() => {
-    if (slashQuery == null) return
+    if (slashQuery == null && !showAtMentionMenu) return
     const dismissOutside = (event: PointerEvent | FocusEvent) => {
-      if (event.target instanceof Node && !composerRootRef.current?.contains(event.target)) setDismissedSlashKey(slashOwnerKey)
+      if (!(event.target instanceof Node) || composerRootRef.current?.contains(event.target)) return
+      if (slashQuery != null) setDismissedSlashKey(slashOwnerKey)
+      if (showAtMentionMenu) setDismissedMentionKey(activeAtMentionKey)
     }
     document.addEventListener('pointerdown', dismissOutside, true)
     document.addEventListener('focusin', dismissOutside)
@@ -1439,7 +1454,7 @@ export function InputBar({
       document.removeEventListener('pointerdown', dismissOutside, true)
       document.removeEventListener('focusin', dismissOutside)
     }
-  }, [slashOwnerKey, slashQuery])
+  }, [slashOwnerKey, slashQuery, showAtMentionMenu, activeAtMentionKey])
 
   const previousComposerContext = useRef(JSON.stringify([activeThreadId, effectiveWorkspaceRoot]))
   useLayoutEffect(() => {
@@ -1460,8 +1475,11 @@ export function InputBar({
   }, [voiceActivity])
 
   useEffect(() => {
-    setSelectedMentionIndex(0)
-  }, [activeAtMentionKey])
+    if (!showAtMentionMenu) {
+      setSelectedMentionIndex(0)
+      setDrilledMention(null)
+    }
+  }, [showAtMentionMenu, composerOwnerKey])
 
   useEffect(() => {
     if (route === 'claw') {
@@ -1507,26 +1525,26 @@ export function InputBar({
     if (!showAtMentionMenu || !activeAtMention || !fileReferenceEnabled || !effectiveWorkspaceRoot) {
       setFileMentionSuggestions((current) => (current.length === 0 ? current : []))
       setFileMentionLoading(false)
+      setFileMentionResultKey(null)
       return
     }
 
     let cancelled = false
     const query = activeAtMention.query
+    const requestKey = fileMentionRequestKey
     const timer = window.setTimeout(() => {
       setFileMentionLoading(true)
       // Resolve the index and any deep path-mention target in parallel so a
       // deeply nested file the bounded index never reached still resolves
       // (issue #340).
-      void Promise.all([
+      const lookup = mentionDirectory !== null ? loadWorkspaceMentionDirectorySuggestions(effectiveWorkspaceRoot, mentionDirectory)
+        : Promise.all([
         loadWorkspaceFileIndex(effectiveWorkspaceRoot),
         loadWorkspaceMentionPathSuggestions(effectiveWorkspaceRoot, query).catch(() => [])
-      ])
-        .then(([index, pathSuggestions]) => {
+      ]).then(([index, pathSuggestions]) => mergeMentionCandidates([...index.directories, ...index.files], pathSuggestions))
+      void lookup
+        .then((candidates) => {
           if (cancelled) return
-          const candidates = mergeMentionCandidates(
-            [...index.directories, ...index.files],
-            pathSuggestions
-          )
           setFileMentionSuggestions(
             filterWorkspaceFileMentionSuggestions(candidates, query, fileReferences)
           )
@@ -1535,7 +1553,7 @@ export function InputBar({
           if (!cancelled) setFileMentionSuggestions([])
         })
         .finally(() => {
-          if (!cancelled) setFileMentionLoading(false)
+          if (!cancelled) { setFileMentionResultKey(requestKey); setFileMentionLoading(false) }
         })
     }, 80)
 
@@ -1543,7 +1561,7 @@ export function InputBar({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [activeAtMention, effectiveWorkspaceRoot, fileReferenceEnabled, fileReferences, showAtMentionMenu])
+  }, [activeAtMention, effectiveWorkspaceRoot, fileReferenceEnabled, fileReferences, showAtMentionMenu, fileMentionRequestKey, mentionDirectory])
 
   useEffect(() => {
     if (!composerMenuOpen) return
@@ -1857,7 +1875,7 @@ export function InputBar({
 
   const applyMentionSuggestion = (suggestion: ComposerMentionSuggestion | null): void => {
     if (composerOwnerRevision !== composerOwnerRevisionRef.current) return
-    if (!suggestion) return
+    if (!suggestion || mentionPending(suggestion)) return
     if (suggestion.kind === 'plugin') {
       applyPluginMention(suggestion)
       return
@@ -1867,6 +1885,21 @@ export function InputBar({
       return
     }
     applyFileMention(suggestion.reference)
+  }
+
+  const drillMentionDirectory = (directory: string, returning = false): void => {
+    if (composerOwnerRevision !== composerOwnerRevisionRef.current || !activeAtMention || fileMentionPending && !returning) return
+    // Leave the token unfinished so the existing @ detector retains the menu.
+    // Settling a row still uses the original reference/token insertion above.
+    const token = formatComposerDirectoryQuery(directory, activeAtMention.quoted)
+    const next = `${input.slice(0, activeAtMention.start)}${token}${input.slice(activeAtMention.end)}`
+    const cursor = activeAtMention.start + token.length
+    setDrilledMention({ owner: composerOwnerKey, start: activeAtMention.start })
+    setInput(next)
+    setComposerCursor(cursor)
+    setSelectedMentionIndex(0)
+    setDismissedMentionKey(null)
+    focusComposerAtRawCursorAfterRender(cursor, next.length)
   }
 
   const removeFileReference = (reference: ComposerFileReference): void => {
@@ -1982,21 +2015,36 @@ export function InputBar({
       }
       if (event.key === 'ArrowDown' && flatMentionSuggestions.length > 0) {
         event.preventDefault()
-        setSelectedMentionIndex((current) => (current + 1) % flatMentionSuggestions.length)
+        setSelectedMentionIndex(current => {
+          for (let offset = 1; offset <= flatMentionSuggestions.length; offset++) {
+            const next = (Math.min(current, flatMentionSuggestions.length - 1) + offset) % flatMentionSuggestions.length
+            if (!mentionPending(flatMentionSuggestions[next])) return next
+          }
+          return current
+        })
         return
       }
       if (event.key === 'ArrowUp' && flatMentionSuggestions.length > 0) {
         event.preventDefault()
-        setSelectedMentionIndex((current) =>
-          current === 0 ? flatMentionSuggestions.length - 1 : current - 1
-        )
+        setSelectedMentionIndex(current => {
+          for (let offset = 1; offset <= flatMentionSuggestions.length; offset++) {
+            const next = (Math.min(current, flatMentionSuggestions.length - 1) - offset + flatMentionSuggestions.length) % flatMentionSuggestions.length
+            if (!mentionPending(flatMentionSuggestions[next])) return next
+          }
+          return current
+        })
         return
       }
       if ((sendByEnter || event.key === 'Tab' && !event.shiftKey) && highlightedMention) {
         event.preventDefault()
+        if (event.key === 'Tab' && highlightedMention.kind === 'file' && isComposerDirectoryReference(highlightedMention.reference)) {
+          drillMentionDirectory(highlightedMention.reference.relativePath)
+          return
+        }
         applyMentionSuggestion(highlightedMention)
         return
       }
+      if ((sendByEnter || event.key === 'Tab') && atMentionLoading) { event.preventDefault(); return }
       if (event.key === 'Escape') {
         event.preventDefault()
         setDismissedMentionKey(activeAtMentionKey)
@@ -2195,6 +2243,7 @@ export function InputBar({
     canonicalName: suggestion.kind === 'file' ? suggestion.title : suggestion.badge,
     section: section.key,
     sectionLabel: section.title,
+    drill: suggestion.kind === 'file' && isComposerDirectoryReference(suggestion.reference),
     suggestion
   })))
 
@@ -2307,8 +2356,26 @@ export function InputBar({
             ariaLabel={t('composerAtMentionMenuTitle')}
             emptyLabel={atMentionLoading ? t('composerAtMentionLoading') : t('composerAtMentionEmpty')}
             loading={atMentionLoading}
+            sections={[
+              ...mentionDrilled ? [] : [
+                { id: 'plugins', label: t('composerMentionSectionPlugins'), pending: agentPluginsLoading },
+                { id: 'skills', label: t('composerMentionSectionSkills') }
+              ],
+              { id: 'files', label: t('composerMentionSectionFiles'), pending: fileMentionPending }
+            ].filter(section => section.pending || mentionMenuItems.some(item => item.section === section.id))}
+            breadcrumbs={mentionDirectory === null ? undefined : [
+              { label: t('composerMentionWorkspace'), value: '', current: !mentionDirectory },
+              ...mentionDirectory.split('/').filter(Boolean).map((label, index, segments) => ({
+                label, value: segments.slice(0, index + 1).join('/'), current: index === segments.length - 1
+              }))
+            ]}
+            breadcrumbsLabel={t('composerMentionBreadcrumbs')}
+            onBreadcrumb={directory => drillMentionDirectory(directory, true)}
+            drillLabel={t('composerMentionDrill')}
+            drillHint={t('composerMentionDrillHint')}
             onHover={setSelectedMentionIndex}
             onSelect={item => applyMentionSuggestion(item.suggestion)}
+            onDrill={item => { if (item.suggestion.kind === 'file' && isComposerDirectoryReference(item.suggestion.reference)) drillMentionDirectory(item.suggestion.reference.relativePath) }}
           />
         ) : null}
 

@@ -37,6 +37,7 @@ import { SubagentInspectorPanel } from '../../../summary/SubagentInspectorPanel'
 import bashHeaderCss from './toolviews/bash-row.module.css'
 import toolRowCss from './ToolRow.module.css'
 import disclosureCss from '../DisclosureRow.module.css'
+import chatViewCss from './ChatView.module.css'
 const registryFixture = vi.hoisted(() => ({ provider: null as AgentProvider | null }))
 vi.mock('../../../../agent/registry', () => ({ getProvider: () => registryFixture.provider ?? ({ getThreadDetail: async () => ({ authoritativeTurnTimings: {}, authoritativeTurnStatuses: {} }) }) }))
 let root: Root, container: HTMLDivElement, previous: ReturnType<typeof useChatStore.getState>
@@ -119,6 +120,22 @@ async function render(turn: ThreadTurn, props: Partial<Parameters<typeof ChatVie
   const processing = props.processing ?? false
   await act(async () => root.render(createElement(ChatView, { threadId: 'thread', turnId: 'turn', turn,
     sections: deriveTurnSections({ turn, isProcessing: processing, liveProcessText: '', liveContent: '', workspaceRoot: '' }), processing, ...props })))
+}
+async function runningDividerDisplay(): Promise<string | undefined> {
+  const divider = container.querySelector('[data-analytix-live-progress] > [aria-hidden]')
+  expect(divider).not.toBeNull()
+  const fs = await vi.importActual<{ readFileSync: (path: string, encoding: 'utf8') => string }>('node:fs')
+  const base = import.meta.url
+  const url = new URL('./ChatView.module.css', base)
+  expect(url.protocol).toBe('file:')
+  const sheet = parse(fs.readFileSync(decodeURIComponent(url.pathname), 'utf8'))
+  let display: string | undefined
+  sheet.walkRules(rule => {
+    if (!rule.selector.includes('> [data-analytix-live-progress] > [aria-hidden]')) return
+    const selector = rule.selector.replace(/\.(chat|process|processBody|responseSeat)\b/g, (_match, name: string) => '.' + chatViewCss[name])
+    if (divider!.matches(selector)) rule.walkDecls('display', declaration => { display = declaration.value })
+  })
+  return display
 }
 function accessibleText(node: Element): string {
   const content = node.cloneNode(true) as Element
@@ -436,6 +453,23 @@ describe('Schedule creation tail in the central turn', () => {
   })
 })
 describe('shared central turn composition', () => {
+  it.each([
+    { name: 'initial input', blocks: [], display: 'none' },
+    { name: 'only steering', blocks: [{ ...user, id: 'steering', text: 'Later direction' }], display: 'none' },
+    { name: 'output', blocks: [tool], display: 'block' },
+    { name: 'output then steering', blocks: [tool, { ...user, id: 'steering', text: 'Later direction' }], display: 'none' },
+    { name: 'assistant output then steering', blocks: [{ kind: 'assistant' as const, id: 'reply', text: 'Earlier response' }, { ...user, id: 'steering', text: 'Later direction' }], display: 'none' },
+    { name: 'steering then output', blocks: [{ ...user, id: 'steering', text: 'Later direction' }, tool], display: 'block' }
+  ])('separates running status from the rendered output after $name', async ({ blocks, display }) => {
+    await render({ user, blocks }, { processing: true, running: true })
+    expect(await runningDividerDisplay()).toBe(display)
+  })
+  it('does not let a retained hidden process body count as rendered output', async () => {
+    await render({ user, blocks: [tool] }, { processing: true, running: true })
+    expect(await runningDividerDisplay()).toBe('block')
+    container.querySelector<HTMLElement>('[data-public-process-body]')!.hidden = true
+    expect(await runningDividerDisplay()).toBe('none')
+  })
   it('mounts feedback only for a final completed runtime assistant identity', async () => {
     const block: Extract<ChatBlock, { kind: 'assistant' }> = { kind: 'assistant', id: 'real-message', text: 'Final reply', meta: { turnId: 'turn' },
       assistantItemIdentity: { threadId: 'thread', turnId: 'turn', itemId: 'real-message' } }
@@ -475,9 +509,10 @@ describe('shared central turn composition', () => {
     const pane = { processPaneRoute: { surface, ownerKey: surface, selectionKey: 'selection', visible: true }, runtimeAvailable: true }
     const composer = document.createElement('textarea'); composer.value = 'UNSENT_USER_DRAFT'; document.body.append(composer)
     try {
-      await render({ user, blocks: [] }, { ...pane, processing: true })
+      await render({ user, blocks: [] }, { ...pane, processing: true, running: true })
       const seat = container.querySelector('[data-analytix-assistant-response-seat]')!
       expect(seat.textContent).toContain('PRIVATE_PROCESS_DRAFT')
+      expect(await runningDividerDisplay()).toBe('block')
       container.scrollTop = 221
       const ordinary: Extract<ChatBlock, { kind: 'assistant' }> = { kind: 'assistant', id: 'ordinary', text: 'NON_BATCH_MATCHING_PROSE', meta: { turnId: 'turn' } }
       await render({ user, blocks: [ordinary] }, { ...pane, processing: false, turnStatus: 'completed' })

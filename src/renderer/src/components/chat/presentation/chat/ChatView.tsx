@@ -98,6 +98,7 @@ export const ChatView = memo(function ChatView({ threadId, turnId, turn, section
     return calls.length || final && (sections.generatedFileBlocks.length || deliveries) ? <AttachmentDeliveries
       blocks={final ? sections.generatedFileBlocks : []} present={{ threadId, calls }}>{final ? deliveries : null}</AttachmentDeliveries> : null
   }
+  // CSS follows the mounted seats, including independently updated private rows.
   return <ProtectedToolResultScope.Provider value={threadId}>
     <PresentClosingContext.Provider value={renderClosing}>
     <UserMessageActionsRevealContext.Provider value={userActionsReveal}>
@@ -127,7 +128,7 @@ export const ChatView = memo(function ChatView({ threadId, turnId, turn, section
             ...(acceptedTerminalBound ? { endSeq: receipt!.lastSeq, proof: { kind: 'accepted' as const, receipt: { ...receipt! }, terminal: { ...terminal! } } }
               : generalTerminalBound ? { endSeq: generalReceipt!.lastSeq, proof: { kind: 'general' as const, receipt: { ...generalReceipt! } } } : { proof: null }) })
         } } : undefined} rollback={rollback}
-        hasOutput={process.length > 0 || Boolean(finalBlock || liveAnswer)} />
+        hasOutput />
     </div>
     </UserMessageActionsRevealContext.Provider>
     </PresentClosingContext.Provider>

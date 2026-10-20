@@ -206,13 +206,24 @@ export async function loadWorkspaceMentionPathSuggestions(
   if (!root) return []
   const dir = mentionQueryDirectory(query)
   if (dir == null) return []
+  return loadWorkspaceMentionDirectorySuggestions(root, dir)
+}
+
+/** List actual children for a drilled @ directory using the existing workspace IPC. */
+export async function loadWorkspaceMentionDirectorySuggestions(
+  workspaceRoot: string,
+  directory: string
+): Promise<ComposerFileReference[]> {
+  const root = workspaceRoot.trim()
+  if (!root) return []
+  const dir = directory.replaceAll('\\', '/').replace(/\/+$/u, '')
 
   const cacheKey = `${root}::${dir}`
   const cached = workspaceMentionDirectoryCache.get(cacheKey)
   if (cached) return cached
 
   const task = (async () => {
-    const result = await window.analytix.files.listDirectory({ workspaceRoot: root, path: dir })
+    const result = await window.analytix.files.listDirectory({ workspaceRoot: root, path: dir || root })
     if (!result.ok) return []
     const references: ComposerFileReference[] = []
     for (const entry of result.entries) {
