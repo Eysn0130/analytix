@@ -44,7 +44,7 @@
   },
   "dependencies": {
     "@computer-use/nut-js": "^4.2.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "analytix-computer-use": "file:../../vendor/analytix-computer-use",
     "better-sqlite3": "^12.10.0",
     "diff": "^8.0.4",
