@@ -96,7 +96,8 @@ Unless an accepted target explicitly supersedes them:
   `packages/runtime-go/internal/runtimeapp`.
 - `packages/runtime` owns public TypeScript contracts, configuration,
   telemetry, and the `analytix serve` launcher. The launcher starts the Go
-  `runtime-server`; `ANALYTIX_RUNTIME_BACKEND=typescript` is diagnostic only.
+  `runtime-server`. Electron rejects `ANALYTIX_RUNTIME_BACKEND=typescript`
+  with `retired_backend`.
 - The desktop boundary is:
 
   ```text

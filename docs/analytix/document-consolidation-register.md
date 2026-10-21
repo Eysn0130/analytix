@@ -73,6 +73,20 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 ## 5. 后续整理队列
 
+### 2026-10-20 runtime 启动与凭据指引纠偏
+
+基线 `e2e8d34c0531f36eb069a36c1547759f5ba3cae7`。仅修根 `AGENTS.md` 与
+runtime 中英文 README：按 [CLI 解析](../../packages/runtime/src/cli/serve.ts)、
+[Go launcher](../../packages/runtime/src/cli/serve-entry.ts) 和
+[Electron adapter](../../src/main/runtime/analytix-adapter.ts)
+澄清退役 backend 拒绝、argv 凭据拒绝、runtime token 配置兼容及旧 Provider
+参数只解析不转发；不改产品源码、测试、历史 checklist 或凭据 authority。
+
+直接验证限 diff、路径和链接检查；复用该基线 Application CI 已覆盖的 8 个
+CLI / backend 合成用例，相关产品源码、测试与执行配置保持不变。候选与 CI 状态以
+对应 commit/PR 为准；不据此声明真实 Provider、原生打包或全仓治理完成。
+回滚使用普通 revert，本批四文件纠偏完成即停止，不混入模块搬迁或旧代码清退。
+
 ### 2026-10-20 请求缓存死叶清退
 
 基线 `e9122a9d5128f20c44eaa7825d1607abe4c9a706`。本批 P2 仅删除 renderer
