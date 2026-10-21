@@ -82,3 +82,37 @@ export function useConversationWidthPreference(): number | null {
     return currentWidth
   }, () => null)
 }
+
+export const TRAJECTORY_DURATION_STORAGE_KEY = 'analytix.trajectory.duration'
+export function readTrajectoryDurationPreference(): boolean {
+  return readBrowserStorageItem(TRAJECTORY_DURATION_STORAGE_KEY) === 'true'
+}
+let currentDuration: boolean | undefined
+const durationListeners = new Set<() => void>()
+let durationStorageListenerAttached = false
+function ensureDurationStorageListener(): void {
+  if (durationStorageListenerAttached || typeof window === 'undefined') return
+  window.addEventListener('storage', (event: StorageEvent) => {
+    if (event.key !== null && event.key !== TRAJECTORY_DURATION_STORAGE_KEY) return
+    const storage = browserStorage()
+    if (storage === null) return
+    try { currentDuration = storage.getItem(TRAJECTORY_DURATION_STORAGE_KEY) === 'true' }
+    catch { return }
+    for (const listener of durationListeners) listener()
+  })
+  durationStorageListenerAttached = true
+}
+export function writeTrajectoryDurationPreference(duration: boolean): void {
+  ensureDurationStorageListener()
+  currentDuration = duration
+  writeBrowserStorageItem(TRAJECTORY_DURATION_STORAGE_KEY, String(duration))
+  for (const listener of durationListeners) listener()
+}
+function subscribeDuration(listener: () => void): () => void {
+  ensureDurationStorageListener()
+  durationListeners.add(listener)
+  return () => { durationListeners.delete(listener) }
+}
+export function useTrajectoryDurationPreference(): boolean {
+  return useSyncExternalStore(subscribeDuration, () => currentDuration ??= readTrajectoryDurationPreference(), () => false)
+}

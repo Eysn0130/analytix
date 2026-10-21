@@ -120,7 +120,7 @@
     "@fortune-sheet/react": "1.0.4",
     "@js-temporal/polyfill": "0.5.1",
     "@larksuiteoapi/node-sdk": "^1.72.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@peculiar/x509": "2.0.0",
     "@shikijs/langs": "3.23.0",
     "@superdoc/docx-engine": "0.23.0",
