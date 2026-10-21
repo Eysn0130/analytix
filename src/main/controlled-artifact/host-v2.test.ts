@@ -53,6 +53,8 @@ describe('ControlledArtifactHostV2', () => {
     let now = '2026-07-18T12:00:00.123456789Z'
     const protectedBody = Buffer.from('{"bankAccount":"0006222020202020202020"}', 'utf8')
     const fixture = await createHostFixture(() => now, 9, undefined, protectedBody)
+    expect(Object.keys(fixture.invocation)).toEqual([])
+    expect(() => JSON.stringify(fixture.invocation)).toThrow('main-process-only')
     const admission = await postAdmission(fixture.environment, fixture.admissionRequest)
 
     expect(admission.status).toBe(200)
@@ -117,6 +119,78 @@ describe('ControlledArtifactHostV2', () => {
     }
 
     expect((await postAdmission(fixture.environment, legacyRequest)).status).toBe(400)
+  })
+
+  it('rejects a wrong bearer and duplicate admission keys without consuming the invocation', async () => {
+    const fixture = await createHostFixture(() => '2026-07-18T12:00:02.123456789Z', 51)
+    const wrongBearer = await postAdmission({
+      ...fixture.environment,
+      [CONTROLLED_ARTIFACT_HOST_V2_TOKEN_ENV]: Buffer.alloc(32, 0x3d).toString('base64url')
+    }, fixture.admissionRequest)
+    expect(wrongBearer.status).toBe(401)
+
+    const duplicateKeys = await post(
+      fixture.environment,
+      '/v2/controlled-artifacts/admission',
+      JSON_MEDIA_TYPE,
+      Buffer.from('{"schemaVersion":2,' + goJSONStringify(fixture.admissionRequest).slice(1))
+    )
+    expect(duplicateKeys.status).toBe(400)
+    expect(fixture.releasedBodies).toEqual([])
+    expect((await postAdmission(fixture.environment, fixture.admissionRequest)).status).toBe(200)
+  })
+
+  it('makes a failed commit non-retryable and returns only the fixed rejection', async () => {
+    let commitCalls = 0
+    const fixture = await createHostFixture(() => '2026-07-18T12:00:02.123456789Z', 52, async () => {
+      commitCalls++
+      throw new Error('private effect failure at /synthetic/protected-target')
+    })
+    const body = Buffer.from('{"bankAccount":"0000000000000000000000"}', 'utf8')
+    const frame = createReleaseFrame(createSignedReceipt(fixture, body), body)
+    const failed = await post(fixture.environment, '/v2/controlled-artifacts/release', RELEASE_MEDIA_TYPE, frame)
+    const replay = await post(fixture.environment, '/v2/controlled-artifacts/release', RELEASE_MEDIA_TYPE, frame)
+
+    expect([failed.status, replay.status]).toEqual([500, 409])
+    expect(commitCalls).toBe(1)
+    expect(fixture.releasedBodies).toEqual([])
+    for (const response of [failed, replay]) {
+      expect(response.body.toString('utf8')).toBe('{"code":"controlled_artifact_host_rejected"}')
+    }
+  })
+
+  it('rejects another authority and a corrupted signature before accepting the frozen authority', async () => {
+    const body = Buffer.from('{"bankAccount":"0000000000000000000053"}', 'utf8')
+    const fixture = await createHostFixture(() => '2026-07-18T12:00:02.123456789Z', 53, undefined, body)
+    const otherAuthority = generateKeyPairSync('ed25519')
+    const foreignReceipt = createSignedReceipt({
+      ...fixture,
+      authority: otherAuthority,
+      authorityPublicKey: rawEd25519PublicKey(otherAuthority.publicKey)
+    }, body)
+    const foreign = await post(fixture.environment, '/v2/controlled-artifacts/release', RELEASE_MEDIA_TYPE,
+      createReleaseFrame(foreignReceipt, body))
+    expect(foreign.status).toBe(409)
+
+    const corruptedReceipt = createSignedReceipt(fixture, body)
+    corruptedReceipt.authoritySignature = Buffer.alloc(64, 0x42).toString('base64url')
+    corruptedReceipt.recordDigest = ''
+    corruptedReceipt.recordDigest = sha256(Buffer.concat([
+      RECEIPT_RECORD_DOMAIN,
+      Buffer.from(goJSONStringify(corruptedReceipt))
+    ]))
+    const corrupted = await post(fixture.environment, '/v2/controlled-artifacts/release', RELEASE_MEDIA_TYPE,
+      createReleaseFrame(corruptedReceipt, body))
+    expect(corrupted.status).toBe(400)
+    expect(fixture.releasedBodies).toEqual([])
+    for (const response of [foreign, corrupted]) {
+      expect(response.body.toString('utf8')).toBe('{"code":"controlled_artifact_host_rejected"}')
+    }
+
+    const accepted = await post(fixture.environment, '/v2/controlled-artifacts/release', RELEASE_MEDIA_TYPE,
+      createReleaseFrame(createSignedReceipt(fixture, body), body))
+    expect(accepted.status).toBe(200)
+    expect(fixture.releasedBodies).toEqual([body.toString('utf8')])
   })
 
   it('makes concurrent release a single host-side effect', async () => {
@@ -195,6 +269,7 @@ describe('ControlledArtifactHostV2', () => {
       .not.toBe(firstEnvironment[CONTROLLED_ARTIFACT_HOST_V2_TLS_ROOT_CERT_DER_ENV])
     expect(second.environment[CONTROLLED_ARTIFACT_HOST_V2_TLS_LEAF_SPKI_SHA256_ENV])
       .not.toBe(firstEnvironment[CONTROLLED_ARTIFACT_HOST_V2_TLS_LEAF_SPKI_SHA256_ENV])
+    expect((await postAdmission(second.environment, first.admissionRequest)).status).toBe(409)
   })
 
   it('proves the exact quiescent TLS transport generation before invocation activation', async () => {

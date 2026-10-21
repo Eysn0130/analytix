@@ -48,11 +48,11 @@ describe('controlled artifact desktop architecture', () => {
 
 function sourceFiles(root: string): string[] {
   const files: string[] = []
-  for (const name of readdirSync(root)) {
-    const path = join(root, name)
-    const stats = statSync(path)
-    if (stats.isDirectory()) files.push(...sourceFiles(path))
-    else if (/\.(?:ts|tsx)$/u.test(name)) files.push(path)
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name)
+    const isDirectory = entry.isDirectory() || (entry.isSymbolicLink() && statSync(path).isDirectory())
+    if (isDirectory) files.push(...sourceFiles(path))
+    else if (/\.(?:ts|tsx)$/u.test(entry.name)) files.push(path)
   }
   return files
 }
