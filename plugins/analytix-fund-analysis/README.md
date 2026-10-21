@@ -48,7 +48,7 @@ display；广泛研判、资金穿透、报告、导出和发布仍处于 fail-c
   fallback；正式 artifact、报告和外部发布仍有独立 gate。不得把旧模块直接加入
   闭包或把 cached catalog 当作在线证明。
 - `skills/`：Data Analytics 式多 skill 产品面。`analytix-fund-analysis` 保留兼容入口，`index` 做轻量路由，focused skills 覆盖当前案件上下文、数据质量与口径、资金事实快查、特定双方资金往来核验、账户/主体画像、对手方、资金追踪、开放式侦查实验室、全案分析、报告、补调取证、研判完整性复核、报告事实结论复核、研判材料交付复核、资金流向图谱、视觉证据和受控 Case Workbench。
-- `references/`：唯一维护源，供发布校验和脚本使用；完整 `/analytix ...` 命令表位于 `references/command-router.md`，机器可读路由位于 `references/command-metadata.json`，最小 capability registry 位于 `references/capability-registry.json` / `references/capability-registry.schema.json`，顶级插件化总方案位于 `references/top-pluginization-plan.md`，并声明 eval 覆盖门禁与 passive 非资金误触发题；Hub 生命周期位于 `references/hub-lifecycle.md`，反模式位于 `references/anti-patterns.md`。这些文件必须与 `skills/analytix-fund-analysis/references/` 保持一致，不包含本机路径、会话回归、真实案件样例、golden/oracle 数据或研发测试材料；eval rubric 和 golden/oracle 只允许留在本地 eval-only 脚本材料中。
+- `references/`：仓库中的唯一维护源，供校验和开发脚本使用，并与 `skills/analytix-fund-analysis/references/` 的 tracked 副本保持一致。运行参考包括 `references/command-router.md`、`references/command-metadata.json`、`references/capability-registry.json` 及其 schema、`references/hub-lifecycle.md` 和 `references/anti-patterns.md`。开发蓝图、实现矩阵、路线图、漂移表及 benchmark 仅在仓库保留，不进入桌面、Hub 包源或 runtime skill 投影；运行导航不依赖这些开发材料。参考材料不包含本机路径、会话回归、真实案件样例或 golden/oracle 数据；eval rubric 和 golden/oracle 只允许留在本地 eval-only 脚本材料中。
 
 - `scripts/prepare-hub-package.mjs`：只在 `/tmp` 下生成可复核的 Hub 包源、marketplace stub 和 tar.gz 摘要；它不是 Hub publish/install/upgrade/remount 路径，不能写 Analytix runtime 或系统 Codex 状态。
 - `output/analytix-fund-analysis/functional-closure/`：当前候选版本的真实功能闭环证据目录。该目录只作本地验收输出，不进入发布包。插件源码目录下不再保留历史 `evidence/` A/B 产物，Hub 包源也会排除旧产物目录，避免旧证据、旧禁令或旧 golden 影响当前发布判断。
@@ -63,8 +63,10 @@ npm run test:plugin-contracts
 ```
 
 `skills/analytix-fund-analysis/references/` 是 tracked 派生副本，保留 skill 相对路径。
-完整 25 文件清单、普通文件与逐字节一致检查同时供 doctor、Hub 包源准备和 runtime-cache
-快照使用；新增/删除文件须更新该合同清单。同步不会安装、remount 或发布插件。
+`scripts/runtime-cache-contract.mjs` 维护 25 项源清单与六项开发材料分类，派生 19 项运行参考。
+源校验与同步检查完整 25 对普通文件及逐字节一致性；Hub、桌面包和 runtime-cache
+投影只接收 19 项运行参考，两份投影仍须一致。新增/删除文件或改变分类须更新该合同。
+同步不会安装、remount 或发布插件；分发投影收敛也不删除仓库开发材料。
 
 ## 开发启动
 
