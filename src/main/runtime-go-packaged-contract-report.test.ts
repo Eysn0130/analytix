@@ -8,6 +8,9 @@ import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 
 const require = createRequire(import.meta.url)
+const { SHIPPING_REFERENCE_FILES } = require(
+  '../../plugins/analytix-fund-analysis/scripts/runtime-cache-contract.mjs'
+) as { SHIPPING_REFERENCE_FILES: string[] }
 const {
   NATIVE_DEVELOPMENT_BUILD_MARKER,
   NATIVE_DISPOSITION_DEVELOPMENT,
@@ -303,6 +306,12 @@ function writeBundledFundsPlugin(context: Record<string, any>): void {
   cpSync(join(sourceRoot, 'agents', 'openai.yaml'), join(destinationRoot, 'agents', 'openai.yaml'))
   for (const relativePath of ANALYTIX_FUNDS_PRODUCTION_MCP_FILES) {
     cpSync(join(sourceRoot, relativePath), join(destinationRoot, relativePath))
+  }
+  for (const directory of ['references', 'skills/analytix-fund-analysis/references']) {
+    mkdirSync(join(destinationRoot, directory), { recursive: true })
+    for (const name of SHIPPING_REFERENCE_FILES) {
+      cpSync(join(sourceRoot, directory, name), join(destinationRoot, directory, name))
+    }
   }
 }
 
