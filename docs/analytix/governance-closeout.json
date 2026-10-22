@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "status": "partial",
-  "purpose": "治理收官基线及逐项台账；不是产品/Privacy验收或合并授权",
+  "purpose": "Historical：固定2c549464的阶段0非原子快照；各部分以自身UTC为准，不表示当前PR、分支或源码存量；不是产品/Privacy验收或合并授权",
   "maintained_as_of_utc": "2026-10-22T08:36:51.489926+00:00",
   "scope": {
     "feature_development": "frozen",
     "privacy": "frozen; 不修、不合、不执行验收",
     "authorized_write_set": ["docs/analytix/governance-closeout.json","docs/analytix/document-consolidation-register.md"],
-    "delivery": "本地focused commit；不push/merge/close/delete",
+    "delivery": "阶段0准备时的交付边界：本地focused commit；不push/merge/close/delete",
     "merge_policy": "每批先回执清单、CI与数字，用户确认后才正常合并"
   },
   "source": {
@@ -62,7 +62,7 @@
   },
   "unused_baseline": {
     "status": "pass",
-    "use": "observational baseline; not an enabled or accepted CI ratchet",
+    "use": "历史诊断；1522为旧算法身份数，不作为当前CI基线。后继实现与验收见ratchet_successor，当前机器owner见sources_of_truth。",
     "started_at_utc": "2026-10-22T08:30:19.679Z",
     "finished_at_utc": "2026-10-22T08:31:30.408Z",
     "diagnostic_exit": 0,
@@ -320,9 +320,9 @@
       "private_probe_role": "task-owned diagnostic; not installed product/CI tooling",
       "command": "after the one same-shell standard helper, node diagnose-unused.mjs <clean-source> <existing-matched-tool-root> dependency-closure.json",
       "exact_id_replay_requires_private_probe_or_equivalent_implementation": true,
-      "committed_findings": "compact identities/counts/classification/locations; raw tokens and scope detail remain only in private diagnostic report"
+      "committed_findings": "阶段0当时：compact identities/counts/classification/locations; raw tokens and scope detail remain only in private diagnostic report"
     },
-    "ratchet_gaps": ["Anonymous scopes with identical syntactic anchors may share identity; occurrence counts are retained","Four required ratchet boundary tests have not been implemented or run","No CI ratchet has been enabled","No initializer side-effect/deletion-safety review; parameters remain counted and untouched","allowInlineConfig was true; bounded text audit found no explicit no-unused override/disable-all candidate, but future CI policy remains to be settled"],
+    "ratchet_gaps": ["阶段0历史缺口，已由PR85后继替代：Anonymous scopes with identical syntactic anchors may share identity; occurrence counts are retained","阶段0历史缺口，已由PR85后继替代：Four required ratchet boundary tests have not been implemented or run","阶段0历史缺口，已由PR85后继替代：No CI ratchet has been enabled","仍需逐候选审查：No initializer side-effect/deletion-safety review; parameters remain counted and untouched","阶段0历史缺口，已由PR85后继替代：allowInlineConfig was true; bounded text audit found no explicit no-unused override/disable-all candidate, but future CI policy remains to be settled"],
     "exemptions": [],
     "findings_by_file": [
       {"path":"electron.vite.config.ts","findings":[{"id":"d20bbf7dffddf99519e64c7e81d7877e32b77571a2b9186bf3a1508b76b9786e","name":"_options","kind":"parameter","definition":"Parameter","count":1,"locations":[[56,20]]}],"rule":"@typescript-eslint/no-unused-vars"},
@@ -810,7 +810,7 @@
       "completeDependabotDiffs": 33,
       "dependabotCount": 33,
       "humanDraftCount": 2,
-      "limitations": ["PR51 functional freeze: very large diff output was truncated and not fully reviewed; changedFiles/additions/deletions/scope/actualVersions/paths remain null.","PR70 files read was denied by automatic approval review because the user prohibited touching its nine files; the action did not execute and no alternate interface or nine-file read was attempted.","Security identifiers are PR-body candidates only; security footer or release wording does not establish advisory applicability or a verified fix.","No install, product tests, native/installer acceptance, paid/live Provider use, or production-data access was performed in this collection.","Cross-PR target overlap is a candidate content mapping, not authority to close or merge a PR; PR55 dual-lock replacement remains a future candidate.","Closed PR53/61 comments state up-to-date but do not explicitly name PR79; PR79 mapping is supported by actual four-file version coverage and chronology.","This file only restores previously collected session records; it is not product source or an integrated repository ledger."],
+      "limitations": ["PR51 functional freeze: very large diff output was truncated and not fully reviewed; changedFiles/additions/deletions/scope/actualVersions/paths remain null.","PR70 files read was denied by automatic approval review because the user prohibited touching its nine files; the action did not execute and no alternate interface or nine-file read was attempted.","Security identifiers are PR-body candidates only; security footer or release wording does not establish advisory applicability or a verified fix.","No install, product tests, native/installer acceptance, paid/live Provider use, or production-data access was performed in this collection.","Cross-PR target overlap is a candidate content mapping, not authority to close or merge a PR; PR55 dual-lock replacement remains a future candidate.","Closed PR53/61 comments state up-to-date but do not explicitly name PR79; PR79 mapping is supported by actual four-file version coverage and chronology.","阶段0导出时：This file only restores previously collected session records; it is not product source or an integrated repository ledger."],
       "mainSha": "2c5494642b35f7cdb9cd27939486beec7d5adaaf",
       "measurementMeaning": "main/open PR snapshot; diff and comment reads followed in the same bounded collection at the recorded heads and pinned main SHA",
       "measurementUTC": "2026-10-22T07:43:51Z",
@@ -892,7 +892,7 @@
   "branch_inventory": {
     "schema_version": 1,
     "repository": "Eysn0130/analytix",
-    "purpose": "Stage 0 read-only branch governance ledger scratch export; no cleanup executed",
+    "purpose": "Historical：Stage 0 read-only branch governance ledger scratch export; no cleanup executed",
     "baseline": {
       "branch": "main",
       "sha": "2c5494642b35f7cdb9cd27939486beec7d5adaaf",
@@ -1338,12 +1338,12 @@
     "prior_helper_failure": "此前default sandbox preflight exit1；后续升权重试被拒未执行",
     "prior_fetch_denial": "此前fetch被拒未执行；本小批经明确新授权正常fetch成功",
     "current_helper": "本次一次未修改标准helper exit0；无循环/修权限/安装",
-    "remote_writes": "none; no push/merge/close/delete/dispatch",
+    "remote_writes": "截至阶段0准备完成时：none; no push/merge/close/delete/dispatch",
     "earlier_transport_gap": "脚本创建transport中断后先确认文件不存在，才创建；helper未重复"
   },
   "next_batches": {
     "unused_ratchet": {
-      "status": "plan only",
+      "status": "阶段0历史计划；已由PR85合并替代，见ratchet_successor；以下四文件/四项用例仅为当时计划，不代表PR85最终交付清单",
       "write_set": ["scripts/unused-findings-gate.mjs","scripts/unused-findings-gate.test.mjs","scripts/unused-findings-baseline.json",".github/workflows/ci.yml"],
       "required_tests": ["删旧增新失败","已修回归失败","纯移行不误报","过期基线项移除"],
       "constraints": ["identity+count, resolved baseline shrinks, no automatic baseline regeneration","inherit actual glob/ignore; JS core, TS extension/core off; parameters counted but no default cleanup","identity ambiguity must be resolved/reviewed before admitting CI baseline"]
@@ -1369,6 +1369,18 @@
       "large-files.json": "3e2ef8e16f7d53b66d8c04f863d9424273b36cb4377d9c52e1f69493af304512"
     },
     "tests": "未运行产品测试或打包；本批只读ESLint诊断与数据/链接/diff检查",
-    "unresolved": ["安全后台开关证据","后续ratchet实现/四边界验证及身份歧义处理","逐批PR和分支处置，须用户当批确认"]
+    "unresolved": ["安全后台开关证据","逐批PR和分支处置，须用户当批确认"]
+  },
+  "snapshot_note": "maintained_as_of_utc保留原整理时间，不替代各部分测量UTC；库存数字不随当前施工静默更新。 scratchExportOnly、scope.delivery和execution_history.remote_writes均限定原准备阶段。",
+  "ratchet_successor": {
+    "pull_request": "https://github.com/Eysn0130/analytix/pull/85",
+    "merge_commit": "fca67b41b0eca05f084c7c7406790a50edea476a",
+    "acceptance": "PR85已合并；完整本地main gate exit0。当前身份/次数/guard和操作合同只引用下列owner，不复制动态值。"
+  },
+  "sources_of_truth": {
+    "this_ledger": "阶段0库存与历史unused诊断",
+    "current_unused_baseline": "../../scripts/unused-findings-baseline.json",
+    "current_unused_contract": "development-baseline.md#unused-finding-ratchet",
+    "historical_scan_paths": "qa/unused-scan-2c549464.json"
   }
 }
