@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ALL_SKILL_NAMES,
+  DEVELOPMENT_ONLY_REFERENCE_FILES,
   FOCUSED_SKILL_NAMES,
   MARKETPLACE_NAME,
   PLUGIN_CACHE_FILES,
@@ -313,13 +314,9 @@ const REQUIRED_RESOURCE_URIS = [
   "skill://analytix-fund-analysis/references/capability-registry.schema.json",
 ];
 
-const DEVELOPMENT_ONLY_RESOURCE_URIS = [
-  "skill://analytix-fund-analysis/references/plugin-benchmark.md",
-  "skill://analytix-fund-analysis/references/mature-plugin-drift-table.md",
-  "skill://analytix-fund-analysis/references/top-pluginization-plan.md",
-  "skill://analytix-fund-analysis/references/blueprint-implementation-matrix.md",
-  "skill://analytix-fund-analysis/references/casegraph-roadmap.md",
-];
+const DEVELOPMENT_ONLY_RESOURCE_URIS = DEVELOPMENT_ONLY_REFERENCE_FILES.map(
+  (name) => `skill://analytix-fund-analysis/references/${name}`,
+);
 
 const REQUIRED_PROMPT_NAMES = [
   "explore-case-database",

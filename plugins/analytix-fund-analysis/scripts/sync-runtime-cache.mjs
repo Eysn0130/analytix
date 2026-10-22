@@ -15,7 +15,10 @@ import {
   RUNTIME_CACHE_TRANSACTION_VERSION,
   RUNTIME_SKILL_FILES,
   REFERENCE_FILES,
+  SHIPPING_REFERENCE_FILES,
+  DEVELOPMENT_REFERENCE_PATHS,
   inspectReferenceCopies,
+  inspectShippingReferenceCopies,
 } from "./runtime-cache-contract.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -57,6 +60,7 @@ function parseArgs(argv) {
     runtimeHome: "",
     selfTestRuntimeConfig: false,
     selfTestLocalRemount: false,
+    selfTestFaultCase: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -67,12 +71,25 @@ function parseArgs(argv) {
     else if (arg === "--runtime-home") options.runtimeHome = next();
     else if (arg === "--self-test-runtime-config") options.selfTestRuntimeConfig = true;
     else if (arg === "--self-test-local-remount") options.selfTestLocalRemount = true;
+    else if (arg === "--self-test-fault-case") {
+      const value = next();
+      if (options.selfTestFaultCase !== null || value.length !== 1 || !/^[0-7]$/u.test(value)) {
+        throw new Error("--self-test-fault-case requires one index from 0 through 7");
+      }
+      options.selfTestFaultCase = Number(value);
+    }
     else if (arg === "-h" || arg === "--help") {
       printHelp();
       process.exit(0);
     } else {
       throw new Error(`unknown argument: ${arg}`);
     }
+  }
+  if (options.selfTestFaultCase !== null && (
+    !options.selfTestLocalRemount || options.selfTestRuntimeConfig
+    || options.apply || options.confirmLocalRemount || argv.includes("--runtime-home")
+  )) {
+    throw new Error("--self-test-fault-case requires --self-test-local-remount and no runtime mutation options");
   }
   return options;
 }
@@ -88,6 +105,7 @@ Options:
   --runtime-home <path>   Analytix runtime home. Default: ANALYTIX_AGENT_RUNTIME_HOME or ~/.analytix.
   --self-test-runtime-config Run the runtime config path-remount self-test in a temporary runtime home.
   --self-test-local-remount Run transaction, crash recovery, concurrency, source-snapshot, and idempotence tests in temporary homes.
+  --self-test-fault-case <0-7> With --self-test-local-remount, run one logical recovery case only; data fsync stays skipped as in the baseline matrix.
   --json                  Print machine-readable JSON.
 
 This tool is not a Hub publish, install, upgrade, customer update, or online hot-swap path.
@@ -253,7 +271,7 @@ function captureSourceSnapshot(sourceRoot = pluginRoot) {
     throw new Error(`Missing source files; runtime state was not touched: ${missing.join(", ")}`);
   }
   // Compare captured bytes too: a source edit during capture cannot remount drift.
-  for (const name of REFERENCE_FILES) {
+  for (const name of SHIPPING_REFERENCE_FILES) {
     if (!files.get(`references/${name}`).equals(files.get(`skills/${PLUGIN_NAME}/references/${name}`))) {
       throw new Error(`Embedded reference snapshot drift: ${name}`);
     }
@@ -1460,7 +1478,7 @@ function printResult(result, json) {
 }
 
 function createSourceFixture(rootPath, version, omittedPath = "") {
-  for (const relativePath of PLUGIN_CACHE_FILES) {
+  for (const relativePath of [...PLUGIN_CACHE_FILES, ...DEVELOPMENT_REFERENCE_PATHS]) {
     if (relativePath === omittedPath) continue;
     const target = path.join(rootPath, relativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -1550,12 +1568,95 @@ function expectFailure(fn, marker) {
   return message;
 }
 
-function selfTestLocalRemount(json) {
+function selfTestRecoveryCases(tempParent, sourceRoot, version, selectedFaultCase = null) {
+  const faultPoints = [
+    "after_journal_prepared",
+    "after_generation_published",
+    "after_direct_backup_moved",
+    "after_direct_published",
+    `after_skill_backup_moved:${ALL_SKILL_NAMES[0]}`,
+    `after_metadata_published:runtime_install_policy`,
+    "after_marketplace_pointer_published",
+    "after_first_quarantine",
+  ];
+  const recoveryDispositions = [];
+  const crashPointerStates = [];
+  for (let index = 0; index < faultPoints.length; index += 1) {
+    if (selectedFaultCase !== null && index !== selectedFaultCase) continue;
+    const faultFixture = createRuntimeFixture(path.join(tempParent, `fault-${index}`), version);
+    const faultPoint = faultPoints[index];
+    if (selectedFaultCase !== null) console.error(`[runtime-cache recovery] selected ${index}: start ${faultPoint}`);
+    expectFailure(() => executeSync({
+      apply: true,
+      confirmLocalRemount: true,
+      runtimeHome: faultFixture.runtimeHome,
+      sourceRoot,
+      faultPoint,
+      simulateCrash: true,
+      skipDataFsyncForTest: true,
+    }), `simulated crash at ${faultPoint}`);
+    const crashedMarketplace = parseJsonBytes(
+      fs.readFileSync(generatedMarketplacePath(assertAnalytixRuntimeHome(faultFixture.runtimeHome))),
+      "crashed marketplace pointer",
+    );
+    const crashedPointerHash = text(crashedMarketplace.plugins.find((entry) => text(entry.name) === PLUGIN_NAME)?.source?.sha256);
+    const shouldBeCommitted = ["after_marketplace_pointer_published", "after_first_quarantine"].includes(faultPoint);
+    if ((crashedPointerHash !== "1".repeat(64)) !== shouldBeCommitted) {
+      throw new Error(`marketplace pointer exposed the wrong transaction state after ${faultPoint}`);
+    }
+    crashPointerStates.push(shouldBeCommitted ? "committed" : "old_generation");
+    const recovered = executeSync({
+      apply: true,
+      confirmLocalRemount: true,
+      runtimeHome: faultFixture.runtimeHome,
+      sourceRoot,
+      skipDataFsyncForTest: true,
+    });
+    verifyCommittedFixture(recovered);
+    if (selectedFaultCase !== null) {
+      const expectedDisposition = shouldBeCommitted ? "committed_forward" : "rolled_back";
+      if (recovered.recovery?.recovered !== true || recovered.recovery.disposition !== expectedDisposition) {
+        throw new Error(`wrong recovery disposition at ${faultPoint}`);
+      }
+      for (const root of recovered.installed_roots) inspectShippingReferenceCopies(root);
+      const skillReferences = fs.readdirSync(path.join(recovered.runtime_home, "skills", PLUGIN_NAME, "references")).sort();
+      if (JSON.stringify(skillReferences) !== JSON.stringify([...SHIPPING_REFERENCE_FILES].sort())) {
+        throw new Error(`wrong recovered skill reference inventory at ${faultPoint}`);
+      }
+      console.error(`[runtime-cache recovery] selected ${index}: complete ${faultPoint}`);
+    }
+    recoveryDispositions.push(recovered.recovery?.disposition || "none");
+  }
+
+  return { faultPoints, recoveryDispositions, crashPointerStates };
+}
+
+function selfTestLocalRemount(json, selectedFaultCase = null) {
   const tempParent = fs.mkdtempSync(path.join(os.tmpdir(), "analytix-runtime-remount-"));
   try {
     const sourceRoot = path.join(tempParent, "source");
     const version = "0.16.16";
     createSourceFixture(sourceRoot, version);
+    if (selectedFaultCase !== null) {
+      inspectReferenceCopies(sourceRoot);
+      const recovery = selfTestRecoveryCases(tempParent, sourceRoot, version, selectedFaultCase);
+      inspectReferenceCopies(sourceRoot);
+      if (recovery.crashPointerStates.length !== 1) throw new Error("selected recovery case did not execute exactly once");
+      const report = {
+        ok: true,
+        mode: "single_recovery_case",
+        selected_fault_case: selectedFaultCase,
+        data_fsync: "skipped_as_baseline",
+        source_reference_count: REFERENCE_FILES.length,
+        shipping_reference_count: SHIPPING_REFERENCE_FILES.length,
+        fault_points_tested: [recovery.faultPoints[selectedFaultCase]],
+        crash_pointer_states: recovery.crashPointerStates,
+        recovery_dispositions: recovery.recoveryDispositions,
+      };
+      if (json) console.log(JSON.stringify(report, null, 2));
+      else console.log("[runtime-cache] selected logical recovery case passed; full self-test not run; data fsync skipped as in baseline");
+      return;
+    }
 
     const missingVersionFixture = createRuntimeFixture(path.join(tempParent, "missing-version"), "0.0.0-old");
     const missingVersionError = expectFailure(() => executeSync({
@@ -1566,6 +1667,22 @@ function selfTestLocalRemount(json) {
     }), "Existing same-version direct runtime cache is required");
 
     const fixture = createRuntimeFixture(path.join(tempParent, "current"), version);
+    // Simulate an installed 25-reference generation without touching real caches.
+    for (const root of [fixture.directRoot, fixture.oldMarketplaceRoot]) {
+      for (const relativePath of REFERENCE_FILES.flatMap((name) => [
+        `references/${name}`, `skills/${PLUGIN_NAME}/references/${name}`,
+      ])) {
+        const target = path.join(root, relativePath);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(path.join(sourceRoot, relativePath), target);
+      }
+      inspectReferenceCopies(root);
+    }
+    for (const name of REFERENCE_FILES) {
+      const target = path.join(fixture.runtimeHome, "skills", PLUGIN_NAME, "references", name);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(path.join(sourceRoot, "references", name), target);
+    }
     const applied = executeSync({
       apply: true,
       confirmLocalRemount: true,
@@ -1573,6 +1690,17 @@ function selfTestLocalRemount(json) {
       sourceRoot,
     });
     verifyCommittedFixture(applied);
+    for (const root of applied.installed_roots) {
+      inspectShippingReferenceCopies(root);
+      for (const relativePath of DEVELOPMENT_REFERENCE_PATHS) {
+        if (fs.existsSync(path.join(root, relativePath))) throw new Error("development reference survived plugin remount");
+      }
+    }
+    const installedSkillReferences = fs.readdirSync(path.join(fixture.runtimeHome, "skills", PLUGIN_NAME, "references")).sort();
+    if (JSON.stringify(installedSkillReferences) !== JSON.stringify([...SHIPPING_REFERENCE_FILES].sort())) {
+      throw new Error("runtime skill does not contain exactly the shipping references");
+    }
+    inspectReferenceCopies(sourceRoot);
     const quarantineSafe = !fs.existsSync(fixture.oldMarketplaceRoot)
       && fs.existsSync(applied.marketplace_installed_root)
       && fs.existsSync(applied.direct_installed_root)
@@ -1679,50 +1807,7 @@ function selfTestLocalRemount(json) {
       throw new Error("old-hash CAS failure did not restore installed directories and retain its recovery journal");
     }
 
-    const faultPoints = [
-      "after_journal_prepared",
-      "after_generation_published",
-      "after_direct_backup_moved",
-      "after_direct_published",
-      `after_skill_backup_moved:${ALL_SKILL_NAMES[0]}`,
-      `after_metadata_published:runtime_install_policy`,
-      "after_marketplace_pointer_published",
-      "after_first_quarantine",
-    ];
-    const recoveryDispositions = [];
-    const crashPointerStates = [];
-    for (let index = 0; index < faultPoints.length; index += 1) {
-      const faultFixture = createRuntimeFixture(path.join(tempParent, `fault-${index}`), version);
-      const faultPoint = faultPoints[index];
-      expectFailure(() => executeSync({
-        apply: true,
-        confirmLocalRemount: true,
-        runtimeHome: faultFixture.runtimeHome,
-        sourceRoot,
-        faultPoint,
-        simulateCrash: true,
-        skipDataFsyncForTest: true,
-      }), `simulated crash at ${faultPoint}`);
-      const crashedMarketplace = parseJsonBytes(
-        fs.readFileSync(generatedMarketplacePath(assertAnalytixRuntimeHome(faultFixture.runtimeHome))),
-        "crashed marketplace pointer",
-      );
-      const crashedPointerHash = text(crashedMarketplace.plugins.find((entry) => text(entry.name) === PLUGIN_NAME)?.source?.sha256);
-      const shouldBeCommitted = ["after_marketplace_pointer_published", "after_first_quarantine"].includes(faultPoint);
-      if ((crashedPointerHash !== "1".repeat(64)) !== shouldBeCommitted) {
-        throw new Error(`marketplace pointer exposed the wrong transaction state after ${faultPoint}`);
-      }
-      crashPointerStates.push(shouldBeCommitted ? "committed" : "old_generation");
-      const recovered = executeSync({
-        apply: true,
-        confirmLocalRemount: true,
-        runtimeHome: faultFixture.runtimeHome,
-        sourceRoot,
-        skipDataFsyncForTest: true,
-      });
-      verifyCommittedFixture(recovered);
-      recoveryDispositions.push(recovered.recovery?.disposition || "none");
-    }
+    const { faultPoints, recoveryDispositions, crashPointerStates } = selfTestRecoveryCases(tempParent, sourceRoot, version);
 
     const markerHashes = applied.installed_roots.map((root) => text(parseJsonBytes(
       fs.readFileSync(path.join(root, ".analytix-hub-installed-plugin.json")),
@@ -1748,6 +1833,9 @@ function selfTestLocalRemount(json) {
       uncommitted_generation_not_installed: crashPointerStates.slice(0, -2).every((state) => state === "old_generation"),
       recovery_dispositions: recoveryDispositions,
       second_dry_run_copy_count: secondDryRunCopyCount,
+      source_reference_count: REFERENCE_FILES.length,
+      shipping_reference_count: SHIPPING_REFERENCE_FILES.length,
+      development_references_removed: true,
       commit_order: RUNTIME_CACHE_COMMIT_ORDER,
       offline_boundary: "--confirm-local-remount requires runtime and MCP stopped because independent directory swaps are not globally atomic",
     };
@@ -1805,7 +1893,7 @@ function main() {
   try {
     options = parseArgs(process.argv.slice(2));
     if (options.selfTestRuntimeConfig) return selfTestRuntimeConfigPatch(options.json);
-    if (options.selfTestLocalRemount) return selfTestLocalRemount(options.json);
+    if (options.selfTestLocalRemount) return selfTestLocalRemount(options.json, options.selfTestFaultCase);
     const result = executeSync(options);
     printResult(result, options.json);
   } catch (error) {
