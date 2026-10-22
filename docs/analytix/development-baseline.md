@@ -415,3 +415,41 @@ the whole product stable because `verify:baseline` passes:
 <a id="pr-22-follow-up-persistence-and-ci-attribution"></a>
 <a id="pr-22-legacy-source-review-delta-2026-09-13"></a>
 Historical evidence: [development 429–1152](documentation-delivery-review-2026-09-09.md#snapshot-d469-development-429).
+
+## Unused finding ratchet
+
+`scripts/unused-findings-gate.mjs` counts JS core and TS extension findings
+(core disabled for TS), with `vars/args/caughtErrors: all`, no underscore
+exemption, no inline suppression, fix or cache. It inherits the root ESLint
+files/ignores and dynamically discovers current inputs, including new scripts.
+The [historical scan archive](qa/unused-scan-2c549464.json) reconstructs the
+2,339 expected tracked paths; it is not a future scan allowlist. The historical
+1,933 findings were relabeled from the saved report bound by SHA-256 in the
+[baseline](../../scripts/unused-findings-baseline.json), not rediscovered.
+
+Identity uses file, rule, binding, category, declaration kind/import source and
+semantic scope anchors, never line, column or sibling ordinal. Repeated anonymous candidates include used
+bindings; ordered normalized host-statement slices guard ambiguous groups.
+Structure changes in groups retaining findings fail closed for explicit review;
+explicit pruning to zero removes the allowance, so later regression fails.
+An identical final source cannot prove the historical origin of identical code. Baseline
+rows are audit locations only. The audit lists all old duplicate groups and
+the remaining guarded groups; parameters remain counted, not auto-cleaned.
+
+CI requires strict current/declaration multiset equality and no expansion from
+the event base. Commit the source fix first, then explicitly prune entries with
+`UNUSED_EVENT=pull_request UNUSED_BASE=<base-sha> UNUSED_HEAD=<head-sha> node
+scripts/unused-findings-gate.mjs --prune`, inspect the reductions and commit.
+Prune cannot accept additions, count increases or structural changes in retained
+ambiguous groups. The generated reduction is a candidate, not a passing head check.
+PR/push use exact event commits and the base checker; dispatch requires an
+explicit `unused_base` commit. Missing Git objects fail, never mean empty debt.
+The only bootstrap is the reviewed 2c549464 source/report and exact baseline
+hash. Config and the 132-package lock/installed metadata closure are pinned;
+tooling changes need a separate reviewed migration, not a reset command.
+Workflow/checker changes still require source review: an editable workflow and
+a check name alone do not create an independent tamper-proof boundary.
+
+Run `node --test scripts/unused-findings-gate.test.mjs` for the six synthetic
+lifecycle/ambiguity contracts. This gate covers only the inherited JS/TS scan;
+it establishes neither unused-code removability nor product/Privacy acceptance.
