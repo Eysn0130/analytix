@@ -58,6 +58,14 @@ jobs:
         with:
           go-version: '1.26.4'
           cache-dependency-path: packages/runtime-go/go.sum
+      - name: Check new source file LF budget
+        env:
+          SOURCE_SIZE_EVENT: ${{ github.event_name }}
+          SOURCE_SIZE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SOURCE_SIZE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          node --test scripts/source-file-size-gate.test.mjs
+          node scripts/source-file-size-gate.mjs
       - name: Install locked dependencies (including runtime)
         run: npm ci
       - name: Inspect actual public candidate ancestry and source policy
