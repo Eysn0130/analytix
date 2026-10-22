@@ -421,7 +421,10 @@ Historical evidence: [development 429–1152](documentation-delivery-review-2026
 `scripts/unused-findings-gate.mjs` counts JS core and TS extension findings
 (core disabled for TS), with `vars/args/caughtErrors: all`, no underscore
 exemption, no inline suppression, fix or cache. It inherits the root ESLint
-files/ignores and dynamically discovers current inputs, including new scripts.
+files/ignores over dynamically discovered regular JS/TS files in Git HEAD,
+including newly committed scripts. Untracked install/build outputs (including
+Git-ignored files) are not event-head source; tracked generated files still follow the same ESLint
+rules. No fixed historical path allowlist selects current inputs.
 The [historical scan archive](qa/unused-scan-2c549464.json) reconstructs the
 2,339 expected tracked paths; it is not a future scan allowlist. The historical
 1,933 findings were relabeled from the saved report bound by SHA-256 in the
@@ -458,5 +461,6 @@ Workflow/checker changes still require source review: an editable workflow and
 a check name alone do not create an independent tamper-proof boundary.
 
 Run `node --test scripts/unused-findings-gate.test.mjs` for the six synthetic
-lifecycle/ambiguity contracts. This gate covers only the inherited JS/TS scan;
-it establishes neither unused-code removability nor product/Privacy acceptance.
+lifecycle/ambiguity contracts and committed-source selection regression. This
+gate covers only the inherited JS/TS scan; it establishes neither unused-code
+removability nor product/Privacy acceptance.

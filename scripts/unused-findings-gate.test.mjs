@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { tools, indexSource, label, snapshot, compare, prune, eventRefs } from './unused-findings-gate.mjs'
+import { tools, indexSource, label, snapshot, compare, prune, eventRefs, scan, sourceFiles } from './unused-findings-gate.mjs'
 
 const { eslint, parser } = await tools(process.cwd(), process.env.UNUSED_TOOL_ROOT ?? process.cwd())
 async function fixture(code, extension = 'mjs') {
@@ -24,13 +24,14 @@ function baselineHistory(t) {
   const git = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=SyntheticFixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args],
     { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
   git('init', '--quiet')
-  return (baseline, source) => {
+  const commit = (baseline, source) => {
     fs.writeFileSync(path.join(dir, 'baseline.json'), JSON.stringify(baseline), { mode: 0o600 })
     fs.writeFileSync(path.join(dir, 'source.mjs'), source, { mode: 0o600 })
     git('add', '--', 'baseline.json', 'source.mjs')
     git('commit', '--quiet', '-m', 'Synthetic baseline lifecycle')
     return JSON.parse(git('show', 'HEAD:baseline.json'))
   }
+  return Object.assign(commit, { dir, git })
 }
 
 test('1 delete old/add new fails even if a PR edits its baseline; prune never adds', async () => {
@@ -151,4 +152,30 @@ test('6 deleting whole old scope and inserting same-signature scope elsewhere fa
     assert.throws(() => check(before, after, after), /Baseline expansion/, branch)
     t.diagnostic('host target branch rejected: ' + branch)
   }
+})
+
+test('7 committed source selection excludes install output, retains ignores and admits new files', async t => {
+  const history = baselineHistory(t), empty = { schema: 1, entries: [], guards: [] }
+  fs.writeFileSync(path.join(history.dir, 'eslint.config.js'), fs.readFileSync('eslint.config.js'), { mode: 0o600 })
+  fs.mkdirSync(path.join(history.dir, 'build'))
+  fs.writeFileSync(path.join(history.dir, 'build/ignored.mjs'), 'const ignoredDebt = 1;', { mode: 0o600 })
+  fs.writeFileSync(path.join(history.dir, '.gitignore'), 'packages/runtime/dist/\n', { mode: 0o600 })
+  history.git('add', '--', 'eslint.config.js', '.gitignore', 'build/ignored.mjs')
+  history(empty, 'export const retained = 1;')
+  fs.mkdirSync(path.join(history.dir, 'packages/runtime/dist'), { recursive: true })
+  fs.writeFileSync(path.join(history.dir, 'packages/runtime/dist/emitted.js'), 'const emittedDebt = 1;', { mode: 0o600 })
+  fs.writeFileSync(path.join(history.dir, 'untracked.mjs'), 'const uncommittedDebt = 1;', { mode: 0o600 })
+  const toolRoot = process.env.UNUSED_TOOL_ROOT ?? process.cwd()
+  const before = await scan(history.dir, toolRoot)
+  assert.deepEqual(before.files.sort(), ['eslint.config.js', 'source.mjs'])
+  check(empty, empty, before)
+  fs.writeFileSync(path.join(history.dir, 'new.mjs'), 'const newlyCommittedDebt = 1;', { mode: 0o600 })
+  history.git('add', '--', 'new.mjs')
+  history(empty, 'export const retained = 1;')
+  const after = await scan(history.dir, toolRoot)
+  assert.ok(after.files.includes('new.mjs'))
+  assert.equal(after.entries.length, 1)
+  assert.equal(after.entries[0].signature.binding, 'newlyCommittedDebt')
+  assert.throws(() => check(empty, empty, after), /Findings differ/)
+  assert.throws(() => sourceFiles(history.dir, 'f'.repeat(40)), /Command failed/)
 })

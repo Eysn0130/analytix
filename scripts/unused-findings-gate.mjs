@@ -209,9 +209,21 @@ export function prune(trusted, actual, allGuards) {
   return { ...trusted, entries: actual.entries, guards: actual.guards }
 }
 
+// Install/build output is not event-head source. Discover each commit dynamically,
+// then let the unchanged ESLint configuration select its JS/TS files and ignores.
+export function sourceFiles(root, ref = 'HEAD') {
+  return git(root, 'ls-tree', '-r', '-z', '--full-tree', ref).split('\0').filter(Boolean).flatMap(record => {
+    const tab = record.indexOf('\t'), header = record.slice(0, tab), file = record.slice(tab + 1)
+    if (!/\.(?:js|mjs|cjs|ts|tsx)$/.test(file)) return []
+    if (!/^100(?:644|755) blob /.test(header)) throw Error(`Source must be a regular committed file: ${file}`)
+    return [file]
+  })
+}
 export async function scan(root, toolRoot) {
   const { eslint, parser } = await tools(root, toolRoot)
-  const results = await eslint.lintFiles(['.'])
+  const inputs = []
+  for (const file of sourceFiles(root)) if (!await eslint.isPathIgnored(path.join(root, file))) inputs.push(file)
+  const results = inputs.length ? await eslint.lintFiles(inputs) : []
   const findings = [], guards = new Map(), files = []
   for (const result of results) {
     files.push(path.relative(root, result.filePath).split(path.sep).join('/'))
