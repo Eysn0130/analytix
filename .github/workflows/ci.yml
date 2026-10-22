@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      unused_base:
+        description: 'Trusted comparison commit for unused baseline (full SHA)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -47,6 +52,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
@@ -68,6 +74,24 @@ jobs:
           node scripts/source-file-size-gate.mjs
       - name: Install locked dependencies (including runtime)
         run: npm ci
+      - name: Check unused finding ratchet against trusted event base
+        env:
+          UNUSED_EVENT: ${{ github.event_name }}
+          UNUSED_BASE: ${{ github.event.pull_request.base.sha || github.event.before || inputs.unused_base }}
+          UNUSED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # Never interpolate untrusted event strings into shell source.
+          [[ "$UNUSED_BASE" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$UNUSED_HEAD" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          checker="$RUNNER_TEMP/unused-findings-gate.mjs"
+          if git cat-file -e "$UNUSED_BASE:scripts/unused-findings-gate.mjs" 2>/dev/null; then
+            git show "$UNUSED_BASE:scripts/unused-findings-gate.mjs" > "$checker"
+          else
+            test "$UNUSED_BASE" = 2c5494642b35f7cdb9cd27939486beec7d5adaaf
+            cp scripts/unused-findings-gate.mjs "$checker"
+          fi
+          node "$checker"
+          node --test scripts/unused-findings-gate.test.mjs
       - name: Inspect actual public candidate ancestry and source policy
         run: node scripts/check-public-push.mjs --candidate
       - name: Validate workflow syntax and security-sensitive expressions
