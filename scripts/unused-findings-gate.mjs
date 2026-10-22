@@ -10,7 +10,7 @@ export const RAW_SHA = 'dff6e88701aabb1d26794c84cb8661d04084b89181f5513ca1cbcdda
 export const BASELINE = 'scripts/unused-findings-baseline.json'
 export const CHECKER = 'scripts/unused-findings-gate.mjs'
 const CONFIG = 'eslint.config.js'
-const BOOTSTRAP_SHA = '5f77ca5c94e7e826d68f048f3425cf5f5873f35749275983cdf9aeac32432825'
+const BOOTSTRAP_SHA = '0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae'
 export const digest = value => createHash('sha256').update(value).digest('hex')
 const json = value => JSON.stringify(value)
 const options = { vars: 'all', args: 'all', caughtErrors: 'all', ignoreRestSiblings: false }
@@ -68,14 +68,32 @@ export function indexSource(input, file, parser) {
     for (let child = node, p = parents.get(child); p; child = p, p = parents.get(p)) {
       if (p.type === 'VariableDeclarator' && p.init === child) return [...out, ['binding', norm(p.id)]]
       if (['Property', 'MethodDefinition', 'PropertyDefinition'].includes(p.type)) {
-        out.push(['property', skeleton(p.key), p.computed ?? false, p.kind ?? null]); continue
+        out.push(['property', skeleton(p.key), p.computed ?? false, p.kind ?? null, p.static ?? false]); continue
       }
       if (['CallExpression', 'NewExpression'].includes(p.type)) {
         out.push([p.type, skeleton(p.callee), p.arguments.find(a => a.type === 'Literal' && typeof a.value === 'string')?.value ?? null,
           p.callee === child ? 'callee' : p.arguments.indexOf(child)]); continue
       }
       if (p.type === 'MemberExpression') {
-        out.push([p.type, p.object === child ? 'object' : 'property', skeleton(p.property), p.computed]); continue
+        out.push([p.type, p.object === child ? 'object' : 'property', skeleton(p.object), skeleton(p.property), p.computed]); continue
+      }
+      if (p.type === 'AssignmentExpression') {
+        out.push([p.type, p.operator, p.left === child ? 'left' : 'right', skeleton(p.left)]); continue
+      }
+      if (['LogicalExpression', 'BinaryExpression'].includes(p.type)) {
+        out.push([p.type, p.operator, p.left === child ? 'left' : 'right', skeleton(p.left === child ? p.right : p.left)]); continue
+      }
+      if (p.type === 'TaggedTemplateExpression') {
+        out.push([p.type, skeleton(p.tag)]); continue
+      }
+      if (p.type === 'TemplateLiteral') {
+        out.push([p.type, p.quasis.map(q => digest(q.value.cooked ?? q.value.raw))]); continue
+      }
+      if (['JSXElement', 'JSXOpeningElement', 'JSXAttribute'].includes(p.type)) {
+        out.push([p.type, skeleton(p.openingElement?.name ?? p.name)]); continue
+      }
+      if (['JSXExpressionContainer', 'JSXSpreadAttribute', 'JSXSpreadChild', 'JSXFragment'].includes(p.type)) {
+        out.push([p.type]); continue
       }
       if (p.type === 'ConditionalExpression') {
         out.push([p.type, p.test === child ? 'test' : p.consequent === child ? 'consequent' : 'alternate', skeleton(p.test)]); continue

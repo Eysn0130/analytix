@@ -431,6 +431,10 @@ Identity uses file, rule, binding, category, declaration kind/import source and
 semantic scope anchors, never line, column or sibling ordinal. Anonymous anchors
 follow the expression route through calls/properties to the owning variable,
 stopping at another function or statement; callee skeletons omit nested bodies.
+Assignment left values, computed-member receivers, logical conditions, static
+members, JSX names and template tags retain their stable target. Transparent
+JSX/template/TS wrappers continue toward that target; array siblings gain no
+ordinal identity, and this is not a claim of physical scope provenance.
 Repeated anonymous candidates include used bindings; ordered normalized
 host-statement slices guard ambiguous groups.
 Structure changes in groups retaining findings fail closed for explicit review;

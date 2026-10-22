@@ -7,12 +7,12 @@ import { execFileSync } from 'node:child_process'
 import { tools, indexSource, label, snapshot, compare, prune, eventRefs } from './unused-findings-gate.mjs'
 
 const { eslint, parser } = await tools(process.cwd(), process.env.UNUSED_TOOL_ROOT ?? process.cwd())
-async function fixture(code) {
-  const file = 'scripts/synthetic-unused.mjs'
+async function fixture(code, extension = 'mjs') {
+  const file = 'scripts/synthetic-unused.' + extension
   const [result] = await eslint.lintText(code, { filePath: file })
   assert.equal(result.fatalErrorCount, 0)
   const index = indexSource(code, file, parser)
-  const findings = label(file, result.messages.filter(m => m.ruleId === 'no-unused-vars'), index)
+  const findings = label(file, result.messages.filter(m => ['no-unused-vars', '@typescript-eslint/no-unused-vars'].includes(m.ruleId)), index)
   return { ...snapshot(findings, index.guards), allGuards: index.guards }
 }
 const check = (base, declared, actual) => compare(base, declared, actual, actual.allGuards)
@@ -94,7 +94,7 @@ test('5 two anonymous scopes each bind underscore: swapping used/unused fails cl
   assert.throws(() => check(base, head, head), /Ambiguous structure changed/)
 })
 
-test('6 deleting whole old scope and inserting same-signature scope elsewhere fails', async () => {
+test('6 deleting whole old scope and inserting same-signature scope elsewhere fails', async t => {
   const base = await fixture('function owner() { run((_) => "old"); run((_) => String(_)); } owner();')
   const head = await fixture('function owner() { run((_) => String(_)); run((_) => "new"); } owner();')
   assert.deepEqual(base.entries, head.entries)
@@ -115,4 +115,40 @@ test('6 deleting whole old scope and inserting same-signature scope elsewhere fa
   const chainOld = await fixture('export function pick(xs){return xs.filter(value=>value>0).map((_,i)=>i);}')
   const chainEdited = await fixture('export function pick(xs){return xs.filter(value=>value>1).map((_,i)=>i);}')
   check(chainOld, chainOld, chainEdited)
+  const assignmentOld = await fixture('function pick(xs){let first,second; first=xs.filter((_,i)=>i>0); second=xs.filter((value,i)=>value>i);return [first,second];}')
+  const assignmentNew = await fixture('function pick(xs){let first,second;second=xs.filter((_,i)=>i>0);return [first,second];}')
+  assert.throws(() => check(assignmentOld, assignmentOld, assignmentNew), /Findings differ/)
+  assert.throws(() => check(assignmentOld, assignmentNew, assignmentNew), /Baseline expansion/)
+  const cb = 'xs.filter((_,i)=>i>0)'
+  const targets = [
+    ['variable', target => `export const ${target}=${cb};`],
+    ['property', target => `export const ${target}={x:${cb}};`],
+    ['call', target => `export function probe(xs){return ${target}(${cb});}`],
+    ['new', target => `export function probe(xs){return new ${target}(${cb});}`],
+    ['member receiver', target => `export function probe(xs){return ${target}[${cb}];}`],
+    ['conditional', target => `export function probe(xs){return ${target}?${cb}:[];}`],
+    ['logical', target => `export function probe(xs){return ${target}&&${cb};}`],
+    ['binary', target => `export function probe(xs){return ${target}+${cb};}`],
+    ['assignment identifier', target => `export function probe(xs){let ${target};${target}=${cb};return ${target};}`],
+    ['assignment static property', target => `export function probe(xs){obj.${target}=${cb};}`],
+    ['assignment computed property', target => `export function probe(xs){obj["${target}"]=${cb};}`],
+    ['template owner', target => 'export const '+target+'=`${'+cb+'}`;'],
+    ['tag', target => 'export function probe(xs){return '+target+'`${'+cb+'}`;}'],
+    ['jsx owner', target => `export const ${target}=<X>{${cb}}</X>;`, 'tsx'],
+    ['jsx tag', target => `export function probe(xs){return <${target}>{${cb}}</${target}>;}`, 'tsx'],
+    ['jsx attribute', target => `export function probe(xs){return <X ${target}={${cb}}/>;}`, 'tsx'],
+    ['static field', target => `export class Owner {${target === 'First' ? 'static ' : ''}x=${cb};}`],
+    ['static method', target => `export class Owner {${target === 'First' ? 'static ' : ''}x(_,i){return i;}}`],
+    ['array owner', target => `export const ${target}=[${cb}];`],
+    ['spread array owner', target => `export const ${target}=[...${cb}];`],
+    ['sequence owner', target => `export const ${target}=(0,${cb});`],
+    ['optional call owner', target => `export const ${target}=xs?.filter((_,i)=>i>0);`],
+    ['TS wrapper owner', target => `export const ${target}=(${cb} as unknown);`, 'tsx']
+  ]
+  for (const [branch, source, extension] of targets) {
+    const before = await fixture(source('First'), extension), after = await fixture(source('Second'), extension)
+    assert.throws(() => check(before, before, after), /Findings differ/, branch)
+    assert.throws(() => check(before, after, after), /Baseline expansion/, branch)
+    t.diagnostic('host target branch rejected: ' + branch)
+  }
 })
