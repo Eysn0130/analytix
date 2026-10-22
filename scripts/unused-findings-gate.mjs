@@ -10,7 +10,7 @@ export const RAW_SHA = 'dff6e88701aabb1d26794c84cb8661d04084b89181f5513ca1cbcdda
 export const BASELINE = 'scripts/unused-findings-baseline.json'
 export const CHECKER = 'scripts/unused-findings-gate.mjs'
 const CONFIG = 'eslint.config.js'
-const BOOTSTRAP_SHA = 'e9fb8c389dc35c473f94c4c9138aa0ae13be57aa5e8588d4fa78d8093899037c'
+const BOOTSTRAP_SHA = '5f77ca5c94e7e826d68f048f3425cf5f5873f35749275983cdf9aeac32432825'
 export const digest = value => createHash('sha256').update(value).digest('hex')
 const json = value => JSON.stringify(value)
 const options = { vars: 'all', args: 'all', caughtErrors: 'all', ignoreRestSiblings: false }
@@ -41,10 +41,11 @@ export async function tools(root, toolRoot = root) {
 export function indexSource(input, file, parser) {
   const parsed = parser.parseForESLint(input, { filePath: file, loc: true, range: true, tokens: true,
     comment: false, ecmaVersion: 'latest', sourceType: 'module', ecmaFeatures: { jsx: true }, project: false })
-  const parents = new WeakMap()
+  const parents = new WeakMap(), functionBodies = []
   function walk(node, parent) {
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') return
     if (parent) parents.set(node, parent)
+    if (/Function|Class/.test(node.type) && node.body?.range) functionBodies.push(node.body.range)
     for (const [key, value] of Object.entries(node)) {
       if (['parent', 'loc', 'range', 'tokens', 'comments'].includes(key)) continue
       if (Array.isArray(value)) value.forEach(n => walk(n, node))
@@ -55,18 +56,44 @@ export function indexSource(input, file, parser) {
   const tokens = parsed.ast.tokens
   const normRange = (start, end) => tokens.filter(t => t.range[0] >= start && t.range[1] <= end).map(t => [t.type, t.value])
   const norm = node => node?.range ? normRange(...node.range) : []
+  // A callee may contain earlier callbacks in a chain; retain syntax, not their bodies.
+  const skeleton = node => {
+    if (!node?.range) return []
+    const bodies = functionBodies.filter(([start, end]) => start >= node.range[0] && end <= node.range[1])
+    return tokens.filter(t => t.range[0] >= node.range[0] && t.range[1] <= node.range[1]
+      && !bodies.some(([start, end]) => t.range[0] >= start && t.range[1] <= end)).map(t => [t.type, t.value])
+  }
+  function hostPath(node) {
+    const out = []
+    for (let child = node, p = parents.get(child); p; child = p, p = parents.get(p)) {
+      if (p.type === 'VariableDeclarator' && p.init === child) return [...out, ['binding', norm(p.id)]]
+      if (['Property', 'MethodDefinition', 'PropertyDefinition'].includes(p.type)) {
+        out.push(['property', skeleton(p.key), p.computed ?? false, p.kind ?? null]); continue
+      }
+      if (['CallExpression', 'NewExpression'].includes(p.type)) {
+        out.push([p.type, skeleton(p.callee), p.arguments.find(a => a.type === 'Literal' && typeof a.value === 'string')?.value ?? null,
+          p.callee === child ? 'callee' : p.arguments.indexOf(child)]); continue
+      }
+      if (p.type === 'MemberExpression') {
+        out.push([p.type, p.object === child ? 'object' : 'property', skeleton(p.property), p.computed]); continue
+      }
+      if (p.type === 'ConditionalExpression') {
+        out.push([p.type, p.test === child ? 'test' : p.consequent === child ? 'consequent' : 'alternate', skeleton(p.test)]); continue
+      }
+      if (/Function|Class|Statement$|^Program$/.test(p.type)) break
+      if (/Expression$|^TS|^SpreadElement$/.test(p.type)) {
+        out.push([p.type, p.operator ?? null, p.left === child ? 'left' : p.right === child ? 'right' : null]); continue
+      }
+      break
+    }
+    return out
+  }
   function anchor(node) {
     const p = parents.get(node)
     const header = normRange(node.range[0], node.body?.range?.[0] ?? node.range[1])
     if (node.id?.name) return [node.type, node.id.name, header]
-    if (p?.type === 'VariableDeclarator') return [node.type, 'binding', norm(p.id), header]
-    if (['Property', 'MethodDefinition', 'PropertyDefinition'].includes(p?.type)) return [node.type, 'property', norm(p.key), header]
-    if (['CallExpression', 'NewExpression'].includes(p?.type)) {
-      return [node.type, 'call', norm(p.callee), p.arguments.find(a => a.type === 'Literal' && typeof a.value === 'string')?.value ?? null,
-        p.arguments.indexOf(node), header]
-    }
     if (node.type === 'BlockStatement' && p && p.type !== 'Program') return [node.type, p.type, normRange(p.range[0], node.range[0])]
-    return [node.type, header]
+    return [node.type, header, hostPath(node)]
   }
   const positions = new Map(), candidates = new Map()
   for (const scope of parsed.scopeManager.scopes) for (const variable of scope.variables) {

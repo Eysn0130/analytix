@@ -428,8 +428,11 @@ The [historical scan archive](qa/unused-scan-2c549464.json) reconstructs the
 [baseline](../../scripts/unused-findings-baseline.json), not rediscovered.
 
 Identity uses file, rule, binding, category, declaration kind/import source and
-semantic scope anchors, never line, column or sibling ordinal. Repeated anonymous candidates include used
-bindings; ordered normalized host-statement slices guard ambiguous groups.
+semantic scope anchors, never line, column or sibling ordinal. Anonymous anchors
+follow the expression route through calls/properties to the owning variable,
+stopping at another function or statement; callee skeletons omit nested bodies.
+Repeated anonymous candidates include used bindings; ordered normalized
+host-statement slices guard ambiguous groups.
 Structure changes in groups retaining findings fail closed for explicit review;
 explicit pruning to zero removes the allowance, so later regression fails.
 An identical final source cannot prove the historical origin of identical code. Baseline
