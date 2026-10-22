@@ -1,5 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { tools, indexSource, label, snapshot, compare, prune, eventRefs } from './unused-findings-gate.mjs'
 
 const { eslint, parser } = await tools(process.cwd(), process.env.UNUSED_TOOL_ROOT ?? process.cwd())
@@ -12,6 +16,22 @@ async function fixture(code) {
   return { ...snapshot(findings, index.guards), allGuards: index.guards }
 }
 const check = (base, declared, actual) => compare(base, declared, actual, actual.allGuards)
+
+// Actual commits exercise serialization and the trusted-baseline lifecycle, not just a variable named 'committed'.
+function baselineHistory(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'analytix-unused-history-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const git = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=SyntheticFixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args],
+    { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+  git('init', '--quiet')
+  return (baseline, source) => {
+    fs.writeFileSync(path.join(dir, 'baseline.json'), JSON.stringify(baseline), { mode: 0o600 })
+    fs.writeFileSync(path.join(dir, 'source.mjs'), source, { mode: 0o600 })
+    git('add', '--', 'baseline.json', 'source.mjs')
+    git('commit', '--quiet', '-m', 'Synthetic baseline lifecycle')
+    return JSON.parse(git('show', 'HEAD:baseline.json'))
+  }
+}
 
 test('1 delete old/add new fails even if a PR edits its baseline; prune never adds', async () => {
   const base = await fixture('const oldBinding = 1;')
@@ -28,10 +48,12 @@ test('1 delete old/add new fails even if a PR edits its baseline; prune never ad
   assert.throws(() => eventRefs({ UNUSED_EVENT: 'push', UNUSED_BASE: '0'.repeat(40), UNUSED_HEAD: sha }), /Missing trusted/)
 })
 
-test('2 fixed finding regression fails after committed baseline prune lifecycle', async () => {
+test('2 fixed finding regression fails after committed baseline prune lifecycle', async t => {
+  const commit = baselineHistory(t)
   const original = await fixture('const debt = 1;')
   const fixed = await fixture('const debt = 1; console.log(debt);')
-  const committed = prune(original, fixed, fixed.allGuards)
+  const trusted = commit(original, 'const debt = 1;')
+  const committed = commit(prune(trusted, fixed, fixed.allGuards), 'const debt = 1; console.log(debt);')
   check(committed, committed, fixed)
   assert.throws(() => check(committed, original, original), /Baseline expansion/)
   assert.throws(() => check(committed, committed, original), /Findings differ/)
@@ -46,7 +68,8 @@ test('3 pure line shift passes including ambiguous anonymous bindings', async ()
   assert.deepEqual(base.entries, head.entries)
 })
 
-test('4 stale baseline fails until explicit prune; malformed counts/duplicates fail', async () => {
+test('4 stale baseline fails until explicit prune; malformed counts/duplicates fail', async t => {
+  const commit = baselineHistory(t)
   const base = await fixture('const resolved = 1; const retained = 2;')
   const head = await fixture('const resolved = 1; console.log(resolved); const retained = 2;')
   assert.throws(() => check(base, base, head), /Findings differ/)
@@ -55,7 +78,8 @@ test('4 stale baseline fails until explicit prune; malformed counts/duplicates f
   const emptied = prune(ambiguous, allFixed, allFixed.allGuards)
   check(ambiguous, emptied, allFixed)
   assert.throws(() => check(emptied, ambiguous, ambiguous), /Baseline expansion/)
-  const reduced = prune(base, head, head.allGuards)
+  const trusted = commit(base, 'const resolved = 1; const retained = 2;')
+  const reduced = commit(prune(trusted, head, head.allGuards), 'const resolved = 1; console.log(resolved); const retained = 2;')
   assert.equal(reduced.entries.length, base.entries.length - 1)
   check(base, reduced, head)
   assert.throws(() => check(base, { ...base, entries: [...base.entries, base.entries[0]] }, head), /Invalid baseline/)
