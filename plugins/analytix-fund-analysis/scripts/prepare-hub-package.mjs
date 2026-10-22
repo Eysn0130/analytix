@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inspectReferenceCopies } from "./runtime-cache-contract.mjs";
+import { DEVELOPMENT_REFERENCE_PATHS, inspectReferenceCopies, inspectShippingReferenceCopies } from "./runtime-cache-contract.mjs";
 
 import {
   inspectProductionMcpEntryClosure,
@@ -106,6 +106,7 @@ function copyPluginSource(pluginRoot, destinationPluginRoot) {
       if (relativePath === "evidence" || relativePath.startsWith("evidence/")) return false;
       if (relativePath === "output" || relativePath.startsWith("output/")) return false;
       if (relativePath === "scripts" || relativePath.startsWith("scripts/")) return false;
+      if (DEVELOPMENT_REFERENCE_PATHS.includes(relativePath)) return false;
       if (relativePath === "mcp") return true;
       if (relativePath.startsWith("mcp/")) {
         return PRODUCTION_MCP_ENTRY_CLOSURE_SET.has(relativePath);
@@ -267,7 +268,7 @@ function preparePackage(options) {
   fs.mkdirSync(path.join(outRoot, "plugins"), { recursive: true });
   const destinationPluginRoot = path.join(outRoot, "plugins", packageId);
   copyPluginSource(pluginRoot, destinationPluginRoot);
-  const references = inspectReferenceCopies(destinationPluginRoot);
+  const references = inspectShippingReferenceCopies(destinationPluginRoot);
   const productionMcpPayload = validateProductionMcpPayload(destinationPluginRoot);
   const marketplacePath = writeMarketplace(outRoot, projection);
   const goldenIsolation = validateGoldenIsolation(destinationPluginRoot);

@@ -363,6 +363,7 @@ describe('main-private desktop external-state isolation', () => {
           if (name.includes('production-mcp-entry-closure-manifest')) return { loadProductionMcpEntryClosureContract: () => ({ files: [] }) }
           if (name.includes('packaged-lifecycle-guard')) return { _internals: { assertNoPrepackagedCommandLine: () => {} } }
           if (name === './scripts/core-package-profile.cjs') return createRequire(import.meta.url)(join(process.cwd(), name))
+          if (name === './plugins/analytix-fund-analysis/scripts/runtime-cache-contract.mjs') return createRequire(import.meta.url)(join(process.cwd(), name))
           throw new Error('unexpected builder dependency')
         } }
       runInNewContext(builderConfig, context)
