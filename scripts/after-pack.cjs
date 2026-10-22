@@ -1,5 +1,6 @@
 const { CORE_CONTROLLED_DISPOSITION, isCoreDisposition, CORE_DISPOSITION, ABSENT_FUNDS, isCoreContext, assertCoreResourcesAbsent, assertPdfJsNodeRasterAbsent, assertCoreOptionalAssetsAbsent } = require('./core-package-profile.cjs')
 const { execFileSync } = require('node:child_process')
+const { inspectShippingReferenceCopies } = require('../plugins/analytix-fund-analysis/scripts/runtime-cache-contract.mjs')
 const { createHash, randomUUID } = require('node:crypto')
 const { chmodSync, closeSync, constants, copyFileSync, cpSync, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } = require('node:fs')
 const { dirname, isAbsolute, join, relative, resolve, sep } = require('node:path')
@@ -2721,6 +2722,7 @@ function validateBundledFundsPlugin(context, options = {}) {
   if (!packagedRootStat.isDirectory() || packagedRootStat.isSymbolicLink()) {
     throw new Error('[after-pack] funds_plugin_root_invalid')
   }
+  inspectShippingReferenceCopies(packagedRoot)
   const packagedMcpRoot = join(packagedRoot, 'mcp')
   const packagedMcpRootStat = lstatSync(packagedMcpRoot)
   if (!packagedMcpRootStat.isDirectory() || packagedMcpRootStat.isSymbolicLink()) {

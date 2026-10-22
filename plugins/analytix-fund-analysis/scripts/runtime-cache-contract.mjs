@@ -41,6 +41,23 @@ export const REFERENCE_FILES = [
   "tool-availability.md",
 ];
 
+// Maintained source and its portable mirror retain development material;
+// installed plugins and runtime skills contain only operational references.
+export const DEVELOPMENT_ONLY_REFERENCE_FILES = [
+  "blueprint-implementation-matrix.md",
+  "blueprint-execution-plan.md",
+  "casegraph-roadmap.md",
+  "mature-plugin-drift-table.md",
+  "plugin-benchmark.md",
+  "top-pluginization-plan.md",
+];
+export const SHIPPING_REFERENCE_FILES = REFERENCE_FILES.filter(
+  (name) => !DEVELOPMENT_ONLY_REFERENCE_FILES.includes(name),
+);
+export const DEVELOPMENT_REFERENCE_PATHS = DEVELOPMENT_ONLY_REFERENCE_FILES.flatMap(
+  (name) => [`references/${name}`, `skills/${PLUGIN_NAME}/references/${name}`],
+);
+
 export const FOCUSED_SKILL_NAMES = [
   "index",
   "case-context",
@@ -70,10 +87,10 @@ export const PLUGIN_CACHE_FILES = [
   ".mcp.json",
   "agents/openai.yaml",
   ...PRODUCTION_MCP_ENTRY_CLOSURE_FILES,
-  ...REFERENCE_FILES.map((relativePath) => `references/${relativePath}`),
+  ...SHIPPING_REFERENCE_FILES.map((relativePath) => `references/${relativePath}`),
   "skills/analytix-fund-analysis/SKILL.md",
   "skills/analytix-fund-analysis/agents/openai.yaml",
-  ...REFERENCE_FILES.map(
+  ...SHIPPING_REFERENCE_FILES.map(
     (relativePath) =>
       `skills/analytix-fund-analysis/references/${relativePath}`,
   ),
@@ -85,7 +102,7 @@ export const PLUGIN_CACHE_FILES = [
 
 export const RUNTIME_SKILL_FILES = [
   "SKILL.md",
-  ...REFERENCE_FILES.map((relativePath) => `references/${relativePath}`),
+  ...SHIPPING_REFERENCE_FILES.map((relativePath) => `references/${relativePath}`),
 ];
 
 export function runtimeCacheContractViolations() {
@@ -113,14 +130,14 @@ export function runtimeCacheContractViolations() {
 import { PRODUCTION_MCP_ENTRY_CLOSURE_FILES } from "./production-mcp-entry-closure-contract.mjs";
 
 // Root references are maintained source; embedded copies keep skills portable.
-function referenceDirectory(pluginRoot, relative, allowMissing = false) {
+function referenceDirectory(pluginRoot, relative, allowMissing = false, referenceFiles = REFERENCE_FILES) {
   const root = fs.realpathSync(pluginRoot);
   const directory = path.join(root, relative);
   if (!fs.lstatSync(directory).isDirectory() || fs.realpathSync(directory) !== directory) {
     throw new Error(`Reference directory must be a regular source directory: ${relative}`);
   }
   const names = fs.readdirSync(directory).sort();
-  const expected = [...REFERENCE_FILES].sort();
+  const expected = [...referenceFiles].sort();
   if (names.some(name => !expected.includes(name)) ||
       (!allowMissing && JSON.stringify(names) !== JSON.stringify(expected))) {
     throw new Error(`Reference inventory mismatch: ${relative}`);
@@ -134,18 +151,26 @@ function referenceDirectory(pluginRoot, relative, allowMissing = false) {
   return directory;
 }
 
-export function inspectReferenceCopies(pluginRoot) {
-  const source = referenceDirectory(pluginRoot, "references");
-  const destination = referenceDirectory(pluginRoot, `skills/${PLUGIN_NAME}/references`);
+function inspectCopies(pluginRoot, referenceFiles) {
+  const source = referenceDirectory(pluginRoot, "references", false, referenceFiles);
+  const destination = referenceDirectory(pluginRoot, `skills/${PLUGIN_NAME}/references`, false, referenceFiles);
   let bytes = 0;
-  for (const name of REFERENCE_FILES) {
+  for (const name of referenceFiles) {
     const value = fs.readFileSync(path.join(source, name));
     if (!value.equals(fs.readFileSync(path.join(destination, name)))) {
       throw new Error(`Embedded reference drift: ${name}`);
     }
     bytes += value.length;
   }
-  return { files: REFERENCE_FILES.length, bytes };
+  return { files: referenceFiles.length, bytes };
+}
+
+export function inspectReferenceCopies(pluginRoot) {
+  return inspectCopies(pluginRoot, REFERENCE_FILES);
+}
+
+export function inspectShippingReferenceCopies(pluginRoot) {
+  return inspectCopies(pluginRoot, SHIPPING_REFERENCE_FILES);
 }
 
 export function synchronizeReferenceCopies(pluginRoot) {

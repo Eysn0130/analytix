@@ -1,5 +1,6 @@
 const { existsSync, readFileSync } = require('node:fs')
 const { join } = require('node:path')
+const { DEVELOPMENT_REFERENCE_PATHS } = require('./plugins/analytix-fund-analysis/scripts/runtime-cache-contract.mjs')
 const { requireOfficialTeamIdentifier } = require('./scripts/macos-signing-policy.cjs')
 const {
   loadProductionMcpEntryClosureContract
@@ -238,6 +239,7 @@ module.exports = {
         'references/**/*',
         'skills/**/*',
         ...productionFundsMcpEntryClosureFiles,
+        ...DEVELOPMENT_REFERENCE_PATHS.map(relativePath => `!${relativePath}`),
         '!**/.DS_Store',
         '!**/._*'
       ]
