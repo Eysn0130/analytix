@@ -73,6 +73,19 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 ## 5. 后续整理队列
 
+### 2026-10-22 治理收官台账
+
+Historical：固定基线 `2c549464` 的[阶段0机器台账](governance-closeout.json)
+记录当时35项PR、94分支、74项大文件；各部分使用自身UTC，整理时间不是统一采集
+时刻，也不代表当前库存。旧unused的1522身份/1933次数保留为历史算法诊断。
+
+后继 [PR85](https://github.com/Eysn0130/analytix/pull/85) 已合并为 `fca67b41`。
+当前身份、次数与guard以[机器基线](../../scripts/unused-findings-baseline.json)为准，
+命令与合同只见[操作owner](development-baseline.md#unused-finding-ratchet)；
+[历史2339路径清单](qa/unused-scan-2c549464.json)不作当前扫描白名单。
+安全后台证据仍未完成；功能与Privacy冻结。台账不是产品验收或合并授权；
+后续每批先回执清单、CI和数字，用户确认后才合并。
+
 ### 2026-10-20 runtime 启动与凭据指引纠偏
 
 基线 `e2e8d34c0531f36eb069a36c1547759f5ba3cae7`。仅修根 `AGENTS.md` 与
