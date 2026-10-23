@@ -410,13 +410,52 @@ function assertCandidateDirectory(outputRoot, sourceRoot = REPO_ROOT) {
   return real
 }
 
-function authorFrozenCandidate(outputRoot) {
+// Explicit inputs are disposable snapshots, never an alternate production lock.
+function readCandidateRequirements(inputPath, sourceRoot = REPO_ROOT) {
+  const resolved = path.resolve(inputPath)
+  const stat = fs.lstatSync(resolved)
+  const real = fs.realpathSync(resolved)
+  const relative = path.relative(fs.realpathSync(os.tmpdir()), real)
+  const sourceRelative = path.relative(fs.realpathSync(sourceRoot), real)
+  const insideSource = !sourceRelative || (sourceRelative !== '..' && !sourceRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(sourceRelative))
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || real !== resolved ||
+      insideSource || !relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error('Candidate requirements input must be a regular single-link file below the temporary root and outside the source tree, without symbolic links')
+  }
+  return fs.readFileSync(real, 'utf8')
+}
+
+function candidateRequirementsText(acceptedRequirements, backendLockText, explicitRequirements) {
+  const anyioLines = acceptedRequirements.match(/^anyio==[^\n]+$/gmu)
+  if (!anyioLines || anyioLines.length !== 1) throw new Error('Frozen requirements must contain one AnyIO pin')
+  const synchronized = acceptedRequirements.replace(/^anyio==[^\n]+$/mu, backendAnyioRequirement(backendLockText))
+  if (explicitRequirements === undefined) return synchronized
+
+  // This batch admits only a Pillow pin/hash replacement plus the existing
+  // backend-derived AnyIO alignment. Preserve every other byte and line order;
+  // do not accept pip options, URLs, markers, continuations or new dependencies.
+  assertBackendAnyioRequirement(explicitRequirements, backendLockText)
+  const acceptedLines = synchronized.split('\n')
+  const candidateLines = explicitRequirements.split('\n')
+  const invalid = () => { throw new Error('Candidate requirements may change only the exact Pillow pin/hash and backend-derived AnyIO line') }
+  if (candidateLines.length !== acceptedLines.length) invalid()
+  let pillowCount = 0
+  for (const [index, line] of acceptedLines.entries()) {
+    if (line.startsWith('pillow==')) {
+      pillowCount++
+      if (!/^pillow==\d+\.\d+\.\d+ --hash=sha256:[0-9a-f]{64}$/u.test(candidateLines[index])) invalid()
+    } else if (candidateLines[index] !== line) invalid()
+  }
+  if (pillowCount !== 1) invalid()
+  return explicitRequirements
+}
+
+function authorFrozenCandidate(outputRoot, candidateRequirementsPath) {
   const output = assertCandidateDirectory(outputRoot)
   const backendLockText = fs.readFileSync(path.join(REPO_ROOT, 'backend', 'uv.lock'), 'utf8')
   const acceptedRequirements = fs.readFileSync(REQUIREMENTS_LOCK_PATH, 'utf8')
-  const anyioLines = acceptedRequirements.match(/^anyio==[^\n]+$/gmu)
-  if (!anyioLines || anyioLines.length !== 1) throw new Error('Frozen requirements must contain one AnyIO pin')
-  const requirements = acceptedRequirements.replace(/^anyio==[^\n]+$/mu, backendAnyioRequirement(backendLockText))
+  const explicitRequirements = candidateRequirementsPath === undefined ? undefined : readCandidateRequirements(candidateRequirementsPath)
+  const requirements = candidateRequirementsText(acceptedRequirements, backendLockText, explicitRequirements)
   assertBackendAnyioRequirement(requirements, backendLockText)
   const requirementsPath = path.join(output, path.basename(REQUIREMENTS_LOCK_PATH))
   fs.writeFileSync(requirementsPath, requirements, { flag: 'wx', mode: 0o600 })
@@ -471,7 +510,10 @@ function stageArchiveExtractor() {
 
 function main(args = process.argv.slice(2)) {
   if (args.length === 2 && args[0] === '--freeze-candidate') return authorFrozenCandidate(args[1])
-  if (args.length) throw new Error('Usage: build-windows-backend-runtime-assets.cjs [--freeze-candidate <empty-temporary-directory>]')
+  if (args.length === 4 && args[0] === '--freeze-candidate' && args[2] === '--candidate-requirements') {
+    return authorFrozenCandidate(args[1], args[3])
+  }
+  if (args.length) throw new Error('Usage: build-windows-backend-runtime-assets.cjs [--freeze-candidate <empty-temporary-directory> [--candidate-requirements <isolated-temporary-file>]]')
   assertBackendAnyioRequirement(fs.readFileSync(REQUIREMENTS_LOCK_PATH, 'utf8'),
     fs.readFileSync(path.join(REPO_ROOT, 'backend', 'uv.lock'), 'utf8'))
   installPythonRuntime()
@@ -496,11 +538,13 @@ module.exports = {
   REQUIREMENTS_LOCK_PATH,
   assertCandidateDirectory,
   authorFrozenCandidate,
+  candidateRequirementsText,
   extractBackendWheels,
   installBackendWheelhouse,
   installPythonRuntime,
   preparePythonRuntime,
   prunePythonRuntimeBuildArtifacts,
+  readCandidateRequirements,
   resolvePythonAsset,
   stageArchiveExtractor,
   stageBackendPythonSitePackages,
