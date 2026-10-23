@@ -218,7 +218,13 @@
     "@tiptap/extension-bubble-menu": "3.30.5",
     "@tiptap/extension-floating-menu": "3.30.5",
     "fast-uri": "3.1.6",
-    "js-yaml": "4.3.2"
+    "js-yaml": "4.3.2",
+    "tailwindcss": {
+      "postcss-selector-parser": "7.1.6"
+    },
+    "postcss-nested": {
+      "postcss-selector-parser": "7.1.6"
+    }
   },
   "author": "Guoqin He (GitHub: Eysn0130)",
   "license": "Apache-2.0",
