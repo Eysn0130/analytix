@@ -42,6 +42,16 @@ test('surface forwards actual view state through its existing typed bridge and r
     await receive({command:'local-view',action:'read',channel:'channel',operationId:'missing',documentId:'document',version:'version'})
     expect(send).toHaveBeenCalledWith(expect.objectContaining({type:'view',operationId:'opened',view:null}))
     expect(send).toHaveBeenCalledWith(expect.objectContaining({type:'result',operationId:'missing',ok:false,error:'view-unavailable'}))
+    expect(document.getElementById('footer')!.dataset.error).toBe('true')
+    // Local wheel/resize reads have no renderer result announcement. Their
+    // native error must remain visible after the regular footer is retired.
+    await receive({command:'local-view',action:'read',channel:'channel',operationId:'restored',documentId:'document',version:'version'})
+    expect(document.getElementById('footer')!.dataset.error).toBe('false')
+    worker.mockRejectedValueOnce(new Error('view-unavailable'))
+    document.getElementById('qtcanvas')!.dispatchEvent(new Event('wheel'))
+    await vi.advanceTimersByTimeAsync(180)
+    expect(document.getElementById('footer')!.dataset.error).toBe('true')
+    expect(document.getElementById('status')!.textContent).toContain('视图调整不可用')
   } finally {releaseListeners();vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();document.body.innerHTML=''}
 })
 

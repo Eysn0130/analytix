@@ -10,6 +10,8 @@
 }
 
 .toolbar { flex: none; min-width: 0; }
+.toolbar :global(button[aria-label]) { border-radius: 999px; }
+.toolbar :global(button[data-compact]) { width: 36px; min-width: 36px; height: 36px; }
 .toolbarActions { display: flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; max-width: max(36px, calc(100cqw - 140px)); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .toolbarActions::-webkit-scrollbar { display: none; }
 .fileActions { display: inline-flex; flex: none; align-items: center; gap: 6px; flex-wrap: nowrap; }
@@ -55,6 +57,7 @@
 .annotation button { min-height: 28px; border-radius: 6px; }
 
 .viewport { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; background: var(--ds-bg-main); }
+.host[data-native-office-kind='xlsx'] .viewport { background: #fff; }
 .surface { flex: 1; min-width: 0; min-height: 0; }
 .state {
   position: absolute;

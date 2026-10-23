@@ -8,6 +8,7 @@
   --dsh-excel-warning-fill: rgb(254, 245, 231);
   --dsh-excel-secondary: rgb(97, 102, 107);
   --dsh-excel-radius: 8px;
+  --dsh-excel-line: #e5e7eb;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -18,6 +19,8 @@
 }
 
 .workbook {
+  /* This canvas stays white in both app themes; keep the existing light-surface focus color. */
+  --ax-border-focus: #3154db;
   position: relative;
   flex: 1;
   min-height: 0;
@@ -25,6 +28,7 @@
   color-scheme: light;
   /* FortuneSheet's white controls need light-scheme text even in a dark app. */
   color: CanvasText;
+  background: #fff;
 }
 
 /* Hide editing handles and redundant controls within the read-only preview. */
@@ -36,11 +40,95 @@
 }
 
 .workbook :global(.luckysheet-sheet-area div.luckysheet-sheets-item) {
-  padding-right: 5px;
+  height: 28px;
+  padding: 0 10px;
+  margin: 0 4px 0 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #5f6368;
+  font-size: 12px;
+  line-height: 28px;
+  transition: none;
+  overflow: hidden;
+}
+
+.workbook :global(.luckysheet-sheet-area div.luckysheet-sheets-item:hover) {
+  background: #f3f4f6;
+  color: #202124;
+}
+
+.workbook :global(.luckysheet-sheet-area div.luckysheet-sheets-item-active),
+.workbook :global(.luckysheet-sheet-area div.luckysheet-sheets-item-active:hover) {
+  background: #e9eaed;
+  color: #202124;
+}
+
+.workbook :global(.luckysheet-sheet-area div.luckysheet-sheets-item:focus-visible),
+.workbook :global(.fortune-sheettab-button:focus-visible),
+.workbook :global(.fortune-sheettab-scroll:focus-visible) {
+  outline: 2px solid var(--ax-border-focus);
+  outline-offset: -2px;
 }
 
 .workbook :global(.luckysheet-sheet-area) {
-  padding: 0;
+  height: 36px;
+  min-height: 36px;
+  flex: none;
+  padding: 3px 8px 4px;
+  border-top: 1px solid var(--dsh-excel-line);
+  background: #fff;
+  transition: none;
+}
+
+.workbook :global(.fortune-sheettab-button),
+.workbook :global(.fortune-sheettab-scroll) {
+  height: 28px;
+  border-radius: 8px;
+}
+
+.workbook :global(.fortune-sheettab-button) {
+  width: 28px;
+}
+
+.workbook :global(.fortune-sheettab-button:hover),
+.workbook :global(.fortune-sheettab-scroll:hover) {
+  background: #f3f4f6;
+}
+
+/* These are selection overlays, never cell fills or saved workbook formats. */
+.workbook :global(.luckysheet-cell-selected:not(.luckysheet-filter-selected)) {
+  border-color: var(--ax-border-focus);
+  background: color-mix(in srgb, var(--ax-border-focus) 6%, transparent);
+}
+
+.workbook :global(.luckysheet-cell-selected-focus) {
+  background: color-mix(in srgb, var(--ax-border-focus) 4%, transparent);
+}
+
+.workbook :global(.fortune-row-header-selected),
+.workbook :global(.fortune-col-header-selected) {
+  border-color: var(--ax-border-focus);
+  /* Fortune writes a gray inline backgroundColor on these exact overlays. */
+  background-color: color-mix(in srgb, var(--ax-border-focus) 10%, transparent) !important;
+}
+
+.workbook :global(.fortune-row-header-hover),
+.workbook :global(.fortune-col-header-hover) {
+  background: rgb(0 0 0 / .04);
+}
+
+.workbook :global(.fortune-fx-editor) {
+  height: 40px;
+  flex: none;
+  border-color: var(--dsh-excel-line);
+  background: #fff;
+}
+
+.workbook :global(.fortune-name-box-container) {
+  border-color: var(--dsh-excel-line);
+  color: #5f6368;
+  font-size: 12px;
 }
 
 .workbook :global(#luckysheet-sheet-content) {
@@ -68,6 +156,7 @@
 
 .workbook :global(.fortune-fx-input-container) {
   min-width: 0;
+  border: 0;
 }
 
 .workbook :global(.fortune-fx-input) {
@@ -76,6 +165,10 @@
   overflow-y: hidden;
   white-space: nowrap;
   scrollbar-width: none;
+  padding: 0 8px;
+  color: #202124;
+  font-size: 12px;
+  line-height: 39px;
 }
 
 .notice {
@@ -140,7 +233,7 @@
 .zoomTarget { position: relative; display: flex; flex: none; align-items: center; overflow: visible; }
 .zoomTarget :global(.fortune-zoom-top .fortune-zoom-ratio) { width: 68px; color: inherit; }
 .zoomTarget :global(.fortune-zoom-top button) { font: inherit; color: inherit; border: 0; background: transparent; }
-.zoomTarget :global(.fortune-zoom-top .fortune-zoom-ratio-current) { height: 36px; border-radius: 8px; font-size: 14px; }
+.zoomTarget :global(.fortune-zoom-top .fortune-zoom-ratio-current) { height: 36px; border-radius: 999px; font-size: 14px; }
 .zoomTarget :global(.fortune-zoom-top .fortune-zoom-ratio-menu) {
   top: calc(100% + 6px); right: 0; bottom: auto; left: auto;
   min-width: 104px; padding: 4px; color: inherit;
@@ -150,6 +243,7 @@
 .zoomTarget :global(.fortune-zoom-top .fortune-zoom-ratio-item) { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 32px; border-radius: 8px; }
 .zoomTarget :global(.fortune-zoom-top button:focus-visible) { outline: 2px solid var(--ax-border-focus); outline-offset: -2px; }
 .zoomTarget :global(.fortune-zoom-top .fortune-zoom-ratio-item:hover) { background: var(--ds-surface-hover); }
-.workbook :global(.fortune-fx-editor) { height: 40px; flex: none; }
-.workbook :global(.luckysheet-sheet-area) { height: 36px; min-height: 36px; flex: none; }
-.workbook :global(.luckysheet-sheet-area div.luckysheet-sheets-item) { height: 28px; line-height: 28px; font-size: 12px; }
+
+/* The shared header remains unchanged for other preview types. */
+:global([data-workspace-viewer-header]):has(.zoomTarget) :global(button[aria-label]) { border-radius: 999px; }
+:global([data-workspace-viewer-header]):has(.zoomTarget) :global(button[data-compact]) { width: 36px; min-width: 36px; height: 36px; }

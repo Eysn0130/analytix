@@ -16,17 +16,47 @@ function worker(readOnly = true, kind = 'docx', pageCount = 3) {
     getSelection: () => ({ getString: () => '' }), addSelectionChangeListener() {}, removeSelectionChangeListener: remove
   }
   const load = vi.fn()
+  const colors: Record<string, number> = {}, configWrites = vi.fn((entry:string,name:string,value:any) => {
+    if (name !== 'Color') throw Error('unexpected configuration property')
+    colors[entry] = value.value
+  })
+  const scheme = {getByName:(entry:string) => ({
+    getPropertyValue:() => colors[entry], setPropertyValue:(name:string,value:any) => configWrites(entry,name,value),
+    getPropertySetInfo:() => ({getPropertyByName:() => ({Type:'long'})})
+  })}
+  const commitColors = vi.fn(), config = {
+    getPropertyValue:() => 'preview', getByName:() => ({getByName:() => scheme}), commitChanges:commitColors
+  }
+  const configure = vi.fn(() => config), provider = {createInstanceWithArguments:configure}
+  const context = {getServiceManager:() => ({createInstanceWithContext:() => provider})}
   const model = { getDrawPages:() => ({getCount:() => pages.length, getByIndex:(i:number) => pages[i]}), isReadonly: vi.fn(() => readOnly), isModified: vi.fn(() => false), getCurrentController: () => controller, setModified: vi.fn(), close,
     addModifyListener: (l: any) => { listeners.modify = l }, removeModifyListener: remove, storeToURL() {} }
   const port: any = { postMessage: (m: any) => messages.push(m) }
   const css = { frame: { Desktop: { create: () => ({ loadComponentFromURL: (...args: unknown[]) => { load(...args); return model } }) } },
     beans: { PropertyValue: function(this: any, p: any) { Object.assign(this, p) } }, util: { XModifyListener: {} }, view: { XSelectionChangeListener: {} } }
-  const zeta = { Any:function(this:any,_type:any,value:any){this.value=value}, sameUnoObject:(a:any,b:any) => a === b, uno: { com: { sun: { star: css } } }, getUnoComponentContext() {}, mainPort: port, unoObject: (_: any, o: any) => o }
+  const zeta = { Any:function(this:any,_type:any,value:any){this.value=value}, sameUnoObject:(a:any,b:any) => a === b, uno: { com: { sun: { star: css } } }, getUnoComponentContext:() => context, mainPort: port, unoObject: (_: any, o: any) => o }
   vm.runInNewContext(readFileSync(new URL('./surface/office-worker.js', import.meta.url), 'utf8'), { Module: { zetajs: { then: (fn: any) => fn(zeta) } } })
   const send = (command: string, extra = {}) => { port.onmessage({ data: envelope(command, extra) }); return messages.at(-1) }
   send('bind'); send('open', { kind })
-  return { send, close, model, remove, load, properties, setPropertyValue, change: () => listeners.modify.modified() }
+  return { send, close, model, remove, load, properties, setPropertyValue, colors, configWrites, configure, commitColors, change: () => listeners.modify.modified() }
 }
+test.each(['xlsx','docx','pptx'])('%s preview colors stay in engine configuration before model loading', kind => {
+  const w = worker(true,kind)
+  expect(w.configure).toHaveBeenCalledWith('com.sun.star.configuration.ConfigurationUpdateAccess', [
+    expect.objectContaining({Name:'nodepath',Value:'/org.openoffice.Office.UI/ColorScheme'})
+  ])
+  expect(w.colors).toEqual(kind === 'xlsx'
+    ? {AppBackground:0xffffff,DocColor:0xffffff,CalcGrid:0xe5e7eb} : {AppBackground:0xf7f7f7})
+  expect(w.commitColors).toHaveBeenCalledOnce()
+  expect(w.commitColors.mock.invocationCallOrder[0]).toBeLessThan(w.load.mock.invocationCallOrder[0])
+  expect(w.setPropertyValue.mock.invocationCallOrder.every(order => order > w.load.mock.invocationCallOrder[0])).toBe(true)
+  if (kind === 'xlsx') expect(w.setPropertyValue).not.toHaveBeenCalled()
+  for (const name of ['GridColor','ShowGrid','HasSheetTabs']) {
+    expect(w.setPropertyValue.mock.calls.some(([property]) => property === name)).toBe(false)
+  }
+  expect(w.model.setModified).not.toHaveBeenCalled()
+  expect(w.send('captureSelection').state).toMatchObject({changeSequence:0,acknowledgedSequence:0,dirty:false})
+})
 test('conditional close accepts clean exact sequence and performs one native close', () => {
   const w = worker(); expect(w.send('close', { expectedChangeSequence: 0, discard: false }).ok).toBe(true); expect(w.close).toHaveBeenCalledOnce()
 })

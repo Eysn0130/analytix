@@ -1002,15 +1002,24 @@ function validPresentationReview(r) {
     }
     return viewState();
   }
-  function configurePreviewStage() {
+  function configurePreviewStage(kind) {
     const provider = context.getServiceManager().createInstanceWithContext('com.sun.star.configuration.ConfigurationProvider', context);
     const settings = provider.createInstanceWithArguments('com.sun.star.configuration.ConfigurationUpdateAccess', [prop('nodepath', '/org.openoffice.Office.UI/ColorScheme')]);
     const schemeName = settings.getPropertyValue('CurrentColorScheme');
     const scheme = settings.getByName('ColorSchemes').getByName(schemeName);
     const background = scheme.getByName('AppBackground');
-    setViewProperty(background, 'Color', 0xf7f7f7);
+    const backgroundColor = kind === 'xlsx' ? 0xffffff : 0xf7f7f7;
+    setViewProperty(background, 'Color', backgroundColor);
+    // Engine-local application colors, before a document model exists. Do not
+    // use controller GridColor/ShowGrid/HasSheetTabs: those mark Calc modified.
+    if (kind === 'xlsx') {
+      setViewProperty(scheme.getByName('DocColor'), 'Color', 0xffffff);
+      setViewProperty(scheme.getByName('CalcGrid'), 'Color', 0xe5e7eb);
+    }
     settings.commitChanges();
-    if (background.getPropertyValue('Color') !== 0xf7f7f7) throw Error('view-unavailable');
+    if (background.getPropertyValue('Color') !== backgroundColor || kind === 'xlsx' &&
+      (scheme.getByName('DocColor').getPropertyValue('Color') !== 0xffffff ||
+       scheme.getByName('CalcGrid').getPropertyValue('Color') !== 0xe5e7eb)) throw Error('view-unavailable');
   }
   function close() {
     cancelFreeze();
@@ -1172,7 +1181,7 @@ function validPresentationReview(r) {
   function openModel(r) {
         if (active || !filters[r.kind]) throw Error('document-already-open');
         // Configuration lives in this isolated browser engine's virtual FS only.
-        try { configurePreviewStage(); } catch { /* Optional stage styling must not block read-only preview. */ }
+        try { configurePreviewStage(r.kind); } catch { /* Optional stage styling must not block read-only preview. */ }
         try { loadNativeModel(r.kind,true); }
         catch (error) { close(); throw error; }
         active = {documentId:r.documentId, version:r.version, kind:r.kind, openOperationId:r.operationId, sequence:0, acknowledged:0, editing:false, viewFit:r.kind !== 'xlsx',nativeWritable:false,manualGeneration:0,manualChanges:new Set(),manualOperations:new Set(),workbookSelectionIdentity:null,workbookSelectionGeneration:0};
