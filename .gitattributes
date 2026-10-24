@@ -1,1 +1,3 @@
 .githooks/* text eol=lf
+scripts/windows-backend-requirements.lock.txt text eol=lf
+scripts/windows-python-runtime-lock.json text eol=lf
