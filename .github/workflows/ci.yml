@@ -49,7 +49,7 @@ jobs:
           architecture: x64
       - name: Verify pinned lxml native loading, XML entities and input rejection
         run: |
-          python -I -B scripts/windows-lxml-native-probe.py run --lock-mode future-target --work-dir "$env:RUNNER_TEMP/analytix-lxml-native"
+          python -I -B scripts/windows-lxml-native-probe.py run --lock-mode accepted-required --work-dir "$env:RUNNER_TEMP/analytix-lxml-native"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   source-baseline:
