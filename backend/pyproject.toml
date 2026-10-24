@@ -13,7 +13,7 @@ dependencies = [
   "uvicorn[standard]>=0.30.0,<1.0.0",
   "pydantic>=2.8.0,<3.0.0",
   "duckdb==1.5.4",
-  "sqlglot>=25.0.0,<27.0.0",
+  "sqlglot>=25.0.0,<31.0.0",
   "pandas>=2.1.0",
   "openpyxl>=3.1.0",
   "xlrd>=2.0.1",
