@@ -206,7 +206,7 @@
     "globals": "^17.6.0",
     "jsdom": "29.0.1",
     "micromark-util-types": "2.0.2",
-    "patch-package": "8.0.0",
+    "patch-package": "8.0.1",
     "postcss": "^8.5.25",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.2",

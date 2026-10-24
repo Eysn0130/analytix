@@ -27,7 +27,7 @@ function fixture(t) {
     'scripts/postinstall.cjs', 'scripts/ensure-runtime-install.cjs', 'scripts/app-install-state.cjs', 'scripts/apply-dsh-preview-patches.cjs'])]) {
     const target = join(root, path); mkdirSync(dirname(target), { recursive: true }); copyFileSync(join(sourceRoot, path), target)
   }
-  const manifest = { dependencies: { '@fortune-sheet/core': '1.0.4', '@fortune-sheet/react': '1.0.4', exceljs: '4.4.0', superdoc: '2.24.0' }, devDependencies: { 'patch-package': '8.0.0' } }
+  const manifest = { dependencies: { '@fortune-sheet/core': '1.0.4', '@fortune-sheet/react': '1.0.4', exceljs: '4.4.0', superdoc: '2.24.0' }, devDependencies: { 'patch-package': '8.0.1' } }
   writeFileSync(join(root, 'package.json'), JSON.stringify(manifest))
   const lock = { packages: Object.fromEntries(Object.entries({ ...manifest.dependencies, ...manifest.devDependencies }).map(([name, version]) => ['node_modules/' + name, { version }])) }
   writeFileSync(join(root, 'package-lock.json'), JSON.stringify(lock))
