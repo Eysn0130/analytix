@@ -4,7 +4,7 @@ const { readFileSync, lstatSync, readdirSync } = require('node:fs')
 const { resolve, join } = require('node:path')
 const { spawnSync } = require('node:child_process')
 
-const patchPackageVersion = '8.0.0'
+const patchPackageVersion = '8.0.1'
 const requiredPatches = [
   {
     "package": "@fortune-sheet/core",
@@ -139,7 +139,7 @@ function patchesRequired(root) {
   for (const patch of requiredPatches) {
     if (declared[patch.package] !== patch.version) throw new Error('[dsh-preview-patches] All reviewed dependency versions must be declared together.')
   }
-  if (declared['patch-package'] !== patchPackageVersion) throw new Error('[dsh-preview-patches] Local patch-package 8.0.0 must be declared.')
+  if (declared['patch-package'] !== patchPackageVersion) throw new Error('[dsh-preview-patches] Local patch-package 8.0.1 must be declared.')
   return true
 }
 
