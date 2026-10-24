@@ -83,8 +83,10 @@ Historical：固定基线 `2c549464` 的[阶段0机器台账](governance-closeou
 当前身份、次数与guard以[机器基线](../../scripts/unused-findings-baseline.json)为准，
 命令与合同只见[操作owner](development-baseline.md#unused-finding-ratchet)；
 [历史2339路径清单](qa/unused-scan-2c549464.json)不作当前扫描白名单。
-安全后台证据仍未完成；功能与Privacy冻结。台账不是产品验收或合并授权；
-后续每批先回执清单、CI和数字，用户确认后才合并。
+安全后台证据仍未完成；功能与Privacy冻结。台账不是产品验收或独立合并授权。
+治理续建先读同台账的 `standing_execution_rules` 与当前交付记录；历史库存仍绑定
+各自SHA和UTC。2026-10-22的逐批确认纪律属于该时点记录；2026-10-24当前用户
+已对列明事项授予条件满足后正常合并的常设授权，不适用于未列明事项。
 
 ### 2026-10-20 runtime 启动与凭据指引纠偏
 

@@ -1382,5 +1382,1065 @@
     "current_unused_baseline": "../../scripts/unused-findings-baseline.json",
     "current_unused_contract": "development-baseline.md#unused-finding-ratchet",
     "historical_scan_paths": "qa/unused-scan-2c549464.json"
+  },
+  "standing_execution_rules": {
+    "status": "Operational; read before every continuation and delegation",
+    "approved_at_utc": "2026-10-24T05:30:00Z",
+    "authority": "User-approved governance closeout package; does not authorize unrelated work",
+    "frozen": ["product code", "feature development", "Privacy changes, merges and acceptance execution", "real cases, credentials and live Providers"],
+    "prohibited": [
+      "process enumeration or equivalent discovery",
+      "environment reconnaissance outside the declared task scope",
+      "permission repairs or deletion of preserved evidence",
+      "bypass, force-push, settings changes, release, tag or deploy"
+    ],
+    "isolation": {
+      "before_use": ["verify task-owned canonical cache destinations", "directories 0700", "no extra ACL", "new backend cache; do not execute from old backend isolation"],
+      "old_backend": "Retain unused, including the 0666 empty lock; do not delete or repair permissions. Only explicitly approved public metadata/wheel evidence may be copied read-only after verification.",
+      "mode_scope": "0700/no-extra-ACL applies to isolation roots and all private cache/evidence/output directories. Public Git checkout subdirectories may retain normal0755 behind the verified0700 worktree root; do not chmod them or place private outputs there."
+    },
+    "downloads": {
+      "sources": ["official PyPI", "official npm"],
+      "scope": "Only metadata and exact-version packages of already approved items; verify against approved artifact hashes or fingerprints before offline generation or validation.",
+      "preparation": "No installation, build or project execution during acquisition. This does not cancel separately approved synthetic tests or the real patch-package CLI contract."
+    },
+    "git": "One writer per branch; fresh main/head; mechanical synchronization only; final-head required CI; ready then normal merge commit; no auto-merge or branch deletion.",
+    "public_pr_text": "Public PR/SHA/CI links and coverage mapping only; no local machine paths or unsafe machine evidence.",
+    "verification": "Reuse completed evidence with unchanged relevant inputs. Never relabel failed, skipped, unexecuted or partial checks as passed; no automatic unused-baseline rebuild.",
+    "refusals": {
+      "old_logs_and_annotations": ["119912129517 logs and annotations", "119329587298 logs"],
+      "other": "Do not retry refused security/alerts/protection routes or PR70 diff. C quinn remains evidence-only; no retry, alternate route or manual bypass sequence.",
+      "katex_advisory_collection": "GET /repos/KaTeX/KaTeX/security/advisories?per_page=100 was refused; do not retry or use another route for that refused collection.",
+      "bot_job_details_2026_10_24": {
+        "job_ids": [120854834344, 120852330106, 120844267888],
+        "action": "GET/actions/jobs/<id>details",
+        "result": "400URLnotallowed;do not retryor use steps/logs/gh/anotherroute toretrievethesamejobdetails",
+        "allowed_limit": "Existingcheck/runstatuscachemay be cited;failurecauseunknown. No blanketbanon unrelatednewtargetmetadata."
+      },
+      "individual_job_route": "Genericgithub_fetch/actions/jobs/<id>isnotanallowedendpointfamily;do not probeothervariants. The3explicitlyrefusedjobsremainunreadthroughalternativeroutes."
+    },
+    "hard_stops": [
+      "product code or Privacy required",
+      "certifi fingerprint differs from the accepted comparison",
+      "lock drift outside the declared write set",
+      "behavior change beyond approved exact-version contract alignment",
+      "unofficial source or hash mismatch",
+      "CI failure with unlocated cause",
+      "reserved E/H, Electron/rustls, Pillow or Python 3.10 decision"
+    ],
+    "item_holds": "Unexpected external candidate-head changes or an unlocated failure hold that item only. A target-behavior probe failure is retained as failed evidence and holds its merge; other approved items continue.",
+    "reporting": "No queue/running patrol receipts; hard stops immediately, otherwise one final package delivery report.",
+    "supersession": "Current user approval at2026-10-24T05:30Z supersedes historical scope.delivery/merge_policy and the earlier backend/#106 preparation holds and narrower download fences. Inventory and earlier diagnostics remain historical; old backend isolation remains abandoned.",
+    "explicit_resumption": {
+      "backend_metadata": ["pypdf6.21.2", "urllib3 2.8.0", "certifi2026.10.19"],
+      "patch_package": "Previously verified official8.0.1 artifact and its real-CLI evidence admitted; do not redownload or rerun unchanged verification."
+    },
+    "frozen_pr_policy": "Currentcloseouttarget:freezePRmeansclosed+registeredretainedbranch. HistoricalbranchF recommendationnot-to-closeisarchivedcontext.51/70stillopenareuncompleteddisposition;thisdependencypackagedoesnotclose themorunfreezefeatures/Privacy.",
+    "observation_control": "Onlydeclaredexactheads/runs;one60smetadataobserver. Eachcompletedexeccommitsactualjob/stepdata. Withinthiscontinuouspackage,finite4hwindowsmaycheckpointandresumesamedeclaredtargetswithoutnewuserapproval;neverextendarefusedactionoroldPR80budget,neveraddendpoints/logs. Stopwhenalltargetsdone."
+  },
+  "delivery_cycle_2026_10_24": {
+    "source_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+    "order": ["PR105 Windows native evidence", "Windows lxml/urllib3/certifi/pypdf combined carrier", "PR103 then PR104 then PR107 then PR106", "backend urllib3/certifi combined carrier"],
+    "mappings_required": ["62", "33", "78 source-map-js", "59", "58", "78 tmp", "35 backend+Windows residual", "16", "36", "76"],
+    "three_scope_events": [
+      {
+        "event": "Backend pypdf registry metadata acquired outside the former narrow fence",
+        "disposition": "Disclosed; exact pypdf/urllib3/certifi metadata approved on 2026-10-24. Verify preserved pypdf metadata against its wheel; use a new isolated cache."
+      },
+      {
+        "event": "Missing process-enumeration prohibition in a delegated brief led to one pgrep attempt",
+        "result": "Exit 3; no process list returned. This is not evidence of no system processes.",
+        "disposition": "Disclosed; propagate this ledger before every delegation; no further enumeration."
+      },
+      {
+        "event": "patch-package 8.0.1 real-CLI preparation conflicted with the former narrow download fence",
+        "disposition": "Disclosed; verified official package and real CLI evidence explicitly admitted on 2026-10-24; do not repeat unchanged checks."
+      }
+    ],
+    "cache_audit": "The abandoned backend UV cache contains a 0666 empty regular lock behind private directories. Retain it unchanged; do not treat the failed outer audit as a passed preparation.",
+    "merges": [
+      {
+        "pr": 105,
+        "head": "091c45442de46312fb60c97d0e6390100621cb69",
+        "merge": "adddf5692531b68fa449ec37d1e3c02f373c23e5",
+        "tree": "8847ba25f3b829e1b0fed3f9734d2deb7d89706c",
+        "required_checks": "57 success; Development 52/52; CodeQL success; no review submissions or threads",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40007335924",
+        "native_job": "https://github.com/Eysn0130/analytix/actions/runs/40007335924/job/120615280099",
+        "scope": "3 files +231/-0; native future-target evidence, not packaged Python3.11.15 acceptance",
+        "base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+        "git_commit_time_utc": "2026-10-23T22:39:48-07:00",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40007327363"
+      },
+      {
+        "pr": 109,
+        "head": "84ec6518dc4f3655f27a232024bd60dde61b9957",
+        "merge": "bc3a64284a518e663e17bc7fd51f4b9b9990e586",
+        "tree": "f47ada2c0056544082941e37dc6611665496a797",
+        "required_checks": "57success;Development52/52;CodeQL4analyzers plusPRsummary;0reviews/threads",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40067856417",
+        "native_job": "https://github.com/Eysn0130/analytix/actions/runs/40067856417/job/120794767104",
+        "scope": "3 files9+/9-; LF487/45/21 unchanged",
+        "base": "adddf5692531b68fa449ec37d1e3c02f373c23e5",
+        "git_commit_time_utc": "2026-10-23T23:57:41-07:00",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40067859267"
+      },
+      {
+        "pr": 103,
+        "head": "d497a1483e78c7a778f36ab107eac18960021f8e",
+        "base": "bc3a64284a518e663e17bc7fd51f4b9b9990e586",
+        "merge": "f38b550b5ce6fbf3344e0adf9ee456502bf8eea9",
+        "tree": "637d0c7a48b2ec24e1e34a266ea2e2571932dcec",
+        "merged_at_utc": "2026-10-24T09:18:35Z",
+        "required_checks": "57/57success;Development52/52 gate120835397788;CodeQL4+summary120810957414;0reviews/threads;CLEAN",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40072787199",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40072784293",
+        "scope": "3files7+/7-; LF unchanged; exact7fieldJSONdelta unchanged;32localprobesnotrepeated",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/33#issuecomment-6382461230",
+        "old_pr": "33closedunmerged2026-10-24T09:19:13Z",
+        "main_development_run": 40081439424,
+        "main_codeql_run": 40081439198,
+        "git_commit_time_utc": "2026-10-24T02:18:35-07:00"
+      },
+      {
+        "pr": 104,
+        "head": "4a191f67db6014cefd2bb6e7c59546130707a3d8",
+        "base": "f38b550b5ce6fbf3344e0adf9ee456502bf8eea9",
+        "merge": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+        "tree": "d98b1e1abfe15878f3bfba7945a47587fcf8d002",
+        "git_commit_time_utc": "2026-10-24T05:21:59-07:00",
+        "required_checks": "57success;Development52/52 gate120869918326;CodeQL4+summary120836386201;0reviews/threads;CLEAN",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40081553584",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40081549873",
+        "scope": "Onlyruntime lock3+/3-,5441LFunchanged;3fieldcontractunchanged;8localcasesnotrepeated",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/60#issuecomment-6384155699",
+        "subitem_mapping": "https://github.com/Eysn0130/analytix/pull/78#issuecomment-6384156353",
+        "old_pr": "60closedunmerged2026-10-24T12:22:52Z;78previouslyclosed,no reclose",
+        "main_development_run": 40093628630,
+        "main_codeql_run": 40093628269
+      },
+      {
+        "pr": 107,
+        "head": "9cf5498d3b7816030024866676f793cf14993dec",
+        "base": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+        "merge": "877fdf52894c8953ca5593fee38276c90fc5ae3e",
+        "tree": "543ded3cde316a9ff56a715b7463cdc8e3a01c68",
+        "git_commit_time_utc": "2026-10-24T08:25:37-07:00",
+        "required_checks": "57success;Development52/52 gate120906901677;CodeQL4+summary120872377388;0reviews/threads;CLEAN",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40093771519",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40093769991",
+        "scope": "2files8+/5-;lock17720→17720LF,manifest232→235LF;exact6JSONchangesunchanged;priorlocalKaTeXvalidationreused",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/59#issuecomment-6385995911",
+        "old_pr": "59closedunmerged2026-10-24T15:26:24Z;97mixedmajorPRnotclosed/notfullysuperseded",
+        "main_development_run": 40106918650,
+        "main_codeql_run": 40106918259
+      },
+      {
+        "pr": 106,
+        "head": "54548e592436e0d0f03deca9919d78e75978bcfc",
+        "base": "877fdf52894c8953ca5593fee38276c90fc5ae3e",
+        "merge": "624a0deb15fa2a7fe5bed06b46cbb494b6493bd7",
+        "tree": "a3415abba64f4b061bbeca908493d5e593cad10a",
+        "git_commit_time_utc": "2026-10-24T09:37:19-07:00",
+        "required_checks": "57success;Development52/52 gate120926260720;CodeQL4+summary120911575632;0reviews/threads;CLEAN",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40107050249",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40107048609",
+        "scope": "4files25+/24-;rootlock17720→17721LF,manifest235→235,guard228→228,test572→572;exact10JSONchangesandreviewedguard/testblobsunchanged;originalrealCLI/contract/appstate/lintnotrepeated",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/58#issuecomment-6386771081",
+        "subitem_mapping": "https://github.com/Eysn0130/analytix/pull/78#issuecomment-6386772109",
+        "old_pr": "58closedunmerged2026-10-24T16:37:59Z;78previouslyclosed,no reclose",
+        "main_development_run": 40112407202,
+        "main_codeql_run": 40112406529
+      },
+      {
+        "pr": 111,
+        "head": "2141a09e730c4e20bfffcd15d325eccee831e988",
+        "base": "624a0deb15fa2a7fe5bed06b46cbb494b6493bd7",
+        "merge": "742b6ccfb6d6819287e18dcf825f723ce705a0ab",
+        "tree": "dd3084b6cbc84861ffb26b98d24524b67cbd7a75",
+        "git_commit_time_utc": "2026-10-24T10:34:58-07:00",
+        "required_checks": "57success;Development52/52 gate120939341028;CodeQL4+summary120928577775;0reviews/threads;CLEAN",
+        "gate_limit": "gatejob/checksuccess;steps=[]incollection,norawstep/PASSlogclaim",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40112895978",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40112893920",
+        "scope": "backend/uv.lockonly6+/6-,2278LF;62nodes,other60+globals/AnyIO/pypdfunchanged",
+        "main_development_run": 40116779792,
+        "main_codeql_run": 40116779362
+      }
+    ],
+    "decisions": [
+      {
+        "decision": "Record execution restrictions before implementation/delegation; preserve compact historical inventory bytes",
+        "evidence": "Local rules commits3996d431d then b620465f; net92LF added; original35PR/94branch/74file snapshot unchanged"
+      },
+      {
+        "decision": "First backend creation denial was not bypassed; same executor and exact targets retried once after receiving full05:30 user evidence",
+        "initial_result": "denied; shell not started; no partial creation",
+        "retry_result": "exit0; task directories0700/no extra ACL and new files0600; old backend unchanged"
+      },
+      {
+        "decision": "Merge105 first only after fresh head/base/file-blob/check/review verification",
+        "result": "Normal merge adddf569; both parents and exact candidate tree verified"
+      },
+      {
+        "decision": "Private isolation roots/caches require0700; public Git source interiors can remain0755 behind the private root. No chmod workaround",
+        "evidence": "New backend root0700/no-extra-ACL; output/cache directories0700. Source checkout permissions do not widen path reachability."
+      },
+      {
+        "decision": "Retain and correct temporary preparation mistakes without repeating passed target tests",
+        "evidence": "Same-byte duplicate numpy index copy reused; old certifi7.22 wheel path corrected from existing receipt. Both failures occurred before UV/network/lock mutation."
+      },
+      {
+        "decision": "Reuse HTTP and certificate evidence with exact artifact identity; do not overstate seam",
+        "evidence": "HTTP3 synthetic; proxy-policy did not perform a real TLS handshake. Backend certifi121→120,add0/remove1 onlyemSignECCG3. Windows comparison remains+4/-2."
+      },
+      {
+        "decision": "Final Windows combined input is regenerated and checked at actual105 successor, not assembled by concatenating prior hashes",
+        "evidence": "PR10945wheels/3022files, final digest equality and actual production verifySitePackages; consumer after-pack calls same owner. Installer not tested."
+      },
+      {
+        "decision": "Keep larger or unsupported candidates separate from minimal security carriers",
+        "evidence": "Do not adopt12extraneous deletions in104/108, globalfs-extra cleanup in58, or nestedKaTeX.16.47 from59/97."
+      },
+      {
+        "decision": "Keep Zod tool migration explicit; no policy/prune bypass",
+        "evidence": "98 root-lock change actually failed Tool lock drift.108 runtime-only does not directly modify root closure. Trusted policy equality prevents ad hoc tool-version edits or automatic baseline reset."
+      },
+      {
+        "decision": "Correct the independent receipt-scope review predicate without expanding approved inputs",
+        "evidence": "First predicate omitted approvedpypdf index and4knownpublicwheels. Exact finite set then independently accepted131records:125sharedmetadata+2pypdfdata+4wheels. No newcopies/downloads/UVrerun."
+      },
+      {
+        "decision": "Identify real Windows/backend coupling before deciding evidence reuse",
+        "evidence": "Production contract shares onlyAnyIO pin/universalwheel withbackend; otherWindows pins have independent frozenauthority. Backend candidate leavesAnyIO complete node unchanged among60non-target nodes,so unrelateduv changes do not require repeating theWindows aggregate."
+      },
+      {
+        "decision": "Distinguish actualmain checks fromPR-only CodeQLsummary",
+        "evidence": "adddf mainDevelopment40067130230 completed/success52/52;CodeQL40067130352 completed/success4/4. Main57checks=52Development+4Analyze+1Dependabot;noPR-styleCodeQLsummary. Initialobserver delayedterminalnotification by incorrectly requiring thatsummary; actualinputs/checksnotchanged."
+      },
+      {
+        "decision": "Hold only failedPR109 textupdate; do not repeat uncertain/rejected payload or usecommentroute",
+        "evidence": "After merge, update returnedisError; rawerror not retained. Readback confirmed bodyunchanged. Causeunknown; textactionpaused,no retry or alternatecomment."
+      },
+      {
+        "decision": "Repair observer control without duplicatingCI or addingAPIpolling",
+        "evidence": "Oldcell13 confirmedterminated; originaltargets/60s cadence resumed with onecompletedexecpermetadata round. Eachround now commits actualjobID/name/status/laststep. At08:21:06–07 mainhad2realrunningruntime jobs;103hadnative/Go work and32realqueuedshards. NotCodeQLsummary/top-levelprojectionblocking. NoCIcancel/rerun,processenumeration or newlogread; stop-boundarylogattemptvisibilityhistoricallyunknown."
+      },
+      {
+        "decision": "UseverifiedGitcommittertime ratherthan anunverifiedinterimtimestamp",
+        "evidence": "104commitcfb5d8d7 actualcommitter2026-10-24T12:21:59Z;earlier12:21:18internalreceiptcorrected,notusedasverifiedmerge time."
+      },
+      {
+        "decision": "Useknownsupportedtooldeclarationsbeforeselectingreadroutes;preservemutationerrorsbeforecondensedoutput",
+        "evidence": "DirectsinglejobGETchoiceproduced3URLallowlistrefusals;readfailureisdistinctfromactualunknownbotCIcause. No alternate-routeattempts. PR109bodyerrorrawtextwasnotretained;readbackprovednotapplied,actionheld. Subsequent111writesstoredfullresultsandall4publicmappingcommentssucceeded."
+      },
+      {
+        "decision": "Do not equateclosedbotPRswithacceptedgovernancegoals",
+        "evidence": "86botcomment6381191726 sayspypdfup-to-date;stronger6.21.2covered99+109.94botcomment6381205128 saysupdatableanotherway;notanexplicit110replacementoracceptanceof26updates.110new22updates lacksfrozenaggregatecarrier."
+      },
+      {
+        "decision": "Keepcurrentbranchretentionandhistoricalsnapshotpolicyseparate",
+        "evidence": "99remoteheadsrecordedat742;69tipreachable,2same-tip patch-equivalent,22openPRheads,2frozenbranches,3unproven,main1. No deletions. HistoricalU1finite-replaybranchstillpresent. Nullahead/behindisunavailablelocalobject,notzero."
+      }
+    ],
+    "initial_open_snapshot": {
+      "at_utc": "2026-10-24T05:32Z",
+      "main": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+      "open": 36,
+      "complete_pagination": true,
+      "ids": [108, 107, 106, 105, 104, 103, 102, 98, 97, 95, 94, 93, 92, 90, 89, 86, 77, 76, 70, 60, 59, 58, 57, 51, 36, 34, 33, 31, 29, 15, 12, 11, 7, 4, 2, 1]
+    },
+    "windows_combined_candidate": {
+      "pr": 109,
+      "base": "adddf5692531b68fa449ec37d1e3c02f373c23e5",
+      "head": "84ec6518dc4f3655f27a232024bd60dde61b9957",
+      "tree": "f47ada2c0056544082941e37dc6611665496a797",
+      "scope": "3 files9+/9-; LF487/45/21 unchanged",
+      "requirements_sha256": "95366e5bf2f871e0441005129149e71aeb9c40179d391b7fb08ada11dee647b3",
+      "wheel_set_sha256": "8977ea385a8ceafbe9d7fd8420fef9676eb64cf4b0da73733996a2386091fa2e",
+      "content_sha256": "9012704fe018bf2d758742920e71e452abf30c2c0dc5400897d9bfbe083cf813",
+      "wheels": 45,
+      "files": 3022,
+      "helper_exit": 0,
+      "helper_seconds": 67.97666096687317,
+      "recompute_exit": 0,
+      "recompute_seconds": 94.274391625,
+      "independent_review": "Final Git inputs equal measured artifact; six producer/validator source hashes match; probe blob unchanged. Full9+/9- diff reviewed.",
+      "reused": "Same-wheel HTTP3/PDF6, exact cert+4/-2 and earlier negative validators; no unchanged-case rerun",
+      "receipt_sha256": "acde831fcebf4e1a1fb77d4eaac811cef8608eef96196713dd2f873aacd09981",
+      "ci": "https://github.com/Eysn0130/analytix/actions/runs/40067856417",
+      "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40067859267",
+      "status": "merged; final-head57checks success, Development52/52 and actualaccepted-required nativepositive/negative controls passed",
+      "merge": "bc3a64284a518e663e17bc7fd51f4b9b9990e586",
+      "native_job": "https://github.com/Eysn0130/analytix/actions/runs/40067856417/job/120794767104",
+      "public_body_update": "After merge, update returnedisError; rawerror not retained. Readback confirmed bodyunchanged. Causeunknown; textactionpaused,no retry or alternatecomment."
+    },
+    "retained_decisions": {
+      "metadata_utc": "2026-10-24T05:39Z",
+      "source_sha": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+      "atomic": false,
+      "columns": ["pr", "head", "category", "actual_change", "gap_or_next_decision"],
+      "rows": [
+        [89, "da5871807db650e413bd6ca136175aa4e129ff3f", "E", "Go1.25→1.26;x/sys.46→.49;x/text.38→.43;go.sum updates", "CI already1.26.4; module minimum remains reserved decision"],
+        [4, "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "H", "setup-python5.6→7", "runner/cache/release compatibility missing"],
+        [7, "cf368d0e088e49afb8f0ea9b314f95015047aeda", "H", "checkout4.4→7.0.1", "workspace/credential persistence compatibility missing"],
+        [90, "b15bee7d344dbd47fe6bea62a25dd11be1cf6de0", "H", "upload-artifact4.6.2→7.0.2", "producer/consumer artifact compatibility missing"],
+        [15, "f11600dd5b425c1292e16f635dfdf130d18f4fae", "H", "pytest8.4.2→9.1.1", "fixture/plugin compatibility missing"],
+        [95, "2544c7a16c43a1d53ef687eecd7c18d7976aac61", "H", "Windows websockets16→17.3", "requirements-only; aggregate lock missing"],
+        [34, "02e9ebab41a10be1ee0a865e9c4838cddcada851", "platform-security", "Electron41.10.3→42.11.9", "install/nativeABI/renderer/package evidence missing; devDependency is not unreachability"],
+        [57, "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "TLS-decision", "rustls.23.41→.46;webpki.103.13→.15", "data-engine packaging consumer exists; exact TLS/build-time/runtime reachability and advisory binding not established"],
+        [77, "2999027a5b0c8dce7c635540b45860ead26e06ce", "Pillow-Python", "Windows Pillow12.3→13", "100 is candidate tooling only; accepted upgrade/aggregate/formalPython3.10 evidence missing"],
+        [92, "1638d8e6fe8f40ee0a1fe7401d240453ef148273", "G-major", "SQLGlot26.33→30.23", "SQL/AST contract compatibility missing"],
+        [93, "c1600d4bc596c5494ac47c76c52a6744751ec35a", "G-contract", "wechat2.4.3→2.4.10", "Node minimum/OpenClaw peer contract change requires compatibility decision"],
+        [97, "afaad7a4797fc0f5263771357cd639363058ea0d", "G-major", "KaTeX.19;Commander8→15;nestedKaTeX.16.47", "107 addresses current safety target, not acceptance of entire97"],
+        [98, "5f5f8a561284fd0c9ab32980dba2e8547adfca97", "tool-migration", "dual Zod4.4.3→4.6.7;12extraneous lines removed", "actualroot tool-lock drift; migration contract must be explicitly reviewed"],
+        [108, "55a891faf43b9bd8654c142abd6f308af9d59ae4", "runtime-Zod", "runtime-only4.4.3→4.6.6;12extraneous lines removed", "does not directly change root tool closure; separate minimal option, not dual-tree completion"],
+        [2, "946bb377ae3392408bec05474c4f0c67c45550f1", "C-refused", "cleaning_ops quinn-proto.11.14→.17", "belowrequired.11.19; evidence-only,no retry or alternative execution"],
+        [31, "0ac9267c634927e172be535370ab15843007e715", "other-quinn", "analysis_compute quinn-proto target.11.18", "belowrequired.11.19; no execution"],
+        [1, "027ab53ab470b6c0a545939eecd7000110c40eeb", "unverified", "cleaning_ops tar.4.45→.46", "Windows lock reselection; compatibility not verified"],
+        [29, "b35306029b571f090244bb0f26b0f50525a6222f", "unverified", "analysis_compute tar.4.45→.46", "another tree, not replacement for1; not verified"],
+        [11, "e1b8aad04611129727535b2e209b38d53d7cba02", "minor-unverified", "ReactDOM/types19.2→19.3", "notH major; renderer/peer validation missing"],
+        [12, "1cf3583b40fe4362ad786888ad500c17d24b94c3", "minor-unverified", "ICU locale-core2.2→2.3", "compatibility not verified"],
+        [86, "b0412173ecaeb908483eb2c7e1e68ca460225629", "old-insufficient", "Windows pypdf6.21.1", "below6.21.2; aggregate lock missing"],
+        [94, "a74017cc232bd08dc78c98d2d9619697d164bcb6", "old-mixed", "26updates;certifi10.19;pypdf6.21.1", "old10.18observation superseded; pypdf insufficient,aggregate missing"]
+      ],
+      "zod_options": [
+        "retaincurrent with owner/deadline,not disposed",
+        "runtime-only minimal108 without unrelated deletion; root remains4.4.3",
+        "recommended: separately approve and verify tool migration contract then coordinated dual-tree change; retain original1933 provenance and no automatic expanded allowance"
+      ],
+      "zod_contract": "verifyTools reads root lock; trusted.policy must equal declared.policy before prune. UNUSED_TOOL_ROOT is not a root-lock migration bypass.",
+      "c_advisory_gap": "Previously referenced two independently verified primary advisory sources were not found in this review; candidate sets are not verified bindings.",
+      "current_metadata_alignment": {
+        "source": "package_snapshot at17:41:28–29UTC/main742b6cc;oldcontentreviewremainsboundto05:39reviewedhead",
+        "columns": ["pr", "reviewed_head", "snapshot_head", "content_scope_status"],
+        "rows": [
+          [89, "da5871807db650e413bd6ca136175aa4e129ff3f", "da5871807db650e413bd6ca136175aa4e129ff3f", "samehead"],
+          [4, "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "samehead"],
+          [7, "cf368d0e088e49afb8f0ea9b314f95015047aeda", "cf368d0e088e49afb8f0ea9b314f95015047aeda", "samehead"],
+          [90, "b15bee7d344dbd47fe6bea62a25dd11be1cf6de0", "1a224b640d5750a99932feaa4be656bd7c1dd433", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [15, "f11600dd5b425c1292e16f635dfdf130d18f4fae", "f11600dd5b425c1292e16f635dfdf130d18f4fae", "samehead"],
+          [95, "2544c7a16c43a1d53ef687eecd7c18d7976aac61", "f64678911e7da5a09ef6e849c83c43036f9d99d2", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [34, "02e9ebab41a10be1ee0a865e9c4838cddcada851", "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [57, "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "samehead"],
+          [77, "2999027a5b0c8dce7c635540b45860ead26e06ce", "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [92, "1638d8e6fe8f40ee0a1fe7401d240453ef148273", "a6682fcb98e266e0ca43130eeba447b62b0f1327", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [93, "c1600d4bc596c5494ac47c76c52a6744751ec35a", "f699f8f660ef2429d2a106d970de3710985cb93b", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [97, "afaad7a4797fc0f5263771357cd639363058ea0d", "699c4c8f02adc5ed1840cb4d899ff13caf6485b3", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [98, "5f5f8a561284fd0c9ab32980dba2e8547adfca97", "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [108, "55a891faf43b9bd8654c142abd6f308af9d59ae4", "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3", "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [2, "946bb377ae3392408bec05474c4f0c67c45550f1", "946bb377ae3392408bec05474c4f0c67c45550f1", "samehead"],
+          [31, "0ac9267c634927e172be535370ab15843007e715", "0ac9267c634927e172be535370ab15843007e715", "samehead"],
+          [1, "027ab53ab470b6c0a545939eecd7000110c40eeb", "027ab53ab470b6c0a545939eecd7000110c40eeb", "samehead"],
+          [29, "b35306029b571f090244bb0f26b0f50525a6222f", "b35306029b571f090244bb0f26b0f50525a6222f", "samehead"],
+          [11, "e1b8aad04611129727535b2e209b38d53d7cba02", "e1b8aad04611129727535b2e209b38d53d7cba02", "samehead"],
+          [12, "1cf3583b40fe4362ad786888ad500c17d24b94c3", "1cf3583b40fe4362ad786888ad500c17d24b94c3", "samehead"],
+          [86, "b0412173ecaeb908483eb2c7e1e68ca460225629", null, "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"],
+          [94, "a74017cc232bd08dc78c98d2d9619697d164bcb6", null, "closedorheadchanged;oldcontentstatementnotclaimedcurrent;freshdiffrequiredbeforeadoption"]
+        ]
+      }
+    },
+    "backend_combined_candidate": {
+      "status": "merged742b6ccafterfreshrootreview,57/57checks,normalready+merge;treeandbothparentsverified",
+      "branch": "codex/security-backend-ab-clean",
+      "base": "624a0deb15fa2a7fe5bed06b46cbb494b6493bd7",
+      "head": "2141a09e730c4e20bfffcd15d325eccee831e988",
+      "tree": "dd3084b6cbc84861ffb26b98d24524b67cbd7a75",
+      "scope": "backend/uv.lock only6+/6-;2278LF unchanged",
+      "lock_sha256": "1668e4465fa5696ae3eb529d90789b81669b169137dcad530e436cd3e0fc0dbd",
+      "metadata_preparation": {
+        "tool": "uv0.11.5",
+        "exit": 0,
+        "seconds": 3.0006053750403225,
+        "new_versions": ["urllib3==2.8.0", "certifi==2026.10.19"],
+        "pypdf_verified_metadata_reused": true,
+        "requests": "not independently counted"
+      },
+      "offline_generation": {
+        "exit": 0,
+        "seconds": 0.20010004099458456
+      },
+      "offline_check": {
+        "exit": 0,
+        "seconds": 0.029061416164040565
+      },
+      "independent_review": "62nodes;60non-target nodes and every global field equalbase; pypdf6.21.2 unchanged. Full6+/6- diff reviewed.",
+      "certifi": "Existing comparison121→120/add0/remove1 onlyemSignECCG3; currentwheel/PEM hashes match. No unchanged comparison rerun.",
+      "http": "Existing same-wheel HTTP3 reused; proxy context isolation is synthetic,not aTLS handshake.",
+      "receipt_sha256": "9182bf590fb00806c22b24222211b9959ab74085ea599e5cc1ae2383a25d676c",
+      "preparation_safety": "New0700/no-extra-ACL cache and0600files; copies only known accepted shared metadata plus explicitly admittedpypdf evidence; old backend not revived. Noinstall/build/project execution/process enumeration/permission repair.",
+      "reuse_scope_review": {
+        "records": 131,
+        "accepted_shared_metadata_records": 125,
+        "approved_old_pypdf_metadata_records": 2,
+        "approved_wheel_records": 4,
+        "other_abandoned_backend_records": 0,
+        "index_sha256": "f348f8a0bdbd1c7e8a5b8ed40a81c2e705755e3f94bc1f727d111addc676a64e",
+        "index_direct_decode": false,
+        "binding": "Origin/hash record plus wheel METADATA and unchanged complete lockedpypdf node; do not call index digest a directwheel content check."
+      },
+      "original_local": {
+        "base": "adddf5692531b68fa449ec37d1e3c02f373c23e5",
+        "head": "969cc7a51d7020d418e9a8d4b868bf60d80ec510",
+        "tree": "0ea9296a5e4e300adb467975e1f6ee238cab1dad"
+      },
+      "pr": 111,
+      "url": "https://github.com/Eysn0130/analytix/pull/111",
+      "ci": "https://github.com/Eysn0130/analytix/actions/runs/40112895978",
+      "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40112893920",
+      "fresh_base_equivalence": "Originaladddfandnew624a backendtree/pyproject/Pythonpin/helperblobsidentical;exactlockdigestpreserved;noUV/helper/download/HTTP/certretest",
+      "independent_root_review": "ReadactualGitTOML62nodes:onlycertifi7.22→10.19andurllib3 2.7→2.8changed;60othercomplete nodes+global/AnyIO/pypdfequal;onefile6+/6-/2278LF;nomodechange. 106merge/parents/tree and10JSONchanges/twosourceblobsalso independentlyverifiedfromlocalGitobjects.",
+      "merge": "742b6ccfb6d6819287e18dcf825f723ce705a0ab"
+    },
+    "ratchet_existing_owner_check": {
+      "source_sha": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+      "method": "Read current canonical baseline JSON,not diagnostic regeneration",
+      "identities": 1927,
+      "occurrences": 1933,
+      "guards": 8,
+      "raw_provenance_sha256": "dff6e88701aabb1d26794c84cb8661d04084b89181f5513ca1cbcdda1bc4458c",
+      "limit": "Gate enforcement is not cleanup of1933 findings; parameters are not default deletion targets.",
+      "tools": {
+        "eslint": "10.4.0",
+        "typescript": "5.9.3",
+        "typescript-eslint": "8.59.4",
+        "zod": "4.4.3"
+      },
+      "closure_packages": 132,
+      "identity_version": "stable-host-v3",
+      "rule_options": {
+        "vars": "all",
+        "args": "all",
+        "caughtErrors": "all",
+        "ignoreRestSiblings": false
+      },
+      "allow_inline_config": false,
+      "scan_coverage": "JS core/TSextensionwithTS coreoff;realESLintglob/ignore;notPython/Go/Rustunusedcoverage. Historical2339listisnotanoperationalallowlist;newtrackedgovernancescriptsareincludedbydynamicgate.",
+      "historical_scan_extensions": {
+        ".cjs": 50,
+        ".js": 5,
+        ".mjs": 259,
+        ".ts": 1482,
+        ".tsx": 543
+      },
+      "counts": "1927identities/1933occurrences/8guards;604variables/1297parameters/32catch;notnewcleanuporre-generateddiagnostic"
+    },
+    "closeout_criteria_gaps": {
+      "pr_inventory": "Snapshot24open=22bot+2frozenhuman;all24listed. Original35notfullydisposed;openexceptionsneedactualowner/nextaction/deadlineandreservedriskdecisions.51/70freezePRdispositionstillpending;86/94closedstatedoesnotmeanallgoalsaccepted.",
+      "ratchet": "85enforcement deployed;604variables require side-effect-aware review,1297parameters remain bydefault.",
+      "dependency_routine": "87configuration deployed; actual six-ecosystem/security-channel acceptance not inferred from config orfooter; screenshots still pending.",
+      "large_files": "74/311205LF historical2c inventory; classifications I31/E3/L4/V19/K1/C1/F15. Embeddedgeneration provenance not established; frozenitems remain frozen,not all files need splitting.",
+      "branches": "94historical;19withoutdirectPR=I16 tipreachablemerged/E2patch-equivalent/U1uniqueunproven. No deletion authorized bythis package; currentSHA/reference verification and approved retained-set decisions remain."
+    },
+    "scope_limits": {
+      "product_and_privacy": "Still frozen; no product acceptance claim",
+      "native": "Future-target and accepted-required wheel probes are not packagedPython3.11.15 ordesktop installer acceptance",
+      "default_branch_banner": "PR109pushreported239vulnerabilities:10critical/117high/100moderate/12low. Unmappedbanner,not auditedalert inventory or security-setting proof.",
+      "c": "No execution/retry/alternative runbook; primary two-advisory binding was not found in this bounded review.",
+      "later_default_branch_banner": "107syncpushreported223:11critical/111high/84moderate/17low. Historical109banner239 isretained;neither isauditedalertinventory. Donotattribute countdeltaorcriticalchange tothese patches;securitysettingsevidence stillmissing.",
+      "newer_default_branch_banner": "106syncpushreported222:11critical/110high/84moderate/17low;unmappedbanneronly,notanalertaudit,attribution orsettingsproof"
+    },
+    "updated_at_utc": "2026-10-24T17:56:17.576815+00:00",
+    "queue_expected_heads": {
+      "provenance": "User-confirmed2026-10-24T05:30Z; each stage must freshly verify before owned synchronization and again before merge",
+      "103": "58913c077cd92dce945cdc8fb38be61852d85712",
+      "104": "6ef6e5a03796f4a28e8bc7799543d05b8f192811",
+      "107": "bcc5fb1d4720cf247c43129f6c531165cee1fab7",
+      "106": "910decd634cbf1975d7f857301146f2d76db1d35"
+    },
+    "next_action": "本包7个获批依赖/验证载体均已正常合并并完成对应映射。保留事项须由后续明确范围与fresh证据恢复；不得重复创建或重新合并旧PR。治理收官尚未确认，功能与Privacy继续冻结；安全开关证据和已拒诊断保持未完成。",
+    "reviewed_change_contracts": {
+      "method": "Per orderedfile, recursively sorted JSON object keys; add/remove/replace lists with key-path and exact values; arrays atomic; SHA256 of json.dumps(sort_keys=True,separators=comma/colon,ensure_ascii=True). Recompute between freshbase and owned synchronizedhead; require same digest and unchanged non-targetsource.",
+      "items": {
+        "103": {
+          "original_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+          "reviewed_head": "58913c077cd92dce945cdc8fb38be61852d85712",
+          "json_files": ["package-lock.json", "packages/runtime/package-lock.json", "packages/runtime/package.json"],
+          "semantic_delta_sha256": "e4c00974ed7427f046f8e0e3700842b4fb93174e0ace03f7bef30e4d0327b368",
+          "json_change_count": 7
+        },
+        "104": {
+          "original_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+          "reviewed_head": "6ef6e5a03796f4a28e8bc7799543d05b8f192811",
+          "json_files": ["packages/runtime/package-lock.json"],
+          "semantic_delta_sha256": "2845111504a1e8dc5656dc29fb090c3c2d7098620e21fafbe0127c7137953691",
+          "json_change_count": 3
+        },
+        "107": {
+          "original_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+          "reviewed_head": "bcc5fb1d4720cf247c43129f6c531165cee1fab7",
+          "json_files": ["package-lock.json", "package.json"],
+          "semantic_delta_sha256": "b21049e2dc6cc885a71b9bc552441ba6b8f9cc600d3fd2e3cfb9d0043051192a",
+          "json_change_count": 6
+        },
+        "106": {
+          "original_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+          "reviewed_head": "910decd634cbf1975d7f857301146f2d76db1d35",
+          "json_files": ["package-lock.json", "package.json"],
+          "semantic_delta_sha256": "a37c7eab4b4f04866ea494d0f3a5029640d78b6ec175433b9cb87e6be72cfe41",
+          "tool_source_blobs": {
+            "scripts/apply-dsh-preview-patches.cjs": {
+              "before": "3a84e90f4d13174671f0ccc3e23ad178ba3db51d",
+              "after": "18b83041d0093edd2770fe92e320c70dcfc6020e"
+            },
+            "scripts/apply-dsh-preview-patches.test.mjs": {
+              "before": "9dfb8f76927382cfd18f1a248ba0cb85cca00853",
+              "after": "b555889cfdd460d9e0b18f43c51dbf765afc8d90"
+            }
+          },
+          "json_change_count": 10
+        }
+      }
+    },
+    "synchronized_candidates": {
+      "103": {
+        "base": "bc3a64284a518e663e17bc7fd51f4b9b9990e586",
+        "head": "d497a1483e78c7a778f36ab107eac18960021f8e",
+        "tree": "637d0c7a48b2ec24e1e34a266ea2e2571932dcec",
+        "mechanical_proof": "Exact7JSONchanges and contractSHA unchanged; only3declaredfiles vsfreshbase;diffcheckexit0;unchangedlocalprobesnotrepeated",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40072787199",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40072784293",
+        "status": "mergedf38b550b;final57/57success;nohead/base/contentdrift"
+      },
+      "104": {
+        "base": "f38b550b5ce6fbf3344e0adf9ee456502bf8eea9",
+        "head": "4a191f67db6014cefd2bb6e7c59546130707a3d8",
+        "tree": "d98b1e1abfe15878f3bfba7945a47587fcf8d002",
+        "mechanical_proof": "Onlyruntime lock3+/3-/5441LF;exact3JSONchanges with original28451115contract;103iptargetandallothernodesunchanged;diffcheck0;8localcasesnotrepeated",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40081553584",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40081549873",
+        "status": "mergedcfb5d8d7;final57success,requiredgateactualstepPASS"
+      },
+      "107": {
+        "base": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+        "head": "9cf5498d3b7816030024866676f793cf14993dec",
+        "tree": "543ded3cde316a9ff56a715b7463cdc8e3a01c68",
+        "mechanical_proof": "2files8+/5-;lock17720→17720LF;manifest232→235LF;exact6JSONchanges b21049e2contract;diffcheck0;unchangedKaTeXprobes/API/renderernotrerun",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40093771519",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40093769991",
+        "status": "merged877fdf5;final57/57success,normalmergeverifiedcandidate-tree+bothparents"
+      },
+      "106": {
+        "base": "877fdf52894c8953ca5593fee38276c90fc5ae3e",
+        "head": "54548e592436e0d0f03deca9919d78e75978bcfc",
+        "tree": "a3415abba64f4b061bbeca908493d5e593cad10a",
+        "mechanical_proof": "4files25+/24-;exact10JSONchanges a37c7eabcontractandtwooriginalsourceblobs;non-targetunchanged;diffcheck0",
+        "lf_before_after": [
+          ["package-lock.json", 17720, 17721],
+          ["package.json", 235, 235],
+          ["scripts/apply-dsh-preview-patches.cjs", 228, 228],
+          ["scripts/apply-dsh-preview-patches.test.mjs", 572, 572]
+        ],
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40107050249",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40107048609",
+        "status": "merged624a0deb;final57/57success,normalmergeverifiedcandidate-tree+bothparents"
+      }
+    },
+    "queue_validation_evidence": {
+      "103": {
+        "files": 3,
+        "added": 7,
+        "deleted": 7,
+        "lf_before_after": [
+          ["package-lock.json", 17720, 17720],
+          ["packages/runtime/package-lock.json", 5441, 5441],
+          ["packages/runtime/package.json", 65, 65]
+        ],
+        "probe": "Fouractualconsumers root/runtime×express-rate-limit8.5.2/socks2.8.9;32syntheticgroupspass5.275s;Node22.22.1,96MiB/10s/64KiB",
+        "receipt_sha256": "42a4b5bba6dd0a4df658684ca2814404a3182404ca9a6a2b625fd0d4fe755aed"
+      },
+      "104": {
+        "files": 1,
+        "added": 3,
+        "deleted": 3,
+        "lf_before_after": [
+          ["packages/runtime/package-lock.json", 5441, 5441]
+        ],
+        "probe": "8actualPostCSS/source-mapcasespass0.295862s;64MiB/2s/64KiB;14invalidoffsets,40nestedmaps,100klinegap;rootalready1.2.2;12extraneousnodespreserved",
+        "receipt_sha256": "abf5fd8418e058e94cc9bc3b34f697583334f1fd8ac9c556b009dafc9bc74f3a"
+      },
+      "107": {
+        "files": 2,
+        "added": 8,
+        "deleted": 5,
+        "lf_before_after": [
+          ["package.json", 232, 235],
+          ["package-lock.json", 17720, 17720]
+        ],
+        "probe": "8API/safetypass1.8s;2existingfiles3affectedcasespass41.107s/45filteredskip;4rendererarms old/new×light/dark14.67s strictgeometry/styles/pixels;Electron41.10.3",
+        "limits": "Twofixtureassertionmistakesretained;oldmainunique0.16.46node,notclaimremovalofnestednodefrommain. Overridepreventsunsafe0.16.47nestedbylarger59/97candidates. Runtimeabsent.",
+        "receipt_sha256": "cebadb1178e1f484651d53fc87689b339af583b0dd8f7cc3d1cc8a74dec602c0"
+      },
+      "106": {
+        "files": 4,
+        "added": 25,
+        "deleted": 24,
+        "lf_before_after": [
+          ["package.json", 232, 232],
+          ["package-lock.json", 17720, 17721],
+          ["scripts/apply-dsh-preview-patches.cjs", 228, 228],
+          ["scripts/apply-dsh-preview-patches.test.mjs", 572, 572]
+        ],
+        "probe": "RealCLI4patches/18postimages,replayexit0samehash,guardthirdalready_applied/0CLIcalls;oldversionnegative;actualtmpconsumer0.2.7. CLI0.849886s,9contractcases1.965s,5appstatecases0.141s,lint24.898s,syntax/diff0;total85.544s",
+        "contract": "Onlyguardversionconstant+messageandtestfixturepin8.0.1;otherguardchecksunchanged;nootherfs-extra/extraneouscleanup",
+        "receipt_sha256": "6c8da3e90e5e7ef81f0b2aa0e7436106644f50871df45a5a2ef352d85863c957"
+      }
+    },
+    "coverage_disposition": {
+      "35": {
+        "status": "双树已覆盖；本轮残留登记销项",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/35#issuecomment-6387403077",
+        "pr_state": "Alreadyclosedunmerged;no repeatedclose/reopen",
+        "scope": "pypdf6.21.2via99backend+109Windows;111onlypreservesnode;historical35→86retained"
+      },
+      "16": {
+        "status": "双树已覆盖；本轮残留登记销项",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/16#issuecomment-6387403622",
+        "pr_state": "Alreadyclosedunmerged;no repeatedclose/reopen",
+        "scope": "backendexistinglxml6.1.3preserved;Windows109plus105/109nativeevidence"
+      },
+      "36": {
+        "status": "双树已覆盖；本轮残留登记销项",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/36#issuecomment-6387404262",
+        "pr_state": "Alreadyclosedunmerged;no repeatedclose/reopen",
+        "scope": "urllib3 2.8.0Windows109+backend111;HTTP3synthetic,noactualTLS-handshakeclaim"
+      },
+      "76": {
+        "status": "双树已覆盖；本轮残留登记销项",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/76#issuecomment-6387404922",
+        "pr_state": "Alreadyclosedunmerged;no repeatedclose/reopen",
+        "scope": "certifi10.19both;Windows+4/-2,backend+0/-1onlyemSignECCG3"
+      },
+      "33": "Closedunmergedafter103normalmergef38b550b;replacementcoversroot+runtime10.7.4,comment6382461230",
+      "60": "Closedunmergedafter104normalmergecfb5d8d7;freshbotdiffgoalstillruntime1.2.2+unrelated12linecleanup,notadopted;comment6384155699",
+      "59": "Closedunmergedafter107normalmerge877fdf5/comment6385995911;rootunique.18.2+mathtransitiveoverridepreventsunsafe.16.47;97notfullydisposed",
+      "58": "Closedunmergedafter106merge624a0deb/comment6386771081;realpatchCLI8.0.1andactualtmp0.2.7covered;unrelatedglobalfs-extra cleanupnotadopted",
+      "78": "Previouslybotclosedunmerged;source-mapcompleted104/comment6384156353;tmp/patch-packagecompleted106/comment6386772109;patch-packageisoneoforiginal7directtools,tmpoverlapnotextraeighthdirecttool;sixotherdirecttools+Vite/Rolldownchangesremain;noreclose",
+      "62": "Alreadyclosedafter101merge1dd053cc;first13pixelfailurehistoryretained;donotreclose"
+    },
+    "g102_readonly_disposition": {
+      "at_utc": "2026-10-24T07:07Z",
+      "head": "ad609e6a9a06de9c215c39d7747b88531a1bd262",
+      "base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+      "scope": "backendpyproject/uvlock only294+/236-;62→63nodes;58→59names;no productcode or declaredtoolchainchange",
+      "dependency_delta": "FastAPI.141.1→.153;Pydantic2.13.5→2.14.1/core2.46.5→2.50.1;DuckDB1.5.4→1.5.6;crypto50.0.1→50.0.2;pdfium5.13→5.14;newOTelAPI1.45.1",
+      "additional_diff": "pyprojectGitmode100755→100644;markerorderingandcontext-redundantconditionnormalization",
+      "safe_sync_requirement": "Onlyafterbackendcarrier;preservecompleteurllib3/certifi/pypdf/AnyIOnodesfromfreshmain;nooldwholelockreplacement",
+      "coverage_limits": "ExistingfullBackendCIisapplicable;FakeDocumentisnotpdfium5.14nativeevidence;oldcrypto50.0.1PDFresultdoesnotprove50.0.2. No newlocaltests/downloads/helperrun.",
+      "decision": "Notautomaticallyadoptedintheexplicitsecurityqueue: ancillarymodechangeandmarker/nativecoveragequalificationremain inGdecisionpacket. No permission/indexmodeadjustmenthere; no claimcompatibilityaccepted."
+    },
+    "main_ci": [
+      {
+        "head": "bc3a64284a518e663e17bc7fd51f4b9b9990e586",
+        "observed_at_utc": "2026-10-24T08:33:38Z",
+        "development_run": 40072253250,
+        "development_jobs": "52/52 success",
+        "gate_job": 120825506184,
+        "codeql_run": 40072253353,
+        "codeql": "4/4 Analyze success; no PR summary required onmain",
+        "check_runs": "64/64 success;52Development+4Analyze+8other",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40072253250"
+      },
+      {
+        "head": "f38b550b5ce6fbf3344e0adf9ee456502bf8eea9",
+        "observed_at_utc": "2026-10-24T12:20:24Z",
+        "development_run": 40081439424,
+        "development_jobs": "52/52success",
+        "gate_job": 120868233941,
+        "codeql_run": 40081439198,
+        "codeql": "4/4Analyze success;noPRsummaryonmain",
+        "check_runs": "64success/3failureof67;3additionalDependabotfailuresnotdiagnosed",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40081439424"
+      },
+      {
+        "head": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+        "observed_at_utc": "2026-10-24T15:27:37Z",
+        "development_run": 40093628630,
+        "workflow_status": "completed",
+        "workflow_conclusion": "cancelled",
+        "development_jobs": "Actual52/52successandcorrespondingcheckssuccess",
+        "gate_job": 120909617058,
+        "gate_actual_step": "success2026-10-24T15:27:08Z",
+        "codeql_run": 40093628269,
+        "codeql": "4Analyze success",
+        "check_runs": "63/63success=56CI+7other",
+        "limit": "Cancellationcauseunverified;do not inferautomaticreplacement or reportworkflowcompleted/success. No reruntorewritehistory;doesnotestablishsuccess-onlydownstreamworkflowprecondition."
+      },
+      {
+        "head": "877fdf52894c8953ca5593fee38276c90fc5ae3e",
+        "observed_at_utc": "2026-10-24T16:32:22Z",
+        "development_run": 40106918650,
+        "workflow_status": "completed",
+        "workflow_conclusion": "success",
+        "development_jobs": "52/52success",
+        "gate_job": 120925401421,
+        "gate_actual_step": "success",
+        "codeql_run": 40106918259,
+        "codeql": "4Analyzesuccess;noPRsummaryrequiredonmain",
+        "check_runs": "56/56success,paginationcomplete",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40106918650"
+      },
+      {
+        "head": "624a0deb15fa2a7fe5bed06b46cbb494b6493bd7",
+        "observed_at_utc": "2026-10-24T17:21:30Z",
+        "development_run": 40112407202,
+        "workflow_status": "completed",
+        "workflow_conclusion": "success",
+        "development_jobs": "52/52success",
+        "gate_job": 120936292625,
+        "gate_limit": "job/checksuccess;steps=[]incollection,no rawstep/PASSlogclaim",
+        "codeql_run": 40112406529,
+        "codeql": "4Analyzesuccess",
+        "check_runs": "56/56success,completepagination",
+        "ci": "https://github.com/Eysn0130/analytix/actions/runs/40112407202"
+      }
+    ],
+    "queue_validation_evidence_source_base": "Originalverifiedcandidatesagainst1dd053cc;fresh-baseeffectiveLF/scopeisreportedineachmergeentry",
+    "independent_bot_failure_hold": {
+      "completed": "Mainf38bDevelopment52/52andCodeQL4success;PR104own57/57success",
+      "jobs": [
+        [40088026033, 120854834344],
+        [40087158727, 120852330106],
+        [40084407120, 120844267888]
+      ],
+      "attempted_action": "Threeindependentread-onlyGET/actions/jobs/<id>requests;allrefused",
+      "reason_exact": "HTTPError: 400: GitHub Fetch URL is not an allowed public GitHub repository or search endpoint. (Response: None)",
+      "status": "Denied;nojobdetailsretrieved;causesunknown. No retryor alternateroute/logretrieval. Needoriginalfailuretextfrom permittedsourcebefore disposition.",
+      "scope": "Holdthesebotdiagnostics;donotclaimallmainchecks green. Otherapprovedcarrierswiththeirownfinalrequiredgatecontinue;noneofthesefailureswasprovedrelatedorunrelated."
+    },
+    "candidate_package_volume": {
+      "source_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+      "candidate_head": "2141a09e730c4e20bfffcd15d325eccee831e988",
+      "candidate_tree": "dd3084b6cbc84861ffb26b98d24524b67cbd7a75",
+      "method": "Gitdiff numstat;LF=countnewlinebytes,nolineextensionestimate;categoriesmutuallyexclusive",
+      "columns": ["path", "category", "added", "deleted", "old_LF", "new_LF"],
+      "rows": [
+        [".gitattributes", "ci_config_manifest", 2, 0, 1, 3],
+        [".github/workflows/ci.yml", "ci_config_manifest", 9, 0, 478, 487],
+        ["backend/uv.lock", "lock_data", 6, 6, 2278, 2278],
+        ["package-lock.json", "lock_data", 28, 27, 17720, 17721],
+        ["package.json", "ci_config_manifest", 5, 2, 232, 235],
+        ["packages/runtime/package-lock.json", "lock_data", 6, 6, 5441, 5441],
+        ["packages/runtime/package.json", "ci_config_manifest", 1, 1, 65, 65],
+        ["scripts/apply-dsh-preview-patches.cjs", "validation_tool_source", 2, 2, 228, 228],
+        ["scripts/apply-dsh-preview-patches.test.mjs", "test_source", 1, 1, 572, 572],
+        ["scripts/windows-backend-requirements.lock.txt", "lock_data", 4, 4, 45, 45],
+        ["scripts/windows-lxml-native-probe.py", "validation_tool_source", 220, 0, 0, 220],
+        ["scripts/windows-python-runtime-lock.json", "lock_data", 4, 4, 21, 21]
+      ],
+      "groups": {
+        "ci_config_manifest": {
+          "files": 4,
+          "added": 17,
+          "deleted": 3
+        },
+        "lock_data": {
+          "files": 5,
+          "added": 48,
+          "deleted": 47
+        },
+        "validation_tool_source": {
+          "files": 2,
+          "added": 222,
+          "deleted": 2
+        },
+        "test_source": {
+          "files": 1,
+          "added": 1,
+          "deleted": 1
+        }
+      },
+      "total": {
+        "files": 12,
+        "added": 288,
+        "deleted": 53
+      },
+      "product_source_files": 0,
+      "tracked_files_before": 7362,
+      "tracked_files_candidate": 7363
+    },
+    "package_snapshot": {
+      "at_utc_start": "2026-10-24 17:41:28 UTC",
+      "at_utc_end": "2026-10-24 17:41:29 UTC",
+      "source_main": "742b6ccfb6d6819287e18dcf825f723ce705a0ab",
+      "main_unchanged_across_pagination": true,
+      "atomic": false,
+      "method": "Same-round completeRESTpagination:open24<100andbranches99<100;uniqueIDs/namesverified;maincheckedbefore/after. Doesnotclaimglobalatomicsnapshot.",
+      "open_prs": {
+        "columns": ["number", "author", "draft", "state", "head", "branch", "head_repo", "title", "created_at", "updated_at", "assignees", "category"],
+        "rows": [
+          [110, "dependabot[bot]", false, "open", "4882a9cc33392e295aefd17284c0645c1f4e5cf1", "dependabot/pip/scripts/pip-minor-patch-8d12d4c10b", "Eysn0130/analytix", "build(deps): bump the pip-minor-patch group across 1 directory with 22 updates", "2026-10-24T07:02:15Z", "2026-10-24T07:02:20Z", [], "G_other"],
+          [108, "dependabot[bot]", false, "open", "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3", "dependabot/npm_and_yarn/packages/runtime/zod-4.6.6", "Eysn0130/analytix", "build(deps): bump zod from 4.4.3 to 4.6.6 in /packages/runtime", "2026-10-23T18:54:06Z", "2026-10-24T12:37:01Z", [], "Zod"],
+          [102, "dependabot[bot]", false, "open", "ad609e6a9a06de9c215c39d7747b88531a1bd262", "dependabot/uv/backend/uv-minor-patch-cbb656aa63", "Eysn0130/analytix", "chore(deps): bump the uv-minor-patch group across 1 directory with 5 updates", "2026-10-23T15:13:20Z", "2026-10-23T22:52:02Z", [], "G_other"],
+          [98, "dependabot[bot]", false, "open", "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53", "dependabot/npm_and_yarn/npm_and_yarn-b94f287d41", "Eysn0130/analytix", "build(deps): bump zod in /", "2026-10-23T02:16:33Z", "2026-10-24T12:34:25Z", [], "Zod"],
+          [97, "dependabot[bot]", false, "open", "699c4c8f02adc5ed1840cb4d899ff13caf6485b3", "dependabot/npm_and_yarn/npm_and_yarn-89976db822", "Eysn0130/analytix", "build(deps): bump katex in /", "2026-10-23T02:14:32Z", "2026-10-24T12:35:08Z", [], "G_major_contract"],
+          [95, "dependabot[bot]", false, "open", "f64678911e7da5a09ef6e849c83c43036f9d99d2", "dependabot/pip/scripts/websockets-17.3", "Eysn0130/analytix", "build(deps): bump websockets from 16.0 to 17.3 in /scripts", "2026-10-23T01:56:56Z", "2026-10-24T07:00:31Z", [], "H"],
+          [93, "dependabot[bot]", false, "open", "f699f8f660ef2429d2a106d970de3710985cb93b", "dependabot/npm_and_yarn/npm_and_yarn-823d526490", "Eysn0130/analytix", "build(deps): bump @tencent-weixin/openclaw-weixin in /", "2026-10-23T01:56:06Z", "2026-10-24T12:27:21Z", [], "G_major_contract"],
+          [92, "dependabot[bot]", false, "open", "a6682fcb98e266e0ca43130eeba447b62b0f1327", "dependabot/uv/backend/sqlglot-30.23.0", "Eysn0130/analytix", "build(deps): bump sqlglot from 26.33.0 to 30.24.0 in /backend", "2026-10-23T01:55:01Z", "2026-10-24T17:37:38Z", [], "G_major_contract"],
+          [90, "dependabot[bot]", false, "open", "1a224b640d5750a99932feaa4be656bd7c1dd433", "dependabot/github_actions/actions/upload-artifact-7.0.2", "Eysn0130/analytix", "build(deps): bump actions/upload-artifact from 4.6.2 to 7.0.2", "2026-10-23T01:53:59Z", "2026-10-24T07:00:02Z", [], "H"],
+          [89, "dependabot[bot]", false, "open", "da5871807db650e413bd6ca136175aa4e129ff3f", "dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47", "Eysn0130/analytix", "build(deps): bump the gomod-minor-patch group across 1 directory with 2 updates", "2026-10-23T01:53:18Z", "2026-10-23T22:48:14Z", [], "E"],
+          [77, "dependabot[bot]", false, "open", "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", "dependabot/pip/scripts/pillow-13.0.0", "Eysn0130/analytix", "build(deps): bump pillow from 12.3.0 to 13.0.0 in /scripts", "2026-10-20T22:51:57Z", "2026-10-24T07:00:05Z", [], "Pillow"],
+          [70, "Eysn0130", true, "open", "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3", "codex/excel-preview-polish", "Eysn0130/analytix", "Polish Excel preview chrome and native status feedback", "2026-10-20T07:50:46Z", "2026-10-20T07:58:47Z", [], "frozen"],
+          [57, "dependabot[bot]", false, "open", "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "dependabot/cargo/tools/data_engine/rustls-0.23.46", "Eysn0130/analytix", "chore(deps): bump rustls from 0.23.41 to 0.23.46 in /tools/data_engine", "2026-10-18T19:22:56Z", "2026-10-18T19:23:00Z", [], "platform_security"],
+          [51, "Eysn0130", true, "open", "2ab4de9c58b81a82af51f0f525d64320a7486a31", "codex/tool-result-local-snapshots", "Eysn0130/analytix", "Add protected local settled Shell and Read results", "2026-10-06T03:25:26Z", "2026-10-06T04:34:55Z", [], "frozen"],
+          [34, "dependabot[bot]", false, "open", "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", "dependabot/npm_and_yarn/electron-41.10.6", "Eysn0130/analytix", "build(deps-dev): bump electron from 41.10.3 to 42.11.16", "2026-09-29T21:22:35Z", "2026-10-24T12:25:35Z", [], "platform_security"],
+          [31, "dependabot[bot]", false, "open", "0ac9267c634927e172be535370ab15843007e715", "dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18", "Eysn0130/analytix", "build(deps): bump quinn-proto from 0.11.14 to 0.11.18 in /tools/analysis_compute", "2026-09-18T18:30:46Z", "2026-09-18T18:30:47Z", [], "quinn_reserved"],
+          [29, "dependabot[bot]", false, "open", "b35306029b571f090244bb0f26b0f50525a6222f", "dependabot/cargo/tools/analysis_compute/tar-0.4.46", "Eysn0130/analytix", "build(deps): bump tar from 0.4.45 to 0.4.46 in /tools/analysis_compute", "2026-09-18T18:30:37Z", "2026-09-18T18:30:38Z", [], "G_other"],
+          [15, "dependabot[bot]", false, "open", "f11600dd5b425c1292e16f635dfdf130d18f4fae", "dependabot/uv/backend/pytest-9.1.1", "Eysn0130/analytix", "Bump pytest from 8.4.2 to 9.1.1 in /backend", "2026-09-11T19:47:18Z", "2026-10-23T15:09:56Z", [], "H"],
+          [12, "dependabot[bot]", false, "open", "1cf3583b40fe4362ad786888ad500c17d24b94c3", "dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0", "Eysn0130/analytix", "Bump icu_locale_core from 2.2.0 to 2.3.0 in /tools/analysis_compute", "2026-09-11T19:47:01Z", "2026-09-11T19:47:02Z", [], "G_other"],
+          [11, "dependabot[bot]", false, "open", "e1b8aad04611129727535b2e209b38d53d7cba02", "dependabot/npm_and_yarn/multi-2c38914542", "Eysn0130/analytix", "build(deps): bump react-dom and @types/react-dom", "2026-09-11T17:43:27Z", "2026-10-20T22:51:40Z", [], "G_other"],
+          [7, "dependabot[bot]", false, "open", "cf368d0e088e49afb8f0ea9b314f95015047aeda", "dependabot/github_actions/actions/checkout-7.0.1", "Eysn0130/analytix", "build(deps): bump actions/checkout from 4.4.0 to 7.0.1", "2026-09-11T17:39:42Z", "2026-10-18T19:22:56Z", [], "H"],
+          [4, "dependabot[bot]", false, "open", "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "dependabot/github_actions/actions/setup-python-7.0.0", "Eysn0130/analytix", "build(deps): bump actions/setup-python from 5.6.0 to 7.0.0", "2026-09-11T17:39:33Z", "2026-10-18T19:22:55Z", [], "H"],
+          [2, "dependabot[bot]", false, "open", "946bb377ae3392408bec05474c4f0c67c45550f1", "dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17", "Eysn0130/analytix", "Bump quinn-proto from 0.11.14 to 0.11.17 in /tools/cleaning_ops", "2026-09-11T17:20:02Z", "2026-09-11T17:20:02Z", [], "quinn_reserved"],
+          [1, "dependabot[bot]", false, "open", "027ab53ab470b6c0a545939eecd7000110c40eeb", "dependabot/cargo/tools/cleaning_ops/tar-0.4.46", "Eysn0130/analytix", "Bump tar from 0.4.45 to 0.4.46 in /tools/cleaning_ops", "2026-09-11T17:19:57Z", "2026-09-11T17:19:58Z", [], "G_other"]
+        ]
+      },
+      "open_count": 24,
+      "open_categories": {
+        "G_other": 6,
+        "Zod": 2,
+        "G_major_contract": 3,
+        "H": 5,
+        "E": 1,
+        "Pillow": 1,
+        "frozen": 2,
+        "platform_security": 2,
+        "quinn_reserved": 2
+      },
+      "branches": {
+        "count": 99,
+        "columns": ["name", "tip", "class", "current_open_prs", "historical_direct_prs", "ahead", "behind"],
+        "rows": [
+          ["codex/account-flow-fidelity", "b5d280dbe7c159fb7924203ee0b2dbbbf6771dd6", "tip_in_main_retain_until_cleanup_approval", [], [38], 0, 220],
+          ["codex/analytix-ui-refresh-20260917", "dde784437dc8563e84066629dd57f4a11fd9acc9", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 482],
+          ["codex/chat-functional-closure", "306190867d77c9454ba69af620eb835bb57d6554", "tip_in_main_retain_until_cleanup_approval", [], [50], 0, 170],
+          ["codex/chat-presentation-completion", "04a8291cac3c32a759fab3bec42255b288953d89", "tip_in_main_retain_until_cleanup_approval", [], [69], 0, 81],
+          ["codex/chat-ui", "045ec838e0a19b4394102857b83b6c4e8e14b5fd", "tip_in_main_retain_until_cleanup_approval", [], [41], 0, 199],
+          ["codex/ci-runtime-scheduling", "09299c79d8f7b529b24bcda59ee88c474fe5bc57", "tip_in_main_retain_until_cleanup_approval", [], [49], 0, 179],
+          ["codex/context-sample-truth", "f052e0f97a06a524bfd0a97a6722d4e9fe87ebd7", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 143],
+          ["codex/dependabot-minor-patch-groups", "3596b0faed06a473d01ef0237b746df7c950816d", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 40],
+          ["codex/development-pr-baseline", "4fde8f8febc4b8fcd7c9c98dc6f97d0cdf8df07e", "tip_in_main_retain_until_cleanup_approval", [], [22], 0, 574],
+          ["codex/docs-currentness-cleanup", "0abfc68cbddf152bb17104241036ee0f6d2affa2", "tip_in_main_retain_until_cleanup_approval", [], [68], 0, 84],
+          ["codex/dsh-chat-presentation", "bbae1caae98e60a8ebebd10907529b784dd9d395", "tip_in_main_retain_until_cleanup_approval", [], [47], 0, 181],
+          ["codex/dsh-composer-family", "e77c86854af0bb99ee475ece285f7f76d1987bd1", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 95],
+          ["codex/dsh-main-delivery-20261018", "ef872f01756ca05f1fb6b2f2d453635fe6a3450b", "tip_in_main_retain_until_cleanup_approval", [], [56], 0, 153],
+          ["codex/dsh-mention-menu", "96d4955a9cb5c168bc6a53994fc00c86ce90b12c", "tip_in_main_retain_until_cleanup_approval", [], [67], 0, 86],
+          ["codex/dsh-recursive-tool-calls", "423e84b38f9a628eec3fc1e3e338e5d4d243c588", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 141],
+          ["codex/excel-direct-editing", "eb1a556dc3009a86a30cee36cb4401d20d85549e", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 139],
+          ["codex/excel-native-save", "c71ca5d4d78b69e3246fe70412fa5bbb3726b209", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 92],
+          ["codex/excel-preview-polish", "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3", "frozen_registered_PR_disposition_pending", [70], [70], 2, 85],
+          ["codex/finite-replay-archive-reuse", "af74a35b9165590c8f1e63f1ae858b7f83bdb9c9", "unproven_preserve", [], [], null, null],
+          ["codex/finite-replay-validation-cancel", "0231104b9f2ed00b65fe4822f365cd7251cc1dbc", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 113],
+          ["codex/fork-legacy-owner-barrier", "89187f0b3039684a00fe42bf0406e390a3465a57", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 111],
+          ["codex/governance-buffer-assertions", "60bc9903dfcd6cbd7803c5e8f1b6b181b8254015", "tip_in_main_retain_until_cleanup_approval", [], [72], 0, 73],
+          ["codex/governance-closeout-ledger", "e60c8a5ad33379d9e846f90fd6f8458db1e7866b", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 36],
+          ["codex/governance-conformance-meta", "e0c283e05b69585c74c9917b35bc0986ec55491c", "tip_in_main_retain_until_cleanup_approval", [], [81], 0, 58],
+          ["codex/governance-entry-audit", "97cf4ff57958e6c1124cee2cad8d1474a06b2382", "tip_in_main_retain_until_cleanup_approval", [], [71], 0, 75],
+          ["codex/governance-funds-shipping-references", "112bb4a0a477563a86d5f89f0c2d4d3d49905137", "tip_in_main_retain_until_cleanup_approval", [], [82], 0, 54],
+          ["codex/governance-git-guidance-owner", "7add34b21250e2129fd1973dbc79ebb464d94e21", "tip_in_main_retain_until_cleanup_approval", [], [83], 0, 51],
+          ["codex/governance-maintenance-d123", "98f1e40255815b37ba1c980c5bf61761ad449a11", "tip_in_main_retain_until_cleanup_approval", [], [43], 0, 196],
+          ["codex/governance-retire-controlled-v1", "a7b1f1a45a23f9e47b8cd60709bea79207cf41d3", "tip_in_main_retain_until_cleanup_approval", [], [80], 0, 60],
+          ["codex/governance-runtime-guides", "1ade7d066f0d7acdcaeaf6c8c1b589fd80f6b2fe", "tip_in_main_retain_until_cleanup_approval", [], [74], 0, 63],
+          ["codex/history-replay-start-diagnostics", "2d6d326b759f19353d627bf9704a8f607a5cc3a1", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 143],
+          ["codex/native-office-quit-lifecycle", "25ddfec93a998347f51bdee4b739d0aa35268b36", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 88],
+          ["codex/owner-product-delivery-20260913", "174887e8c0103cd02b5b1c1dd3e4f004efab9108", "tip_in_main_retain_until_cleanup_approval", [], [23], 0, 564],
+          ["codex/owner-workspace-fixture-closure-20260913", "bd00267f7c56d5577a66cbe7587d9d4789a69b17", "tip_in_main_retain_until_cleanup_approval", [], [24], 0, 560],
+          ["codex/product-combination-validation", "25ddfec93a998347f51bdee4b739d0aa35268b36", "tip_in_main_retain_until_cleanup_approval", [], [66], 0, 88],
+          ["codex/provider-registry-typed-errors-20260914", "92fb189c36cea6a3e56248856182a6b45b24de1d", "tip_in_main_retain_until_cleanup_approval", [], [26], 0, 555],
+          ["codex/question-answer-handoff", "2ccbf335cfb5e9c8f04778dfb2dd1925ab3e81b4", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 109],
+          ["codex/question-reply-body-collector", "e4101a8a69984f35323446fc78afbe2e08957ca5", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 116],
+          ["codex/repository-governance", "59e944ca8603ea8cfde6769fd4bed14219f7b958", "tip_in_main_retain_until_cleanup_approval", [], [40], 0, 216],
+          ["codex/repository-maintenance-20261018", "e664f9ea03d3a7da6f671408763b667ef025c14b", "historical_patch_equivalent_same_tip_retain", [], [], null, null],
+          ["codex/retire-pre-analytix-docs-20261019", "830dae8145612c7ed0eda225643a4eca7fe43e1f", "tip_in_main_retain_until_cleanup_approval", [], [65], 0, 143],
+          ["codex/retire-unused-quality-20261018", "db3a73f883448e2ff370d02c3900839390510ba3", "historical_patch_equivalent_same_tip_retain", [], [], null, null],
+          ["codex/security-backend-ab-clean", "2141a09e730c4e20bfffcd15d325eccee831e988", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 1],
+          ["codex/security-backend-pypdf-6-21-2", "c205c99c3876add905294322ec07b011cb4593ba", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 28],
+          ["codex/security-hono-patch", "81b139f569de0915d77624d848ad97dd1ce30c89", "tip_in_main_retain_until_cleanup_approval", [], [75], 0, 68],
+          ["codex/security-ip-address-dual-tree", "d497a1483e78c7a778f36ab107eac18960021f8e", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 13],
+          ["codex/security-katex-complete", "9cf5498d3b7816030024866676f793cf14993dec", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 7],
+          ["codex/security-mcp-transports", "5220c53abae10dd4a4dd513a66512f092d18ac01", "tip_in_main_retain_until_cleanup_approval", [], [79], 0, 66],
+          ["codex/security-patch-package-contract", "54548e592436e0d0f03deca9919d78e75978bcfc", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 4],
+          ["codex/security-proxy-addr-patch", "7ae8b300c75f573338fd8ec0786c984333a5c440", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 32],
+          ["codex/security-runtime-source-map-js-1-2-2", "4a191f67db6014cefd2bb6e7c59546130707a3d8", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 10],
+          ["codex/security-selector-parser-patch", "21265d31228c5d24e47238cea7dfc4cced5e10bc", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 21],
+          ["codex/security-windows-ab-combined", "84ec6518dc4f3655f27a232024bd60dde61b9957", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 16],
+          ["codex/settings-focus-restoration", "b30a43349a50b79252f8d27c736b8ac410dee4ca", "tip_in_main_retain_until_cleanup_approval", [], [64], 0, 145],
+          ["codex/settings-main-integration-20261018", "d3d8d1b87ed0f72b2df73e187a8c08430d95324f", "tip_in_main_retain_until_cleanup_approval", [], [63], 0, 147],
+          ["codex/settings-reference-modal-20261018", "e33a3632fa1d09da1804deb51e293b8eb9635abe", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 154],
+          ["codex/shared-regression-source-row", "a11df9c1511defcf647d711c32c7bfe8c8d5ba14", "tip_in_main_retain_until_cleanup_approval", [], [37], 0, 227],
+          ["codex/source-file-size-guard", "51c13fa6dadb04e5a5040b19f94c5cbde7d49879", "tip_in_main_retain_until_cleanup_approval", [], [84], 0, 48],
+          ["codex/stats-page-total", "f0b16f93655bd3c8ac6e61235f82159672286e51", "tip_in_main_retain_until_cleanup_approval", [], [39], 0, 218],
+          ["codex/terminal-markdown-accessibility", "7936f20b20f7b111add84d10bd649c5fbe74be0e", "tip_in_main_retain_until_cleanup_approval", [], [44], 0, 193],
+          ["codex/tool-result-local-snapshots", "2ab4de9c58b81a82af51f0f525d64320a7486a31", "frozen_registered_PR_disposition_pending", [51], [51], 2, 169],
+          ["codex/trajectory-duration-preference", "f4f06fa89e979dd50861581ac572035c427afe09", "tip_in_main_retain_until_cleanup_approval", [], [73], 0, 70],
+          ["codex/ui-interaction-audit", "3fe27c071c4557358e7ba2ef00b067bbca45fee6", "tip_in_main_retain_until_cleanup_approval", [], [46], 0, 184],
+          ["codex/ui-official-icons", "4a352d02575453392104b411adc12cae30a53beb", "tip_in_main_retain_until_cleanup_approval", [], [45], 0, 188],
+          ["codex/unified-workbench-s0-20260914", "f9a95e0aae88379ff324240d0b0d095b20dc0d07", "tip_in_main_retain_until_cleanup_approval", [], [25], 0, 558],
+          ["codex/unified-workbench-s1-20260914", "e7fe89abe164ce587ea22af6f477b4ce72a14c12", "tip_in_main_retain_until_cleanup_approval", [], [27], 0, 544],
+          ["codex/unified-workspace-viewer", "7ea81cfd4377b8bdbd6c9cb71da96afd7abdae28", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 106],
+          ["codex/unused-findings-ratchet", "065b23bcb79062d2219eeb8e23df63a1a4b878e1", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 42],
+          ["codex/windows-anyio-freeze", "0ea57530f991d4b662d5f3a31e64be188b7b9215", "tip_in_main_retain_until_cleanup_approval", [], [42], 0, 214],
+          ["codex/windows-candidate-requirements-input", "90e986b2b191fe9081ffc4b63364b4c796a99636", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 24],
+          ["codex/windows-lxml-native-contract", "091c45442de46312fb60c97d0e6390100621cb69", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 18],
+          ["codex/wip-terminal-workspace", "a96ac8108d17eeda8f1cdc742b87a8ea96bb670a", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 141],
+          ["codex/word-editing-closure", "a90352fda8ae34bd71293c1d37e5bab66536f6de", "tip_in_main_retain_until_cleanup_approval", [], [], 0, 142],
+          ["codex/workbench-product-delivery-20260914", "5712d37be3ee2b20179432f523521d52e8a9408e", "tip_in_main_retain_until_cleanup_approval", [], [28], 0, 232],
+          ["dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0", "1cf3583b40fe4362ad786888ad500c17d24b94c3", "open_PR_in_flight_or_decision", [12], [12], 1, 634],
+          ["dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18", "0ac9267c634927e172be535370ab15843007e715", "open_PR_in_flight_or_decision", [31], [31], 1, 554],
+          ["dependabot/cargo/tools/analysis_compute/tar-0.4.46", "b35306029b571f090244bb0f26b0f50525a6222f", "open_PR_in_flight_or_decision", [29], [29], 1, 554],
+          ["dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17", "946bb377ae3392408bec05474c4f0c67c45550f1", "open_PR_in_flight_or_decision", [2], [2], 1, 638],
+          ["dependabot/cargo/tools/cleaning_ops/tar-0.4.46", "027ab53ab470b6c0a545939eecd7000110c40eeb", "open_PR_in_flight_or_decision", [1], [1], 1, 638],
+          ["dependabot/cargo/tools/data_engine/rustls-0.23.46", "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "open_PR_in_flight_or_decision", [57], [57], null, null],
+          ["dependabot/github_actions/actions/checkout-7.0.1", "cf368d0e088e49afb8f0ea9b314f95015047aeda", "open_PR_in_flight_or_decision", [7], [7], null, null],
+          ["dependabot/github_actions/actions/setup-python-7.0.0", "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "open_PR_in_flight_or_decision", [4], [4], null, null],
+          ["dependabot/github_actions/actions/upload-artifact-7.0.2", "1a224b640d5750a99932feaa4be656bd7c1dd433", "open_PR_in_flight_or_decision", [90], [], null, null],
+          ["dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47", "da5871807db650e413bd6ca136175aa4e129ff3f", "open_PR_in_flight_or_decision", [89], [], null, null],
+          ["dependabot/npm_and_yarn/electron-41.10.6", "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", "open_PR_in_flight_or_decision", [34], [34], null, null],
+          ["dependabot/npm_and_yarn/ip-address-10.7.2", "d3c1fc74af37ac2ffa44180fe257c79ddc22f639", "unproven_preserve", [], [33], null, null],
+          ["dependabot/npm_and_yarn/katex-0.18.2", "0f7fb08d81d563ad9f7daf23c80ac7dc38b90e66", "unproven_preserve", [], [59], null, null],
+          ["dependabot/npm_and_yarn/multi-2c38914542", "e1b8aad04611129727535b2e209b38d53d7cba02", "open_PR_in_flight_or_decision", [11], [11], null, null],
+          ["dependabot/npm_and_yarn/npm_and_yarn-823d526490", "f699f8f660ef2429d2a106d970de3710985cb93b", "open_PR_in_flight_or_decision", [93], [], null, null],
+          ["dependabot/npm_and_yarn/npm_and_yarn-89976db822", "699c4c8f02adc5ed1840cb4d899ff13caf6485b3", "open_PR_in_flight_or_decision", [97], [], null, null],
+          ["dependabot/npm_and_yarn/npm_and_yarn-b94f287d41", "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53", "open_PR_in_flight_or_decision", [98], [], null, null],
+          ["dependabot/npm_and_yarn/packages/runtime/zod-4.6.6", "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3", "open_PR_in_flight_or_decision", [108], [], null, null],
+          ["dependabot/pip/scripts/pillow-13.0.0", "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", "open_PR_in_flight_or_decision", [77], [77], null, null],
+          ["dependabot/pip/scripts/pip-minor-patch-8d12d4c10b", "4882a9cc33392e295aefd17284c0645c1f4e5cf1", "open_PR_in_flight_or_decision", [110], [], null, null],
+          ["dependabot/pip/scripts/websockets-17.3", "f64678911e7da5a09ef6e849c83c43036f9d99d2", "open_PR_in_flight_or_decision", [95], [], null, null],
+          ["dependabot/uv/backend/pytest-9.1.1", "f11600dd5b425c1292e16f635dfdf130d18f4fae", "open_PR_in_flight_or_decision", [15], [15], 1, 634],
+          ["dependabot/uv/backend/sqlglot-30.23.0", "a6682fcb98e266e0ca43130eeba447b62b0f1327", "open_PR_in_flight_or_decision", [92], [], null, null],
+          ["dependabot/uv/backend/uv-minor-patch-cbb656aa63", "ad609e6a9a06de9c215c39d7747b88531a1bd262", "open_PR_in_flight_or_decision", [102], [], 2, 20],
+          ["main", "742b6ccfb6d6819287e18dcf825f723ce705a0ab", "main", [], [], 0, 0]
+        ],
+        "class_counts": {
+          "tip_in_main_retain_until_cleanup_approval": 69,
+          "frozen_registered_PR_disposition_pending": 2,
+          "unproven_preserve": 3,
+          "historical_patch_equivalent_same_tip_retain": 2,
+          "open_PR_in_flight_or_decision": 22,
+          "main": 1
+        },
+        "method": "Gitgraphonlyfromexistinglocalobjects;nullahead/behindmeansunavailable,notzero;nobranchfetch/delete. Eonlyifsamehistoricallyprovedtipand2cisancestorofcurrentmain.",
+        "new_names_since_fixed2c": [
+          "codex/dependabot-minor-patch-groups",
+          "codex/governance-closeout-ledger",
+          "codex/security-backend-ab-clean",
+          "codex/security-backend-pypdf-6-21-2",
+          "codex/security-ip-address-dual-tree",
+          "codex/security-katex-complete",
+          "codex/security-patch-package-contract",
+          "codex/security-proxy-addr-patch",
+          "codex/security-runtime-source-map-js-1-2-2",
+          "codex/security-selector-parser-patch",
+          "codex/security-windows-ab-combined",
+          "codex/unused-findings-ratchet",
+          "codex/windows-candidate-requirements-input",
+          "codex/windows-lxml-native-contract",
+          "dependabot/github_actions/actions/upload-artifact-7.0.2",
+          "dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47",
+          "dependabot/npm_and_yarn/npm_and_yarn-823d526490",
+          "dependabot/npm_and_yarn/npm_and_yarn-89976db822",
+          "dependabot/npm_and_yarn/npm_and_yarn-b94f287d41",
+          "dependabot/npm_and_yarn/packages/runtime/zod-4.6.6",
+          "dependabot/pip/scripts/pip-minor-patch-8d12d4c10b",
+          "dependabot/pip/scripts/websockets-17.3",
+          "dependabot/uv/backend/sqlglot-30.23.0",
+          "dependabot/uv/backend/uv-minor-patch-cbb656aa63"
+        ],
+        "missing_names_since_fixed2c": [
+          "dependabot/github_actions/actions/upload-artifact-7.0.1",
+          "dependabot/go_modules/packages/runtime-go/golang.org/x/sys-0.49.0",
+          "dependabot/go_modules/packages/runtime-go/golang.org/x/text-0.43.0",
+          "dependabot/npm_and_yarn/development-tools-345b777bd7",
+          "dependabot/npm_and_yarn/multi-319a4b26c4",
+          "dependabot/npm_and_yarn/multi-d49ef80a9c",
+          "dependabot/npm_and_yarn/packages/runtime/proxy-addr-2.0.8",
+          "dependabot/npm_and_yarn/packages/runtime/source-map-js-1.2.2",
+          "dependabot/npm_and_yarn/packages/runtime/zod-4.5.4",
+          "dependabot/npm_and_yarn/tencent-weixin/openclaw-weixin-2.4.8",
+          "dependabot/npm_and_yarn/zod-4.5.4",
+          "dependabot/pip/scripts/certifi-2026.10.19",
+          "dependabot/pip/scripts/lxml-6.1.3",
+          "dependabot/pip/scripts/pandas-3.0.5",
+          "dependabot/pip/scripts/pypdf-6.19.0",
+          "dependabot/pip/scripts/urllib3-2.8.0",
+          "dependabot/pip/scripts/websockets-17.1",
+          "dependabot/uv/backend/duckdb-1.5.5",
+          "dependabot/uv/backend/sqlglot-30.18.0"
+        ]
+      },
+      "auto_merge": false,
+      "security_settings": "Notread/retriedthroughrefusedroutes;user-suppliedevidencepending",
+      "open_delta": {
+        "initial": 36,
+        "current": 24,
+        "removed_from_initial": [33, 36, 58, 59, 60, 76, 86, 94, 103, 104, 105, 106, 107],
+        "new_open": [110],
+        "new_created_and_merged": [109, 111],
+        "explanation": "5initialownedPRsmerged;4oldPRsclosedafterreplacement;36/76/86/94alreadyclosedbeforefinalmapping;110newopen. Actualstate,notclaimallclosedtargetsfullydisposed."
+      },
+      "extra_closed_records": [
+        {
+          "pr": 86,
+          "state": "closed",
+          "merged": false,
+          "head": "b0412173ecaeb908483eb2c7e1e68ca460225629",
+          "closed_at": "2026-10-24T06:59:58Z",
+          "bot_comments": [
+            {
+              "id": 6381191726,
+              "created_at": null,
+              "actor": "dependabot[bot]",
+              "body": "Looks like pypdf is up-to-date now, so this is no longer needed."
+            }
+          ]
+        },
+        {
+          "pr": 94,
+          "state": "closed",
+          "merged": false,
+          "head": "a74017cc232bd08dc78c98d2d9619697d164bcb6",
+          "closed_at": "2026-10-24T07:01:19Z",
+          "bot_comments": [
+            {
+              "id": 6381205128,
+              "created_at": null,
+              "actor": "dependabot[bot]",
+              "body": "Looks like these dependencies are updatable in another way, so this is no longer needed."
+            }
+          ]
+        }
+      ]
+    },
+    "main_ci_links_after_package": {
+      "source_main": "742b6ccfb6d6819287e18dcf825f723ce705a0ab",
+      "development": "https://github.com/Eysn0130/analytix/actions/runs/40116779792",
+      "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40116779362",
+      "note": "Immutablepublicrunlinks;subsequentterminalstatesbelongtothepublicrunrecord/finaldeliveryreceipt,notapredictioninthissnapshot."
+    },
+    "tracked_count_context": {
+      "fixed2c": 7356,
+      "initial1dd": 7362,
+      "dependency_package": 7363,
+      "six_pre_cycle_additions": [
+        "docs/analytix/governance-closeout.json",
+        "docs/analytix/qa/unused-scan-2c549464.json",
+        "scripts/unused-findings-baseline.json",
+        "scripts/unused-findings-gate.mjs",
+        "scripts/unused-findings-gate.test.mjs",
+        "src/main/windows-backend-candidate.test.ts"
+      ],
+      "this_package_new_file": "scripts/windows-lxml-native-probe.py220LF",
+      "method": "Gitls-treecountsandGitdiff--diff-filter=A;currenttargetnumbersarenotsame-timeasfixed2c"
+    },
+    "G110_new_candidate": {
+      "head": "4882a9cc33392e295aefd17284c0645c1f4e5cf1",
+      "title": "pipminorpatch22updates",
+      "actual_write_set": "Onlyscripts/windows-backend-requirements.lock.txt22+/22-;45LF;noaggregateJSONupdate",
+      "observed": "FouracceptedsecuritypinsandPillow12.3remain;manyhashesexpandedtomultipleplatformartifacts. NotanacceptedWindowsfrozenruntimecandidate.",
+      "disposition": "Gdecisionmaterial;missingfinalaggregateandnative/contractverification. NoclaimCIactuallyfailedhere;notautomaticallymergedunderF. Closed94doesnotproveits26updatesfullyaccepted.",
+      "source": "PublicPR110completefilesresponse,notpackageacquisition"
+    },
+    "record_scope": "Thisisadatedpackageledgerthrough742b6cc;documentationpublicationisaseparatefocusedchange. Itisnotaliveinventoryoragovernanceacceptance/unfreezeclaim.",
+    "publication_note": "Only final reviewed blobs will be delivered on a fresh short branch; intermediate local formatting/checkpoint commits remain private recovery history. No force/amend/reset. Canonical user changes untouched."
   }
 }
