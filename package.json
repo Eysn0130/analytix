@@ -149,7 +149,7 @@
     "i18next": "^25.4.2",
     "jimp": "^1.6.1",
     "jszip": "3.10.1",
-    "katex": "0.16.46",
+    "katex": "0.18.2",
     "lazy-val": "file:packages/updater-lazy",
     "lottie-web": "^5.13.0",
     "lucide-react": "^0.544.0",
@@ -219,6 +219,9 @@
     "@tiptap/extension-floating-menu": "3.30.5",
     "fast-uri": "3.1.6",
     "js-yaml": "4.3.2",
+    "micromark-extension-math": {
+      "katex": "$katex"
+    },
     "tailwindcss": {
       "postcss-selector-parser": "7.1.6"
     },
