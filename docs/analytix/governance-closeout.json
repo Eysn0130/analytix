@@ -2458,7 +2458,7 @@
       [51, "codex/tool-result-local-snapshots", "2ab4de9c58b81a82af51f0f525d64320a7486a31", "closed unmerged; retained frozen exact branch"]
     ],
     "branch_cleanup": {
-      "method": "Complete paginated100 refs; git merge-base --is-ancestor tip17e with recorded exit0. Delete only exact current refs whose tip is included. No private/archive history published; no force/ref rewrites.",
+      "method": "Complete paginated100 refs; git merge-base --is-ancestor tip17e with recorded exit0. Delete only exact current refs whose tip is included. No private/archive history published; no force/ref rewrites. Records preserve initial100ref identities/associations;39deleted+31held are cleanup decisions,not a finalinventory. Laterexternal_ref_delta anddatedsnapshots supersedeinitialkeep_open associations.",
       "recorded_before_deletion_utc": "2026-10-25T08:40:12.001179+00:00",
       "recovery": "Each delete_included commit remains an ancestor of retained main17e; restore exact ref from recorded SHA through normal git push SHA:refs/heads/name if needed. No independent commit becomes unreachable from retained main.",
       "columns": ["ref", "tip_sha", "related_prs", "current_disposition", "containment_exit", "retained_recovery_main"],
@@ -2620,7 +2620,7 @@
     "verification": {
       "baseline_mutated": false,
       "product_source_changed": false,
-      "local_docs": "JSONold20fieldsunchanged; all1927lookupkeys/1933counts boundonce;39deletionproofs+freeze refs+19dispositions+B21questions;diff/pathcheck0;independentreviewblockingresolved",
+      "local_docs": "JSONold20fieldsunchanged; all1927lookupkeys/1933counts boundonce;39deletionproofs+freeze refs+19dispositions+B21questions;diff/pathcheck0;independentreviewblockingresolved; parent fixedhead baselineAPI returned400too-large/unsupported and wasnotretried/redirected. Parentdidnotindependentlyrecompute entirelargebaseline; root/existingauthorizedlocalreadonly evidence suppliesfullkey/hash/countverification.",
       "PR11_final_ci": "complete58checks/52jobs",
       "final_publication_ci": "pending newPR/currenthead",
       "final_snapshot": "pending afterpublication; datedprepublication snapshot only"
@@ -2647,7 +2647,7 @@
       ["codex/word-editing-closure", "a90352fda8ae34bd71293c1d37e5bab66536f6de", "I", "retain: included but outside original39 deletion scope after auto-review rejection"]
     ],
     "unused_review_deferrals": {
-      "kind": "read-only finding review-deferral register; not lint suppressions or gate exemptions",
+      "kind": "逐项绑定分类的延期复核登记；不是1927项都已完成初始化/导入副作用/消费者语义审查，不是正式安全豁免，不关闭lint或gate",
       "source_sha": "17e2dd28f8bffe749ea04b80ab22409abff3129c",
       "created_at_utc": "2026-10-25T08:40:37.000664+00:00",
       "baseline_path": "scripts/unused-findings-baseline.json",
@@ -3490,12 +3490,12 @@
             "pr_url": "https://github.com/Eysn0130/analytix/pull/12",
             "source_paths": ["tools/analysis_compute/Cargo.lock"],
             "primary_urls": [],
-            "source_path_status": "当前收到的F审阅回执未给出Cargo.lock完整路径；不猜目录，root从其原始F回执补入。PR URL及head确知。",
+            "source_path_status": "已由既有Git对象独立核实完整路径tools/analysis_compute/Cargo.lock；该PR仅此文件，26+/15−。未核实的是当前完整兼容性及历史CI失败原因，不是文件路径。",
             "verified_path_method": "git show --format= --name-only1cf3583b; onlythispath;26+/15- vs58b365b"
           },
           "recommendation": "转B；原CI有cargo步骤失败且原因未取，不称全绿。可约束更小兼容闭包或明确接受proc-macro major。",
           "decision_question": "是否接受含proc-macro major的ICU闭包迁移，或先约束更小兼容闭包？",
-          "limits": ["详细源码/CI判据由root/f_candidates_review_20261025独立只读审阅提供，本子任务未重跑。"],
+          "limits": ["独立只读F审阅已核完整锁差异和真实消费者；未重跑测试，历史失败原因未取。"],
           "owner": "Eysn / governance coordinator",
           "review_by_utc": "2026-11-01T00:00:00Z",
           "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
@@ -3602,7 +3602,7 @@
     "security_channels_current": "未完成：安全开关与alert linkage仍待用户截图；不重试已拒API、不以publicrepo/auto_mergefalse/pushbanner推断开启或漏洞销项。三项旧botjobfailurecause仍未知，拒绝详情边界保留。",
     "closeout_criteria": [
       ["stock_PRs", "partial", "51/70closedfrozen;11merged22edwith58checks;remaining21B needdecisions,notpreacceptedexceptions."],
-      ["unused_ratchet", "enforced_pending_finalhead_evidence", "ActualPR11gate2342files/1927identities/1933occurrences/8guards,exit0;allreview-deferralsregistered;cleanupnotimplemented pendingtrim-only decision. Finalmainrepeat remainsrequired."],
+      ["unused_ratchet", "partial_enforcement_pass_review_cleanup_incomplete", "ActualPR11gate2342files/1927identities/1933occurrences/8guards exit0. 分类延期登记不等于逐项初始化/导入副作用/消费者语义审查或正式安全豁免；安全清理及完整语义审阅未完成。6importproposals notapplied;trim-onlydecision pending;finalmain gate stillrequired."],
       ["dependency_maintenance", "partial", "Weekly6ecologygroups deployedpreviously;securitysettings/alert linkage unverified;Bmajor/toolcontracts undecided."],
       ["largefiles", "recorded_not_mechanically_split", "Historical74withsourceclassifications retained;currentnarrow74unchanged;notallarehandwrittenproduction."],
       ["branches", "partial", "39originalMdeleted/recoverable;19nodirectPRretained;31expandedrefsheldafterdenial;newinflightrefsrecordbeforepublication."],
