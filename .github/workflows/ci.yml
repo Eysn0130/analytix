@@ -298,6 +298,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.26.4'
@@ -305,6 +306,31 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
+      - name: Verify the selected Go module tuple and immutable checksum inputs
+        working-directory: packages/runtime-go
+        run: |
+          umask 077
+          base="$RUNNER_TEMP/analytix-go-module-base"
+          mkdir -m 700 "$base"
+          git show 4084b7aba1058dac480633faa59223d21edaa8c5:packages/runtime-go/go.mod > "$base/go.mod"
+          git show 4084b7aba1058dac480633faa59223d21edaa8c5:packages/runtime-go/go.sum > "$base/go.sum"
+          (cd "$base" && go mod download && go list -m -f '{{.Path}} {{.Version}}' all) > "$RUNNER_TEMP/go-base-modules.txt"
+          go mod download
+          go mod verify
+          go list -mod=readonly -m -f '{{.Path}} {{.Version}}' all > "$RUNNER_TEMP/go-candidate-modules.txt"
+          git diff --exit-code -- go.mod go.sum
+          node --input-type=module - "$RUNNER_TEMP/go-base-modules.txt" "$RUNNER_TEMP/go-candidate-modules.txt" <<'NODE'
+          import fs from 'node:fs'
+          import assert from 'node:assert/strict'
+          const parse = file => new Map(fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(([name]) => name !== 'analytix.local/runtime-go'))
+          const before = parse(process.argv[2]), after = parse(process.argv[3])
+          const allowed = new Set(['golang.org/x/sys', 'golang.org/x/text'])
+          const changed = [...new Set([...before.keys(), ...after.keys()])].filter(name => before.get(name) !== after.get(name)).sort()
+          assert.deepEqual(changed.filter(name => !allowed.has(name)), [])
+          assert.equal(after.get('golang.org/x/sys'), 'v0.49.0')
+          assert.equal(after.get('golang.org/x/text'), 'v0.43.0')
+          console.log(JSON.stringify({status:'pass', baseline:'4084b7aba1058dac480633faa59223d21edaa8c5', selected:[...allowed].map(name=>[name,before.get(name),after.get(name)]), changed, modules:after.size, checksum_inputs:'unchanged', toolchain_scope:'CI only; no Mac version sampling'}))
+          NODE
       - name: Test all other Go packages with bounded concurrency
         working-directory: packages/runtime-go
         env:
