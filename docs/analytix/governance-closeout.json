@@ -2452,832 +2452,1299 @@
     "start_open_count": 24,
     "start_branch_count": 100,
     "scope": "A mechanical governance only; B decision packet; product/features/Privacy frozen",
-    "standing_delta": ["Explicitly approved reversible remote branch deletion only after recorded SHA, main containment and fresh ref recheck. Overrides earlier no-branch-deletion sentence only for this batch.", "Close51/70 without merging; preserve exact frozen branches and commits.", "Unused1927/1933 identity/count baseline unchanged. Finding-changing cleanup is proposal-only pending explicit trim-only decision. Review deferral is not lint suppression.", "Final CI must cover complete expected matrix and required gate in one effective exact-head validation chain; no success subsets or mixed attempts.", "No new Node/Electron changes or Mac node/go version sampling; B evidence only.", "All prior refusal, no-process-enumeration, no task-external reconnaissance, isolation/no-permission-change and public-text rules remain effective."],
+    "standing_delta": ["Deletion authority limited to original39M refs after exactSHA/main containment/recovery record;39 completed. Expanded70 request denied unexecuted;31 additionalincluded refs held and never split for retry. Any otherref requires precise newapproval; mainaccessibility alone does not authorize deletion.", "Close51/70 without merging; preserve exact frozen branches and commits.", "Unused1927/1933 identity/count baseline unchanged. Finding-changing cleanup is proposal-only pending explicit trim-only decision. Review deferral is not lint suppression.", "Final CI must cover complete expected matrix and required gate in one effective exact-head validation chain; no success subsets or mixed attempts.", "No new Node/Electron changes or Mac node/go version sampling; B evidence only.", "All prior refusal, no-process-enumeration, no task-external reconnaissance, isolation/no-permission-change and public-text rules remain effective."],
     "frozen_prs": [
-      [70, "codex/excel-preview-polish", "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3", "closure pending; preserve branch"],
-      [51, "codex/tool-result-local-snapshots", "2ab4de9c58b81a82af51f0f525d64320a7486a31", "closure pending; preserve branch"]
+      [70, "codex/excel-preview-polish", "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3", "closed unmerged; retained frozen exact branch"],
+      [51, "codex/tool-result-local-snapshots", "2ab4de9c58b81a82af51f0f525d64320a7486a31", "closed unmerged; retained frozen exact branch"]
     ],
     "branch_cleanup": {
       "method": "Complete paginated100 refs; git merge-base --is-ancestor tip17e with recorded exit0. Delete only exact current refs whose tip is included. No private/archive history published; no force/ref rewrites.",
       "recorded_before_deletion_utc": "2026-10-25T08:40:12.001179+00:00",
       "recovery": "Each delete_included commit remains an ancestor of retained main17e; restore exact ref from recorded SHA through normal git push SHA:refs/heads/name if needed. No independent commit becomes unreachable from retained main.",
-      "columns": ["ref", "tip_sha", "related_prs", "classification", "containment_exit", "retained_recovery_main"],
+      "columns": ["ref", "tip_sha", "related_prs", "current_disposition", "containment_exit", "retained_recovery_main"],
       "records": [
-        [
-          "codex/account-flow-fidelity",
-          "b5d280dbe7c159fb7924203ee0b2dbbbf6771dd6",
-          [38],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/analytix-ui-refresh-20260917",
-          "dde784437dc8563e84066629dd57f4a11fd9acc9",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/chat-functional-closure",
-          "306190867d77c9454ba69af620eb835bb57d6554",
-          [50],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/chat-presentation-completion",
-          "04a8291cac3c32a759fab3bec42255b288953d89",
-          [69],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/chat-ui",
-          "045ec838e0a19b4394102857b83b6c4e8e14b5fd",
-          [41],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/ci-runtime-scheduling",
-          "09299c79d8f7b529b24bcda59ee88c474fe5bc57",
-          [49],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/context-sample-truth",
-          "f052e0f97a06a524bfd0a97a6722d4e9fe87ebd7",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/dependabot-minor-patch-groups",
-          "3596b0faed06a473d01ef0237b746df7c950816d",
-          [87],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/development-pr-baseline",
-          "4fde8f8febc4b8fcd7c9c98dc6f97d0cdf8df07e",
-          [22],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/docs-currentness-cleanup",
-          "0abfc68cbddf152bb17104241036ee0f6d2affa2",
-          [68],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/dsh-chat-presentation",
-          "bbae1caae98e60a8ebebd10907529b784dd9d395",
-          [47],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/dsh-composer-family",
-          "e77c86854af0bb99ee475ece285f7f76d1987bd1",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/dsh-main-delivery-20261018",
-          "ef872f01756ca05f1fb6b2f2d453635fe6a3450b",
-          [56],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/dsh-mention-menu",
-          "96d4955a9cb5c168bc6a53994fc00c86ce90b12c",
-          [67],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/dsh-recursive-tool-calls",
-          "423e84b38f9a628eec3fc1e3e338e5d4d243c588",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/excel-direct-editing",
-          "eb1a556dc3009a86a30cee36cb4401d20d85549e",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/excel-native-save",
-          "c71ca5d4d78b69e3246fe70412fa5bbb3726b209",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/excel-preview-polish",
-          "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3",
-          [70],
-          "keep_frozen",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/finite-replay-archive-reuse",
-          "af74a35b9165590c8f1e63f1ae858b7f83bdb9c9",
-          [],
-          "keep_unproven",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/finite-replay-validation-cancel",
-          "0231104b9f2ed00b65fe4822f365cd7251cc1dbc",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/fork-legacy-owner-barrier",
-          "89187f0b3039684a00fe42bf0406e390a3465a57",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-buffer-assertions",
-          "60bc9903dfcd6cbd7803c5e8f1b6b181b8254015",
-          [72],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-closeout-ledger",
-          "e60c8a5ad33379d9e846f90fd6f8458db1e7866b",
-          [88],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-conformance-meta",
-          "e0c283e05b69585c74c9917b35bc0986ec55491c",
-          [81],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-delivery-ledger-20261024",
-          "cafcfed60ee3aad85d8940f1a64b0f1285cd2980",
-          [112],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-entry-audit",
-          "97cf4ff57958e6c1124cee2cad8d1474a06b2382",
-          [71],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-funds-shipping-references",
-          "112bb4a0a477563a86d5f89f0c2d4d3d49905137",
-          [82],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-git-guidance-owner",
-          "7add34b21250e2129fd1973dbc79ebb464d94e21",
-          [83],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-maintenance-d123",
-          "98f1e40255815b37ba1c980c5bf61761ad449a11",
-          [43],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-retire-controlled-v1",
-          "a7b1f1a45a23f9e47b8cd60709bea79207cf41d3",
-          [80],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/governance-runtime-guides",
-          "1ade7d066f0d7acdcaeaf6c8c1b589fd80f6b2fe",
-          [74],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/history-replay-start-diagnostics",
-          "2d6d326b759f19353d627bf9704a8f607a5cc3a1",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/native-office-quit-lifecycle",
-          "25ddfec93a998347f51bdee4b739d0aa35268b36",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/owner-product-delivery-20260913",
-          "174887e8c0103cd02b5b1c1dd3e4f004efab9108",
-          [23],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/owner-workspace-fixture-closure-20260913",
-          "bd00267f7c56d5577a66cbe7587d9d4789a69b17",
-          [24],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/product-combination-validation",
-          "25ddfec93a998347f51bdee4b739d0aa35268b36",
-          [66],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/provider-registry-typed-errors-20260914",
-          "92fb189c36cea6a3e56248856182a6b45b24de1d",
-          [26],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/question-answer-handoff",
-          "2ccbf335cfb5e9c8f04778dfb2dd1925ab3e81b4",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/question-reply-body-collector",
-          "e4101a8a69984f35323446fc78afbe2e08957ca5",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/repository-governance",
-          "59e944ca8603ea8cfde6769fd4bed14219f7b958",
-          [40],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/repository-maintenance-20261018",
-          "e664f9ea03d3a7da6f671408763b667ef025c14b",
-          [],
-          "keep_unproven",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/retire-pre-analytix-docs-20261019",
-          "830dae8145612c7ed0eda225643a4eca7fe43e1f",
-          [65],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/retire-unused-quality-20261018",
-          "db3a73f883448e2ff370d02c3900839390510ba3",
-          [],
-          "keep_unproven",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-backend-ab-clean",
-          "2141a09e730c4e20bfffcd15d325eccee831e988",
-          [111],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-backend-pypdf-6-21-2",
-          "c205c99c3876add905294322ec07b011cb4593ba",
-          [99],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-hono-patch",
-          "81b139f569de0915d77624d848ad97dd1ce30c89",
-          [75],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-ip-address-dual-tree",
-          "d497a1483e78c7a778f36ab107eac18960021f8e",
-          [103],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-katex-complete",
-          "9cf5498d3b7816030024866676f793cf14993dec",
-          [107],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-mcp-transports",
-          "5220c53abae10dd4a4dd513a66512f092d18ac01",
-          [79],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-patch-package-contract",
-          "54548e592436e0d0f03deca9919d78e75978bcfc",
-          [106],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-proxy-addr-patch",
-          "7ae8b300c75f573338fd8ec0786c984333a5c440",
-          [96],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-runtime-source-map-js-1-2-2",
-          "4a191f67db6014cefd2bb6e7c59546130707a3d8",
-          [104],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-selector-parser-patch",
-          "21265d31228c5d24e47238cea7dfc4cced5e10bc",
-          [101],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/security-windows-ab-combined",
-          "84ec6518dc4f3655f27a232024bd60dde61b9957",
-          [109],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/settings-focus-restoration",
-          "b30a43349a50b79252f8d27c736b8ac410dee4ca",
-          [64],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/settings-main-integration-20261018",
-          "d3d8d1b87ed0f72b2df73e187a8c08430d95324f",
-          [63],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/settings-reference-modal-20261018",
-          "e33a3632fa1d09da1804deb51e293b8eb9635abe",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/shared-regression-source-row",
-          "a11df9c1511defcf647d711c32c7bfe8c8d5ba14",
-          [37],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/source-file-size-guard",
-          "51c13fa6dadb04e5a5040b19f94c5cbde7d49879",
-          [84],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/stats-page-total",
-          "f0b16f93655bd3c8ac6e61235f82159672286e51",
-          [39],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/terminal-markdown-accessibility",
-          "7936f20b20f7b111add84d10bd649c5fbe74be0e",
-          [44],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/tool-result-local-snapshots",
-          "2ab4de9c58b81a82af51f0f525d64320a7486a31",
-          [51],
-          "keep_frozen",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/trajectory-duration-preference",
-          "f4f06fa89e979dd50861581ac572035c427afe09",
-          [73],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/ui-interaction-audit",
-          "3fe27c071c4557358e7ba2ef00b067bbca45fee6",
-          [46],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/ui-official-icons",
-          "4a352d02575453392104b411adc12cae30a53beb",
-          [45],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/unified-workbench-s0-20260914",
-          "f9a95e0aae88379ff324240d0b0d095b20dc0d07",
-          [25],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/unified-workbench-s1-20260914",
-          "e7fe89abe164ce587ea22af6f477b4ce72a14c12",
-          [27],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/unified-workspace-viewer",
-          "7ea81cfd4377b8bdbd6c9cb71da96afd7abdae28",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/unused-findings-ratchet",
-          "065b23bcb79062d2219eeb8e23df63a1a4b878e1",
-          [85],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/windows-anyio-freeze",
-          "0ea57530f991d4b662d5f3a31e64be188b7b9215",
-          [42],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/windows-candidate-requirements-input",
-          "90e986b2b191fe9081ffc4b63364b4c796a99636",
-          [100],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/windows-lxml-native-contract",
-          "091c45442de46312fb60c97d0e6390100621cb69",
-          [105],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/wip-terminal-workspace",
-          "a96ac8108d17eeda8f1cdc742b87a8ea96bb670a",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/word-editing-closure",
-          "a90352fda8ae34bd71293c1d37e5bab66536f6de",
-          [],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "codex/workbench-product-delivery-20260914",
-          "5712d37be3ee2b20179432f523521d52e8a9408e",
-          [28],
-          "delete_included",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0",
-          "1cf3583b40fe4362ad786888ad500c17d24b94c3",
-          [12],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18",
-          "0ac9267c634927e172be535370ab15843007e715",
-          [31],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/cargo/tools/analysis_compute/tar-0.4.46",
-          "b35306029b571f090244bb0f26b0f50525a6222f",
-          [29],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17",
-          "946bb377ae3392408bec05474c4f0c67c45550f1",
-          [2],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/cargo/tools/cleaning_ops/tar-0.4.46",
-          "027ab53ab470b6c0a545939eecd7000110c40eeb",
-          [1],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/cargo/tools/data_engine/rustls-0.23.46",
-          "db19f2652cb618b8d45db48e76c2f57a6cba2d6a",
-          [57],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/github_actions/actions/checkout-7.0.1",
-          "cf368d0e088e49afb8f0ea9b314f95015047aeda",
-          [7],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/github_actions/actions/setup-python-7.0.0",
-          "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f",
-          [4],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/github_actions/actions/upload-artifact-7.0.2",
-          "1a224b640d5750a99932feaa4be656bd7c1dd433",
-          [90],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47",
-          "da5871807db650e413bd6ca136175aa4e129ff3f",
-          [89],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/npm_and_yarn/electron-41.10.6",
-          "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb",
-          [34],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/npm_and_yarn/ip-address-10.7.2",
-          "d3c1fc74af37ac2ffa44180fe257c79ddc22f639",
-          [33],
-          "keep_unproven",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/npm_and_yarn/katex-0.18.2",
-          "0f7fb08d81d563ad9f7daf23c80ac7dc38b90e66",
-          [59],
-          "keep_unproven",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/npm_and_yarn/multi-2c38914542",
-          "e1b8aad04611129727535b2e209b38d53d7cba02",
-          [11],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/npm_and_yarn/npm_and_yarn-823d526490",
-          "f699f8f660ef2429d2a106d970de3710985cb93b",
-          [93],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/npm_and_yarn/npm_and_yarn-89976db822",
-          "699c4c8f02adc5ed1840cb4d899ff13caf6485b3",
-          [97],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/npm_and_yarn/npm_and_yarn-b94f287d41",
-          "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53",
-          [98],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/npm_and_yarn/packages/runtime/zod-4.6.6",
-          "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3",
-          [108],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/pip/scripts/pillow-13.0.0",
-          "57589814d34f4babaf1a7878fc13bcd3b0c33bb1",
-          [77],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/pip/scripts/pip-minor-patch-8d12d4c10b",
-          "4882a9cc33392e295aefd17284c0645c1f4e5cf1",
-          [110],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/pip/scripts/websockets-17.3",
-          "f64678911e7da5a09ef6e849c83c43036f9d99d2",
-          [95],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/uv/backend/pytest-9.1.1",
-          "f11600dd5b425c1292e16f635dfdf130d18f4fae",
-          [15],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/uv/backend/sqlglot-30.23.0",
-          "a6682fcb98e266e0ca43130eeba447b62b0f1327",
-          [92],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "dependabot/uv/backend/uv-minor-patch-cbb656aa63",
-          "ad609e6a9a06de9c215c39d7747b88531a1bd262",
-          [102],
-          "keep_open",
-          1,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ],
-        [
-          "main",
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c",
-          [],
-          "keep_main",
-          0,
-          "17e2dd28f8bffe749ea04b80ab22409abff3129c"
-        ]
+        ["codex/account-flow-fidelity", "b5d280dbe7c159fb7924203ee0b2dbbbf6771dd6", [38], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/analytix-ui-refresh-20260917", "dde784437dc8563e84066629dd57f4a11fd9acc9", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/chat-functional-closure", "306190867d77c9454ba69af620eb835bb57d6554", [50], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/chat-presentation-completion", "04a8291cac3c32a759fab3bec42255b288953d89", [69], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/chat-ui", "045ec838e0a19b4394102857b83b6c4e8e14b5fd", [41], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/ci-runtime-scheduling", "09299c79d8f7b529b24bcda59ee88c474fe5bc57", [49], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/context-sample-truth", "f052e0f97a06a524bfd0a97a6722d4e9fe87ebd7", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/dependabot-minor-patch-groups", "3596b0faed06a473d01ef0237b746df7c950816d", [87], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/development-pr-baseline", "4fde8f8febc4b8fcd7c9c98dc6f97d0cdf8df07e", [22], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/docs-currentness-cleanup", "0abfc68cbddf152bb17104241036ee0f6d2affa2", [68], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/dsh-chat-presentation", "bbae1caae98e60a8ebebd10907529b784dd9d395", [47], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/dsh-composer-family", "e77c86854af0bb99ee475ece285f7f76d1987bd1", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/dsh-main-delivery-20261018", "ef872f01756ca05f1fb6b2f2d453635fe6a3450b", [56], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/dsh-mention-menu", "96d4955a9cb5c168bc6a53994fc00c86ce90b12c", [67], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/dsh-recursive-tool-calls", "423e84b38f9a628eec3fc1e3e338e5d4d243c588", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/excel-direct-editing", "eb1a556dc3009a86a30cee36cb4401d20d85549e", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/excel-native-save", "c71ca5d4d78b69e3246fe70412fa5bbb3726b209", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/excel-preview-polish", "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3", [70], "keep_frozen", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/finite-replay-archive-reuse", "af74a35b9165590c8f1e63f1ae858b7f83bdb9c9", [], "keep_unproven", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/finite-replay-validation-cancel", "0231104b9f2ed00b65fe4822f365cd7251cc1dbc", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/fork-legacy-owner-barrier", "89187f0b3039684a00fe42bf0406e390a3465a57", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-buffer-assertions", "60bc9903dfcd6cbd7803c5e8f1b6b181b8254015", [72], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-closeout-ledger", "e60c8a5ad33379d9e846f90fd6f8458db1e7866b", [88], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-conformance-meta", "e0c283e05b69585c74c9917b35bc0986ec55491c", [81], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-delivery-ledger-20261024", "cafcfed60ee3aad85d8940f1a64b0f1285cd2980", [112], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-entry-audit", "97cf4ff57958e6c1124cee2cad8d1474a06b2382", [71], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-funds-shipping-references", "112bb4a0a477563a86d5f89f0c2d4d3d49905137", [82], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-git-guidance-owner", "7add34b21250e2129fd1973dbc79ebb464d94e21", [83], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-maintenance-d123", "98f1e40255815b37ba1c980c5bf61761ad449a11", [43], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-retire-controlled-v1", "a7b1f1a45a23f9e47b8cd60709bea79207cf41d3", [80], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/governance-runtime-guides", "1ade7d066f0d7acdcaeaf6c8c1b589fd80f6b2fe", [74], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/history-replay-start-diagnostics", "2d6d326b759f19353d627bf9704a8f607a5cc3a1", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/native-office-quit-lifecycle", "25ddfec93a998347f51bdee4b739d0aa35268b36", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/owner-product-delivery-20260913", "174887e8c0103cd02b5b1c1dd3e4f004efab9108", [23], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/owner-workspace-fixture-closure-20260913", "bd00267f7c56d5577a66cbe7587d9d4789a69b17", [24], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/product-combination-validation", "25ddfec93a998347f51bdee4b739d0aa35268b36", [66], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/provider-registry-typed-errors-20260914", "92fb189c36cea6a3e56248856182a6b45b24de1d", [26], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/question-answer-handoff", "2ccbf335cfb5e9c8f04778dfb2dd1925ab3e81b4", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/question-reply-body-collector", "e4101a8a69984f35323446fc78afbe2e08957ca5", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/repository-governance", "59e944ca8603ea8cfde6769fd4bed14219f7b958", [40], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/repository-maintenance-20261018", "e664f9ea03d3a7da6f671408763b667ef025c14b", [], "keep_unproven", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/retire-pre-analytix-docs-20261019", "830dae8145612c7ed0eda225643a4eca7fe43e1f", [65], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/retire-unused-quality-20261018", "db3a73f883448e2ff370d02c3900839390510ba3", [], "keep_unproven", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-backend-ab-clean", "2141a09e730c4e20bfffcd15d325eccee831e988", [111], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-backend-pypdf-6-21-2", "c205c99c3876add905294322ec07b011cb4593ba", [99], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-hono-patch", "81b139f569de0915d77624d848ad97dd1ce30c89", [75], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-ip-address-dual-tree", "d497a1483e78c7a778f36ab107eac18960021f8e", [103], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-katex-complete", "9cf5498d3b7816030024866676f793cf14993dec", [107], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-mcp-transports", "5220c53abae10dd4a4dd513a66512f092d18ac01", [79], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-patch-package-contract", "54548e592436e0d0f03deca9919d78e75978bcfc", [106], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-proxy-addr-patch", "7ae8b300c75f573338fd8ec0786c984333a5c440", [96], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-runtime-source-map-js-1-2-2", "4a191f67db6014cefd2bb6e7c59546130707a3d8", [104], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-selector-parser-patch", "21265d31228c5d24e47238cea7dfc4cced5e10bc", [101], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/security-windows-ab-combined", "84ec6518dc4f3655f27a232024bd60dde61b9957", [109], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/settings-focus-restoration", "b30a43349a50b79252f8d27c736b8ac410dee4ca", [64], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/settings-main-integration-20261018", "d3d8d1b87ed0f72b2df73e187a8c08430d95324f", [63], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/settings-reference-modal-20261018", "e33a3632fa1d09da1804deb51e293b8eb9635abe", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/shared-regression-source-row", "a11df9c1511defcf647d711c32c7bfe8c8d5ba14", [37], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/source-file-size-guard", "51c13fa6dadb04e5a5040b19f94c5cbde7d49879", [84], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/stats-page-total", "f0b16f93655bd3c8ac6e61235f82159672286e51", [39], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/terminal-markdown-accessibility", "7936f20b20f7b111add84d10bd649c5fbe74be0e", [44], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/tool-result-local-snapshots", "2ab4de9c58b81a82af51f0f525d64320a7486a31", [51], "keep_frozen", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/trajectory-duration-preference", "f4f06fa89e979dd50861581ac572035c427afe09", [73], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/ui-interaction-audit", "3fe27c071c4557358e7ba2ef00b067bbca45fee6", [46], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/ui-official-icons", "4a352d02575453392104b411adc12cae30a53beb", [45], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/unified-workbench-s0-20260914", "f9a95e0aae88379ff324240d0b0d095b20dc0d07", [25], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/unified-workbench-s1-20260914", "e7fe89abe164ce587ea22af6f477b4ce72a14c12", [27], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/unified-workspace-viewer", "7ea81cfd4377b8bdbd6c9cb71da96afd7abdae28", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/unused-findings-ratchet", "065b23bcb79062d2219eeb8e23df63a1a4b878e1", [85], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/windows-anyio-freeze", "0ea57530f991d4b662d5f3a31e64be188b7b9215", [42], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/windows-candidate-requirements-input", "90e986b2b191fe9081ffc4b63364b4c796a99636", [100], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/windows-lxml-native-contract", "091c45442de46312fb60c97d0e6390100621cb69", [105], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/wip-terminal-workspace", "a96ac8108d17eeda8f1cdc742b87a8ea96bb670a", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/word-editing-closure", "a90352fda8ae34bd71293c1d37e5bab66536f6de", [], "held_scope_not_approved", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["codex/workbench-product-delivery-20260914", "5712d37be3ee2b20179432f523521d52e8a9408e", [28], "deleted_original39_verified", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0", "1cf3583b40fe4362ad786888ad500c17d24b94c3", [12], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18", "0ac9267c634927e172be535370ab15843007e715", [31], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/cargo/tools/analysis_compute/tar-0.4.46", "b35306029b571f090244bb0f26b0f50525a6222f", [29], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17", "946bb377ae3392408bec05474c4f0c67c45550f1", [2], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/cargo/tools/cleaning_ops/tar-0.4.46", "027ab53ab470b6c0a545939eecd7000110c40eeb", [1], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/cargo/tools/data_engine/rustls-0.23.46", "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", [57], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/github_actions/actions/checkout-7.0.1", "cf368d0e088e49afb8f0ea9b314f95015047aeda", [7], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/github_actions/actions/setup-python-7.0.0", "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", [4], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/github_actions/actions/upload-artifact-7.0.2", "1a224b640d5750a99932feaa4be656bd7c1dd433", [90], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47", "da5871807db650e413bd6ca136175aa4e129ff3f", [89], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/npm_and_yarn/electron-41.10.6", "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", [34], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/npm_and_yarn/ip-address-10.7.2", "d3c1fc74af37ac2ffa44180fe257c79ddc22f639", [33], "keep_unproven", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/npm_and_yarn/katex-0.18.2", "0f7fb08d81d563ad9f7daf23c80ac7dc38b90e66", [59], "keep_unproven", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/npm_and_yarn/multi-2c38914542", "e1b8aad04611129727535b2e209b38d53d7cba02", [11], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-823d526490", "f699f8f660ef2429d2a106d970de3710985cb93b", [93], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-89976db822", "699c4c8f02adc5ed1840cb4d899ff13caf6485b3", [97], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-b94f287d41", "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53", [98], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/npm_and_yarn/packages/runtime/zod-4.6.6", "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3", [108], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/pip/scripts/pillow-13.0.0", "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", [77], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/pip/scripts/pip-minor-patch-8d12d4c10b", "4882a9cc33392e295aefd17284c0645c1f4e5cf1", [110], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/pip/scripts/websockets-17.3", "f64678911e7da5a09ef6e849c83c43036f9d99d2", [95], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/uv/backend/pytest-9.1.1", "f11600dd5b425c1292e16f635dfdf130d18f4fae", [15], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/uv/backend/sqlglot-30.23.0", "a6682fcb98e266e0ca43130eeba447b62b0f1327", [92], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["dependabot/uv/backend/uv-minor-patch-cbb656aa63", "ad609e6a9a06de9c215c39d7747b88531a1bd262", [102], "keep_open", 1, "17e2dd28f8bffe749ea04b80ab22409abff3129c"],
+        ["main", "17e2dd28f8bffe749ea04b80ab22409abff3129c", [], "keep_main", 0, "17e2dd28f8bffe749ea04b80ab22409abff3129c"]
       ],
-      "deletion_results": [],
+      "deletion_results": [
+        {
+          "utc": "2026-10-25T08:43:44.649111+00:00",
+          "targets": 10,
+          "exit": 0
+        },
+        {
+          "utc": "2026-10-25T08:43:48.306776+00:00",
+          "targets": 10,
+          "exit": 0
+        },
+        {
+          "utc": "2026-10-25T08:43:52.517159+00:00",
+          "targets": 10,
+          "exit": 0
+        },
+        {
+          "utc": "2026-10-25T08:43:56.405251+00:00",
+          "targets": 9,
+          "exit": 0
+        }
+      ],
       "authorized_original39": ["codex/account-flow-fidelity", "codex/chat-functional-closure", "codex/chat-presentation-completion", "codex/chat-ui", "codex/ci-runtime-scheduling", "codex/development-pr-baseline", "codex/docs-currentness-cleanup", "codex/dsh-chat-presentation", "codex/dsh-main-delivery-20261018", "codex/dsh-mention-menu", "codex/governance-buffer-assertions", "codex/governance-conformance-meta", "codex/governance-entry-audit", "codex/governance-funds-shipping-references", "codex/governance-git-guidance-owner", "codex/governance-maintenance-d123", "codex/governance-retire-controlled-v1", "codex/governance-runtime-guides", "codex/owner-product-delivery-20260913", "codex/owner-workspace-fixture-closure-20260913", "codex/product-combination-validation", "codex/provider-registry-typed-errors-20260914", "codex/repository-governance", "codex/retire-pre-analytix-docs-20261019", "codex/security-hono-patch", "codex/security-mcp-transports", "codex/settings-focus-restoration", "codex/settings-main-integration-20261018", "codex/shared-regression-source-row", "codex/source-file-size-guard", "codex/stats-page-total", "codex/terminal-markdown-accessibility", "codex/trajectory-duration-preference", "codex/ui-interaction-audit", "codex/ui-official-icons", "codex/unified-workbench-s0-20260914", "codex/unified-workbench-s1-20260914", "codex/windows-anyio-freeze", "codex/workbench-product-delivery-20260914"],
       "expanded70_action": {
         "status": "denied_not_executed",
         "reason": "Automatic approval: only the original39 merged candidates explicitly authorized;70 exceeds that scope. No remote deletion command ran.",
-        "disposition": "Stop70 target; preserve remaining31 main-contained refs pending precise approval. Safe alternative: original39 only with same recorded recovery/preflight checks."
+        "disposition": "Stop70 target; preserve remaining31 main-contained refs pending precise approval. Safe alternative: original39 only with same recorded recovery/preflight checks.",
+        "reason_verbatim": "该命令会删除70个远端分支，属于高风险外部破坏性操作；用户仅明确授权逐条核验后删除39条已合并候选，当前70条的范围未被明确授权，不能据“main可达”扩大删除范围。"
+      },
+      "deleted_exact_refs": ["codex/account-flow-fidelity", "codex/chat-functional-closure", "codex/chat-presentation-completion", "codex/chat-ui", "codex/ci-runtime-scheduling", "codex/development-pr-baseline", "codex/docs-currentness-cleanup", "codex/dsh-chat-presentation", "codex/dsh-main-delivery-20261018", "codex/dsh-mention-menu", "codex/governance-buffer-assertions", "codex/governance-conformance-meta", "codex/governance-entry-audit", "codex/governance-funds-shipping-references", "codex/governance-git-guidance-owner", "codex/governance-maintenance-d123", "codex/governance-retire-controlled-v1", "codex/governance-runtime-guides", "codex/owner-product-delivery-20260913", "codex/owner-workspace-fixture-closure-20260913", "codex/product-combination-validation", "codex/provider-registry-typed-errors-20260914", "codex/repository-governance", "codex/retire-pre-analytix-docs-20261019", "codex/security-hono-patch", "codex/security-mcp-transports", "codex/settings-focus-restoration", "codex/settings-main-integration-20261018", "codex/shared-regression-source-row", "codex/source-file-size-guard", "codex/stats-page-total", "codex/terminal-markdown-accessibility", "codex/trajectory-duration-preference", "codex/ui-interaction-audit", "codex/ui-official-icons", "codex/unified-workbench-s0-20260914", "codex/unified-workbench-s1-20260914", "codex/windows-anyio-freeze", "codex/workbench-product-delivery-20260914"],
+      "after_snapshot": {
+        "at_utc": "2026-10-25T08:46:35.287Z",
+        "branches": 61,
+        "open_prs": 22,
+        "all39_absent": true,
+        "remaining31_included_refs": "held after expanded deletion approval rejection; no alternative execution",
+        "unique_or_unproven5": "preserve exact commits; equivalence alone is not exact recovery proof"
+      },
+      "held_scope_not_approved": ["codex/analytix-ui-refresh-20260917", "codex/context-sample-truth", "codex/dependabot-minor-patch-groups", "codex/dsh-composer-family", "codex/dsh-recursive-tool-calls", "codex/excel-direct-editing", "codex/excel-native-save", "codex/finite-replay-validation-cancel", "codex/fork-legacy-owner-barrier", "codex/governance-closeout-ledger", "codex/governance-delivery-ledger-20261024", "codex/history-replay-start-diagnostics", "codex/native-office-quit-lifecycle", "codex/question-answer-handoff", "codex/question-reply-body-collector", "codex/security-backend-ab-clean", "codex/security-backend-pypdf-6-21-2", "codex/security-ip-address-dual-tree", "codex/security-katex-complete", "codex/security-patch-package-contract", "codex/security-proxy-addr-patch", "codex/security-runtime-source-map-js-1-2-2", "codex/security-selector-parser-patch", "codex/security-windows-ab-combined", "codex/settings-reference-modal-20261018", "codex/unified-workspace-viewer", "codex/unused-findings-ratchet", "codex/windows-candidate-requirements-input", "codex/windows-lxml-native-contract", "codex/wip-terminal-workspace", "codex/word-editing-closure"],
+      "recovery_record_local_commits": ["2ce136c4d", "4eb1cc8e6"],
+      "scope_error": "Root incorrectly expanded original39 to70using containment as sufficientauthority. Automaticapprovaldenied unexecuted; onlyoriginal39 subsequentlyexecuted afterseparate exactscope approval. Parent2026-10-25confirmed no remaining31retries/splitting.",
+      "external_ref_delta": {
+        "after39_at_utc": "2026-10-25T08:46:35.287Z",
+        "prepublication_at_utc": "2026-10-25T09:17:17.563Z",
+        "missing": "dependabot/npm_and_yarn/multi-2c38914542",
+        "old_tip": "2b834b1188053a41523cd72fdcd983d86ed8893f",
+        "observed_after_merge11": true,
+        "actor": "notverified; rootdidnotissue this deletion",
+        "recoverability": "finalPRhead2b834b1includedinretained22edmain",
+        "count_equation": "100-39explicitdeletions-1observedadditionalabsence=60beforeledgerbranchpublication; do notcreditrootwith40deletions."
       }
     },
-    "decisions": ["PR12 includes syn2→3 major through zerovec-derive; not eligible for F, move to B.", "Only main-contained refs eligible for this deletion batch; patch-equivalent or unproven refs retained, not treated as safely recoverable exact commits."],
+    "decisions": ["PR12 includes syn2→3 major through zerovec-derive; not eligible for F, move to B.", "Only main-contained refs eligible for this deletion batch; patch-equivalent or unproven refs retained, not treated as safely recoverable exact commits.", "#11 head2b834b1 mechanically synced;2files22+/22-,132toolclosure/security nodes unchanged.Localcandidate renderer unavailable;no install/download/oldReact substitution.Finalhead CI required.", "39originalM refs deleted in4normalpushbatches afterfreshSHA/containment; expanded70 request was a scopejudgment error,denied unexecuted;remaining31held,not split as workaround.19historical no-directPR refs retained.", "Malformed encoded single-branch URL INVALID_ARGUMENT was not repeated; allowed complete branchcollection supplied normal batchpreflight. No deniedsensitive endpoint queried.", "Localformatter first failed before serialization completion and temporarily truncated only this task-owned uncommitted ledger; restored exact localHEAD blob and serialize+JSONvalidate beforewrite. No remote or canonical dirty file affected.", "Independentreview found old preflightlabeldelete_included ambiguous after rejection; replaced with currentdispositions39deleted/31held. No additionaldeletion.", "#12 Cargo.lock path independentlyconfirmed fromGitobject,notguessed.", "No Macnode/go version sampling,Node.nvmrc/Electron edits or Privacy/productexecution in this cycle.", "PR11Ffinal52jobs+4CodeQL+extraDependabotchecktotal58success;CLEAN/no reviews/threads;normalmerge22ed,notoldheadgreens.", "PR11newdecodedSourcebaseline output actually2342files (not2341 orhistorical2339),1927/1933/8guards pass;baselinebytehash remainsunchanged.", "PR11headbranch observedabsent aftermerge; rootdeleted onlyoriginal39; actorunverified, countdeltaexplicit.", "All74historicalnarrowlargefileblobs byte-identical2c→17e; reuse sourceclassifications,notmechanicalsplit.", "Package/release workflowsonlymanualdispatch; no dispatch/release/tagperformed. Existingindependentbranch source-transferworkflow isnot releaseacceptance."],
     "verification": {
       "baseline_mutated": false,
       "product_source_changed": false,
-      "final_ci": "pending",
-      "final_snapshot": "pending"
+      "local_docs": "JSONold20fieldsunchanged; all1927lookupkeys/1933counts boundonce;39deletionproofs+freeze refs+19dispositions+B21questions;diff/pathcheck0;independentreviewblockingresolved",
+      "PR11_final_ci": "complete58checks/52jobs",
+      "final_publication_ci": "pending newPR/currenthead",
+      "final_snapshot": "pending afterpublication; datedprepublication snapshot only"
+    },
+    "nineteen_without_direct_pr": [
+      ["codex/analytix-ui-refresh-20260917", "dde784437dc8563e84066629dd57f4a11fd9acc9", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/context-sample-truth", "f052e0f97a06a524bfd0a97a6722d4e9fe87ebd7", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/dsh-composer-family", "e77c86854af0bb99ee475ece285f7f76d1987bd1", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/dsh-recursive-tool-calls", "423e84b38f9a628eec3fc1e3e338e5d4d243c588", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/excel-direct-editing", "eb1a556dc3009a86a30cee36cb4401d20d85549e", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/excel-native-save", "c71ca5d4d78b69e3246fe70412fa5bbb3726b209", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/finite-replay-archive-reuse", "af74a35b9165590c8f1e63f1ae858b7f83bdb9c9", "U", "retain: unproven exact recovery"],
+      ["codex/finite-replay-validation-cancel", "0231104b9f2ed00b65fe4822f365cd7251cc1dbc", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/fork-legacy-owner-barrier", "89187f0b3039684a00fe42bf0406e390a3465a57", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/history-replay-start-diagnostics", "2d6d326b759f19353d627bf9704a8f607a5cc3a1", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/native-office-quit-lifecycle", "25ddfec93a998347f51bdee4b739d0aa35268b36", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/question-answer-handoff", "2ccbf335cfb5e9c8f04778dfb2dd1925ab3e81b4", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/question-reply-body-collector", "e4101a8a69984f35323446fc78afbe2e08957ca5", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/repository-maintenance-20261018", "e664f9ea03d3a7da6f671408763b667ef025c14b", "E", "retain: unproven exact recovery"],
+      ["codex/retire-unused-quality-20261018", "db3a73f883448e2ff370d02c3900839390510ba3", "E", "retain: unproven exact recovery"],
+      ["codex/settings-reference-modal-20261018", "e33a3632fa1d09da1804deb51e293b8eb9635abe", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/unified-workspace-viewer", "7ea81cfd4377b8bdbd6c9cb71da96afd7abdae28", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/wip-terminal-workspace", "a96ac8108d17eeda8f1cdc742b87a8ea96bb670a", "I", "retain: included but outside original39 deletion scope after auto-review rejection"],
+      ["codex/word-editing-closure", "a90352fda8ae34bd71293c1d37e5bab66536f6de", "I", "retain: included but outside original39 deletion scope after auto-review rejection"]
+    ],
+    "unused_review_deferrals": {
+      "kind": "read-only finding review-deferral register; not lint suppressions or gate exemptions",
+      "source_sha": "17e2dd28f8bffe749ea04b80ab22409abff3129c",
+      "created_at_utc": "2026-10-25T08:40:37.000664+00:00",
+      "baseline_path": "scripts/unused-findings-baseline.json",
+      "baseline_sha256": "0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae",
+      "identity_version": "stable-host-v3",
+      "historical_source_sha": "2c5494642b35f7cdb9cd27939486beec7d5adaaf",
+      "raw_report_sha256": "dff6e88701aabb1d26794c84cb8661d04084b89181f5513ca1cbcdda1bc4458c",
+      "raw_report_read_this_task": false,
+      "source_evidence": "Existing complete signatures and1933 audit rows in canonical baseline; no newESLint discovery/helper run. Current17e source inspected only for6import candidates.",
+      "scope": {
+        "identities": 1927,
+        "occurrences": 1933,
+        "files": 435,
+        "category": {
+          "variable": {
+            "identities": 604,
+            "occurrences": 604
+          },
+          "parameter": {
+            "identities": 1292,
+            "occurrences": 1297
+          },
+          "caught_error": {
+            "identities": 31,
+            "occurrences": 32
+          }
+        },
+        "extension": {
+          ".cjs": {
+            "identities": 9,
+            "occurrences": 9
+          },
+          ".js": {
+            "identities": 1,
+            "occurrences": 1
+          },
+          ".mjs": {
+            "identities": 157,
+            "occurrences": 158
+          },
+          ".ts": {
+            "identities": 1396,
+            "occurrences": 1400
+          },
+          ".tsx": {
+            "identities": 364,
+            "occurrences": 365
+          }
+        }
+      },
+      "owner": "Eysn / affected-owner via governance coordinator",
+      "review_by_utc": "2026-11-01T00:00:00Z",
+      "earlier_review": "Before first affected source change, or when the relevant freeze is lifted, whichever occurs first. Deadline is review deadline, not automatic permission or expiry of gate protection.",
+      "gate_effect": "none; no ignore/comment/config/suppression; all1933 findings remain detected. No identity/count/guard/provenance changes.",
+      "method": "Deterministic ordered classification from each existing signature.path/category/declaration. RuleA andB are explicitly reviewed keysets; H uses path regex privacy|secret|credential|protected[-_]?local|keychain; P/C usecategory; F non-test src/,packages/runtime/src/,plugins/; D restpattern; I ImportBinding; L FunctionName/Type; V residual. H/F classifications are scope routing, not individual semantic safety proofs.",
+      "test_path_predicate": "(^|/)(?:test|tests|__tests__|testdata|fixture|fixtures|__fixtures__|test-support|test_support)(?:/|$)|(^|/)[^/]*-test-support(?:/|$)|(^|/)test_[^/]*$|(?:[._-])(?:test|spec|fixtures?)(?:[._-]|$)",
+      "rules": {
+        "A": {
+          "status": "candidate-awaiting-trim-decision",
+          "reason": "已只读核实测试文件的node:path命名导入resolve未被词法绑定引用；另一个path.resolve只出现在独立fixture子程序字符串中。不改变模块保留/求值。仅备补丁，未验证或合入。",
+          "review_condition": "用户明确允许显式trim-only后，复检源blob、执行该测试和gate；不得仅删finding而留stale基线。"
+        },
+        "B": {
+          "status": "defer-byte-contract-review",
+          "reason": "仅删除未用导入/内建解构项看似无业务变化，但native-context或formal-harness对该源码字节/清单有直接依赖。不能把非产品脚本误认成无验收影响的低风险清理。",
+          "review_condition": "先确认源摘要/manifest的必要传播与针对性合同验证，不为删几行重做原生全验收。"
+        },
+        "H": {
+          "status": "frozen-protected-scope",
+          "reason": "路径涉及Privacy、credential、secret、protected-local或Keychain；本轮冻结，未对真实数据/凭据执行任何检查。路径分类是保守路由，不是证明每条绑定有安全语义。",
+          "review_condition": "相应冻结经用户明确解除且受影响owner审阅后再处理；当前检测继续生效。"
+        },
+        "P": {
+          "status": "defer-parameter-contract",
+          "reason": "未用参数仍可能维护回调位置、接口形状、函数length或合成fixture合同；参数默认不批量清理。本次未逐函数证明可删。",
+          "review_condition": "首次修改该函数/调用者时以调用链与回调合同逐条核实，保留严格args:all检测。"
+        },
+        "C": {
+          "status": "defer-error-contract",
+          "reason": "catch绑定未用不等于整个catch可删除；错误控制流、拒绝优先级及诊断行为尚需单独审阅。",
+          "review_condition": "受影响异常路径迭代时证明仅省略绑定且行为不变；不得删catch或放宽错误断言。"
+        },
+        "F": {
+          "status": "frozen-product-source",
+          "reason": "手写产品/插件源码变量处于产品冻结范围；本轮只登记，不改源码。未用诊断不证明初始化无副作用。",
+          "review_condition": "产品解冻或当前功能真实迭代时检查初始化、动态消费者与兼容合同。"
+        },
+        "D": {
+          "status": "defer-destructure-projection",
+          "reason": "rest/解构可能有意剥除字段，直接删绑定可能改变结果投影或触发属性getter的求值。",
+          "review_condition": "证明对象/数组投影与属性求值顺序不变后再选改法，不用underscore忽略规则屏蔽。"
+        },
+        "I": {
+          "status": "defer-import-review",
+          "reason": "未用导入仍需核模块初始化、type-only边界、重导出/动态装配以及测试读取源码的消费者；未逐条检查。",
+          "review_condition": "先证明移除绑定保留必要模块求值，并只运行受影响owner检查。"
+        },
+        "L": {
+          "status": "defer-dynamic-contract",
+          "reason": "本地函数或类型名称未用需闭合字符串/VM/生成/打包消费者与类型合同，不能仅凭静态finding删除。",
+          "review_condition": "得到真实无消费者证据且明确允许trim后，再按职责成簇处理。"
+        },
+        "V": {
+          "status": "defer-initializer-review",
+          "reason": "局部变量未用尚未证明初始化与求值顺序无副作用；保留当前表达式。",
+          "review_condition": "逐条检查initializer、副作用、资源释放和失败语义；有副作用则保留表达式或不改。"
+        }
+      },
+      "counts": {
+        "P": {
+          "identities": 1284,
+          "occurrences": 1289
+        },
+        "F": {
+          "identities": 441,
+          "occurrences": 441
+        },
+        "D": {
+          "identities": 89,
+          "occurrences": 89
+        },
+        "C": {
+          "identities": 31,
+          "occurrences": 32
+        },
+        "I": {
+          "identities": 15,
+          "occurrences": 15
+        },
+        "H": {
+          "identities": 11,
+          "occurrences": 11
+        },
+        "V": {
+          "identities": 43,
+          "occurrences": 43
+        },
+        "L": {
+          "identities": 7,
+          "occurrences": 7
+        },
+        "B": {
+          "identities": 5,
+          "occurrences": 5
+        },
+        "A": {
+          "identities": 1,
+          "occurrences": 1
+        }
+      },
+      "candidate": {
+        "key": "bd7475b5bc17ba1b547f2f16d12b89de77a6e569fb59baf3dd6cc13b0f3100e2",
+        "path": "scripts/runtime-go-release-finalization.test.mjs",
+        "binding": "resolve",
+        "source_blob": "615de7e68fae3264f590eb0936f027ba7429cf35",
+        "location": {
+          "line": 6,
+          "column": 25
+        },
+        "patch": "remove onlyresolve from namednode:path import; keepdirname/join and moduleimport.",
+        "source_reason": "One lexically declaredresolve; second textualpath.resolve atline333 isinside separatelygeneratedfixture with its ownrequire(node:path). Noinitializer/call isremoved; node:path remainsimported.",
+        "contract": "Testfunctionbody,SQL,parameters,exceptionassertions unchanged. No production code.",
+        "expected_after_explicit_trim_only": {
+          "identities": 1926,
+          "occurrences": 1932,
+          "parameter": 1297,
+          "caught_error": 32,
+          "variable": 603
+        },
+        "proposed_validation": ["node --test scripts/runtime-go-release-finalization.test.mjs under standardcachehelper in isolatedtaskworkspace", "applicablelint and completeunusedgate using samefixedlockclosure; explicittrim removesexactkey only", "normalrequiredCI on finalhead"],
+        "executed_validation": false,
+        "blocked": "User intent1927/1933unchanged vsstrict-equality+trim remainspending. No mutation/trim/merge."
+      },
+      "per_identity_binding": {
+        "source": "baseline.entries at exactbaseline_sha256; each0-basedlookupindex expands to existingfullkey/signature/count. Indices compress data only, never finding identity or gate equality. Inclusive ranges cover everyentry once.",
+        "inclusive_index_ranges": {
+          "P": ["0-3", "5-7", "10-11", "13-14", "16-17", "19-20", "26-27", "29-30", "32", "35", "37-38", "40-41", "43", "45", "50-52", "55", "57-61", "63", "65-68", "70", "72", "78-80", "82", "85", "87-88", "90-94", "96", "98-99", "101", "106", "109", "111-114", "116", "119", "122-123", "127-130", "132-138", "141-142", "144-152", "155-156", "158-162", "164", "167-168", "170-172", "174", "176", "179-183", "187-189", "192", "194-201", "203-206", "208-210", "213", "217-219", "223", "225", "227", "229-231", "233-234", "240-241", "244-246", "250", "252-256", "258", "260-263", "265-267", "269-271", "276-277", "279-280", "283-285", "287-293", "295-299", "301", "303-305", "308-310", "313-314", "316", "318-320", "323-324", "326-329", "331-334", "338", "341-343", "345-347", "350-359", "361", "365-366", "369-373", "376-377", "380-381", "383-385", "388-393", "395", "397", "400-404", "406", "410", "412-415", "417", "419", "422-423", "425", "427", "429-430", "433-434", "436-441", "444-445", "449-450", "452", "454", "456-457", "459", "461-462", "464-465", "467", "469-471", "473-475", "477-478", "480-488", "490-491", "494-497", "499-500", "502-503", "505-508", "510-511", "513", "516", "518-520", "522-525", "528-529", "531-537", "539-541", "543", "545", "547", "549", "552-555", "557-558", "561", "566-569", "572", "574-579", "581", "583", "585", "587-596", "598-602", "604-606", "608-610", "612-614", "617-620", "622-623", "625-630", "632", "636-637", "639", "641-643", "645-647", "649-652", "655-657", "659", "661-664", "666-667", "671-673", "676-677", "679", "681-686", "689-691", "693-697", "700-701", "705-712", "714", "716-717", "719-720", "722", "724-727", "732-733", "735", "737-738", "741", "744-749", "751-752", "754", "757-766", "769", "771-773", "775-776", "778-779", "781-785", "787-788", "790-791", "795-796", "799-800", "802", "804-805", "807", "809-812", "814-816", "821-822", "824-826", "828-832", "835-838", "840-843", "846-851", "853-858", "860-864", "866-869", "871-874", "876", "878", "880-886", "889-891", "896-897", "899", "902-907", "910-919", "921-922", "925", "927", "929", "932-933", "935", "937", "939", "941", "943-946", "948", "950", "952-960", "963-965", "967-970", "972-973", "975", "980", "982-986", "988-996", "998-1000", "1004-1012", "1014-1016", "1018-1019", "1021-1024", "1027-1029", "1031-1032", "1034-1040", "1042", "1044-1046", "1048-1049", "1051-1054", "1056", "1058", "1060-1061", "1064-1066", "1068-1070", "1072", "1074", "1076-1078", "1080", "1085-1086", "1088", "1091-1096", "1099", "1101", "1103", "1106-1107", "1109-1112", "1114-1116", "1118-1119", "1121-1122", "1124", "1128-1129", "1131-1134", "1136", "1138-1139", "1141", "1143-1146", "1148-1152", "1154-1158", "1160-1161", "1163-1164", "1166-1169", "1172-1182", "1184", "1186-1189", "1191-1193", "1195-1198", "1200", "1202", "1204-1205", "1207-1213", "1215", "1218", "1220-1221", "1226", "1228-1229", "1231-1233", "1235-1236", "1238-1240", "1242-1244", "1246-1247", "1250-1260", "1262-1263", "1265-1266", "1269-1272", "1274", "1277-1286", "1288", "1290", "1292-1294", "1296", "1298", "1300-1309", "1312-1314", "1316-1317", "1320-1323", "1325-1326", "1329-1331", "1333-1335", "1337", "1339-1341", "1343-1345", "1350", "1352", "1355-1356", "1358-1359", "1361", "1363-1365", "1367-1371", "1373", "1379-1382", "1385-1386", "1388-1397", "1399-1403", "1405-1406", "1409-1411", "1413", "1416", "1418-1419", "1421-1424", "1426", "1428", "1430-1433", "1435-1437", "1441-1448", "1450-1452", "1454", "1457-1459", "1462", "1464-1466", "1468", "1470-1475", "1477", "1480", "1482", "1484-1485", "1489-1490", "1492-1493", "1495-1497", "1499-1503", "1505", "1507-1510", "1513-1517", "1519-1522", "1525", "1527", "1529-1532", "1534-1535", "1537", "1540-1544", "1546-1550", "1552", "1554-1556", "1558-1559", "1561-1564", "1567", "1569-1573", "1576-1578", "1582-1584", "1586-1588", "1591-1594", "1596", "1598-1599", "1601-1602", "1606-1613", "1616-1619", "1621-1622", "1624-1629", "1631", "1633-1635", "1638-1639", "1645-1648", "1650-1652", "1654-1658", "1660", "1662", "1664", "1667", "1670-1674", "1676", "1679-1682", "1684-1686", "1688", "1690-1692", "1696-1698", "1700-1709", "1713-1715", "1717", "1719", "1721", "1723-1730", "1737", "1739-1744", "1747-1750", "1752", "1754-1757", "1759", "1763-1765", "1767", "1770", "1772-1775", "1777-1785", "1787-1791", "1794", "1796-1797", "1799-1800", "1802-1804", "1806-1809", "1812-1814", "1816-1821", "1823-1827", "1831", "1833-1835", "1837-1840", "1842-1845", "1847-1851", "1854-1857", "1859-1862", "1864", "1866-1869", "1872-1873", "1875", "1879-1882", "1884-1886", "1888-1889", "1891-1897", "1899-1901", "1903-1907", "1909-1915", "1917-1919", "1921-1926"],
+          "F": ["4", "8-9", "21-25", "28", "31", "33-34", "39", "42", "44", "47", "49", "53", "56", "62", "69", "73-74", "76", "81", "84", "86", "95", "97", "102-104", "108", "110", "115", "118", "121", "124-126", "140", "153", "157", "163", "169", "184-185", "190-191", "193", "207", "211-212", "214", "216", "220-221", "224", "226", "228", "232", "235-236", "242-243", "247-249", "251", "257", "259", "268", "273", "275", "278", "282", "286", "294", "300", "302", "306-307", "312", "315", "317", "321-322", "325", "330", "335-336", "339-340", "348-349", "360", "362-364", "368", "374-375", "378", "382", "394", "396", "398-399", "407-409", "416", "418", "421", "426", "428", "431-432", "435", "442-443", "447-448", "451", "453", "458", "466", "476", "479", "489", "492", "501", "509", "514-515", "521", "526", "530", "538", "542", "546", "548", "550-551", "556", "563", "565", "571", "573", "580", "582", "584", "586", "603", "607", "611", "615-616", "621", "624", "631", "634-635", "638", "648", "654", "658", "660", "668-670", "674-675", "678", "680", "687-688", "692", "698", "702", "704", "718", "721", "723", "728-729", "731", "736", "739-740", "742-743", "750", "753", "756", "768", "770", "774", "786", "789", "792-794", "797", "801", "803", "806", "808", "813", "817-819", "834", "845", "852", "865", "870", "875", "877", "879", "887-888", "892-894", "898", "909", "923-924", "926", "928", "930", "938", "942", "947", "951", "961-962", "966", "971", "976", "978", "981", "987", "1002-1003", "1013", "1017", "1020", "1025-1026", "1030", "1033", "1041", "1043", "1047", "1050", "1057", "1059", "1062-1063", "1067", "1071", "1073", "1075", "1079", "1082-1084", "1089", "1097", "1100", "1102", "1104-1105", "1108", "1117", "1120", "1123", "1130", "1137", "1140", "1142", "1147", "1153", "1159", "1162", "1171", "1190", "1199", "1206", "1217", "1219", "1223-1225", "1227", "1234", "1237", "1241", "1248-1249", "1264", "1267", "1287", "1291", "1299", "1311", "1319", "1332", "1336", "1338", "1342", "1346", "1348-1349", "1351", "1353", "1362", "1366", "1374", "1377-1378", "1387", "1404", "1407-1408", "1412", "1417", "1420", "1427", "1429", "1434", "1439", "1449", "1453", "1455-1456", "1460-1461", "1469", "1476", "1478-1479", "1481", "1483", "1487-1488", "1491", "1494", "1506", "1511", "1518", "1523-1524", "1528", "1533", "1538-1539", "1545", "1551", "1553", "1565-1566", "1568", "1574", "1579", "1585", "1589-1590", "1595", "1597", "1600", "1603-1605", "1614-1615", "1623", "1632", "1641-1644", "1649", "1653", "1659", "1661", "1663", "1665-1666", "1668-1669", "1675", "1677", "1687", "1689", "1695", "1699", "1710-1712", "1718", "1720", "1731-1732", "1734", "1738", "1751", "1753", "1758", "1761-1762", "1766", "1768-1769", "1776", "1786", "1792-1793", "1795", "1798", "1805", "1810", "1815", "1822", "1830", "1832", "1841", "1846", "1852", "1865", "1870-1871", "1874", "1876-1878", "1887", "1902", "1916"],
+          "D": ["12", "15", "46", "48", "71", "89", "117", "131", "165", "175", "186", "202", "238-239", "264", "272", "281", "311", "367", "411", "420", "446", "460", "468", "498", "504", "544", "570", "597", "640", "644", "699", "713", "734", "798", "820", "827", "895", "908", "920", "949", "977", "979", "997", "1081", "1087", "1090", "1170", "1201", "1203", "1230", "1261", "1276", "1289", "1310", "1315", "1318", "1324", "1328", "1347", "1354", "1357", "1360", "1376", "1384", "1414-1415", "1467", "1486", "1512", "1526", "1536", "1557", "1560", "1575", "1620", "1636", "1683", "1693", "1722", "1735-1736", "1771", "1828-1829", "1836", "1858", "1863", "1920"],
+          "C": ["18", "36", "75", "83", "143", "178", "337", "424", "472", "562", "665", "703", "777", "780", "859", "901", "1113", "1126-1127", "1135", "1214", "1297", "1372", "1383", "1440", "1580-1581", "1760", "1801", "1811", "1883"],
+          "I": ["54", "107", "120", "177", "379", "387", "823", "900", "936", "1125", "1194", "1245", "1268", "1275", "1908"],
+          "H": ["64", "386", "405", "839", "934", "1001", "1098", "1185", "1425", "1630", "1678"],
+          "V": ["77", "100", "105", "139", "154", "166", "274", "344", "455", "463", "517", "527", "564", "653", "715", "730", "767", "833", "844", "931", "974", "1055", "1165", "1183", "1216", "1222", "1295", "1327", "1375", "1438", "1463", "1498", "1504", "1637", "1640", "1694", "1716", "1733", "1745-1746", "1853", "1890", "1898"],
+          "L": ["173", "222", "237", "560", "633", "755", "1273"],
+          "B": ["215", "493", "512", "559", "940"],
+          "A": ["1398"]
+        },
+        "proof": "Expanded1927uniqueindices; sum count1933; all10rule counts agree; no baseline edits or suppressions.",
+        "encoding": "Each string n or a-b expands to inclusive0-basedbaseline.entries indices; dictionary groups are mutuallyexclusive. Exactbaselinehash required, and identity remains existingkey."
+      },
+      "explicit_reviewed_keysets": {
+        "A": ["bd7475b5bc17ba1b547f2f16d12b89de77a6e569fb59baf3dd6cc13b0f3100e2"],
+        "B": ["1b8c4bec046664dc0b91f57aa9d76c13f4b4bf0546851a9fda939680daceea1a", "40abb36f0d00f581d167fdab5a32e1d877a0855cab9ca40634e348a3a612c0e6", "4384754bd6beab54c688d57ad66d8a07be7683f8568cd19bd7aa7ce47a2b2b59", "4975d500a95ffa5cfb4deb05272df64e22ba111fda393205049d166a35244df2", "7e6c044e5eee8f5e605dfa16b5667d54d8fcbddb0db8b99e9d9981b5ea9896ba"]
+      },
+      "decision_question": "是否允许安全清理同步显式trim-only裁减已修项（不新增身份/次数），永久保留1927/1933历史起点？本轮仅备方案，不清理、不trim、不合入。",
+      "supplemental_candidate_review": {
+        "status": "proposal_only_not_applied_not_tested",
+        "source": "17e2dd28f8bffe749ea04b80ab22409abff3129c",
+        "at_utc": "2026-10-25T09:03:25.762377+00:00",
+        "bounded_reviewed": 10,
+        "additional_bindings": 5,
+        "patch_scope": "4files3+/5-;imports only;no source/baseline applied",
+        "combined_with_resolve": "6bindings; arithmetic1921identities/1927occurrences ifallapproved+validated+explicittrim;NOT currentmeasuredcount",
+        "columns": ["path", "binding", "line", "source_blob", "why_proposal_only"],
+        "candidates": [
+          ["packages/runtime/src/tool-test-support/tool/builtin-tool-utils.ts", "readFile", 2, "163e3542d76f617369948e4ddf09a2e43eebde07", "Selected contract is tool path/filesystem helper; preserve all boundary/path tests. This is retainedTS test-support, not wholemodule retirement."],
+          ["packages/runtime/src/services-test-support/turn-service.ts", "ThreadStatus", 1, "70114807a8e70e2b67955246f895f3dcf15049ff", "Do not remove TurnService or its TSconformance oracle; this is one unusedtype name only."],
+          ["src/main/ipc/register-app-ipc-handlers.test.ts", "mergeScheduleSettings", 12, "52b17cd1f470378a26feb8033ad88434b4491ce0", "Test importsElectron under existingmock harness; do not invokeapp/Providers directly."],
+          ["src/main/ipc/register-app-ipc-handlers.test.ts", "AppSettingsPatch", 19, "52b17cd1f470378a26feb8033ad88434b4491ce0", "Preserve all settingspatch tests/assertions; do not mistake anunusedtype nameforunusedpublicpatch contract."],
+          ["src/renderer/src/components/chat/MessageTimeline.tool-summary.test.ts", "isSubagentProcessBlock", 19, "6d57602191a1e9e1d213d1d8ba7d8349959ec5b0", "Preserve all subagentpublic projection/security assertions; this removes anunusedbinding, nottests oftheexport itself."]
+        ],
+        "retained": [
+          {
+            "path": "scripts/runtime-go-reasonix-live-parity.mjs",
+            "binding": "json",
+            "line": 12,
+            "blob": "d0239751221419e03db01471099aafdafbb44973",
+            "reason": "Initializer args.has(--json) is a call; script also routes actualsettings/live Provider probes. Outside thenoProvider/credential-adjacent cleanup scope and lowbenefit. Do not runscript.",
+            "status": "retain; not a proved safe-deletionitem"
+          },
+          {
+            "path": "src/renderer/src/agent/analytix-contract.test.ts",
+            "binding": "acceptedFinalView",
+            "line": 79,
+            "blob": "6e7530718997d9d74c8f4c6fa05624e564aaff4a",
+            "reason": "Object has satisfies CoreAcceptedFinalPublicViewV2Json: declaration itself iscompiletime conformance proof even without a value consumer. Deleting it removes anindependenttypecheck; public accepted-final/authority seam is frozen. Retain.",
+            "status": "retain; not a proved safe-deletionitem"
+          },
+          {
+            "path": "packages/runtime/src/tool-test-support/tool/builtin-tool-operations.ts",
+            "binding": "existsSync",
+            "line": 1,
+            "blob": "642946f05768d8b0079b2444d2efaa574f37308a",
+            "reason": "Only binding inits moduleimport; deleting would remove the whole node:fs importedge, unlike retained-named-import proposals. Builtin likelylowrisk, but no needexpand evaluation-preservation proof forthisonefinding. Retain instead ofinventing side-effect-onlyimport.",
+            "status": "retain; not a proved safe-deletionitem"
+          },
+          {
+            "path": "packages/runtime/src/tool-test-support/tool/lsp-client.ts",
+            "binding": "randomUUID",
+            "line": 16,
+            "blob": "6a09deca39597ddae19ae9b7391860423f24143f",
+            "reason": "Only binding innode:crypto import; deleting drops wholemodule importedge in subprocessLSP lifecyclehelper. No closure/initializationbehavior claim made. Retain thisround ratherthan spend lifecycleverification fora1linecleanup.",
+            "status": "retain; not a proved safe-deletionitem"
+          },
+          {
+            "path": "src/renderer/src/components/summary/ThreadSummaryPanel.test.ts",
+            "binding": "isThreadSummaryPublicationBlocked",
+            "line": 13,
+            "blob": "8bd195d63bdfe5cd4a21834beb97ae684a8f3ae6",
+            "reason": "Same-module namedimport could beremoved withoutdroppingmoduleedge, but publication-blocking summarysurface isauthority/Privacy-adjacent. Exclude fromsafe subset undercurrent freeze.",
+            "status": "retain; not a proved safe-deletionitem"
+          }
+        ],
+        "contracts": "No initializer call,SQL,functionbody,parameter,exception assertion removed in the proposed importpatch; selectedTSmodules are test-support,not whole-module retirement. Allcurrent1933 findings remainactive. Newcandidate review provenance does not change initialroutingcounts.",
+        "next_check": "Only after explicittrim/lifecycleapproval: affected3testpaths, applicabletypecheck/lint, fullgate. No new install/diagnostic/tests executed now."
+      }
+    },
+    "source_inventory_start": {
+      "source_main": "17e2dd28f8bffe749ea04b80ab22409abff3129c",
+      "at_utc": "2026-10-25T08:45:21.863713+00:00",
+      "method": "git ls-tree -rz --long; each unique blob cat-file once; LF byte count, binary NUL excluded from textualLF; categories priority lock/embedded-vendor/test/source/docs/config/other",
+      "source_extensions18": [".c", ".cjs", ".cs", ".css", ".go", ".html", ".js", ".mjs", ".mts", ".nsh", ".ps1", ".py", ".rs", ".s", ".sh", ".ts", ".tsx", ".zsh"],
+      "test_predicate": "(^|/)(?:test|tests|__tests__|testdata|fixture|fixtures|__fixtures__|test-support|test_support)(?:/|$)|(^|/)[^/]*-test-support(?:/|$)|(^|/)test_[^/]*$|(?:[._-])(?:test|spec|fixtures?)(?:[._-]|$)",
+      "lock_predicate": "(^|/)(?:package-lock\\.json|npm-shrinkwrap\\.json|yarn\\.lock|pnpm-lock\\.yaml|uv\\.lock|Cargo\\.lock|go\\.sum|poetry\\.lock|Pipfile\\.lock|[^/]*requirements[^/]*lock\\.txt|windows-python-runtime-lock\\.json)$",
+      "embedded_predicate": "^(?:embedded|vendor|dist|output|node_modules)/|(?:^|/)(?:vendor|third_party|third-party)/",
+      "tracked": 7363,
+      "categories": {
+        "documentation": {
+          "files": 407,
+          "bytes": 10904429,
+          "LF": 165184,
+          "binary_files": 0
+        },
+        "configuration_metadata": {
+          "files": 205,
+          "bytes": 7653999,
+          "LF": 65812,
+          "binary_files": 0
+        },
+        "source": {
+          "files": 3924,
+          "bytes": 50195584,
+          "LF": 1252301,
+          "binary_files": 0
+        },
+        "assets_legal_other": {
+          "files": 103,
+          "bytes": 26350552,
+          "LF": 7415,
+          "binary_files": 41
+        },
+        "test_source": {
+          "files": 2592,
+          "bytes": 39557289,
+          "LF": 905097,
+          "binary_files": 0
+        },
+        "lock_data": {
+          "files": 11,
+          "bytes": 1611733,
+          "LF": 34261,
+          "binary_files": 0
+        },
+        "embedded_snapshot_provenance_unverified": {
+          "files": 94,
+          "bytes": 2495855,
+          "LF": 66537,
+          "binary_files": 0
+        },
+        "vendored_or_build_snapshot": {
+          "files": 27,
+          "bytes": 3681964,
+          "LF": 1781,
+          "binary_files": 2
+        }
+      },
+      "source18": {
+        "files": 6619,
+        "LF": 2224507,
+        "large_all": 143,
+        "large_non_test": 82
+      },
+      "narrow8": {
+        "large_all": 135,
+        "large_non_test": 74
+      },
+      "embedded_prefix": "src/renderer/src/data-analysis/features/flow/runtime/embedded/",
+      "embedded_caveat": "Embedded94files/66537LF are separated as a current embedded snapshot; this review does not prove their generation provenance or authorize editing/deletion. Explicit vendor/build paths separate; no claim every other source handwritten."
+    },
+    "reserved_decisions_current": {
+      "schema": "governance-b-decision-fragment-v1",
+      "status": "Reference; decision material only, no implementation or merge authority",
+      "source_sha": "17e2dd28f8bffe749ea04b80ab22409abff3129c",
+      "evidence_cutoff_utc": "2026-10-25T08:40:35Z",
+      "created_at_utc": "2026-10-25T08:47:37.265530+00:00",
+      "method": ["Read current PR metadata and complete files lists; reused unchanged verified input evidence.", "PR102 API omitted large lock patch; compared complete TOML nodes from existing Git objects.", "Read immutable main manifests, lock nodes, ratchet verification logic and consumer paths.", "Official primary web research for contract/security updates; no helper, test, install, package download, product execution or version sampling."],
+      "rows": [
+        {
+          "pr": 89,
+          "head": "da5871807db650e413bd6ca136175aa4e129ff3f",
+          "category": "E-toolchain",
+          "judgment": "两文件17+/11−；go1.25.0→1.26.0，x/sys.46→.49、x/text.38→.43；当前CI使用1.26.4不等于最低版本决定。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/89",
+            "source_paths": [
+              {
+                "path": "packages/runtime-go/go.mod",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime-go/go.mod"
+              },
+              {
+                "path": "packages/runtime-go/go.sum",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime-go/go.sum"
+              },
+              {
+                "path": ".github/workflows/ci.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/ci.yml"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "明确退役1.25后采用最小工具链载体，正式构建与打包消费需验证。",
+          "decision_question": "是否批准生产Go模块最低版本升至1.26，并验证正式构建与打包消费链？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 4,
+          "head": "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f",
+          "category": "H-major",
+          "judgment": "setup-python5.6→7，涉及CI及release；官方v7迁移ESM并移除pip-install输入，本PR没有添加新输入。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/4",
+            "source_paths": [
+              {
+                "path": ".github/workflows/ci.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/ci.yml"
+              },
+              {
+                "path": ".github/workflows/release.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/release.yml"
+              }
+            ],
+            "primary_urls": ["https://github.com/actions/setup-python/releases/tag/v7.0.0"]
+          },
+          "recommendation": "可批准固定SHA升级方向，检查全部Python设置与缓存消费者，不仅Development摘要。",
+          "decision_question": "是否批准setup-python7独立工具合同迁移及相关工作流验证？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 7,
+          "head": "cf368d0e088e49afb8f0ea9b314f95015047aeda",
+          "category": "H-major",
+          "judgment": "checkout4→7.0.1，四工作流16处替换；v7增加fork PR安全默认值，v6改变凭据保存位置，不是无行为变化。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/7",
+            "source_paths": [
+              {
+                "path": ".github/workflows/ci.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/ci.yml"
+              },
+              {
+                "path": ".github/workflows/package.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/package.yml"
+              },
+              {
+                "path": ".github/workflows/pr28-independent-environment.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/pr28-independent-environment.yml"
+              },
+              {
+                "path": ".github/workflows/release.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/release.yml"
+              }
+            ],
+            "primary_urls": ["https://github.com/actions/checkout", "https://github.com/actions/checkout/releases/tag/v7.0.1"]
+          },
+          "recommendation": "保留persist-credentials:false；验证PR、workflow_run与打包路径，不启用unsafe选项。",
+          "decision_question": "是否批准checkout7迁移并保留现有凭据与可信事件边界？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 90,
+          "head": "1a224b640d5750a99932feaa4be656bd7c1dd433",
+          "category": "H-major",
+          "judgment": "upload-artifact4→7.0.2仅改两个产物工作流；Development不执行全部上传下载消费链。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/90",
+            "source_paths": [
+              {
+                "path": ".github/workflows/package.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/package.yml"
+              },
+              {
+                "path": ".github/workflows/pr28-independent-environment.yml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/pr28-independent-environment.yml"
+              }
+            ],
+            "primary_urls": ["https://github.com/actions/upload-artifact/releases/tag/v7.0.2"]
+          },
+          "recommendation": "用合成小产物验证名称、内容及读取端兼容，不为此发布安装包。",
+          "decision_question": "是否批准artifact7迁移并以合成上传下载闭环验收？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 15,
+          "head": "f11600dd5b425c1292e16f635dfdf130d18f4fae",
+          "category": "H-major",
+          "judgment": "pytest8.4.2→9.1.1且放宽manifest上限、更新锁marker；官方9含破坏变化，最低Python3.10仍满足。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/15",
+            "source_paths": [
+              {
+                "path": "backend/pyproject.toml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/pyproject.toml"
+              },
+              {
+                "path": "backend/uv.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/uv.lock"
+              }
+            ],
+            "primary_urls": ["https://docs.pytest.org/en/stable/announce/release-9.0.0.html", "https://docs.pytest.org/en/stable/backwards-compatibility.html"]
+          },
+          "recommendation": "验证现有fixture/plugin合同后采用，marker重排需确认等价。",
+          "decision_question": "是否批准pytest9迁移，保留测试发现、fixture与失败语义？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 95,
+          "head": "f64678911e7da5a09ef6e849c83c43036f9d99d2",
+          "category": "H-major",
+          "judgment": "Windows websockets16→17.3仅requirements一行，缺冻结聚合JSON与实际协议兼容证据。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/95",
+            "source_paths": [
+              {
+                "path": "scripts/windows-backend-requirements.lock.txt",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-backend-requirements.lock.txt"
+              },
+              {
+                "path": "scripts/windows-python-runtime-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-python-runtime-lock.json"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "重建完整Windows候选，不能把一行改动直接作为冻结载体。",
+          "decision_question": "是否批准完整Windows websockets17候选与实际WebSocket消费链验证？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 34,
+          "head": "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb",
+          "category": "platform-security",
+          "judgment": "目标42.11.16内嵌Node24.19.0；Electron41于2026-08-24、42于2026-10-20 EOL。10月21日Node修复为22.23.4/24.22.1/26.12.1；官方44.9.3与45.0.0页仍列24.22.0，不可称升级44/45已含修复。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/34",
+            "source_paths": [
+              {
+                "path": "package.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package.json"
+              },
+              {
+                "path": "package-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package-lock.json"
+              }
+            ],
+            "primary_urls": ["https://releases.electronjs.org/schedule", "https://releases.electronjs.org/release/v42.11.16", "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases", "https://releases.electronjs.org/"]
+          },
+          "recommendation": "不采纳42.11.16为长期安全目标；优先评估受支持44线实际修补候选，45备选；确认Electron补丁及嵌入Node，补native ABI、启动、renderer、安装证据。",
+          "decision_question": "是否批准独立Node22.23.4工具迁移及受支持Electron44/45兼容候选评估，暂不直接采纳#34？",
+          "limits": ["本轮未修改Node或Electron，未采样本机版本。", "官方版本状态为2026-10-25只读快照，后续候选须重新核实。"],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 57,
+          "head": "db19f2652cb618b8d45db48e76c2f57a6cba2d6a",
+          "category": "TLS-security",
+          "judgment": "data_engine锁rustls.23.41→.23.46、webpki.103.13→.103.15。rustls目标修RUSTSEC-2026-0346–0349，但0382要求webpki≥.103.16，roots当前1.0.8也低于0381要求1.0.10；另两Rust锁为rustls.23.39/webpki.103.13/roots1.0.7。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/57",
+            "source_paths": [
+              {
+                "path": "tools/data_engine/Cargo.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/data_engine/Cargo.lock"
+              },
+              {
+                "path": "tools/data_engine/Cargo.toml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/data_engine/Cargo.toml"
+              },
+              {
+                "path": "tools/data_engine/src/main.rs",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/data_engine/src/main.rs"
+              },
+              {
+                "path": "tools/analysis_compute/Cargo.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/analysis_compute/Cargo.lock"
+              },
+              {
+                "path": "tools/cleaning_ops/Cargo.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/cleaning_ops/Cargo.lock"
+              },
+              {
+                "path": "scripts/native-components.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/native-components.json"
+              },
+              {
+                "path": "scripts/native-component-contract.cjs",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/native-component-contract.cjs"
+              }
+            ],
+            "primary_urls": ["https://rustsec.org/advisories/RUSTSEC-2026-0346.html", "https://rustsec.org/advisories/RUSTSEC-2026-0347.html", "https://rustsec.org/advisories/RUSTSEC-2026-0348.html", "https://rustsec.org/advisories/RUSTSEC-2026-0349.html", "https://rustsec.org/advisories/RUSTSEC-2026-0382.html", "https://rustsec.org/advisories/RUSTSEC-2026-0381.html"]
+          },
+          "recommendation": "重新界定三锁最小安全目标，至少核rustls.23.46/webpki.103.16/roots1.0.10；不照合原57，不执行C树被拒操作。",
+          "decision_question": "是否批准先核三锁TLS补丁与实际feature/构建消费证据，再形成最小安全载体，C拒绝边界保持不变？",
+          "limits": ["锁反向链rustls/webpki←reqwest0.12.28←libduckdb-sys1.10504.0←duckdb←data-engine；native组件合同及实际DuckDB连接可达。", "锁图不能区分构建时或运行时TLS，也不证明已利用或不可达。", "精确libduckdb-sys Cargo.toml/build.rs官方页本次未能读取；未换途径补取，feature边界仍缺。"],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 77,
+          "head": "57589814d34f4babaf1a7878fc13bcd3b0c33bb1",
+          "category": "Pillow-Python-contract",
+          "judgment": "Windows仅Pillow12.3→13一行；backend锁仍12.3且manifest Python≥3.10；Windows正式runtime3.11.15。Pillow13官方停止3.10并含API移除；100仅候选生成工具。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/77",
+            "source_paths": [
+              {
+                "path": "backend/pyproject.toml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/pyproject.toml"
+              },
+              {
+                "path": "backend/uv.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/uv.lock"
+              },
+              {
+                "path": "scripts/windows-backend-requirements.lock.txt",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-backend-requirements.lock.txt"
+              },
+              {
+                "path": "scripts/windows-python-runtime-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-python-runtime-lock.json"
+              },
+              {
+                "path": "scripts/build-windows-backend-runtime-assets.cjs",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/build-windows-backend-runtime-assets.cjs"
+              },
+              {
+                "path": "src/main/windows-backend-candidate.test.ts",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/src/main/windows-backend-candidate.test.ts"
+              }
+            ],
+            "primary_urls": ["https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html", "https://pillow.readthedocs.io/en/stable/installation/python-support.html"]
+          },
+          "recommendation": "三选：保留12.3并限期接受残余；正式退役3.10后两树升13（推荐先补正式支持证据）；按解释器拆版本但3.10残余仍需接受。",
+          "decision_question": "是否选择退役Python3.10并验证两树Pillow13，或明确选择另两项及残余期限？",
+          "limits": ["CI3.11.9不是正式打包3.11.15验收；本机采样不作为正式3.10支持证据。"],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 92,
+          "head": "a6682fcb98e266e0ca43130eeba447b62b0f1327",
+          "category": "G-major",
+          "judgment": "目标现为SQLGlot30.24.0；旧30.23材料须修正。manifest<27→<31，uv revision3→5和marker变化；真实SQL/AST检查消费。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/92",
+            "source_paths": [
+              {
+                "path": "backend/pyproject.toml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/pyproject.toml"
+              },
+              {
+                "path": "backend/uv.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/uv.lock"
+              },
+              {
+                "path": "backend/app/repositories/analysis_repository.py",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/app/repositories/analysis_repository.py"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "不照合；先冻结允许与拒绝SQL语料作升级对照，保拒绝优先级。",
+          "decision_question": "是否批准SQLGlot30的SQL/AST兼容迁移并保留现有拒绝优先级？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 93,
+          "head": "f699f8f660ef2429d2a106d970de3710985cb93b",
+          "category": "G-runtime-contract",
+          "judgment": "Weixin2.4.3→2.4.10虽patch，但Node最低≥22→≥22.13.0，OpenClaw peer≥2026.3.22→≥2026.5.12；真实动态深导入send-media.js。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/93",
+            "source_paths": [
+              {
+                "path": "package.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package.json"
+              },
+              {
+                "path": "package-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package-lock.json"
+              },
+              {
+                "path": "src/main/weixin-bridge-runtime.ts",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/src/main/weixin-bridge-runtime.ts"
+              },
+              {
+                "path": "src/main/openclaw-weixin-media.d.ts",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/src/main/openclaw-weixin-media.d.ts"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "作为运行环境与媒体深导入合同迁移，不按F普通patch合并。",
+          "decision_question": "是否接受新的Node/OpenClaw最低合同并验证登录、媒体深导入与打包可达性？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 97,
+          "head": "699c4c8f02adc5ed1840cb4d899ff13caf6485b3",
+          "category": "G-major",
+          "judgment": "KaTeX.19与Commander15，并引入嵌套KaTeX.16.47；main已有107的.18.2及$katex约束完成较小安全目标，原PR基于旧main。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/97",
+            "source_paths": [
+              {
+                "path": "package.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package.json"
+              },
+              {
+                "path": "package-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package-lock.json"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "不直接采纳原PR；若需.19，重建保留现有安全约束的最小候选。",
+          "decision_question": "是否关闭旧97并登记安全目标由107承接，KaTeX.19另作兼容决策？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 102,
+          "head": "ad609e6a9a06de9c215c39d7747b88531a1bd262",
+          "category": "G-group-contract",
+          "judgment": "2文件294+/236−；62→63锁节点，新增OTel API，升级FastAPI/Pydantic/core/DuckDB/crypto/pdfium；附模式100755→100644和marker变化。候选仍certifi7.22/urllib3 2.7，不可整锁替换当前10.19/2.8。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/102",
+            "source_paths": [
+              {
+                "path": "backend/pyproject.toml",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/pyproject.toml"
+              },
+              {
+                "path": "backend/uv.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/uv.lock"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "重建保完整安全节点的组；剥离附带模式变化，补原生pdfium与crypto证据。",
+          "decision_question": "是否批准重建保持现有安全节点的backend minor/patch组，并按真实原生消费者验收？",
+          "limits": ["旧完整BackendCI不能替代新原生pdfium5.14/crypto50.0.2证据。"],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 110,
+          "head": "4882a9cc33392e295aefd17284c0645c1f4e5cf1",
+          "category": "G-frozen-carrier-contract",
+          "judgment": "单requirements文件22+/22−、45LF，无聚合JSON；四安全pin/Pillow12.3保留，多平台hash扩张。含DuckDB1.5.6、NumPy2.5.4、Pandas3.0.6、FastAPI.156.4、Pydantic/core等22更新。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/110",
+            "source_paths": [
+              {
+                "path": "scripts/windows-backend-requirements.lock.txt",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-backend-requirements.lock.txt"
+              },
+              {
+                "path": "scripts/windows-python-runtime-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-python-runtime-lock.json"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "不能直接作为冻结载体；需完整候选、实际聚合和原生/HTTP/PDF合同。",
+          "decision_question": "是否批准把22项重建为完整Windows冻结候选并重新计算聚合、验证原生/HTTP/PDF合同？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 98,
+          "head": "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53",
+          "category": "Zod-tool-migration",
+          "judgment": "两树Zod4.6.7，夹12行extraneous删除；根4.4.3属132包ratchet闭包，既有实际失败为Tool lock drift:node_modules/zod。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/98",
+            "source_paths": [
+              {
+                "path": "package.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package.json"
+              },
+              {
+                "path": "package-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package-lock.json"
+              },
+              {
+                "path": "packages/runtime/package.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime/package.json"
+              },
+              {
+                "path": "packages/runtime/package-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime/package-lock.json"
+              },
+              {
+                "path": "scripts/unused-findings-gate.mjs",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/unused-findings-gate.mjs"
+              },
+              {
+                "path": "scripts/unused-findings-baseline.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/unused-findings-baseline.json"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "单独批准工具迁移，保原1933来源并比较新旧身份，不改policy或自动重建吞入。",
+          "decision_question": "是否批准独立Zod工具闭包迁移后协调双树升级，禁止扩大历史finding额度？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 108,
+          "head": "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3",
+          "category": "Zod-runtime-only",
+          "judgment": "runtime-only4.6.6夹同12行删除，不直接改根闭包；98失败不等于108已证实同类失败，也不算双树完成。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/108",
+            "source_paths": [
+              {
+                "path": "packages/runtime/package.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime/package.json"
+              },
+              {
+                "path": "packages/runtime/package-lock.json",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime/package-lock.json"
+              },
+              {
+                "path": "scripts/unused-findings-gate.mjs",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/unused-findings-gate.mjs"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "若急需仅runtime，先剥无关删除；长期推荐显式工具迁移后的协调方案。",
+          "decision_question": "是否采用runtime-only过渡方案，还是等待显式工具迁移后统一处理？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 12,
+          "head": "1cf3583b40fe4362ad786888ad500c17d24b94c3",
+          "category": "F-to-B-transitive-major",
+          "judgment": "独立F reviewer确证ICU2.2→2.3同时引入syn3.0.5 major（zerovec-derive依赖syn2→3），另换windows-sys依赖边；不满足全闭包minor/patch。真实中文排序消费者存在。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/12",
+            "source_paths": ["tools/analysis_compute/Cargo.lock"],
+            "primary_urls": [],
+            "source_path_status": "当前收到的F审阅回执未给出Cargo.lock完整路径；不猜目录，root从其原始F回执补入。PR URL及head确知。",
+            "verified_path_method": "git show --format= --name-only1cf3583b; onlythispath;26+/15- vs58b365b"
+          },
+          "recommendation": "转B；原CI有cargo步骤失败且原因未取，不称全绿。可约束更小兼容闭包或明确接受proc-macro major。",
+          "decision_question": "是否接受含proc-macro major的ICU闭包迁移，或先约束更小兼容闭包？",
+          "limits": ["详细源码/CI判据由root/f_candidates_review_20261025独立只读审阅提供，本子任务未重跑。"],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 1,
+          "head": "027ab53ab470b6c0a545939eecd7000110c40eeb",
+          "category": "tar-evidence-only",
+          "judgment": "cleaning_ops当前tar.4.45，候选.4.46；6+/15−且重选windows-sys.59→.52删除旧节点。两树不互相替代，缺完整兼容与准确安全公告绑定。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/1",
+            "source_paths": [
+              {
+                "path": "tools/cleaning_ops/Cargo.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/cleaning_ops/Cargo.lock"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "只复核已有允许证据，不执行或称安全销项；先核公告绑定及无关Windows重选。",
+          "decision_question": "是否先核公告绑定并重建不夹带无关Windows重选的两树载体，再决定采纳？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 29,
+          "head": "b35306029b571f090244bb0f26b0f50525a6222f",
+          "category": "tar-evidence-only",
+          "judgment": "analysis_compute当前tar.4.45，候选.4.46；6+/15−且重选windows-sys.59→.52删除旧节点。两树不互相替代，缺完整兼容与准确安全公告绑定。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/29",
+            "source_paths": [
+              {
+                "path": "tools/analysis_compute/Cargo.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/analysis_compute/Cargo.lock"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "只复核已有允许证据，不执行或称安全销项；先核公告绑定及无关Windows重选。",
+          "decision_question": "是否先核公告绑定并重建不夹带无关Windows重选的两树载体，再决定采纳？",
+          "limits": [],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 2,
+          "head": "946bb377ae3392408bec05474c4f0c67c45550f1",
+          "category": "C-refused-evidence-only",
+          "judgment": "cleaning_ops当前quinn-proto.11.14，候选.11.17且改rand/getrandom闭包；历史≥.11.19不是本轮安全证明，准确公告绑定缺口保留。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/2",
+            "source_paths": [
+              {
+                "path": "tools/cleaning_ops/Cargo.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/cleaning_ops/Cargo.lock"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "不可执行、重试或提供替代手动runbook；维持证据与限期残余登记，平台合规恢复并重新绑定公告后再决策。",
+          "decision_question": "是否维持证据包与限期残余登记，待平台合规恢复且公告重新绑定后再决定修复？",
+          "limits": ["C拒绝不能由本次重复批准解除；禁止换工具、渠道或手动代跑绕过。"],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        },
+        {
+          "pr": 31,
+          "head": "0ac9267c634927e172be535370ab15843007e715",
+          "category": "quinn-evidence-only",
+          "judgment": "analysis_compute当前quinn-proto.11.14，候选.11.18且改rand/getrandom闭包；历史≥.11.19不是本轮安全证明，准确公告绑定缺口保留。",
+          "evidence": {
+            "pr_url": "https://github.com/Eysn0130/analytix/pull/31",
+            "source_paths": [
+              {
+                "path": "tools/analysis_compute/Cargo.lock",
+                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/analysis_compute/Cargo.lock"
+              }
+            ],
+            "primary_urls": []
+          },
+          "recommendation": "不可执行、重试或提供替代手动runbook；维持证据与限期残余登记，平台合规恢复并重新绑定公告后再决策。",
+          "decision_question": "是否维持证据包与限期残余登记，待平台合规恢复且公告重新绑定后再决定修复？",
+          "limits": ["C拒绝不能由本次重复批准解除；禁止换工具、渠道或手动代跑绕过。"],
+          "owner": "Eysn / governance coordinator",
+          "review_by_utc": "2026-11-01T00:00:00Z",
+          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
+        }
+      ],
+      "execution_restrictions": ["Product/features/Privacy remain frozen.", "No process enumeration or task-external environment reconnaissance.", "No permission repair or old backend isolation reuse.", "No real cases, credentials or live Providers.", "No refused endpoint retries or route changes; C remains evidence-only.", "Only root integrates canonical ledger; this fragment does not change repository files."],
+      "unverified": ["Formal Python3.10 support evidence and packaged3.11.15 acceptance.", "Exact libduckdb-sys feature/build-time/runtime TLS boundary.", "Accurate current quinn advisory bindings; historical lower bound is not a new security proof."],
+      "counts": {
+        "decision_items": 21,
+        "new_tests": 0,
+        "helper_runs": 0,
+        "repository_files_changed": 0
+      }
+    },
+    "record_scope": "Dated pre-publication record. Final currentmain,complete inventory/PR/branch/check snapshot must be taken after publication; this JSON does not assert its own future merge SHA.",
+    "security_channels_current": "未完成：安全开关与alert linkage仍待用户截图；不重试已拒API、不以publicrepo/auto_mergefalse/pushbanner推断开启或漏洞销项。三项旧botjobfailurecause仍未知，拒绝详情边界保留。",
+    "closeout_criteria": [
+      ["stock_PRs", "partial", "51/70closedfrozen;11merged22edwith58checks;remaining21B needdecisions,notpreacceptedexceptions."],
+      ["unused_ratchet", "enforced_pending_finalhead_evidence", "ActualPR11gate2342files/1927identities/1933occurrences/8guards,exit0;allreview-deferralsregistered;cleanupnotimplemented pendingtrim-only decision. Finalmainrepeat remainsrequired."],
+      ["dependency_maintenance", "partial", "Weekly6ecologygroups deployedpreviously;securitysettings/alert linkage unverified;Bmajor/toolcontracts undecided."],
+      ["largefiles", "recorded_not_mechanically_split", "Historical74withsourceclassifications retained;currentnarrow74unchanged;notallarehandwrittenproduction."],
+      ["branches", "partial", "39originalMdeleted/recoverable;19nodirectPRretained;31expandedrefsheldafterdenial;newinflightrefsrecordbeforepublication."],
+      ["final_consistency", "pending", "Must take same-finalmain/UTC completePR/branch/inventory/findings/requiredjobs afterpublication; thisrecord isdated input."]
+    ],
+    "next_decisions": ["Approve or decline trim-only baseline lifecycle for verifiednon-productcleanup, preserving historical1927/1933.", "DecideB21questionsinonebatch;noautomaticmajor/toolmigrationoracceptedsecurityresidual.", "Decidepreciselyscoped extra main-containedbranchcleanup after finalref/SHA/recovery receipt; current70actionremainsdenied,notretried.", "Provide securitysettings/alert linkage evidence or explicitlydecidehowto completeit; no deniedAPI bypass.", "Globalcloseout/unfreeze isnotgrantedbythiscycle."],
+    "authority_resolution": "Thedated2026-10-25standing_delta controls thiscycle; priorstanding_execution_rules remains the restrictive default. Its oldno-deletion sentence is overridden only for the exactoriginal39alreadycompleted; no implicitfuturedeletion grant.",
+    "merges": [
+      {
+        "pr": 11,
+        "head": "2b834b1188053a41523cd72fdcd983d86ed8893f",
+        "base": "17e2dd28f8bffe749ea04b80ab22409abff3129c",
+        "merge": "22edb87187ab819f0eb100da9af192a52efa5136",
+        "tree": "d68d2c5723e88854688f35bbf9563f56747fe63b",
+        "scope": "2manifests/locks22+/22-; package235LF/lock17721LF unchanged;no productfunctions/SQL/parameters/exception changes;dependencyversions intentionally updated",
+        "development": "https://github.com/Eysn0130/analytix/actions/runs/40177637999",
+        "codeql": "https://github.com/Eysn0130/analytix/actions/runs/40177635483",
+        "result": "52/52jobs samehead/run/attempt1;4CodeQL;58/58checks (extraDependabotcheck),gate121128139460success;0reviews/threads,CLEAN;normalmerge",
+        "mapping": "https://github.com/Eysn0130/analytix/pull/11#issuecomment-6395837105",
+        "local_limit": "Candidate localrenderer unavailable; no install/download/oldReact substitution. ActualfinalheadCI installedactualnewlock,ranApplicationtests/typecheck/sourcebuild. No desktopinstaller/liveProvider acceptance."
+      }
+    ],
+    "actual_unused_gate": {
+      "head": "2b834b1188053a41523cd72fdcd983d86ed8893f",
+      "event_base": "17e2dd28f8bffe749ea04b80ab22409abff3129c",
+      "event": "pull_request",
+      "run": 40177637999,
+      "job": 121121682146,
+      "step": "Check unused finding ratchet against trusted event base",
+      "command": "node trustedbasechecker; node --test scripts/unused-findings-gate.test.mjs",
+      "exit": 0,
+      "result_at_utc": "2026-10-25T08:46:08.3172651Z",
+      "files": 2342,
+      "identities": 1927,
+      "occurrences": 1933,
+      "ambiguity_groups": 8,
+      "source": "Actual decoded new Sourcebaseline job log; no historicalfindings rediscovery or localhelper/diagnostic rerun.2342is actualcurrentdynamic scan,not historical2339 whitelist or435findingfiles.",
+      "final_main_gate": "pending finalpublication main; do not substitute this earlierhead."
+    },
+    "prepublication_snapshot": {
+      "utc_start": "2026-10-25T09:17:16.179Z",
+      "utc_end": "2026-10-25T09:17:17.563Z",
+      "source_main": "22edb87187ab819f0eb100da9af192a52efa5136",
+      "atomic": false,
+      "main_unchanged": true,
+      "complete_pages": "21openPRs/60branches,firstpagesunder100",
+      "open_columns": ["pr", "head", "ref"],
+      "open_prs": [
+        [110, "4882a9cc33392e295aefd17284c0645c1f4e5cf1", "dependabot/pip/scripts/pip-minor-patch-8d12d4c10b"],
+        [108, "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3", "dependabot/npm_and_yarn/packages/runtime/zod-4.6.6"],
+        [102, "ad609e6a9a06de9c215c39d7747b88531a1bd262", "dependabot/uv/backend/uv-minor-patch-cbb656aa63"],
+        [98, "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53", "dependabot/npm_and_yarn/npm_and_yarn-b94f287d41"],
+        [97, "699c4c8f02adc5ed1840cb4d899ff13caf6485b3", "dependabot/npm_and_yarn/npm_and_yarn-89976db822"],
+        [95, "f64678911e7da5a09ef6e849c83c43036f9d99d2", "dependabot/pip/scripts/websockets-17.3"],
+        [93, "f699f8f660ef2429d2a106d970de3710985cb93b", "dependabot/npm_and_yarn/npm_and_yarn-823d526490"],
+        [92, "a6682fcb98e266e0ca43130eeba447b62b0f1327", "dependabot/uv/backend/sqlglot-30.23.0"],
+        [90, "1a224b640d5750a99932feaa4be656bd7c1dd433", "dependabot/github_actions/actions/upload-artifact-7.0.2"],
+        [89, "da5871807db650e413bd6ca136175aa4e129ff3f", "dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47"],
+        [77, "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", "dependabot/pip/scripts/pillow-13.0.0"],
+        [57, "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "dependabot/cargo/tools/data_engine/rustls-0.23.46"],
+        [34, "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", "dependabot/npm_and_yarn/electron-41.10.6"],
+        [31, "0ac9267c634927e172be535370ab15843007e715", "dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18"],
+        [29, "b35306029b571f090244bb0f26b0f50525a6222f", "dependabot/cargo/tools/analysis_compute/tar-0.4.46"],
+        [15, "f11600dd5b425c1292e16f635dfdf130d18f4fae", "dependabot/uv/backend/pytest-9.1.1"],
+        [12, "1cf3583b40fe4362ad786888ad500c17d24b94c3", "dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0"],
+        [7, "cf368d0e088e49afb8f0ea9b314f95015047aeda", "dependabot/github_actions/actions/checkout-7.0.1"],
+        [4, "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "dependabot/github_actions/actions/setup-python-7.0.0"],
+        [2, "946bb377ae3392408bec05474c4f0c67c45550f1", "dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17"],
+        [1, "027ab53ab470b6c0a545939eecd7000110c40eeb", "dependabot/cargo/tools/cleaning_ops/tar-0.4.46"]
+      ],
+      "branch_columns": ["ref", "sha"],
+      "branches": [
+        ["codex/analytix-ui-refresh-20260917", "dde784437dc8563e84066629dd57f4a11fd9acc9"],
+        ["codex/context-sample-truth", "f052e0f97a06a524bfd0a97a6722d4e9fe87ebd7"],
+        ["codex/dependabot-minor-patch-groups", "3596b0faed06a473d01ef0237b746df7c950816d"],
+        ["codex/dsh-composer-family", "e77c86854af0bb99ee475ece285f7f76d1987bd1"],
+        ["codex/dsh-recursive-tool-calls", "423e84b38f9a628eec3fc1e3e338e5d4d243c588"],
+        ["codex/excel-direct-editing", "eb1a556dc3009a86a30cee36cb4401d20d85549e"],
+        ["codex/excel-native-save", "c71ca5d4d78b69e3246fe70412fa5bbb3726b209"],
+        ["codex/excel-preview-polish", "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3"],
+        ["codex/finite-replay-archive-reuse", "af74a35b9165590c8f1e63f1ae858b7f83bdb9c9"],
+        ["codex/finite-replay-validation-cancel", "0231104b9f2ed00b65fe4822f365cd7251cc1dbc"],
+        ["codex/fork-legacy-owner-barrier", "89187f0b3039684a00fe42bf0406e390a3465a57"],
+        ["codex/governance-closeout-ledger", "e60c8a5ad33379d9e846f90fd6f8458db1e7866b"],
+        ["codex/governance-delivery-ledger-20261024", "cafcfed60ee3aad85d8940f1a64b0f1285cd2980"],
+        ["codex/history-replay-start-diagnostics", "2d6d326b759f19353d627bf9704a8f607a5cc3a1"],
+        ["codex/native-office-quit-lifecycle", "25ddfec93a998347f51bdee4b739d0aa35268b36"],
+        ["codex/question-answer-handoff", "2ccbf335cfb5e9c8f04778dfb2dd1925ab3e81b4"],
+        ["codex/question-reply-body-collector", "e4101a8a69984f35323446fc78afbe2e08957ca5"],
+        ["codex/repository-maintenance-20261018", "e664f9ea03d3a7da6f671408763b667ef025c14b"],
+        ["codex/retire-unused-quality-20261018", "db3a73f883448e2ff370d02c3900839390510ba3"],
+        ["codex/security-backend-ab-clean", "2141a09e730c4e20bfffcd15d325eccee831e988"],
+        ["codex/security-backend-pypdf-6-21-2", "c205c99c3876add905294322ec07b011cb4593ba"],
+        ["codex/security-ip-address-dual-tree", "d497a1483e78c7a778f36ab107eac18960021f8e"],
+        ["codex/security-katex-complete", "9cf5498d3b7816030024866676f793cf14993dec"],
+        ["codex/security-patch-package-contract", "54548e592436e0d0f03deca9919d78e75978bcfc"],
+        ["codex/security-proxy-addr-patch", "7ae8b300c75f573338fd8ec0786c984333a5c440"],
+        ["codex/security-runtime-source-map-js-1-2-2", "4a191f67db6014cefd2bb6e7c59546130707a3d8"],
+        ["codex/security-selector-parser-patch", "21265d31228c5d24e47238cea7dfc4cced5e10bc"],
+        ["codex/security-windows-ab-combined", "84ec6518dc4f3655f27a232024bd60dde61b9957"],
+        ["codex/settings-reference-modal-20261018", "e33a3632fa1d09da1804deb51e293b8eb9635abe"],
+        ["codex/tool-result-local-snapshots", "2ab4de9c58b81a82af51f0f525d64320a7486a31"],
+        ["codex/unified-workspace-viewer", "7ea81cfd4377b8bdbd6c9cb71da96afd7abdae28"],
+        ["codex/unused-findings-ratchet", "065b23bcb79062d2219eeb8e23df63a1a4b878e1"],
+        ["codex/windows-candidate-requirements-input", "90e986b2b191fe9081ffc4b63364b4c796a99636"],
+        ["codex/windows-lxml-native-contract", "091c45442de46312fb60c97d0e6390100621cb69"],
+        ["codex/wip-terminal-workspace", "a96ac8108d17eeda8f1cdc742b87a8ea96bb670a"],
+        ["codex/word-editing-closure", "a90352fda8ae34bd71293c1d37e5bab66536f6de"],
+        ["dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0", "1cf3583b40fe4362ad786888ad500c17d24b94c3"],
+        ["dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18", "0ac9267c634927e172be535370ab15843007e715"],
+        ["dependabot/cargo/tools/analysis_compute/tar-0.4.46", "b35306029b571f090244bb0f26b0f50525a6222f"],
+        ["dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17", "946bb377ae3392408bec05474c4f0c67c45550f1"],
+        ["dependabot/cargo/tools/cleaning_ops/tar-0.4.46", "027ab53ab470b6c0a545939eecd7000110c40eeb"],
+        ["dependabot/cargo/tools/data_engine/rustls-0.23.46", "db19f2652cb618b8d45db48e76c2f57a6cba2d6a"],
+        ["dependabot/github_actions/actions/checkout-7.0.1", "cf368d0e088e49afb8f0ea9b314f95015047aeda"],
+        ["dependabot/github_actions/actions/setup-python-7.0.0", "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f"],
+        ["dependabot/github_actions/actions/upload-artifact-7.0.2", "1a224b640d5750a99932feaa4be656bd7c1dd433"],
+        ["dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47", "da5871807db650e413bd6ca136175aa4e129ff3f"],
+        ["dependabot/npm_and_yarn/electron-41.10.6", "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb"],
+        ["dependabot/npm_and_yarn/ip-address-10.7.2", "d3c1fc74af37ac2ffa44180fe257c79ddc22f639"],
+        ["dependabot/npm_and_yarn/katex-0.18.2", "0f7fb08d81d563ad9f7daf23c80ac7dc38b90e66"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-823d526490", "f699f8f660ef2429d2a106d970de3710985cb93b"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-89976db822", "699c4c8f02adc5ed1840cb4d899ff13caf6485b3"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-b94f287d41", "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53"],
+        ["dependabot/npm_and_yarn/packages/runtime/zod-4.6.6", "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3"],
+        ["dependabot/pip/scripts/pillow-13.0.0", "57589814d34f4babaf1a7878fc13bcd3b0c33bb1"],
+        ["dependabot/pip/scripts/pip-minor-patch-8d12d4c10b", "4882a9cc33392e295aefd17284c0645c1f4e5cf1"],
+        ["dependabot/pip/scripts/websockets-17.3", "f64678911e7da5a09ef6e849c83c43036f9d99d2"],
+        ["dependabot/uv/backend/pytest-9.1.1", "f11600dd5b425c1292e16f635dfdf130d18f4fae"],
+        ["dependabot/uv/backend/sqlglot-30.23.0", "a6682fcb98e266e0ca43130eeba447b62b0f1327"],
+        ["dependabot/uv/backend/uv-minor-patch-cbb656aa63", "ad609e6a9a06de9c215c39d7747b88531a1bd262"],
+        ["main", "22edb87187ab819f0eb100da9af192a52efa5136"]
+      ],
+      "B_head_delta": "All21B heads exactlyequal08:40review; React-only22ed changes do notupdate otherB manifests/locks wholesale."
+    },
+    "line_account": {
+      "ledger_before_LF": 2446,
+      "ledger_after_LF": 3750,
+      "product_code_LF_delta": 0,
+      "React_manifest_LF_before_after": [235, 235],
+      "root_lock_LF_before_after": [17721, 17721],
+      "new_tracked_files": 0
     }
   }
 }
