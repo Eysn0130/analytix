@@ -9,10 +9,13 @@ import (
 func isThreadMutationConflict(err error) bool {
 	return errors.Is(err, threadapp.ErrThreadMutationBaselineConflict) || errors.Is(err, threadapp.ErrThreadMutationTransition) ||
 		errors.Is(err, threadapp.ErrCaseWorkspaceSignedRebind) || errors.Is(err, threadapp.ErrCaseRewindSignedArchive) ||
-		errors.Is(err, threadapp.ErrCaseDeleteSignedTombstone)
+		errors.Is(err, threadapp.ErrCaseDeleteSignedTombstone) || errors.Is(err, threadapp.ErrSidePromotionUnavailable)
 }
 
 func threadMutationError(err error) map[string]any {
+	if errors.Is(err, threadapp.ErrSidePromotionUnavailable) {
+		return map[string]any{"code": "conflict", "message": "The request conflicts with the current runtime state."}
+	}
 	code := "thread_mutation_conflict"
 	switch {
 	case errors.Is(err, threadapp.ErrCaseWorkspaceSignedRebind):

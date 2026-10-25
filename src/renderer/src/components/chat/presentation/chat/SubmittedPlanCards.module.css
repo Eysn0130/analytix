@@ -1,0 +1,35 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+.cards { display: flex; flex-direction: column; gap: 10px; }
+.cards:empty { display: none; }
+.card {
+  --plan-card-fill: var(--dsw-static-neutral-50, rgb(250, 250, 250));
+  --plan-card-hover: var(--dsw-static-neutral-100, rgb(245, 245, 245));
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  height: 60px;
+  padding: 8px 10px;
+  margin: 0;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-xl);
+  background: var(--plan-card-fill);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+:global([data-theme='dark']) .card { --plan-card-fill: var(--dsw-static-neutral-850, rgb(33, 33, 35)); --plan-card-hover: var(--dsw-static-neutral-800, rgb(41, 41, 41)); }
+.card:hover { background: var(--plan-card-hover); }
+.card:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 3px; }
+.cardIcon { box-sizing: border-box; flex: none; display: grid; place-items: center; width: 40px; height: 40px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-md); background: var(--plan-card-fill); }
+.cardDetails { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.cardTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; line-height: 20px; }
+.cardDescription { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
+.cardOpen { box-sizing: border-box; display: inline-flex; flex: none; align-items: center; height: 28px; padding: 4px 8px; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-button-floating-fill, var(--dsw-alias-bg-layer-1)); font-size: 12px; line-height: 18px; }
+@media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+:global(:root[data-motion-reduced='true']) .card { transition: none; }

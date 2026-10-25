@@ -64,12 +64,13 @@ const (
 	terminalContextEpochStateValidV1
 	terminalModelInputComparableV1
 	terminalProviderCostCompleteV1
+	terminalProviderAttemptInventoryCompleteV1
 	terminalBoolFieldCountV1
 )
 
 var terminalBoolFieldNamesV1 = [terminalBoolFieldCountV1]string{
 	"prefixChanged", "toolSourceChanged", "cacheTelemetrySupported", "cacheTelemetryPresent",
-	"providerNativeCacheTelemetry", "cacheBaselineObserved", "providerAttemptTelemetryValid", "contextEpochStateValid", "modelInputComparable", "providerCostEstimateComplete",
+	"providerNativeCacheTelemetry", "cacheBaselineObserved", "providerAttemptTelemetryValid", "contextEpochStateValid", "modelInputComparable", "providerCostEstimateComplete", "providerAttemptInventoryComplete",
 }
 
 type terminalNumberFieldV1 uint8
@@ -570,7 +571,7 @@ func parseTerminalCacheDiagnosticsV1(input map[string]any) (terminalCacheDiagnos
 			}
 			out.hasProviderAttemptError = true
 		case "prefixChanged", "toolSourceChanged", "cacheTelemetrySupported", "cacheTelemetryPresent",
-			"providerNativeCacheTelemetry", "cacheBaselineObserved", "providerAttemptTelemetryValid", "contextEpochStateValid", "modelInputComparable", "providerCostEstimateComplete":
+			"providerNativeCacheTelemetry", "cacheBaselineObserved", "providerAttemptTelemetryValid", "contextEpochStateValid", "modelInputComparable", "providerCostEstimateComplete", "providerAttemptInventoryComplete":
 			field, ok := terminalBoolFieldForNameV1(key)
 			flag, valid := value.(bool)
 			if !ok || !valid || out.boolPresent[field] {
@@ -818,6 +819,9 @@ func (diagnostics *terminalCacheDiagnosticsV1) validateCrossField(observedRatePr
 
 	attemptValidPresent := diagnostics.boolPresent[terminalProviderAttemptTelemetryValidV1]
 	attemptValid := attemptValidPresent && diagnostics.bools[terminalProviderAttemptTelemetryValidV1]
+	if diagnostics.boolPresent[terminalProviderAttemptInventoryCompleteV1] && (!attemptValidPresent || (attemptValid && !diagnostics.bools[terminalProviderAttemptInventoryCompleteV1])) {
+		return false
+	}
 	attemptDetailsPresent := diagnostics.attemptStatuses.present || diagnostics.attemptInputTokens.present ||
 		diagnostics.attemptOutputTokens.present || diagnostics.attemptCacheHitTokens.present ||
 		diagnostics.attemptCacheMissTokens.present || diagnostics.attemptRate.present ||

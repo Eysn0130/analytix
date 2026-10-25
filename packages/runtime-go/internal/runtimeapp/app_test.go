@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -31,6 +32,62 @@ func TestNewRuntimeServerHandlerAssemblesRunnableHandler(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("health status = %d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestRuntimeUserInputConfigurationReachesProductionAssembly(t *testing.T) {
+	// Keep the production diagnostic probe, but make every binary unavailable.
+	// This test observes the real tool catalog without launching subprocesses.
+	t.Setenv("PATH", t.TempDir())
+	catalog := func(document string) (int, string) {
+		t.Helper()
+		handler, err := NewRuntimeServerHandlerE(Config{
+			RuntimeToken:   DefaultRuntimeToken,
+			DurableTempDir: t.TempDir(), DataDir: t.TempDir(),
+			MCPConfigJSON: document,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer shutdownOwnedRuntimeHandler(t, handler)
+		request := httptest.NewRequest(http.MethodGet, "/v1/runtime/tools", nil)
+		request.Header.Set("Authorization", "Bearer "+DefaultRuntimeToken)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("tool catalog status = %d", response.Code)
+		}
+		var tools struct {
+			SchemaVersion int `json:"schemaVersion"`
+			ToolContracts struct {
+				Count       int    `json:"count"`
+				CatalogHash string `json:"catalogHash"`
+			} `json:"toolContracts"`
+			Commands []struct {
+				Found bool `json:"found"`
+			} `json:"commands"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &tools); err != nil {
+			t.Fatal(err)
+		}
+		if tools.SchemaVersion != 2 || tools.ToolContracts.Count == 0 || len(tools.ToolContracts.CatalogHash) != 64 || len(tools.Commands) == 0 {
+			t.Fatal("production tool catalog is unavailable")
+		}
+		for _, command := range tools.Commands {
+			if command.Found {
+				t.Fatal("isolated diagnostic unexpectedly found an executable")
+			}
+		}
+		return tools.ToolContracts.Count, tools.ToolContracts.CatalogHash
+	}
+	defaultCount, defaultHash := catalog("")
+	legacyCount, legacyHash := catalog(`{"runtime":{"userInput":{"policy":"legacy","defaultTimeoutSeconds":7}}}`)
+	timedCount, timedHash := catalog(`{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":7}}}`)
+	if defaultCount != legacyCount || defaultHash != legacyHash {
+		t.Fatal("explicit legacy timeout changed the ordinary Question catalog")
+	}
+	if timedCount != legacyCount || timedHash == legacyHash {
+		t.Fatal("timed policy did not reach the production tool catalog")
 	}
 }
 
@@ -212,5 +269,78 @@ func TestRuntimeHostPolicyProductionCallerIsReachedThroughHTTPCaseTurn(t *testin
 	}
 	if exists, readErr := policies.HasRecords(context.Background()); readErr != nil || !exists {
 		t.Fatalf("HTTP case turn did not reach the production HostPolicy caller: exists=%v err=%v", exists, readErr)
+	}
+}
+
+func TestRuntimeUserInputConfigurationRejectedByProductionAssembly(t *testing.T) {
+	for _, document := range []string{
+		`{"runtime":{"userInput":null}}`,
+		`{"runtime":{"userInput":{"defaultTimeoutSeconds":7}}}`,
+		`{"runtime":{"userInput":{"policy":"timed","defaultTimeoutSeconds":0}}}`,
+		`{"runtime":{"userInput":{"policy":"legacy","unknown":true}}}`,
+	} {
+		t.Run(document, func(t *testing.T) {
+			handler, err := NewRuntimeServerHandlerE(Config{
+				RuntimeToken: DefaultRuntimeToken, DurableTempDir: t.TempDir(), DataDir: t.TempDir(), MCPConfigJSON: document,
+			})
+			if handler != nil {
+				shutdownOwnedRuntimeHandler(t, handler)
+			}
+			if err == nil || !strings.HasPrefix(err.Error(), "runtime.userInput") {
+				t.Fatalf("production composition silently dropped an invalid leaf: %v", err)
+			}
+		})
+	}
+}
+
+func TestProductionUsageQueryIncludesTrustedEmptyConversationProjection(t *testing.T) {
+	// Observe the real producer composition without binaries or Provider calls.
+	t.Setenv("PATH", t.TempDir())
+	h, err := NewRuntimeServerHandlerE(Config{Insecure: true, DurableTempDir: t.TempDir(), DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lifecycle, ok := h.(interface{ Shutdown(context.Context) error }); ok {
+		defer func() {
+			if err := lifecycle.Shutdown(context.Background()); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	create := httptest.NewRecorder()
+	// Keep the workspace label independent of numeric TempDir paths checked for PII.
+	h.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/threads", strings.NewReader(`{"title":"synthetic usage assembly","workspace":"/synthetic/usage-workspace"}`)))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("thread create status=%d body=%s", create.Code, create.Body.String())
+	}
+	var thread map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &thread); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := thread["id"].(string)
+	if id == "" {
+		t.Fatal("missing synthetic thread id")
+	}
+	query := httptest.NewRecorder()
+	h.ServeHTTP(query, httptest.NewRequest(http.MethodGet, "/v1/usage?group_by=thread&thread_id="+id, nil))
+	if query.Code != http.StatusOK {
+		t.Fatalf("usage query status=%d body=%s", query.Code, query.Body.String())
+	}
+	var response struct {
+		Buckets []struct {
+			ConversationUsage struct {
+				SchemaVersion string `json:"schemaVersion"`
+				Billing       struct {
+					InventoryComplete bool   `json:"inventoryComplete"`
+					AttemptCount      uint64 `json:"attemptCount"`
+				}
+			} `json:"conversationUsage"`
+		}
+	}
+	if err := json.Unmarshal(query.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Buckets) != 1 || response.Buckets[0].ConversationUsage.SchemaVersion != "conversation-usage.v1" || !response.Buckets[0].ConversationUsage.Billing.InventoryComplete || response.Buckets[0].ConversationUsage.Billing.AttemptCount != 0 {
+		t.Fatalf("production Usage observer was not consumed: %s", query.Body.String())
 	}
 }

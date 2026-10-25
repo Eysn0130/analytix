@@ -103,6 +103,12 @@ func PrivateProtocolSafeHistoryWithOriginsV1(
 			results,
 			resultIndexes,
 		)
+		originUses := map[int]int{}
+		for _, sourceIndex := range sourceIndexes {
+			if sourceIndex >= 0 {
+				originUses[sourceIndex]++
+			}
+		}
 		for resultIndex, item := range projected {
 			body, err := json.Marshal(item)
 			if err != nil {
@@ -113,7 +119,15 @@ func PrivateProtocolSafeHistoryWithOriginsV1(
 				Role:    "user",
 				Content: privateProtocolSafeHistoryPrefixV1 + string(body),
 			})
-			if sourceIndexes[resultIndex] >= 0 {
+			if sourceIndexes[resultIndex] >= 0 && sourceIndexes[resultIndex] < len(messages) {
+				source := messages[sourceIndexes[resultIndex]]
+				if originUses[sourceIndexes[resultIndex]] == 1 {
+					rebindPendingUserInputSafeHistoryV1(source, &out[outputIndex])
+				} else if source.PrivateUserInputPendingBinding != nil {
+					// A duplicated call cannot mint two exact origins from one
+					// trusted result. Preserve the mismatched wire proof to reject.
+					out[outputIndex].PrivateUserInputPendingBinding = source.PrivateUserInputPendingBinding
+				}
 				origins = append(origins, PrivateProtocolSafeHistoryOriginV1{
 					OutputMessageIndex: outputIndex,
 					SourceMessageIndex: sourceIndexes[resultIndex],

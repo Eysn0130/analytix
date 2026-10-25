@@ -1,14 +1,11 @@
 import type { ProviderRegistryRequest, ProviderRegistryResult } from '@shared/analytix-api'
 
+export type LocalProviderRecoveryReason = 'saved_connection_unavailable' | 'credential_reentry_required'
+
 export type LocalProviderReadiness =
   | { kind: 'setup' }
   | { kind: 'ready'; providerId: string; model: string }
-  | { kind: 'recovery'; message: string }
-
-const LOCAL_PROVIDER_RECOVERY_MESSAGE =
-  'Your saved connection is temporarily unavailable. Retry or open Settings to review the Provider. Your configuration has been kept.'
-const LOCAL_PROVIDER_REENTRY_MESSAGE =
-  'This saved Provider credential needs to be re-entered once in Settings after the storage change. Your configuration has been kept.'
+  | { kind: 'recovery'; reason: LocalProviderRecoveryReason }
 
 // Listing references classifies setup vs recovery; it does not prove that the
 // OS-backed credential is accessible in this process. No network probe runs here.
@@ -32,7 +29,7 @@ export async function checkLocalProviderReadiness(
       schemaVersion: 1, operation: 'credential-check', providerId: provider.id, expected
     })
     if ('error' in result && result.error.code === 'credential_reentry_required') {
-      return { kind: 'recovery', message: LOCAL_PROVIDER_REENTRY_MESSAGE }
+      return { kind: 'recovery', reason: 'credential_reentry_required' }
     }
     if ('credentialAvailable' in result && result.credentialAvailable === true &&
       result.providerId === provider.id && result.registryRevision === expected.registryRevision &&
@@ -48,7 +45,7 @@ export function resolveLocalProviderReadiness(
   result: ProviderRegistryResult
 ): LocalProviderReadiness {
   if ('error' in result || !('providers' in result)) {
-    return { kind: 'recovery', message: LOCAL_PROVIDER_RECOVERY_MESSAGE }
+    return { kind: 'recovery', reason: 'saved_connection_unavailable' }
   }
 
   const selectedId = result.selectedProviderId?.trim() ?? ''
@@ -58,12 +55,12 @@ export function resolveLocalProviderReadiness(
   const selected = configured.find((provider) => provider.id === selectedId)
   if (!selected || !selected.credentialConfigured || !selected.credentialPurpose ||
     !selected.selectedModel || !selected.models.includes(selected.selectedModel)) {
-    return { kind: 'recovery', message: LOCAL_PROVIDER_RECOVERY_MESSAGE }
+    return { kind: 'recovery', reason: 'saved_connection_unavailable' }
   }
 
   return { kind: 'ready', providerId: selected.id, model: selected.selectedModel }
 }
 
 export function localProviderRecoveryReadiness(): LocalProviderReadiness {
-  return { kind: 'recovery', message: LOCAL_PROVIDER_RECOVERY_MESSAGE }
+  return { kind: 'recovery', reason: 'saved_connection_unavailable' }
 }

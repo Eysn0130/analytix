@@ -2,6 +2,7 @@
 
 const { spawnSync } = require('node:child_process')
 const { existsSync, readFileSync } = require('node:fs')
+const ts = require('typescript')
 const {
   manifest: nativeComponentManifest,
   sourceSetDigest: nativeSourceSetDigest
@@ -119,6 +120,46 @@ function expectNoFileMatches(name, pattern) {
   if (matches.length > 0) {
     fail(name, matches.join('\n'))
   }
+}
+
+// Core admission rejects these resources; it does not resolve or execute a helper.
+// Keep this classification narrower than the execution-authority path inventory.
+const coreResourceAbsencePath =
+  'packages/runtime-go/internal/adapters/outbound/packagedbuildauthorityfs/reader.go'
+const coreResourceAbsenceFunction = [
+  'func verifyCoreResourcesAbsentV2(resources string) error {',
+  '\tfor _, name := range []string{"backend", "plugins/analytix-fund-analysis", "office-private", "runtime/document-runtime", "runtime/native-components", "runtime/analytix-native-development-build.json", "runtime/analytix-native-components-receipt.json", "runtime/analytix-import-accelerator", "runtime/analytix-cleaning-ops", "runtime/analytix-analysis-compute", "runtime/analytix-data-engine"} {',
+  '\t\tif _, err := os.Lstat(filepath.Join(resources, filepath.FromSlash(name))); !errors.Is(err, os.ErrNotExist) {',
+  '\t\t\treturn errors.New("core package contains unexpected professional resources")',
+  '\t\t}',
+  '\t}',
+  '\treturn nil',
+  '}',
+  ''
+].join('\n')
+
+function coreResourceAbsenceReferenceAllowed(line, source) {
+  const match = line.match(/^([^:]+):([1-9][0-9]*):(.*)$/)
+  if (!match || match[1] !== coreResourceAbsencePath) return false
+  const declaration = coreResourceAbsenceFunction.split('\n', 1)[0]
+  const start = source.indexOf(coreResourceAbsenceFunction)
+  if (
+    start < 0 ||
+    (start > 0 && source[start - 1] !== '\n') ||
+    source.indexOf(declaration) !== start ||
+    source.indexOf(declaration, start + declaration.length) !== -1
+  ) return false
+
+  // Preserve offsets while blanking comments and literals, so a copied function
+  // inside a comment/raw string cannot be mistaken for the actual declaration.
+  const code = source.replace(
+    /"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`[^`]*`|\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/g,
+    (token) => ' '.repeat(token.length)
+  )
+  if (!code.startsWith(declaration, start)) return false
+  const resourceLine = coreResourceAbsenceFunction.split('\n')[1]
+  const lineNumber = source.slice(0, start).split('\n').length + 1
+  return Number(match[2]) === lineNumber && match[3] === resourceLine
 }
 
 function expectNativeComponentRegistry(name) {
@@ -295,9 +336,13 @@ function expectNativeComponentRegistry(name) {
       'packages/runtime-go/internal/adapters/outbound/nativecomponentpublication/publisher_darwin.go',
       'packages/runtime-go/internal/domain/packagedbuildauthority/authority_v2.go'
     ])
+    const coreAbsenceSource = readTextFile(coreResourceAbsencePath)
     const undeclared = runtimeReferences.stdout.split(/\r?\n/).filter(Boolean).filter((line) => {
       const separator = line.indexOf(':')
-      return separator < 0 || !allowedGoAuthorityReferences.has(line.slice(0, separator))
+      return separator < 0 || (
+        !allowedGoAuthorityReferences.has(line.slice(0, separator)) &&
+        !coreResourceAbsenceReferenceAllowed(line, coreAbsenceSource)
+      )
     })
     if (undeclared.length > 0) {
       violations.push(`Data-plane helpers may be referenced only by the frozen Go execution authority:\n${undeclared.join('\n')}`)
@@ -358,8 +403,91 @@ function legacyKunSettingsMigrationLineAllowed(line) {
   return legacyKunSettingsMigrationAllowedLinePatterns.some((pattern) => new RegExp(pattern).test(line))
 }
 
+function protectedRuntimeBindingCurrent(source, binding) {
+  const syntax = ts.createSourceFile('preload.ts', source, ts.ScriptTarget.Latest, true)
+  const declaration = syntax.statements.filter(ts.isVariableStatement)
+    .flatMap(statement => [...statement.declarationList.declarations])
+    .find(node => ts.isIdentifier(node.name) && node.name.text === 'flatApi')
+  if (!declaration || !declaration.initializer) return false
+  const initializer = ts.isSatisfiesExpression(declaration.initializer) ? declaration.initializer.expression : declaration.initializer
+  if (!ts.isObjectLiteralExpression(initializer)) return false
+  const properties = initializer.properties.filter(node =>
+    ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === binding.method)
+  if (properties.length !== 1 || !ts.isArrowFunction(properties[0].initializer)) return false
+  const method = properties[0].initializer
+  if (!ts.isBlock(method.body)) return false
+  const calls = []
+  const visit = node => {
+    if (ts.isFunctionLike(node)) return
+    if (ts.isCallExpression(node)) calls.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(method.body)
+  const ipcNamed = (node, name) => ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'ipcRenderer' && node.expression.name.text === name
+  const ipcCalls = name => calls.filter(node => ipcNamed(node, name))
+  const channelMatches = call => call.arguments.length > 0 && ts.isStringLiteral(call.arguments[0]) && call.arguments[0].text === binding.channel
+  if (binding.event) {
+    const [declaration, registration, returned] = method.body.statements
+    if (method.parameters.length !== 1 || method.body.statements.length !== 3 ||
+      !ts.isVariableStatement(declaration) || declaration.declarationList.declarations.length !== 1 ||
+      !ts.isExpressionStatement(registration) || !ts.isReturnStatement(returned) ||
+      !returned.expression || !ts.isArrowFunction(returned.expression)) return false
+    const wrapped = declaration.declarationList.declarations[0], on = registration.expression
+    const cleanup = returned.expression, remove = cleanup.body
+    // The expression cleanup has no parameters or local scope that could shadow wrapped.
+    return Boolean(declaration.declarationList.flags & ts.NodeFlags.Const) &&
+      ts.isIdentifier(wrapped.name) && wrapped.initializer && ts.isArrowFunction(wrapped.initializer) &&
+      cleanup.parameters.length === 0 && ipcNamed(on, 'on') && ipcNamed(remove, 'removeListener') &&
+      on.arguments.length === 2 && remove.arguments.length === 2 && channelMatches(on) && channelMatches(remove) &&
+      ts.isIdentifier(on.arguments[1]) && on.arguments[1].text === wrapped.name.text &&
+      ts.isIdentifier(remove.arguments[1]) && remove.arguments[1].text === wrapped.name.text
+  }
+  const [parsedStatement, guard, effect] = method.body.statements
+  if (!parsedStatement || !ts.isVariableStatement(parsedStatement) || parsedStatement.declarationList.declarations.length !== 1 ||
+    !(parsedStatement.declarationList.flags & ts.NodeFlags.Const)) return false
+  const parsed = parsedStatement.declarationList.declarations[0]
+  if (!ts.isIdentifier(parsed.name) || parsed.name.text !== 'parsed' || !parsed.initializer || !ts.isCallExpression(parsed.initializer)) return false
+  const parse = parsed.initializer
+  const effectStatements = effect && ts.isTryStatement(effect) && method.body.statements.length === 3 &&
+    effect.catchClause && !effect.finallyBlock ? effect.tryBlock.statements
+    : method.body.statements.length === 4 && ts.isReturnStatement(method.body.statements[3]) ? method.body.statements.slice(2) : []
+  const resultStatement = effectStatements[0]
+  const result = resultStatement && ts.isVariableStatement(resultStatement) && resultStatement.declarationList.declarations.length === 1 &&
+    Boolean(resultStatement.declarationList.flags & ts.NodeFlags.Const)
+    ? resultStatement.declarationList.declarations[0] : undefined
+  const resultParse = result && ts.isIdentifier(result.name) && result.name.text === 'result' ? result.initializer : undefined
+  const invokes = ipcCalls('invoke')
+  return ts.isPropertyAccessExpression(parse.expression) && ts.isIdentifier(parse.expression.expression) &&
+    parse.expression.expression.text === binding.request && parse.expression.name.text === 'safeParse' &&
+    parse.arguments.length === 1 && method.parameters.length === 1 &&
+    ts.isIdentifier(parse.arguments[0]) && ts.isIdentifier(method.parameters[0].name) &&
+    parse.arguments[0].text === method.parameters[0].name.text &&
+    guard && ts.isIfStatement(guard) && !guard.elseStatement && guard.expression.getText(syntax).replace(/\s/g, '') === '!parsed.success' &&
+    (ts.isReturnStatement(guard.thenStatement) || ts.isThrowStatement(guard.thenStatement)) &&
+    invokes.length === 1 && channelMatches(invokes[0]) && guard.end < invokes[0].pos &&
+    invokes[0].arguments.length === 2 && invokes[0].arguments[1].getText(syntax) === 'parsed.data' &&
+    resultParse && ts.isCallExpression(resultParse) && ts.isPropertyAccessExpression(resultParse.expression) &&
+    ts.isIdentifier(resultParse.expression.expression) && resultParse.expression.expression.text === binding.response &&
+    resultParse.expression.name.text === 'safeParse' && resultParse.arguments.length === 1 &&
+    ts.isAwaitExpression(resultParse.arguments[0]) && resultParse.arguments[0].expression === invokes[0]
+}
+
 function sourceClassificationSelfTest() {
   const backendCountAllowed = new RegExp(formalEvidenceRuntimeBackendCountAllowedLine)
+  const copyBinding = protectedRuntimeFacadeBindings.find(binding => binding.method === 'copyToolResultLocalDisplay')
+  const invalidatedBinding = protectedRuntimeFacadeBindings.find(binding => binding.method === 'onToolResultLocalDisplayInvalidated')
+  const validCopy = `const flatApi = { copyToolResultLocalDisplay: async request => {
+    const parsed = toolResultLocalCopyRequestSchemaV1.safeParse(request)
+    if (!parsed.success) return { ok: false }
+    const result = toolResultLocalEffectResultSchemaV1.safeParse(await ipcRenderer.invoke('tool-result-local:copy', parsed.data))
+    return result.data
+  } }`
+  const validInvalidated = `const flatApi = { onToolResultLocalDisplayInvalidated: handler => {
+    const wrapped = (_event, value) => handler(value)
+    ipcRenderer.on('tool-result-local:invalidated', wrapped)
+    return () => ipcRenderer.removeListener('tool-result-local:invalidated', wrapped)
+  } }`
   const cases = {
     productionBindingProofAllowed: !isLegacyProductSurfaceFileName(
       'packages/runtime-go/internal/domain/toolresult/case_source_binding_proof.go'
@@ -389,6 +517,33 @@ function sourceClassificationSelfTest() {
     cleanupKunSettingsFileComparisonAllowed: legacyKunSettingsMigrationLineAllowed(
       'src/main/settings-store.ts:1927:        basename(loaded.sourcePath) === LEGACY_KUN_SETTINGS_FILE_NAME,'
     ),
+    protectedLatestKunSourceComparisonAllowed: legacyKunSettingsMigrationLineAllowed(
+      'src/main/settings-store.ts:2370:              const parsed = currentRecord && basename(current!.sourcePath) === LEGACY_KUN_SETTINGS_FILE_NAME'
+    ),
+    protectedFreshKunSourceComparisonAllowed: legacyKunSettingsMigrationLineAllowed(
+      'src/main/settings-store.ts:2463:      const parsed = basename(current.sourcePath) === LEGACY_KUN_SETTINGS_FILE_NAME'
+    ),
+    kunComparisonInAnotherFileRejected: !legacyKunSettingsMigrationLineAllowed(
+      'src/renderer/src/components/SettingsView.tsx:1:      const parsed = basename(current.sourcePath) === LEGACY_KUN_SETTINGS_FILE_NAME'
+    ),
+    kunComparisonWithDifferentSourceRejected: !legacyKunSettingsMigrationLineAllowed(
+      'src/main/settings-store.ts:2463:      const parsed = basename(current.physicalPath) === LEGACY_KUN_SETTINGS_FILE_NAME'
+    ),
+    protectedRuntimeBindingsCurrent: protectedRuntimeFacadeBindings.every(binding =>
+      protectedRuntimeBindingCurrent(readFileSync('src/preload/index.ts', 'utf8'), binding)),
+    dedicatedCopyBindingAllowed: protectedRuntimeBindingCurrent(validCopy, copyBinding),
+    genericCopyFallbackRejected: !protectedRuntimeBindingCurrent(validCopy.replace('tool-result-local:copy', 'runtime:request'), copyBinding),
+    missingCopyAdmissionRejected: !protectedRuntimeBindingCurrent(validCopy.replace('if (!parsed.success) return { ok: false }', ''), copyBinding),
+    rawCopyPayloadRejected: !protectedRuntimeBindingCurrent(validCopy.replace("'tool-result-local:copy', parsed.data", "'tool-result-local:copy', request"), copyBinding),
+    unusedCopyClosureRejected: !protectedRuntimeBindingCurrent(validCopy.replace('const result = ', 'const result = async () => '), copyBinding),
+    shadowedInvalidatedWrapperRejected: !protectedRuntimeBindingCurrent(validInvalidated.replace(
+      "return () => ipcRenderer.removeListener('tool-result-local:invalidated', wrapped)",
+      "return () => { const wrapped = () => {}; ipcRenderer.removeListener('tool-result-local:invalidated', wrapped) }"
+    ), invalidatedBinding),
+    unknownRuntimeApiRejected: !rendererNamedRuntimeApis.includes('unverifiedPrivateRead'),
+    genericRuntimeApiRejected: !rendererNamedRuntimeApis.includes('runtimeRequest'),
+    directSettingsReadRejected: !rendererNamedSettingsApis.includes('getSettings'),
+    rendererTestTsxExcluded: rendererProductionGlobs.includes('!**/*.test.tsx') && rendererProductionGlobs.includes('!**/*.spec.tsx'),
     privateLegacyMigrationLocatorAllowed: legacyKunSettingsMigrationLineAllowed(
       "src/main/provider-registry-legacy-migration.ts:58:  'agents.kun.apiKey',"
     ),
@@ -733,8 +888,29 @@ const legacyKunSettingsMigrationAllowedLinePatterns = [
   '^src/main/settings-store\\.ts:\\d+:      `\\$\\{sourceLocator\\}:agents\\.kun\\.apiKey`,$',
   '^src/main/settings-store\\.ts:\\d+:      const isKunSource = basename\\(loaded\\.sourcePath\\) === LEGACY_KUN_SETTINGS_FILE_NAME$',
   '^src/main/settings-store\\.ts:\\d+:        basename\\(loaded\\.sourcePath\\) === LEGACY_KUN_SETTINGS_FILE_NAME,$',
+  '^src/main/settings-store\\.ts:\\d+:\\s+const parsed = currentRecord && basename\\(current!\\.sourcePath\\) === LEGACY_KUN_SETTINGS_FILE_NAME$',
+  '^src/main/settings-store\\.ts:\\d+:\\s+const parsed = basename\\(current\\.sourcePath\\) === LEGACY_KUN_SETTINGS_FILE_NAME$',
   "^src/main/provider-registry-legacy-migration\\.ts:\\d+:  'agents\\.kun\\.apiKey',$"
 ]
+
+const protectedRuntimeFacadeBindings = [
+  { method: 'copyToolResultLocalDisplay', channel: 'tool-result-local:copy', request: 'toolResultLocalCopyRequestSchemaV1', response: 'toolResultLocalEffectResultSchemaV1' },
+  { method: 'saveToolResultLocalDisplay', channel: 'tool-result-local:save', request: 'toolResultLocalSaveRequestSchemaV1', response: 'toolResultLocalEffectResultSchemaV1' },
+  { method: 'openToolResultLocalPresentFile', channel: 'tool-result-local:present-open', request: 'toolResultLocalPresentOpenRequestSchemaV1', response: 'toolResultLocalEffectResultSchemaV1' },
+  { method: 'onToolResultLocalDisplayInvalidated', channel: 'tool-result-local:invalidated', event: true },
+  { method: 'saveUserInputDraft', channel: 'user-input-local:save-draft', request: 'userInputLocalSaveDraftRequestSchemaV1', response: 'userInputDraftSaveResultSchemaV1' },
+  { method: 'discardUserInputLateReply', channel: 'user-input-local:discard-late-reply', request: 'userInputLocalDiscardLateReplyRequestSchemaV1', response: 'userInputLocalDiscardLateReplyResponseSchemaV1' }
+]
+const rendererNamedRuntimeApis = [
+  'acceptedSlotDisplay', 'cancelFundsCSVImport', 'cleaningDiffPreview', 'confirmFundsCSVSnapshot',
+  'directSourcePreview', 'fetchUpstreamModels', 'getAnalytixConfigFile', 'importMappingPreview',
+  'invalidateToolResultLocalDisplay', 'onRuntimeStatus', 'openAnalytixConfigDir', 'probeModelCapabilities',
+  'probeModelProvider', 'restartRuntime', 'revokeCleaningDiffPreview', 'runDeterministicFundsCleaning',
+  'stageFundsCSVSnapshot', 'statusFundsCSVImport', 'setAnalytixConfigFile',
+  ...protectedRuntimeFacadeBindings.map(binding => binding.method)
+]
+const rendererNamedSettingsApis = ['saveSettingsSilent', 'setSettings']
+const rendererProductionGlobs = ['!**/*.test.ts', '!**/*.test.tsx', '!**/*.spec.ts', '!**/*.spec.tsx']
 
 if (process.argv.includes('--self-test-source-classification')) {
   console.log(JSON.stringify(sourceClassificationSelfTest()))
@@ -748,7 +924,7 @@ const rendererEntryPaths = [
   'src/renderer/src/components/SessionHeader.tsx',
   'src/renderer/src/components/PluginMarketplaceView.tsx',
   'src/renderer/src/components/write/WriteSidebar.tsx',
-  'src/renderer/src/components/chat/WorkspaceModeTabs.tsx',
+  'src/renderer/src/components/shell/NavigationRail.tsx',
   'src/renderer/src/components/chat/SidebarProjectsSection.tsx',
   'src/renderer/src/components/chat',
   'src/renderer/src/store'
@@ -961,7 +1137,8 @@ const runtimeContractFreshnessPaths = [
  'packages/runtime-go/internal/mcp/mcp_contract_replay_handler.go',
  'packages/runtime-go/internal/conformance/g5_shadow.go',
  'packages/runtime-go/shadow_test.go',
-  'src/main/runtime/analytix-adapter.ts'
+  'src/main/runtime/analytix-adapter.ts',
+  'src/main/runtime/go-runtime-canary.ts'
 ]
 
 const runtimeRouteClientSourcePaths = [
@@ -1014,11 +1191,8 @@ const post881RuntimeContractTokenPaths = [
   'src/renderer/src/hooks/use-model-usage.test.ts',
   'src/renderer/src/components/settings-section-agents.tsx',
   'src/renderer/src/components/settings-section-agents.test.ts',
-  'src/renderer/src/components/settings-section-llm-debug.tsx',
   'src/renderer/src/lib/keyboard-shortcut-settings.ts',
   'src/renderer/src/components/chat/use-voice-dictation.ts',
-  'src/renderer/src/components/chat/InitialSessionUsageHeatmap.tsx',
-  'src/renderer/src/components/chat/InitialSessionUsageHeatmap.test.ts',
   'src/main/ipc/app-ipc-schemas.ts',
   'src/main/ipc/app-ipc-schemas.test.ts',
   'src/main/ipc/register-app-ipc-handlers.ts',
@@ -1111,7 +1285,8 @@ const post881RuntimeContractTokenPaths = [
   'packages/runtime-go/README.md',
   'src/renderer/src/agent/analytix-mapper.test.ts',
  'packages/runtime-go/internal/conformance/g5_shadow.go',
-  'src/main/runtime/analytix-adapter.ts'
+  'src/main/runtime/analytix-adapter.ts',
+  'src/main/runtime/go-runtime-canary.ts'
 ]
 
 const runtimeDesktopBridgeContractPaths = [
@@ -1442,9 +1617,9 @@ expectAllRgMatches(
   'post-881 renderer runtime provider facade contract token scan',
   [
     'archiveThread\\(threadId: string, archived: boolean\\)',
-    "updateThreadRelation\\(threadId: string, relation: NonNullable<NormalizedThread\\['relation'\\]>\\)",
+    'promoteSideThread\\(threadId: string\\)',
     'archive thread failed',
-    'update thread relation failed',
+    'promote Side thread failed',
     'rendererRuntimeClient\\.runtimeRequest'
   ],
   post881RuntimeContractTokenPaths
@@ -1456,15 +1631,22 @@ expectRgMatches(
   post881RuntimeContractTokenPaths
 )
 
-expectRgMatches(
-  'post-881 side conversation provider relation contract token scan',
-  "promoteSideConversation clears the relation through the provider and refreshes the thread list|updateThreadRelation\\(sideId, 'primary'\\)|relationMock|refreshThreadsMock",
+expectAllRgMatches(
+  'post-881 side conversation provider promotion contract token scan',
+  [
+    'promoteSideConversation verifies durable fork lineage and normal-list visibility before closing',
+    'promoteSideThread\\(sideId\\)',
+    'getThreadDetail\\(sideId\\)',
+    'listThreads\\(\\{ limit: 0 \\}\\)',
+    'expect\\(provider\\.listMock\\)\\.toHaveBeenCalledExactlyOnceWith',
+    'keeps the original Side, draft and subscription when promotion %s fails'
+  ],
   post881RuntimeContractTokenPaths
 )
 
 expectRgMatches(
-  'post-881 side conversation relation G5 shadow token scan',
-  'sideConversationRelationContractMatrix|sideConversationRelationPromotesThroughProvider|sideConversationRelationRejectsDirectBridge|sideConversationRelationUnitEvidencePresent',
+  'post-881 side conversation promotion G5 shadow token scan',
+  'sideConversationPromotionContractMatrix|sideConversationPromotionPromotesThroughProvider|sideConversationPromotionRejectsDirectBridge|sideConversationPromotionUnitEvidencePresent',
   post881RuntimeContractTokenPaths
 )
 
@@ -1491,7 +1673,6 @@ expectAllRgMatches(
   [
     'useKeyboardShortcutSettings\\(\\)',
     'useSpeechToTextEnabled\\(\\)',
-    'setModelLabel\\(settings\\.runtime\\.model\\.trim\\(\\)\\)',
     'rendererRuntimeClient\\.getSettings'
   ],
   post881RuntimeContractTokenPaths
@@ -1746,6 +1927,7 @@ expectNoRgMatches(
   '\\b(?:live-provider-scripted-server|live-provider-fake-server|usesLocalScriptedProviderServer|usesLocalFakeProviderServer|usesLocalFakeMCPTransport|localScriptedProviderServer|fakeMCPTransportUsed|fixtureMCPTransportUsed|fake-mcp-manager|analytix-go-d0241)\\b',
   [
     'src/main/runtime/analytix-adapter.ts',
+    'src/main/runtime/go-runtime-canary.ts',
     'src/main/runtime/analytix-adapter.test.ts',
     'packages/runtime-go/internal/conformance/livelocal/production_candidate_handler.go',
     'packages/runtime-go/internal/mcp/manager_test_double.go',
@@ -2396,53 +2578,37 @@ expectNoRgMatches(
   'renderer direct runtime bridge bypass scan',
   directRuntimeRequestBridgePattern,
   ['src/renderer/src'],
-  ['!**/*.test.ts']
+  rendererProductionGlobs
 )
 
 expectNoRgMatches(
   'renderer direct settings read bypass scan',
   directSettingsGetBridgePattern,
   ['src/renderer/src'],
-  ['!**/*.test.ts']
+  rendererProductionGlobs
 )
 
 expectWindowAnalytixApiAllowList(
   'renderer named runtime API allow-list scan',
   windowAnalytixRuntimeApiPattern,
-  [
-    'acceptedSlotDisplay',
-    'cancelFundsCSVImport',
-    'cleaningDiffPreview',
-    'confirmFundsCSVSnapshot',
-    'directSourcePreview',
-    'fetchUpstreamModels',
-    'getAnalytixConfigFile',
-    'importMappingPreview',
-    'onRuntimeStatus',
-    'openAnalytixConfigDir',
-    'probeModelCapabilities',
-    'probeModelProvider',
-    'restartRuntime',
-    'revokeCleaningDiffPreview',
-    'runDeterministicFundsCleaning',
-    'stageFundsCSVSnapshot',
-    'statusFundsCSVImport',
-    'setAnalytixConfigFile'
-  ],
+  rendererNamedRuntimeApis,
   ['src/renderer/src'],
-  ['!**/*.test.ts']
+  rendererProductionGlobs
 )
 
 expectWindowAnalytixApiAllowList(
   'renderer named settings API allow-list scan',
   windowAnalytixSettingsApiPattern,
-  [
-    'saveSettingsSilent',
-    'setSettings'
-  ],
+  rendererNamedSettingsApis,
   ['src/renderer/src'],
-  ['!**/*.test.ts']
+  rendererProductionGlobs
 )
+
+for (const binding of protectedRuntimeFacadeBindings) {
+  if (!protectedRuntimeBindingCurrent(readFileSync('src/preload/index.ts', 'utf8'), binding)) {
+    fail('protected runtime facade binding scan', `${binding.method}: dedicated channel and local schema binding unavailable`)
+  }
+}
 
 expectNoRgMatches(
   'legacy native layout production scan',

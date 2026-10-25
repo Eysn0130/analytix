@@ -12,6 +12,8 @@ func TestThreadPathHandlersRoutesThreadSubpaths(t *testing.T) {
 		wantName  string
 		wantValue string
 	}{
+		{"/v1/threads/thr_1/message-feedback", "feedback", "thr_1/message-feedback"},
+		{"/v1/threads/thr_1/message-feedback/message_1", "feedback", "thr_1/message-feedback/message_1"},
 		{"/v1/threads/thr_1/summary", "summary", "thr_1/summary"},
 		{"/v1/threads/thr_1/summary/tasks/task_1", "summary", "thr_1/summary/tasks/task_1"},
 		{"/v1/threads/thr_1/events", "events", "thr_1"},
@@ -38,18 +40,19 @@ func TestThreadPathHandlersRoutesThreadSubpaths(t *testing.T) {
 		}
 		response := httptest.NewRecorder()
 		ThreadPathHandlers{
-			Summary:     handler("summary"),
-			Events:      handler("events"),
-			Fork:        handler("fork"),
-			Goal:        handler("goal"),
-			Todos:       handler("todos"),
-			Compact:     handler("compact"),
-			Review:      handler("review"),
-			Checkpoints: handler("checkpoints"),
-			TurnAction:  handler("turn_action"),
-			Turns:       handler("turns"),
-			Rewind:      handler("rewind"),
-			Record:      handler("record"),
+			MessageFeedback: handler("feedback"),
+			Summary:         handler("summary"),
+			Events:          handler("events"),
+			Fork:            handler("fork"),
+			Goal:            handler("goal"),
+			Todos:           handler("todos"),
+			Compact:         handler("compact"),
+			Review:          handler("review"),
+			Checkpoints:     handler("checkpoints"),
+			TurnAction:      handler("turn_action"),
+			Turns:           handler("turns"),
+			Rewind:          handler("rewind"),
+			Record:          handler("record"),
 		}.Handle(response, httptest.NewRequest(http.MethodGet, tc.path, nil))
 		if response.Code != http.StatusOK || calledName != tc.wantName || calledValue != tc.wantValue {
 			t.Fatalf("%s routed to %s(%q), status %d; want %s(%q)", tc.path, calledName, calledValue, response.Code, tc.wantName, tc.wantValue)

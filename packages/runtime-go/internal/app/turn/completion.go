@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	contracts "analytix.local/runtime-go/internal/contracts"
+	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 )
 
 type CompletionRecordInput struct {
@@ -17,6 +18,7 @@ type CompletionRecordInput struct {
 	CacheDiagnostics map[string]any
 	UsageSource      string
 	ChildRunID       string
+	EndReason        *domainterminal.EndReason
 }
 
 type AssistantTextItemInput struct {
@@ -67,16 +69,17 @@ func BuildCompletionRecord(input CompletionRecordInput) CompletionRecord {
 	if childRunID := strings.TrimSpace(input.ChildRunID); childRunID != "" {
 		usageEvent["childRunId"] = childRunID
 	}
+	terminalEvent := map[string]any{
+		"kind": "turn_completed", "threadId": threadID, "turnId": turnID, "status": "completed",
+	}
+	if input.EndReason != nil {
+		terminalEvent["endReason"] = domainterminal.EndReasonMap(input.EndReason)
+	}
 	return CompletionRecord{
 		AssistantItem:      assistantItem,
 		ItemCompletedEvent: itemCompletedEvent(assistantItem),
 		UsageEvent:         usageEvent,
-		TurnCompletedEvent: map[string]any{
-			"kind":     "turn_completed",
-			"threadId": threadID,
-			"turnId":   turnID,
-			"status":   "completed",
-		},
+		TurnCompletedEvent: terminalEvent,
 	}
 }
 

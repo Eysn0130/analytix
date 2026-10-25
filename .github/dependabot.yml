@@ -1,20 +1,28 @@
 version: 2
+# Weekly version updates group minor/patch only; majors remain separate.
+# Security updates are independent and are not delayed by this schedule.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: npm
     directories: [/, /packages/runtime, /plugins/atlasflow/skills/atlasflow]
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
     groups:
-      development-tools:
+      npm-minor-patch:
         applies-to: version-updates
-        dependency-type: development
+        patterns: ["*"]
         update-types: [minor, patch]
+        group-by: dependency-name
     # Major framework migrations stay separate reviewable PRs. Never fold an
     # Electron/TypeScript/Vite/Tailwind migration into a maintenance batch.
   - package-ecosystem: gomod
@@ -22,18 +30,39 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    groups:
+      gomod-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: cargo
     directories: [/tools/import_accelerator, /tools/cleaning_ops, /tools/analysis_compute, /tools/data_engine]
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+        group-by: dependency-name
   - package-ecosystem: uv
     directory: /backend
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    groups:
+      uv-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: pip
     directory: /scripts
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    groups:
+      pip-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]

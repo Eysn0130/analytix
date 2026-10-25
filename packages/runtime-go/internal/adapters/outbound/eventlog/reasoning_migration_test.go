@@ -11,11 +11,19 @@ import (
 
 	appcontextepoch "analytix.local/runtime-go/internal/app/contextepoch"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
+	"analytix.local/runtime-go/internal/contracts"
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 	testsecurity "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
+
+// This credential-shaped fixture is built only from a public hexadecimal alphabet.
+// Local synthetic test fixture; never sourced from an account.
+const syntheticReasoningMigrationTestCredentialV1 = "sk-0123456789abcdef0123456789abcdef"
 
 func TestSummaryIndexMigrationPreservesTypedNanosecondMetadata(t *testing.T) {
 	stamp := "2026-09-13T07:17:19.123456789Z"
@@ -233,7 +241,10 @@ func TestMigrateReasoningThreadJSONRejectsDuplicateKeysBesideCurrentAuthority(t 
 }
 
 func TestProjectLegacyOrdinaryThreadPrivacyDoesNotPromoteNestedContentKeysToAuthority(t *testing.T) {
-	const secret = "sk-nested-ordinary-content"
+	const secret = syntheticReasoningMigrationTestCredentialV1
+	if !domainsecret.ContainsCredentialV1(secret) {
+		t.Fatal("synthetic credential fixture must exercise credential projection")
+	}
 	input := map[string]any{
 		"id": "thread-nested-content", "status": "running",
 		"turns": []any{map[string]any{
@@ -608,5 +619,120 @@ func TestMigratePrivateReasoningPreservesMaskedMessageCardinalityAndAuditMarkers
 	after, _ := os.ReadFile(path)
 	if !bytes.Equal(after, before) {
 		t.Fatal("repeat private message migration was not byte-stable")
+	}
+}
+
+// This synthetic legacy metadata fixture is first accepted by the existing
+// complete projector/record producer. It exercises real JSONL migration, not
+// Host admission, timed continuation or native acceptance.
+func TestReasoningMetadataMigrationPreservesValidatedLargeQuestionHistory(t *testing.T) {
+	content := domainsteering.UserInputReplyContentV1{
+		Kind:      domainsteering.UserInputReplyContentKindV1,
+		Questions: []domainsteering.UserInputReplyQuestionContentV1{},
+		Answers:   []domainsteering.UserInputReplyAnswerContentV1{},
+	}
+	for index := 0; index < 3; index++ {
+		content.Questions = append(content.Questions, domainsteering.UserInputReplyQuestionContentV1{
+			Question: "Synthetic migration detail?", Options: []domainsteering.UserInputReplyOptionContentV1{},
+		})
+		content.Answers = append(content.Answers, domainsteering.UserInputReplyAnswerContentV1{
+			Selected: []string{}, Custom: strings.Repeat(string(rune('a'+index)), 400000),
+		})
+	}
+	encoded, err := json.Marshal(content)
+	if err != nil || domainevent.ValidateQuestionReplyContentV1(string(encoded)) != nil {
+		t.Fatal("fixture Question content was not validated", err)
+	}
+	const stamp = "2026-10-09T00:00:00Z"
+	const threadID, turnID, clientID = "thread_question_migration", "turn_question_migration", "00000000-0000-4000-8000-0000000000a1"
+	thread := map[string]any{
+		"id": threadID, "title": "Synthetic Question migration", "status": "idle", "createdAt": stamp, "updatedAt": stamp,
+		"turns": []any{map[string]any{
+			"id": turnID, "threadId": threadID, "status": "completed", "prompt": "synthetic", "createdAt": stamp,
+			"finishedAt": stamp, "items": []any{}, "steering": []any{map[string]any{
+				"id": domainsteering.EntryIDV1(turnID, clientID), "clientUserMessageId": clientID,
+				"text": string(encoded), "admittedAt": stamp, "status": "cancelled", "kind": "user_message", "delivery": "steer",
+			}},
+		}},
+	}
+	validated, err := threadapp.MetadataSidecarEntryCheckedV1(thread, stamp)
+	if err != nil || domainevent.ValidatePublicRecord(validated) != nil {
+		t.Fatal("fixture did not pass the real complete metadata producer", err)
+	}
+	for _, name := range []string{"valid_legacy_reasoning", "missing_carrier", "invalid_carrier", "ordinary_large_string"} {
+		t.Run(name, func(t *testing.T) {
+			record := contracts.CloneMap(validated)
+			legacy := record["thread"].(map[string]any)
+			entry := legacy["turns"].([]any)[0].(map[string]any)["steering"].([]any)[0].(map[string]any)
+			legacy["reasoningContent"] = "SYNTHETIC_LEGACY_REASONING"
+			if name == "missing_carrier" || name == "ordinary_large_string" {
+				delete(entry, "kind")
+				delete(entry, "delivery")
+			} else if name == "invalid_carrier" {
+				entry["delivery"] = "invalid"
+			}
+			if name == "ordinary_large_string" {
+				entry["text"] = strings.Repeat("x", (1<<20)+1)
+			}
+			if domainevent.ValidatePublicRecord(record) == nil {
+				t.Fatal("fixture did not enter the legacy cleanup path")
+			}
+			if name != "valid_legacy_reasoning" {
+				if projected, err := threadapp.MetadataSidecarEntryCheckedV1(legacy, stamp); err == nil || projected != nil {
+					t.Fatal("invalid carrier or ordinary large text acquired a metadata Question slot")
+				}
+			}
+			path := filepath.Join(t.TempDir(), "metadata.jsonl")
+			before, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, append(before, '\n'), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := migrateReasoningMetadataJSONL(path); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var migrated map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(after), &migrated); err != nil {
+				t.Fatal(err)
+			}
+			if domainevent.ValidatePublicRecord(migrated) != nil {
+				t.Fatal("migration produced an invalid public record")
+			}
+			if bytes.Contains(after, []byte("reasoningContent")) || bytes.Contains(after, []byte("SYNTHETIC_LEGACY_REASONING")) {
+				t.Fatal("legacy reasoning was retained")
+			}
+			if name == "valid_legacy_reasoning" {
+				if migrated["kind"] != "thread_metadata" {
+					t.Fatalf("validated Question metadata was replaced by %v", migrated["kind"])
+				}
+				retained := migrated["thread"].(map[string]any)["turns"].([]any)[0].(map[string]any)["steering"].([]any)[0].(map[string]any)
+				if retained["text"] != string(encoded) || retained["kind"] != "user_message" || retained["delivery"] != "steer" {
+					t.Fatal("legacy cleanup changed complete Question bytes or lost its proven carrier")
+				}
+				public, err := threadapp.ProjectPublicThread(migrated["thread"].(map[string]any))
+				if err != nil {
+					t.Fatal(err)
+				}
+				wire := public["turns"].([]any)[0].(map[string]any)["steering"].([]any)[0].(map[string]any)
+				if wire["text"] != string(encoded) || wire["kind"] != nil || wire["delivery"] != nil {
+					t.Fatal("migration carrier reached the public wire DTO")
+				}
+			} else if migrated["kind"] != "content_redacted" || migrated["thread"] != nil {
+				t.Fatal("invalid carrier or ordinary large text was accepted as metadata history")
+			}
+			if err := migrateReasoningMetadataJSONL(path); err != nil {
+				t.Fatal(err)
+			}
+			again, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(after, again) {
+				t.Fatal("repeat migration was not byte stable", err)
+			}
+		})
 	}
 }

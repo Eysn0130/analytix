@@ -36,7 +36,17 @@ func TestRuntimeHTTPHostScheduleListUsesExactContainedLoopback(t *testing.T) {
 	}
 	hostScheduleRequireExecutableV1(t, node)
 	hostScheduleRequireRegularFileV1(t, entrypoint)
+	hostSchedulePublicSeamV1(t, node, entrypoint)
+}
 
+func TestRuntimeHTTPHostScheduleListUsesExactTypedHostAPI(t *testing.T) {
+	// These paths deliberately do not exist: the private typed client must not
+	// execute or read either legacy startup projection field.
+	hostSchedulePublicSeamV1(t, "/synthetic/analytix-host", "/synthetic/schedule-entry.js")
+}
+
+func hostSchedulePublicSeamV1(t *testing.T, node, entrypoint string) {
+	t.Helper()
 	var scheduleCalls atomic.Int64
 	var scheduleRequestValid atomic.Bool
 	scheduleBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -18,13 +18,16 @@ import (
 	turnstartapp "analytix.local/runtime-go/internal/app/turnstart"
 	domaincaseentity "analytix.local/runtime-go/internal/domain/caseentity"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	provider "analytix.local/runtime-go/internal/provider"
 )
 
 type runtimeAgentLoopInput struct {
+	hostLateQuestionWake         bool
 	ThreadID                     string
 	TurnID                       string
 	Thread                       map[string]any
@@ -57,6 +60,7 @@ type runtimeAgentLoopInput struct {
 	AnthropicCapsule             *domainmodel.AnthropicThinkingCapsule
 	PrivateProtocolCapsules      []*domainmodel.AnthropicThinkingCapsule
 	ProviderCallSequence         uint64
+	OutputCapLogicalSequence     uint64
 	TerminalRecoveryKind         apploop.RuntimeTerminalRecoveryKind
 	CaseFundPolicy               *apploop.CaseFundAnalysisPolicy
 	HostEntitySelection          apploop.HostCaseEntitySelectionV1
@@ -112,13 +116,14 @@ func (h *runtimeServerHandler) runRuntimeAgentLoop(ctx context.Context, input ru
 		SystemPrompt: input.SystemPrompt, ProviderID: input.ProviderID, Model: input.Model,
 		Policy: caseFundPolicy, Boundary: boundary,
 		History: appmodel.ProviderHistoryBeforeTurnWithSteeringAuthority(
-			input.Thread, input.HistoryBeforeTurnID, h.steeringAuthority,
+			input.Thread, input.HistoryBeforeTurnID, h.steeringAuthority, h.continuations,
 		),
 		OrdinaryHistory:             ordinaryHistory,
 		CaseTaskContinuationHistory: caseTaskContinuationHistory,
 		Background:                  h.runtimeBackgroundJobContextMessages(input.ThreadID, input.SubagentDepth, input.SecurityContext),
 		UserPrompt:                  initialProviderText, AttachmentPlanDigest: input.Attachments.PlanDigest,
-		ContextEpoch: input.ContextEpoch, CaseSensitive: domainsecurity.TurnSecurityContextIsCaseSensitive(input.SecurityContext),
+		OmitCurrentUserPrompt: input.hostLateQuestionWake,
+		ContextEpoch:          input.ContextEpoch, CaseSensitive: domainsecurity.TurnSecurityContextIsCaseSensitive(input.SecurityContext),
 	})
 	if initial.Boundary != "" {
 		return runtimeAgentLoopResult{
@@ -153,6 +158,10 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 			return runtimeAgentLoopResult{}, err
 		}
 	}
+	ctx = domainprocess.WithKnownSecretsV1(ctx, input.ProviderConfig.APIKey, h.runtimeToken)
+	defer domainprocess.ClearKnownSecretsV1(ctx)
+	processProducer := h.beginProcessDisplayV1(ctx, input.SecurityContext, input.ProviderConfig.APIKey, h.runtimeToken)
+	defer processProducer.FinishV1()
 	loopEvents := apploop.NewRuntimeEventRecorderWithTrace(h.store, runtimeThreadTraceEnabled())
 	providerAttempts := h.runtimeProviderAttempts(input)
 	caseFundPolicy, boundary := h.resolveRuntimeCaseFundAnalysisPolicy(&input)
@@ -172,7 +181,7 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 	input.SystemPrompt = baseSystemPrompt
 	maxSteps := h.resolveRuntimeModelStepLimit(input.Thread, input.Request)
 	continuationSourcesRequired := appmodel.ContinuationSourceReferencesRequiredV1(input.Thread)
-	return apploop.RunRuntimeAgentLoop(ctx, apploop.RuntimeRunnerInput{
+	result, err := apploop.RunRuntimeAgentLoop(ctx, apploop.RuntimeRunnerInput{
 		ThreadID: input.ThreadID, TurnID: input.TurnID,
 		ProviderConfig: input.ProviderConfig, ProviderID: input.ProviderID, Model: input.Model, Effort: input.Effort,
 		Workspace: input.Workspace, Prompt: input.Request.Prompt, Mode: input.Request.Mode, GUIPlan: cloneMap(input.Request.GUIPlan),
@@ -189,7 +198,8 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 		PrivateProtocolSession:   input.PrivateProtocolSession, AnthropicCapsule: input.AnthropicCapsule,
 		PrivateProtocolCapsules: append([]*domainmodel.AnthropicThinkingCapsule(nil), input.PrivateProtocolCapsules...),
 		ProviderCallSequence:    input.ProviderCallSequence, TerminalRecoveryKind: input.TerminalRecoveryKind,
-		CaseFundPolicy: caseFundPolicy, AdditionalCaseDataEffect: additionalCaseDataEffect, Messages: messages,
+		OutputCapLogicalSequence: input.OutputCapLogicalSequence,
+		CaseFundPolicy:           caseFundPolicy, AdditionalCaseDataEffect: additionalCaseDataEffect, Messages: messages,
 		RestoredProviderStep:        input.RestoredProviderStep,
 		CaseSourceUnavailable:       input.CaseSourceUnavailable,
 		OrdinaryResultInputIsolated: input.OrdinaryResultInputIsolated && !additionalCaseDataEffect,
@@ -204,6 +214,19 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 		}(),
 	}, apploop.RuntimeRunnerDependencies{
 		Provider: h.provider, PendingWork: h.pendingWork, Events: loopEvents,
+		ProcessUnit: func(n domaincontinuation.ProviderContinuationNamespaceV1, active bool) {
+			processProducer.UnitV2(n, active, input.ToolScope...)
+		},
+		ProcessToolReady: func(pending appmodel.PendingToolCall) {
+			processProducer.ToolReadyV2(pending.ProviderNamespace, pending.Call.ID, pending.ToolCallItemID, pending.ToolScope...)
+		},
+		ProcessDisplay: func(frame domainmodel.ProcessFrameV1) {
+			// Every live source uses this same producer and actual turn registry.
+			// The turn registry includes every successful actual prepared key,
+			// including attempts with no reasoning and prior retry credentials.
+			frame.ProjectionSecrets = domainprocess.KnownSecretsV1(ctx)
+			processProducer.FrameV1(frame)
+		},
 		ResolveProviderIntent: providerAttempts.CurrentIntent,
 		PrepareProviderStep: func(stepCtx context.Context, step apploop.RuntimeProviderStep) (apploop.RuntimeProviderStep, error) {
 			if !step.UsesFundsDataAuthority() {
@@ -303,7 +326,15 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 				},
 			)
 		},
-		PrepareProviderAttempt: providerAttempts.Prepare,
+		PrepareProviderAttempt: func(attemptCtx context.Context, attempt int, request domainmodel.Request, promptRoute, toolManifestHash string, providerCallSequence uint64) (domainmodel.Request, apploop.ProviderAttemptSettlement, error) {
+			prepared, settle, err := providerAttempts.Prepare(attemptCtx, attempt, request, promptRoute, toolManifestHash, providerCallSequence)
+			if err == nil {
+				// Preparation has already bound the real credential under the
+				// current effect lease. Record it even when display is unavailable.
+				domainprocess.RecordKnownSecretsV1(attemptCtx, prepared.APIKey)
+			}
+			return prepared, settle, err
+		},
 		MaterializeCreatePlan: func(materializeCtx context.Context, currentMessages []domainmodel.Message, planText string, privateProtocolObserved bool) (apploop.RuntimeMaterializedPlan, error) {
 			output, isError, nextMessages, continuationRef, err := h.materializeRuntimeCreatePlanText(
 				materializeCtx,
@@ -319,6 +350,10 @@ func (h *runtimeServerHandler) runRuntimeAgentLoopWithMessages(ctx context.Conte
 		},
 		ToolDriver: h.runtimeToolStepDriver(loopEvents),
 	})
+	if err != nil {
+		recordRuntimeProviderFailureTrace(input.ThreadID, input.TurnID, err)
+	}
+	return result, err
 }
 
 func runtimeProviderExecutionInputV1(input runtimeAgentLoopInput) provider.TurnExecutionInput {

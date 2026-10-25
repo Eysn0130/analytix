@@ -289,3 +289,15 @@ func jsonBody(t *testing.T, body any) *bytes.Reader {
 	}
 	return bytes.NewReader(data)
 }
+
+func TestInitialRequestedSkillIDsRemainClosed(t *testing.T) {
+	for _, body := range []string{`{"prompt":"hello","requestedSkillIds":["../private"]}`, `{"prompt":"hello","requestedSkillIds":null}`, `{"prompt":"hello","requestedSkillIds":[17]}`} {
+		if _, err := DecodeStartTurnRequest("thread", []byte(body)); err == nil {
+			t.Fatal("invalid requested skill accepted")
+		}
+	}
+	request, err := DecodeStartTurnRequest("thread", []byte(`{"prompt":"hello","requestedSkillIds":["review","office-word"]}`))
+	if err != nil || len(request.RequestedSkillIDs) != 2 {
+		t.Fatal("initial skill request lost", err)
+	}
+}

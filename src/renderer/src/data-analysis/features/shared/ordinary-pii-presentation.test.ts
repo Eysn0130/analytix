@@ -1,3 +1,4 @@
+import ordinaryPIICorpus from "../../../../../../packages/runtime/src/conformance/fixtures/ordinary-pii-projection-v1.json";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import flowViewSyncStoreScript from "../flow/runtime/embedded/analysis_flow/flow
 import restrictedPiiProjectionScript from "../flow/runtime/embedded/analysis_flow/restricted-pii-projection.js?raw";
 import flowShellStateStoreScript from "../flow/runtime/embedded/analysis_flow/flow-shell-state-store.js?raw";
 import {
+  ordinaryPiiProjection,
   normalizeOrdinaryPresentationFieldName,
   projectDetectedOrdinaryRestrictedPii,
   projectOrdinaryFieldValue,
@@ -68,12 +70,40 @@ function runEmbeddedScript(script: string, targetWindow: EmbeddedWindow): void {
 }
 
 function createEmbeddedProjectionWindow(): EmbeddedWindow {
-  const targetWindow: EmbeddedWindow = {};
+  const targetWindow: EmbeddedWindow = { __ANALYTIX_ORDINARY_PII_PROJECTION__: ordinaryPiiProjection };
   runEmbeddedScript(restrictedPiiProjectionScript, targetWindow);
   return targetWindow;
 }
 
 describe("ordinary PII presentation boundaries", () => {
+  it("fails closed if the shared host projection was not installed before embedded boot", () => {
+    expect(() => runEmbeddedScript(restrictedPiiProjectionScript, {})).toThrow("ordinary PII host projection missing");
+  });
+
+  it("uses the shared complete ordinary and typed-field corpus in the embedded runtime", () => {
+    const embedded = createEmbeddedProjectionWindow().__ANALYTIX_ORDINARY_PII_PROJECTION__!;
+    expect(embedded).toBe(ordinaryPiiProjection);
+    for (const testCase of ordinaryPIICorpus.untrustedTextCases) {
+      const projected = embedded.projectDetected(testCase.input);
+      expect(projected, testCase.id).toBe(projectDetectedOrdinaryRestrictedPii(testCase.input));
+      if (testCase.expected === "preserve") expect(projected, testCase.id).toBe(testCase.input);
+      else expect(projected, testCase.id).not.toBe(testCase.input);
+    }
+    for (const testCase of ordinaryPIICorpus.typedFieldCases) {
+      const projected = embedded.projectField(testCase.fieldName, testCase.value);
+      expect(projected, testCase.id).toBe(projectOrdinaryFieldValue(testCase.fieldName, testCase.value));
+      if (testCase.expected === "preserve") expect(projected, testCase.id).toBe(testCase.value);
+      else expect(projected, testCase.id).not.toBe(testCase.value);
+    }
+  });
+  it("retains typed masks and fails closed for already-coerced numbers in the embedded runtime", () => {
+    const embedded = createEmbeddedProjectionWindow().__ANALYTIX_ORDINARY_PII_PROJECTION__!;
+    expect(embedded.projectField("account_no", "0000123456789012")).toBe("0000********9012");
+    expect(embedded.projectField("phone_no", "13800138000")).toBe("138****8000");
+    expect(embedded.projectField("account_no", Number("6222020202020202020"))).toBe("[ACCOUNT]");
+    expect(embedded.projectField("id_no", Number("110101199001011234"))).toBe("[IDENTITY]");
+  });
+
   it("keeps TypeScript and embedded JavaScript projection vectors in parity", () => {
     const targetWindow = createEmbeddedProjectionWindow();
     const embedded = targetWindow.__ANALYTIX_ORDINARY_PII_PROJECTION__;
@@ -98,6 +128,7 @@ describe("ordinary PII presentation boundaries", () => {
       "账号：6214－6007－8000－0579－708",
       "联系 13800138000，IP 192.168.10.24",
       "AA:BB:CC:DD:EE:FF",
+      "2001:db8:abcd::1234",
       "6214600780000579708",
       "图6214600780000579708",
       "6.2146007800005797e+18",
@@ -144,8 +175,8 @@ describe("ordinary PII presentation boundaries", () => {
     expect(html).toContain('data-iid="flow-tree-account-1-2"');
     expect(html).toContain("6214***********9708");
     expect(html).toContain("320***********123X");
-    expect(html).toContain("138****8000");
-    expect(html).toContain("192.168.*.*");
+    expect(html).toContain("[PHONE]");
+    expect(html).toContain("[IP]");
     expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
     expect(html).not.toContain(rawAccount);
     expect(html).not.toContain(rawIdentity);
@@ -290,8 +321,8 @@ describe("ordinary PII presentation boundaries", () => {
     expect(outerHtml).toContain('data-gid="flow-tree-group-1-1"');
     expect(outerHtml).toContain('data-iid="flow-tree-account-1-1"');
     expect(outerHtml).toContain("6214***********9708");
-    expect(outerHtml).toContain("320***********123X");
-    expect(outerHtml).toContain("138****8000");
+    expect(outerHtml).toContain("[ACCOUNT]");
+    expect(outerHtml).toContain("[PHONE]");
     expect(outerHtml).not.toContain(rawAccount);
     expect(outerHtml).not.toContain(rawIdentity);
     expect(outerHtml).not.toContain(rawPhone);
@@ -350,8 +381,8 @@ describe("ordinary PII presentation boundaries", () => {
     expect(nodeRows?.rows.map((row) => row.text).join(" ")).toContain("6214***********9708");
     expect(nodeRows?.rows.map((row) => row.text).join(" ")).not.toContain(rawAccount);
     expect(userEdge?.label).toBe("6214***********9708");
-    expect(amountEdge?.label).toBe("6214***********9708");
-    expect(amountEdge?.labelTop).toBe("账号：6214***********9708");
+    expect(amountEdge?.label).toBe("[ACCOUNT]");
+    expect(amountEdge?.labelTop).toBe("账号：[ACCOUNT]");
   });
 
   it("projects hover titles and account lists before constructing hover DOM", () => {
@@ -366,7 +397,7 @@ describe("ordinary PII presentation boundaries", () => {
     );
     const serialized = JSON.stringify(hover);
 
-    expect(hover?.title).toBe("账户合集 138****8000");
+    expect(hover?.title).toBe("账户合集 [PHONE]");
     expect(hover?.accounts).toEqual(["6214***********9708", "0000********9012"]);
     expect(serialized).not.toContain(rawAccount);
     expect(serialized).not.toContain(rawPhone);
@@ -423,7 +454,7 @@ describe("ordinary PII presentation boundaries", () => {
       CONTROLLED_ARTIFACT_PUBLICATION_REQUIRED
     );
 
-    expect(builtName).toMatch(/6214_+9708/);
+    expect(builtName).toBe("_案件_A-[ACCOUNT]-账号：[ACCOUNT]-图谱.png");
     expect(builtName).not.toContain(rawAccount);
     expect(builtName).not.toMatch(/[\\/:]/);
     expect(buildFlowExportDownloadName(payload, "../../exe")).toMatch(/\.png$/);

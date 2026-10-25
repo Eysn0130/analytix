@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { useChatStore } from './store/chat-store'
+import { observeQuestionPlanAuthority } from './store/workspace-tabs-store'
+import { subscribeBeforeSharedActiveCaseContextChange } from './data-analysis/services/analysis/stats-case-overview-resource'
 import { supportsDesktopTitleBar, WindowsTitleBar } from './components/WindowsTitleBar'
 import { RuntimeStatusBanner } from './components/RuntimeStatusBanner'
 import { TopNoticeHost } from './components/TopNoticeHost'
@@ -43,6 +45,7 @@ function RouteFallback(): React.ReactElement {
 }
 
 export default function AppShell(): React.ReactElement {
+  useEffect(() => observeQuestionPlanAuthority(window.analytix?.runtime, subscribeBeforeSharedActiveCaseContextChange), [])
   const route = useChatStore((s) => s.route)
   const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const activeThreadId = useChatStore((s) => s.activeThreadId)
@@ -87,7 +90,10 @@ export default function AppShell(): React.ReactElement {
       <div className="flex min-h-0 flex-1 flex-col">
         <RuntimeStatusBanner />
         <Suspense fallback={<RouteFallback />}>
-          {route === 'settings' ? <SettingsView /> : <Workbench />}
+          <div inert={route === 'settings'} className="flex min-h-0 flex-1 flex-col">
+            <Workbench />
+          </div>
+          {route === 'settings' ? <SettingsView /> : null}
         </Suspense>
       </div>
       <TopNoticeHost />

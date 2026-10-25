@@ -3,6 +3,8 @@ import { withImageThreadNavigation } from '../write/image-thread-navigation'
 import type { AgentProvider, AttachmentReference, ChatBlock, NormalizedThread, ReviewTarget, ThreadEventSink, UserFileReference } from '../agent/types'
 import { projectAttachmentReferencesForPublicSurfaces } from '../agent/attachment-public'
 import { getProvider } from '../agent/registry'
+import { restoreThreadDisplayHistory } from '../agent/analytix-runtime'
+import { filterRewoundDisplayBlocks, mergeGoalHistoryBlocks, reconcileTurnUsageById } from '../agent/analytix-mapper'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import i18n from '../i18n'
 import { applyTheme, applyUiFontScale } from '../lib/apply-theme'
@@ -43,7 +45,8 @@ import {
   buildClawRuntimePrompt,
   buildCodeRuntimePrompt
 } from '@shared/app-settings'
-import type { ChatState, ChatStoreGet, ChatStoreSet, QueuedUserMessage } from './chat-store-types'
+import type { ChatState, ChatStoreGet, ChatStoreSet, QueuedUserMessage, ThreadSelectionReceipt } from './chat-store-types'
+import { appendQueuedMessages, consumeAcceptedQueuedMessages, queueMessagesPatch, queuePausePatch, queuedMessagesForThread, queuedPauseReason } from './chat-store-queue'
 import {
   activeClawChannel,
   canonicalComposerModelForSelection,
@@ -123,7 +126,6 @@ type StoreActionContext = {
   sseAbortRef: SseAbortRef
 }
 
-let drainingQueuedMessages = false
 const finalizingThreadHandoffs = new Set<string>()
 const CHECKPOINT_SEND_SOFT_TIMEOUT_MS = 650
 const checkpointGitUnavailableWorkspaces = new Set<string>()
@@ -308,12 +310,18 @@ function subscribeThreadEventsWithRecovery(
   controller?: AbortController,
   naturallyRetired?: WeakSet<AbortController>
 ): void {
+  const streamSubmissionGeneration = sseAbortRef ? getThreadBinding(sseAbortRef).submissionGeneration : undefined
   void provider.subscribeThreadEvents(threadId, sinceSeq, sink, signal)
     .catch(() => undefined)
     .then(() => {
       if (signal.aborted || (sseAbortRef && controller && sseAbortRef.current !== controller)) return
       const state = get()
       if (state.activeThreadId !== threadId || !state.busy) return
+      // A terminal callback can start the next queued send before this stream's
+      // EOF. Its pending HTTP owner will rebind after ACK; recovering the old
+      // turn here would revoke that still-unsent successor's preflight.
+      if (sseAbortRef && getThreadBinding(sseAbortRef).submissionGeneration !== streamSubmissionGeneration &&
+          isPendingActiveStreamTurnId(state.currentTurnId)) return
       void state.recoverActiveTurn()
     })
     .finally(() => {
@@ -349,6 +357,7 @@ function threadHandoffNeedsSwitchFinalize(operation: ThreadHandoffOperation): bo
 }
 
 type MidTurnSteerDraft = {
+  requestedSkillIds?: string[]
   id?: string
   text: string
   displayText?: string
@@ -371,11 +380,13 @@ function requiresOrdinaryPublicProjection(text: string): boolean {
   return projectOrdinaryPublicText(text) !== text
 }
 
-function queuedMessageFromSteerDraft(draft: MidTurnSteerDraft, index: number, now = Date.now()): QueuedUserMessage {
-  const id = draft.id?.trim() || `q-${now}-${index}`
+function queuedMessageFromSteerDraft(draft: MidTurnSteerDraft, threadId: string): QueuedUserMessage {
+  const id = draft.id?.trim() || createClientUserMessageId()
   return {
+    threadId,
     id,
     text: draft.text,
+    ...(draft.requestedSkillIds?.length ? { requestedSkillIds: [...draft.requestedSkillIds] } : {}),
     ...(draft.displayText ? { displayText: draft.displayText } : {}),
     ...(draft.mode ? { mode: draft.mode } : {}),
     ...(draft.model ? { model: draft.model } : {}),
@@ -396,18 +407,18 @@ async function steerActiveTurn(options: {
   get: ChatStoreGet
   provider: AgentProvider
   draft: MidTurnSteerDraft
-  removeQueuedId?: string
-  queueOnFailure?: boolean
+  isCurrent: () => boolean
 }): Promise<boolean> {
-  const { set, get, provider, draft, removeQueuedId, queueOnFailure = true } = options
+  const { set, get, provider, draft, isCurrent } = options
   const activeThreadId = get().activeThreadId
   const turnId = get().currentTurnId
-  if (!activeThreadId || !turnId || draft.guiPlan || typeof provider.steerUserMessage !== 'function') {
+  if (!isCurrent() || !activeThreadId || !turnId || draft.guiPlan || typeof provider.steerUserMessage !== 'function') {
     return false
   }
 
   const now = Date.now()
-  const clientUserMessageId = createClientUserMessageId()
+  const clientUserMessageId = draft.id ?? createClientUserMessageId()
+  draft.id = clientUserMessageId
   const visibleText = projectOrdinaryPublicText(draft.displayText?.trim() || draft.text)
   const publicAttachments = draft.attachments?.length
     ? projectAttachmentReferencesForPublicSurfaces(draft.attachments)
@@ -425,6 +436,7 @@ async function steerActiveTurn(options: {
           turnId,
           clientUserMessageId,
           steeringStatus: 'pending' as const,
+          ...(!requiresOrdinaryPublicProjection(draft.text) ? { steeringQueue: queuedMessageFromSteerDraft(draft, activeThreadId) } : {}),
           ...(draft.displayText && draft.displayText !== draft.text
             ? { displayText: projectOrdinaryPublicText(draft.displayText) }
             : {}),
@@ -434,10 +446,6 @@ async function steerActiveTurn(options: {
         }
       }
     ],
-    queuedMessages: removeQueuedId
-      ? s.queuedMessages.filter((message) => message.id !== removeQueuedId)
-      : s.queuedMessages,
-    queuedMessagesPausedReason: removeQueuedId && s.queuedMessages.length <= 1 ? null : s.queuedMessagesPausedReason,
     error: null
   }))
 
@@ -452,7 +460,7 @@ async function steerActiveTurn(options: {
       attachmentIds: draft.attachmentIds,
       fileReferences: draft.fileReferences
     })
-    set((s) => ({
+    set((s) => isCurrent() ? ({
       blocks: s.blocks.map((block) =>
         block.kind === 'user' && block.id === clientUserMessageId
           ? {
@@ -466,22 +474,18 @@ async function steerActiveTurn(options: {
           : block
       ),
       error: null
-    }))
+    }) : {})
     return true
   } catch (error) {
-    set((s) => ({
+    // HTTP acknowledgement can be lost after SSE has delivered the actual item.
+    // Admission alone is insufficient; match the consumed Core identity.
+    if (get().activeThreadId === activeThreadId && get().blocks.some(block => block.kind === 'user' &&
+        block.meta?.turnId === turnId && block.meta.clientUserMessageId === clientUserMessageId &&
+        block.meta.steeringStatus === 'accepted')) return true
+    set((s) => isCurrent() ? ({
       blocks: s.blocks.filter((block) => !(block.kind === 'user' && block.id === clientUserMessageId)),
-      ...(queueOnFailure
-        ? {
-            queuedMessages: [
-              ...s.queuedMessages,
-              queuedMessageFromSteerDraft(draft, s.queuedMessages.length)
-            ],
-            queuedMessagesPausedReason: 'failed' as const
-          }
-        : {}),
       error: formatRuntimeError(error)
-    }))
+    }) : {})
     return false
   }
 }
@@ -493,10 +497,15 @@ export function createThreadActions(
   // generation lets maintenance revoke older completions.
   let currentReceiptOwner: symbol | null = null
   let sendGeneration = 0
+  let selectionGeneration = 0
+  const drainingQueues = new Map<string, symbol>()
+  const pendingQueueDrains = new Set<string>()
+  let selectionAbort: AbortController | null = null
   const binding = getThreadBinding(sseAbortRef)
   const pendingRecoveries = new WeakSet<AbortController>()
-  const naturallyRetired = new WeakSet<AbortController>()
+  const naturallyRetired = binding.naturallyRetired
   const bindController = (): AbortController => {
+    selectionAbort?.abort()
     sseAbortRef.current?.abort()
     const controller = new AbortController()
     binding.generation += 1
@@ -508,15 +517,62 @@ export function createThreadActions(
     (!controller.signal.aborted || naturallyRetired.has(controller)) &&
     (sseAbortRef.current === controller ||
       (sseAbortRef.current === null && naturallyRetired.has(controller)))
+  const dispatchQueuedMessage = async (message: QueuedUserMessage): Promise<boolean> => {
+    const threadId = message.threadId
+    const generation = selectionGeneration
+    const interruptionGeneration = binding.interruptionGeneration
+    if (!threadId || get().activeThreadId !== threadId || message.sending || !get().queuedMessages.includes(message)) return false
+    if (message.guiPlan) { set(s => queuePausePatch(s, 'failed', threadId)); return false }
+    if (requiresOrdinaryPublicProjection(message.text)) {
+      set(s => ({ queuedMessages: s.queuedMessages.filter(item => item !== message),
+        ...queuePausePatch(s, 'failed', threadId), error: i18n.t('common:queuedMessageSensitiveInputBlocked') }))
+      return false
+    }
+    const ticket = { ...message, sending: true }
+    set(s => ({ queuedMessages: s.queuedMessages.map(item => item === message ? ticket : item) }))
+    const isCurrent = () => get().activeThreadId === threadId && selectionGeneration === generation &&
+      binding.interruptionGeneration === interruptionGeneration && get().queuedMessages.includes(ticket) && queuedPauseReason(get(), threadId) !== 'interrupted'
+    let dispatched = false
+    let accepted = false
+    try {
+      if (get().busy || threadHasPendingRuntimeWork(get().blocks)) {
+        dispatched = true
+        accepted = await steerActiveTurn({ set, get, provider: getProvider(), draft: ticket, isCurrent })
+      } else {
+        accepted = await get().sendMessage(ticket.text, ticket.mode, { queued: ticket,
+          submissionGuard: { isCurrent, validateBeforeSend: async () => { const current = isCurrent(); dispatched = current; return current } } })
+      }
+      return accepted
+    } finally {
+      // Only this exact entry is settled. A drop, newer item or another thread
+      // never gets restored from an old whole-queue snapshot.
+      set(s => !s.queuedMessages.includes(ticket) ? {} : ({
+        queuedMessages: accepted ? s.queuedMessages.filter(item => item !== ticket)
+          : s.queuedMessages.map(item => item === ticket ? message : item),
+        ...(!accepted && dispatched ? queuePausePatch(s, queuedPauseReason(s, threadId) ?? 'failed', threadId) : {})
+      }))
+    }
+  }
   return {
   createThread: async (options = {}) => withImageThreadNavigation(undefined, async navigationCurrent => {
-    if (get().runtimeConnection !== 'ready') {
+    selectionGeneration += 1
+    const creationGeneration = selectionGeneration
+    let localProvider: AgentProvider | null = null
+    const creationCurrent = () => navigationCurrent() && (!localProvider || getProvider() === localProvider) && (options.isCurrent === undefined ||
+      creationGeneration === selectionGeneration && options.isCurrent())
+    if (!options.localDocument && get().runtimeConnection !== 'ready') {
       set({ error: i18n.t('common:runtimeActionNeedsConnection') })
       return
     }
     try {
+      if (options.localDocument) {
+        if (options.useWorktreePool) throw new Error('Local document ownership cannot acquire a worktree.')
+        localProvider = getProvider()
+        await localProvider.connect()
+        if (!creationCurrent()) return
+      }
       const settings = await rendererRuntimeClient.getSettings()
-      if (!navigationCurrent()) return
+      if (!creationCurrent()) return
       const activeThread = get().activeThreadId
         ? get().threads.find((thread) => thread.id === get().activeThreadId)
         : null
@@ -528,11 +584,11 @@ export function createThreadActions(
         normalizeWorkspaceRoot(settings.workspaceRoot)
       if (!workspaceRoot) {
         await get().chooseWorkspace({ createThreadAfter: true })
-        if (!navigationCurrent()) return
+        if (!creationCurrent()) return
         return
       }
       const codeWorkspaceRoots = rememberCodeWorkspaceRoots(get().codeWorkspaceRoots, [workspaceRoot])
-      if (!options.useWorktreePool && !options.materialize) {
+      if (!options.useWorktreePool && !options.materialize && !options.localDocument) {
         sseAbortRef.current?.abort()
         sseAbortRef.current = null
         binding.generation += 1
@@ -555,7 +611,7 @@ export function createThreadActions(
         syncTurnCompletionPoll(set, get)
         return
       }
-      const p = getProvider()
+      const p = localProvider ?? getProvider()
       set({ codeWorkspaceRoots })
       const reusableThreadId = options.forceNew || options.useWorktreePool
         ? null
@@ -565,11 +621,16 @@ export function createThreadActions(
             workspaceRoot,
             (thread) => isCodeThread(thread, get().clawChannels)
           )
-      if (!navigationCurrent()) return
+      if (!creationCurrent()) return
       if (reusableThreadId) {
-        if (get().activeThreadId !== reusableThreadId) {
-          await get().selectThread(reusableThreadId)
-          if (!navigationCurrent()) return
+        const reusableThread = get().threads.find(thread => thread.id === reusableThreadId)
+        const selectReusable = options.beforeSelect?.({ threadId: reusableThreadId, workspace: reusableThread?.workspace || workspaceRoot }) !== false
+        if (!selectReusable || !creationCurrent()) return
+        if (get().activeThreadId !== reusableThreadId || options.localDocument) {
+          await get().selectThread(reusableThreadId, { onSelected: options.onSelected,
+            ...(options.localDocument ? { localDocument: true } : {}),
+            ...(options.isCurrent ? { isCurrent: options.isCurrent } : {}) })
+          if (!creationCurrent()) return
         } else {
           set({ error: null })
         }
@@ -581,7 +642,7 @@ export function createThreadActions(
           const poolIndex = await window.analytix.workspace.findAvailableWorktreePoolIndex({
             projectPath: workspaceRoot
           })
-          if (!navigationCurrent()) return
+          if (!creationCurrent()) return
           if (poolIndex === null) {
             set({ error: i18n.t('common:worktreePoolFull') })
           } else {
@@ -596,7 +657,7 @@ export function createThreadActions(
             try {
               wt = await acquireWithForce(false)
             } catch (acquireErr) {
-              if (!navigationCurrent()) return
+              if (!creationCurrent()) return
               const acquireMsg = acquireErr instanceof Error ? acquireErr.message : String(acquireErr)
               if (parseWorktreeHasChangesError(acquireMsg)) {
                 wt = await acquireWithForce(true)
@@ -611,7 +672,7 @@ export function createThreadActions(
               branch: wt.branch
             }
             workspaceRoot = wt.path
-            if (!navigationCurrent()) {
+            if (!creationCurrent()) {
               // Acquisition completed; cancel selection without orphaning its slot.
               try {
                 await window.analytix.workspace.releaseWorktree({ projectPath: acquiredWorktree.projectPath, poolIndex })
@@ -620,7 +681,7 @@ export function createThreadActions(
             }
           }
         } catch {
-          if (!navigationCurrent()) return
+          if (!creationCurrent()) return
           set({ error: i18n.t('common:worktreeAcquireFailed') })
         }
       }
@@ -628,8 +689,10 @@ export function createThreadActions(
         workspace: workspaceRoot,
         title: getDefaultThreadTitle(),
         mode: 'agent',
-        ...(get().composerModel.trim() ? { model: get().composerModel.trim() } : {}),
-        ...(get().composerProviderId.trim() ? { providerId: get().composerProviderId.trim() } : {})
+        ...(options.localDocument ? { localDocument: true } : {
+          ...(get().composerModel.trim() ? { model: get().composerModel.trim() } : {}),
+          ...(get().composerProviderId.trim() ? { providerId: get().composerProviderId.trim() } : {})
+        })
       })
       if (acquiredWorktree) {
         saveThreadWorktreeRegistry(
@@ -645,21 +708,26 @@ export function createThreadActions(
       // Register + activate optimistically before refreshing. A freshly created
       // Analytix thread may not be listed until the first message is written.
       // Setting it active first lets refreshThreads preserve it in the sidebar.
+      const selectCreated = creationCurrent() && options.beforeSelect?.({ threadId: t.id, workspace: t.workspace || workspaceRoot }) !== false
       set((s) => ({
-        ...(navigationCurrent() ? { activeThreadId: t.id } : {}),
+        ...(selectCreated ? { activeThreadId: t.id, turnUsageById: {}, rewoundTurnIds: {} } : {}),
         codeWorkspaceRoots: rememberCodeWorkspaceRoots(s.codeWorkspaceRoots, [workspaceRoot, t.workspace]),
         threads: s.threads.some((thread) => thread.id === t.id) ? s.threads : [t, ...s.threads]
       }))
-      if (!navigationCurrent()) return
-      await get().selectThread(t.id)
-      if (!navigationCurrent()) return
-      await get().refreshThreads()
+      if (!selectCreated) return
+      const selected: { receipt?: ThreadSelectionReceipt } = {}
+      await get().selectThread(t.id, { onSelected: receipt => {
+        selected.receipt = receipt
+        options.onSelected?.(receipt)
+      }, ...(options.localDocument ? { localDocument: true, isCurrent: options.isCurrent } : {}) })
+      if (!navigationCurrent() || options.isCurrent && !selected.receipt?.isCurrent()) return
+      await get().refreshThreads({ isCurrent: selected.receipt?.isCurrent ?? navigationCurrent })
       if (!navigationCurrent()) return
     } catch (e) {
-      if (!navigationCurrent()) return
+      if (!navigationCurrent() || options.isCurrent && !options.isCurrent()) return
       set({
         error: formatRuntimeError(e),
-        ...(shouldOpenSettingsForError(e)
+        ...(!options.localDocument && shouldOpenSettingsForError(e)
           ? { route: 'settings' as const, settingsSection: 'agents' as const }
           : {})
       })
@@ -675,6 +743,7 @@ export function createThreadActions(
       return false
     }
     const recoveryRequestSeq = state.lastSeq
+    const recoveryGoalEpoch = state.goalStateEpoch
     const p = getProvider()
     const ac = bindController()
     pendingRecoveries.add(ac)
@@ -684,6 +753,7 @@ export function createThreadActions(
     clearBusyWatchdog()
     set({ error: runtimeStreamRecoveringMessage() })
     try {
+      const rawDetail = await p.getThreadDetail(activeThreadId)
       const {
         blocks: rawBlocks,
         latestSeq,
@@ -691,11 +761,12 @@ export function createThreadActions(
         latestTurnId,
         latestUserMessageId,
         turnDurationByUserId = {},
+        turnUsageById, turnUsageThroughSeq,
         goal,
         todos,
         historyAuthority,
         latestTurnAcceptedFinalDigest
-      } = await p.getThreadDetail(activeThreadId)
+      } = await restoreThreadDisplayHistory(p, activeThreadId, rawDetail, ac.signal)
       if (!ownsRecovery()) return false
       const blocks = hydrateBlockModelLabels(activeThreadId, rawBlocks)
       const busy = threadSnapshotLooksRunning(blocks, threadStatus)
@@ -738,7 +809,7 @@ export function createThreadActions(
           busy: false,
           error: i18n.t('common:runtimeFinalSnapshotUnavailable'),
           runtimeErrorDetail: null,
-          queuedMessagesPausedReason: 'failed'
+          ...queuePausePatch(get(), 'failed', activeThreadId)
         })
         return false
       }
@@ -758,9 +829,13 @@ export function createThreadActions(
         const hasNewerLiveState = !shouldReplaceLiveState || s.lastSeq > recoveryRequestSeq
         return {
           activeThreadId,
-          activeThreadGoal: goal ?? null,
+          activeThreadGoal: s.goalStateEpoch === recoveryGoalEpoch ? goal ?? null : s.activeThreadGoal,
+          activeGoalActivation: s.goalStateEpoch === recoveryGoalEpoch ? null : s.activeGoalActivation,
+          goalStateEpoch: s.goalStateEpoch === recoveryGoalEpoch ? (s.goalStateEpoch ?? 0) + 1 : s.goalStateEpoch,
           activeThreadTodos: todos ?? null,
-          blocks: hasNewerLiveState ? s.blocks : blocks,
+          blocks: hasNewerLiveState ? s.goalStateEpoch === recoveryGoalEpoch ? mergeGoalHistoryBlocks(s.blocks,blocks.filter(block => block.kind === 'goal')) : s.blocks : mergeGoalHistoryBlocks(blocks,s.goalStateEpoch === recoveryGoalEpoch ? blocks.filter(block=>block.kind==='goal') : s.blocks.filter(block => block.kind === 'goal')),
+          turnUsageById: reconcileTurnUsageById(activeThreadId, turnUsageById, s.turnUsageById,
+            hasNewerLiveState ? undefined : turnUsageThroughSeq, s.rewoundTurnIds),
           lastSeq: Math.max(latestSeq, s.lastSeq),
           liveAssistant: hasNewerLiveState ? s.liveAssistant : '',
           error: hasNewerLiveState ? s.error : busy ? runtimeStreamRecoveringMessage() : null,
@@ -770,7 +845,7 @@ export function createThreadActions(
           turnDurationByUserId: hasNewerLiveState
             ? { ...turnDurationByUserId, ...s.turnDurationByUserId }
             : turnDurationByUserId,
-          queuedMessages: s.queuedMessages
+          ...consumeAcceptedQueuedMessages(s, activeThreadId, blocks)
         }
       })
 
@@ -784,7 +859,7 @@ export function createThreadActions(
         armBusyWatchdog(set, get)
       } else {
         resetBusyRecoveryAttempts()
-        if (get().queuedMessages.length > 0) {
+        if (queuedMessagesForThread(get()).length > 0) {
           void get().drainQueuedMessages()
         }
       }
@@ -811,14 +886,31 @@ export function createThreadActions(
     }
   },
 
-  selectThread: async (id) => withImageThreadNavigation(undefined, async navigationCurrent => {
-    if (get().runtimeConnection !== 'ready') {
-      set({ error: i18n.t('common:runtimeActionNeedsConnection') })
-      return
-    }
+  selectThread: async (id, options) => withImageThreadNavigation(undefined, async navigationCurrent => {
+    const localSelection = options?.localDocument || get().runtimeConnection !== 'ready'
+    selectionAbort?.abort()
+    const historyAbort = new AbortController()
+    selectionAbort = historyAbort
+    const requestGeneration = ++selectionGeneration
+    const requestBindingGeneration = binding.generation
+    const requestSubmissionGeneration = binding.submissionGeneration
+    const requestMetadataGeneration = binding.threadMetadataGenerationById.get(id) ?? 0
+    const requestGoalEpoch = get().goalStateEpoch
     const p = getProvider()
+    const selectionCurrent = (): boolean => navigationCurrent() && options?.isCurrent?.() !== false && requestGeneration === selectionGeneration &&
+      (binding.threadMetadataGenerationById.get(id) ?? 0) === requestMetadataGeneration &&
+      requestBindingGeneration === binding.generation && requestSubmissionGeneration === binding.submissionGeneration &&
+      getProvider() === p
+    let localCoreConnected = false
     try {
+      if (localSelection) {
+        await p.connect()
+        if (!selectionCurrent()) return
+        localCoreConnected = true
+      }
       const threadSnap = get().threads.find((thread) => thread.id === id) ?? null
+      const rawDetail = await loadThreadDetailWithCache(p, id, threadSnap)
+      if (!selectionCurrent()) return
       const {
         thread: detailThread,
         blocks: rawBlocks,
@@ -827,11 +919,14 @@ export function createThreadActions(
         latestTurnId,
         latestUserMessageId,
         turnDurationByUserId = {},
+        turnUsageById, turnUsageThroughSeq,
         usage: threadUsage,
         goal,
         todos
-      } = await loadThreadDetailWithCache(p, id, threadSnap)
-      if (!navigationCurrent()) return
+      } = await restoreThreadDisplayHistory(p, id, rawDetail, historyAbort.signal)
+      if (!selectionCurrent() || isPublicProjectionRevoked(id)) return
+      if (get().activeThreadId === id && get().goalStateEpoch !== requestGoalEpoch) return
+      if (get().activeThreadId === id && get().lastSeq > latestSeq) return
       if (detailThread && detailThread.id !== id) throw new Error('Runtime thread response identity mismatch.')
       const prevId = get().activeThreadId
       const prevBusy = get().busy
@@ -875,9 +970,19 @@ export function createThreadActions(
         watchTurnCompletion: nextWatch,
         unreadThreadIds: nextUnread,
         activeThreadId: id,
+        ...consumeAcceptedQueuedMessages(get(), id, blocks),
+        // Goal/history and replay cursor come from one thread snapshot.
+        // The live attach signal refreshes process-local activation after
+        // subscription, closing changes between this read and connection.
         activeThreadGoal: goal ?? null,
+        activeGoalActivation: null,
+        goalStateEpoch: (get().goalStateEpoch ?? 0) + 1,
         activeThreadTodos: todos ?? null,
         blocks,
+        turnUsageById: reconcileTurnUsageById(id, turnUsageById,
+          get().activeThreadId === id ? get().turnUsageById : undefined, turnUsageThroughSeq,
+          get().activeThreadId === id ? get().rewoundTurnIds : undefined),
+        rewoundTurnIds: get().activeThreadId === id ? get().rewoundTurnIds ?? {} : {},
         lastSeq: latestSeq,
         liveAssistant: '',
         error: null,
@@ -887,8 +992,6 @@ export function createThreadActions(
         turnStartedAtByUserId: {},
         turnDurationByUserId,
         inspectorSelectedId: null,
-        queuedMessages: [],
-        queuedMessagesPausedReason: null,
         ...(composerSelection
           ? {
               composerModel: composerSelection.model,
@@ -901,14 +1004,34 @@ export function createThreadActions(
       const sink = buildThreadEventSink(set, get, { threadId: id, signal: ac.signal, sinceSeq: latestSeq })
       subscribeThreadEventsWithRecovery(p, id, latestSeq, sink, ac.signal, get, sseAbortRef, ac, naturallyRetired)
       if (busy) armBusyWatchdog(set, get)
+      else if (get().activeThreadId === id && !threadHasPendingRuntimeWork(get().blocks) &&
+          !queuedPauseReason(get(), id) && queuedMessagesForThread(get(), id).length > 0) {
+        void get().drainQueuedMessages(id)
+      }
+      const selectedBindingGeneration = binding.generation
+      const selectedSubmissionGeneration = binding.submissionGeneration
+      const selectedRoute = get().route
+      const receipt: ThreadSelectionReceipt = {
+        threadId: id,
+        isCurrent: () => navigationCurrent() && requestGeneration === selectionGeneration &&
+          ownsDetailBinding(ac, selectedBindingGeneration) &&
+          binding.submissionGeneration === selectedSubmissionGeneration && getProvider() === p &&
+          get().activeThreadId === id && get().route === selectedRoute &&
+          (localSelection ? localCoreConnected : get().runtimeConnection === 'ready') &&
+          options?.isCurrent?.() !== false && !isPublicProjectionRevoked(id)
+      }
+      if (receipt.isCurrent()) options?.onSelected?.(receipt)
     } catch (e) {
-      if (!navigationCurrent()) return
+      if (!selectionCurrent()) return
       set({
         error: formatRuntimeError(e),
-        ...(shouldOpenSettingsForError(e)
+        ...(!localSelection && shouldOpenSettingsForError(e)
           ? { route: 'settings' as const, settingsSection: 'agents' as const }
           : {})
       })
+    } finally {
+      if ((binding.threadMetadataGenerationById.get(id) ?? 0) !== requestMetadataGeneration) historyAbort.abort()
+      if (selectionAbort === historyAbort) selectionAbort = null
     }
   }),
 
@@ -916,6 +1039,7 @@ export function createThreadActions(
     if (get().runtimeConnection !== 'ready') return
     const targetThreadId = threadId.trim()
     if (!targetThreadId) return
+    if (get().activeThreadId !== targetThreadId) selectionGeneration += 1
     if (isPublicProjectionRevoked(targetThreadId)) {
       set({ error: i18n.t('common:runtimeFinalSnapshotUnavailable') })
       return
@@ -941,7 +1065,12 @@ export function createThreadActions(
     clearBusyWatchdog()
     set({
       activeThreadId: targetThreadId,
+      activeThreadGoal: keepExistingBlocks ? prevState.activeThreadGoal : null,
+      activeGoalActivation: keepExistingBlocks ? prevState.activeGoalActivation : null,
+      goalStateEpoch: (prevState.goalStateEpoch ?? 0) + 1,
       blocks: keepExistingBlocks && !knownBoundaryOnlyHistory ? prevState.blocks : [],
+      turnUsageById: keepExistingBlocks && !knownBoundaryOnlyHistory ? prevState.turnUsageById : {},
+      rewoundTurnIds: keepExistingBlocks ? prevState.rewoundTurnIds ?? {} : {},
       lastSeq: keepExistingBlocks ? prevState.lastSeq : 0,
       liveAssistant: keepExistingBlocks && !knownBoundaryOnlyHistory ? prevState.liveAssistant : '',
       unreadThreadIds: { ...prevState.unreadThreadIds, [targetThreadId]: false },
@@ -950,9 +1079,7 @@ export function createThreadActions(
       currentTurnUserId: null,
       turnStartedAtByUserId: {},
       turnDurationByUserId: {},
-      inspectorSelectedId: null,
-      queuedMessages: [],
-      queuedMessagesPausedReason: null
+      inspectorSelectedId: null
     })
     const ac = bindController()
     const liveBindingGeneration = binding.generation
@@ -971,7 +1098,9 @@ export function createThreadActions(
       : publicSink
     subscribeThreadEventsWithRecovery(p, targetThreadId, liveSinceSeq, sink, ac.signal, get, sseAbortRef, ac, naturallyRetired)
     armBusyWatchdog(set, get)
+    const liveGoalEpoch = get().goalStateEpoch
     try {
+      const rawDetail = await p.getThreadDetail(targetThreadId)
       const {
         blocks: rawBlocks,
         latestSeq,
@@ -979,10 +1108,11 @@ export function createThreadActions(
         latestTurnId,
         latestUserMessageId,
         turnDurationByUserId = {},
+        turnUsageById, turnUsageThroughSeq,
         goal,
         todos,
         historyAuthority
-      } = await p.getThreadDetail(targetThreadId)
+      } = await restoreThreadDisplayHistory(p, targetThreadId, rawDetail, ac.signal)
       if (!navigationCurrent()) return
       if (
         !ownsDetailBinding(ac, liveBindingGeneration) ||
@@ -1020,16 +1150,21 @@ export function createThreadActions(
           latestTurnId && isPendingActiveStreamTurnId(s.currentTurnId)
             ? latestTurnId
             : s.currentTurnId
+        const nextBlocks = boundaryOnlyHistory ? blocks : hasNewerLiveState
+          ? (keepExistingBlocks && prevState.blocks.length > 0 ? s.blocks
+            : mergePersistedBlocksWithLiveOverlay(filterRewoundDisplayBlocks(blocks, s.rewoundTurnIds), s.blocks)) : blocks
+        const goalHistory = s.goalStateEpoch === liveGoalEpoch
+          ? blocks.filter(block => block.kind === 'goal')
+          : s.blocks.filter(block => block.kind === 'goal')
         return {
-          activeThreadGoal: boundaryOnlyHistory ? null : goal ?? null,
+          activeThreadGoal: boundaryOnlyHistory ? null : s.goalStateEpoch === liveGoalEpoch ? goal ?? null : s.activeThreadGoal,
+          activeGoalActivation: boundaryOnlyHistory ? null : s.goalStateEpoch === liveGoalEpoch ? null : s.activeGoalActivation,
+          goalStateEpoch: s.goalStateEpoch === liveGoalEpoch ? (s.goalStateEpoch ?? 0) + 1 : s.goalStateEpoch,
           activeThreadTodos: boundaryOnlyHistory ? null : todos ?? null,
-          blocks: boundaryOnlyHistory
-            ? blocks
-            : hasNewerLiveState
-              ? (keepExistingBlocks && prevState.blocks.length > 0
-                ? s.blocks
-                : mergePersistedBlocksWithLiveOverlay(blocks, s.blocks))
-              : blocks,
+          turnUsageById: reconcileTurnUsageById(targetThreadId, turnUsageById, s.turnUsageById,
+            hasNewerLiveState ? undefined : turnUsageThroughSeq, s.rewoundTurnIds),
+          blocks: boundaryOnlyHistory ? nextBlocks : mergeGoalHistoryBlocks(nextBlocks,goalHistory),
+          ...consumeAcceptedQueuedMessages(s, targetThreadId, nextBlocks),
           lastSeq: Math.max(latestSeq, s.lastSeq),
           liveAssistant: boundaryOnlyHistory ? '' : hasNewerLiveState ? s.liveAssistant : '',
           busy: boundaryOnlyHistory ? busy : hasNewerLiveState ? s.busy : busy,
@@ -1050,7 +1185,7 @@ export function createThreadActions(
               : turnDurationByUserId
         }
       })
-      if (!busy && get().queuedMessages.length > 0) {
+      if (!busy && queuedMessagesForThread(get(), targetThreadId).length > 0) {
         void get().drainQueuedMessages()
       }
     } catch (e) {
@@ -1066,118 +1201,94 @@ export function createThreadActions(
     }
   }),
 
-  drainQueuedMessages: async () => {
-    if (drainingQueuedMessages) return
-    drainingQueuedMessages = true
+  drainQueuedMessages: async (requestedThreadId) => {
+    const threadId = requestedThreadId ?? get().activeThreadId
+    if (!threadId || get().activeThreadId !== threadId) return
+    if (drainingQueues.has(threadId)) {
+      pendingQueueDrains.add(threadId)
+      return
+    }
+    const generation = selectionGeneration
+    const ticket = Symbol('queue-drain')
+    drainingQueues.set(threadId, ticket)
     try {
-      while (true) {
+      while (get().activeThreadId === threadId && selectionGeneration === generation) {
         const state = get()
-        if (state.queuedMessagesPausedReason) return
-        const queuedMessages = state.queuedMessages.filter((message) => !message.guiPlan)
-        if (queuedMessages.length !== state.queuedMessages.length) {
-          set({ queuedMessages })
-        }
-        const next = queuedMessages[0]
-        if (!next || state.busy) return
-        if (requiresOrdinaryPublicProjection(next.text)) {
-          set((current) => ({
-            queuedMessages: current.queuedMessages.filter((message) => message.id !== next.id),
-            queuedMessagesPausedReason: 'failed',
-            error: i18n.t('common:queuedMessageSensitiveInputBlocked')
-          }))
-          return
-        }
-        const started = await get().sendMessage(next.text, next.mode, { queued: next })
-        if (!started) {
-          set({ queuedMessagesPausedReason: 'failed' })
-          return
-        }
+        if (queuedPauseReason(state, threadId) || state.busy || threadHasPendingRuntimeWork(state.blocks)) return
+        const messages = queuedMessagesForThread(state, threadId)
+        const valid = messages.filter(message => !message.guiPlan)
+        if (valid.length !== messages.length) set(queueMessagesPatch(state, threadId, valid))
+        const next = valid[0]
+        if (!next || next.sending || !await dispatchQueuedMessage(next)) return
       }
     } finally {
-      drainingQueuedMessages = false
+      if (drainingQueues.get(threadId) === ticket) {
+        drainingQueues.delete(threadId)
+        // A new activation may have requested a drain while the old receipt
+        // held the lock. Consume that request once; failures never self-retry.
+        const requestedAgain = pendingQueueDrains.delete(threadId)
+        const state = get()
+        if (requestedAgain && state.activeThreadId === threadId && state.runtimeConnection === 'ready' &&
+            !state.busy && !threadHasPendingRuntimeWork(state.blocks) && !queuedPauseReason(state, threadId) &&
+            queuedMessagesForThread(state, threadId).some(message => !message.sending)) {
+          void state.drainQueuedMessages(threadId)
+        }
+      }
     }
   },
 
-  editQueuedMessage: (id, text) => {
+  editQueuedMessage: (threadId, id, text) => {
+    if (get().activeThreadId !== threadId) return
     const trimmed = text.trim()
     if (!trimmed) return
     if (requiresOrdinaryPublicProjection(trimmed)) {
       set({ error: i18n.t('common:queuedMessageSensitiveInputBlocked') })
       return
     }
-    set((s) => ({
-      queuedMessages: s.queuedMessages.map((message) =>
-        message.id === id
-          ? {
-              ...message,
-              text: trimmed,
-              displayText: message.displayText && message.displayText !== message.text
-                ? message.displayText
-                : trimmed
-            }
-          : message
-      )
-    }))
+    set(s => ({ queuedMessages: s.queuedMessages.map(message =>
+      message.threadId === threadId && message.id === id && !message.sending
+        ? { ...message, text: trimmed, requestedSkillIds: trimmed === message.text ? message.requestedSkillIds : [], displayText: message.displayText && message.displayText !== message.text ? message.displayText : trimmed }
+        : message) }))
   },
 
-  removeQueuedMessage: (id) =>
-    set((s) => ({
-      queuedMessages: s.queuedMessages.filter((message) => message.id !== id),
-      queuedMessagesPausedReason: s.queuedMessages.length <= 1 ? null : s.queuedMessagesPausedReason
-    })),
+  removeQueuedMessage: (threadId, id) => {
+    if (get().activeThreadId !== threadId) return
+    set(s => !s.queuedMessages.some(message => message.threadId === threadId && message.id === id) ? {} : ({
+      queuedMessages: s.queuedMessages.filter(message => message.threadId !== threadId || message.id !== id),
+      ...(queuedMessagesForThread(s, threadId).length <= 1 ? queuePausePatch(s, null, threadId) : {}) }))
+  },
 
-  reorderQueuedMessages: (ids) =>
-    set((s) => {
+  reorderQueuedMessages: (threadId, ids) => {
+    if (get().activeThreadId !== threadId) return
+    set(s => {
       const order = new Map(ids.map((id, index) => [id, index]))
-      const known = s.queuedMessages.filter((message) => order.has(message.id))
-      const unknown = s.queuedMessages.filter((message) => !order.has(message.id))
+      const messages = queuedMessagesForThread(s, threadId)
+      const known = messages.filter(message => order.has(message.id))
+      const unknown = messages.filter(message => !order.has(message.id))
       known.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
-      return { queuedMessages: [...known, ...unknown] }
-    }),
-
-  sendQueuedMessageNow: async (id) => {
-    const message = get().queuedMessages.find((item) => item.id === id)
-    if (!message) return false
-    if (requiresOrdinaryPublicProjection(message.text)) {
-      set((state) => ({
-        queuedMessages: state.queuedMessages.filter((item) => item.id !== id),
-        queuedMessagesPausedReason: 'failed',
-        error: i18n.t('common:queuedMessageSensitiveInputBlocked')
-      }))
-      return false
-    }
-    if (!get().busy) {
-      set({ queuedMessagesPausedReason: null })
-      return get().sendMessage(message.text, message.mode, { queued: message })
-    }
-    const provider = getProvider()
-    if (message.guiPlan) {
-      set({ queuedMessagesPausedReason: 'failed' })
-      return false
-    }
-    const steered = await steerActiveTurn({
-      set,
-      get,
-      provider,
-      draft: message,
-      removeQueuedId: id,
-      queueOnFailure: true
+      return queueMessagesPatch(s, threadId, [...known, ...unknown])
     })
-    if (!steered && !get().queuedMessagesPausedReason) {
-      set({ queuedMessagesPausedReason: 'failed' })
-    }
-    return steered
   },
 
-  resumeInterruptedQueue: () => {
-    set({ queuedMessagesPausedReason: null })
-    void get().drainQueuedMessages()
+  sendQueuedMessageNow: async (threadId, id) => {
+    if (get().activeThreadId !== threadId) return false
+    const message = queuedMessagesForThread(get(), threadId).find(item => item.id === id)
+    if (!message || message.sending) return false
+    set(s => queuePausePatch(s, null, threadId))
+    const sent = await dispatchQueuedMessage(message)
+    return sent
   },
 
-  setQueuedMessagesPausedReason: (reason) => set({ queuedMessagesPausedReason: reason }),
+  resumeInterruptedQueue: (threadId) => {
+    if (get().activeThreadId !== threadId || queuedMessagesForThread(get(), threadId).some(message => message.sending)) return
+    set(s => queuePausePatch(s, null, threadId))
+    void get().drainQueuedMessages(threadId)
+  },
+
+  setQueuedMessagesPausedReason: (reason, threadId) => set(s => queuePausePatch(s, reason, threadId)),
 
   startThreadHandoff: async (request) => {
-    if (get().queuedMessages.length > 0) {
+    if (queuedMessagesForThread(get(), request.sourceThreadId).length > 0) {
       set({ error: i18n.t('common:threadHandoffBlockedQueuedMessages') })
       return false
     }
@@ -1327,7 +1438,16 @@ export function createThreadActions(
 
   sendMessage: async (text, mode, overrides) => {
     const trimmedText = text.trim()
+    const requestedSkillIds = [...(overrides?.queued?.requestedSkillIds ?? overrides?.requestedSkillIds ?? [])]
     if (!trimmedText) return false
+    if (overrides?.queued && (overrides.queued.threadId !== get().activeThreadId || !get().queuedMessages.includes(overrides.queued))) return false
+    if (binding.threadPolicyPending.has(get().activeThreadId ?? '') ||
+      get().threads.find(thread => thread.id === get().activeThreadId)?.executionPolicyUncertain) {
+      set({ error: i18n.t('common:composerExecutionPolicyUnavailable', {
+        defaultValue: 'Thread execution policy is unavailable. Select it again before sending.'
+      }) })
+      return false
+    }
     if (get().runtimeConnection !== 'ready') {
       set({ error: i18n.t('common:runtimeActionNeedsConnection') })
       return false
@@ -1347,8 +1467,12 @@ export function createThreadActions(
         set({ error: i18n.t('common:composerQueuePlaceholder') })
         return false
       }
-      const now = Date.now()
       const activeThreadId = get().activeThreadId
+      const entryGeneration = selectionGeneration
+      const interruptionGeneration = binding.interruptionGeneration
+      const ownsEntry = () => !!activeThreadId && get().activeThreadId === activeThreadId &&
+        selectionGeneration === entryGeneration && binding.interruptionGeneration === interruptionGeneration
+      if (!activeThreadId) return false
       const threadSnap = activeThreadId
         ? get().threads.find((thread) => thread.id === activeThreadId)
         : undefined
@@ -1370,6 +1494,7 @@ export function createThreadActions(
         reference.path.trim() && reference.relativePath.trim() && reference.name.trim()
       )
       const draft: MidTurnSteerDraft = {
+        requestedSkillIds: [...(overrides?.requestedSkillIds ?? [])],
         text: trimmedText,
         ...(displayText ? { displayText } : {}),
         ...(mode ? { mode } : {}),
@@ -1382,27 +1507,22 @@ export function createThreadActions(
         ...(attachments?.length ? { attachments } : {}),
         ...(fileReferences?.length ? { fileReferences } : {})
       }
-      if (!overrides?.guiPlan) {
+      if (!overrides?.guiPlan && overrides?.deliveryIntent !== 'queue') {
         const steered = await steerActiveTurn({
           set,
           get,
           provider: p,
           draft,
-          queueOnFailure: false
+          isCurrent: ownsEntry
         })
         if (steered) return true
       }
+      if (!ownsEntry()) return false
       if (requiresOrdinaryPublicProjection(trimmedText)) {
         set({ error: i18n.t('common:queuedMessageSensitiveInputBlocked') })
         return false
       }
-      set((s) => ({
-        queuedMessages: [
-          ...s.queuedMessages,
-          queuedMessageFromSteerDraft(draft, s.queuedMessages.length, now)
-        ],
-        error: null
-      }))
+      set((s) => ({ ...appendQueuedMessages(s, [queuedMessageFromSteerDraft(draft, activeThreadId)]), error: null }))
       // UI/runtime can briefly drift (busy=false while runtime still has an active turn).
       // Kick recovery so queued input drains as soon as the in-flight turn settles.
       if (!get().busy && hasPendingActiveTurn) {
@@ -1410,6 +1530,9 @@ export function createThreadActions(
       }
       return true
     }
+    // New work revokes an older maintenance operation even if the healthy SSE
+    // subscription is reused and this turn finishes before that operation wakes.
+    binding.submissionGeneration += 1
     const receiptOwner = Symbol('send-receipt')
     const receiptGeneration = ++sendGeneration
     currentReceiptOwner = receiptOwner
@@ -1447,13 +1570,13 @@ export function createThreadActions(
       queued?.modelLabel ?? overrides?.modelLabel ?? optimisticUserModelLabel(composerModel, threadSnap?.model)
     const previousBlocks = get().blocks
     const previousActiveThreadId = get().activeThreadId
+    const previousTurnUsageById = get().turnUsageById
+    const previousRewoundTurnIds = get().rewoundTurnIds
     const previousLastSeq = get().lastSeq
     const previousCurrentTurnId = get().currentTurnId
     const previousCurrentTurnUserId = get().currentTurnUserId
     const previousTurnStartedAtByUserId = get().turnStartedAtByUserId
     const previousTurnDurationByUserId = get().turnDurationByUserId
-    const previousQueuedMessages = get().queuedMessages
-    const previousQueuedMessagesPausedReason = get().queuedMessagesPausedReason
     let provisionalTurnId = activeThreadId ? pendingActiveStreamTurnId(activeThreadId, userBlockId) : null
     resetBusyRecoveryAttempts()
     set((s) => ({
@@ -1483,9 +1606,7 @@ export function createThreadActions(
       error: null,
       currentTurnId: provisionalTurnId ?? s.currentTurnId,
       currentTurnUserId: userBlockId,
-      turnStartedAtByUserId: { ...s.turnStartedAtByUserId, [userBlockId]: now },
-      queuedMessages: queued ? s.queuedMessages.filter((message) => message.id !== queued.id) : s.queuedMessages,
-      queuedMessagesPausedReason: queued && s.queuedMessages.length <= 1 ? null : s.queuedMessagesPausedReason
+      turnStartedAtByUserId: { ...s.turnStartedAtByUserId, [userBlockId]: now }
     }))
     if (activeThreadId && provisionalTurnId) {
       resetActiveStream(activeThreadId, {
@@ -1506,8 +1627,6 @@ export function createThreadActions(
             currentTurnUserId: previousCurrentTurnUserId,
             turnStartedAtByUserId: previousTurnStartedAtByUserId,
             turnDurationByUserId: previousTurnDurationByUserId,
-            queuedMessages: previousQueuedMessages,
-            queuedMessagesPausedReason: previousQueuedMessagesPausedReason,
             error: i18n.t('common:workspaceRequiredToCreateThread')
           })
           return false
@@ -1541,6 +1660,8 @@ export function createThreadActions(
         }
         set((s) => ({
           activeThreadId: threadId,
+          turnUsageById: {},
+          rewoundTurnIds: {},
           currentTurnId: provisionalTurnId,
           codeWorkspaceRoots: rememberCodeWorkspaceRoots(s.codeWorkspaceRoots, [workspaceRoot, createdThread?.workspace]),
           lastSeq: 0,
@@ -1562,6 +1683,8 @@ export function createThreadActions(
         }).catch(() => undefined)
         set({
           activeThreadId: previousActiveThreadId,
+          turnUsageById: previousTurnUsageById,
+          rewoundTurnIds: previousRewoundTurnIds,
           blocks: previousBlocks,
           lastSeq: previousLastSeq,
           busy: false,
@@ -1569,8 +1692,6 @@ export function createThreadActions(
           currentTurnUserId: previousCurrentTurnUserId,
           turnStartedAtByUserId: previousTurnStartedAtByUserId,
           turnDurationByUserId: previousTurnDurationByUserId,
-          queuedMessages: previousQueuedMessages,
-          queuedMessagesPausedReason: previousQueuedMessagesPausedReason,
           error: formatRuntimeError(e),
           ...(shouldOpenSettingsForError(e)
             ? { route: 'settings' as const, settingsSection: 'agents' as const }
@@ -1606,13 +1727,16 @@ export function createThreadActions(
             block.kind === 'user' && block.id === state.currentTurnUserId && block.meta?.turnId === receipt.turnId))
       return matchingTurn && matchingUser
     }
-    const refreshReceiptThreads = async (): Promise<void> => {
-      if (!ownsReceiptContext()) return
+    const refreshReceiptThreads = async (
+      ownsContext: () => boolean = ownsReceiptContext,
+      ownsFollowup: () => boolean = ownsFollowupContext
+    ): Promise<void> => {
+      if (!ownsContext()) return
       // Only the initiating receipt can start housekeeping. Its bounded follow-up
       // outlives send's finally, but not another send, subscription or turn snapshot.
       // Keep only primitive snapshot fields, not the entire store/draft graph.
       const { busy, currentTurnId, currentTurnUserId } = get()
-      const isCurrent = () => ownsFollowupContext() && get().busy === busy &&
+      const isCurrent = () => ownsFollowup() && get().busy === busy &&
         get().currentTurnId === currentTurnId && get().currentTurnUserId === currentTurnUserId
       if (!isCurrent()) return
       try {
@@ -1628,10 +1752,14 @@ export function createThreadActions(
     }
     const cancelPreparedSubmission = (): void => {
       const ownsState = ownsRunningReceipt()
-      submissionSubscription?.abort()
-      if (sseAbortRef.current === submissionSubscription) {
-        sseAbortRef.current = null
-        binding.generation += 1
+      const ownsSubscription = currentReceiptOwner === receiptOwner && sendGeneration === receiptGeneration &&
+        receiptBindingGeneration === binding.generation && get().activeThreadId === activeThreadId
+      if (ownsSubscription) {
+        submissionSubscription?.abort()
+        if (sseAbortRef.current === submissionSubscription) {
+          sseAbortRef.current = null
+          binding.generation += 1
+        }
       }
       if (ownsState && activeThreadId && provisionalTurnId) clearActiveStream(activeThreadId, provisionalTurnId)
       // A later thread/turn owns its own state. Remove only our unsent optimistic
@@ -1705,13 +1833,27 @@ export function createThreadActions(
       if (submissionGuard) {
         let admitted = false
         try { admitted = await submissionGuard.validateBeforeSend() } catch { /* fail closed */ }
-        if (!admitted || !submissionGuard.isCurrent() || get().activeThreadId !== activeThreadId || get().runtimeConnection !== 'ready') {
+        if (!admitted || !submissionGuard.isCurrent() || !ownsRunningReceipt()) {
           cancelPreparedSubmission()
           return false
         }
       }
+      const executionThread = get().threads.find(thread => thread.id === activeThreadId)
+      const executionPolicyGeneration = binding.threadMetadataGenerationById.get(activeThreadId) ?? 0
+      if (binding.threadPolicyPending.has(activeThreadId) || executionThread?.executionPolicyUncertain) {
+        const ownsPolicySubmission = ownsRunningReceipt()
+        cancelPreparedSubmission()
+        if (ownsPolicySubmission) set({ error: i18n.t('common:composerExecutionPolicyUnavailable', {
+          defaultValue: 'Thread execution policy is unavailable. Select it again before sending.'
+        }) })
+        return false
+      }
       const { turnId, userMessageItemId } = await p.sendUserMessage(activeThreadId, runtimeText, {
+        requestedSkillIds,
         mode,
+        ...(executionThread?.executionPolicyVersion === 2 && executionThread.approvalPolicy && executionThread.sandboxMode
+          ? { executionPolicy: { approvalPolicy: executionThread.approvalPolicy, sandboxMode: executionThread.sandboxMode } }
+          : {}),
         ...(composerModel ? { model: composerModel } : {}),
         ...(!channel && composerProviderId ? { providerId: composerProviderId } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
@@ -1719,7 +1861,11 @@ export function createThreadActions(
         ...((queued?.guiPlan ?? overrides?.guiPlan) ? { guiPlan: queued?.guiPlan ?? overrides?.guiPlan } : {}),
         ...(attachmentIds.length ? { attachmentIds } : {}),
         ...(workspaceCheckpointId ? { workspaceCheckpointId } : {}),
-        ...(fileReferences.length ? { fileReferences } : {})
+        ...(fileReferences.length ? { fileReferences } : {}),
+        submissionIsCurrent: () => ownsRunningReceipt() && (!submissionGuard || submissionGuard.isCurrent()) &&
+          (binding.threadMetadataGenerationById.get(activeThreadId) ?? 0) === executionPolicyGeneration &&
+          !binding.threadPolicyPending.has(activeThreadId) &&
+          !get().threads.find(thread => thread.id === activeThreadId)?.executionPolicyUncertain
       })
       acknowledged = true
       const receipt = { turnId, userMessageItemId }
@@ -1820,6 +1966,10 @@ export function createThreadActions(
       // Post-acknowledgement housekeeping cannot turn a sent message into a
       // failed draft or roll back a turn that SSE has already established.
       if (acknowledged) return true
+      if (submissionGuard && !submissionGuard.isCurrent()) {
+        cancelPreparedSubmission()
+        return false
+      }
       // A disconnected SSE listener does not revoke our still-pending user
       // bubble. Navigation or a newer send does revoke it, including A-B-A.
       const ownsOptimisticTurn = get().currentTurnId === provisionalTurnId &&
@@ -1857,7 +2007,6 @@ export function createThreadActions(
             currentTurnUserId: previousCurrentTurnUserId,
             turnStartedAtByUserId: started,
             turnDurationByUserId: durations,
-            queuedMessages: previousQueuedMessages,
             error: activeTurnConflict ? i18n.t('common:runtimeActiveTurn') : formatRuntimeError(e)
           }
         })
@@ -1866,7 +2015,17 @@ export function createThreadActions(
         void refreshReceiptThreads()
         return false
       }
-      await get().recoverActiveTurn()
+      const recoverySubmissionGeneration = binding.submissionGeneration
+      const recovery = get().recoverActiveTurn()
+      // Recovery may synchronously bind a new stream. Its own handoff is allowed;
+      // navigation or new work while it awaits still revoke the old send's UI.
+      const recoveryBindingGeneration = binding.generation
+      const ownsRecoveryFollowup = (): boolean => sendGeneration === receiptGeneration &&
+        binding.submissionGeneration === recoverySubmissionGeneration && binding.generation === recoveryBindingGeneration &&
+        get().activeThreadId === activeThreadId && get().runtimeConnection === 'ready'
+      const ownsRecoveryReceipt = (): boolean => currentReceiptOwner === receiptOwner && ownsRecoveryFollowup()
+      await recovery
+      if (!ownsRecoveryReceipt()) return false
       const recovered = get()
       const originalUserIds = new Set(previousBlocks.filter((block) => block.kind === 'user').map((block) => block.id))
       const durablyAccepted = recovered.activeThreadId === activeThreadId && recovered.blocks.some((block) =>
@@ -1874,7 +2033,9 @@ export function createThreadActions(
         !!block.meta?.turnId && !isPendingActiveStreamTurnId(block.meta.turnId)
       )
       if (durablyAccepted) {
-        await get().refreshThreads()
+        // Confirmed delivery outlives sidebar I/O. A failed or pending refresh
+        // cannot turn an accepted edit into a retryable draft.
+        void refreshReceiptThreads(ownsRecoveryReceipt, ownsRecoveryFollowup)
         return true
       }
       if (recovered.activeThreadId === activeThreadId && !recovered.busy && recovered.error === null) {

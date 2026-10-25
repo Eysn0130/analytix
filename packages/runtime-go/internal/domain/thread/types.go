@@ -24,6 +24,7 @@ type ResumeIdentity struct {
 }
 
 type CompactionResult struct {
+	SummaryFacts            *CompactionSummaryFactsV1
 	ThreadID                string
 	TurnID                  string
 	ItemID                  string

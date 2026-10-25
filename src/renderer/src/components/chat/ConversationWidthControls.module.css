@@ -1,0 +1,50 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+.widthHandle {
+  /* Pinned design-platform l1 tint; adapt only the local theme selector. */
+  --dsw-alias-scrollbar-bg-l1: rgb(229, 229, 229);
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 0;
+  /* Outside content by 24px, with a 24px safe zone at either column edge.
+     Negative space resolves to zero width on narrow columns. */
+  width: min(10px, calc((100% - var(--ax-thread-summary-reserve, 0px) - var(--ax-chat-content-axis)) / 2 - 24px - 24px));
+  cursor: col-resize;
+}
+.widthHandle[data-side='left'] {
+  right: calc(50% + var(--ax-thread-summary-reserve, 0px) / 2 + var(--ax-chat-content-axis) / 2 + 24px);
+}
+.widthHandle[data-side='right'] {
+  left: calc(50% - var(--ax-thread-summary-reserve, 0px) / 2 + var(--ax-chat-content-axis) / 2 + 24px);
+}
+:global([data-theme='dark']) .widthHandle {
+  --dsw-alias-scrollbar-bg-l1: rgb(60, 60, 61);
+}
+.widthHandle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(var(--ax-width-handle-pointer-y, 50%) - 36px),
+    var(--dsw-alias-scrollbar-bg-l1) calc(var(--ax-width-handle-pointer-y, 50%) - 8px),
+    var(--dsw-alias-scrollbar-bg-l1) calc(var(--ax-width-handle-pointer-y, 50%) + 8px),
+    transparent calc(var(--ax-width-handle-pointer-y, 50%) + 36px)
+  );
+  opacity: 0;
+  pointer-events: none;
+}
+.widthHandle[data-side='left']::after { right: 4px; }
+.widthHandle[data-side='right']::after { left: 4px; }
+.widthHandle:hover::after,
+.widthHandle:focus-visible::after,
+.widthHandle[data-dragging]::after { opacity: 1; }
+.widthHandle:focus-visible { outline: none; }
+.widthHandle[data-dragging] { z-index: 8; }
+:global([data-analytix-conversation-body]):has([data-conversation-composer-overlay]) .widthHandle {
+  display: none;
+}

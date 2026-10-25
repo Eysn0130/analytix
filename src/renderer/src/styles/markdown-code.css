@@ -193,29 +193,7 @@
   background: var(--ds-inline-code-hover-bg);
 }
 
-.ds-process-file-reference {
-  appearance: none;
-  display: inline;
-  margin: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  padding: 0 0.12rem;
-  color: var(--ds-accent);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
 
-.ds-process-file-reference:hover {
-  background: var(--ds-accent-soft);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
 
 .ds-markdown .ds-code-block {
   margin: 0 0 0.75rem;

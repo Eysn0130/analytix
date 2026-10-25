@@ -1,9 +1,44 @@
 package control
 
 import (
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	"sync"
 	"testing"
+	"time"
 )
+
+func TestUserInputExactClaimAndContinueLeaveReplacementPending(t *testing.T) {
+	r := NewGateRegistry[string]()
+	id := "input-exact"
+	record := GateRecord{ThreadID: "source", TurnID: "turn", ItemID: "item", ContinuationReceiptID: "original"}
+	if !r.RegisterPendingUserInput(id, record, "first") {
+		t.Fatal("register first")
+	}
+	observed, pending, _, _ := r.PeekUserInput(id)
+	r.DeleteUserInput(id)
+	replacement := record
+	replacement.ContinuationReceiptID = "replacement"
+	if !r.RegisterPendingUserInput(id, replacement, "second") {
+		t.Fatal("register replacement")
+	}
+	if !r.StartUserInputWait(id, &domaincontinuation.UserInputTimedWaitV1{TimeoutSeconds: 120}, time.Now().UTC().Format(time.RFC3339Nano), func() { t.Error("stale continuation fired replacement wait") }) {
+		t.Fatal("start replacement wait")
+	}
+	t.Cleanup(func() { r.DeleteUserInput(id) })
+	if _, ok := r.ClaimUserInputExact(id, observed, pending); ok {
+		t.Fatal("stale observation claimed replacement")
+	}
+	if r.TriggerUserInputWaitExact(id, observed, pending) {
+		t.Fatal("stale observation finished replacement wait")
+	}
+	current, retained, exists, hasPending := r.PeekUserInput(id)
+	if !exists || !hasPending || current != replacement || retained != "second" || r.userInputWaits[id].finishing {
+		t.Fatal("rejected observation changed replacement authority or timer")
+	}
+	if _, ok := r.ClaimUserInputExact(id, current, retained); !ok {
+		t.Fatal("exact current observation failed")
+	}
+}
 
 func TestGateRegistryContinuationClaimIsExclusiveAndGenerationBound(t *testing.T) {
 	registry := NewGateRegistry[string]()
@@ -413,5 +448,83 @@ func TestApprovalUserInputManagerKeepsSubmittedAnswersOutOfReplay(t *testing.T) 
 	}
 	if result["submitStatus"] != gateStatusOK || result["cancelStatus"] != gateStatusOK {
 		t.Fatalf("manager statuses mismatch: %#v", result)
+	}
+}
+
+func TestTimedQuestionWaitClaimsUseOriginalDeadlineAndCloseOnce(t *testing.T) {
+	registry := NewGateRegistry[string]()
+	registry.RegisterPendingUserInput("input", GateRecord{ThreadID: "thread", TurnID: "turn", ItemID: "item"}, "pending")
+	fired := make(chan struct{}, 4)
+	issued := time.Now().Add(-500 * time.Millisecond).UTC().Format(time.RFC3339Nano)
+	if !registry.StartUserInputWait("input", &domaincontinuation.UserInputTimedWaitV1{TimeoutSeconds: 1}, issued, func() { fired <- struct{}{} }) {
+		t.Fatal("start")
+	}
+	remaining, ended, release, ok := registry.AttachUserInputWait("input")
+	if !ok || remaining == nil || *remaining > 500 {
+		t.Fatal("attachment snapshot")
+	}
+	// A real held request suppresses Host fallback, including past the deadline.
+	select {
+	case <-fired:
+		t.Fatal("claim did not suppress fallback")
+	case <-time.After(650 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-fired:
+	case <-time.After(time.Second):
+		t.Fatal("last release renewed original deadline")
+	}
+	if registry.StartUserInputWait("input", &domaincontinuation.UserInputTimedWaitV1{TimeoutSeconds: 1}, issued, func() { t.Error("replaced timer callback") }) != true {
+		t.Fatal("same policy must remain idempotent")
+	}
+	if !registry.TriggerUserInputWait("input") {
+		t.Fatal("duplicate completion should be scheduling-idempotent")
+	}
+	select {
+	case <-fired:
+		t.Fatal("duplicate completion ran twice")
+	case <-time.After(20 * time.Millisecond):
+	}
+	registry.ClaimUserInput("input")
+	select {
+	case <-ended:
+	case <-time.After(time.Second):
+		t.Fatal("claim did not close attachment")
+	}
+	release()
+}
+
+func TestExpiredUnclaimedTimedQuestionCannotAcquireNewWaitClaim(t *testing.T) {
+	registry := NewGateRegistry[string]()
+	registry.RegisterPendingUserInput("input", GateRecord{ThreadID: "thread", TurnID: "turn", ItemID: "item"}, "pending")
+	fired := make(chan struct{}, 2)
+	registry.StartUserInputWait("input", &domaincontinuation.UserInputTimedWaitV1{TimeoutSeconds: 1}, time.Now().Add(-2*time.Second).UTC().Format(time.RFC3339Nano), func() { fired <- struct{}{} })
+	if _, _, release, ok := registry.AttachUserInputWait("input"); ok {
+		release()
+		t.Fatal("expired unclaimed wait was revived")
+	}
+	select {
+	case <-fired:
+	case <-time.After(time.Second):
+		t.Fatal("expired Host completion did not run")
+	}
+	registry.ClaimUserInput("input")
+}
+
+func TestUnlimitedTimedQuestionHasNullableWaitAndNoContinueCommand(t *testing.T) {
+	registry := NewGateRegistry[string]()
+	registry.RegisterPendingUserInput("input", GateRecord{ThreadID: "thread", TurnID: "turn", ItemID: "item"}, "pending")
+	registry.StartUserInputWait("input", &domaincontinuation.UserInputTimedWaitV1{TimeoutSeconds: -1}, time.Now().UTC().Format(time.RFC3339Nano), func() { t.Error("unlimited wait expired") })
+	remaining, ended, release, ok := registry.AttachUserInputWait("input")
+	if !ok || remaining != nil || registry.TriggerUserInputWait("input") {
+		t.Fatal("unlimited call became finite")
+	}
+	release()
+	registry.ClaimUserInput("input")
+	select {
+	case <-ended:
+	default:
+		t.Fatal("original call did not own unlimited attachment")
 	}
 }

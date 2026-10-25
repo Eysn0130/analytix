@@ -7,7 +7,7 @@ import type {
   TransitionEvent as ReactTransitionEvent
 } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Command, Search, Settings, Smartphone, X } from '../../design/AnalytixUiIcons'
+import { Command, Search, X } from '../../design/AnalytixUiIcons'
 import { AnalytixIconRegistry } from '../../design/AnalytixIconRegistry'
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -43,14 +43,6 @@ type SidebarFlowCollapseProps = {
 const SIDEBAR_COLLAPSE_SETTLE_MS = 540
 
 type SidebarCollapsePhase = 'closed' | 'opening-ready' | 'opening' | 'open' | 'closing-ready' | 'closing'
-
-type SidebarFooterActionsProps = {
-  settingsLabel: string
-  connectPhoneLabel: string
-  onOpenSettings: () => void
-  onToggleConnectPhone: () => void
-  connectPhoneActive?: boolean
-}
 
 function onNextFrame(callback: () => void): () => void {
   if (typeof globalThis.requestAnimationFrame === 'function') {
@@ -88,7 +80,7 @@ export function SidebarCollapseMotion({
 
   useLayoutEffect(() => {
     let cancelFrame: (() => void) | undefined
-    let timeout: number | undefined
+    let timeout: ReturnType<typeof globalThis.setTimeout> | undefined
 
     if (open) {
       setHasOpened(true)
@@ -372,53 +364,6 @@ export function SidebarCommandRow({
       {trailing ?? null}
       {showChevron ? <AnalytixIconRegistry.icons.disclosureRight className="h-3.5 w-3.5 text-ds-faint" /> : null}
     </button>
-  )
-}
-
-function SidebarSettingsIcon({ className }: { className?: string }): ReactElement {
-  return <Settings size={20} className={className} aria-hidden />
-}
-
-function SidebarConnectPhoneIcon({ className }: { className?: string }): ReactElement {
-  return <Smartphone size={16} className={className} aria-hidden />
-}
-
-export function SidebarFooterActions({
-  settingsLabel,
-  connectPhoneLabel,
-  onOpenSettings,
-  onToggleConnectPhone,
-  connectPhoneActive = false
-}: SidebarFooterActionsProps): ReactElement {
-  return (
-    <div className="ds-sidebar-footer-actions">
-      <div className="ds-sidebar-footer-row">
-        <div className="ds-sidebar-footer-settings-cell">
-          <button
-            type="button"
-            data-cursor-spotlight-target
-            className="ds-sidebar-footer-settings-button"
-            onClick={onOpenSettings}
-          >
-            <span className="ds-sidebar-footer-settings-content">
-              <SidebarSettingsIcon className="ds-sidebar-footer-settings-icon" />
-              <span className="ds-sidebar-footer-label">{settingsLabel}</span>
-            </span>
-          </button>
-        </div>
-        <button
-          type="button"
-          data-cursor-spotlight-target
-          className="ds-sidebar-footer-phone-button"
-          title={connectPhoneLabel}
-          aria-label={connectPhoneLabel}
-          aria-expanded={connectPhoneActive}
-          onClick={onToggleConnectPhone}
-        >
-          <SidebarConnectPhoneIcon className="ds-sidebar-footer-phone-icon" />
-        </button>
-      </div>
-    </div>
   )
 }
 

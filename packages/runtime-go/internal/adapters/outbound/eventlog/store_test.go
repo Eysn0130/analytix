@@ -2,6 +2,7 @@ package eventlog
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	domainevent "analytix.local/runtime-go/internal/domain/event"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 )
 
 func TestStoreAppendReadHighestAndTypedEvents(t *testing.T) {
@@ -1130,5 +1132,169 @@ func TestStoreReplayPreservesExactPayloadNumberAndRejectsInexactSequence(t *test
 	invalidResult, invalidErr := store.LoadSince(invalidThreadID, 0)
 	if invalidErr == nil || invalidResult.Events != nil || invalidResult.Diagnostics != nil {
 		t.Fatalf("inexact sequence returned a partial replay: result=%#v err=%v", invalidResult, invalidErr)
+	}
+}
+
+func TestStoreRejectsQuestionEncodedFrameBeforeTransactionV1(t *testing.T) {
+	store := NewStore(t.TempDir())
+	questions, answers := []any{}, []any{}
+	for i := 0; i < 3; i++ {
+		questions = append(questions, map[string]any{"question": "Synthetic?", "header": "", "options": []any{}, "multiSelect": false})
+		answers = append(answers, map[string]any{"selected": []any{}, "custom": strings.Repeat("\\", 400000)})
+	}
+	content, err := json.Marshal(map[string]any{"kind": "question_reply_content", "questions": questions, "answers": answers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := map[string]any{"kind": "turn_steered", "threadId": "thread-capacity", "turnId": "turn-capacity", "clientUserMessageId": "00000000-0000-4000-8000-0000000000a1", "timestamp": "2026-01-01T00:00:00Z", "seq": float64(1), "text": string(content)}
+	encoded, err := json.Marshal(event)
+	if err != nil || len(encoded) <= maxEventJSONLLineBytesV1 {
+		t.Fatal("fixture did not exceed actual frame cap")
+	}
+	if err := store.AppendEvent("thread-capacity", event); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+		t.Fatalf("actual append limit errorType=%T", err)
+	}
+	if _, err := os.Stat(store.ThreadDir("thread-capacity")); !os.IsNotExist(err) {
+		t.Fatal("over-capacity append created transaction effects")
+	}
+}
+
+func TestAtomicAppendErrorExposesCommittedStateV1(t *testing.T) {
+	for _, test := range []struct {
+		err  *AtomicAppendError
+		want bool
+	}{{nil, false}, {&AtomicAppendError{Committed: false}, false}, {&AtomicAppendError{Committed: true}, true}} {
+		if test.err.AtomicAppendCommittedV1() != test.want {
+			t.Fatal("confirmed commit state changed")
+		}
+		if test.err != nil && AtomicAppendCommitted(test.err) != test.want {
+			t.Fatal("existing commit classifier changed")
+		}
+	}
+}
+
+func storedLogicalStepAssemblyV1(threadID string, seq int) map[string]any {
+	return map[string]any{
+		"kind": "pipeline_stage", "seq": float64(seq), "threadId": threadID, "turnId": "turn-assembly",
+		"timestamp": "2026-10-15T00:00:01.123456789Z", "stage": "logical_step_assembled", "label": "Logical step assembled",
+		"details": map[string]any{"schemaVersion": float64(1), "logicalStepId": "11111111-1111-4111-8111-111111111111"},
+	}
+}
+
+func TestStorePersistsLogicalStepAssemblyThroughSingleAndAtomicBatchV1(t *testing.T) {
+	for _, route := range []string{"single", "single_atomic", "batch"} {
+		t.Run(route, func(t *testing.T) {
+			const threadID = "thread-assembly"
+			root := t.TempDir()
+			store := NewStore(root)
+			start := map[string]any{
+				"kind": "pipeline_stage", "seq": float64(1), "threadId": threadID, "turnId": "turn-assembly",
+				"timestamp": "2026-10-15T00:00:00Z", "stage": "logical_step_started", "label": "Logical step started",
+				"details": map[string]any{"schemaVersion": float64(1), "logicalStepId": "11111111-1111-4111-8111-111111111111"},
+			}
+			assembly := storedLogicalStepAssemblyV1(threadID, 2)
+			closed := map[string]any{
+				"kind": "pipeline_stage", "seq": float64(3), "threadId": threadID, "turnId": "turn-assembly",
+				"timestamp": "2026-10-15T00:00:02Z", "stage": "logical_step_closed", "label": "Logical step closed",
+				"details": map[string]any{"schemaVersion": float64(1), "logicalStepId": "11111111-1111-4111-8111-111111111111", "assistantMessageAssembled": true, "llmMs": float64(1123)},
+			}
+			events := []map[string]any{start, assembly, closed}
+			before, _ := json.Marshal(events)
+			if route == "batch" {
+				if err := store.AppendEventsAtomic(threadID, events); err != nil {
+					t.Fatalf("assembly atomic batch rejected: %v", err)
+				}
+			} else {
+				if err := store.AppendEvent(threadID, start); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				if route == "single_atomic" {
+					// This is the actual RecordEventsAtomic -> AppendEvents path:
+					// a one-event atomic bundle uses the single-event journal.
+					err = store.AppendEvents(threadID, []map[string]any{assembly}, true)
+				} else {
+					err = store.AppendEvent(threadID, assembly)
+				}
+				if err != nil {
+					t.Fatalf("assembly single append rejected: %v", err)
+				}
+				if err := store.AppendEvent(threadID, closed); err != nil {
+					t.Fatal(err)
+				}
+			}
+			after, _ := json.Marshal(events)
+			if !bytes.Equal(before, after) {
+				t.Fatal("append rewrote the producer's events")
+			}
+			for _, reader := range []*Store{store, NewStore(root)} {
+				loaded, err := reader.LoadSince(threadID, 0)
+				if err != nil || len(loaded.Diagnostics) != 0 || len(loaded.Events) != len(events) {
+					t.Fatalf("assembly durable readback incomplete: %#v %v", loaded, err)
+				}
+				for index, event := range loaded.Events {
+					if !sameEventJSON(event, events[index]) {
+						t.Fatal("readback lost Host time, sequence, identity, or closed fields")
+					}
+				}
+				if highest, err := reader.HighestSeq(threadID); err != nil || highest != 3 {
+					t.Fatalf("assembly changed the durable frontier: %d %v", highest, err)
+				}
+			}
+			body, err := os.ReadFile(store.EventsPath(threadID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			committed, err := ParseCommittedEventLogBytesV1(context.Background(), threadID, body)
+			if err != nil || len(committed) != 3 || !sameEventJSON(committed[1], assembly) {
+				t.Fatalf("committed parser rejected or changed assembly: %#v %v", committed, err)
+			}
+		})
+	}
+}
+
+func TestStoreRejectsOpenLogicalStepAssemblyBeforeDurableStateV1(t *testing.T) {
+	for _, route := range []string{"single_atomic", "batch", "raw"} {
+		for _, invalid := range []string{"metrics", "trace", "version", "label"} {
+			t.Run(route+"/"+invalid, func(t *testing.T) {
+				const threadID = "thread-assembly-reject"
+				root := t.TempDir()
+				store := NewStore(root)
+				event := storedLogicalStepAssemblyV1(threadID, 1)
+				switch invalid {
+				case "metrics":
+					event["details"].(map[string]any)["llmMs"] = float64(0)
+				case "trace":
+					event["trace"] = map[string]any{}
+				case "version":
+					event["details"].(map[string]any)["schemaVersion"] = float64(2)
+				case "label":
+					event["label"] = "Logical step closed"
+				}
+				var err error
+				switch route {
+				case "single_atomic":
+					err = store.AppendEvents(threadID, []map[string]any{event}, true)
+				case "batch":
+					event["seq"] = float64(2)
+					err = store.AppendEventsAtomic(threadID, []map[string]any{
+						{"kind": "usage", "threadId": threadID, "seq": float64(1)}, event,
+					})
+				case "raw":
+					body, marshalErr := json.Marshal(event)
+					if marshalErr != nil {
+						t.Fatal(marshalErr)
+					}
+					_, _, err = store.AppendRawLine(threadID, string(body))
+				}
+				if !errors.Is(err, ErrInvalidEventLifecycleV1) {
+					t.Fatalf("open assembly entered durable storage: %v", err)
+				}
+				entries, err := os.ReadDir(root)
+				if err != nil || len(entries) != 0 {
+					t.Fatalf("rejected assembly created partial durable state: %#v %v", entries, err)
+				}
+			})
+		}
 	}
 }

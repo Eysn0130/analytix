@@ -1,3 +1,4 @@
+import { getThreadBinding } from './chat-store-thread-binding'
 import type {
   AcceptedFinalProjectionBatch,
   AgentProvider,
@@ -19,19 +20,26 @@ import {
   acceptedFinalProjectionReceiptsEqual,
   acceptedFinalUsageSnapshotsEqual
 } from '../agent/accepted-final-projection-receipt'
+import { restoreThreadDisplayHistory } from '../agent/analytix-runtime'
 import { DEFAULT_ANALYTIX_MODEL, type ModelReasoningEffort } from '@shared/app-settings'
 import { projectModelReasoningEffortV1 } from '@shared/model-reasoning-effort'
-import { projectToolEventForRenderer } from '../agent/analytix-mapper'
+import { normalizeProviderErrorDiagnostics, normalizeProviderOutputCapForRenderer, normalizeProviderRetryLifecycleForRenderer, providerRetryStatusItemId, projectToolEventForRenderer, mergeTurnUsageById, reconcileTurnUsageById, turnUsageEntryFromBatch } from '../agent/analytix-mapper'
 import { redactSecretText } from '@shared/secret-redaction'
 import { projectOrdinaryPublicText } from '@shared/ordinary-log-pii-projection'
-import { markPublicProjectionRevoked } from '../lib/public-projection-revocation'
+import { markPublicProjectionRevoked, isPublicProjectionRevoked } from '../lib/public-projection-revocation'
+import { filterThreadsForSidebar } from '../lib/thread-sidebar-visibility'
 import type { ChatState, SideConversation, SidePanelState } from './chat-store-types'
 import { hydrateBlockModelLabels } from './chat-store-helpers'
+import { mergeRestoredGeneralTerminalProjectionReceipts, retainGeneralTerminalProjectionReceipts } from './chat-store-runtime'
 import {
+  findUserInputStatusBlockIndex,
   reconcileOptimisticUserBlock,
   settlePendingRuntimeWorkAfterInterrupt,
+  retireProviderRetryStatusesForTurn,
+  isNeutralProviderRequestStage,
   threadSnapshotLooksRunning,
-  upsertUserBlock
+  upsertUserBlock,
+  upsertUserInputBlock
 } from './chat-store-runtime-helpers'
 import { createStreamingDeltaScheduler } from '../thread/streaming/streaming-delta-scheduler'
 import {
@@ -47,6 +55,7 @@ type SideContext = {
   set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void
   get: () => ChatState
   getProvider: () => AgentProvider
+  threadBindingOwner?: { current: AbortController | null }
   /** i18n reference (kept loose; the host already imports the default). */
   t: (key: string) => string
   formatRuntimeError: (error: unknown) => string
@@ -69,6 +78,10 @@ type UserInputBlock = Extract<ChatBlock, { kind: 'user_input' }>
 
 const sideAbortControllers = new Map<string, AbortController>()
 const sideLatestSeqByThread = new Map<string, number>()
+// Request ownership only; usage remains in the existing SideConversation slice.
+const sideOpenRequests = new Map<string, object>()
+const sidePromotionRequests = new Map<string, object>()
+let sideOpenPresentationRequest: object | null = null
 const SIDE_TERMINAL_SNAPSHOT_UNAVAILABLE_KEY = 'common:runtimeFinalSnapshotUnavailable'
 
 function createSideClientUserMessageId(): string {
@@ -146,42 +159,18 @@ function upsertSideApprovalBlock(blocks: ChatBlock[], block: ApprovalBlock): Cha
   return updated
 }
 
-function upsertSideUserInputBlock(blocks: ChatBlock[], block: UserInputBlock): ChatBlock[] {
-  const idx = blocks.findIndex(
-    (candidate) =>
-      candidate.kind === 'user_input' &&
-      (candidate.id === block.id || candidate.requestId === block.requestId || candidate.requestId === block.id)
-  )
-  if (idx < 0) return [...blocks, block]
-  const current = blocks[idx]
-  if (current.kind !== 'user_input') return blocks
-  const next: UserInputBlock = {
-    ...current,
-    ...block,
-    createdAt: current.createdAt ?? block.createdAt,
-    status: current.status === 'pending' ? block.status : current.status,
-    answers: block.answers ?? current.answers,
-    errorMessage: block.errorMessage ?? current.errorMessage,
-    meta: {
-      ...(current.meta ?? {}),
-      ...(block.meta ?? {})
-    }
-  }
-  const updated = [...blocks]
-  updated[idx] = next
-  return updated
-}
-
 function upsertSideCompactionBlock(blocks: ChatBlock[], block: CompactionBlock): ChatBlock[] {
   const idx = blocks.findIndex((candidate) => candidate.kind === 'compaction' && candidate.id === block.id)
   if (idx < 0) return [...blocks, block]
   const current = blocks[idx]
   if (current.kind !== 'compaction') return blocks
+  if (current.status !== 'running' && block.status === 'running') return blocks
   const next: CompactionBlock = {
     ...current,
     ...block,
     createdAt: current.createdAt ?? block.createdAt,
     detail: block.detail ?? current.detail,
+    summaryKind: block.summaryKind ?? current.summaryKind,
     meta: {
       ...(current.meta ?? {}),
       ...(block.meta ?? {})
@@ -206,35 +195,6 @@ function patchSide(
 
 function setSidePanel(panel: SidePanelState, patch: Partial<SidePanelState>): SidePanelState {
   return { ...panel, ...patch }
-}
-
-function flushSideLiveBlocks(side: SideConversation): { side: SideConversation; blocks: ChatBlock[] } {
-  let nextBlocks = side.blocks
-  const activeTurnId = side.turnId?.trim() || null
-	const activeStream = activeTurnId ? getActiveStreamSnapshotFor(side.threadId, activeTurnId) : null
-  let nextLiveAssistant = side.liveAssistant + (activeStream?.liveAssistant ?? '')
-  if (nextLiveAssistant) {
-    const id = `live_assistant_${side.lastSeq || Date.now()}`
-    nextBlocks = [
-      ...nextBlocks,
-      {
-        kind: 'assistant',
-        id,
-        createdAt: new Date().toISOString(),
-        text: nextLiveAssistant,
-        ...(activeTurnId ? { meta: { turnId: activeTurnId } } : {})
-      }
-    ]
-    nextLiveAssistant = ''
-  }
-  if (activeTurnId && activeStream?.threadId) {
-    clearActiveStream(side.threadId, activeTurnId)
-  }
-  if (nextBlocks === side.blocks) return { side, blocks: nextBlocks }
-  return {
-    side: { ...side, blocks: nextBlocks, liveAssistant: nextLiveAssistant },
-    blocks: nextBlocks
-  }
 }
 
 function sideBlockBelongsToTurn(block: ChatBlock, turnId: string): boolean {
@@ -459,13 +419,14 @@ async function reconcileTerminalSideFromThreadDetail(input: {
   )
 
   try {
-    const detail = await input.provider.getThreadDetail(sideId)
+    const detail = await restoreThreadDisplayHistory(input.provider, sideId, await input.provider.getThreadDetail(sideId))
     assertSideTerminalSnapshotIdentity(
       detail,
       expectedTurnId,
       expectedUserBlockId,
       input.acceptedFinalDigest
     )
+    if (isPublicProjectionRevoked(sideId)) return
     const loadedBlocks = hydrateBlockModelLabels(sideId, detail.blocks)
     const current = input.ctx.get().sideConversations[sideId]
     if (!current || current.threadId.trim() !== sideId || !sideMatchesExpectedTerminalTurn(current, expectedTurnId)) {
@@ -481,6 +442,7 @@ async function reconcileTerminalSideFromThreadDetail(input: {
           blocks: loadedBlocks,
           liveAssistant: '',
           lastSeq: Math.max(side.lastSeq, detail.latestSeq),
+          turnUsageById: reconcileTurnUsageById(sideId, detail.turnUsageById, side.turnUsageById, detail.turnUsageThroughSeq, side.rewoundTurnIds),
           busy: false,
           turnId: null,
           userItemId: null,
@@ -528,19 +490,26 @@ async function recoverSideSubscriptionAfterEnd(input: {
     }))
   )
   try {
-    const detail = await provider.getThreadDetail(sideId)
-    if (signal.aborted) return
+    const detail = await restoreThreadDisplayHistory(provider, sideId, await provider.getThreadDetail(sideId), signal)
+    if (signal.aborted || isPublicProjectionRevoked(sideId)) return
     const blocks = hydrateBlockModelLabels(sideId, detail.blocks)
     const busy = threadSnapshotLooksRunning(blocks, detail.threadStatus)
+    const currentSide = ctx.get().sideConversations[sideId]
+    if (!currentSide) return
+    // Observe real live progress before merging the GET's own cursor. A newer
+    // server snapshot is expected after disconnect, not evidence of a race.
+    const liveSeqBeforeSnapshot = latestSideSeq(sideId, currentSide.lastSeq)
+    const currentTurnChanged = currentSide.turnId !== side.turnId
     rememberSideSeq(sideId, detail.latestSeq)
     ctx.set((state) =>
       patchSide(state, sideId, (cur) => {
-        const currentSeq = latestSideSeq(sideId, cur.lastSeq)
-        const hasNewerLiveState = currentSeq > input.recoverySeq
+        const hasNewerLiveState = liveSeqBeforeSnapshot > input.recoverySeq || currentTurnChanged
         if (hasNewerLiveState) {
           return {
             ...cur,
-            lastSeq: Math.max(cur.lastSeq, detail.latestSeq)
+            lastSeq: Math.max(cur.lastSeq, detail.latestSeq),
+            turnUsageById: reconcileTurnUsageById(sideId, detail.turnUsageById, cur.turnUsageById,
+              undefined, cur.rewoundTurnIds)
           }
         }
         return {
@@ -548,6 +517,7 @@ async function recoverSideSubscriptionAfterEnd(input: {
           blocks,
           liveAssistant: '',
           lastSeq: Math.max(cur.lastSeq, detail.latestSeq),
+          turnUsageById: reconcileTurnUsageById(sideId, detail.turnUsageById, cur.turnUsageById, detail.turnUsageThroughSeq, cur.rewoundTurnIds),
           busy,
           turnId: busy ? detail.latestTurnId ?? cur.turnId : null,
           userItemId: detail.latestUserMessageId ?? cur.userItemId,
@@ -581,30 +551,45 @@ async function reconcileSideSnapshotFromThreadDetail(input: {
   sideId: string
   cursorSeq: number
   ctx: SideContext
+  isCurrentStream: () => boolean
 }): Promise<void> {
   const sideId = input.sideId.trim()
   if (!sideId) return
+  const original = input.ctx.get().sideConversations[sideId]
+  if (!original || !input.isCurrentStream()) return
   const provider = input.ctx.getProvider()
   try {
-    const detail = await provider.getThreadDetail(sideId)
+    const incoming = await provider.getThreadDetail(sideId)
+    if (!input.isCurrentStream() || isPublicProjectionRevoked(sideId)) return
+    const snapshot = { ...incoming, blocks: retainGeneralTerminalProjectionReceipts(
+      input.ctx.get().sideConversations[sideId]?.blocks ?? [], incoming.blocks, sideId, incoming.latestSeq
+    ) }
+    const detail = await restoreThreadDisplayHistory(provider, sideId, snapshot)
+    if (!input.isCurrentStream() || isPublicProjectionRevoked(sideId)) return
     const blocks = hydrateBlockModelLabels(sideId, detail.blocks)
     const busy = threadSnapshotLooksRunning(blocks, detail.threadStatus)
-    rememberSideSeq(sideId, Math.max(detail.latestSeq, input.cursorSeq))
-    input.ctx.set((state) =>
-      patchSide(state, sideId, (side) => {
+    input.ctx.set((state) => {
+      const patch = patchSide(state, sideId, (side) => {
+        if (!input.isCurrentStream() || side.threadId !== original.threadId ||
+            side.parentThreadId !== original.parentThreadId || side.createdAt !== original.createdAt ||
+            latestSideSeq(sideId, side.lastSeq) > detail.latestSeq || detail.latestSeq < input.cursorSeq) return side
+        const restored = mergeRestoredGeneralTerminalProjectionReceipts(side.blocks, blocks, sideId, detail.latestSeq)
+        rememberSideSeq(sideId, detail.latestSeq)
         clearActiveStream(sideId)
         return {
           ...side,
-          blocks: busy ? blocks : settlePendingRuntimeWorkAfterInterrupt(blocks),
+          blocks: busy ? restored : settlePendingRuntimeWorkAfterInterrupt(restored),
           liveAssistant: '',
           lastSeq: Math.max(side.lastSeq, detail.latestSeq, input.cursorSeq),
+          turnUsageById: reconcileTurnUsageById(sideId, detail.turnUsageById, side.turnUsageById, detail.turnUsageThroughSeq, side.rewoundTurnIds),
           busy,
           turnId: busy ? detail.latestTurnId ?? side.turnId : null,
           userItemId: detail.latestUserMessageId ?? side.userItemId,
           error: null
         }
       })
-    )
+      return patch.sideConversations ? { ...patch, usageRefreshKey: state.usageRefreshKey + 1 } : patch
+    })
   } catch (error) {
     if (typeof window === 'undefined') return
     void window.analytix?.logs?.error?.('side-snapshot-reconcile', 'Failed to reconcile side snapshot', {
@@ -625,13 +610,8 @@ function sideRuntimeStatusText(ev: RuntimeStatusEventPayload, t: SideContext['t'
   if (ev.kind === 'tool_storm_suppressed') return fixed('common:toolStormSuppressedStatus', 'Repeated tool activity was suppressed')
   if (ev.kind === 'compaction_summary_fallback') return fixed('common:compactionSummaryFallbackStatus', 'Context compaction summary is unavailable')
   if (ev.kind !== 'pipeline_stage') return ''
+  if (isNeutralProviderRequestStage(ev.stage)) return sideRuntimeStatusMeta(ev)?.providerError ? fixed('common:providerErrorStatus', 'Provider request failed') : ''
   switch (ev.stage) {
-    case 'pre_send':
-      return fixed('common:providerRequestPreparingStatus', 'Preparing model request')
-    case 'post_send':
-      return fixed('common:providerRequestStartedStatus', 'Model request started')
-    case 'response_received':
-      return fixed('common:providerResponseReceivedStatus', 'Response received')
     case 'provider_retrying':
       return fixed('common:providerRetryingStatus', 'Provider request is retrying')
     case 'provider_error':
@@ -644,11 +624,20 @@ function sideRuntimeStatusText(ev: RuntimeStatusEventPayload, t: SideContext['t'
 }
 
 function sideRuntimeStatusMeta(ev: RuntimeStatusEventPayload): RuntimeDisclosureMetadata | undefined {
+  const details = ev.meta?.details && typeof ev.meta.details === 'object' && !Array.isArray(ev.meta.details)
+    ? ev.meta.details as Record<string, unknown> : undefined
+  const providerError = normalizeProviderErrorDiagnostics(details?.providerError)
+  const lifecycle = ev.stage === 'provider_retrying' && details?.visibleRecovery !== true
+    ? normalizeProviderRetryLifecycleForRenderer(ev.retry) : undefined
+  const providerOutputCap = ev.stage === 'response_received' ? normalizeProviderOutputCapForRenderer(ev.providerOutputCap) : undefined
   const meta: RuntimeDisclosureMetadata = {
+    ...(ev.stage === 'pre_send' || ev.stage === 'post_send' || ev.stage === 'response_received' ? { stage: ev.stage } : {}),
     ...(ev.turnId ? { turnId: ev.turnId } : {}),
     ...(ev.child ? { child: ev.child } : {}),
-    ...(ev.attempt !== undefined || ev.maxAttempt !== undefined
-      ? { providerRetry: { ...(ev.attempt !== undefined ? { attempt: ev.attempt } : {}), ...(ev.maxAttempt !== undefined ? { maxAttempt: ev.maxAttempt } : {}) } }
+    ...(providerOutputCap ? { providerOutputCap } : {}),
+    ...(providerError ? { providerError } : {}),
+    ...(lifecycle || ev.attempt !== undefined || ev.maxAttempt !== undefined
+      ? { providerRetry: { ...(lifecycle ? { lifecycle } : {}), ...(ev.attempt !== undefined ? { attempt: ev.attempt } : {}), ...(ev.maxAttempt !== undefined ? { maxAttempt: ev.maxAttempt } : {}) } }
       : {})
   }
   return Object.keys(meta).length ? meta : undefined
@@ -748,6 +737,9 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
   // Replayed or re-delivered deltas duplicate text already on screen;
   // drop anything at or below the subscription's replay floor.
   let appliedDeltaSeqFloor = sinceSeq
+  let runtimeStatusSeqFloor = sinceSeq
+  let terminalEventBarrier = false
+  let committedTerminal: { turnId: string; lastSeq: number } | null = null
   let streamTurnId = ctx.get().sideConversations[sideId]?.turnId?.trim() || null
   const adoptStreamTurnId = (turnId?: string | null): string => {
     const normalizedTurnId = turnId?.trim() || null
@@ -810,8 +802,17 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       rememberSideSeq(sideId, seq)
     },
     onTurnStarted: (ev) => {
+      if (ev.threadId && ev.threadId !== sideId) return
+      const turnId = ev.turnId.trim()
+      if (isAborted() || !turnId || ctx.get().sideConversations[sideId]?.rewoundTurnIds?.[turnId] === true ||
+        ev.seq !== undefined && ev.seq <= appliedDeltaSeqFloor || committedTerminal && (turnId === committedTerminal.turnId ||
+        !Number.isSafeInteger(ev.seq) || ev.seq! <= committedTerminal.lastSeq)) return
+      terminalEventBarrier = false
       flushPendingDeltas()
       const activeTurnId = adoptStreamTurnId(ev.turnId)
+      appendActiveStreamDeltas({ threadId: sideId, turnId: activeTurnId, lastSeq: ev.seq,
+        startedAt: ev.createdAt && Number.isFinite(Date.parse(ev.createdAt)) ? Date.parse(ev.createdAt) : null,
+        runtimeRunning: true })
       rememberSideSeq(sideId, (ev as { seq?: number }).seq)
       ctx.set((s) =>
         patchSide(s, sideId, (side) => ({
@@ -824,12 +825,13 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       )
     },
     onUserMessage: (ev) => {
+      if (ev.turnId && ctx.get().sideConversations[sideId]?.rewoundTurnIds?.[ev.turnId] === true) return
       flushPendingDeltas()
       const activeTurnId = adoptStreamTurnId(ev.turnId)
       rememberSideSeq(sideId, (ev as { seq?: number }).seq)
       ctx.set((s) =>
         patchSide(s, sideId, (side) => {
-          const flushed = flushSideLiveBlocks(side)
+          const flushed = { side: { ...side, liveAssistant: '' }, blocks: side.blocks }
           const optimisticUserId = side.userItemId
           const reconciledBlocks =
             optimisticUserId &&
@@ -851,9 +853,11 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       )
     },
     onDeltas: (rawDeltas) => {
+      if (isAborted() || terminalEventBarrier) return
       const deltas: ThreadDeltaEvent[] = []
       let batchMaxSeq = appliedDeltaSeqFloor
       for (const delta of rawDeltas) {
+        if (delta.turnId && ctx.get().sideConversations[sideId]?.rewoundTurnIds?.[delta.turnId] === true) continue
 		if (typeof delta.seq === 'number') {
           if (delta.seq <= appliedDeltaSeqFloor) continue
           batchMaxSeq = Math.max(batchMaxSeq, delta.seq)
@@ -874,7 +878,7 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       const activeTurnId = adoptEventCursor(ev)
       ctx.set((s) =>
         patchSide(s, sideId, (side) => {
-          const flushed = flushSideLiveBlocks(side)
+          const flushed = { side: { ...side, liveAssistant: '' }, blocks: side.blocks }
           const eventTurnId = sideToolEventTurnId(ev, activeTurnId ?? side.turnId)
           const idx = flushed.blocks.findIndex((b) =>
             b.kind === 'tool' && sideToolBlockMatchesEvent(b, ev, activeTurnId ?? side.turnId)
@@ -920,7 +924,7 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       const activeTurnId = adoptEventCursor(ev as SideEventCursor)
       ctx.set((s) =>
         patchSide(s, sideId, (side) => {
-          const flushed = flushSideLiveBlocks(side)
+          const flushed = { side: { ...side, liveAssistant: '' }, blocks: side.blocks }
           const block: CompactionBlock = {
             kind: 'compaction',
             id: ev.itemId,
@@ -928,6 +932,7 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
             summary: ev.summary,
             status: ev.status,
             detail: ev.detail,
+            summaryKind: ev.summaryKind,
             auto: ev.auto,
             meta: {
               ...(ev.meta ?? {}),
@@ -943,22 +948,52 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       )
     },
     onRuntimeStatus: (ev) => {
+      if (isAborted() || (ev.threadId && ev.threadId !== sideId)) return
+      const side = ctx.get().sideConversations[sideId]
+      if (!side) return
+      const turnScoped = Boolean(ev.turnId) || ev.kind === 'pipeline_stage' || ev.kind === 'tool_result_upload_wait'
+      if (turnScoped && terminalEventBarrier) return
+      const currentTurnId = side.turnId?.trim()
+      if (turnScoped && !side.busy && (!currentTurnId || !isPendingActiveStreamTurnId(currentTurnId))) return
+      if (ev.turnId && currentTurnId && !isPendingActiveStreamTurnId(currentTurnId) &&
+          currentTurnId !== ev.turnId) return
+      if (ev.seq !== undefined) {
+        if (!Number.isSafeInteger(ev.seq) || ev.seq <= runtimeStatusSeqFloor) return
+        runtimeStatusSeqFloor = ev.seq
+      }
+      const text = sideRuntimeStatusText(ev, ctx.t)
+      if (!turnScoped) {
+        if (!text) return
+        rememberSideSeq(sideId, ev.seq)
+        const meta = sideRuntimeStatusMeta(ev)
+        ctx.set(s => patchSide(s, sideId, current => {
+          const block: Extract<ChatBlock, { kind: 'system' }> = { kind: 'system', id: ev.itemId,
+            createdAt: ev.createdAt ?? new Date().toISOString(), text, ...(meta ? { meta } : {}) }
+          const blocks = [...current.blocks]
+          const index = blocks.findIndex(candidate => candidate.kind === 'system' && candidate.id === ev.itemId)
+          if (index >= 0) blocks[index] = block
+          else blocks.push(block)
+          return { ...current, blocks, lastSeq: latestSideSeq(sideId, current.lastSeq) }
+        }))
+        return
+      }
       flushPendingDeltas()
       const activeTurnId = adoptEventCursor(ev as SideEventCursor)
-      const text = sideRuntimeStatusText(ev, ctx.t)
       if (!text) return
       ctx.set((s) =>
         patchSide(s, sideId, (side) => {
-          const flushed = flushSideLiveBlocks(side)
+          const flushed = { side: { ...side, liveAssistant: '' }, blocks: side.blocks }
           const meta = sideRuntimeStatusMeta(ev)
+          const retry = meta?.providerRetry?.lifecycle
+          const itemId = retry && ev.turnId ? providerRetryStatusItemId(sideId, ev.turnId, retry) : ev.itemId
           const block: Extract<ChatBlock, { kind: 'system' }> = {
             kind: 'system',
-            id: ev.itemId,
+            id: itemId,
             createdAt: ev.createdAt ?? new Date().toISOString(),
             text,
             ...(meta ? { meta } : {})
           }
-          const index = flushed.blocks.findIndex((candidate) => candidate.kind === 'system' && candidate.id === ev.itemId)
+          const index = flushed.blocks.findIndex((candidate) => candidate.kind === 'system' && candidate.id === itemId)
           if (index >= 0) {
             const blocks = [...flushed.blocks]
             blocks[index] = block
@@ -973,7 +1008,7 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       const activeTurnId = adoptEventCursor(req as SideEventCursor)
       ctx.set((s) =>
         patchSide(s, sideId, (side) => {
-          const flushed = flushSideLiveBlocks(side)
+          const flushed = { side: { ...side, liveAssistant: '' }, blocks: side.blocks }
           const block: ApprovalBlock = {
             kind: 'approval',
             id: sideApprovalBlockId(req.approvalId),
@@ -1011,10 +1046,8 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
     },
     onUserInput: (req) => {
       flushPendingDeltas()
-      const activeTurnId = adoptEventCursor(req as SideEventCursor)
       ctx.set((s) =>
         patchSide(s, sideId, (side) => {
-          const flushed = flushSideLiveBlocks(side)
           const block: UserInputBlock = {
             kind: 'user_input',
             id: req.itemId,
@@ -1027,9 +1060,12 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
               ...(req.turnId ? { turnId: req.turnId } : {})
             }
           }
+          if (upsertUserInputBlock(side.blocks, block) === side.blocks) return side
+          const activeTurnId = adoptEventCursor(req as SideEventCursor)
+          const flushed = { side: { ...side, liveAssistant: '' }, blocks: side.blocks }
           return {
             ...flushed.side,
-            blocks: upsertSideUserInputBlock(flushed.blocks, block),
+            blocks: upsertUserInputBlock(flushed.blocks, block),
             ...sideCursorPatch(flushed.side, activeTurnId),
             ...(activeTurnId ? { busy: true, error: null } : {})
           }
@@ -1039,21 +1075,45 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
     onUserInputStatus: (ev) => {
       flushPendingDeltas()
       ctx.set((s) =>
-        patchSide(s, sideId, (side) => ({
-          ...side,
-          blocks: side.blocks.map((block) =>
-            block.kind === 'user_input' &&
-            (block.id === ev.itemId || block.requestId === ev.itemId || block.requestId === ev.requestId)
-              ? {
-                  ...block,
-                  status: ev.status,
-                  answers: ev.answers ?? block.answers,
-                  errorMessage: ev.errorMessage ?? block.errorMessage
-                }
-              : block
-          )
-        }))
+        patchSide(s, sideId, (side) => {
+          const blockIndex = findUserInputStatusBlockIndex(side.blocks, ev)
+          if (blockIndex < 0) return side
+          return {
+            ...side,
+            blocks: side.blocks.map((block, index) =>
+              index === blockIndex && block.kind === 'user_input'
+                ? {
+                    ...block,
+                    status: ev.status,
+                    answers: ev.answers ?? block.answers,
+                    errorMessage: ev.errorMessage ?? block.errorMessage
+                  }
+                : block
+            )
+          }
+        })
       )
+    },
+    onThreadRewound: (event) => {
+      if (isAborted() || event.threadId !== sideId) return
+      streamingDeltaScheduler.discard()
+      const removed = event.removedTurnIds.length ? event.removedTurnIds : [event.turnId]
+      for (const turnId of removed) clearActiveStream(sideId, turnId)
+      if (event.seq !== undefined) {
+        rememberSideSeq(sideId, event.seq)
+        appliedDeltaSeqFloor = Math.max(appliedDeltaSeqFloor, event.seq)
+        runtimeStatusSeqFloor = Math.max(runtimeStatusSeqFloor, event.seq)
+      }
+      if (streamTurnId && removed.includes(streamTurnId)) { streamTurnId = null; terminalEventBarrier = true }
+      ctx.set(state => patchSide(state, sideId, side => {
+        const turnRemoved = side.turnId !== null && removed.includes(side.turnId)
+        return { ...side,
+          blocks: side.blocks.filter(block => !removed.some(turnId => sideBlockBelongsToTurn(block, turnId))),
+          turnUsageById: Object.fromEntries(Object.entries(side.turnUsageById ?? {}).filter(([turnId]) => !removed.includes(turnId))),
+          rewoundTurnIds: { ...side.rewoundTurnIds, ...Object.fromEntries(removed.map(id => [id, true as const])) },
+          ...(event.seq !== undefined ? { lastSeq: Math.max(side.lastSeq, event.seq) } : {}),
+          ...(turnRemoved ? { liveAssistant: '', busy: false, turnId: null, userItemId: null } : {}) }
+      }))
     },
     onGoal: () => {
       // Side conversations do not render goal chips yet.
@@ -1069,12 +1129,15 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       await reconcileSideSnapshotFromThreadDetail({
         sideId,
         cursorSeq,
-        ctx
+        ctx,
+        isCurrentStream: () => !isAborted() && (!signal || sideAbortControllers.get(sideId)?.signal === signal)
       })
     },
     onPublicProjectionRevoked: async (ev) => {
       if (isAborted() || ev.threadId !== sideId) return
       markPublicProjectionRevoked(ev.threadId)
+      sideOpenRequests.delete(sideId)
+      sidePromotionRequests.delete(sideId)
       streamingDeltaScheduler.discard()
       teardownSideSubscription(sideId)
       clearActiveStream(sideId)
@@ -1102,6 +1165,7 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
         throw new Error('general terminal side delivery binding is invalid')
       }
       const before = ctx.get().sideConversations[sideId]
+      if (before?.rewoundTurnIds?.[batch.turnId] === true) throw new Error('general terminal side delivery belongs to a rewound turn')
       const beforeCursor = before ? latestSideSeq(sideId, before.lastSeq) : -1
       if (!before || !/^[a-f0-9]{64}$/.test(batch.batchDigest) ||
           beforeCursor !== batch.firstSeq - 1 || before.turnId?.trim() !== batch.turnId ||
@@ -1146,12 +1210,20 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
           if (block.meta?.turnId === batch.turnId) return false
           return !(userIndex >= 0 && index > userIndex && index < nextUserIndex)
         }).filter((block) => block.id !== batch.terminalItem?.id)
+        const terminalItem = batch.terminalItem?.kind === 'assistant' ? {
+          ...batch.terminalItem,
+          generalTerminalProjectionReceipt: {
+            schemaVersion: 1 as const, batchDigest: batch.batchDigest,
+            threadId: batch.threadId, turnId: batch.turnId, itemId: batch.terminalItem.id,
+            firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, status: batch.terminal.status
+          }
+        } : batch.terminalItem
         committed = true
         return {
           ...side,
           blocks: [
-            ...settlePendingRuntimeWorkAfterInterrupt(withoutProvisional),
-            ...(batch.terminalItem ? [batch.terminalItem] : [])
+            ...settlePendingRuntimeWorkAfterInterrupt(retireProviderRetryStatusesForTurn(withoutProvisional, batch.turnId)),
+            ...(terminalItem ? [terminalItem] : [])
           ],
           liveAssistant: '',
           lastSeq: batch.lastSeq,
@@ -1159,12 +1231,16 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
           turnId: null,
           userItemId: null,
           error: null,
-          lastTurnUsage: batch.usage
+          lastTurnUsage: batch.usage,
+          turnUsageById: mergeTurnUsageById(sideId, side.turnUsageById,
+            { [batch.turnId]: turnUsageEntryFromBatch(batch) })
         }
       }))
       if (!committed) {
         throw new Error('general terminal side delivery could not be committed atomically')
       }
+      terminalEventBarrier = true
+      committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
       rememberSideSeq(sideId, batch.lastSeq)
       clearActiveStream(sideId)
       streamTurnId = null
@@ -1174,6 +1250,7 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
         throw new Error('accepted-final side delivery binding is invalid')
       }
       const before = ctx.get().sideConversations[sideId]
+      if (before?.rewoundTurnIds?.[batch.turnId] === true) throw new Error('accepted-final side delivery belongs to a rewound turn')
       if (!before) {
         throw new Error('accepted-final side delivery could not be committed atomically')
       }
@@ -1205,6 +1282,8 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
             turnId: sideCurrentTurnMatches ? null : side.turnId,
             userItemId: sideCurrentTurnMatches ? null : side.userItemId,
             lastTurnUsage: sideHasCandidate ? null : side.lastTurnUsage,
+            turnUsageById: Object.fromEntries(Object.entries(side.turnUsageById ?? {})
+              .filter(([turnId]) => turnId !== batch.turnId)),
             error: ctx.t(SIDE_TERMINAL_SNAPSHOT_UNAVAILABLE_KEY)
           }
         }))
@@ -1228,6 +1307,8 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
         rememberSideSeq(sideId, batch.lastSeq)
         clearActiveStream(sideId)
         streamTurnId = null
+        terminalEventBarrier = true
+        committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
         return batch.receipt
       }
       if (acceptedFinalProjectionHasCandidateReceipt(before.blocks, batch) ||
@@ -1268,7 +1349,7 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
         return {
           ...side,
           blocks: [
-            ...settlePendingRuntimeWorkAfterInterrupt(withoutProvisional),
+            ...settlePendingRuntimeWorkAfterInterrupt(retireProviderRetryStatusesForTurn(withoutProvisional, batch.turnId)),
             assistant,
             ...(batch.terminalError ? [batch.terminalError] : [])
           ],
@@ -1278,12 +1359,16 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
           turnId: null,
           userItemId: null,
           error: null,
-          lastTurnUsage: batch.usage
+          lastTurnUsage: batch.usage,
+          turnUsageById: mergeTurnUsageById(sideId, side.turnUsageById,
+            { [batch.turnId]: turnUsageEntryFromBatch(batch) })
         }
       }))
       if (!committed) {
         return reject('accepted-final side delivery could not be committed atomically')
       }
+      terminalEventBarrier = true
+      committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
       rememberSideSeq(sideId, batch.lastSeq)
       clearActiveStream(sideId)
       streamTurnId = null
@@ -1309,6 +1394,7 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
         )
         return
       }
+      terminalEventBarrier = true
       teardownSideSubscription(sideId)
       streamingDeltaScheduler.dispose()
       const completedTurnId = eventTurnId ?? streamTurnId ?? activeSideTurnId
@@ -1349,10 +1435,11 @@ function buildSideSink(sideId: string, ctx: SideContext, sinceSeq = 0, signal?: 
       })
       streamTurnId = null
     },
-    onUsage: (usage) => {
-      // Side usage is reported only to keep lastSeq cursors consistent;
-      // a per-thread usage counter can be wired here in the future.
-      void usage
+    onUsage: () => {
+      // A real scoped usage event invalidates the existing query signal. Its
+      // legacy payload is not the canonical whole-log billing projection.
+      if (isAborted() || !ctx.get().sideConversations[sideId]) return
+      ctx.set((state) => ({ usageRefreshKey: state.usageRefreshKey + 1 }))
     }
   }
   return signal ? guardSideSink(sink, signal) : sink
@@ -1376,14 +1463,24 @@ function startSideSubscription(sideId: string, sinceSeq: number, ctx: SideContex
     .catch(() => undefined)
     .then(() => {
       if (ac.signal.aborted) return
+      const retireSettledBinding = (): void => {
+        // A recovery may already have installed a new subscription. Retire
+        // only this controller, and never use EOF as turn-terminal authority.
+        if (sideAbortControllers.get(sideId) === ac && !ctx.get().sideConversations[sideId]?.busy) {
+          teardownSideSubscription(sideId)
+        }
+      }
       const side = ctx.get().sideConversations[sideId]
-      if (!side?.busy) return
+      if (!side?.busy) {
+        retireSettledBinding()
+        return
+      }
       void recoverSideSubscriptionAfterEnd({
         sideId,
         recoverySeq: latestSideSeq(sideId, side.lastSeq),
         ctx,
         signal: ac.signal
-      })
+      }).finally(retireSettledBinding)
     })
 }
 
@@ -1403,6 +1500,9 @@ export function createSideActions(ctx: SideContext): Pick<
   | 'discardSideConversation'
   | 'promoteSideConversation'
 > {
+  const binding = ctx.threadBindingOwner ? getThreadBinding(ctx.threadBindingOwner) : undefined
+  const policyAvailable = (threadId: string): boolean => !binding?.threadPolicyPending.has(threadId) &&
+    !ctx.get().threads.find(thread => thread.id === threadId)?.executionPolicyUncertain
   const actions: Pick<
     ChatState,
     | 'spawnSideConversation'
@@ -1451,6 +1551,7 @@ export function createSideActions(ctx: SideContext): Pick<
       }
       const now = new Date().toISOString()
       const inheritedAt = new Date().toISOString()
+      sidePromotionRequests.delete(forked.id)
       const side: SideConversation = {
         threadId: forked.id,
         parentThreadId: parentId,
@@ -1467,7 +1568,8 @@ export function createSideActions(ctx: SideContext): Pick<
         turnId: null,
         userItemId: null,
         error: null,
-        lastTurnUsage: null
+        lastTurnUsage: null,
+        turnUsageById: {}
       }
       ctx.set((s) => ({
         sideConversations: { ...s.sideConversations, [forked.id]: side },
@@ -1499,7 +1601,14 @@ export function createSideActions(ctx: SideContext): Pick<
       if (side.busy) return false
       const trimmed = text.trim()
       if (!trimmed) return false
+      if (!policyAvailable(sideId)) {
+        ctx.set(s => patchSide(s, sideId, current => ({ ...current,
+          error: ctx.t('common:composerExecutionPolicyUnavailable') })))
+        return false
+      }
+      sidePromotionRequests.delete(sideId)
       const provider = ctx.getProvider()
+      const executionPolicyGeneration = binding?.threadMetadataGenerationById.get(sideId) ?? 0
       const reasoningEffort = sideReasoningEffortRequestValue(side.reasoningEffort)
       const optimisticUserId = createSideClientUserMessageId()
       const provisionalTurnId = pendingActiveStreamTurnId(sideId, optimisticUserId)
@@ -1528,7 +1637,10 @@ export function createSideActions(ctx: SideContext): Pick<
       try {
         const { turnId, userMessageItemId } = await provider.sendUserMessage(sideId, trimmed, {
           model: side.model,
-          ...(reasoningEffort ? { reasoningEffort } : {})
+          ...(reasoningEffort ? { reasoningEffort } : {}),
+          submissionIsCurrent: () => ctx.getProvider() === provider && policyAvailable(sideId) &&
+            (binding?.threadMetadataGenerationById.get(sideId) ?? 0) === executionPolicyGeneration &&
+            ctx.get().sideConversations[sideId]?.turnId === provisionalTurnId
         })
         const currentTurnId = ctx.get().sideConversations[sideId]?.turnId
         if (currentTurnId && currentTurnId !== turnId) {
@@ -1634,6 +1746,7 @@ export function createSideActions(ctx: SideContext): Pick<
     },
 
     selectSideConversation: (sideId) => {
+      sideOpenPresentationRequest = null
       ctx.set((s) => {
         if (!s.sideConversations[sideId]) return {}
         return { sidePanel: setSidePanel(s.sidePanel, { activeSideId: sideId, open: true }) }
@@ -1642,7 +1755,7 @@ export function createSideActions(ctx: SideContext): Pick<
 
     openThreadInSidePanel: async (threadId, options = {}) => {
       const targetId = threadId.trim()
-      if (!targetId) return false
+      if (!targetId || isPublicProjectionRevoked(targetId)) return false
       const state = ctx.get()
       const parentId = options.parentThreadId ?? state.activeThreadId
       if (!parentId) {
@@ -1653,6 +1766,8 @@ export function createSideActions(ctx: SideContext): Pick<
         ctx.set({ error: ctx.t('common:runtimeActionNeedsConnection') })
         return false
       }
+      const presentationRequest = {}
+      sideOpenPresentationRequest = presentationRequest
       const existing = state.sideConversations[targetId]
       if (existing) {
         ctx.set((s) => ({
@@ -1662,12 +1777,24 @@ export function createSideActions(ctx: SideContext): Pick<
         return true
       }
 
+      const request = presentationRequest
+      sideOpenRequests.set(targetId, request)
+      const requestCurrent = (): boolean => sideOpenRequests.get(targetId) === request && sideOpenPresentationRequest === request &&
+        !isPublicProjectionRevoked(targetId) && !isPublicProjectionRevoked(parentId) &&
+        ctx.get().runtimeConnection === 'ready' && ctx.get().activeThreadId === state.activeThreadId &&
+        ctx.get().sidePanel === state.sidePanel
+      const releaseRequest = (): void => {
+        if (sideOpenRequests.get(targetId) === request) sideOpenRequests.delete(targetId)
+        if (sideOpenPresentationRequest === request) sideOpenPresentationRequest = null
+      }
       const provider = ctx.getProvider()
       const targetThread = state.threads.find((thread) => thread.id === targetId) ?? null
       let detail: Awaited<ReturnType<AgentProvider['getThreadDetail']>>
       try {
-        detail = await provider.getThreadDetail(targetId)
+        detail = await restoreThreadDisplayHistory(provider, targetId, await provider.getThreadDetail(targetId))
       } catch (e) {
+        if (!requestCurrent()) { releaseRequest(); return false }
+        releaseRequest()
         ctx.set({
           error: ctx.formatRuntimeError(e),
           ...(ctx.shouldOpenSettingsForError(e)
@@ -1677,6 +1804,7 @@ export function createSideActions(ctx: SideContext): Pick<
         return false
       }
 
+      if (!requestCurrent() || (detail.thread && detail.thread.id !== targetId)) { releaseRequest(); return false }
       const now = new Date().toISOString()
       const blocks = hydrateBlockModelLabels(targetId, detail.blocks)
       const side: SideConversation = {
@@ -1696,21 +1824,34 @@ export function createSideActions(ctx: SideContext): Pick<
         turnId: detail.latestTurnId ?? null,
         userItemId: detail.latestUserMessageId ?? null,
         error: null,
-        lastTurnUsage: null
+        lastTurnUsage: null,
+        turnUsageById: mergeTurnUsageById(targetId, detail.turnUsageById)
       }
-      ctx.set((s) => ({
-        sideConversations: { ...s.sideConversations, [targetId]: side },
-        sidePanel: setSidePanel(s.sidePanel, { open: true, activeSideId: targetId })
-      }))
+      let installed = false
+      ctx.set((s) => {
+        if (!requestCurrent()) return {}
+        const current = s.sideConversations[targetId]
+        if (current) return {}
+        sidePromotionRequests.delete(targetId)
+        installed = true
+        return { sideConversations: { ...s.sideConversations, [targetId]: side },
+          sidePanel: setSidePanel(s.sidePanel, { open: true, activeSideId: targetId }) }
+      })
+      releaseRequest()
+      if (!installed) return false
       startSideSubscription(targetId, detail.latestSeq, ctx)
       return true
     },
 
     setSidePanelOpen: (open) => {
+      sideOpenPresentationRequest = null
       ctx.set((s) => ({ sidePanel: setSidePanel(s.sidePanel, { open }) }))
     },
 
     closeSideConversation: async (sideId) => {
+      sidePromotionRequests.delete(sideId)
+      sideOpenPresentationRequest = null
+      sideOpenRequests.delete(sideId)
       const state = ctx.get()
       const closingSide = state.sideConversations[sideId] ?? null
       teardownSideSubscription(sideId)
@@ -1732,6 +1873,9 @@ export function createSideActions(ctx: SideContext): Pick<
     },
 
     discardSideConversation: async (sideId) => {
+      sidePromotionRequests.delete(sideId)
+      sideOpenPresentationRequest = null
+      sideOpenRequests.delete(sideId)
       const state = ctx.get()
       const side = state.sideConversations[sideId]
       teardownSideSubscription(sideId)
@@ -1768,22 +1912,73 @@ export function createSideActions(ctx: SideContext): Pick<
     promoteSideConversation: async (sideId) => {
       const state = ctx.get()
       const side = state.sideConversations[sideId]
-      if (!side) return
+      if (!side || sidePromotionRequests.has(sideId)) return
       const provider = ctx.getProvider()
-      if (typeof provider.updateThreadRelation !== 'function') {
-        ctx.set({ error: ctx.formatRuntimeError(new Error('promote side conversation is not supported')) })
+      if (state.runtimeConnection !== 'ready' || side.busy || side.source === 'background-agent' ||
+          typeof provider.promoteSideThread !== 'function') {
+        ctx.set(s => patchSide(s, sideId, current => ({ ...current,
+          error: ctx.formatRuntimeError(new Error('promote side conversation is not supported')) })))
         return
+      }
+      const request = {}
+      sidePromotionRequests.set(sideId, request)
+      const isCurrent = (): boolean => {
+        const current = ctx.get().sideConversations[sideId]
+        return sidePromotionRequests.get(sideId) === request && ctx.getProvider() === provider &&
+          ctx.get().runtimeConnection === 'ready' && !isPublicProjectionRevoked(sideId) &&
+          !isPublicProjectionRevoked(side.parentThreadId) && current?.threadId === side.threadId &&
+          current.parentThreadId === side.parentThreadId && current.createdAt === side.createdAt &&
+          current.inheritedAt === side.inheritedAt
       }
       try {
-        await provider.updateThreadRelation(sideId, 'primary')
+        const before = (await provider.getThreadDetail(sideId)).thread
+        if (!isCurrent()) return
+        if (!before || before.id !== sideId || (before.relation !== 'side' && before.relation !== 'fork') ||
+            before.parentThreadId !== side.parentThreadId || before.forkedFromThreadId !== side.parentThreadId) {
+          throw new Error('Side promotion source could not be verified')
+        }
+        // A prior ACK may have committed before its readback/list failed.
+        // Resume verification of the exact fork without another mutation.
+        if (before.relation === 'side') await provider.promoteSideThread(sideId)
+        if (!isCurrent()) return
+        const promoted = (await provider.getThreadDetail(sideId)).thread
+        if (!isCurrent()) return
+        const lineage = ['workspace', 'parentThreadId', 'forkedFromThreadId', 'forkedFromTitle',
+          'forkedAt', 'forkedFromMessageCount', 'forkedFromTurnCount'] as const
+        if (!promoted || promoted.id !== sideId || promoted.relation !== 'fork' ||
+            lineage.some(key => promoted[key] !== before[key])) {
+          throw new Error('Side promotion durable readback did not preserve its source')
+        }
+        const listed = await provider.listThreads({ limit: 0 })
+        if (!isCurrent()) return
+        const visible = listed.find(thread => thread.id === sideId)
+        if (!visible || visible.relation !== 'fork' || lineage.some(key => visible[key] !== promoted[key])) {
+          throw new Error('Promoted Side is not visible in the normal thread list')
+        }
+        const sidebarVisible = await filterThreadsForSidebar([visible], provider)
+        if (!isCurrent()) return
+        if (!sidebarVisible.some(thread => thread.id === sideId)) {
+          throw new Error('Promoted Side is not visible in the normal sidebar')
+        }
+        // This is a positive inventory observation, independent of search.
+        ctx.set(s => !isCurrent() ? {} : {
+          threads: [...s.threads.filter(thread => thread.id !== sideId), visible]
+        })
+        if (!isCurrent()) return
+        const current = ctx.get().sideConversations[sideId]
+        if (current.busy || current.input.length > 0 || current.input !== side.input) {
+          throw new Error('Side promotion completed; the current draft remains open in Side')
+        }
+        await actions.closeSideConversation(sideId)
       } catch (e) {
-        ctx.set({ error: ctx.formatRuntimeError(e) })
-        return
+        if (isCurrent()) {
+          const message = ctx.formatRuntimeError(e)
+          ctx.set(s => !isCurrent() || s.sideConversations[sideId].error !== side.error
+            ? {} : patchSide(s, sideId, current => ({ ...current, error: message })))
+        }
+      } finally {
+        if (sidePromotionRequests.get(sideId) === request) sidePromotionRequests.delete(sideId)
       }
-      await ctx.get().refreshThreads()
-      // Closing is a structural teardown; call directly so a stubbed
-      // `state.closeSideConversation` (e.g. in tests) cannot swallow it.
-      await actions.closeSideConversation(sideId)
     }
   }
   return actions
@@ -1794,6 +1989,9 @@ export function createSideActions(ctx: SideContext): Pick<
  * `boot`/`unmount` path to avoid dangling SSE streams on app shutdown.
  */
 export function teardownAllSideSubscriptions(): void {
+  sidePromotionRequests.clear()
+  sideOpenRequests.clear()
+  sideOpenPresentationRequest = null
   for (const ac of sideAbortControllers.values()) ac.abort()
   sideAbortControllers.clear()
   sideLatestSeqByThread.clear()

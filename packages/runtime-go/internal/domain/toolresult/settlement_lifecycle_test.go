@@ -26,6 +26,7 @@ func TestSettlementLifecycleStatusV1ClosedMapping(t *testing.T) {
 		{name: "restart outcome unknown", projection: OutcomeUnknownAfterRestartProjectionV1(), isError: true, want: "failed"},
 		{name: "case source private", projection: caseCompleted, want: "completed"},
 		{name: "case source failed", projection: caseFailed, isError: true, want: "failed"},
+		{name: "job query of failed job", projection: syntheticTaskJobProjectionV1(t), want: "completed"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -62,6 +63,7 @@ func TestSettlementLifecycleStatusV1RejectsMismatchAndForgedUnknown(t *testing.T
 		"invalid": {
 			projection: PublicToolResultProjectionV1{SchemaVersion: 1, ProjectionKind: ProjectionHostStatus, Status: "completed"},
 		},
+		"job projection marked error": {projection: syntheticTaskJobProjectionV1(t), isError: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if status, err := SettlementLifecycleStatusV1(input.projection, input.isError); status != "" || !errors.Is(err, ErrToolResultLifecycleInvalidV1) {

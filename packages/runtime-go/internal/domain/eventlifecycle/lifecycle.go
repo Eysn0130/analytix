@@ -8,7 +8,9 @@ import (
 	"errors"
 	"strings"
 
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 )
 
 var ErrInvalidEventLifecycleV1 = errors.New("new event lifecycle is outside the closed V1 allowlist")
@@ -26,6 +28,11 @@ func ValidateNewEventLifecycleV1(event map[string]any) error {
 	}
 
 	switch kind {
+	case domainthread.MessageFeedbackPutKindV1, domainthread.MessageFeedbackDeleteKindV1:
+		if err := forbidStatusV1(event); err != nil {
+			return err
+		}
+		return domainthread.ValidateMessageFeedbackEventV1(event)
 	case "thread_created":
 		return requireStatusV1(event, "idle")
 	case "thread_updated":
@@ -47,7 +54,7 @@ func ValidateNewEventLifecycleV1(event map[string]any) error {
 	case "approval_resolved":
 		return requireStatusV1(event, "allowed", "denied", "expired")
 	case "user_input_resolved":
-		return requireStatusV1(event, "submitted", "cancelled")
+		return requireStatusV1(event, "submitted", "cancelled", "continued")
 	case "child_steer_queued":
 		return requireStatusV1(event, string(domainjob.StatusQueued))
 	case "child_steer_admitted":
@@ -72,13 +79,17 @@ func ValidateNewEventLifecycleV1(event map[string]any) error {
 		if !stagePresent || !stageExact || !validPipelineStageV1(stage) {
 			return invalidV1("pipeline stage is missing or invalid")
 		}
+		if stage == "logical_step_assembled" {
+			return validateLogicalStepAssembledV1(event)
+		}
 		return nil
-	case "thread_rewound",
+	case "thread_fork_seed", "thread_fork_seed_completed",
+		"thread_rewound",
 		"turn_steered",
 		"item_created", "item_updated", "item_completed",
 		"tool_call_started", "tool_call_finished", "tool_call_ready",
 		"tool_storm_suppressed", "tool_catalog_changed",
-		"compaction_started", "compaction_completed",
+		"compaction_started", "compaction_completed", "compaction_failed",
 		"goal_updated", "goal_cleared", "goal_evidence_audit",
 		"todos_updated", "todos_cleared", "autoresearch_state_audit",
 		"checkpoint_captured", "checkpoint_rewind_rescue_created", "checkpoint_rewind_applied",
@@ -128,7 +139,7 @@ func validPipelineStageV1(stage string) bool {
 	switch stage {
 	case "setup", "pre_start", "post_start", "input_received", "input_cached", "input_routed",
 		"input_compressed", "input_remembered", "pre_send", "post_send", "response_received",
-		"provider_admission_rejected",
+		"provider_admission_rejected", "logical_step_started", "logical_step_assembled", "logical_step_closed",
 		"provider_retrying", "step_limit_finalizing", "provider_error", "empty_final_recovered", "loop_guard":
 		return true
 	}
@@ -142,6 +153,16 @@ func validPipelineStageV1(stage string) bool {
 		return true
 	}
 	return exactDynamicSuffixV1(stage, "background_job_", domainjob.TerminalStatusV1)
+}
+
+func validateLogicalStepAssembledV1(event map[string]any) error {
+	if len(event) != 8 {
+		return invalidV1("logical step assembly envelope is not closed")
+	}
+	if _, ok := domainevent.ProjectClosedLogicalStepEventDetailsV1(event); !ok {
+		return invalidV1("logical step assembly envelope or details are not closed")
+	}
+	return nil
 }
 
 func exactDynamicSuffixV1(stage, prefix string, valid func(string) bool) bool {

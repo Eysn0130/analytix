@@ -131,6 +131,320 @@
       "id": "relative-numeric-chinese-path",
       "input": "工作区 docs/2026/09/26/中文 文档.txt",
       "expected": "preserve"
+    },
+    {
+      "id": "ungrouped-five-plus-ten",
+      "input": "00000.  0000000000",
+      "expected": "preserve"
+    },
+    {
+      "id": "account-five-plus-ten",
+      "input": "账号 00000.  0000000000",
+      "expected": "mask",
+      "sensitiveCanonical": "000000000000000"
+    },
+    {
+      "id": "amount-eleven-not-mobile",
+      "input": "金额 12345678901",
+      "expected": "preserve"
+    },
+    {
+      "id": "amount-valid-mobile",
+      "input": "金额 13800138000",
+      "expected": "mask",
+      "sensitiveCanonical": "13800138000"
+    },
+    {
+      "id": "amount-invalid-identity-checksum",
+      "input": "金额 110105194912310020",
+      "expected": "preserve"
+    },
+    {
+      "id": "amount-valid-identity-checksum",
+      "input": "金额 11010519491231002X",
+      "expected": "mask",
+      "sensitiveCanonical": "11010519491231002"
+    },
+    {
+      "id": "amount-valid-fifteen-digit-identity",
+      "input": "金额 110105491231002",
+      "expected": "mask",
+      "sensitiveCanonical": "110105491231002"
+    },
+    {
+      "id": "latest-measure-after-account",
+      "input": "账户 ****5678；金额 123456789012345678",
+      "expected": "preserve"
+    },
+    {
+      "id": "latest-account-after-measure",
+      "input": "金额 1234；账户 123456789012",
+      "expected": "mask",
+      "sensitiveCanonical": "123456789012"
+    },
+    {
+      "id": "bare-calendar-minute",
+      "input": "202607161530",
+      "expected": "preserve"
+    },
+    {
+      "id": "bare-calendar-second",
+      "input": "20260716153045",
+      "expected": "preserve"
+    },
+    {
+      "id": "bare-calendar-leap-year",
+      "input": "20000229010101",
+      "expected": "preserve"
+    },
+    {
+      "id": "invalid-calendar-month",
+      "input": "20261316153045",
+      "expected": "mask",
+      "sensitiveCanonical": "20261316153045"
+    },
+    {
+      "id": "invalid-calendar-nonleap-day",
+      "input": "19000229010101",
+      "expected": "mask",
+      "sensitiveCanonical": "19000229010101"
+    },
+    {
+      "id": "calendar-trailing-separator",
+      "input": "20260716153045 ",
+      "expected": "mask",
+      "sensitiveCanonical": "20260716153045"
+    },
+    {
+      "id": "bare-epoch-millis",
+      "input": "1700000000000",
+      "expected": "preserve"
+    },
+    {
+      "id": "epoch-upper-bound",
+      "input": "4102444800000",
+      "expected": "preserve"
+    },
+    {
+      "id": "invalid-epoch-above-bound",
+      "input": "4102444800001",
+      "expected": "mask",
+      "sensitiveCanonical": "4102444800001"
+    },
+    {
+      "id": "account-epoch-millis",
+      "input": "账号 1700000000000",
+      "expected": "mask",
+      "sensitiveCanonical": "1700000000000"
+    },
+    {
+      "id": "numeric-crlf-boundary",
+      "input": "123456\r\n789012",
+      "expected": "preserve"
+    },
+    {
+      "id": "account-cue-across-newline",
+      "input": "账户\n00123456",
+      "expected": "mask",
+      "sensitiveCanonical": "00123456"
+    },
+    {
+      "id": "unicode-space-separators",
+      "input": "0012\u00853456\u20287890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "fullwidth-amount-preserved",
+      "input": "金额 １２３４５６７８９０１２３４５６７８",
+      "expected": "preserve"
+    },
+    {
+      "id": "fullwidth-ascii-measure-cue",
+      "input": "ＡＭＯＵＮＴ １２３４５６７８９０１２３４５６７８",
+      "expected": "preserve"
+    },
+    {
+      "id": "fullwidth-account-format-character",
+      "input": "账户 ００１２\u200b３４５６",
+      "expected": "mask",
+      "sensitiveCanonical": "00123456"
+    },
+    {
+      "id": "format-characters-without-group-break",
+      "input": "0012\u200b3456\u20607890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "bare-dot-account-groups",
+      "input": "0012.3456.7890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "minus-account-groups",
+      "input": "0012−3456−7890",
+      "expected": "mask",
+      "sensitiveCanonical": "001234567890"
+    },
+    {
+      "id": "backslash-digit-boundary",
+      "input": "001234\\567890",
+      "expected": "preserve"
+    },
+    {
+      "id": "fullwidth-dot-digit-boundary",
+      "input": "0012．3456．7890",
+      "expected": "preserve"
+    },
+    {
+      "id": "ascii-cue-word-boundary",
+      "input": "discount 123456789012",
+      "expected": "mask",
+      "sensitiveCanonical": "123456789012"
+    },
+    {
+      "id": "unicode-simple-lowercase-measure-boundary",
+      "input": "\u0130amount 123456789012",
+      "expected": "mask",
+      "sensitiveCanonical": "123456789012"
+    },
+    {
+      "id": "unicode-simple-lowercase-account-boundary",
+      "input": "\u0130account 12345678",
+      "expected": "preserve"
+    },
+    {
+      "id": "ascii-account-word-boundary",
+      "input": "accounting 12345678",
+      "expected": "preserve"
+    },
+    {
+      "id": "original-rune-window-account-32",
+      "input": "账户😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀00123456",
+      "expected": "mask",
+      "sensitiveCanonical": "00123456"
+    },
+    {
+      "id": "original-rune-window-account-33",
+      "input": "账户😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀00123456",
+      "expected": "preserve"
+    },
+    {
+      "id": "original-format-window-account-32",
+      "input": "账户\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b00123456",
+      "expected": "mask",
+      "sensitiveCanonical": "00123456"
+    },
+    {
+      "id": "original-format-window-account-33",
+      "input": "账户\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b\u200b00123456",
+      "expected": "preserve"
+    },
+    {
+      "id": "bounded-fixed-point-account",
+      "input": "账户 6222020000000000000xxxxxxxxxx 12345678",
+      "expected": "mask",
+      "sensitiveCanonical": "12345678"
+    },
+    {
+      "id": "over-32-digits-even-with-measure",
+      "input": "金额 12345678901234567890123456789012345",
+      "expected": "mask",
+      "sensitiveCanonical": "12345678901234567890123456789012345"
+    },
+    {
+      "id": "explicit-account-label-ascii-8",
+      "input": "account:                                        00000000",
+      "expected": "mask",
+      "sensitiveCanonical": "00000000"
+    },
+    {
+      "id": "explicit-account-label-ascii-9",
+      "input": "account:                                        000000000",
+      "expected": "mask",
+      "sensitiveCanonical": "000000000"
+    },
+    {
+      "id": "explicit-account-label-ascii-10",
+      "input": "account:                                        0000000000",
+      "expected": "mask",
+      "sensitiveCanonical": "0000000000"
+    },
+    {
+      "id": "explicit-account-label-ascii-11",
+      "input": "account:                                        00000000000",
+      "expected": "mask",
+      "sensitiveCanonical": "00000000000"
+    },
+    {
+      "id": "explicit-account-label-chinese-8",
+      "input": "\u8d26\u53f7\uff1a                                        00000000",
+      "expected": "mask",
+      "sensitiveCanonical": "00000000"
+    },
+    {
+      "id": "explicit-account-label-chinese-9",
+      "input": "\u8d26\u53f7\uff1a                                        000000000",
+      "expected": "mask",
+      "sensitiveCanonical": "000000000"
+    },
+    {
+      "id": "explicit-account-label-chinese-10",
+      "input": "\u8d26\u53f7\uff1a                                        0000000000",
+      "expected": "mask",
+      "sensitiveCanonical": "0000000000"
+    },
+    {
+      "id": "explicit-account-label-chinese-11",
+      "input": "\u8d26\u53f7\uff1a                                        00000000000",
+      "expected": "mask",
+      "sensitiveCanonical": "00000000000"
+    },
+    {
+      "id": "explicit-account-label-ascii-label-gap",
+      "input": "ACCOUNT\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t=                                        00000000",
+      "expected": "mask",
+      "sensitiveCanonical": "00000000"
+    },
+    {
+      "id": "explicit-account-label-format-gap",
+      "input": "account:\u200b                                        00000000",
+      "expected": "mask",
+      "sensitiveCanonical": "00000000"
+    },
+    {
+      "id": "explicit-account-label-unicode-prefix",
+      "input": "\u0130account:                                        00000000",
+      "expected": "mask",
+      "sensitiveCanonical": "00000000"
+    },
+    {
+      "id": "explicit-account-label-unlabelled",
+      "input": "                                        00000000000",
+      "expected": "preserve"
+    },
+    {
+      "id": "explicit-account-label-measure",
+      "input": "amount:                                        0000000000",
+      "expected": "preserve"
+    },
+    {
+      "id": "explicit-account-label-missing-delimiter",
+      "input": "account                                        00000000",
+      "expected": "preserve"
+    },
+    {
+      "id": "explicit-account-label-newline-boundary",
+      "input": "account:\r\n                                        00000000",
+      "expected": "preserve"
+    },
+    {
+      "id": "explicit-account-label-closest-measure",
+      "input": "account:                                        00000000\uff1b\u91d1\u989d 123456789012",
+      "expected": "mask",
+      "sensitiveCanonical": "00000000"
     }
   ],
   "typedFieldCases": [

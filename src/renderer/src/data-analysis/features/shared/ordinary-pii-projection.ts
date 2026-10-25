@@ -1,3 +1,5 @@
+import { projectOrdinaryPIIIdentifiers } from "@shared/ordinary-log-pii-projection";
+
 export type RestrictedPiiKind = "bank-account" | "identity-number" | "phone-number" | "ip-address" | "mac-address";
 
 const BANK_ACCOUNT_FIELD_NAMES = new Set([
@@ -315,83 +317,19 @@ export function projectOrdinaryRestrictedPii(value: unknown, kind: RestrictedPii
   }
 }
 
-function replaceContextualBankAccounts(text: string): string {
-  const projected = text.replace(
-    /((?:(?:银行)?(?:账号|帐号|账户|卡号|账卡号)|(?:bank\s*)?(?:account|acct|card)(?:[\s_-]*(?:id|no|number))?)\s*[:：=]?\s*)(\p{N}(?:[\s\-‐‑‒–—―_/\\.·•*]*\p{N}){7,})/giu,
-    (_match, prefix: string, pii: string) => `${prefix}${projectOrdinaryRestrictedPii(pii, "bank-account")}`
-  );
-  return projected.replace(
-    /((?:银行)?(?:账号|帐号|账户|卡号|账卡号)\s*[:：]?\s*)(\d+(?:\.\d+)?[eE][+-]?\d+)/gu,
-    (_match, prefix: string, pii: string) => `${prefix}${projectOrdinaryRestrictedPii(pii, "bank-account")}`
-  );
-}
-
-function scientificNumberRanges(text: string): Array<{ start: number; end: number }> {
-  return Array.from(text.matchAll(/[+-]?\d+(?:\.\d+)?[eE][+-]?\d+/g)).map((match) => ({
-    start: match.index,
-    end: match.index + match[0].length,
-  }));
-}
-
-function projectDetectedOrdinaryRestrictedPiiInternal(value: unknown, allowBareBankAccount: boolean): string {
-  const original = String(value ?? "").trim();
-  if (!original) {
-    return "";
-  }
-  const text = canonicalizeDetectionText(original);
-  const compact = compactIdentifier(text);
-  if (/^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(text)) {
-    return projectOrdinaryRestrictedPii(text, "mac-address");
-  }
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(text) || (text.includes(":") && /^[0-9A-Fa-f:]+$/.test(text))) {
+export function projectDetectedOrdinaryRestrictedPii(value: unknown): string {
+  // Preserve the existing bare IPv6 presentation coverage. MAC addresses use
+  // the shared detector's device projection instead of this legacy IP guard.
+  const text = canonicalizeDetectionText(value);
+  if (
+    text.includes(":") && /^[0-9A-Fa-f:]+$/.test(text) &&
+    !/^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(text)
+  ) {
     return projectOrdinaryRestrictedPii(text, "ip-address");
   }
-  if (/^\d{17}[0-9Xx]$/.test(compact)) {
-    return projectOrdinaryRestrictedPii(text, "identity-number");
-  }
-  if (/^1\d{10}$/.test(compact)) {
-    return projectOrdinaryRestrictedPii(text, "phone-number");
-  }
-  if (allowBareBankAccount && /^\p{N}{12,64}$/u.test(compact)) {
-    return projectOrdinaryRestrictedPii(text, "bank-account");
-  }
-
-  let projected = text;
-  projected = projected.replace(
-    /(^|[^0-9A-Fa-f])((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})(?=$|[^0-9A-Fa-f])/g,
-    (_match, prefix: string, pii: string) => `${prefix}${projectOrdinaryRestrictedPii(pii, "mac-address")}`
-  );
-  projected = projected.replace(
-    /(^|[^0-9])(\d{1,3}(?:\.\d{1,3}){3})(?=$|[^0-9])/g,
-    (_match, prefix: string, pii: string) => `${prefix}${projectOrdinaryRestrictedPii(pii, "ip-address")}`
-  );
-  projected = projected.replace(
-    /(^|[^0-9A-Za-z])(\d(?:[\s\-‐‑‒–—―_/\\.·•]*\d){16}[\s\-‐‑‒–—―_/\\.·•]*[0-9Xx])(?=$|[^0-9A-Za-z])/gu,
-    (_match, prefix: string, pii: string) => `${prefix}${projectOrdinaryRestrictedPii(pii, "identity-number")}`
-  );
-  projected = projected.replace(
-    /(^|[^0-9])(1(?:[\s\-‐‑‒–—―_/\\.·•]*\d){10})(?=$|[^0-9])/gu,
-    (_match, prefix: string, pii: string) => `${prefix}${projectOrdinaryRestrictedPii(pii, "phone-number")}`
-  );
-  if (allowBareBankAccount) {
-    const scientificRanges = scientificNumberRanges(projected);
-    projected = projected.replace(
-      /(^|[^\p{N}])(\p{N}(?:[\s\-‐‑‒–—―_/\\.·•]*\p{N}){11,})(?=$|[^\p{N}])/gu,
-      (match, prefix: string, pii: string, offset: number) => {
-        const start = offset + prefix.length;
-        const end = start + pii.length;
-        if (scientificRanges.some((range) => start < range.end && end > range.start)) {
-          return match;
-        }
-        return `${prefix}${projectOrdinaryRestrictedPii(pii, "bank-account")}`;
-      }
-    );
-  }
-  return replaceContextualBankAccounts(projected);
-}
-
-export function projectDetectedOrdinaryRestrictedPii(value: unknown): string {
-  return projectDetectedOrdinaryRestrictedPiiInternal(value, true);
+  // The shared classifier owns cue distance and numeric precedence. Pass the
+  // original source: trimming or normalizing first changes those boundaries.
+  return projectOrdinaryPIIIdentifiers(String(value ?? ""));
 }
 
 export function projectOrdinaryFieldValue(fieldName: unknown, value: unknown): string {
@@ -527,3 +465,11 @@ export function projectOrdinaryCsvField(fieldName: unknown, value: unknown): str
 export function uncontrolledRestrictedPiiExportBlockReason(): string {
   return UNCONTROLLED_EXPORT_BLOCK_REASON;
 }
+
+export const ordinaryPiiProjection = Object.freeze({
+  normalizeFieldName: normalizeOrdinaryPresentationFieldName,
+  resolveKind: resolveRestrictedPiiKind,
+  projectRestricted: projectOrdinaryRestrictedPii,
+  projectField: projectOrdinaryFieldValue,
+  projectDetected: projectDetectedOrdinaryRestrictedPii,
+});

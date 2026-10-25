@@ -111,3 +111,16 @@ func TestGateResolvedEventsAndUserInputOutput(t *testing.T) {
 		t.Fatalf("cancelled user input output mismatch: %#v", cancelled)
 	}
 }
+
+func TestBoundUserInputOutputPreservesOnlyCoreIDAndProjectsText(t *testing.T) {
+	questions := []map[string]any{{"id": "input_123456789012_1", "question": "Choose"}}
+	output := UserInputResolvedOutputForQuestions("submitted", []map[string]string{{"id": "input_123456789012_1", "kind": "answer", "value": "13800138000", "customText": "6222020000000000000", "selectedOptions": `[{"label":"Same","description":"13800138000"}]`}}, false, "input_123456789012", questions)
+	answer := output["answers"].([]map[string]string)[0]
+	if answer["id"] != "input_123456789012_1" || answer["value"] != "[PHONE]" || answer["customText"] != "[ACCOUNT]" || answer["selectedOptions"] != `[{"label":"Same","description":"[PHONE]"}]` {
+		t.Fatalf("host-bound output projection failed: %#v", answer)
+	}
+	cancelled := UserInputResolvedOutputForQuestions("cancelled", []map[string]string{{"value": "private"}}, true, "input_123456789012", questions)
+	if cancelled["answers"] != nil || cancelled["answerCount"] != nil {
+		t.Fatalf("cancelled output carried answers: %#v", cancelled)
+	}
+}

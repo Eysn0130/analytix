@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	appmodel "analytix.local/runtime-go/internal/app/model"
 	contracts "analytix.local/runtime-go/internal/contracts"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 	domaintoolcall "analytix.local/runtime-go/internal/domain/toolcall"
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
@@ -115,6 +117,7 @@ func BuildFork(input ForkInput) (map[string]any, error) {
 	fork["updatedAt"] = now
 	fork["turns"] = clonedTurns
 	delete(fork, "goal")
+	delete(fork, "goalHistory")
 	delete(fork, "securityState")
 	delete(fork, "contextEpochState")
 	stripDerivedExecutionAuthorityFields(fork)
@@ -126,6 +129,11 @@ func BuildFork(input ForkInput) (map[string]any, error) {
 		fork["todos"] = CloneTodoListForThread(todos, forkID, now)
 	} else {
 		delete(fork, "todos")
+	}
+	if !sourceCaseSensitive {
+		if err := deriveOrdinaryCompactionHistoryV1(source, fork, "fork"); err != nil {
+			return nil, err
+		}
 	}
 	return fork, nil
 }
@@ -191,6 +199,7 @@ func BuildResume(input ResumeInput) (map[string]any, error) {
 	resumed["forkedFromMessageCount"] = float64(CountUserMessagesInTurns(clonedTurns))
 	resumed["forkedFromTurnCount"] = float64(len(clonedTurns))
 	delete(resumed, "goal")
+	delete(resumed, "goalHistory")
 	delete(resumed, "securityState")
 	delete(resumed, "contextEpochState")
 	stripDerivedExecutionAuthorityFields(resumed)
@@ -201,7 +210,86 @@ func BuildResume(input ResumeInput) (map[string]any, error) {
 	} else if todos, _ := source["todos"].(map[string]any); todos != nil {
 		resumed["todos"] = CloneTodoListForThread(todos, threadID, now)
 	}
+	if !sourceCaseSensitive {
+		if err := deriveOrdinaryCompactionHistoryV1(source, resumed, "resume"); err != nil {
+			return nil, err
+		}
+	}
 	return resumed, nil
+}
+
+// The existing derivation builders first verify the source's committed
+// summary, then export only its historical data. Parent execution authority
+// stays stripped; the first child turn must receive normal fresh admission.
+func deriveOrdinaryCompactionHistoryV1(source, target map[string]any, derivation string) error {
+	sourceScope, sourceOK := appmodel.ContinuationSourceScopeV1(source)
+	targetID := stringField(target, "id")
+	targetScope, targetOK := appmodel.ContinuationDerivedSourceScopeV1(source, targetID, stringField(target, "workspace"))
+	for _, raw := range listAny(target["turns"]) {
+		turn, _ := raw.(map[string]any)
+		delete(turn, domainthread.CompactionHistoryDerivationFieldV1)
+		items := listAny(turn["items"])
+		if !sourceOK || !targetOK || len(items) != 1 {
+			continue
+		}
+		item, _ := items[0].(map[string]any)
+		if !domainevent.ValidGeneralCompactionProviderHistoryItemV5(item) {
+			continue
+		}
+		var original map[string]any
+		for _, rawSource := range listAny(source["turns"]) {
+			sourceTurn, _ := rawSource.(map[string]any)
+			if stringField(sourceTurn, "id") != stringField(turn, "id") {
+				continue
+			}
+			if original != nil || len(listAny(sourceTurn["items"])) != 1 {
+				return errors.New("derived compaction source turn is ambiguous")
+			}
+			original, _ = listAny(sourceTurn["items"])[0].(map[string]any)
+		}
+		if !domainevent.ValidGeneralCompactionProviderHistoryItemV5(original) || !appmodel.GeneralCompactionSourceScopeCurrentV1(source, original) {
+			continue // Missing or invalid old provenance remains unavailable.
+		}
+		expected := CloneItemForThread(original, targetID, "")
+		if domainthread.CompactionHistoryItemDigestV1(expected) != domainthread.CompactionHistoryItemDigestV1(item) {
+			return errors.New("derived compaction differs from its exact verified source")
+		}
+		if original["auto"] == true {
+			snapshot, err := domainthread.ParseTaskContinuationSnapshotV1(original["taskContinuation"])
+			if err != nil {
+				return err
+			}
+			if snapshot.UserHistory != nil {
+				history := &domainthread.ContinuationUserHistoryV1{Version: snapshot.UserHistory.Version, ScopeDigest: targetScope, Sources: []domainthread.ContinuationUserSourceV1{}}
+				for _, entry := range snapshot.UserHistory.Sources {
+					// A reference selects the exact copied original source. Only its
+					// data-scope commitment changes; it never selects a parent path.
+					history.Sources = append(history.Sources, domainthread.ContinuationUserSourceV1{Reference: entry.Reference, Text: entry.Text,
+						Digest: domainthread.ContinuationSourceDigestV1(targetScope, entry.Reference, entry.Text)})
+				}
+				snapshot.UserHistory = history
+			}
+			sealed, err := domainthread.SealTaskContinuationSnapshotV1(snapshot)
+			if err != nil {
+				return err
+			}
+			item["taskContinuation"] = domainthread.TaskContinuationSnapshotMapV1(sealed)
+			item["reasoningExclusionProof"] = domainevent.ReasoningExclusionProof(item)
+		}
+		if !domainevent.ValidGeneralCompactionProviderHistoryItemV5(item) {
+			return errors.New("derived compaction data is invalid")
+		}
+		proof, err := domainthread.SealCompactionHistoryDerivationV1(domainthread.CompactionHistoryDerivationV1{Derivation: derivation,
+			SourceThreadID: stringField(source, "id"), SourceTurnID: stringField(original, "turnId"), SourceItemID: stringField(original, "id"),
+			SourceScopeDigest: sourceScope, SourceItemDigest: domainthread.CompactionHistoryItemDigestV1(original),
+			SourceSummaryDigest: stringField(original, "summaryDigest"), SourceCheckpointDigest: stringField(original, "checkpointDigest"),
+			ThreadID: targetID, TurnID: stringField(turn, "id"), ItemID: stringField(item, "id"), ScopeDigest: targetScope, ItemDigest: domainthread.CompactionHistoryItemDigestV1(item)})
+		if err != nil {
+			return err
+		}
+		turn[domainthread.CompactionHistoryDerivationFieldV1] = domainthread.CompactionHistoryDerivationMapV1(proof)
+	}
+	return nil
 }
 
 var caseDerivedUserHistoryFieldsV1 = []string{
@@ -264,6 +352,7 @@ func CountUserMessagesInTurns(turns []any) int {
 func CloneTurnForFork(turn map[string]any, threadID string, now string, relation string) map[string]any {
 	if relation == "side" && isTurnInFlight(turn) {
 		cloned := contracts.CloneMap(turn)
+		delete(cloned, domainthread.CompactionHistoryDerivationFieldV1)
 		cloned["threadId"] = threadID
 		cloned["status"] = "aborted"
 		if strings.TrimSpace(stringField(cloned, "finishedAt")) == "" {
@@ -292,6 +381,7 @@ func CloneTurnForThread(turn map[string]any, threadID string, now string) map[st
 	caseAuthority := turnRequiresCaseAuthorityIsolation(turn)
 	privateProtocolCallIDs := privateProtocolObservedCallIDsV1(turn)
 	cloned := contracts.CloneMap(turn)
+	delete(cloned, domainthread.CompactionHistoryDerivationFieldV1)
 	cloned["threadId"] = threadID
 	if isTurnInFlight(cloned) {
 		cloned["status"] = "completed"
@@ -385,6 +475,7 @@ func stripDerivedExecutionAuthorityFields(record map[string]any) {
 		"securityContext", "contextEpochSnapshot", "contextDigest", "contextEpoch", "datasetSnapshotId", "caseId", "caseBindingHash",
 		"sourceManifestHash", "executionGrant", "executionGrantId", "grantId", "parentGrantId", "hostEvidenceSettlement",
 		"privateProtocolObserved",
+		"privateProcessHistory",
 		"approvalTransition", "approvalTransitionId", "approvalItemId", "continuationDispositionId",
 		"continuationReceiptId", "approvalId", "inputId", "pendingApprovalIds", "pendingUserInputIds",
 		"generalTerminalPublication", "generalTerminalPublicationArchive", "generalTerminalCASBinding", "generalTerminalCASBindingDigest",
@@ -401,7 +492,7 @@ func CloneItemForThread(item map[string]any, threadID string, now string) map[st
 	case "execution_grant_transition", "assistant_text", "error":
 		return nil
 	case "compaction":
-		if !domainevent.ValidGeneralCompactionProviderHistoryItemV3(item) {
+		if !domainevent.ValidGeneralCompactionProviderHistoryItem(item) {
 			return nil
 		}
 		cloned = contracts.CloneMap(item)
@@ -418,6 +509,18 @@ func CloneItemForThread(item map[string]any, threadID string, now string) map[st
 	}
 	cloned["threadId"] = threadID
 	stripDerivedExecutionAuthorityFields(cloned)
+	if stringField(cloned, "kind") == "compaction" {
+		// The clone changes only its data owner. Rebind public integrity after
+		// stripping authority; never synthesize a child execution context.
+		cloned["reasoningExclusionProof"] = domainevent.ReasoningExclusionProof(cloned)
+	}
+	// Request identity is part of historical question/option identity, not an
+	// inherited answer handle. Receipts and execution authority stay stripped.
+	if inputID := stringField(item, "inputId"); stringField(cloned, "kind") == "user_input" &&
+		strings.HasPrefix(inputID, "input_") && domainsecurity.IsSHA256Hex(strings.TrimPrefix(inputID, "input_")) &&
+		stringField(item, "id") == "item_"+inputID {
+		cloned["inputId"] = inputID
+	}
 	if isItemInFlight(cloned) {
 		switch stringField(cloned, "kind") {
 		case "approval":

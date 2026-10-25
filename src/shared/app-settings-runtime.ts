@@ -31,6 +31,7 @@ import {
   type AnalytixMcpSearchSettingsV1,
   type AnalytixMusicGenerationSettingsV1,
   type AnalytixRuntimeTuningSettingsV1,
+  type AnalytixUserInputSettingsV1,
   type AnalytixRuntimeSettingsPatchV1,
   type AnalytixRuntimeSettingsV1,
   type SandboxMode,
@@ -69,8 +70,10 @@ const APP_SETTINGS_V1_KEYS = new Set([
   'version',
   'locale',
   'theme',
+  'accentColor',
   'uiFontScale',
   'motionPreference',
+  'performanceUsageMode',
   'cursorSpotlight',
   'provider',
   'runtime',
@@ -162,6 +165,7 @@ export function defaultAnalytixRuntimeSettings(
     storage: defaultAnalytixStorageSettings(),
     contextCompaction: defaultAnalytixContextCompactionSettings(),
     runtimeTuning: defaultAnalytixRuntimeTuningSettings(),
+    userInput: undefined,
     imageGeneration: defaultAnalytixImageGenerationSettings(),
     speechToText: defaultAnalytixSpeechToTextSettings(),
     textToSpeech: defaultAnalytixTextToSpeechSettings(),
@@ -209,6 +213,7 @@ export function analytixProductionStartupProjection(settings: AppSettingsV1): un
         streamIdleTimeoutMs: runtime.runtimeTuning.streamIdleTimeoutMs,
         stepLimits: runtime.runtimeTuning.stepLimits
       },
+      ...(runtime.userInput === undefined ? {} : { userInput: runtime.userInput }),
       subagents: runtime.subagents,
       computerUse: {
         enabled: runtime.computerUse.enabled
@@ -219,6 +224,7 @@ export function analytixProductionStartupProjection(settings: AppSettingsV1): un
     provider: {
       activeProviderId: provider.activeProviderId,
       proxy: provider.proxy,
+      modelPreferences: provider.modelPreferences,
       providers: provider.providers.map((profile) => ({
         id: profile.id,
         name: profile.name,
@@ -260,7 +266,7 @@ function stableAnalytixSettingsStringify(value: unknown): string {
 function canonicalAnalytixSettingsValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalAnalytixSettingsValue)
   if (!value || typeof value !== 'object') return value
-  const out: Record<string, unknown> = {}
+  const out: Record<string, unknown> = Object.create(null)
   for (const key of Object.keys(value as Record<string, unknown>).sort()) {
     out[key] = canonicalAnalytixSettingsValue((value as Record<string, unknown>)[key])
   }
@@ -528,6 +534,17 @@ function projectAnalytixRuntimeFields<T extends object | undefined>(input: T): T
   ) as T
 }
 
+export function normalizeAnalytixUserInputSettings(value: unknown): AnalytixUserInputSettingsV1 | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid user input settings.')
+  const settings = value as Record<string, unknown>
+  const timeout = settings.defaultTimeoutSeconds
+  if (Object.keys(settings).some(key => key !== 'policy' && key !== 'defaultTimeoutSeconds') ||
+      settings.policy !== 'legacy' && settings.policy !== 'timed' ||
+      timeout !== undefined && timeout !== null && (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout !== -1 && (timeout < 1 || timeout > 2147483))) throw new Error('Invalid user input settings.')
+  return { policy: settings.policy, ...(timeout === undefined ? {} : { defaultTimeoutSeconds: timeout as number | null }) }
+}
+
 export function mergeAnalytixRuntimeSettings(
   current: AnalytixRuntimeSettingsV1,
   patch: AnalytixRuntimeSettingsPatchV1 | undefined
@@ -672,6 +689,7 @@ export function mergeAnalytixRuntimeSettings(
     storage: nextStorage,
     contextCompaction: nextContextCompaction,
     runtimeTuning: nextRuntimeTuning,
+    userInput: normalizeAnalytixUserInputSettings(patch?.userInput ?? current.userInput),
     imageGeneration: nextImageGeneration,
     speechToText: nextSpeechToText,
     textToSpeech: nextTextToSpeech,
@@ -1531,7 +1549,8 @@ export function migrateLegacyAppSettings(parsed: LegacyAppSettingsShape): Partia
     baseUrl: hasProviderSettings
       ? parsed.provider?.baseUrl
       : nonEmptyStringOrFallback(explicitAnalytix.baseUrl, legacySeed.baseUrl),
-    providers: parsed.provider?.providers
+    providers: parsed.provider?.providers,
+    modelPreferences: parsed.provider?.modelPreferences
   })
   const analytix = {
     ...analytixDefaults,
@@ -1554,6 +1573,7 @@ export function migrateLegacyAppSettings(parsed: LegacyAppSettingsShape): Partia
     storage: normalizeAnalytixStorageSettings(explicitAnalytix.storage),
     contextCompaction: normalizeAnalytixContextCompactionSettings(explicitAnalytix.contextCompaction),
     runtimeTuning: normalizeAnalytixRuntimeTuningSettings(explicitAnalytix.runtimeTuning),
+    userInput: normalizeAnalytixUserInputSettings(explicitAnalytix.userInput),
     imageGeneration: normalizeAnalytixImageGenerationSettings(explicitAnalytix.imageGeneration),
     speechToText: normalizeAnalytixSpeechToTextSettings(explicitAnalytix.speechToText),
     textToSpeech: normalizeAnalytixTextToSpeechSettings(explicitAnalytix.textToSpeech),

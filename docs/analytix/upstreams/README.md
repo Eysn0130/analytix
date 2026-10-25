@@ -8,9 +8,9 @@ Source of truth for current product behavior: current code/tests and fresh
 evidence, not a historical ledger row.
 
 This directory records how analytix studies and absorbs capability from the
-thirteen repositories currently registered in `upstream-sources.json`: Kun,
+fourteen repositories currently registered in `upstream-sources.json`: Kun,
 DeepSeek-Reasonix, OpenCode, CodexDesktop-Rebuild, Hermes Agent, Claude Code,
-Claw Code, Gajae Code, LazyCodex, postgres-mcp, Instructor, OpenClaw, and DeepSeek Harness. It exists so analytix can keep learning
+Claw Code, Gajae Code, LazyCodex, postgres-mcp, Instructor, OpenClaw, DeepSeek Harness, and OpenAI Apps SDK UI. It exists so analytix can keep learning
 without becoming a patch pile, losing its product architecture, or copying
 material without a verified license and provenance chain.
 
@@ -76,7 +76,7 @@ Current upstream intake as of 2026-08-23:
 
 | File | Purpose |
 | --- | --- |
-| `kun-sync.md` | Review and absorption ledger for Kun releases, commits, and product workflow changes. |
+| `kun-sync.md` | Pinned Kun review marker, source/license boundary and current authority/provenance owners; chronological rows remain in Git. |
 | `reasonix-sync.md` | Review and absorption ledger for Reasonix releases, commits, and agent/runtime changes. |
 | `opencode-sync.md` | Review and comparison ledger for OpenCode agent, provider, task, sub-agent, TODO, and session-continuation ideas. |
 | `codexdesktop-rebuild-sync.md` | Review and reference ledger for CodexDesktop-Rebuild desktop feel, responsiveness, virtualizer, worker, signal, and interaction evidence. |
@@ -85,7 +85,8 @@ Current upstream intake as of 2026-08-23:
 | `claw-code-sync.md` | Low-confidence comparison ledger for Claw Code task vocabulary, Rust experiments, and fixtures. |
 | `gajae-code-sync.md` | Gajae Code orchestration, external-control, session, plugin, native-tool, and provenance ledger. |
 | `lazycodex-sync.md` | LazyCodex committed plugin-component ledger for LSP/CodeGraph, team/worktree, bootstrap, continuation, and evidence verification. |
-| `upstream-sources.json` | Machine-readable twelve-source commit, remote, ledger, and license evidence inventory. |
+| `upstream-sources.json` | Machine-readable current commit, remote, ledger, and license evidence inventory. |
+| `openai-apps-sdk-ui-sync.md` | Fixed MIT source/notice admission for the existing 139 renderer vectors; tracking freshness and parity remain separate. |
 | `openclaw-sync.md` | OpenClaw v2026.5.18 annotated-tag, peeled-commit, license, and compatibility-shim routing record. |
 | `upstream-currentness-delta-2026-07-18.md` | Current fast-forward/source-identity intake, preserved dirty boundary, preliminary delta routing, and explicit remaining gaps. |
 | `postgres-mcp-sync.md` | Current postgres-mcp source, license, SQL-safety comparison role, intake decisions, and unresolved risks. |
@@ -108,12 +109,16 @@ Current upstream intake as of 2026-08-23:
 
 ## Operating Rule
 
-The twelve registered repositories are upstream capability sources. analytix is
+The registered repositories are upstream capability sources. analytix is
 the product and architecture owner.
 
 Each source ledger contains exactly one `analytix-upstream-review-v1` marker.
-Its `reviewedCommit` must equal both the manifest pin and the checkout tracking
-HEAD. A `reached` or `exceeded` marker is rejected unless it binds a
+Its `reviewedCommit` must equal the manifest pin, and admitted objects must be
+verified at that pinned commit. Checkout HEAD, branch, remote, tracking HEAD
+and synchronization are evaluated separately by `researchFreshness`; drift
+does not invalidate admission of unchanged pinned objects. A detached fixed-pin
+checkout does not establish latest or tracking freshness. A `reached` or
+`exceeded` marker is rejected unless it binds a
 SHA-256-verified `CapabilityBenchmarkV1` artifact, the exact Analytix and
 upstream commits, the executed test ids and command, `passed: true`, and
 `skipped: 0`. All current markers remain `not-proven`; source refresh and deep
@@ -136,6 +141,11 @@ Follow [Git workflow](../git-workflow.md) for branch, push, PR, and merge rules.
 The upstream sources are research inputs, not Git remotes for analytix. Do not
 compare the analytix working tree against an upstream remote as if analytix were
 a fork of that project.
+
+Historical product-baseline guidance below predates the user-confirmed
+2026-10-10 independent Analytix direction; it does not impose a Kun product
+baseline on current work. Actual inherited-source attribution and license
+obligations remain subject to the source ledger.
 
 Kun product capabilities are a regression floor for inherited workflows. They
 must keep the target Kun version's product position, entry layer, and trigger

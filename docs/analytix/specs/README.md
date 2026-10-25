@@ -78,7 +78,6 @@ credential-security or product-release result.
 
 The platform change's later package-declaration and local-build admission
 deltas also extend the synchronized foundation. Neither `status.isComplete`
-nor an artifact marked `done` closes implementation tasks. Use the
-[dated review](../documentation-delivery-review-2026-09-09.md) for the examined
-conflicts and scope limits; current work remains governed by the applicable
-accepted requirement and authorized change, not by a new audit roadmap.
+nor an artifact marked `done` closes implementation tasks. The [historical review index](../documentation-delivery-review-2026-09-09.md)
+retains provenance and snapshot locators. Current work remains governed by the
+applicable accepted requirement and authorized change, not by the old review.

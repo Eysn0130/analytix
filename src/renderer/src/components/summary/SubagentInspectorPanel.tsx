@@ -1,3 +1,8 @@
+import type { ProcessPaneRoute } from '../chat/presentation/chat/ProtectedProcessPane'
+import type { TurnForkOwner } from '../../store/chat-store-types'
+import { useThreadUsageState } from '../../hooks/use-thread-usage'
+import type { ConversationUsageV1 } from '../../../../../packages/runtime/src/contracts/usage'
+import type { AuthoritativeTurnStatuses, AuthoritativeTurnTimings } from '../../agent/types'
 import type { Dispatch, SetStateAction, MutableRefObject, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Loader2, MessageCirclePlus, Plus, X } from '../../design/AnalytixUiIcons'
@@ -9,6 +14,7 @@ import type {
   AcceptedFinalProjectionBatch,
   GeneralTerminalProjectionBatch,
   ThreadUsageSnapshot,
+  TurnUsageById,
   ChatBlock,
   CompactionEventPayload,
   RuntimeChildMetadata,
@@ -22,16 +28,20 @@ import type {
 } from '../../agent/types'
 import { acceptedFinalProjectionBatchIsSelfConsistent, acceptedFinalProjectionHasCandidateReceipt, acceptedFinalProjectionIsAlreadyCommitted, acceptedFinalProjectionReceiptsEqual, acceptedFinalUsageSnapshotsEqual } from '../../agent/accepted-final-projection-receipt'
 import { isPublicProjectionRevoked, markPublicProjectionRevoked } from '../../lib/public-projection-revocation'
-import { stripProvisionalAssistantForTurn } from '../../store/chat-store-runtime'
+import { retainGeneralTerminalProjectionReceipts, stripProvisionalAssistantForTurn, trimBlocksForThreadRewind } from '../../store/chat-store-runtime'
 import { GateResponseContext } from '../chat/message-timeline-bubbles'
 import { getProvider } from '../../agent/registry'
+import { restoreThreadDisplayHistory } from '../../agent/analytix-runtime'
+import { filterRewoundDisplayBlocks, mergeTurnUsageById, reconcileTurnUsageById, turnUsageEntryFromBatch } from '../../agent/analytix-mapper'
 import { rendererRuntimeClient } from '../../agent/runtime-client'
 import { formatRuntimeError } from '../../lib/format-runtime-error'
 import { hydrateBlockModelLabels } from '../../store/chat-store-helpers'
 import {
+  findUserInputStatusBlockIndex,
   settlePendingRuntimeWorkAfterInterrupt,
   threadSnapshotLooksRunning,
-  upsertUserBlock
+  upsertUserBlock,
+  upsertUserInputBlock
 } from '../../store/chat-store-runtime-helpers'
 import type { QueuedUserMessage } from '../../store/chat-store-types'
 import { createStreamingDeltaScheduler } from '../../thread/streaming/streaming-delta-scheduler'
@@ -42,7 +52,8 @@ import {
   migrateActiveStreamTurn,
   pendingActiveStreamTurnId
 } from '../../thread/streaming/active-stream-store'
-import { FloatingComposer } from '../chat/FloatingComposer'
+import { InputBar } from '../chat/InputBar'
+import { OwnedSessionStatsPills } from '../chat/presentation/chat/TurnUsagePanel'
 import type { ComposerReasoningEffort } from '../chat/FloatingComposerModelPicker'
 import type { TimelineRuntimeStateOverride } from '../chat/MessageTimeline'
 import { MessageTimeline } from '../chat/MessageTimeline'
@@ -50,7 +61,11 @@ import { PanelCollapseButton } from '../workbench/PanelCollapseButton'
 import { SubagentGlyph, subagentDisplayLabel, subagentLifecycleLabel } from './SubagentSummaryRows'
 
 type ThreadDetailState = {
+  turnUsageById?: TurnUsageById
+  rewoundTurnIds?: Record<string, true>
   lastTurnUsage?: ThreadUsageSnapshot
+  authoritativeTurnTimings?: AuthoritativeTurnTimings
+  authoritativeTurnStatuses?: AuthoritativeTurnStatuses
   generalTerminalBatch?: GeneralTerminalProjectionBatch
 } & (
   | {
@@ -419,7 +434,7 @@ export function SubagentInspectorPanel({
     () => subagents.find((agent) => agent.key === selectedKey) ?? subagents[0] ?? null,
     [selectedKey, subagents]
   )
-  const selectedThreadId = selectedAgent?.childThreadId?.trim() || null
+  const selectedThreadId = selectedAgent?.canOpenThread ? selectedAgent.childThreadId?.trim() || null : null
   const sideChatTabLabel = t('sidePanelTabLabel')
   const selectedLabel = selectedAgent
     ? isSideConversationInspectorAgent(selectedAgent)
@@ -429,19 +444,22 @@ export function SubagentInspectorPanel({
       ? sideChatTabLabel
       : '子智能体'
   const selectedIsSideChat = selectedAgent ? isSideConversationInspectorAgent(selectedAgent) : false
+  const [processPaneOwnerKey] = useState(() => crypto.randomUUID())
   const selectedThreadIdRef = useRef<string | null>(selectedThreadId)
-  const selectionRef = useRef({ threadId: selectedThreadId, visible, generation: 0 })
+  const selectionRef = useRef({ threadId: selectedThreadId, agentKey: selectedAgent?.key, visible, generation: 0 })
   useLayoutEffect(() => {
-    if (selectionRef.current.threadId !== selectedThreadId || selectionRef.current.visible !== visible) {
-      selectionRef.current = { threadId: selectedThreadId, visible, generation: selectionRef.current.generation + 1 }
+    if (selectionRef.current.threadId !== selectedThreadId || selectionRef.current.agentKey !== selectedAgent?.key || selectionRef.current.visible !== visible) {
+      detailLoadInFlightRef.current?.abort.abort()
+      selectionRef.current = { threadId: selectedThreadId, agentKey: selectedAgent?.key, visible, generation: selectionRef.current.generation + 1 }
     }
     selectedThreadIdRef.current = selectedThreadId
-  }, [selectedThreadId, visible])
-  useEffect(() => () => { selectionRef.current.generation += 1 }, [])
+  }, [selectedAgent?.key, selectedThreadId, visible])
+  useEffect(() => () => { selectionRef.current.generation += 1; detailLoadInFlightRef.current?.abort.abort() }, [])
   const detailSeqByThreadIdRef = useRef<Record<string, number>>({})
   const detailLoadInFlightRef = useRef<{
     threadId: string
     generation: number
+    abort: AbortController
     promise: Promise<{ threadId: string; running: boolean; latestSeq: number } | null>
   } | null>(null)
   const [detailState, setDetailState, detailStateRef] = useCommittedState<ThreadDetailState>({
@@ -454,11 +472,13 @@ export function SubagentInspectorPanel({
     latestUserMessageId: null
   })
   const [inputBySubagentKey, setInputBySubagentKey] = useState<Record<string, string>>({})
+  const sendingThreadsRef = useRef(new Set<string>())
   const [composerMode, setComposerMode] = useState<'agent' | 'plan'>('agent')
   const [runningTurnByThreadId, setRunningTurnByThreadId] = useState<Record<string, string>>({})
   const [timelineRuntimeByThreadId, setTimelineRuntimeByThreadId, timelineRuntimeByThreadIdRef] = useCommittedState<Record<string, SubagentTimelineRuntimeState>>({})
   const [subscriptionRestartByThreadId, setSubscriptionRestartByThreadId] = useState<Record<string, number>>({})
   const [composerError, setComposerError] = useState<string | null>(null)
+  const [conversationUsageRevision, setConversationUsageRevision] = useState(0)
   const tabScrollRef = useRef<HTMLDivElement | null>(null)
   const tabScrollbarRef = useRef<HTMLDivElement | null>(null)
   const tabScrollbarDragRef = useRef<{
@@ -477,12 +497,22 @@ export function SubagentInspectorPanel({
     thumbWidth: 100
   })
   const selectedSideChatVisibleAfter = selectedIsSideChat ? sideConversationVisibleAfter(selectedAgent) : null
-  const visibleDetailState = useMemo(
-    () => selectedIsSideChat
-      ? visibleSideConversationDetailState(detailState, selectedSideChatVisibleAfter)
-      : detailState,
-    [detailState, selectedIsSideChat, selectedSideChatVisibleAfter]
+  const visibleDetailState = useMemo<ThreadDetailState>(
+    () => detailState.threadId !== selectedThreadId
+      ? { status: 'loading', threadId: selectedThreadId, blocks: [], error: null, latestSeq: 0,
+        latestTurnId: null, latestUserMessageId: null }
+      : selectedThreadId && isPublicProjectionRevoked(selectedThreadId)
+        ? { status: 'error', threadId: selectedThreadId, blocks: [],
+          error: detailState.status === 'error' ? detailState.error : t('runtimeFinalSnapshotUnavailable'),
+          latestSeq: detailState.latestSeq, latestTurnId: null, latestUserMessageId: null }
+        : selectedIsSideChat ? visibleSideConversationDetailState(detailState, selectedSideChatVisibleAfter) : detailState,
+    [detailState, selectedThreadId, selectedIsSideChat, selectedSideChatVisibleAfter, t]
   )
+  const processPaneRoute = useMemo<ProcessPaneRoute>(() => ({
+    surface: 'inspector', ownerKey: processPaneOwnerKey,
+    selectionKey: JSON.stringify([selectedAgent?.key ?? null, selectedThreadId]),
+    visible: visible && Boolean(selectedThreadId) && detailState.threadId === selectedThreadId && !isPublicProjectionRevoked(selectedThreadId)
+  }), [processPaneOwnerKey, selectedAgent?.key, selectedThreadId, visible, detailState.threadId])
   const selectedInput = selectedAgent ? inputBySubagentKey[selectedAgent.key] ?? '' : ''
   const selectedRunningTurnId = selectedThreadId ? runningTurnByThreadId[selectedThreadId] ?? null : null
   const selectedSubscriptionRestartToken = selectedThreadId ? subscriptionRestartByThreadId[selectedThreadId] ?? 0 : 0
@@ -494,6 +524,9 @@ export function SubagentInspectorPanel({
       ? threadSnapshotLooksRunning(visibleDetailState.blocks, visibleDetailState.threadStatus)
       : false
   const selectedBusy = Boolean(selectedRunningTurnId) || selectedTimelineRuntime.busy || detailLooksRunning
+  const inspectorUsage = useThreadUsageState(selectedThreadId, visible && runtimeConnection === 'ready' && !isPublicProjectionRevoked(selectedThreadId),
+    `${conversationUsageRevision}:${selectedBusy ? 'running' : 'settled'}:${selectedSubscriptionRestartToken}:${Object.values(visibleDetailState.turnUsageById ?? {}).map(entry => entry.lastSeq).join(',')}`,
+    `${runtimeConnection}:${selectedAgent?.key ?? ''}:${selectedSubscriptionRestartToken}:${JSON.stringify(Object.keys(visibleDetailState.rewoundTurnIds ?? {}).sort())}`)
   const selectedTimelineStateOverride = useMemo<TimelineRuntimeStateOverride>(() => {
     const detailForSelected = visibleDetailState.threadId === selectedThreadId ? visibleDetailState : null
     const runningTurnId =
@@ -507,7 +540,11 @@ export function SubagentInspectorPanel({
         selectedTimelineRuntime.currentTurnUserId
         ?? (detailForSelected && detailLooksRunning ? detailForSelected.latestUserMessageId : null),
       turnStartedAtByUserId: selectedTimelineRuntime.turnStartedAtByUserId,
-      turnDurationByUserId: detailForSelected?.turnDurationByUserId ?? {}
+      turnDurationByUserId: detailForSelected?.turnDurationByUserId ?? {},
+      authoritativeTurnTimings: detailForSelected?.authoritativeTurnTimings ?? {},
+      authoritativeTurnStatuses: detailForSelected?.authoritativeTurnStatuses ?? {},
+      turnUsageById: detailForSelected?.turnUsageById ?? {},
+      lastTurnUsage: detailForSelected?.lastTurnUsage
     }
   }, [
     detailLooksRunning,
@@ -655,14 +692,21 @@ export function SubagentInspectorPanel({
     }
     const generation = selectionRef.current.generation
     const startingSeq = detailStateRef.current.threadId === selectedThreadId ? detailStateRef.current.latestSeq : 0
-    const ownsLoad = (): boolean => selectionRef.current.visible && selectionRef.current.generation === generation &&
+    const loadAbort = new AbortController()
+    const ownsLoad = (): boolean => !loadAbort.signal.aborted && selectionRef.current.visible && selectionRef.current.generation === generation &&
       selectedThreadIdRef.current === selectedThreadId && !isPublicProjectionRevoked(selectedThreadId)
+    const loadingThreadId = selectedThreadId
+    const committedTerminal = (current: ThreadDetailState): boolean => {
+      const runtime = timelineRuntimeByThreadIdRef.current[loadingThreadId]
+      return current.threadId === loadingThreadId && current.status === 'ready' &&
+        (current.threadStatus === 'completed' || current.threadStatus === 'failed' || current.threadStatus === 'aborted') &&
+        !runtime?.busy && runtime?.currentTurnId === null
+    }
     const inFlight = detailLoadInFlightRef.current
     if (inFlight?.threadId === selectedThreadId && inFlight.generation === generation) {
       return inFlight.promise
     }
 
-    const loadingThreadId = selectedThreadId
     const promise = (async (): Promise<{ threadId: string; running: boolean; latestSeq: number } | null> => {
       setDetailState((current) => {
         if (mode === 'refresh' && current.threadId === loadingThreadId) return current
@@ -676,18 +720,39 @@ export function SubagentInspectorPanel({
           latestTurnId: current.threadId === loadingThreadId ? current.latestTurnId : null,
           latestUserMessageId: current.threadId === loadingThreadId ? current.latestUserMessageId : null,
           threadStatus: current.threadId === loadingThreadId ? current.threadStatus : undefined,
-          turnDurationByUserId: current.threadId === loadingThreadId ? current.turnDurationByUserId : undefined
+          turnDurationByUserId: current.threadId === loadingThreadId ? current.turnDurationByUserId : undefined,
+          turnUsageById: current.threadId === loadingThreadId ? current.turnUsageById : {},
+          rewoundTurnIds: current.threadId === loadingThreadId ? current.rewoundTurnIds : {}
         }
       })
       try {
-        const detail = await provider.getThreadDetail(loadingThreadId)
+        let detail = await provider.getThreadDetail(loadingThreadId)
         if (!ownsLoad()) return null
         if (detailStateRef.current.threadId === loadingThreadId && detailStateRef.current.latestSeq > (detail.latestSeq ?? 0)) return null
         const committed = detailStateRef.current
-        if (committed.threadId === loadingThreadId && committed.status === 'ready' && committed.latestSeq === detail.latestSeq && committed.lastTurnUsage) {
-          return { threadId: loadingThreadId, running: false, latestSeq: committed.latestSeq }
+        const primaryBlocks = retainGeneralTerminalProjectionReceipts(
+          committed.threadId === loadingThreadId ? committed.blocks : [],
+          hydrateBlockModelLabels(loadingThreadId, detail.blocks), loadingThreadId, detail.latestSeq
+        )
+        // Retain existing primary receipts before replay. Replay adds freshly verified
+        // historical receipts; stripping incoming receipts afterward would remove them.
+        detail = await restoreThreadDisplayHistory(provider, loadingThreadId, { ...detail, blocks: primaryBlocks }, loadAbort.signal)
+        if (!ownsLoad()) return null
+        const latest = detailStateRef.current
+        if (latest.threadId === loadingThreadId && latest.latestSeq > detail.latestSeq) return null
+        const rewoundTurnIds = latest.threadId === loadingThreadId ? latest.rewoundTurnIds ?? {} : {}
+        const blocks = filterRewoundDisplayBlocks(detail.blocks, rewoundTurnIds)
+        const turnUsageById = reconcileTurnUsageById(loadingThreadId, detail.turnUsageById,
+          latest.threadId === loadingThreadId ? latest.turnUsageById : undefined, detail.turnUsageThroughSeq, rewoundTurnIds)
+        if (committedTerminal(latest) && latest.latestSeq === detail.latestSeq) {
+          // A same-cursor GET must preserve the committed body/receipt, but may
+          // retry previously unavailable usage replay. No latest-snapshot fallback.
+          setDetailState(current => current.threadId === loadingThreadId && current.latestSeq === detail.latestSeq
+            ? { ...current, turnUsageById,
+              authoritativeTurnTimings: { ...current.authoritativeTurnTimings, ...detail.authoritativeTurnTimings },
+              authoritativeTurnStatuses: { ...detail.authoritativeTurnStatuses, ...current.authoritativeTurnStatuses } } : current)
+          return { threadId: loadingThreadId, running: false, latestSeq: latest.latestSeq }
         }
-        const blocks = hydrateBlockModelLabels(loadingThreadId, detail.blocks)
         detailSeqByThreadIdRef.current = {
           ...detailSeqByThreadIdRef.current,
           [loadingThreadId]: Math.max(detailSeqByThreadIdRef.current[loadingThreadId] ?? 0, detail.latestSeq ?? 0)
@@ -696,12 +761,17 @@ export function SubagentInspectorPanel({
           status: 'ready',
           threadId: loadingThreadId,
           blocks,
+          turnUsageById,
+          rewoundTurnIds,
+          lastTurnUsage: latest.threadId === loadingThreadId && latest.latestTurnId === detail.latestTurnId ? latest.lastTurnUsage : undefined,
           error: null,
           latestSeq: detail.latestSeq,
           latestTurnId: detail.latestTurnId ?? null,
           latestUserMessageId: detail.latestUserMessageId ?? null,
           threadStatus: detail.threadStatus,
-          turnDurationByUserId: detail.turnDurationByUserId
+          turnDurationByUserId: detail.turnDurationByUserId,
+          authoritativeTurnTimings: detail.authoritativeTurnTimings,
+          authoritativeTurnStatuses: detail.authoritativeTurnStatuses
         })
         const busy = threadSnapshotLooksRunning(blocks, detail.threadStatus)
         setTimelineRuntimeByThreadId((current) => ({
@@ -735,7 +805,10 @@ export function SubagentInspectorPanel({
         return { threadId: loadingThreadId, running: busy, latestSeq: detail.latestSeq ?? 0 }
       } catch (error) {
         if (!ownsLoad() || (detailStateRef.current.threadId === loadingThreadId && detailStateRef.current.latestSeq > startingSeq)) return null
+        const committed = detailStateRef.current
+        if (committedTerminal(committed)) return null
         setDetailState((current) => ({
+          ...current,
           status: 'error',
           threadId: loadingThreadId,
           blocks: current.threadId === loadingThreadId ? current.blocks : [],
@@ -749,13 +822,13 @@ export function SubagentInspectorPanel({
         return null
       }
     })()
-    detailLoadInFlightRef.current = { threadId: loadingThreadId, generation, promise }
+    detailLoadInFlightRef.current = { threadId: loadingThreadId, generation, abort: loadAbort, promise }
     return promise.finally(() => {
       if (detailLoadInFlightRef.current?.threadId === loadingThreadId && detailLoadInFlightRef.current.promise === promise) {
         detailLoadInFlightRef.current = null
       }
     })
-  }, [provider, selectedThreadId, visible, setDetailState, detailStateRef, setTimelineRuntimeByThreadId])
+  }, [provider, selectedThreadId, visible, setDetailState, detailStateRef, setTimelineRuntimeByThreadId, timelineRuntimeByThreadIdRef])
 
   useEffect(() => {
     if (!visible) return undefined
@@ -795,9 +868,13 @@ export function SubagentInspectorPanel({
     let appliedDeltaSeqFloor = Math.max(sinceSeq, detailCoveredSeq())
     let streamTurnId = startingDetail.latestTurnId
     let subscriptionClosed = false
+    let terminalEventBarrier = false
+    let committedTerminal: { turnId: string; lastSeq: number } | null = null
     const eventStale = (): boolean =>
       subscriptionClosed || abort.signal.aborted || selectedThreadIdRef.current !== threadId ||
       selectionRef.current.generation !== generation || !selectionRef.current.visible || isPublicProjectionRevoked(threadId)
+    const turnWasRewound = (turnId: string | null | undefined): boolean => Boolean(turnId &&
+      detailStateRef.current.threadId === threadId && detailStateRef.current.rewoundTurnIds?.[turnId] === true)
 
     const patchRuntime = (patch: Partial<SubagentTimelineRuntimeState>): void => {
       setTimelineRuntimeByThreadId((current) => ({
@@ -842,7 +919,7 @@ export function SubagentInspectorPanel({
     }
 
     const flushDeltas = ({ assistant, lastSeq, turnId }: { assistant: string; lastSeq: number; turnId: string | null }): void => {
-      if (eventStale()) return
+      if (eventStale() || turnWasRewound(turnId)) return
       const activeTurnId = adoptTurnId(turnId) ?? pendingActiveStreamTurnId(threadId, 'inspector')
       streamTurnId = activeTurnId
       rememberSeq(lastSeq)
@@ -867,6 +944,7 @@ export function SubagentInspectorPanel({
     }
 
     const finishTerminal = (): void => {
+      terminalEventBarrier = true
       scheduler.discard()
       clearActiveStream(threadId)
       patchRuntime({ busy: false, currentTurnId: null, currentTurnUserId: null })
@@ -890,27 +968,64 @@ export function SubagentInspectorPanel({
       }
       throw new Error(message)
     }
+    const refreshTerminalFacts = async (batch: GeneralTerminalProjectionBatch | AcceptedFinalProjectionBatch): Promise<void> => {
+      const ownsTerminal = (): boolean => {
+        const current = detailStateRef.current
+        const runtime = timelineRuntimeByThreadIdRef.current[threadId]
+        return selectionRef.current.visible && selectionRef.current.generation === generation &&
+          selectedThreadIdRef.current === threadId && !isPublicProjectionRevoked(threadId) &&
+          current.threadId === threadId && current.status === 'ready' &&
+          current.latestTurnId === batch.turnId && current.latestSeq === batch.lastSeq &&
+          current.threadStatus === batch.terminal.status && !runtime?.busy && runtime?.currentTurnId === null
+      }
+      // A pre-terminal GET can be stale. Wait for it, then read the terminal facts once.
+      // This path never reconciles transcript, usage or receipts, even if the GET fails.
+      const inFlight = detailLoadInFlightRef.current
+      if (inFlight?.threadId === threadId && inFlight.generation === generation) {
+        await inFlight.promise.catch(() => null)
+      }
+      if (!ownsTerminal()) return
+      try {
+        const detail = await provider.getThreadDetail(threadId)
+        if (!ownsTerminal() || detail.latestSeq < batch.lastSeq ||
+            detail.authoritativeTurnStatuses?.[batch.turnId] && detail.authoritativeTurnStatuses[batch.turnId] !== batch.terminal.status) return
+        const timing = detail.authoritativeTurnTimings?.[batch.turnId]
+        if (!timing) return
+        setDetailState(current => ownsTerminal()
+          ? { ...current, authoritativeTurnTimings: { ...current.authoritativeTurnTimings, [batch.turnId]: timing } }
+          : current)
+      } catch { /* Optional terminal facts remain unknown; committed delivery stays intact. */ }
+    }
     const commitTerminal = (batch: GeneralTerminalProjectionBatch | AcceptedFinalProjectionBatch, blocks: ChatBlock[]): void => {
+      committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
       const current = detailStateRef.current
       // Both local owners commit synchronously before the sink resolves/ACKs.
       setDetailState({ ...current, status: 'ready', threadId, blocks, error: null,
         latestSeq: batch.lastSeq, latestTurnId: batch.turnId, threadStatus: batch.terminal.status,
         lastTurnUsage: batch.usage,
+        turnUsageById: mergeTurnUsageById(threadId, current.turnUsageById, { [batch.turnId]: turnUsageEntryFromBatch(batch) }),
+        authoritativeTurnStatuses: { ...current.authoritativeTurnStatuses, [batch.turnId]: batch.terminal.status },
         generalTerminalBatch: 'batchDigest' in batch ? batch : undefined })
       detailSeqByThreadIdRef.current[threadId] = batch.lastSeq
       appliedDeltaSeqFloor = Math.max(appliedDeltaSeqFloor, batch.lastSeq)
       finishTerminal()
+      void refreshTerminalFacts(batch)
     }
     const sink: ThreadEventSink = {
       onGeneralTerminalBatch: async (batch) => {
         if (eventStale()) throw new Error('general terminal delivery belongs to an inactive inspector')
+        if (turnWasRewound(batch.turnId)) throw new Error('general terminal delivery belongs to a rewound inspector turn')
         const current = detailStateRef.current
         const runtime = timelineRuntimeByThreadIdRef.current[threadId]
         const previous = current.generalTerminalBatch
         if (batch.threadId === threadId && previous && current.latestSeq === batch.lastSeq &&
             JSON.stringify(previous) === JSON.stringify(batch) && !runtime?.busy &&
             runtime?.currentTurnId === null && runtime.currentTurnUserId === null &&
-            acceptedFinalUsageSnapshotsEqual(current.lastTurnUsage, batch.usage)) return
+            acceptedFinalUsageSnapshotsEqual(current.lastTurnUsage, batch.usage)) {
+          terminalEventBarrier = true
+          committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
+          return
+        }
         if (batch.threadId !== threadId || current.threadId !== threadId ||
             !/^[a-f0-9]{64}$/.test(batch.batchDigest) || !Number.isSafeInteger(batch.firstSeq) || batch.firstSeq <= 0 ||
             !Number.isSafeInteger(batch.lastSeq) || batch.lastSeq < batch.firstSeq ||
@@ -921,10 +1036,19 @@ export function SubagentInspectorPanel({
         }
         const blocks = stripProvisionalAssistantForTurn(current.blocks, batch.turnId, current.latestUserMessageId)
           .filter(block => block.id !== batch.terminalItem?.id)
-        commitTerminal(batch, [...settlePendingRuntimeWorkAfterInterrupt(blocks), ...(batch.terminalItem ? [batch.terminalItem] : [])])
+        const terminalItem = batch.terminalItem?.kind === 'assistant' ? {
+          ...batch.terminalItem,
+          generalTerminalProjectionReceipt: {
+            schemaVersion: 1 as const, batchDigest: batch.batchDigest,
+            threadId: batch.threadId, turnId: batch.turnId, itemId: batch.terminalItem.id,
+            firstSeq: batch.firstSeq, lastSeq: batch.lastSeq, status: batch.terminal.status
+          }
+        } : batch.terminalItem
+        commitTerminal(batch, [...settlePendingRuntimeWorkAfterInterrupt(blocks), ...(terminalItem ? [terminalItem] : [])])
       },
       onAcceptedFinalBatch: async (batch) => {
         if (eventStale()) throw new Error('accepted-final delivery belongs to an inactive inspector')
+        if (turnWasRewound(batch.turnId)) throw new Error('accepted-final delivery belongs to a rewound inspector turn')
         const current = detailStateRef.current
         const runtime = timelineRuntimeByThreadIdRef.current[threadId]
         if (!acceptedFinalProjectionBatchIsSelfConsistent(batch) || batch.threadId !== threadId || current.threadId !== threadId) {
@@ -935,6 +1059,8 @@ export function SubagentInspectorPanel({
               current.threadStatus !== batch.terminal.status || !acceptedFinalUsageSnapshotsEqual(current.lastTurnUsage, batch.usage)) {
             return rejectBatch(batch, 'accepted-final terminal state is incomplete')
           }
+          terminalEventBarrier = true
+          committedTerminal = { turnId: batch.turnId, lastSeq: batch.lastSeq }
           return batch.receipt
         }
         if (acceptedFinalProjectionHasCandidateReceipt(current.blocks, batch) || current.latestSeq !== batch.firstSeq - 1 ||
@@ -952,16 +1078,23 @@ export function SubagentInspectorPanel({
       onPublicProjectionRevoked: (event) => {
         if (eventStale() || event.threadId !== threadId) return
         markPublicProjectionRevoked(threadId)
+        if (detailLoadInFlightRef.current?.threadId === threadId) detailLoadInFlightRef.current.abort.abort()
         finishTerminal()
         setDetailState({ status: 'error', threadId, blocks: [], error: t('runtimeFinalSnapshotUnavailable'),
-          latestSeq: detailStateRef.current.latestSeq, latestTurnId: null, latestUserMessageId: null, threadStatus: 'error' })
+          latestSeq: detailStateRef.current.latestSeq, latestTurnId: null, latestUserMessageId: null, threadStatus: 'error',
+          turnUsageById: {}, rewoundTurnIds: {}, lastTurnUsage: undefined })
       },
       onSeq: (seq) => {
         if (eventStale()) return
         rememberSeq(seq)
       },
       onTurnStarted: (ev) => {
-        if (eventStale()) return
+        const turnId = ev.turnId.trim()
+        if (eventStale() || !turnId || turnWasRewound(turnId) ||
+          typeof ev.seq === 'number' && ev.seq <= Math.max(sinceSeq, detailCoveredSeq()) ||
+          committedTerminal && (turnId === committedTerminal.turnId ||
+          !Number.isSafeInteger(ev.seq) || ev.seq! <= committedTerminal.lastSeq)) return
+        terminalEventBarrier = false
         flushScheduler()
         const activeTurnId = adoptTurnId(ev.turnId)
         rememberSeq(ev.seq)
@@ -977,7 +1110,7 @@ export function SubagentInspectorPanel({
         })
       },
       onUserMessage: (ev) => {
-        if (eventStale()) return
+        if (eventStale() || turnWasRewound(ev.turnId)) return
         flushScheduler()
         const activeTurnId = adoptTurnId(ev.turnId)
         rememberSeq(eventSeq(ev))
@@ -1010,11 +1143,12 @@ export function SubagentInspectorPanel({
         })
       },
       onDeltas: (rawDeltas: ThreadDeltaEvent[]) => {
-        if (eventStale()) return
+        if (eventStale() || terminalEventBarrier) return
         const deltas: ThreadDeltaEvent[] = []
         const seqFloor = Math.max(appliedDeltaSeqFloor, detailCoveredSeq())
         let batchMaxSeq = seqFloor
         for (const delta of rawDeltas) {
+          if (turnWasRewound(delta.turnId)) continue
           if (typeof delta.seq === 'number') {
             if (delta.seq <= seqFloor) continue
             batchMaxSeq = Math.max(batchMaxSeq, delta.seq)
@@ -1027,7 +1161,7 @@ export function SubagentInspectorPanel({
         if (deltas.length > 0) scheduler.enqueue(deltas)
       },
       onTool: (ev: ToolEventPayload) => {
-        if (eventStale()) return
+        if (eventStale() || turnWasRewound(eventTurnId(ev, streamTurnId))) return
         flushScheduler()
         const activeTurnId = adoptTurnId(eventTurnId(ev, streamTurnId))
         rememberSeq(eventSeq(ev))
@@ -1045,7 +1179,7 @@ export function SubagentInspectorPanel({
         patchRuntime({ busy: true, currentTurnId: activeTurnId })
       },
       onCompaction: (ev: CompactionEventPayload) => {
-        if (eventStale()) return
+        if (eventStale() || turnWasRewound(eventTurnId(ev, streamTurnId))) return
         flushScheduler()
         const activeTurnId = adoptTurnId(eventTurnId(ev, streamTurnId))
         rememberSeq(ev.seq)
@@ -1059,6 +1193,7 @@ export function SubagentInspectorPanel({
             summary: ev.summary,
             status: ev.status,
             detail: ev.detail,
+            summaryKind: ev.summaryKind,
             auto: ev.auto,
             meta: {
               ...(ev.meta ?? {}),
@@ -1074,7 +1209,7 @@ export function SubagentInspectorPanel({
       },
       onReview: () => undefined,
       onApproval: (req) => {
-        if (eventStale()) return
+        if (eventStale() || turnWasRewound(eventTurnId(req, streamTurnId))) return
         flushScheduler()
         const activeTurnId = adoptTurnId(eventTurnId(req, streamTurnId))
         flushPendingLiveBlocks(activeTurnId)
@@ -1117,7 +1252,16 @@ export function SubagentInspectorPanel({
         })
       },
       onUserInput: (req) => {
-        if (eventStale()) return
+        if (eventStale() || turnWasRewound(eventTurnId(req, streamTurnId))) return
+        const observed = detailStateRef.current
+        if (observed.threadId !== threadId) return
+        if (upsertUserInputBlock(observed.blocks, {
+          kind: 'user_input',
+          id: req.itemId,
+          requestId: req.requestId,
+          questions: req.questions,
+          status: 'pending'
+        }) === observed.blocks) return
         flushScheduler()
         const activeTurnId = adoptTurnId(eventTurnId(req, streamTurnId))
         flushPendingLiveBlocks(activeTurnId)
@@ -1135,12 +1279,8 @@ export function SubagentInspectorPanel({
               ...(activeTurnId ? { turnId: activeTurnId } : {})
             }
           }
-          const index = current.blocks.findIndex((candidate) =>
-            candidate.kind === 'user_input' && (candidate.id === req.itemId || candidate.requestId === req.requestId)
-          )
-          const blocks = index >= 0
-            ? current.blocks.map((candidate, candidateIndex) => candidateIndex === index ? block : candidate)
-            : [...current.blocks, block]
+          const blocks = upsertUserInputBlock(current.blocks, block)
+          if (blocks === current.blocks) return current
           return { ...current, blocks, latestTurnId: activeTurnId ?? current.latestTurnId, threadStatus: 'running' }
         })
       },
@@ -1148,10 +1288,15 @@ export function SubagentInspectorPanel({
         if (eventStale()) return
         setDetailState((current) => {
           if (current.threadId !== threadId) return current
+          const index = findUserInputStatusBlockIndex(current.blocks, ev)
+          const matched = current.blocks[index]
+          if (!matched || matched.kind !== 'user_input') return current
+          const ownerTurnId = eventTurnId(matched, streamTurnId)
+          if (current.rewoundTurnIds?.[ownerTurnId] === true) return current
           return {
             ...current,
-            blocks: current.blocks.map((block) =>
-              block.kind === 'user_input' && (block.id === ev.itemId || block.requestId === ev.itemId || block.requestId === ev.requestId)
+            blocks: current.blocks.map((block, blockIndex) =>
+              block.kind === 'user_input' && blockIndex === index
                 ? {
                     ...block,
                     status: ev.status,
@@ -1192,14 +1337,59 @@ export function SubagentInspectorPanel({
           }
         })
       },
+      onUsage: () => { if (!eventStale()) setConversationUsageRevision(revision => revision + 1) },
       onThreadLifecycle: (ev) => {
         if (eventStale()) return
         rememberSeq(ev.seq)
       },
       onThreadRewound: (ev) => {
-        if (eventStale()) return
-        rememberSeq(ev.seq)
-        void loadSelectedDetail('refresh')
+        if (eventStale() || ev.threadId !== threadId) return
+        const removed = ev.removedTurnIds.length ? ev.removedTurnIds : [ev.turnId]
+        scheduler.discard()
+        for (const turnId of removed) clearActiveStream(threadId, turnId)
+        const rewindSeq = Number.isSafeInteger(ev.seq) ? ev.seq! : detailStateRef.current.latestSeq
+        appliedDeltaSeqFloor = Math.max(appliedDeltaSeqFloor, rewindSeq)
+        detailSeqByThreadIdRef.current[threadId] = Math.max(detailCoveredSeq(), rewindSeq)
+        const activeRemoved = Boolean(streamTurnId && removed.includes(streamTurnId)) ||
+          Boolean(timelineRuntimeByThreadIdRef.current[threadId]?.currentTurnId &&
+            removed.includes(timelineRuntimeByThreadIdRef.current[threadId].currentTurnId!))
+        if (activeRemoved) finishTerminal()
+        setDetailState(current => {
+          if (current.threadId !== threadId) return current
+          const rewoundTurnIds = { ...current.rewoundTurnIds,
+            ...Object.fromEntries(removed.map(turnId => [turnId, true as const])) }
+          const trimmed = trimBlocksForThreadRewind(current.blocks, removed)
+          const latestRemoved = Boolean(current.latestTurnId && removed.includes(current.latestTurnId))
+          const turnDurationByUserId = { ...current.turnDurationByUserId }
+          for (const userId of trimmed.droppedUserIds) delete turnDurationByUserId[userId]
+          const keepTurns = <T,>(entries: Record<string, T> | undefined): Record<string, T> =>
+            Object.fromEntries(Object.entries(entries ?? {}).filter(([turnId]) => rewoundTurnIds[turnId] !== true))
+          return { ...current, blocks: filterRewoundDisplayBlocks(trimmed.blocks, rewoundTurnIds),
+            latestSeq: Math.max(current.latestSeq, rewindSeq), rewoundTurnIds,
+            turnUsageById: reconcileTurnUsageById(threadId, undefined, current.turnUsageById, undefined, rewoundTurnIds),
+            lastTurnUsage: latestRemoved ? undefined : current.lastTurnUsage,
+            generalTerminalBatch: current.generalTerminalBatch && removed.includes(current.generalTerminalBatch.turnId) ? undefined : current.generalTerminalBatch,
+            latestTurnId: latestRemoved ? null : current.latestTurnId,
+            latestUserMessageId: latestRemoved ? null : current.latestUserMessageId,
+            threadStatus: latestRemoved ? undefined : current.threadStatus,
+            turnDurationByUserId, authoritativeTurnTimings: keepTurns(current.authoritativeTurnTimings),
+            authoritativeTurnStatuses: keepTurns(current.authoritativeTurnStatuses) }
+        })
+        setTimelineRuntimeByThreadId(current => {
+          const runtime = current[threadId] ?? emptySubagentRuntimeState()
+          const turnStartedAtByUserId = { ...runtime.turnStartedAtByUserId }
+          const remainingUsers = new Set(detailStateRef.current.blocks.filter(block => block.kind === 'user').map(block => block.id))
+          for (const userId of Object.keys(turnStartedAtByUserId)) if (!remainingUsers.has(userId)) delete turnStartedAtByUserId[userId]
+          return { ...current, [threadId]: { ...runtime, turnStartedAtByUserId } }
+        })
+        // A GET already in flight may precede the durable cut. Do not reuse it
+        // as the post-rewind refresh; wait, recheck selection, then fetch once.
+        const inFlight = detailLoadInFlightRef.current
+        if (inFlight?.threadId === threadId && inFlight.generation === generation) inFlight.abort.abort()
+        void (async () => {
+          if (inFlight?.threadId === threadId && inFlight.generation === generation) await inFlight.promise.catch(() => null)
+          if (!eventStale()) await loadSelectedDetail('refresh')
+        })()
       },
       onGoal: () => undefined,
       onTodos: () => undefined,
@@ -1220,10 +1410,11 @@ export function SubagentInspectorPanel({
           clearActiveStream(threadId)
         }
         streamTurnId = null
-        await loadSelectedDetail('refresh')
+        const refreshed = await loadSelectedDetail('refresh')
+        if (!eventStale() && refreshed?.threadId === threadId) setConversationUsageRevision(value => value + 1)
       },
       onTurnComplete: (ev) => {
-        if (eventStale()) return
+        if (eventStale() || turnWasRewound(eventTurnId(ev, streamTurnId))) return
         flushScheduler()
         rememberSeq(ev?.seq)
         const completedTurnId = eventTurnId(ev, streamTurnId) || streamTurnId
@@ -1315,9 +1506,20 @@ export function SubagentInspectorPanel({
     const agentKey = selectedAgent?.key
     const rawInput = selectedInput
     const text = rawInput.trim()
-    if (!threadId || !agentKey || !text || runtimeConnection !== 'ready' || selectedBusy) return
+    if (!threadId || !agentKey || !text || runtimeConnection !== 'ready' || selectedBusy || sendingThreadsRef.current.has(threadId)) return
+    const generation = selectionRef.current.generation
+    const isCurrent = () => selectionRef.current.visible && selectionRef.current.generation === generation &&
+      selectedThreadIdRef.current === threadId && !isPublicProjectionRevoked(threadId)
+    if (!isCurrent()) return
+    sendingThreadsRef.current.add(threadId)
     setComposerError(null)
     setInputBySubagentKey((current) => ({ ...current, [agentKey]: '' }))
+    const provisionalTurnId = pendingActiveStreamTurnId(threadId, 'subagent-inspector')
+    setRunningTurnByThreadId((current) => ({ ...current, [threadId]: current[threadId] ?? 'pending' }))
+    setTimelineRuntimeByThreadId((current) => ({ ...current, [threadId]: {
+      ...(current[threadId] ?? emptySubagentRuntimeState()), busy: true,
+      currentTurnId: current[threadId]?.currentTurnId ?? provisionalTurnId, currentTurnUserId: null
+    } }))
     void (async () => {
       try {
         const settings = await rendererRuntimeClient.getSettings()
@@ -1325,17 +1527,6 @@ export function SubagentInspectorPanel({
         const model = composerModel.trim()
         const providerId = composerProviderId?.trim()
         const reasoningEffort = composerReasoningEffort
-        const provisionalTurnId = pendingActiveStreamTurnId(threadId, 'subagent-inspector')
-        setRunningTurnByThreadId((current) => ({ ...current, [threadId]: current[threadId] ?? 'pending' }))
-        setTimelineRuntimeByThreadId((current) => ({
-          ...current,
-          [threadId]: {
-            ...(current[threadId] ?? emptySubagentRuntimeState()),
-            busy: true,
-            currentTurnId: current[threadId]?.currentTurnId ?? provisionalTurnId,
-            currentTurnUserId: null
-          }
-        }))
         const started = await provider.sendUserMessage(threadId, prompt, {
           mode: composerMode,
           ...(model ? { model } : {}),
@@ -1361,10 +1552,10 @@ export function SubagentInspectorPanel({
             }
           }
         }))
-        await loadSelectedDetail('refresh')
+        if (isCurrent()) await loadSelectedDetail('refresh')
       } catch (error) {
-        setInputBySubagentKey((current) => ({ ...current, [agentKey]: rawInput }))
-        setComposerError(formatRuntimeError(error))
+        setInputBySubagentKey((current) => current[agentKey] ? current : { ...current, [agentKey]: rawInput })
+        if (isCurrent()) setComposerError(formatRuntimeError(error))
         clearActiveStream(threadId)
         setRunningTurnByThreadId((current) => {
           if (!current[threadId]) return current
@@ -1381,7 +1572,7 @@ export function SubagentInspectorPanel({
             currentTurnUserId: null
           }
         }))
-      }
+      } finally { sendingThreadsRef.current.delete(threadId) }
     })()
   }, [
     composerMode,
@@ -1566,14 +1757,34 @@ export function SubagentInspectorPanel({
 	        {selectedAgent ? (
 	          <div className="flex h-full min-h-0 flex-col">
 	            <SubagentMetadata agent={selectedAgent} />
-	            {selectedThreadId ? (
+	            {selectedThreadId && visible ? (
 	              <SubagentTimeline
+                processPaneRoute={processPaneRoute}
 	                state={visibleDetailState}
+                conversationUsage={inspectorUsage.conversationUsage}
+                captureForkOwner={() => {
+                  const selection = selectionRef.current
+                  if (!selection.visible || selection.threadId !== selectedThreadId || !selectedThreadId) return null
+                  const generation = selection.generation
+                  const isCurrent = () => selectionRef.current.visible && selectionRef.current.generation === generation &&
+                    selectedThreadIdRef.current === selectedThreadId && !isPublicProjectionRevoked(selectedThreadId)
+                  return { isCurrent, getSnapshot: () => {
+                    const current = detailStateRef.current
+                    if (!isCurrent() || current.threadId !== selectedThreadId || current.status !== 'ready') return null
+                    const runtime = timelineRuntimeByThreadIdRef.current[selectedThreadId]
+                    return { blocks: current.blocks, busy: Boolean(runtime?.busy || runningTurnByThreadId[selectedThreadId]) ||
+                      threadSnapshotLooksRunning(current.blocks, current.threadStatus), latestSeq: current.latestSeq,
+                      rewoundTurnIds: current.rewoundTurnIds }
+                  } }
+                }}
                 runtimeStateOverride={selectedTimelineStateOverride}
                 runtimeConnection={runtimeConnection}
                 onRetryConnection={onRetryConnection}
                 onOpenSettings={onOpenSettings}
                 quietEmpty={selectedIsSideChat}
+                loadingLabel={t('loading')}
+                emptyTitle={t('subagentInspectorEmptyTitle')}
+                emptyDetail={t('subagentInspectorEmptyDetail')}
                 onOpenOwnerThread={selectedAgent.canOpenThread && onOpenThreadRequest ? (requestId) => onOpenThreadRequest(selectedThreadId!, requestId) : undefined}
               />
             ) : (
@@ -1595,13 +1806,25 @@ export function SubagentInspectorPanel({
         )}
       </div>
       <div className="shrink-0 border-t border-ds-border-muted bg-white/92 px-4 pb-4 pt-3 dark:bg-ds-card">
+        <OwnedSessionStatsPills threadId={selectedThreadId} projection={inspectorUsage.conversationUsage && selectedThreadId ? {
+          threadId: selectedThreadId, billing: inspectorUsage.conversationUsage.billing, metrics: inspectorUsage.conversationUsage.metrics
+        } : undefined} />
         {composerError ? (
           <div className="mb-3 flex items-start gap-2 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] leading-5 text-red-600 dark:text-red-300">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span className="min-w-0 break-words">{composerError}</span>
           </div>
         ) : null}
-        <FloatingComposer
+        <InputBar
+          ownerThreadId={selectedThreadId}
+          allowBusyFollowUp={false}
+          voiceDictationEnabled={visible && Boolean(selectedThreadId)}
+          dictationOwnerKey={JSON.stringify([selectedAgent?.key, selectedThreadId, visible])}
+          gateOverride={{ threadId: selectedThreadId, block: visibleDetailState.threadId === selectedThreadId
+            ? visibleDetailState.blocks.find((block): block is Extract<ChatBlock, { kind: 'approval' | 'user_input' }> =>
+              (block.kind === 'approval' || block.kind === 'user_input') && block.status === 'pending') ?? null : null,
+            onOpenOwnerThread: selectedAgent?.canOpenThread && selectedThreadId && onOpenThreadRequest
+              ? requestId => onOpenThreadRequest(selectedThreadId, requestId) : undefined }}
           variant="compact"
           input={selectedInput}
           setInput={setSelectedInput}
@@ -1651,6 +1874,9 @@ function SubagentMetadata({ agent }: { agent: CoreThreadSummarySubagentJson }): 
 }
 
 function SubagentTimeline({
+  processPaneRoute,
+  captureForkOwner,
+  conversationUsage,
   state,
   runtimeStateOverride,
   runtimeConnection,
@@ -1658,10 +1884,13 @@ function SubagentTimeline({
   onOpenSettings,
   quietEmpty = false,
   onOpenOwnerThread,
-  loadingLabel = '正在加载子智能体...',
-  emptyTitle = '暂无工作内容',
-  emptyDetail = '子智能体线程已经创建，但还没有可展示的消息。'
+  loadingLabel,
+  emptyTitle,
+  emptyDetail
 }: {
+  processPaneRoute: ProcessPaneRoute
+  captureForkOwner: () => TurnForkOwner | null
+  conversationUsage: ConversationUsageV1 | null
   state: ThreadDetailState
   runtimeStateOverride: TimelineRuntimeStateOverride
   runtimeConnection: RuntimeConnectionStatus
@@ -1669,9 +1898,9 @@ function SubagentTimeline({
   onOpenSettings: () => void
   quietEmpty?: boolean
   onOpenOwnerThread?: (requestId: string) => void
-  loadingLabel?: string
-  emptyTitle?: string
-  emptyDetail?: string
+  loadingLabel: string
+  emptyTitle: string
+  emptyDetail: string
 }): ReactElement {
   if (state.status === 'loading' && state.blocks.length === 0) {
     if (quietEmpty) return <SubagentBlankState />
@@ -1707,6 +1936,9 @@ function SubagentTimeline({
   return (
     <GateResponseContext.Provider value={{ onOpenOwnerThread }}>
     <MessageTimeline
+      processPaneRoute={processPaneRoute}
+      captureForkOwner={captureForkOwner}
+      conversationUsage={conversationUsage}
       blocks={state.blocks}
       live=""
       activeThreadId={state.threadId}

@@ -48,30 +48,53 @@ func TestFreshOrdinaryMacProfileSavesAndReloadsWithoutPreseededMasterKey(t *test
 }
 
 func TestOrdinaryMacMissingMasterKeyPreservesCommittedCredential(t *testing.T) {
-	ctx := context.Background()
-	dataDir := t.TempDir()
-	authority, err := openProviderRegistryAuthorityV1(ctx, dataDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = connectProviderRegistryTestWinnerV1(t, ctx, authority.Manager(), "provider-missing-master-key", "synthetic-private-key")
-	if err := authority.Close(); err != nil {
-		t.Fatal(err)
-	}
-	secretPath := filepath.Join(dataDir, "private", "provider-secrets", "credentials.v1.json")
-	before, err := os.ReadFile(secretPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(filepath.Join(filepath.Dir(secretPath), "master-key", "master.key")); err != nil {
-		t.Fatal(err)
-	}
-	if reopened, err := openProviderRegistryAuthorityV1(ctx, dataDir); err == nil {
-		_ = reopened.Close()
-		t.Fatal("missing file master key was silently replaced")
-	}
-	if after, err := os.ReadFile(secretPath); err != nil || !bytes.Equal(before, after) {
-		t.Fatal("missing master key changed committed ciphertext")
+	for _, markerPresent := range []bool{true, false} {
+		name := "marker-retained"
+		if !markerPresent {
+			name = "marker-missing"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			dataDir := t.TempDir()
+			authority, err := openProviderRegistryAuthorityV1(ctx, dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = connectProviderRegistryTestWinnerV1(t, ctx, authority.Manager(), "provider-missing-master-key", "synthetic-private-key")
+			if err := authority.Close(); err != nil {
+				t.Fatal(err)
+			}
+			secretPath := filepath.Join(dataDir, "private", "provider-secrets", "credentials.v1.json")
+			before, err := os.ReadFile(secretPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			masterPath := filepath.Join(filepath.Dir(secretPath), "master-key", "master.key")
+			markerPath := filepath.Join(filepath.Dir(secretPath), "master-key", "authority.v1")
+			if err := os.Remove(masterPath); err != nil {
+				t.Fatal(err)
+			}
+			if !markerPresent {
+				if err := os.Remove(markerPath); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if reopened, err := openProviderRegistryAuthorityV1(ctx, dataDir); err == nil {
+				_ = reopened.Close()
+				t.Fatal("missing file master key was silently replaced")
+			}
+			if _, err := os.Lstat(masterPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("recovery created a replacement master key over committed ciphertext")
+			}
+			if !markerPresent {
+				if _, err := os.Lstat(markerPath); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("failed recovery recreated the missing authority marker")
+				}
+			}
+			if after, err := os.ReadFile(secretPath); err != nil || !bytes.Equal(before, after) {
+				t.Fatal("missing master key changed committed ciphertext")
+			}
+		})
 	}
 }
 

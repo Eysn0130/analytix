@@ -3,11 +3,15 @@ package server
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	httpapi "analytix.local/runtime-go/internal/adapters/inbound/httpapi"
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
+	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
+	domainjob "analytix.local/runtime-go/internal/domain/job"
+	jobs "analytix.local/runtime-go/internal/jobs"
 )
 
 func (h *runtimeServerHandler) handleThreads(w http.ResponseWriter, r *http.Request) {
@@ -16,19 +20,24 @@ func (h *runtimeServerHandler) handleThreads(w http.ResponseWriter, r *http.Requ
 
 func (h *runtimeServerHandler) handleThreadPath(w http.ResponseWriter, r *http.Request) {
 	httpapi.ThreadPathHandlers{
-		Summary:     h.handleThreadSummaryPath,
-		Events:      h.handleThreadEvents,
-		Fork:        h.handleThreadFork,
-		Goal:        h.handleThreadGoal,
-		Todos:       h.handleThreadTodos,
-		Compact:     h.handleThreadCompact,
-		Review:      h.handleThreadReview,
-		Checkpoints: h.handleThreadCheckpointPath,
-		TurnAction:  h.handleThreadTurnAction,
-		Turns:       h.handleThreadTurns,
-		Rewind:      h.handleThreadRewind,
-		Record:      h.handleThreadRecord,
+		MessageFeedback: h.handleThreadMessageFeedback,
+		Summary:         h.handleThreadSummaryPath,
+		Events:          h.handleThreadEvents,
+		Fork:            h.handleThreadFork,
+		Goal:            h.handleThreadGoal,
+		Todos:           h.handleThreadTodos,
+		Compact:         h.handleThreadCompact,
+		Review:          h.handleThreadReview,
+		Checkpoints:     h.handleThreadCheckpointPath,
+		TurnAction:      h.handleThreadTurnAction,
+		Turns:           h.handleThreadTurns,
+		Rewind:          h.handleThreadRewind,
+		Record:          h.handleThreadRecord,
 	}.Handle(w, r)
+}
+
+func (h *runtimeServerHandler) handleThreadMessageFeedback(w http.ResponseWriter, r *http.Request, rest string) {
+	httpapi.MessageFeedbackHandlersV1{Service: h.runtimeThreadService()}.Handle(w, r, rest)
 }
 
 func (h *runtimeServerHandler) handleThreadRewind(w http.ResponseWriter, r *http.Request, threadID string) {
@@ -67,7 +76,13 @@ func (h *runtimeServerHandler) runtimeThreadService() *threadapp.Service {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.threads == nil {
+		if h.goalDriver == nil {
+			h.goalDriver = h.newGoalRoundDriverV1()
+		}
 		h.threads = threadapp.NewService(threadapp.Dependencies{
+			GoalMutation: h.goalDriver.Mutate, GoalActivation: h.goalDriver.Activation,
+			SummarizeCompaction:      h.summarizeOrdinaryCompaction,
+			ProjectCompactionHistory: h.projectOrdinaryCompactionHistory,
 			Repository:               h.store,
 			DataDir:                  h.dataDir,
 			DefaultApprovalPolicy:    h.approvalPolicy,
@@ -82,7 +97,19 @@ func (h *runtimeServerHandler) runtimeThreadService() *threadapp.Service {
 			BeginScopeTransition:     h.beginRuntimeThreadScopeTransition,
 			BeginWorkspaceTransition: h.beginRuntimeWorkspaceScopeTransition,
 			BeginMetadataRead:        state.AcquireSecurityScopeRead,
-			QuiesceThreadTurns:       h.quiesceRuntimeThreadForMutation,
+			BeginArchiveRead:         h.beginRuntimeThreadArchiveRead,
+			ObservePromotionChildren: func(ctx context.Context) (pendingworkapp.TrustedInventoryV1, []domainjob.Record, bool, error) {
+				if h.pendingWork == nil {
+					return pendingworkapp.TrustedInventoryV1{}, nil, false, threadapp.ErrSidePromotionUnavailable
+				}
+				inventory, err := h.pendingWork.TrustedInventoryV1(ctx)
+				if err != nil {
+					return pendingworkapp.TrustedInventoryV1{}, nil, false, err
+				}
+				runs, err := jobs.ReadChildRunIdentitySnapshotV1(ctx, filepath.Join(h.dataDir, "child-runs"))
+				return inventory, runs.Records, runs.HasLegacyTypeScript, err
+			},
+			QuiesceThreadTurns: h.quiesceRuntimeThreadForMutation,
 		})
 	}
 	return h.threads

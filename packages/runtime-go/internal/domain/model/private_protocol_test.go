@@ -392,3 +392,15 @@ func clonePrivateProtocolTestMessages(messages []Message) []Message {
 	copy(out, messages)
 	return out
 }
+
+func TestLateQuestionCarrierIsExcludedFromMessageJSON(t *testing.T) {
+	message := Message{Role: "user", Content: "ordinary content", PrivateUserInputReplyRequired: true, PrivateUserInputReplyBinding: struct{ Sentinel string }{Sentinel: "HOST_LATE_ID_SENTINEL"}}
+	encoded, err := json.Marshal(message)
+	if err != nil || strings.Contains(string(encoded), "HOST_LATE_ID_SENTINEL") || strings.Contains(string(encoded), "PrivateUserInput") {
+		t.Fatal("late Question process-only carrier became JSON-visible")
+	}
+	var restored Message
+	if json.Unmarshal(encoded, &restored) != nil || restored.PrivateUserInputReplyBinding != nil || restored.PrivateUserInputReplyRequired {
+		t.Fatal("JSON restored late Question authority")
+	}
+}

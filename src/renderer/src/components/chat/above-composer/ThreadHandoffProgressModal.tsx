@@ -88,7 +88,7 @@ export function ThreadHandoffProgressModalContent({
         : <GitBranch className="h-7 w-7 text-ds-ink" strokeWidth={1.8} />
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/18 px-4 py-6 backdrop-blur-[2px]">
+    <div data-analytix-thread-handoff-modal className="fixed inset-0 z-[90] flex items-center justify-center bg-black/18 px-4 py-6 backdrop-blur-[2px]">
       <div className="max-h-[calc(100dvh-2rem)] w-full max-w-[520px] overflow-y-auto rounded-2xl border border-ds-border bg-ds-card px-6 py-5 shadow-[0_22px_70px_rgba(20,47,95,0.22)]">
         <div className="flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-ds-hover/60">
@@ -140,7 +140,7 @@ export function ThreadHandoffProgressModalContent({
             <button
               type="button"
               onClick={() => onRetry(operation.id)}
-              className="h-8 rounded-full bg-ds-ink px-4 text-sm font-semibold text-ds-main transition hover:opacity-85"
+              className="h-8 rounded-full px-4 text-sm font-semibold transition bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
             >
               {t('threadHandoffRetry')}
             </button>

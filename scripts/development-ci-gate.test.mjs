@@ -12,12 +12,14 @@ test('Go partitions cover every discovered package and runtime test exactly once
   const dedicated = 'TestRuntimeHeldUnknownAndUnavailableProfessionalLaneAllowOrdinaryHTTP'
   const shared = [...Array.from({ length: runtimeShardCount * 2 + 1 }, (_, i) => `TestFixture${i}`), 'ExampleRead', 'FuzzDecode']
   const required = [...shared, dedicated]
+  const manualStartupDiagnostic = 'TestRuntimeStartupOpaqueMCPManualCaptureLifecycle'
   const external = runtimeExternalDiagnostics.map(entry => entry.test)
   assert.deepEqual(external, [
     'TestRuntimeOptionalPublicFixturePathV1',
     'TestRuntimeOptionalPluginPublicConsumerV1',
     'TestRuntimeOptionalPluginUnauthorizedFirstMCPTerminalDiagnosticV1',
-    'TestLocalNonPublishablePackageInspectionWhenExplicitlyProvided'
+    'TestLocalNonPublishablePackageInspectionWhenExplicitlyProvided',
+    manualStartupDiagnostic
   ])
   assert.ok(runtimeExternalDiagnostics.every(entry => typeof entry.reason === 'string' && entry.reason.length > 20))
   const names = [...required, runtimePlatformTests[0], ...external]
@@ -39,6 +41,13 @@ test('Go partitions cover every discovered package and runtime test exactly once
   ].sort(), partition.discovered)
   assert.equal(new Set(partition.discovered).size, names.length)
   assert.deepEqual(partition.externalDiagnostics, runtimeExternalDiagnostics.map(entry => ({ ...entry, status: 'not_executed' })))
+  assert.deepEqual(partition.externalDiagnostics.find(entry => entry.test === manualStartupDiagnostic), {
+    test: manualStartupDiagnostic,
+    reason: 'macOS, explicit qualified Office assets and the task-owned synthetic DOCX required.',
+    status: 'not_executed'
+  })
+  assert.ok(partition.shards.every(shard => !shard.includes(manualStartupDiagnostic)))
+  assert.ok(partition.platformRequired.every(entry => entry.test !== manualStartupDiagnostic))
   assert.equal(partition.platformRequired[0].lane, 'runtime-platform')
   assert.equal(partition.platformRequired[0].platform, 'darwin')
   assert.deepEqual(runtimePlatformSelection(listing([...names, runtimePlatformTests[1]])), runtimePlatformTests)
@@ -232,6 +241,29 @@ test('CI routes the complementary platform suites into the same required gate', 
   assert.match(rootPlatform, /if: \$\{\{ matrix\.tags == '' \}\}/)
   assert.match(rootPlatform, /node \.\.\/\.\.\/scripts\/go-ci-shards\.mjs platform-root/)
   assert.doesNotMatch(platform, /continue-on-error|passWithNoTests|npm run dist|ANALYTIX_TEST_SHARED_/)
+})
+
+test('runtime scheduling interleaves every ordinary and production shard within the concurrency cap', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const runtime = workflow.slice(workflow.indexOf('  runtime-shards:'), workflow.indexOf('  runtime-platform:'))
+  assert.match(runtime, /^ {6}max-parallel: 8$/m)
+  assert.match(runtime, /^ {6}fail-fast: false$/m)
+  const matrix = runtime.match(/ {6}matrix:\n([\s\S]*?) {4}env:/)?.[1]
+  assert.ok(matrix, 'runtime matrix must be present')
+  const dimensions = [...matrix.matchAll(/^ {8}(\w+): \[([^\]]+)\]$/gm)]
+  assert.deepEqual(dimensions.map(match => match[1]), ['shard', 'tags'])
+  assert.equal(matrix.trim(), dimensions.map(match => match[0]).join('\n').trim())
+  assert.doesNotMatch(matrix, /include:|exclude:/)
+  const shards = dimensions[0][2].split(',').map(value => Number(value.trim()))
+  const tags = dimensions[1][2].split(',').map(value => value.trim().replace(/^'(.*)'$/, '$1'))
+  assert.deepEqual(shards, Array.from({ length: runtimeShardCount }, (_, index) => index))
+  assert.deepEqual(tags, ['', 'analytix_prod'])
+  const tuples = shards.flatMap(shard => tags.map(tags => ({ shard, tags })))
+  assert.equal(tuples.length, 32)
+  assert.equal(new Set(tuples.map(({ shard, tags }) => `${shard}:${tags}`)).size, 32)
+  assert.deepEqual(tuples, Array.from({ length: 16 }, (_, shard) => [
+    { shard, tags: '' }, { shard, tags: 'analytix_prod' }
+  ]).flat())
 })
 
 test('all complete CI job families are required for the merge gate', () => {

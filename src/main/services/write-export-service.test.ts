@@ -665,8 +665,8 @@ describe('write-export-service helpers', () => {
     expect(result.ok).toBe(true)
     expect(clipboard.write).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: '# Case note\n\n账号:[ACCOUNT]',
-        html: expect.stringContaining('账号:[ACCOUNT]')
+        text: '# Case note\n\n账号：[ACCOUNT]',
+        html: expect.stringContaining('账号：[ACCOUNT]')
       })
     )
     expect(JSON.stringify(vi.mocked(clipboard.write).mock.calls)).not.toContain(account)
@@ -747,7 +747,7 @@ describe('write-export-service helpers', () => {
       workspaceRoot,
       content: `账号：${account}`
     })
-    expect(html).toContain('账号:[ACCOUNT]')
+    expect(html).toContain('账号：[ACCOUNT]')
     expect(html).not.toContain(account)
 
     await expect(buildWriteExportHtmlDocument({

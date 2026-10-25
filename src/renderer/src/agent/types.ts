@@ -20,8 +20,11 @@ import type {
 } from './analytix-contract'
 import type { ApprovalPolicy, SandboxMode } from '@shared/app-settings'
 import type { ModelReasoningEffort as SharedModelReasoningEffort } from '@shared/app-settings'
+import type { PublicToolResultProjectionV1 } from '../../../../packages/runtime/src/contracts/items'
 import type { PublicProjectionRevokedEvent } from '../../../../packages/runtime/src/contracts/events.js'
 import type { ModelReasoningEffort } from '../../../../packages/runtime/src/contracts/capabilities.js'
+import type { UserInputActionSelectorV1 } from '../../../../packages/runtime/src/contracts/approvals.js'
+import type { TurnEndReason } from '../../../../packages/runtime/src/contracts/turns.js'
 import type { CostEstimateStatus, CostKnownCurrency } from './usage-cost'
 
 export type ToolItemKind = 'tool_call' | 'command_execution' | 'file_change' | 'subagent'
@@ -232,7 +235,13 @@ export type WebCitationSource = {
 }
 
 export type RuntimeDisclosureMetadata = {
+  stage?: 'pre_send' | 'post_send' | 'response_received'
   factHistoryState?: 'retained_snapshot'
+  /** Token count reported by Host compaction; never a message count. */
+  replacedTokens?: number
+  shadowedItemCount?: number
+  tokenCountKind?: 'estimated'
+  tokenEstimatorVersion?: 1
   turnId?: string
   displayText?: string
   delivery?: 'steer'
@@ -251,6 +260,7 @@ export type RuntimeDisclosureMetadata = {
   diagnostics?: RuntimeJobDiagnosticsMetadata
   providerError?: RuntimeProviderErrorDiagnosticsMetadata
   providerRetry?: RuntimeProviderRetryDiagnosticsMetadata
+  providerOutputCap?: RuntimeProviderOutputCapObservation
   providerRecovery?: RuntimeProviderRecoveryDiagnosticsMetadata
   sources?: WebCitationSource[]
 }
@@ -262,9 +272,32 @@ export type RuntimeProviderRecoveryDiagnosticsMetadata = {
   recoveryExhausted?: boolean
 }
 
+export type RuntimeProviderRetryLifecycleMetadata = {
+  schemaVersion: 1
+  /** Host logical invocation identity; never SSE seq. */
+  logicalSequence: number
+  outerAttempt: number
+} & (
+  | { source: 'provider_retry'; physicalAttempt?: never }
+  | { source: 'transport_reconnect'; physicalAttempt: number }
+) & (
+  | { phase: 'scheduled'; delayMs: number; deadlineUnixMs: number; cancelReason?: never }
+  | { phase: 'started'; delayMs?: never; deadlineUnixMs?: never; cancelReason?: never }
+  | { phase: 'cancelled'; cancelReason: 'context_cancelled' | 'deadline_exceeded' | 'attempt_rejected'; delayMs?: never; deadlineUnixMs?: never }
+)
+
+/** A single Provider return observation, without turn-terminal authority. */
+export type RuntimeProviderOutputCapObservation = {
+  stopReason: 'length'
+  streamCompleted: boolean
+  logicalSequence: number
+  toolCallCount?: number
+}
+
 export type RuntimeProviderRetryDiagnosticsMetadata = {
   attempt?: number
   maxAttempt?: number
+  lifecycle?: RuntimeProviderRetryLifecycleMetadata
 }
 
 export type RuntimeProviderErrorDiagnosticsMetadata = {
@@ -290,8 +323,31 @@ export type RuntimeProviderErrorDiagnosticsMetadata = {
   dispatchState?: 'not_sent' | 'sent' | 'indeterminate'
 }
 
+/** Public physical-attempt totals: a missing value is unknown, never zero. */
+export type ProviderAttemptTokenAggregate = {
+  complete: boolean
+  knownObservationCount: number
+  observationCount: number
+  value?: number
+}
+export type ProviderAttemptStatuses = {
+  succeeded: number
+  failed: number
+  cancelled: number
+  timedOut: number
+  streamAborted: number
+}
+
 /** Renderer-safe cache telemetry: hashes, counters and booleans only. */
 export type RuntimeCacheDiagnosticsMetadata = {
+  providerLogicalCallCount?: number
+  providerAttemptTelemetryValid?: boolean
+  providerAttemptStatuses?: ProviderAttemptStatuses
+  providerAttemptInputTokens?: ProviderAttemptTokenAggregate
+  providerAttemptOutputTokens?: ProviderAttemptTokenAggregate
+  providerAttemptCacheHitTokens?: ProviderAttemptTokenAggregate
+  providerAttemptCacheMissTokens?: ProviderAttemptTokenAggregate
+  providerAttemptCacheRate?: { known: boolean; numerator: number; denominator: number }
   dynamicStateCheck?: 'not_checked'
   toolSchemaEstimator?: 'utf8_bytes_div4'
   responseModelObservation?: 'not_reported' | 'matches_resolved' | 'differs_resolved'
@@ -410,10 +466,22 @@ export type RuntimeJobDiagnosticsMetadata = {
 
 /** Host-projected tool metadata; raw arguments/output/diagnostic text is forbidden. */
 export type ToolBlockMeta = Record<string, unknown> & {
+  /** Physical identities from strictly admitted Core call/result items only. */
+  recordThreadId?: string
+  toolCallItemId?: string
+  toolResultItemId?: string
+  /** Separate witnesses survive shallow call/result/progress merges. */
+  toolCallIdentity?: { threadId: string; turnId: string; callId: string; itemId: string }
+  toolResultIdentity?: { threadId: string; turnId: string; callId: string; itemId: string }
+  /** Identity-only selector carried by both live events and public snapshots. */
+  localResult?: { turnId: string; callId: string; resultItemId: string }
+  publicResult?: PublicToolResultProjectionV1
   rewindPlan?: CoreCheckpointRewindPlanJson
 }
 
 export type UserInputOption = {
+  /** Issued by Core; display labels are never selection authority. */
+  id?: string
   label: string
   description: string
 }
@@ -423,13 +491,32 @@ export type UserInputQuestion = {
   id: string
   question: string
   options: UserInputOption[]
+  multiSelect?: boolean
 }
 
+/** Safe local display projection, also the retained legacy submission shape. */
 export type UserInputAnswer = {
   id: string
   label: string
   value: string
 }
+
+/** Private form payload. Never spread this shape into public display state. */
+export type UserInputStructuredAnswer =
+  | { id: string; kind: 'answer'; optionIds: string[]; customText?: string }
+  | { id: string; kind: 'skip' }
+
+export type UserInputSubmission = UserInputAnswer | UserInputStructuredAnswer
+export type UserInputWaitState = {
+  phase: 'connecting' | 'counting' | 'focused' | 'editing' | 'waiting' | 'continuing' | 'scheduled' | 'ended' | 'error'
+  remainingMs: number | null
+}
+export type UserInputWaitControls = {
+  focus: () => void; blur: () => void; engage: () => void; takeTime: () => void; retry: () => void
+  unsubscribe: () => void
+}
+
+export type ThreadExecutionPolicy = { approvalPolicy: ApprovalPolicy; sandboxMode: SandboxMode }
 
 export type NormalizedThread = {
   id: string
@@ -440,6 +527,9 @@ export type NormalizedThread = {
   mode: string
   workspace?: string
   status?: string
+  executionPolicyVersion?: 2
+  /** Renderer-only unknown mutation outcome; never serialized to Core. */
+  executionPolicyUncertain?: boolean
   approvalPolicy?: ApprovalPolicy
   sandboxMode?: SandboxMode
   archived?: boolean
@@ -511,7 +601,17 @@ export type ThreadGoalResearch = {
   requirementCount: number
 }
 
+export type ThreadGoalStateV1 = {
+  goal: ThreadGoal | null
+  activation: import('../../../../packages/runtime/src/contracts/goal').GoalActivationV1 | null
+  historyBlocks: Extract<ChatBlock, { kind: 'goal' }>[]
+}
+
 export type ThreadGoal = {
+  id?: string
+  revision?: number
+  maxGoalRounds?: number
+  roundsStarted?: number
   threadId: string
   objective: string
   status: ThreadGoalStatus
@@ -617,8 +717,9 @@ export type CompactionBlock = {
   id: string
   createdAt?: string
   summary: string
-  status: 'running' | 'success' | 'error'
+  status: 'running' | 'success' | 'error' | 'unknown'
   detail?: string
+  summaryKind?: 'conversation'
   auto?: boolean
   messagesBefore?: number
   messagesAfter?: number
@@ -661,8 +762,12 @@ export type ReviewBlock = {
 }
 
 export type ChatBlock =
+  | { kind: 'goal'; id: string; createdAt?: string; operation: string;
+      goal: ThreadGoal | null; ref?: import('../../../../packages/runtime/src/contracts/goal').GoalRefV1 }
   | {
       kind: 'user'
+      source?: import('../../../../packages/runtime/src/contracts/goal').GoalRoundSourceV1
+      generalTerminalProjectionReceipt?: GeneralTerminalProjectionReceiptV1
       id: string
       createdAt?: string
       text: string
@@ -673,6 +778,8 @@ export type ChatBlock =
   | {
       kind: 'assistant'
       id: string
+      /** Only a completed runtime assistant item mapper supplies this owner. */
+      assistantItemIdentity?: { threadId: string; turnId: string; itemId: string }
       createdAt?: string
       text: string
       acceptedFinalView?: CoreAcceptedFinalPublicViewJson
@@ -684,6 +791,7 @@ export type ChatBlock =
        */
       acceptedFinalProjectionReceipt?: AcceptedFinalProjectionReceiptV1
       acceptedFinalProjectionTerminal?: AcceptedFinalProjectionTerminalV1
+      generalTerminalProjectionReceipt?: GeneralTerminalProjectionReceiptV1
       meta?: RuntimeDisclosureMetadata
     }
   | ToolBlock
@@ -716,7 +824,8 @@ export type ChatBlock =
       createdAt?: string
       requestId: string
       questions: UserInputQuestion[]
-      status: 'pending' | 'submitted' | 'cancelled' | 'error'
+      status: 'pending' | 'submitted' | 'cancelled' | 'continued' | 'error'
+      timedWait?: import('../../../../packages/runtime/src/contracts/approvals').UserInputTimedWaitV1 | null
       answers?: UserInputAnswer[]
       errorMessage?: string
       meta?: RuntimeDisclosureMetadata
@@ -749,6 +858,10 @@ export type ToolEventPayload = {
 }
 
 export type RuntimeStatusEventPayload = {
+  threadId?: string
+  seq?: number
+  retry?: RuntimeProviderRetryLifecycleMetadata
+  providerOutputCap?: RuntimeProviderOutputCapObservation
   kind:
     | 'tool_result_upload_wait'
     | 'tool_catalog_changed'
@@ -787,6 +900,7 @@ export type CompactionEventPayload = {
   summary: string
   status: 'running' | 'success' | 'error'
   detail?: string
+  summaryKind?: 'conversation'
   auto?: boolean
   messagesBefore?: number
   messagesAfter?: number
@@ -808,6 +922,7 @@ export type UserInputRequestPayload = {
   itemId: string
   requestId: string
   questions: UserInputQuestion[]
+  timedWait?: import('../../../../packages/runtime/src/contracts/approvals').UserInputTimedWaitV1 | null
   turnId?: string
   meta?: RuntimeDisclosureMetadata
 }
@@ -815,14 +930,16 @@ export type UserInputRequestPayload = {
 export type UserInputStatusPayload = {
   itemId: string
   requestId?: string
-  status: 'submitted' | 'cancelled' | 'error'
+  status: 'submitted' | 'cancelled' | 'continued' | 'error'
   answers?: UserInputAnswer[]
   errorMessage?: string
 }
 
 export type UserMessageEventPayload = {
+  source?: import('../../../../packages/runtime/src/contracts/goal').GoalRoundSourceV1
   itemId: string
   turnId?: string
+  seq?: number
   createdAt?: string
   text: string
   modelLabel?: string
@@ -844,6 +961,7 @@ export type TurnCompletedEventPayload = {
   seq?: number
   acceptedFinalDigest?: string
   terminalReason?: CoreAcceptedFinalTerminalReasonJson
+  endReason?: TurnEndReason
 }
 
 export type SnapshotRequiredEventPayload = {
@@ -881,7 +999,17 @@ export type ThreadErrorOptions = {
   terminalReason?: CoreAcceptedFinalTerminalReasonJson
 }
 
-/** Cumulative usage/cost for a Analytix thread. */
+/** UI projection of one verified terminal batch, bound to its original turn and cursor. */
+export type TurnUsageEntry = {
+  threadId: string
+  turnId: string
+  firstSeq: number
+  lastSeq: number
+  snapshot: ThreadUsageSnapshot
+}
+export type TurnUsageById = Record<string, TurnUsageEntry>
+
+/** Provider snapshot for existing capacity consumers; not an all-attempt token bill. */
 export type ThreadUsageSnapshot = {
   model?: string
   providerId?: string
@@ -933,11 +1061,12 @@ export type AcceptedFinalProjectionTerminalV1 = {
   createdAt: string
   acceptedFinalDigest: string
   terminalReason: CoreAcceptedFinalTerminalReasonJson
+  endReason?: TurnEndReason
 }
 
 /**
  * Renderer projection of one ordinary terminal transport batch. Unlike an
- * accepted-final projection it carries no receipt and grants no evidence,
+ * accepted-final projection it carries no publication receipt and grants no evidence,
  * citation, fact-answer, or publication authority.
  */
 export type GeneralTerminalProjectionBatch = {
@@ -951,10 +1080,29 @@ export type GeneralTerminalProjectionBatch = {
   terminal: GeneralTerminalProjectionTerminalV1
 }
 
+/**
+ * Renderer-local association minted only when an already host-validated ordinary
+ * terminal batch commits atomically. It binds the public item to that batch and
+ * permits protected draft replacement; it grants no publication/evidence authority
+ * and contains no draft content. It is not a runtime event or persistence contract.
+ */
+export type GeneralTerminalProjectionReceiptV1 = {
+  schemaVersion: 1
+  batchDigest: string
+  threadId: string
+  turnId: string
+  itemId: string
+  firstSeq: number
+  lastSeq: number
+  status: GeneralTerminalProjectionTerminalV1['status']
+  endReason?: TurnEndReason
+}
+
 export type GeneralTerminalProjectionTerminalV1 = {
   status: 'completed' | 'failed' | 'aborted'
   createdAt: string
   terminalReason: CoreAcceptedFinalTerminalReasonJson
+  endReason?: TurnEndReason
 }
 
 /**
@@ -997,6 +1145,7 @@ export type ThreadEventSink = {
     seq?: number
   }): void
   onGoal(ev: { threadId: string; goal: ThreadGoal | null; cleared?: boolean; createdAt?: string }): void
+  onGoalActivation?(ev: { threadId: string; activation: import('../../../../packages/runtime/src/contracts/goal').GoalActivationV1 | null }): void | Promise<void>
   onTodos?(ev: { threadId: string; todos: ThreadTodoList | null; cleared?: boolean; createdAt?: string }): void
   onSnapshotRequired?(ev: SnapshotRequiredEventPayload): void | Promise<void>
   onPublicProjectionRevoked?(ev: PublicProjectionRevokedEvent): void | Promise<void>
@@ -1009,6 +1158,17 @@ export type ThreadEventSink = {
   /** Optional: cumulative usage update for the thread. */
   onUsage?(usage: ThreadUsageSnapshot): void
 }
+
+/** UI-only execution facts from a terminal Go turn, never a local clock estimate. */
+export type AuthoritativeTurnTiming = {
+  turnId: string
+  userItemId?: string
+  startedAt: number
+  finishedAt: number
+}
+export type AuthoritativeTurnTimings = Record<string, AuthoritativeTurnTiming>
+export type AuthoritativeTurnStatus = 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
+export type AuthoritativeTurnStatuses = Record<string, AuthoritativeTurnStatus>
 
 export interface AgentProvider {
   readonly id: 'analytix'
@@ -1029,7 +1189,7 @@ export interface AgentProvider {
     threads: NormalizedThread[]
     raw: CoreCaseProjectDetailResponseJson
   }>
-  createThread(input: { workspace?: string; title?: string; autoTitle?: boolean; mode?: string; model?: string; providerId?: string }): Promise<NormalizedThread>
+  createThread(input: { workspace?: string; title?: string; autoTitle?: boolean; mode?: string; model?: string; providerId?: string; localDocument?: boolean }): Promise<NormalizedThread>
   getThreadDetail(threadId: string): Promise<{
     thread?: NormalizedThread
     blocks: ChatBlock[]
@@ -1038,9 +1198,14 @@ export interface AgentProvider {
     latestTurnId?: string
     latestUserMessageId?: string
     turnDurationByUserId?: Record<string, number>
+    authoritativeTurnTimings?: AuthoritativeTurnTimings
+  authoritativeTurnStatuses?: AuthoritativeTurnStatuses
     pendingApprovalIds?: string[]
     pendingUserInputIds?: string[]
     usage?: ThreadUsageSnapshot
+    turnUsageById?: TurnUsageById
+    /** Full bounded ordinary replay; absent when only partial accepted projections are known. */
+    turnUsageThroughSeq?: number
     goal?: ThreadGoal | null
     todos?: ThreadTodoList | null
     historyAuthority?: 'case_boundary_only_v1'
@@ -1062,8 +1227,10 @@ export interface AgentProvider {
       model?: string
       providerId?: string
       reasoningEffort?: SharedModelReasoningEffort
+      executionPolicy?: ThreadExecutionPolicy
       riskIntent?: 'case'
       displayText?: string
+      requestedSkillIds?: string[]
       guiPlan?: {
         operation: 'draft' | 'refine'
         workspaceRoot: string
@@ -1075,6 +1242,8 @@ export interface AgentProvider {
       attachmentIds?: string[]
       fileReferences?: UserFileReference[]
       workspaceCheckpointId?: string
+      /** Renderer-local final HTTP fence. Never serialized or sent to a model. */
+      submissionIsCurrent?: () => boolean
     }
   ): Promise<{ turnId: string; threadId: string; userMessageItemId?: string }>
   reviewThread?(
@@ -1105,6 +1274,10 @@ export interface AgentProvider {
     threadId: string
     workspace: string
   }): Promise<CoreAttachmentMetadataJson>
+  getAttachmentMetadata?(
+    attachmentId: string,
+    options: { threadId: string; workspace: string }
+  ): Promise<CoreAttachmentMetadataJson>
   getAttachmentContent?(
     attachmentId: string,
     options: { threadId: string; workspace: string }
@@ -1150,14 +1323,19 @@ export interface AgentProvider {
   interruptTurn(threadId: string, turnId: string, options?: { discard?: boolean }): Promise<void>
   renameThread(threadId: string, title: string): Promise<void>
   updateThreadWorkspace?(threadId: string, workspace: string): Promise<void>
-  updateThreadRelation?(threadId: string, relation: NonNullable<NormalizedThread['relation']>): Promise<void>
+  updateThreadExecutionPolicy?(threadId: string, policy: ThreadExecutionPolicy): Promise<NormalizedThread>
+  promoteSideThread?(threadId: string): Promise<void>
   archiveThread?(threadId: string, archived: boolean): Promise<void>
   deleteThread(threadId: string): Promise<void>
   compactThread?(threadId: string, reason?: string): Promise<void>
   getThreadGoal?(threadId: string): Promise<ThreadGoal | null>
+  getThreadGoalState?(threadId: string): Promise<ThreadGoalStateV1>
   setThreadGoal?(
     threadId: string,
     patch: {
+      operation?: 'create' | 'edit' | 'pause' | 'resume'
+      ref?: import('../../../../packages/runtime/src/contracts/goal').GoalRefV1
+      maxGoalRounds?: number
       objective?: string
       status?: ThreadGoalStatus
       tokenBudget?: number | null
@@ -1168,7 +1346,7 @@ export interface AgentProvider {
       research?: { enabled: true; requirements?: string[] }
     }
   ): Promise<ThreadGoal>
-  clearThreadGoal?(threadId: string): Promise<boolean>
+  clearThreadGoal?(threadId: string, ref?: import('../../../../packages/runtime/src/contracts/goal').GoalRefV1): Promise<boolean>
   getThreadTodos?(threadId: string): Promise<ThreadTodoList | null>
   setThreadTodos?(
     threadId: string,
@@ -1184,7 +1362,7 @@ export interface AgentProvider {
   clearThreadTodos?(threadId: string): Promise<boolean>
   forkThread?(
     threadId: string,
-    options?: { relation?: 'primary' | 'fork' | 'side'; title?: string; turnId?: string }
+    options?: { relation?: 'primary' | 'fork' | 'side'; title?: string; turnId?: string; endSeq?: number }
   ): Promise<NormalizedThread>
   resumeSession?(
     sessionId: string,
@@ -1203,6 +1381,10 @@ export interface AgentProvider {
     remember?: boolean
   ): Promise<void>
   /** Runtime HTTP compatibility path for request_user_input responses. */
-  submitUserInputResponse?(requestId: string, answers: UserInputAnswer[]): Promise<void>
-  cancelUserInput?(requestId: string): Promise<void>
+  submitUserInputResponse?(requestId: string, answers: UserInputSubmission[], selector?: UserInputActionSelectorV1): Promise<void>
+  cancelUserInput?(requestId: string, selector?: UserInputActionSelectorV1): Promise<void>
+  continueUserInput?(requestId: string, selector?: UserInputActionSelectorV1): Promise<void>
+  submitUserInputLateReply?(requestId: string, answers: UserInputSubmission[], lateReply: import('../../../../packages/runtime/src/contracts/approvals').UserInputLateReplyRequestV1, selector?: UserInputActionSelectorV1): Promise<import('../../../../packages/runtime/src/contracts/approvals').UserInputLateReplyDeliveryV1>
+  observeUserInputWait?(selector: import('../../../../packages/runtime/src/contracts/user-input-local-display').UserInputLocalSelectorV1, listener: (state: UserInputWaitState) => void): UserInputWaitControls
+  settleUserInputWait?(selector: import('../../../../packages/runtime/src/contracts/user-input-local-display').UserInputLocalSelectorV1): void
 }

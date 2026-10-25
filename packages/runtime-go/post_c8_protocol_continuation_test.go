@@ -33,6 +33,7 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 	}
 	var mu sync.Mutex
 	executing, reads, writes := false, 0, 0
+	summaryRequests, foregroundRequests := 0, 0
 	var failure string
 	compactionDigests := map[string]bool{}
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +56,12 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 			encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": fmt.Sprintf("synthetic_%d_%d", reads, writes), "type": "function", "function": map[string]any{"name": name, "arguments": string(encodedArgs)}}}}, "finish_reason": "tool_calls"}}})
 			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", encoded)
 		}
+		if runtimeCompactionSummaryRequestForTestV1(t, body) {
+			summaryRequests++
+			emitText("Preserve the latest file correction and recover original constraints from the retained sources.")
+			return
+		}
+		foregroundRequests++
 		var sources []any
 		var toolText strings.Builder
 		for _, raw := range messages {
@@ -134,6 +141,15 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 	sent := 0
 	send := func(prompt string) {
 		t.Helper()
+		mu.Lock()
+		summaryBefore, foregroundBefore := summaryRequests, foregroundRequests
+		ordinal := sent + 1
+		mu.Unlock()
+		defer func() {
+			mu.Lock()
+			defer mu.Unlock()
+			t.Logf("continuation fixture send=%d summary_before=%d summary_after=%d foreground_before=%d foreground_after=%d", ordinal, summaryBefore, summaryRequests, foregroundBefore, foregroundRequests)
+		}()
 		assertLiveJSON(t, server.URL, http.MethodPost, "/v1/threads/"+threadID+"/turns", DefaultRuntimeToken, mustJSON(t, map[string]any{"prompt": prompt, "approvalPolicy": "auto", "sandboxMode": "workspace-write"}), http.StatusAccepted)
 		sent++
 		t.Logf("completed seeded/live request %d", sent)
@@ -143,7 +159,7 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 		send(fmt.Sprintf("Continue recording context %d without changing prior instructions. ", i) + strings.Repeat("inert background ", 250))
 	}
 	// Cross the real configured soft limit twice. The production turn-start
-	// compactor, not the manual /compact route, creates signed V4 snapshots.
+	// compactor, not the manual /compact route, creates signed V5 snapshots.
 	send("Correction: use C.txt instead of A.txt; B.txt remains forbidden. " + strings.Repeat("more inert context ", 1300))
 	send("Keep the most recent correction in chronological order. " + strings.Repeat("final inert context ", 1300))
 	send("Check the retained context without changing any file or instruction.")
@@ -177,6 +193,9 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 			t.Fatalf("%s effect mismatch: %q %v", name, got, err)
 		}
 	}
+	mu.Lock()
+	foregroundBeforeReadback, summaryBeforeReadback := foregroundRequests, summaryRequests
+	mu.Unlock()
 	// Readback alone cannot cause a completed write to run again.
 	t.Log("closing Core before recovery")
 	server.Close()
@@ -200,6 +219,9 @@ func TestPostC8ContinuationSourcesDriveRealToolEffectsAfterTwoCompactionsAndRest
 	defer mu.Unlock()
 	if writes != 1 {
 		t.Fatal("completed effect replayed on recovery")
+	}
+	if foregroundRequests != foregroundBeforeReadback || summaryRequests != summaryBeforeReadback {
+		t.Fatal("recovery readback dispatched a foreground or summary request")
 	}
 }
 

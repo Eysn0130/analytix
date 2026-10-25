@@ -105,6 +105,18 @@ func (r *RuntimeEventRecorder) PipelineStages(threadID, turnID string, stages []
 		}
 		events = append(events, event)
 	}
+	// A logical start must have one committed frontier. A partial fallback
+	// cannot establish whether its matching close is attributable.
+	for _, stage := range stages {
+		if stage.Stage == "logical_step_started" || stage.Stage == "logical_step_closed" {
+			batch, ok := r.events.(atomicRuntimeEventBatchRecorder)
+			if !ok {
+				return errors.New("runtime logical step atomic recorder is not configured")
+			}
+			_, _, err := batch.RecordEventsAtomic(events)
+			return err
+		}
+	}
 	if batch, ok := r.events.(atomicRuntimeEventBatchRecorder); ok {
 		_, _, err := batch.RecordEventsAtomic(events)
 		return err
@@ -140,8 +152,27 @@ func (r *RuntimeEventRecorder) ToolCallPartial(threadID, turnID string, call dom
 	return r.record(BuildToolCallPartialEvent(threadID, turnID, call.ID, call.Name))
 }
 
-func (r *RuntimeEventRecorder) ProviderRetrying(threadID, turnID string, attempt int, maxAttempts int, cause error) error {
+func (r *RuntimeEventRecorder) ProviderRetrying(threadID, turnID string, attempt int, maxAttempts int, cause error, retries ...domainmodel.ProviderRetryV1) error {
+	var projected map[string]any
+	timestamp := ""
+	if len(retries) > 0 {
+		if len(retries) != 1 || retries[0].At.IsZero() {
+			return errInvalidPipelineTelemetry
+		}
+		retry := retries[0]
+		var err error
+		projected, err = projectProviderRetryV1(retry.Details())
+		target := retry.OuterAttempt
+		if retry.Source == "transport_reconnect" {
+			target = retry.PhysicalAttempt
+		}
+		if err != nil || attempt != target || maxAttempts < attempt || float64(maxAttempts) > 1e15 {
+			return errInvalidPipelineTelemetry
+		}
+		timestamp = retry.At.UTC().Format(time.RFC3339Nano)
+	}
 	return r.record(BuildProviderRetryingEvent(ProviderRetryingEventInput{
+		Retry: projected, Timestamp: timestamp,
 		ThreadID:           threadID,
 		TurnID:             turnID,
 		Attempt:            attempt,
@@ -225,4 +256,15 @@ func (r *RuntimeEventRecorder) assistantDeltaTrace(chunkTrace domainmodel.ChunkT
 		trace["loop_chunk_callback_at"] = UnixMillis(chunkTrace.LoopChunkCallbackAt)
 	}
 	return trace
+}
+
+// This capability is supplied by the actual atomic event sink after a durable
+// commit followed by an acknowledgement/cleanup failure. It grants no success
+// or Provider dispatch; it only prevents an already committed start being lost.
+func runtimePipelineAppendCommittedV1(err error) bool {
+	var committed interface {
+		error
+		AtomicAppendCommittedV1() bool
+	}
+	return errors.As(err, &committed) && committed.AtomicAppendCommittedV1()
 }

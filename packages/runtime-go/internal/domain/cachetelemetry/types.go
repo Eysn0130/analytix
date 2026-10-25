@@ -48,20 +48,43 @@ const (
 // CacheVisibleShapeV1 identifies one exact serialized provider attempt without
 // retaining the endpoint URL or request body. EndpointHMAC binds the effective
 // endpoint, including custom full endpoints, without persisting its secrets.
+// ProviderPublicAttributionV1 contains only host-approved public route labels.
+// It never comes from HMAC reversal, provider output, or current settings on read.
+type ProviderPublicAttributionV1 struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+func (value ProviderPublicAttributionV1) Validate() error {
+	if value == (ProviderPublicAttributionV1{}) {
+		return nil
+	}
+	for _, label := range []string{value.Provider, value.Model} {
+		if label == "" || strings.TrimSpace(label) != label || len(label) > 512 || strings.ContainsAny(label, "\r\n\x00") {
+			return errors.New("provider public attribution is invalid")
+		}
+	}
+	return nil
+}
+
 type CacheVisibleShapeV1 struct {
-	ModelInput          ModelInputSegmentsV1 `json:"modelInput,omitzero"`
-	SchemaVersion       string               `json:"schemaVersion"`
-	LogicalCallHMAC     string               `json:"logicalCallHmac"`
-	Attempt             uint32               `json:"attempt"`
-	ProviderFamily      ProviderFamilyV1     `json:"providerFamily"`
-	ModelHMAC           string               `json:"modelHmac"`
-	Endpoint            EndpointFormatV1     `json:"endpointFormat"`
-	EndpointHMAC        string               `json:"endpointHmac"`
-	WireBodyHMAC        string               `json:"wireBodyHmac"`
-	CredentialScopeHMAC string               `json:"credentialScopeHmac"`
-	ProviderConfigHMAC  string               `json:"providerConfigHmac"`
-	DigestEpoch         uint64               `json:"digestEpoch"`
-	StartedAt           string               `json:"startedAt"`
+	PublicAttribution   ProviderPublicAttributionV1 `json:"publicAttribution,omitzero"`
+	ModelInput          ModelInputSegmentsV1        `json:"modelInput,omitzero"`
+	SchemaVersion       string                      `json:"schemaVersion"`
+	LogicalCallHMAC     string                      `json:"logicalCallHmac"`
+	Attempt             uint32                      `json:"attempt"`
+	ProviderFamily      ProviderFamilyV1            `json:"providerFamily"`
+	ModelHMAC           string                      `json:"modelHmac"`
+	Endpoint            EndpointFormatV1            `json:"endpointFormat"`
+	EndpointHMAC        string                      `json:"endpointHmac"`
+	WireBodyHMAC        string                      `json:"wireBodyHmac"`
+	CredentialScopeHMAC string                      `json:"credentialScopeHmac"`
+	ProviderConfigHMAC  string                      `json:"providerConfigHmac"`
+	DigestEpoch         uint64                      `json:"digestEpoch"`
+	StartedAt           string                      `json:"startedAt"`
+	// Optional additive bindings are omitted for old signed records.
+	StepBindingHMAC string `json:"stepBindingHmac,omitempty"`
+	StepStartedAt   string `json:"stepStartedAt,omitempty"`
 }
 
 // TokenCountV1 distinguishes an unavailable provider counter from a provider
@@ -86,14 +109,26 @@ type EstimatedCostV1 struct {
 	NanoUnits uint64 `json:"nanoUnits,omitempty"`
 }
 
+// ProviderOutputTokensFinalityV1 separates a reported cumulative subtotal from
+// a provider's terminal counter. The empty legacy value proves neither.
+type ProviderOutputTokensFinalityV1 string
+
+const (
+	ProviderOutputTokensFinalV1       ProviderOutputTokensFinalityV1 = "final"
+	ProviderOutputTokensProvisionalV1 ProviderOutputTokensFinalityV1 = "provisional"
+)
+
 type ProviderUsageV1 struct {
-	EstimatedCost   EstimatedCostV1 `json:"estimatedCost,omitzero"`
-	MessagesInput   MessagesInputV1 `json:"messagesInput,omitzero"`
-	InputTokens     TokenCountV1    `json:"inputTokens"`
-	OutputTokens    TokenCountV1    `json:"outputTokens"`
-	CacheHitTokens  TokenCountV1    `json:"cacheHitTokens"`
-	CacheMissTokens TokenCountV1    `json:"cacheMissTokens"`
-	ReasoningTokens TokenCountV1    `json:"reasoningTokens"`
+	NativeCounterPresence   bool                           `json:"nativeCounterPresence,omitempty"`
+	OutputTokensFinality    ProviderOutputTokensFinalityV1 `json:"outputTokensFinality,omitempty"`
+	ReasoningTokensFinality ProviderOutputTokensFinalityV1 `json:"reasoningTokensFinality,omitempty"`
+	EstimatedCost           EstimatedCostV1                `json:"estimatedCost,omitzero"`
+	MessagesInput           MessagesInputV1                `json:"messagesInput,omitzero"`
+	InputTokens             TokenCountV1                   `json:"inputTokens"`
+	OutputTokens            TokenCountV1                   `json:"outputTokens"`
+	CacheHitTokens          TokenCountV1                   `json:"cacheHitTokens"`
+	CacheMissTokens         TokenCountV1                   `json:"cacheMissTokens"`
+	ReasoningTokens         TokenCountV1                   `json:"reasoningTokens"`
 }
 
 // ProviderCallObservationV1 is a terminal settlement for one registered
@@ -106,9 +141,20 @@ type ProviderCallObservationV1 struct {
 	Status        ProviderCallStatusV1 `json:"status"`
 	Usage         ProviderUsageV1      `json:"usage"`
 	SettledAt     string               `json:"settledAt"`
+	FirstTokenAt  string               `json:"firstTokenAt,omitempty"`
 }
 
 func (shape CacheVisibleShapeV1) Validate() error {
+	if err := shape.PublicAttribution.Validate(); err != nil {
+		return err
+	}
+	if shape.StepBindingHMAC != "" || shape.StepStartedAt != "" {
+		stepStart, err := parseCanonicalTimestamp(shape.StepStartedAt)
+		attemptStart, attemptErr := parseCanonicalTimestamp(shape.StartedAt)
+		if !isLowerHexDigest(shape.StepBindingHMAC) || err != nil || attemptErr != nil || stepStart.After(attemptStart) {
+			return errors.New("provider step binding is invalid")
+		}
+	}
 	if err := shape.ModelInput.Validate(); err != nil {
 		return err
 	}
@@ -159,6 +205,14 @@ func (count TokenCountV1) Validate() error {
 }
 
 func (usage ProviderUsageV1) Validate() error {
+	for _, field := range []struct {
+		qualification ProviderOutputTokensFinalityV1
+		known         bool
+	}{{usage.OutputTokensFinality, usage.OutputTokens.Known}, {usage.ReasoningTokensFinality, usage.ReasoningTokens.Known}} {
+		if field.qualification != "" && (field.qualification != ProviderOutputTokensFinalV1 && field.qualification != ProviderOutputTokensProvisionalV1 || !field.known) {
+			return errors.New("provider counter qualification is invalid")
+		}
+	}
 	c := usage.EstimatedCost
 	if (!c.Known && (c.Currency != "" || c.NanoUnits != 0)) || (c.Known && (c.Currency != "USD" && c.Currency != "CNY" || c.NanoUnits > 9007199254740991)) {
 		return errors.New("estimated cost is invalid")
@@ -195,7 +249,9 @@ func (usage ProviderUsageV1) Validate() error {
 
 // ValidateForProviderFamily prevents contradictory provider-native usage from
 // entering the signed attempt ledger. Missing counters remain explicitly
-// unknown; known cache counters must be complete and internally consistent.
+// unknown. Legacy cache pairs retain their complete-pair admission rule. A
+// native presence record can retain independent numeric counters, without
+// establishing comparability when the required counters are missing.
 func (usage ProviderUsageV1) ValidateForProviderFamily(family ProviderFamilyV1) error {
 	if err := usage.Validate(); err != nil {
 		return err
@@ -205,7 +261,13 @@ func (usage ProviderUsageV1) ValidateForProviderFamily(family ProviderFamilyV1) 
 		return nil
 	}
 	if !usage.InputTokens.Known || !usage.CacheHitTokens.Known || !usage.CacheMissTokens.Known {
-		return errors.New("provider cache usage counters are incomplete")
+		if !usage.NativeCounterPresence {
+			return errors.New("provider cache usage counters are incomplete")
+		}
+		if usage.InputTokens.Known && (usage.CacheHitTokens.Known && usage.CacheHitTokens.Value > usage.InputTokens.Value || usage.CacheMissTokens.Known && usage.CacheMissTokens.Value > usage.InputTokens.Value) {
+			return errors.New("provider cache usage counters exceed input tokens")
+		}
+		return nil
 	}
 	if usage.CacheHitTokens.Value > usage.InputTokens.Value || usage.CacheMissTokens.Value > usage.InputTokens.Value ||
 		usage.CacheHitTokens.Value > ^uint64(0)-usage.CacheMissTokens.Value {
@@ -244,6 +306,12 @@ func (observation ProviderCallObservationV1) Validate() error {
 	}
 	if settledAt.Before(startedAt) {
 		return errors.New("provider call observation settles before it starts")
+	}
+	if observation.FirstTokenAt != "" {
+		firstToken, err := parseCanonicalTimestamp(observation.FirstTokenAt)
+		if err != nil || firstToken.Before(startedAt) || firstToken.After(settledAt) {
+			return errors.New("provider first token time is outside its attempt")
+		}
 	}
 	return nil
 }

@@ -61,7 +61,8 @@ function orderedDeliverySeal(value: Record<string, unknown>): Record<string, unk
 
 function signedProviderFailureThreadDetail(
   rendererVersion: 'analytix.host-final-renderer/v1' | 'analytix.host-final-renderer/v2' =
-    'analytix.host-final-renderer/v1'
+    'analytix.host-final-renderer/v1',
+  outputCap = false
 ): {
   thread: Record<string, unknown>
   pin: { keyId: string; publicKey: string }
@@ -87,7 +88,7 @@ function signedProviderFailureThreadDetail(
     contextEpoch: 3,
     datasetSnapshotId: 'snapshot-provider-failure-detail',
     variant: 'GeneralGuidanceAnswer',
-    terminalReason: 'provider_failure',
+    terminalReason: outputCap ? 'success' : 'provider_failure',
     blockerCode: '',
     coverageStatus: 'guidance_only',
     checkedScopeDigest: '',
@@ -221,7 +222,7 @@ function signedProviderFailureThreadDetail(
   const usageEvent: Record<string, unknown> = {
     ...common,
     kind: 'usage',
-    seq: firstSeq + 2,
+    seq: firstSeq + (outputCap ? 1 : 2),
     model: 'model-provider-failure',
     providerId: 'provider-provider-failure',
     usage: {
@@ -236,26 +237,27 @@ function signedProviderFailureThreadDetail(
       turns: 1
     },
     cacheDiagnostics: {},
-    usageFinalStatus: 'failed',
+    usageFinalStatus: outputCap ? 'completed' : 'failed',
     publicationEventId: acceptedFinalPublicationEventId(record.recordDigest, 'usage'),
     publicationSlot: 'usage'
   }
   usageEvent.publicationPayloadDigest = acceptedFinalPublicationPayloadDigest(usageEvent)
   const terminalEvent: Record<string, unknown> = {
     ...common,
-    kind: 'turn_failed',
-    seq: firstSeq + 3,
-    status: 'failed',
-    terminalReason: 'provider_failure',
-    error: text,
-    message: text,
-    code: errorItem.code,
-    itemId: errorItem.id,
+    kind: outputCap ? 'turn_completed' : 'turn_failed',
+    seq: firstSeq + (outputCap ? 2 : 3),
+    status: outputCap ? 'completed' : 'failed',
+    terminalReason: outputCap ? 'success' : 'provider_failure',
+    ...(outputCap ? { endReason: { kind: 'max-tokens' } } : {
+      error: text, message: text, code: errorItem.code, itemId: errorItem.id
+    }),
     publicationEventId: acceptedFinalPublicationEventId(record.recordDigest, 'terminal'),
     publicationSlot: 'terminal'
   }
   terminalEvent.publicationPayloadDigest = acceptedFinalPublicationPayloadDigest(terminalEvent)
-  const events = [assistantEvent, errorEvent, usageEvent, terminalEvent]
+  const events = outputCap
+    ? [assistantEvent, usageEvent, terminalEvent]
+    : [assistantEvent, errorEvent, usageEvent, terminalEvent]
   const lastSeq = firstSeq + events.length - 1
   const eventManifestDigest = sha256(goCanonicalJSON(events.map((event) => ({
     slot: event.publicationSlot,
@@ -346,10 +348,11 @@ function signedProviderFailureThreadDetail(
       turns: [{
         id: turnId,
         threadId,
-        status: 'failed',
+        status: outputCap ? 'completed' : 'failed',
+        ...(outputCap ? { endReason: { kind: 'max-tokens' } } : {}),
         createdAt: timestamp,
         finishedAt: timestamp,
-        items: [assistantItem, errorItem],
+        items: outputCap ? [assistantItem] : [assistantItem, errorItem],
         acceptedFinalView
       }],
       latestSeq: lastSeq,
@@ -694,6 +697,28 @@ function caseCompactionThreadDetail(): Record<string, unknown> {
 }
 
 describe('thread detail runtime response', () => {
+  it('hydrates output cap only when the exact committed delivery and turn agree', () => {
+    const fixture = signedProviderFailureThreadDetail('analytix.host-final-renderer/v2', true)
+    const parsed = ThreadDetailResponseV1Schema.safeParse(fixture.thread)
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true)
+    const response = sanitizeRuntimeResponse({
+      ok: true, status: 200, body: JSON.stringify(fixture.thread)
+    }, `/v1/threads/${fixture.thread.id}`, fixture.pin, 'GET')
+    expect(response.ok, response.body).toBe(true)
+    expect(JSON.parse(response.body).turns[0].endReason).toEqual({ kind: 'max-tokens' })
+
+    const detached = structuredClone(fixture.thread) as Record<string, any>
+    delete detached.turns[0].endReason
+    expect(ThreadDetailResponseV1Schema.safeParse(detached).success).toBe(false)
+    const failed = signedProviderFailureThreadDetail()
+    const invented = structuredClone(failed.thread) as Record<string, any>
+    invented.turns[0].endReason = { kind: 'max-tokens' }
+    expect(ThreadDetailResponseV1Schema.safeParse(invented).success).toBe(false)
+    const open = structuredClone(fixture.thread) as Record<string, any>
+    open.turns[0].endReason.privateReason = 'provider-private'
+    expect(ThreadDetailResponseV1Schema.safeParse(open).success).toBe(false)
+  })
+
   it('accepts V3 public delivery derived from both private V5 renderer versions', () => {
     for (const rendererVersion of [
       'analytix.host-final-renderer/v1',
@@ -1347,7 +1372,21 @@ describe('ordinary child ledger HTTP contract', () => {
     expect(response(detail).ok).toBe(true)
     detail.workspace = '/synthetic/TestFixture1234567890/001/ordinary-workspace'
     expect(ThreadDetailResponseV1Schema.safeParse(detail).success).toBe(true)
-    expect(response(detail).ok).toBe(false)
+    const allowed = response(detail)
+    expect(allowed.ok).toBe(true)
+    expect(JSON.parse(allowed.body)).toEqual(detail)
+
+    for (const workspace of [
+      '/synthetic/account-1234567890/ordinary-workspace',
+      '/synthetic/13800138000/ordinary-workspace'
+    ]) {
+      detail.workspace = workspace
+      expect(ThreadDetailResponseV1Schema.safeParse(detail).success).toBe(true)
+      const rejected = response(detail)
+      expect(rejected.ok).toBe(false)
+      expect(rejected.status).toBe(502)
+      expect(rejected.body).not.toContain(workspace)
+    }
   })
   it.each(['unknown kind', 'raw payload', 'authority', 'parent binding', 'status mismatch'])('rejects %s after a valid control', (change) => {
     const detail = ordinaryChildLedgerDetail()
@@ -1359,5 +1398,81 @@ describe('ordinary child ledger HTTP contract', () => {
     if (change === 'parent binding') Object.assign(item.arguments.diagnostics, { parentTurnId: 'foreign-turn' })
     if (change === 'status mismatch') item.arguments.status = 'delivered'
     expect(response(detail).ok).toBe(false)
+  })
+})
+
+
+describe('continued Host question thread detail correlation', () => {
+  function questionItem(threadId: string, turnId: string, status = 'continued') {
+    const inputId = `input_${'123456789012'}${'a'.repeat(52)}`
+    const timestamp = '2026-10-08T00:00:00Z'
+    return {
+      id: 'item-continued-question', threadId, turnId, kind: 'user_input', role: 'system', status,
+      createdAt: timestamp, ...(status === 'pending' ? {} : { finishedAt: timestamp }),
+      inputId, prompt: 'Choose', questions: [{ id: `${inputId}_1`, header: 'Path', question: 'Choose',
+        multiSelect: false, options: [{ id: `${inputId}_1_option_1`, label: 'Fast', description: '' }] }],
+      timedWait: { timeoutSeconds: 1, deadlineAt: timestamp }
+    }
+  }
+
+  it.each(['pending', 'submitted', 'cancelled', 'continued'])('preserves %s questions across HTTP and IPC response validation', status => {
+    const thread = ordinaryThreadDetail() as Record<string, any>
+    const turn = thread.turns[0]
+    turn.items = [questionItem(thread.id, turn.id, status)]
+    thread.pendingUserInputIds = status === 'pending' ? [turn.items[0].inputId] : []
+    const parsed = ThreadDetailResponseV1Schema.safeParse(thread)
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true)
+    if (!parsed.success) throw new Error('Invalid continued-question detail fixture')
+    expect(parsed.data).toEqual(thread)
+    expect(sanitizePublicRuntimeValue(thread)).toEqual(thread)
+    const path = `/v1/threads/${thread.id}`
+    const host = sanitizeRuntimeResponse({ ok: true, status: 200, body: JSON.stringify(thread) }, path, null, 'GET')
+    expect(host.ok, host.body).toBe(true)
+    expect(host.status).toBe(200)
+    const ipc = sanitizeRuntimeResponse(host, path, null, 'GET')
+    expect(ipc).toEqual(host)
+    expect(JSON.parse(ipc.body)).toEqual(thread)
+  })
+
+  it.each(['analytix.host-final-renderer/v1', 'analytix.host-final-renderer/v2'] as const)('restores signed %s history while retaining the continued question', rendererVersion => {
+    const fixture = signedProviderFailureThreadDetail(rendererVersion)
+    const thread = fixture.thread as Record<string, any>
+    thread.turns[0].items.unshift(questionItem(thread.id, thread.turns[0].id))
+    const parsed = ThreadDetailResponseV1Schema.safeParse(thread)
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true)
+    if (!parsed.success) throw new Error('Invalid signed continued-question detail fixture')
+    expect(parsed.data).toEqual(thread)
+    const path = `/v1/threads/${thread.id}`
+    const host = sanitizeRuntimeResponse({ ok: true, status: 200, body: JSON.stringify(thread) }, path, fixture.pin, 'GET')
+    expect(host.ok, host.body).toBe(true)
+    expect(host.status).toBe(200)
+    const ipc = sanitizeRuntimeResponse(host, path, fixture.pin, 'GET')
+    expect(ipc).toEqual(host)
+    expect(JSON.parse(ipc.body)).toEqual(thread)
+    const noPin = sanitizeRuntimeResponse(host, path, null, 'GET')
+    expect(noPin.ok).toBe(false)
+    expect(noPin.status).toBe(502)
+  })
+
+  it('rejects continued question PII and detached bindings at the exact HTTP seam', () => {
+    for (const mutate of [
+      (item: ReturnType<typeof questionItem>) => { item.questions[0].question = 'account=6222020202020202020' },
+      (item: ReturnType<typeof questionItem>) => { item.questions[0].options[0].description = 'phone=13800138000' },
+      (item: ReturnType<typeof questionItem>) => { item.questions[0].id = `${item.inputId}_2` },
+      (item: ReturnType<typeof questionItem>) => { item.questions[0].options[0].id = `${item.inputId}_2_option_1` }
+    ]) {
+      const thread = ordinaryThreadDetail() as Record<string, any>
+      const turn = thread.turns[0]
+      const item = questionItem(thread.id, turn.id)
+      mutate(item)
+      turn.items = [item]
+      const path = `/v1/threads/${thread.id}`
+      const response = sanitizeRuntimeResponse({ ok: true, status: 200, body: JSON.stringify(thread) }, path, null, 'GET')
+      expect(response.ok).toBe(false)
+      expect(response.status).toBe(502)
+      expect(response.body).not.toContain('6222020202020202020')
+      expect(response.body).not.toContain('13800138000')
+      expect(sanitizeRuntimeResponse(response, path, null, 'GET')).toEqual(response)
+    }
   })
 })

@@ -5,12 +5,12 @@ Applies to: `docs/legacy/`
 Source of truth: 无；当前行为回到代码、accepted specs 和
 `docs/analytix/README.md`
 
-本目录保存 former Kun、旧架构或迁移来源材料，目的是支持 provenance、历史
-比较和迁移审计。它不是当前 Analytix 的规范、操作手册、产品身份或实现证据。
+本目录保留 former Kun 历史材料的 Git 恢复入口，供历史比较和迁移审计。
+它不是当前 Analytix 的规范、操作手册、产品身份或实现证据。
 
 当前子目录：
 
-- `kun/`：former Kun 架构、缓存、hooks 和 contributing 的中英文历史副本。
+- [kun 历史指针](kun/README.md)：中英文旧手册已清退，原文从固定 Git 提交恢复。
 
 引用这些文件时必须写明 `historical`，并核对当前 Analytix 边界：
 

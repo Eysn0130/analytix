@@ -70,6 +70,32 @@ func (s *Service) CommitNativeChange(ctx context.Context, id, thread, change, op
 	return s.verifyCurrentReceipt(ctx, current, receipt)
 }
 
+// BuildNativeWorkbookCandidate is an internal prepared-change operation. The
+// session supplies all file authority; no caller can substitute a path/review.
+func (s *Service) BuildNativeWorkbookCandidate(ctx context.Context, id, thread, change, operation, baseRevision string) (fileport.NativeWorkbookCandidate, error) {
+	if s == nil {
+		return fileport.NativeWorkbookCandidate{}, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return fileport.NativeWorkbookCandidate{}, err
+	}
+	files, ok := s.files.(fileport.NativeWorkbookCandidateFiles)
+	if !ok {
+		return fileport.NativeWorkbookCandidate{}, ErrUnavailable
+	}
+	result, err := files.BuildNativeWorkbookCandidate(ctx, fileport.NativeWorkbookCandidateInput{
+		Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID,
+		ThreadID: thread, ChangeID: change, OperationID: operation, BaseRevision: baseRevision,
+	})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return fileport.NativeWorkbookCandidate{}, ErrUnavailable
+	}
+	return result, err
+}
+
 func (s *Service) UndoNativeChange(ctx context.Context, id, thread, change, baseRevision string) (fileport.Receipt, error) {
 	if s == nil {
 		return fileport.Receipt{}, ErrUnavailable
@@ -172,6 +198,90 @@ func (s *Service) ValidateNativePresentation(ctx context.Context, id, base strin
 	result, err := files.ValidateNativePresentation(ctx, fileport.NativePresentationInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, BaseRevision: base, Selection: selected, Patch: patch})
 	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
 		return nil, ErrUnavailable
+	}
+	return result, err
+}
+
+func (s *Service) PrepareNativeManual(ctx context.Context, id string, draft fileport.NativeManualDraft) (fileport.NativeChangeStatus, error) {
+	if s == nil {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return fileport.NativeChangeStatus{}, err
+	}
+	files, ok := s.files.(fileport.NativeManualFiles)
+	if !ok {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	result, err := files.PrepareNativeManual(ctx, fileport.NativeManualInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, Draft: draft})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	return result, err
+}
+
+func (s *Service) NativeWorkbookEditing(ctx context.Context, id, base string) error {
+	if s == nil {
+		return ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return err
+	}
+	files, ok := s.files.(fileport.NativeWorkbookManualFiles)
+	if !ok {
+		return ErrUnavailable
+	}
+	err = files.NativeWorkbookEditing(ctx, fileport.NativeWorkbookEditingInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, BaseRevision: base})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return ErrUnavailable
+	}
+	return err
+}
+
+func (s *Service) ValidateNativeWorkbookManual(ctx context.Context, id, base string, selected office.WorkbookSelection, target office.WorkbookWriteTarget, edit office.WorkbookManualEdit) (*office.WorkbookReview, error) {
+	if s == nil {
+		return nil, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	files, ok := s.files.(fileport.NativeWorkbookManualFiles)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	result, err := files.ValidateNativeWorkbookManual(ctx, fileport.NativeWorkbookManualValidationInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, BaseRevision: base, Selection: selected, WriteTarget: target, Edit: edit})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return nil, ErrUnavailable
+	}
+	return result, err
+}
+
+func (s *Service) PrepareNativeWorkbookManual(ctx context.Context, id string, draft fileport.NativeWorkbookManualDraft) (fileport.NativeChangeStatus, error) {
+	if s == nil {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, err := s.currentLocked(ctx, id)
+	if err != nil {
+		return fileport.NativeChangeStatus{}, err
+	}
+	files, ok := s.files.(fileport.NativeWorkbookManualFiles)
+	if !ok {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
+	}
+	result, err := files.PrepareNativeWorkbookManual(ctx, fileport.NativeWorkbookManualInput{Workspace: current.workspace, Path: current.path, ObjectIdentity: current.objectID, Draft: draft})
+	if s.identity.ValidateCurrent(ctx, current.principal) != nil {
+		return fileport.NativeChangeStatus{}, ErrUnavailable
 	}
 	return result, err
 }

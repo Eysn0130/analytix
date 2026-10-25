@@ -93,6 +93,12 @@ func (service *Service) Verify(ctx context.Context, entry map[string]any, contex
 	if service == nil || service.authority == nil {
 		return errors.New("steering admission authority is unavailable")
 	}
+	if entry["status"] == "cancelled" {
+		admission, err := domainsteering.AdmissionAuthorityMaterialV1(entry, contextDigest)
+		if err != nil || service.authority.VerifyTrusted(ctx, admission.KeyID, admission.PublicKey, admission.SigningBytes, admission.Signature) != nil {
+			return errors.New("steering cancellation admission authority is not trusted")
+		}
+	}
 	material, err := domainsteering.EntryAuthorityMaterialV1(entry, contextDigest)
 	if err != nil {
 		return err
@@ -114,4 +120,27 @@ func (service *Service) VerifyTrusted(
 		return errors.New("steering admission authority is unavailable")
 	}
 	return service.authority.VerifyTrusted(ctx, keyID, publicKey, message, signature)
+}
+
+func (service *Service) CancelUserInput(ctx context.Context, entry map[string]any, contextDigest string) (map[string]any, error) {
+	if service == nil || service.authority == nil {
+		return nil, errors.New("steering cancellation authority is unavailable")
+	}
+	admission, err := domainsteering.AdmissionAuthorityMaterialV1(entry, contextDigest)
+	if err != nil || service.authority.VerifyTrusted(ctx, admission.KeyID, admission.PublicKey, admission.SigningBytes, admission.Signature) != nil {
+		return nil, errors.New("steering admission authority is not trusted for cancellation")
+	}
+	signingBytes, err := domainsteering.CancelledUserInputEntrySigningBytesV1(entry, contextDigest)
+	if err != nil {
+		return nil, err
+	}
+	signature, err := service.authority.Sign(ctx, signingBytes)
+	if err != nil {
+		return nil, err
+	}
+	sealed, err := domainsteering.SealCancelledUserInputEntryAuthorityV1(entry, contextDigest, service.authority.KeyID(), service.authority.PublicKey(), signature)
+	if err != nil || service.Verify(ctx, sealed, contextDigest) != nil {
+		return nil, errors.New("steering cancellation authority cannot be sealed")
+	}
+	return sealed, nil
 }

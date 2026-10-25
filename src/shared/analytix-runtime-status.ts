@@ -80,6 +80,11 @@ const RUNTIME_STATUS_PUBLIC_V1_CODE_SPECS = {
     message: 'Analytix runtime is restarting to apply settings.',
     sources: ['settings-apply']
   },
+  settings_apply_failed: {
+    state: 'failed',
+    message: 'Runtime settings could not be applied or restored.',
+    sources: ['settings-apply-rollback']
+  },
   settings_rollback_stopped: {
     state: 'stopped',
     message: 'Previous runtime settings were restored, but automatic startup is unavailable.',

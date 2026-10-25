@@ -5,6 +5,7 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,6 +36,7 @@ import (
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainnative "analytix.local/runtime-go/internal/domain/nativecomponent"
 	domainplugincapability "analytix.local/runtime-go/internal/domain/plugincapability"
+	domainprocess "analytix.local/runtime-go/internal/domain/processdisplay"
 	domainregistry "analytix.local/runtime-go/internal/domain/providerregistry"
 	domainruntimeconfig "analytix.local/runtime-go/internal/domain/runtimeconfig"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -89,6 +91,8 @@ func (m *ProductionManager) managedToolCapabilityCurrentNoLock(name string, tool
 }
 
 type ProductionManager struct {
+	effectAdmission              mcpEffectAdmission
+	hostScheduleServer           *ServerSpec
 	mu                           sync.Mutex
 	sourceExecutionMu            sync.RWMutex
 	specs                        []ServerSpec
@@ -138,6 +142,7 @@ type mcpAccountCredentialBoundClient struct {
 	protectedReadDirs []string
 	resolver          mcpAccountCredentialResolver
 	newTransport      func(ServerSpec, string, []string) (mcpTransportClient, error)
+	admitConstructor  func(context.Context) error
 	observed          domainmcp.ServerIdentity
 	closed            bool
 }
@@ -269,6 +274,7 @@ func (client *mcpAccountCredentialBoundClient) withEffect(
 		effectSpec.Headers = map[string]string{}
 	}
 	effectSpec.Headers["Authorization"] = "Bearer " + token
+	domainprocess.RecordKnownSecretsV1(ctx, token)
 	draft.Token = ""
 	draft.AccessToken = ""
 	draft.RefreshToken = ""
@@ -277,6 +283,10 @@ func (client *mcpAccountCredentialBoundClient) withEffect(
 	constructor := client.newTransport
 	if constructor == nil {
 		constructor = newMCPTransportClient
+	}
+	if client.admitConstructor == nil || client.admitConstructor(ctx) != nil {
+		delete(effectSpec.Headers, "Authorization")
+		return nil, errMCPEffectAdmission
 	}
 	transport, err := constructor(effectSpec, client.proxyURL, client.protectedReadDirs)
 	if err != nil {
@@ -467,6 +477,7 @@ func cloneToolContractIssues(issues []mcpprotocol.ToolContractIssue) []mcpprotoc
 type mcpServerCapabilities = mcpprotocol.Capabilities
 
 type ProductionManagerOptions struct {
+	HostScheduleServer          *ServerSpec
 	CacheDir                    string
 	ProxyURL                    string
 	ProtectedReadDirs           []string
@@ -513,6 +524,7 @@ func NewProductionManagerWithOptions(specs []ServerSpec, options ProductionManag
 		accountFlowExecutor = options.AccountFlowExecutor
 	}
 	return &ProductionManager{
+		hostScheduleServer:           exactHostScheduleClientBindingV1(normalizedSpecs, options.HostScheduleServer),
 		specs:                        normalizedSpecs,
 		cacheDir:                     strings.TrimSpace(options.CacheDir),
 		proxyURL:                     strings.TrimSpace(options.ProxyURL),
@@ -731,6 +743,7 @@ func (m *ProductionManager) Connect() {
 	defer m.sourceExecutionMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	_, _ = m.effectAdmissionCallback()
 	m.connectNoLock(false)
 }
 
@@ -779,7 +792,7 @@ func (m *ProductionManager) connectNoLock(includeBackground bool) {
 			}
 			continue
 		}
-		m.connectSpecNoLock(spec, specHash)
+		m.connectSpecNoLock(context.Background(), spec, specHash)
 	}
 	m.refreshCatalogStateNoLock()
 }
@@ -789,7 +802,7 @@ func (m *ProductionManager) refreshCatalogStateNoLock() {
 	m.catalogHash = catalogFingerprintForManagedToolsWithIssues(m.tools, m.toolContractIssues)
 }
 
-func (m *ProductionManager) connectSpecNoLock(spec ServerSpec, specHash string) bool {
+func (m *ProductionManager) connectSpecNoLock(ctx context.Context, spec ServerSpec, specHash string) bool {
 	m.removeServerToolsNoLock(spec.ID)
 	delete(m.serverIdentities, spec.ID)
 	delete(m.toolContractIssues, spec.ID)
@@ -807,7 +820,7 @@ func (m *ProductionManager) connectSpecNoLock(spec ServerSpec, specHash string) 
 		m.failures[spec.ID] = redactMCPDiagnosticText(err.Error(), spec)
 		return false
 	}
-	client, err := m.newMCPTransportClientNoLock(spec, specHash)
+	client, err := m.newMCPTransportClientNoLock(ctx, spec, specHash)
 	if err != nil {
 		if spec.ID == "analytix_funds" {
 			m.revokeHostFundsSourceReadNoLock(
@@ -821,7 +834,11 @@ func (m *ProductionManager) connectSpecNoLock(spec ServerSpec, specHash string) 
 		}
 		return false
 	}
-	catalog, err := listMCPToolCatalogContext(context.Background(), client)
+	var catalog mcpprotocol.ToolCatalog
+	err = m.admitMCPEffect(ctx, client, "")
+	if err == nil {
+		catalog, err = listMCPToolCatalogContext(ctx, client)
+	}
 	if err != nil {
 		client.Close()
 		if spec.ID == "analytix_funds" {
@@ -949,8 +966,24 @@ func withoutHostFundsCountToolV1(tools []ToolSpec) []ToolSpec {
 
 func (m *ProductionManager) refreshPromptResourceCatalogAsync(spec ServerSpec, client mcpTransportClient) {
 	go func() {
-		prompts, promptsErr := client.ListPrompts()
-		resources, resourcesErr := client.ListResources()
+		m.sourceExecutionMu.RLock()
+		defer m.sourceExecutionMu.RUnlock()
+		m.mu.Lock()
+		current := m.clients[spec.ID] == client
+		m.mu.Unlock()
+		if !current {
+			return
+		}
+		var prompts []PromptSpec
+		var resources []ResourceSpec
+		promptsErr := m.admitMCPEffect(context.Background(), client, "")
+		if promptsErr == nil {
+			prompts, promptsErr = client.ListPrompts()
+		}
+		resourcesErr := m.admitMCPEffect(context.Background(), client, "")
+		if resourcesErr == nil {
+			resources, resourcesErr = client.ListResources()
+		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		if m.clients[spec.ID] != client {
@@ -1195,10 +1228,10 @@ func (m *ProductionManager) CallToolSecurityBoundContext(ctx context.Context, to
 		return map[string]any{"toolName": toolName, "executed": false, "code": "mcp_host_context_invalid", "error": "MCP host context does not match the current granted tool arguments"}
 	}
 	var transportHostContext *domainmcp.HostContextEnvelope
-	if isHighRiskCanonicalToolName(toolName) {
+	if isHighRiskCanonicalToolName(toolName) || hostScheduleCreateToolV1(toolName) {
 		transportHostContext = &envelope
 	}
-	return m.callToolContext(ctx, toolName, approved, grant.ConnectionEpoch, grant.SchemaHash, grant.ServerIdentity, &grant.ReadOnly, true, &securityContext, transportHostContext, callArguments)
+	return m.callToolContext(withHostScheduleReceiptContextV1(ctx, envelope), toolName, approved, grant.ConnectionEpoch, grant.SchemaHash, grant.ServerIdentity, &grant.ReadOnly, true, &securityContext, transportHostContext, callArguments)
 }
 
 // ValidateCurrentAccountFlowOuterGrant atomically rechecks the exact durable
@@ -1377,7 +1410,7 @@ func (m *ProductionManager) callToolContext(ctx context.Context, toolName string
 		if specHash == "" {
 			specHash = SpecFingerprint(spec)
 		}
-		if !m.connectSpecNoLock(spec, specHash) {
+		if !m.connectSpecNoLock(ctx, spec, specHash) {
 			failure := m.failures[serverID]
 			m.refreshCatalogStateNoLock()
 			m.mu.Unlock()
@@ -1409,7 +1442,7 @@ func (m *ProductionManager) callToolContext(ctx context.Context, toolName string
 			if specHash == "" {
 				specHash = SpecFingerprint(spec)
 			}
-			if m.connectSpecNoLock(spec, specHash) {
+			if m.connectSpecNoLock(ctx, spec, specHash) {
 				m.refreshCatalogStateNoLock()
 				tool, ok = m.tools[toolName]
 				client = m.clients[serverID]
@@ -1437,6 +1470,9 @@ func (m *ProductionManager) callToolContext(ctx context.Context, toolName string
 	outputSchema := append(json.RawMessage(nil), tool.Tool.OutputSchema...)
 	spec, specOK = m.specByIDNoLock(serverID)
 	hostReadOnly := specOK && spec.ReadOnlyToolNames[rawName]
+	if hostScheduleCreateToolV1(toolName) && (!specOK || !hostScheduleCreateOriginAllowedV1(spec, rawName)) {
+		hostContext = nil
+	}
 	if expectedReadOnly != nil && (!specOK || hostReadOnly != *expectedReadOnly) {
 		m.mu.Unlock()
 		return map[string]any{
@@ -1462,6 +1498,37 @@ func (m *ProductionManager) callToolContext(ctx context.Context, toolName string
 				"code": "mcp_arguments_invalid", "error": "MCP tool arguments do not match the advertised account-flow contract",
 			}
 		}
+	}
+	// Only host-known credentials used by this actual effect enter the shared
+	// per-tool registry. Response text never defines a credential authority.
+	requestSecrets := mcpredaction.ExplicitAuthValues(spec.Headers, spec.Env, spec.URL)
+	domainprocess.RecordKnownSecretsV1(ctx, requestSecrets...)
+	for _, value := range requestSecrets {
+		scheme, token, found := strings.Cut(value, " ")
+		if found && (strings.EqualFold(scheme, "Bearer") || strings.EqualFold(scheme, "Basic")) {
+			token = strings.TrimSpace(token)
+			domainprocess.RecordKnownSecretsV1(ctx, token)
+			if strings.EqualFold(scheme, "Basic") {
+				if len(token) > domainprocess.RawCaptureByteLimitV1 {
+					domainprocess.InvalidateKnownSecretsV1(ctx)
+					continue
+				}
+				decoded, decodeErr := base64.StdEncoding.DecodeString(token)
+				username, password, pair := strings.Cut(string(decoded), ":")
+				if decodeErr != nil || !pair {
+					domainprocess.InvalidateKnownSecretsV1(ctx)
+				} else {
+					domainprocess.RecordKnownSecretsV1(ctx, string(decoded), username, password)
+				}
+				clear(decoded)
+			}
+		}
+	}
+	if err := m.admitMCPEffect(ctx, client, rawName); err != nil {
+		if ctx.Err() != nil {
+			return mcpContextCanceledResult(toolName, serverID, ctx.Err())
+		}
+		return map[string]any{"toolName": toolName, "serverId": serverID, "executed": false, "code": "managed_editing_mutation_blocked", "error": "MCP uncontained effect admission is unavailable"}
 	}
 	var result any
 	hostPrivateHandedOff := false
@@ -1547,9 +1614,9 @@ func (m *ProductionManager) callToolContext(ctx context.Context, toolName string
 			return rpcResult
 		}
 		if !bound && hostReadOnly && shouldRetryMCPCall(err) {
-			retryTool, retryClient, retryOK, retryCode, retryError := m.reconnectToolForRetry(toolName, serverID, rawName)
+			retryTool, retryClient, retryOK, retryCode, retryError := m.reconnectToolForRetry(ctx, toolName, serverID, rawName)
 			if retryOK && retryClient != nil {
-				retryResult, retryErr := callMCPTransportTool(ctx, retryClient, retryTool.RawName, callArguments, nil)
+				retryResult, retryErr := m.admittedToolCall(ctx, retryClient, retryTool.RawName, callArguments, nil)
 				if retryErr == nil {
 					m.mu.Lock()
 					m.calls++
@@ -1615,8 +1682,12 @@ func (m *ProductionManager) callToolContext(ctx context.Context, toolName string
 		}
 	}
 	m.calls++
+	nativeScheduleBound := bound && securityContext != nil && hostScheduleLoopbackPortV1(currentSpec) != 0
 	m.mu.Unlock()
 	output := mcpExecutedToolResult(toolName, serverID, result, outputSchema, readOnlyHint, false)
+	if nativeScheduleBound {
+		m.attachHostScheduleReceiptV1(ctx, toolName, output)
+	}
 	hostPrivateHandedOff = true
 	return output
 }
@@ -1676,6 +1747,9 @@ func mcpConnectionEpochMismatch(toolName string, serverID string, expected uint6
 func mcpExecutedToolResult(toolName string, serverID string, result any, outputSchema json.RawMessage, readOnlyHint bool, retried bool) map[string]any {
 	var hostPrivate *hostFundsAccountFlowEvidenceCarrierV1
 	if unsealed, ok := result.(domainmcp.LosslessToolResult); ok && unsealed.HostPrivate != nil {
+		if injected, carrierOK := unsealed.HostPrivate.(*hostScheduleReceiptCarrierV1); carrierOK {
+			injected.discard()
+		}
 		if injected, carrierOK := unsealed.HostPrivate.(*hostFundsAccountFlowEvidenceCarrierV1); carrierOK {
 			injected.discard()
 		}
@@ -1822,7 +1896,7 @@ func mcpContextCanceledResult(toolName string, serverID string, err error) map[s
 	}
 }
 
-func (m *ProductionManager) reconnectToolForRetry(toolName string, serverID string, rawName string) (managedTool, mcpTransportClient, bool, string, string) {
+func (m *ProductionManager) reconnectToolForRetry(ctx context.Context, toolName string, serverID string, rawName string) (managedTool, mcpTransportClient, bool, string, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	spec, ok := m.specByIDNoLock(serverID)
@@ -1841,7 +1915,7 @@ func (m *ProductionManager) reconnectToolForRetry(toolName string, serverID stri
 	if specHash == "" {
 		specHash = SpecFingerprint(spec)
 	}
-	if !m.connectSpecNoLock(spec, specHash) {
+	if !m.connectSpecNoLock(ctx, spec, specHash) {
 		return managedTool{}, nil, false, "mcp_not_connected", m.failures[serverID]
 	}
 	m.refreshCatalogStateNoLock()
@@ -2272,6 +2346,9 @@ func (m *ProductionManager) probeCaseSourceUnderLease(
 		m.revokeMCPAuthorityAfterNativeFailure(serverID, client, errors.New("MCP native probe transport is unavailable"))
 		return domainsecurity.VerifiedSourceProbe{}, fundsCountCanaryObservationV2{}, errors.New("case source probe transport is unavailable")
 	}
+	if err := m.admitMCPEffect(probeContext, client, ""); err != nil {
+		return domainsecurity.VerifiedSourceProbe{}, fundsCountCanaryObservationV2{}, err
+	}
 	freshCatalogResult, err := listMCPToolCatalogContext(probeContext, client)
 	if err != nil {
 		m.revokeMCPAuthorityAfterNativeFailure(serverID, client, err)
@@ -2295,6 +2372,9 @@ func (m *ProductionManager) probeCaseSourceUnderLease(
 	params, err := sourceProbeNativeParamsV2(constraints.fundsCountProjection)
 	if err != nil {
 		return domainsecurity.VerifiedSourceProbe{}, fundsCountCanaryObservationV2{}, errors.New("case source probe projection carrier is invalid")
+	}
+	if err := m.admitMCPEffect(probeContext, client, ""); err != nil {
+		return domainsecurity.VerifiedSourceProbe{}, fundsCountCanaryObservationV2{}, err
 	}
 	responseValue, err := native.CallNativeContext(probeContext, "analytix/sourceProbe", params)
 	if err != nil {
@@ -2321,6 +2401,9 @@ func (m *ProductionManager) probeCaseSourceUnderLease(
 		return domainsecurity.VerifiedSourceProbe{}, fundsCountCanaryObservationV2{}, errors.New("case source probe funds source-read grant is unavailable")
 	}
 	if err := m.requireHostFundsNativeOwnerCurrent(probeContext, serverID); err != nil {
+		return domainsecurity.VerifiedSourceProbe{}, fundsCountCanaryObservationV2{}, err
+	}
+	if err := m.admitMCPEffect(probeContext, client, hostFundsCountToolNameV1); err != nil {
 		return domainsecurity.VerifiedSourceProbe{}, fundsCountCanaryObservationV2{}, err
 	}
 	countResult, err := callFundsCountToolWithProjectionV2(
@@ -2913,6 +2996,9 @@ func (m *ProductionManager) WithCurrentEvidenceReadAuthority(
 			var raw domainmcp.LosslessToolResult
 			var nativeErr error
 			err = capability.UseExact(input.Context, probe, selection, func(leaseContext context.Context) error {
+				if err := m.admitMCPEffect(leaseContext, client, ""); err != nil {
+					return err
+				}
 				raw, nativeErr = native.CallNativeLosslessContext(leaseContext, fundsEvidenceReadMethod, params)
 				if nativeErr != nil {
 					return nil
@@ -4047,7 +4133,13 @@ func normalizeMCPTrustPath(value string) string {
 	return normalized
 }
 
-func (m *ProductionManager) newMCPTransportClientNoLock(spec ServerSpec, specHash string) (mcpTransportClient, error) {
+func (m *ProductionManager) newMCPTransportClientNoLock(ctx context.Context, spec ServerSpec, specHash string) (mcpTransportClient, error) {
+	if _, err := m.effectAdmissionCallback(); err != nil {
+		return nil, err
+	}
+	if m.hostScheduleServer != nil && reflect.DeepEqual(canonicalHostScheduleMCPBindingV1(spec), canonicalHostScheduleMCPBindingV1(*m.hostScheduleServer)) && specHash == SpecFingerprint(spec) {
+		return newHostScheduleClientV1(m, spec), nil
+	}
 	if reservedCaseFactMCPServerID(spec.ID) || mcpidentity.IsHighRiskServerID(spec.ID) {
 		if m == nil || m.hostFundsServer == nil || m.hostFundsFingerprint == "" ||
 			spec.ID != "analytix_funds" || specHash != m.hostFundsFingerprint ||
@@ -4057,7 +4149,7 @@ func (m *ProductionManager) newMCPTransportClientNoLock(spec ServerSpec, specHas
 		return newHostFundsTransportClientV1(m.hostFundsServer, spec, specHash, m.accountFlowExecutor != nil)
 	}
 	if spec.AccountCredential == nil {
-		return newMCPTransportClient(spec, m.proxyURL, m.protectedReadDirs)
+		return m.newAdmittedMCPTransport(ctx, spec, m.proxyURL, m.protectedReadDirs)
 	}
 	if m == nil || m.accountCredentialResolver == nil || !validMCPAccountCredentialBinding(spec) ||
 		hasMCPAuthorizationHeader(spec.Headers) {
@@ -4067,6 +4159,7 @@ func (m *ProductionManager) newMCPTransportClientNoLock(spec ServerSpec, specHas
 		spec: cloneServerSpecForAuthority(spec), proxyURL: m.proxyURL,
 		protectedReadDirs: append([]string(nil), m.protectedReadDirs...),
 		resolver:          m.accountCredentialResolver, newTransport: newMCPTransportClient,
+		admitConstructor: func(ctx context.Context) error { return m.admitMCPEffect(ctx, nil, "") },
 	}, nil
 }
 

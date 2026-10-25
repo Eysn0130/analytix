@@ -1,18 +1,27 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   chatBlockFromItem,
+  projectToolEventForRenderer,
+  createOrdinaryHistoryReplay,
+  isOrdinaryDisplayHistoryBlock,
   dispatchAnalytixRuntimeEvent,
   dispatchAnalytixRuntimeEvents,
   generalTerminalProjectionBatchFromRuntime,
   mergeChatBlocks,
+  mergeTurnUsageById,
+  reconcileTurnUsageById,
+  turnUsageEntryFromBatch,
+  filterRewoundDisplayBlocks,
   RUNTIME_EVENT_KINDS_COVERED_BY_RENDERER,
   threadFromCore,
   usageFromCore
 } from './analytix-mapper'
 import { RuntimeEventKind } from '../../../../packages/runtime/src/contracts/events'
+import { PublicToolResultProjectionV1, TurnItem } from '../../../../packages/runtime/src/contracts/items'
 import { CORE_RUNTIME_EVENT_KINDS } from './analytix-contract'
-import type { CoreRuntimeEventJson, CoreTurnItemJson } from './analytix-contract'
-import type { ChatBlock, ThreadErrorOptions, ThreadEventSink } from './types'
+import type { CoreRuntimeEventJson, CoreTurnItemJson, CoreChildRuntimeMetadataJson } from './analytix-contract'
+import { taskJobSummaryV1 } from '../../../../packages/runtime/src/contracts/task-job-output'
+import type { ChatBlock, CompactionEventPayload, ThreadErrorOptions, ThreadEventSink } from './types'
 
 function makeSink(): ThreadEventSink {
   return {
@@ -152,6 +161,15 @@ describe('runtime event wire coverage', () => {
 })
 
 describe('thread summary mapping', () => {
+  it.each([undefined, 0, 1, 2, 3])('preserves only the real supported policy marker, source=%s', executionPolicyVersion => {
+    const thread = threadFromCore({ id: 'thr_policy', title: 'Policy', workspace: '/workspace', model: '',
+      mode: 'agent', status: 'idle', executionPolicyVersion, approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access',
+      createdAt: '2026-10-20T00:00:00Z', updatedAt: '2026-10-20T00:00:00Z' })
+    expect(thread.executionPolicyVersion).toBe(executionPolicyVersion === 2 ? 2 : undefined)
+    expect(thread.approvalPolicy).toBe('untrusted'); expect(thread.sandboxMode).toBe('danger-full-access')
+    expect(thread.executionPolicyUncertain).toBe(false)
+  })
+
   it('keeps analytix sidecar preview and counts backend-neutral', () => {
     const thread = threadFromCore({
       id: 'thr_summary',
@@ -478,6 +496,16 @@ describe('thread lifecycle event mapping', () => {
 })
 
 describe('assistant draft isolation', () => {
+  it('preserves true completed assistant ownership only after a committed general terminal batch', () => {
+    const batch = generalTerminalBatch()
+    const projection = generalTerminalProjectionBatchFromRuntime(batch)
+    expect(projection?.terminalItem).toMatchObject({
+      id: 'item_general', assistantItemIdentity: { threadId: 'thr_general', turnId: 'turn_general', itemId: 'item_general' }
+    })
+    const partial = chatBlockFromItem({ id: 'live_assistant_partial', threadId: 'thr_general', turnId: 'turn_general',
+      role: 'assistant', status: 'running', createdAt: '2026-10-11T00:00:00Z', kind: 'assistant_text', text: 'partial' })
+    expect(partial?.kind === 'assistant' ? partial.assistantItemIdentity : undefined).toBeUndefined()
+  })
   it('does not treat a standalone V3 public view as accepted-final authority', () => {
     expect(chatBlockFromItem({
       id: 'item_final',
@@ -618,6 +646,21 @@ describe('user input event mapping', () => {
 })
 
 describe('compaction mapping', () => {
+  it('keeps one actual summary identity across live completion, failure and history item', async () => {
+    const compactions: unknown[] = []
+    const sink = { ...makeSink(), onCompaction: (event: unknown) => compactions.push(event) }
+    await dispatchAnalytixRuntimeEvent({ kind: 'compaction_completed', threadId: 'thread', turnId: 'turn', itemId: 'compaction', compactionId: 'compaction',
+      summaryKind: 'conversation', summary: 'Actual projected summary', shadowedItemCount: 7, replacedTokens: 234,
+      tokenCountKind: 'estimated', tokenEstimatorVersion: 1, auto: false }, sink, async () => undefined)
+    expect(compactions[0]).toMatchObject({ itemId: 'compaction', detail: 'Actual projected summary', summaryKind: 'conversation',
+      meta: { shadowedItemCount: 7, replacedTokens: 234, tokenCountKind: 'estimated', tokenEstimatorVersion: 1 } })
+    await dispatchAnalytixRuntimeEvent({ kind: 'compaction_failed', threadId: 'thread', turnId: 'turn', itemId: 'compaction', compactionId: 'compaction', auto: false }, sink, async () => undefined)
+    expect(compactions[1]).toMatchObject({ itemId: 'compaction', status: 'error' })
+    expect(compactions[1]).not.toHaveProperty('detail')
+    expect(chatBlockFromItem({ id: 'compaction', threadId: 'thread', turnId: 'turn', kind: 'compaction', role: 'system', status: 'completed',
+      createdAt: '2026-10-10T00:00:00Z', summaryKind: 'conversation', summary: 'Actual projected summary', shadowedItemCount: 7,
+      replacedTokens: 234, tokenCountKind: 'estimated', tokenEstimatorVersion: 1 })).toMatchObject({ id: 'compaction', detail: 'Actual projected summary', meta: { shadowedItemCount: 7 } })
+  })
   it('preserves manual compaction markers from runtime events and items', async () => {
     const compactions: unknown[] = []
     const sink: ThreadEventSink = {
@@ -736,8 +779,7 @@ describe('compaction mapping', () => {
     })
     expect(compactions[4]).toMatchObject({
       itemId: 'compaction_turn_case_compaction',
-      status: 'success',
-      messagesBefore: undefined
+      status: 'success'
     })
 
     expect(chatBlockFromItem({
@@ -764,7 +806,6 @@ describe('compaction mapping', () => {
       caseHistoryProjectionVersion: 2
     })).toMatchObject({
       kind: 'compaction',
-      messagesBefore: undefined,
       auto: false
     })
   })
@@ -2421,6 +2462,19 @@ describe('streaming runtime status events', () => {
     expect(tools).toEqual([])
   })
 
+  it.each(['logical_step_started', 'logical_step_closed'] as const)('keeps %s statistics metadata out of visible work rows', async stage => {
+    const statuses: unknown[] = [], tools: unknown[] = []
+    const sink: ThreadEventSink = { ...makeSink(), onRuntimeStatus: event => { statuses.push(event) },
+      onTool: event => { tools.push(event) } }
+    await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: 23, timestamp: '2026-10-12T00:00:00Z',
+      threadId: 'thr_1', turnId: 'turn_1', stage, label: 'UNTRUSTED_STATS_LABEL',
+      details: { schemaVersion: 1, logicalStepId: '11111111-1111-4111-8111-111111111111',
+        ...(stage === 'logical_step_closed' ? { assistantMessageAssembled: true, llmMs: 0, ttftMs: 0, decodeMs: 0, decodeTokens: 0 } : {}) }
+    }, sink, async () => undefined)
+    expect(statuses).toEqual([])
+    expect(tools).toEqual([])
+  })
+
   it('coalesces fixed provider progress by turn and rejects unscoped progress', async () => {
     const statuses: Array<{ itemId: string; label?: string }> = []
     const sink: ThreadEventSink = { ...makeSink(), onRuntimeStatus: event => { statuses.push(event) } }
@@ -4026,3 +4080,905 @@ it('keeps closed cache observation and cost coverage without treating legacy fal
   const legacy = usageFromCore({}, {cacheDiagnostics: {dynamicStateLeaked: false, dynamicStateCheck: 'checked', responseModelObservation: 'PRIVATE', modelInputFirstDifference: 'PRIVATE'} as never})
   expect(legacy.cacheDiagnostics).toBeUndefined()
 })
+
+
+describe('settled protected result metadata bridge', () => {
+  it.each(['bash', 'read', 'read_file'])('carries %s identity through the real tool event port', async (toolName) => {
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    const sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+    const item: CoreTurnItemJson = {
+      id: 'item_result_' + 'b'.repeat(64), turnId: 'turn_own', threadId: 'thr_own', createdAt: '2026-10-06T00:00:00Z',
+      kind: 'tool_result', role: 'tool', status: 'completed', toolName,
+      callId: 'call_host_' + 'a'.repeat(64), toolKind: 'tool_call', isError: false,
+      output: { schemaVersion: 1, projectionKind: 'host_status', disclosure: 'metadata_only',
+        status: 'completed', messageKey: 'tool_completed', code: 'tool_completed',
+        privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false }
+    }
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: 'thr_own', turnId: 'turn_own', item }, sink, async () => undefined)
+    expect(received).toHaveLength(1)
+    expect(received[0].meta?.localResult).toEqual({
+      turnId: 'turn_own', callId: 'call_host_' + 'a'.repeat(64), resultItemId: 'item_result_' + 'b'.repeat(64)
+    })
+    // A later lifecycle-only event must omit the key so the existing three
+    // consumer metadata merges retain the settled identity.
+    await dispatchAnalytixRuntimeEvent({ kind: 'tool_progress', threadId: 'thr_own', turnId: 'turn_own',
+      callId: item.callId, toolName, status: 'completed' }, sink, async () => undefined)
+    expect(Object.hasOwn(received[1].meta ?? {}, 'localResult')).toBe(false)
+  })
+  it('does not give unknown tools or call-only items a settled selector', () => {
+    const base = { id: 'item_call', turnId: 'turn_own', threadId: 'thr_own', role: 'tool' as const, createdAt: '2026-10-06T00:00:00Z', callId: 'call_host_' + 'a'.repeat(64), status: 'completed' as const }
+    const unknown = chatBlockFromItem({ ...base, kind: 'tool_result', toolName: 'ls', output: {} })
+    const call = chatBlockFromItem({ ...base, kind: 'tool_call', toolName: 'bash' })
+    expect(unknown?.kind === 'tool' ? unknown.meta?.localResult : undefined).toBeUndefined()
+    expect(call?.kind === 'tool' ? call.meta?.localResult : undefined).toBeUndefined()
+  })
+})
+
+
+describe('typed public tool projection and token-unit adapters', () => {
+  const toolItem = (output: unknown): CoreTurnItemJson => ({ id: 'item-result', turnId: 'turn', threadId: 'thread', role: 'tool', status: 'completed',
+    createdAt: '2026-10-07T00:00:00Z', kind: 'tool_result', toolName: 'create_plan', callId: 'call', toolKind: 'tool_call', isError: false, output })
+  it('carries a strict public result through hydration and settled event and never carries an unvalidated extra field', async () => {
+    const projection = planToolProjection(), item = toolItem(projection)
+    expect(chatBlockFromItem(item)).toMatchObject({ kind: 'tool', meta: { publicResult: projection } })
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = [], sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', item, threadId: 'thread', turnId: 'turn' }, sink, async () => undefined)
+    expect(received[0].meta?.publicResult).toEqual(projection)
+    await dispatchAnalytixRuntimeEvent({ kind: 'tool_call_finished', callId: 'call', toolName: 'create_plan', status: 'completed' }, sink, async () => undefined)
+    expect(received[1].meta).not.toHaveProperty('publicResult')
+    const hostile = chatBlockFromItem(toolItem({ ...projection, rawBody: 'PRIVATE_UNPUBLISHED_BODY' }))
+    expect(hostile?.kind === 'tool' ? hostile.meta?.publicResult : undefined).toBeUndefined()
+    expect(JSON.stringify(hostile)).not.toContain('PRIVATE_UNPUBLISHED_BODY')
+  })
+  it.each([0, 120])('preserves %s replaced tokens in existing metadata through history, item events and compaction events', async count => {
+    const item: CoreTurnItemJson = { id: 'compaction-a', turnId: 'turn', threadId: 'thread', role: 'system', status: 'completed', createdAt: '2026-10-07T00:00:00Z',
+      kind: 'compaction', replacedTokens: count, pinnedConstraints: [] }
+    const b = chatBlockFromItem(item)
+    expect(b).toMatchObject({ kind: 'compaction', meta: { replacedTokens: count } }); expect(b).not.toHaveProperty('messagesBefore')
+    const events: Array<Parameters<ThreadEventSink['onCompaction']>[0]> = [], sink = { ...makeSink(), onCompaction: (event: Parameters<ThreadEventSink['onCompaction']>[0]) => events.push(event) }
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', item }, sink, async () => undefined)
+    await dispatchAnalytixRuntimeEvent({ kind: 'compaction_completed', turnId: 'turn', replacedTokens: count }, sink, async () => undefined)
+    expect(events).toHaveLength(2)
+    for (const event of events) { expect(event.meta?.replacedTokens).toBe(count); expect(event).not.toHaveProperty('messagesBefore') }
+  })
+  it.each([-1, 1.5, NaN])('does not invent a token count or message count for invalid %s input', count => {
+    const b = chatBlockFromItem({ id: 'compaction-a', role: 'system', status: 'completed', createdAt: '2026-10-07T00:00:00Z', threadId: 'thread', turnId: 'turn',
+      kind: 'compaction', replacedTokens: count, pinnedConstraints: [] })
+    expect(b?.kind === 'compaction' ? b.meta?.replacedTokens : undefined).toBeUndefined(); expect(b).not.toHaveProperty('messagesBefore')
+  })
+})
+
+
+describe('retry lifecycle status projection', () => {
+  it('keeps stable scoped identities, Host units and event ordering while withholding prose', async () => {
+    const statuses: Parameters<NonNullable<ThreadEventSink['onRuntimeStatus']>>[0][] = []
+    const sink: ThreadEventSink = { ...makeSink(), onRuntimeStatus: event => statuses.push(event) }
+    const base = { schemaVersion: 1, source: 'transport_reconnect', logicalSequence: 7, outerAttempt: 2, physicalAttempt: 3 }
+    for (const [index, phase] of ['scheduled', 'started', 'cancelled'].entries()) {
+      await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: 40 + index,
+        threadId: 'retry-thread', turnId: 'retry-turn', stage: 'provider_retrying',
+        timestamp: '2026-10-07T00:00:00.123456789Z', attempt: 3, maxAttempt: 4,
+        label: 'PRIVATE_LABEL', message: 'PRIVATE_MESSAGE', details: {
+          retry: { ...base, phase, ...(phase === 'scheduled' ? { delayMs: 0, deadlineUnixMs: 1 } : {}),
+            ...(phase === 'cancelled' ? { cancelReason: 'deadline_exceeded' } : {}) },
+          providerError: { kind: 'network', status: 503, retryable: true, responseBody: 'PRIVATE_BODY' }
+        } }, sink, async () => undefined)
+    }
+    expect(new Set(statuses.map(event => event.itemId)).size).toBe(1)
+    expect(statuses.map(event => event.seq)).toEqual([40, 41, 42])
+    expect(statuses.map(event => event.retry?.phase)).toEqual(['scheduled', 'started', 'cancelled'])
+    expect(statuses[0]).toMatchObject({ threadId: 'retry-thread', turnId: 'retry-turn',
+      retry: { ...base, phase: 'scheduled', delayMs: 0, deadlineUnixMs: 1 },
+      meta: { details: { providerError: { kind: 'network', status: 503, retryable: true } } } })
+    expect(JSON.stringify(statuses)).not.toContain('PRIVATE_')
+    for (const details of [
+      { ...base, physicalAttempt: 4 }, { ...base, outerAttempt: 3 }, { ...base, logicalSequence: 8 },
+      { schemaVersion: 1, source: 'provider_retry', logicalSequence: 7, outerAttempt: 2 }
+    ]) await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: 50 + statuses.length,
+      threadId: 'retry-thread', turnId: 'retry-turn', stage: 'provider_retrying',
+      details: { retry: { ...details, phase: 'started' } } }, sink, async () => undefined)
+    expect(new Set(statuses.map(event => event.itemId)).size).toBe(5)
+  })
+  it('keeps legacy and malformed/visibleRecovery lifecycle unknown and length nonterminal', async () => {
+    const statuses: Parameters<NonNullable<ThreadEventSink['onRuntimeStatus']>>[0][] = []
+    const sink: ThreadEventSink = { ...makeSink(), onRuntimeStatus: event => statuses.push(event),
+      onTurnComplete: vi.fn(), onError: vi.fn(), onTool: vi.fn() }
+    const retry = { schemaVersion: 1, source: 'provider_retry', phase: 'started', logicalSequence: 1, outerAttempt: 2 }
+    for (const details of [{}, { retry: { ...retry, privateText: 'PRIVATE_REASON' } }, { retry, visibleRecovery: true }]) {
+      await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: 1 + statuses.length,
+        threadId: 'retry-thread', turnId: 'retry-turn', stage: 'provider_retrying', details }, sink, async () => undefined)
+    }
+    expect(statuses.every(status => status.retry === undefined)).toBe(true)
+    await dispatchAnalytixRuntimeEvent({ kind: 'pipeline_stage', seq: 4, threadId: 'retry-thread', turnId: 'retry-turn',
+      stage: 'response_received', details: { stopReason: 'length', streamCompleted: false, logicalSequence: 1 } }, sink, async () => undefined)
+    expect(statuses[3].providerOutputCap).toEqual({ stopReason: 'length', streamCompleted: false, logicalSequence: 1 })
+    expect(sink.onTurnComplete).not.toHaveBeenCalled(); expect(sink.onError).not.toHaveBeenCalled(); expect(sink.onTool).not.toHaveBeenCalled()
+  })
+})
+
+describe('Core user-input identity preservation', () => {
+  const item = { id: 'item_owned', turnId: 'turn_owned', threadId: 'thread_owned', role: 'system' as const,
+    status: 'pending', createdAt: '2026-10-08T00:00:00Z', kind: 'user_input', inputId: 'input_owned',
+    prompt: 'Choose', questions: [{ id: 'input_owned_1', header: 'Path', question: 'Choose', multiSelect: true,
+      options: [{ id: 'input_owned_1_option_1', label: 'Fast', description: '' }] }] }
+  it('carries Core option identity and mode through item and requested event paths', async () => {
+    expect(chatBlockFromItem(item)).toMatchObject({ questions: item.questions })
+    const onUserInput = vi.fn()
+    await dispatchAnalytixRuntimeEvent({ kind: 'user_input_requested', seq: 1, inputId: item.inputId,
+      itemId: item.id, questions: [...item.questions] }, { ...makeSink(), onUserInput }, async () => undefined)
+    expect(onUserInput).toHaveBeenCalledWith(expect.objectContaining({ questions: item.questions }))
+  })
+  it('does not silently delete an invalid option from a modern batch', () => {
+    expect(chatBlockFromItem({ ...item, questions: [{ ...item.questions[0], options: [
+      ...item.questions[0].options, { id: 'input_owned_1_option_2', label: '', description: '' }
+    ] }] })).toMatchObject({ questions: [] })
+  })
+  it.each([
+    { questions: [{ id: 'foreign', header: 'Path', question: 'Choose', multiSelect: false, options: [] }] },
+    { questions: [...item.questions, { id: 'legacy', header: 'Path', question: 'Choose', options: [] }] }
+  ])('rejects detached or partially downgraded modern batches', ({ questions }) => {
+    expect(chatBlockFromItem({ ...item, questions })).toMatchObject({ questions: [] })
+  })
+  it('does not invent a request handle for an incomplete requested event', async () => {
+    const onUserInput = vi.fn()
+    await dispatchAnalytixRuntimeEvent({ kind: 'user_input_requested', seq: 1, prompt: 'Choose',
+      questions: [...item.questions] }, { ...makeSink(), onUserInput }, async () => undefined)
+    expect(onUserInput).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('closed Web fetch metadata through mapper input', () => {
+  const success = {
+    schemaVersion: 1, projectionKind: 'web_fetch_status', disclosure: 'metadata_only',
+    status: 'completed', messageKey: 'tool_completed', code: 'tool_completed',
+    privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false,
+    web: { outcome: 'success', statusCode: 201, byteCount: 12, truncated: false }
+  }
+  it('keeps the actual non-200 status, zero bytes, and unknown read truncation', () => {
+    expect(PublicToolResultProjectionV1.parse(success)).toEqual(success)
+    const empty = { ...success, web: { ...success.web, statusCode: 204, byteCount: 0 } }
+    expect(PublicToolResultProjectionV1.parse(empty)).toEqual(empty)
+    const readError = { ...success, status: 'failed', messageKey: 'tool_failed', code: 'tool_failed',
+      web: { outcome: 'read_error', statusCode: 200, byteCount: 3 } }
+    expect(PublicToolResultProjectionV1.parse(readError)).toEqual(readError)
+    const noResponse = { ...readError, web: { outcome: 'transport_error' } }
+    expect(PublicToolResultProjectionV1.parse(noResponse)).toEqual(noResponse)
+  })
+  it.each([
+    { statusCode: undefined }, { statusCode: 200.1 }, { statusCode: 99 }, { statusCode: 600 }, { statusCode: 503 },
+    { byteCount: undefined }, { byteCount: -1 }, { byteCount: Number.MAX_SAFE_INTEGER + 1 },
+    { truncated: undefined }, { truncated: 'false' }, { outcome: 'unknown' }
+  ])('rejects absent or contradictory success metadata %j', web => {
+    expect(PublicToolResultProjectionV1.safeParse({ ...success, web: { ...success.web, ...web } }).success).toBe(false)
+  })
+  it.each(['rawBody', 'text', 'title', 'snippet', 'url', 'finalUrl', 'sources', 'arbitraryJSON'])('rejects unpublished %s at both object levels', key => {
+    const privateValue = 'PRIVATE_WEB_SENTINEL'
+    expect(PublicToolResultProjectionV1.safeParse({ ...success, [key]: privateValue }).success).toBe(false)
+    expect(PublicToolResultProjectionV1.safeParse({ ...success, web: { ...success.web, [key]: privateValue } }).success).toBe(false)
+  })
+  it('binds the result to exact web_fetch and the matching error lifecycle', () => {
+    const item = { id: 'result', turnId: 'turn', threadId: 'thread', role: 'tool', status: 'completed',
+      createdAt: '2026-10-08T00:00:00Z', kind: 'tool_result', toolName: 'web_fetch',
+      callId: 'call_host_' + 'a'.repeat(64), toolKind: 'tool_call' as const, output: success, isError: false }
+    expect(TurnItem.safeParse(item).success).toBe(true)
+    expect(chatBlockFromItem({ ...item, role: 'tool' as const })).toMatchObject({ kind: 'tool', meta: { publicResult: success } })
+    for (const toolName of ['web_search', 'fetch_url', 'browse', 'WEB_FETCH']) {
+      expect(TurnItem.safeParse({ ...item, toolName }).success).toBe(false)
+      const block = chatBlockFromItem({ ...item, role: 'tool' as const, toolName })
+      if (block?.kind !== 'tool') throw new Error('fixture must hydrate a tool block')
+      expect(block.meta).not.toHaveProperty('publicResult')
+    }
+    for (const toolKind of ['command_execution', 'file_change', 'subagent']) {
+      expect(TurnItem.safeParse({ ...item, toolKind }).success).toBe(false)
+    }
+    expect(TurnItem.safeParse({ ...item, isError: true, status: 'failed' }).success).toBe(false)
+  })
+  it.each(['command_execution', 'file_change', 'subagent', undefined, 'skill'])('does not attach Web metadata with raw kind %s', toolKind => {
+    const item = { id: 'result', turnId: 'turn', threadId: 'thread', role: 'tool', status: 'completed',
+      createdAt: '2026-10-08T00:00:00Z', kind: 'tool_result', toolName: 'web_fetch',
+      callId: 'call_host_' + 'a'.repeat(64), ...(toolKind === undefined ? {} : { toolKind }), output: success, isError: false }
+    const block = chatBlockFromItem(item as unknown as CoreTurnItemJson)
+    if (block?.kind !== 'tool') throw new Error('fixture must hydrate a tool block')
+    expect(block.meta).not.toHaveProperty('publicResult')
+  })
+})
+
+
+describe('settled Web fetch protected selector through real mapper ports', () => {
+  const completed = {
+    schemaVersion: 1, projectionKind: 'web_fetch_status', disclosure: 'metadata_only',
+    status: 'completed', messageKey: 'tool_completed', code: 'tool_completed',
+    privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false,
+    web: { outcome: 'success', statusCode: 201, byteCount: 12, truncated: false }
+  }
+  const item: CoreTurnItemJson = {
+    id: 'item_result_' + 'b'.repeat(64), turnId: 'turn_own', threadId: 'thr_own',
+    createdAt: '2026-10-08T00:00:00Z', kind: 'tool_result', role: 'tool', status: 'completed',
+    toolName: 'web_fetch', callId: 'call_host_' + 'a'.repeat(64), toolKind: 'tool_call',
+    output: completed, isError: false
+  }
+  const selector = { turnId: item.turnId, callId: item.callId, resultItemId: item.id }
+
+  it.each([false, true])('carries the settled Web identity through replay and live events with isError=%s', async isError => {
+    const output = isError ? {
+      ...completed, status: 'failed', messageKey: 'tool_failed', code: 'tool_failed',
+      web: { outcome: 'http_error', statusCode: 503, byteCount: 0, truncated: false }
+    } : completed
+    const settled: CoreTurnItemJson = { ...item, output, isError, status: isError ? 'failed' : 'completed' }
+    expect(TurnItem.safeParse(settled).success).toBe(true)
+    const replay = chatBlockFromItem(settled)
+    expect(replay).toMatchObject({ kind: 'tool', status: isError ? 'error' : 'success',
+      toolKind: 'tool_call', meta: { localResult: selector, publicResult: output } })
+    if (replay?.kind !== 'tool') throw new Error('fixture must hydrate a tool block')
+    expect(Object.keys(replay.meta?.localResult as object).sort()).toEqual(['callId', 'resultItemId', 'turnId'])
+
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    const sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: item.threadId, turnId: item.turnId,
+      item: settled }, sink, async () => undefined)
+    expect(received).toHaveLength(1)
+    expect(received[0].meta).toEqual(replay.meta)
+    // Later lifecycle-only updates must not overwrite the settled binding.
+    for (const kind of ['tool_progress', 'tool_call_finished'] as const) {
+      await dispatchAnalytixRuntimeEvent({ kind, threadId: item.threadId, turnId: item.turnId,
+        callId: item.callId, toolName: 'web_fetch', status: settled.status }, sink, async () => undefined)
+      expect(Object.hasOwn(received.at(-1)?.meta ?? {}, 'localResult')).toBe(false)
+    }
+    const hostile = chatBlockFromItem({ ...settled,
+      output: { ...output, rawBody: 'PRIVATE_UNPUBLISHED_WEB_BODY', requestUrl: 'PRIVATE_UNPUBLISHED_WEB_URL' } })
+    if (hostile?.kind !== 'tool') throw new Error('fixture must hydrate a tool block')
+    expect(hostile.meta).not.toHaveProperty('localResult')
+    expect(hostile.meta).not.toHaveProperty('publicResult')
+    expect(JSON.stringify(hostile)).not.toContain('PRIVATE_UNPUBLISHED_WEB_')
+  })
+
+  it.each(['web_search', 'fetch_url', 'browse', 'WEB_FETCH', ' web_fetch '])('does not grant the Web selector to alias %s', toolName => {
+    const block = chatBlockFromItem({ ...item, toolName })
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it.each(['command_execution', 'file_change', 'subagent', undefined, 'skill'])('requires the raw host tool_call kind instead of %s', toolKind => {
+    const block = chatBlockFromItem({ ...item, toolKind } as unknown as CoreTurnItemJson)
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it.each(['tool_call', 'tool_progress'] as const)('does not give a %s item a settled Web selector', kind => {
+    const block = chatBlockFromItem({ ...item, kind, status: 'running', output: undefined })
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+    expect(block).toMatchObject({ kind: 'tool', status: 'running' })
+  })
+  it.each([
+    ['id', ''], ['id', 'tool_call_not_a_result'],
+    ['turnId', ''], ['turnId', '../foreign'],
+    ['callId', ''], ['callId', 'call_host_bad'],
+    ['threadId', ''], ['threadId', '../foreign']
+  ])('requires the complete Core binding %s=%s', (field, value) => {
+    const block = chatBlockFromItem({ ...item, [field]: value })
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it.each(['pending', 'running'] as const)('does not allocate a settled selector to a valid %s result', status => {
+    const pending = { ...item, status, output: {
+      schemaVersion: 1, projectionKind: 'host_status', disclosure: 'metadata_only', status: 'unknown',
+      messageKey: 'tool_outcome_unknown', code: 'tool_outcome_unknown_after_restart',
+      privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false
+    } }
+    expect(TurnItem.safeParse(pending).success).toBe(true)
+    const block = chatBlockFromItem(pending)
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it.each([
+    { status: 'completed', isError: true }, { status: 'failed', isError: false },
+    { status: 'aborted', isError: false }, { status: undefined, isError: false }
+  ])('rejects contradictory or missing settlement lifecycle %j', lifecycle => {
+    const malformed = { ...item, ...lifecycle } as unknown as CoreTurnItemJson
+    expect(TurnItem.safeParse(malformed).success).toBe(false)
+    const block = chatBlockFromItem(malformed)
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it('keeps two Core calls and result identities distinct through replay merging and live dispatch', async () => {
+    const other: CoreTurnItemJson = { ...item, callId: 'call_host_' + 'c'.repeat(64), id: 'item_result_' + 'd'.repeat(64) }
+    const calls = [item, other].map<CoreTurnItemJson>(value => ({ ...value, kind: 'tool_call', status: 'running', output: undefined }))
+    const replay = mergeChatBlocks([...calls, item, other].map(value => chatBlockFromItem(value)!).filter(Boolean))
+    expect(replay).toHaveLength(2)
+    expect(replay.map(block => block.kind === 'tool' ? block.meta?.localResult : undefined)).toEqual([
+      selector, { turnId: other.turnId, callId: other.callId, resultItemId: other.id }
+    ])
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    const sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+    for (const value of [item, other]) {
+      await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: value.threadId, turnId: value.turnId,
+        item: value }, sink, async () => undefined)
+    }
+    expect(received.map(event => event.meta?.localResult)).toEqual(replay.map(block => block.kind === 'tool' ? block.meta?.localResult : undefined))
+  })
+})
+
+
+describe('settled Search protected selectors through real mapper ports', () => {
+  const completed = {
+    schemaVersion: 1, projectionKind: 'host_status', disclosure: 'metadata_only',
+    status: 'completed', messageKey: 'tool_completed', code: 'tool_completed',
+    privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false
+  }
+  const item: CoreTurnItemJson = {
+    id: 'item_result_' + 'e'.repeat(64), turnId: 'turn_search', threadId: 'thr_search',
+    createdAt: '2026-10-08T00:00:00Z', kind: 'tool_result', role: 'tool', status: 'completed',
+    toolName: 'grep', callId: 'call_host_' + 'f'.repeat(64), toolKind: 'tool_call',
+    output: completed, isError: false
+  }
+  const selector = { turnId: item.turnId, callId: item.callId, resultItemId: item.id }
+
+  it.each([['grep', false], ['glob', false], ['grep', true], ['glob', true]] as const)(
+    'carries exact %s settled identity through hydration and live items with isError=%s', async (toolName, isError) => {
+      const output = isError ? { ...completed, status: 'failed', messageKey: 'tool_failed', code: 'tool_failed' } : completed
+      const settled: CoreTurnItemJson = { ...item, toolName, output, isError, status: isError ? 'failed' : 'completed' }
+      expect(TurnItem.safeParse(settled).success).toBe(true)
+      const replay = chatBlockFromItem(settled)
+      expect(replay).toMatchObject({ kind: 'tool', status: isError ? 'error' : 'success',
+        toolKind: 'tool_call', meta: { localResult: selector, publicResult: output } })
+      if (replay?.kind !== 'tool') throw new Error('fixture must hydrate a tool block')
+      expect(Object.keys(replay.meta?.localResult as object).sort()).toEqual(['callId', 'resultItemId', 'turnId'])
+
+      const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+      const sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+      await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: item.threadId, turnId: item.turnId,
+        item: settled }, sink, async () => undefined)
+      expect(received).toHaveLength(1)
+      expect(received[0].meta?.localResult).toEqual(selector)
+      for (const kind of ['tool_progress', 'tool_call_finished'] as const) {
+        await dispatchAnalytixRuntimeEvent({ kind, threadId: item.threadId, turnId: item.turnId,
+          callId: item.callId, toolName, status: settled.status }, sink, async () => undefined)
+        expect(received.at(-1)?.meta).not.toHaveProperty('localResult')
+      }
+    }
+  )
+
+  it.each([' grep ', ' glob '])(
+    'does not normalize the original producer name %s to grant a locator', toolName => {
+      const block = chatBlockFromItem({ ...item, toolName })
+      expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+    }
+  )
+  it.each(['GREP', 'GLOB', 'grep_files', 'search', 'search_files', 'find', 'ls', 'code_index', 'RUN_SKILL', 'goal', 'skill'])(
+    'preserves ordinary producer %s for keyed Inspect without rewriting it as a specialized tool', toolName => {
+      const block = chatBlockFromItem({ ...item, toolName })
+      expect(block).toMatchObject({ kind: 'tool', toolKind: 'tool_call', meta: { toolName, localResult: selector, publicResult: completed } })
+      expect(Object.keys(block?.kind === 'tool' ? block.meta?.localResult as object : {}).sort()).toEqual(['callId', 'resultItemId', 'turnId'])
+    }
+  )
+  it.each(['command_execution', 'file_change', 'subagent', undefined, 'skill'])(
+    'requires the raw host tool_call kind rather than %s', toolKind => {
+      const block = chatBlockFromItem({ ...item, toolKind } as unknown as CoreTurnItemJson)
+      expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+    }
+  )
+  it.each(['tool_call', 'tool_progress'] as const)('does not give a %s item a settled Search selector', kind => {
+    const block = chatBlockFromItem({ ...item, kind, status: 'running', output: undefined })
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it.each([
+    ['id', ''], ['id', 'not_a_result'], ['turnId', '../foreign'],
+    ['callId', 'call_host_bad'], ['threadId', '']
+  ])('requires a complete valid identity: %s=%s', (field, value) => {
+    const block = chatBlockFromItem({ ...item, [field]: value })
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it.each(['pending', 'running'] as const)('does not grant a valid %s result a settled selector', status => {
+    const unsettled = { ...item, status, output: { ...completed, status: 'unknown',
+      messageKey: 'tool_outcome_unknown', code: 'tool_outcome_unknown_after_restart' } }
+    expect(TurnItem.safeParse(unsettled).success).toBe(true)
+    const block = chatBlockFromItem(unsettled)
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it.each([
+    { status: 'completed', isError: true }, { status: 'failed', isError: false },
+    { status: 'aborted', isError: false }, { status: undefined, isError: false }
+  ])('rejects contradictory or missing settlement lifecycle %j', lifecycle => {
+    const malformed = { ...item, ...lifecycle } as unknown as CoreTurnItemJson
+    expect(TurnItem.safeParse(malformed).success).toBe(false)
+    const block = chatBlockFromItem(malformed)
+    expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+  })
+  it('keeps raw search output out of selectors and renderer state', () => {
+    const block = chatBlockFromItem({ ...item, output: { ...completed,
+      pattern: 'PRIVATE_SEARCH_PATTERN', files: [{ path: 'PRIVATE_SEARCH_PATH',
+        matches: [{ lineNumber: 1, line: 'PRIVATE_SEARCH_LINE' }] }] } })
+    if (block?.kind !== 'tool') throw new Error('fixture must hydrate a tool block')
+    expect(block.meta).not.toHaveProperty('localResult')
+    expect(block.meta).not.toHaveProperty('publicResult')
+    expect(JSON.stringify(block)).not.toContain('PRIVATE_SEARCH_')
+  })
+  it('keeps distinct settled call and result identities separate', () => {
+    const other: CoreTurnItemJson = { ...item, toolName: 'glob',
+      callId: 'call_host_' + 'a'.repeat(64), id: 'item_result_' + 'b'.repeat(64) }
+    const replay = mergeChatBlocks([item, other].map(value => chatBlockFromItem(value)!))
+    expect(replay).toHaveLength(2)
+    expect(replay.map(block => block.kind === 'tool' ? block.meta?.localResult : undefined)).toEqual([
+      selector, { turnId: other.turnId, callId: other.callId, resultItemId: other.id }
+    ])
+  })
+})
+
+
+describe('historical Core DTO isolation', () => {
+  const host = { schemaVersion: 1, projectionKind: 'host_status', disclosure: 'metadata_only', status: 'completed',
+    messageKey: 'tool_completed', code: 'tool_completed', privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false }
+  const rendererContext = { workspaceCheckpointId: 'checkpoint_turn', attachmentIds: ['att_turn'],
+    activeSkillIds: ['skill_turn'], injectedMemoryIds: ['memory_turn'], skillInjectionBytes: 12 }
+  const fixture = (toolName = 'web_fetch'): CoreTurnItemJson => ({
+    id: 'item_result_' + '7'.repeat(64), callId: 'call_host_' + '8'.repeat(64), turnId: 'turn_history', threadId: 'thread_history',
+    createdAt: '2026-10-08T00:00:00Z', kind: 'tool_result', role: 'tool', toolKind: 'tool_call', status: 'completed', isError: false, toolName,
+    output: toolName === 'web_fetch' ? { ...host, projectionKind: 'web_fetch_status', web: { outcome: 'success', statusCode: 201, byteCount: 7, truncated: false } } : host
+  })
+  it.each(['web_fetch', 'grep', 'glob'])('validates the original %s Core result and projects turn context separately', toolName => {
+    const item = Object.freeze(fixture(toolName)), before = JSON.stringify(item)
+    expect(TurnItem.safeParse(item).success).toBe(true)
+    const block = chatBlockFromItem(item, undefined, rendererContext)
+    expect(block).toMatchObject({ kind: 'tool', meta: { ...rendererContext, localResult: {
+      turnId: item.turnId, callId: item.callId, resultItemId: item.id } } })
+    expect(JSON.stringify(item)).toBe(before)
+    expect(TurnItem.safeParse(item).success).toBe(true)
+    expect(item).not.toHaveProperty('activeSkillIds')
+  })
+  it.each(['workspaceCheckpointId', 'attachmentIds', 'activeSkillIds', 'injectedMemoryIds', 'skillInjectionBytes', 'untrustedExtra'])(
+    'does not erase the original unknown field %s to grant protected access', field => {
+      const item = { ...fixture(), [field]: 'forged' }
+      expect(TurnItem.safeParse(item).success).toBe(false)
+      const block = chatBlockFromItem(item, undefined, rendererContext)
+      expect(block?.kind === 'tool' ? block.meta?.localResult : undefined).toBeUndefined()
+      expect(item).toHaveProperty(field, 'forged')
+    })
+})
+
+describe('Footer receipt primary binding', () => {
+  const scope = { threadId: 'thr_general', includeHistoricalBlocks: false }
+  const primaryFrom = (batch: Record<string, unknown> = typedGeneralTerminalBatch()) => {
+    const block = chatBlockFromItem((batch.events as Array<{ item?: CoreTurnItemJson }>)[0].item!)!
+    if (block.kind !== 'assistant') throw new Error('Expected a real projected assistant fixture.')
+    return block
+  }
+  const laterBatch = (itemId?: string): Record<string, unknown> => {
+    const batch = typedGeneralTerminalBatch()
+    const events = batch.events as Array<Record<string, unknown>>
+    const manifest = batch.eventManifest as unknown[]
+    if (itemId) {
+      events[0].itemId = itemId
+      const item = events[0].item as Record<string, unknown>
+      item.id = itemId
+    } else {
+      events.shift(); manifest.shift()
+    }
+    batch.firstSeq = 15; batch.lastSeq = 14 + events.length; batch.seq = batch.lastSeq
+    events.forEach((event, index) => { event.seq = 15 + index })
+    expect(generalTerminalProjectionBatchFromRuntime(batch)).not.toBeNull()
+    return batch
+  }
+  it('retains the verified receipt on an exact primary item without replacing its content or adding replay history', () => {
+    const batch = typedGeneralTerminalBatch('Exact primary answer')
+    const source = generalTerminalProjectionBatchFromRuntime(batch)!.terminalItem!
+    const item = (batch.events as Array<{ item?: CoreTurnItemJson }>)[0].item!
+    const primary = chatBlockFromItem(item)!
+    expect(primary).not.toHaveProperty('generalTerminalProjectionReceipt')
+    const replay = createOrdinaryHistoryReplay('thr_general', 13)
+    replay.accept([{ kind: 'item_created', threadId: 'thr_general', turnId: 'old-turn', seq: 1,
+      item: { id: 'replay-only-user', threadId: 'thr_general', turnId: 'old-turn', role: 'user', kind: 'user_message',
+        status: 'completed', createdAt: item.createdAt, text: 'Replay-only history' } }])
+    replay.accept([batch])
+    const first: ChatBlock = { kind: 'user', id: 'primary-user', text: 'Primary request', meta: { turnId: 'turn_general' } }
+    const extra: ChatBlock = { kind: 'system', id: 'primary-extra', text: 'Primary extra', meta: { turnId: 'turn_general' } }
+    const snapshot = [first, primary, extra], before = JSON.stringify(snapshot)
+    const merged = replay.mergeSnapshot(snapshot, { threadId: 'thr_general', includeHistoricalBlocks: false })
+    expect(merged.find(block => block.id === primary.id)).toMatchObject({ generalTerminalProjectionReceipt: { threadId: 'thr_general', turnId: 'turn_general',
+      itemId: source.id, firstSeq: 11, lastSeq: 13, batchDigest: 'a'.repeat(64), status: 'completed' } })
+    expect(merged.map(block => block.id)).toEqual(snapshot.map(block => block.id))
+    expect(merged[0]).toBe(first); expect(merged[2]).toBe(extra)
+    expect(JSON.stringify(snapshot)).toBe(before)
+    expect(merged[1]).toMatchObject(primary)
+    expect(merged.some(isOrdinaryDisplayHistoryBlock)).toBe(false)
+  })
+  it.each(['turn', 'missing turn', 'item', 'text', 'time', 'missing time', 'illegal time'])(
+    'does not bind a primary with mismatched %s', field => {
+      const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch)
+      switch (field) {
+        case 'turn': primary.meta = { ...primary.meta, turnId: 'other-turn' }; break
+        case 'missing turn': primary.meta = {}; break
+        case 'item': primary.id = 'other-item'; break
+        case 'text': primary.text += ' changed'; break
+        case 'time': primary.createdAt = '2026-07-20T03:00:01Z'; break
+        case 'missing time': delete primary.createdAt; break
+        case 'illegal time': primary.createdAt = 'invalid'; break
+      }
+      const replay = createOrdinaryHistoryReplay('thr_general', 13); replay.accept([batch])
+      const before = JSON.stringify(primary)
+      expect(replay.mergeSnapshot([primary], scope)).toEqual([primary])
+      expect(JSON.stringify(primary)).toBe(before)
+      expect(primary).not.toHaveProperty('generalTerminalProjectionReceipt')
+    })
+  it('requires explicit matching primary scope and preserves the legacy call without grafting authority', () => {
+    const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch)
+    const replay = createOrdinaryHistoryReplay('thr_general', 13); replay.accept([batch])
+    expect(replay.mergeSnapshot([primary])).toEqual([primary])
+    expect(() => replay.mergeSnapshot([primary], { ...scope, threadId: 'other-thread' })).toThrow(/thread identity/)
+    expect(primary).not.toHaveProperty('generalTerminalProjectionReceipt')
+  })
+  it.each([false, true])('rejects duplicate physical IDs before filtering content; conflicting text: %s', conflicting => {
+    const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch)
+    const duplicate = { ...primary, text: conflicting ? 'Changed duplicate' : primary.text }
+    const replay = createOrdinaryHistoryReplay('thr_general', 13); replay.accept([batch])
+    const snapshot = [primary, duplicate]
+    expect(replay.mergeSnapshot(snapshot, scope)).toEqual(snapshot)
+    expect(snapshot.every(block => !block.generalTerminalProjectionReceipt)).toBe(true)
+  })
+  it.each(['new-item', 'item_general', undefined])('refuses old or overwritten receipts after a newer same-turn batch: %s', itemId => {
+    const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch), later = laterBatch(itemId)
+    const replay = createOrdinaryHistoryReplay('thr_general', later.lastSeq as number)
+    replay.accept([batch]); replay.accept([later])
+    // For same-ID overwrite the exact latest item is still ambiguous; for a
+    // new/no item batch the old candidate is outside the latest turn bounds.
+    expect(replay.mergeSnapshot([primary], scope)).toEqual([primary])
+    expect(primary).not.toHaveProperty('generalTerminalProjectionReceipt')
+  })
+  it('does not let a returned usage entry revive a stale terminal receipt', () => {
+    const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch), later = laterBatch()
+    const replay = createOrdinaryHistoryReplay('thr_general', later.lastSeq as number)
+    replay.accept([batch]); replay.accept([later])
+    const returned = replay.turnUsage()
+    expect(returned.turn_general.firstSeq).toBe(15)
+    returned.turn_general.firstSeq = 11; returned.turn_general.lastSeq = 13
+    expect(replay.mergeSnapshot([primary], scope)).toEqual([primary])
+    expect(primary).not.toHaveProperty('generalTerminalProjectionReceipt')
+    expect(replay.turnUsage().turn_general.firstSeq).toBe(15)
+  })
+  it('ignores replay duplicates idempotently and does not expose a mutable verified receipt alias', () => {
+    const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch)
+    const replay = createOrdinaryHistoryReplay('thr_general', 13); replay.accept([batch]); replay.accept([batch])
+    const bound = replay.mergeSnapshot([primary], scope)[0] as typeof primary
+    expect(bound.generalTerminalProjectionReceipt?.lastSeq).toBe(13)
+    expect(replay.mergeSnapshot([bound], scope)[0]).toBe(bound)
+    bound.generalTerminalProjectionReceipt!.batchDigest = 'f'.repeat(64)
+    expect((replay.mergeSnapshot([primary], scope)[0] as typeof primary).generalTerminalProjectionReceipt?.batchDigest).toBe('a'.repeat(64))
+    const historical = replay.mergeSnapshot([])[0] as typeof primary
+    historical.generalTerminalProjectionReceipt!.lastSeq = 99
+    expect((replay.mergeSnapshot([primary], scope)[0] as typeof primary).generalTerminalProjectionReceipt?.lastSeq).toBe(13)
+  })
+  it.each(['newer', 'foreign', 'different digest'])('keeps an existing %s primary proof without replacement', variant => {
+    const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch)
+    const replay = createOrdinaryHistoryReplay('thr_general', 13); replay.accept([batch])
+    const bound = replay.mergeSnapshot([primary], scope)[0] as typeof primary
+    const receipt = { ...bound.generalTerminalProjectionReceipt! }
+    if (variant === 'newer') { receipt.firstSeq = 20; receipt.lastSeq = 22 }
+    if (variant === 'foreign') receipt.threadId = 'other-thread'
+    if (variant === 'different digest') receipt.batchDigest = 'f'.repeat(64)
+    const protectedPrimary = { ...primary, generalTerminalProjectionReceipt: receipt }
+    expect(replay.mergeSnapshot([protectedPrimary], scope)[0]).toBe(protectedPrimary)
+    expect(protectedPrimary.generalTerminalProjectionReceipt).toBe(receipt)
+  })
+  it('does not add ordinary proof to accepted-final ownership', () => {
+    const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch)
+    const replay = createOrdinaryHistoryReplay('thr_general', 13); replay.accept([batch])
+    const protections: Array<Partial<typeof primary>> = [
+      { acceptedFinalView: { schemaVersion: 3, acceptedFinalDigest: 'f'.repeat(64), publicationState: 'accepted',
+        variant: 'SourceUnavailableAnswer', terminalReason: 'source_unavailable', blockerCode: 'current_case_source_unavailable',
+        coverageStatus: 'unavailable', checkedScopeDigest: '', missingScopeCount: 0, claimCount: 0, claimTypes: [],
+        receiptMetadata: { projection: 'masked_metadata_only', count: 0, setDigest: '8'.repeat(64), citations: [] },
+        noHitWording: '', acceptedAt: primary.createdAt! } },
+      { acceptedFinalProjectionReceipt: { schemaVersion: 1, batchId: 'b'.repeat(64), threadId: 'thr_general',
+        turnId: 'turn_general', publicationCommitId: 'c'.repeat(64), lastSeq: 13 } },
+      { acceptedFinalProjectionTerminal: { status: 'completed', createdAt: primary.createdAt!, acceptedFinalDigest: 'c'.repeat(64), terminalReason: 'success' } }
+    ]
+    for (const protection of protections) {
+      const protectedPrimary = { ...primary, ...protection }
+      expect(replay.mergeSnapshot([protectedPrimary], scope)[0]).toBe(protectedPrimary)
+      expect(protectedPrimary).not.toHaveProperty('generalTerminalProjectionReceipt')
+    }
+  })
+  it('does not reintroduce a primary or receipt removed by a verified rewind', () => {
+    const batch = typedGeneralTerminalBatch(), primary = primaryFrom(batch)
+    const replay = createOrdinaryHistoryReplay('thr_general', 14); replay.accept([batch])
+    replay.accept([{ kind: 'thread_rewound', threadId: 'thr_general', seq: 14, removedTurnIds: ['turn_general'] }])
+    expect(replay.mergeSnapshot([primary], scope)).toEqual([])
+    expect(primary).not.toHaveProperty('generalTerminalProjectionReceipt')
+  })
+
+})
+
+describe('ordinary display history replay', () => {
+  const user = (id: string, turnId: string, seq: number): CoreRuntimeEventJson => ({
+    kind: 'item_created', threadId: 'thr_general', turnId, seq,
+    item: { id, threadId: 'thr_general', turnId, kind: 'user_message', role: 'user', status: 'completed', createdAt: '2026-10-08T00:00:00Z', text: id }
+  })
+  it('keeps replay chronology, primary turn contents and one current compaction marker', () => {
+    const replay = createOrdinaryHistoryReplay('thr_general', 16)
+    replay.accept([user('user-old', 'turn_general', 1)])
+    replay.accept([typedGeneralTerminalBatch('authorized old output')])
+    replay.accept([user('user-tail', 'tail-turn', 14), {
+      kind: 'compaction_completed', threadId: 'thr_general', turnId: 'compact-turn', seq: 16,
+      summary: 'Context compacted', pinnedConstraints: ['constraints are not a summary']
+    }])
+    const compact: ChatBlock = { kind: 'compaction', id: 'real-compact-item', status: 'success',
+      summary: 'Context compacted', meta: { turnId: 'compact-turn' } }
+    const tail: ChatBlock = { kind: 'user', id: 'user-tail', text: 'primary tail', meta: { turnId: 'tail-turn' } }
+    const process: ChatBlock = { kind: 'system', id: 'tail-process', text: 'primary process', meta: { turnId: 'tail-turn' } }
+    const merged = replay.mergeSnapshot([compact, tail, process])
+    expect(merged.map(block => block.id)).toEqual(['user-old', 'item_general', 'user-tail', 'tail-process', 'real-compact-item'])
+    expect(merged[1]).toMatchObject({ kind: 'assistant', text: 'authorized old output',
+      generalTerminalProjectionReceipt: { schemaVersion: 1, batchDigest: 'a'.repeat(64),
+        threadId: 'thr_general', turnId: 'turn_general', itemId: 'item_general',
+        firstSeq: 11, lastSeq: 13, status: 'completed' } })
+    expect(merged.slice(0, 2).every(isOrdinaryDisplayHistoryBlock)).toBe(true)
+    expect(merged[1]).toHaveProperty('displayHistory', { source: 'host_public_replay', threadId: 'thr_general', throughSeq: 16 })
+    expect(merged.slice(2).some(isOrdinaryDisplayHistoryBlock)).toBe(false)
+    expect(merged[2]).toBe(tail)
+    expect(merged.at(-1)).not.toHaveProperty('detail')
+    expect(replay.mergeSnapshot([compact, tail, process])).toEqual(merged)
+  })
+  it('ignores drafts and recoverable diagnostics, applies rewind and omits orphan started markers', () => {
+    const replay = createOrdinaryHistoryReplay('thr_general', 17)
+    replay.accept([user('removed-user', 'turn_general', 1)])
+    replay.accept([typedGeneralTerminalBatch('removed output')])
+    replay.accept([
+      { kind: 'error', threadId: 'thr_general', seq: 14, terminal: false, code: 'budget_warning' },
+      { kind: 'compaction_started', threadId: 'thr_general', turnId: 'obsolete-compact', seq: 15 },
+      { kind: 'thread_rewound', threadId: 'thr_general', seq: 16, removedTurnIds: ['turn_general'] },
+      { kind: 'item_completed', threadId: 'thr_general', turnId: 'draft-turn', seq: 17,
+        item: { id: 'draft', threadId: 'thr_general', turnId: 'draft-turn', role: 'assistant',
+          kind: 'assistant_text', status: 'completed', createdAt: '2026-10-08T00:00:00Z', text: 'unverified draft' } }
+    ])
+    expect(replay.mergeSnapshot([{ kind: 'user', id: 'removed-user', text: 'old primary', meta: { turnId: 'turn_general' } }])).toEqual([])
+  })
+  it('binds historical usage to the original terminal turn and committed sequence', () => {
+    const replay = createOrdinaryHistoryReplay('thr_general', 13)
+    expect(() => replay.turnUsage()).toThrow(/boundary/)
+    replay.accept([typedGeneralTerminalBatch('verified old output')])
+    replay.accept([typedGeneralTerminalBatch('verified old output')])
+    expect(Object.keys(replay.turnUsage())).toEqual(['turn_general'])
+    expect(replay.turnUsage().turn_general).toMatchObject({ threadId: 'thr_general', turnId: 'turn_general',
+      firstSeq: 11, lastSeq: 13, snapshot: { inputTokens: 2, outputTokens: 1, totalTokens: 3, cacheHitRate: null, costUsd: null } })
+    expect(replay.turnUsage().turn_general.snapshot.cacheDiagnostics).toBeUndefined()
+  })
+  it('grants deletion only to full replay and fences old snapshots after a live rewind', () => {
+    const batch = generalTerminalProjectionBatchFromRuntime(generalTerminalBatch())!
+    const old = turnUsageEntryFromBatch(batch), future = { ...old, turnId: 'future', firstSeq: 20, lastSeq: 22 }
+    const current = { turn_general: old, future }
+    expect(reconcileTurnUsageById('thr_general', {}, current)).toEqual(current)
+    expect(reconcileTurnUsageById('thr_general', {}, current, 13)).toEqual({ future })
+    expect(reconcileTurnUsageById('thr_general', {}, current, NaN)).toEqual(current)
+    expect(reconcileTurnUsageById('thr_general', current, { future }, undefined, { turn_general: true })).toEqual({ future })
+    const constructorEntry = { ...old, turnId: 'constructor' }
+    expect(mergeTurnUsageById('thr_general', { ['constructor']: constructorEntry })).toHaveProperty('constructor', constructorEntry)
+    expect(mergeTurnUsageById('other', current)).toEqual({})
+    expect(filterRewoundDisplayBlocks([{ kind: 'user', id: 'old', text: 'removed', meta: { turnId: 'turn_general' } },
+      { kind: 'user', id: 'valid', text: 'history', meta: { turnId: 'future' } }], { turn_general: true })).toMatchObject([{ id: 'valid' }])
+  })
+  it('removes only the Host-named historical usage on replayed rewind', () => {
+    const replay = createOrdinaryHistoryReplay('thr_general', 18)
+    replay.accept([generalTerminalBatch()])
+    // Preserve every identity binding in the second consumer-delivery fixture.
+    const keptBatch = JSON.parse(JSON.stringify(generalTerminalBatch()).replaceAll('"turn_general"', '"kept-turn"')
+      .replaceAll('"item_general"', '"kept-item"')) as Record<string, unknown>
+    keptBatch.firstSeq = 15; keptBatch.lastSeq = 17; keptBatch.seq = 17
+    for (const [index, event] of (keptBatch.events as Array<Record<string, unknown>>).entries()) event.seq = 15 + index
+    replay.accept([keptBatch])
+    replay.accept([{ kind: 'thread_rewound', threadId: 'thr_general', seq: 18, removedTurnIds: ['turn_general'] }])
+    expect(Object.keys(replay.turnUsage())).toEqual(['kept-turn'])
+    expect(replay.turnUsage()['kept-turn']).toMatchObject({ threadId: 'thr_general', turnId: 'kept-turn', firstSeq: 15, lastSeq: 17 })
+  })
+
+  it('rejects incomplete, cross-thread and mixed atomic history', () => {
+    expect(() => createOrdinaryHistoryReplay('thr_general', 13).mergeSnapshot([])).toThrow(/boundary/)
+    expect(() => createOrdinaryHistoryReplay('other', 13).accept([generalTerminalBatch()])).toThrow(/boundary/)
+    expect(() => createOrdinaryHistoryReplay('thr_general', 12).accept([generalTerminalBatch()])).toThrow(/boundary/)
+    expect(() => createOrdinaryHistoryReplay('thr_general', 13).accept([user('u', 'turn_general', 1), generalTerminalBatch()])).toThrow(/Mixed/)
+  })
+})
+
+describe('specialized nine-key settled mapper seams', () => {
+  const host = { schemaVersion: 1, projectionKind: 'host_status', disclosure: 'metadata_only', status: 'completed',
+    code: 'tool_completed', messageKey: 'tool_completed', privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false }
+  const item: CoreTurnItemJson = { id: 'item_result_' + 'a'.repeat(64), turnId: 'turn-specialized', threadId: 'thread-specialized',
+    createdAt: '2026-10-09T00:00:00Z', kind: 'tool_result', role: 'tool', status: 'completed', toolName: 'create_goal',
+    callId: 'call_host_' + 'b'.repeat(64), toolKind: 'tool_call', output: host, isError: false }
+  const selector = { turnId: item.turnId, callId: item.callId, resultItemId: item.id }
+  const child: CoreChildRuntimeMetadataJson = { parentThreadId: 'thread-specialized', parentTurnId: 'turn-specialized',
+    childId: 'child-a', childStatus: 'completed', kind: 'subagent', parentToolCallId: item.callId,
+    childThreadId: 'child-thread', childTurnId: 'child-turn', background: true }
+  it.each(['create_goal', 'get_goal', 'update_goal', 'todo_write', 'run_skill'])('preserves settled %s selector through hydration and live item dispatch', async toolName => {
+    const value = { ...item, toolName }
+    expect(TurnItem.safeParse(value).success).toBe(true)
+    const replay = chatBlockFromItem(value)
+    expect(replay).toMatchObject({ kind: 'tool', toolKind: 'tool_call', meta: { toolName, localResult: selector } })
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    const sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: item.threadId, turnId: item.turnId, item: value }, sink, async () => undefined)
+    expect(received).toHaveLength(1); expect(received[0].meta?.localResult).toEqual(selector)
+    await dispatchAnalytixRuntimeEvent({ kind: 'tool_call_finished', threadId: item.threadId, turnId: item.turnId,
+      callId: item.callId, toolName, status: 'completed' }, sink, async () => undefined)
+    expect(received.at(-1)?.meta).not.toHaveProperty('localResult')
+  })
+  it('retains real run_skill identity through hydration, live dispatch and the native child projector', async () => {
+    const value = { ...item, toolName: 'run_skill' }
+    const result = chatBlockFromItem(value, child)
+    expect(result).toMatchObject({ kind: 'tool', toolKind: 'tool_call', meta: { toolName: 'run_skill', localResult: selector,
+      child: { childId: 'child-a', childThreadId: 'child-thread', parentToolCallId: item.callId } } })
+    expect(result?.kind === 'tool' ? result.detail : '').not.toContain('childThreadId')
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: item.threadId, turnId: item.turnId, item: value, child },
+      { ...makeSink(), onTool: event => received.push(event) }, async () => undefined)
+    const projected = projectToolEventForRenderer(received[0])
+    expect(projected).toMatchObject({ toolKind: 'tool_call', status: 'success', meta: { toolName: 'run_skill', localResult: selector } })
+    expect(projectToolEventForRenderer(projected!)).toEqual(projected)
+  })
+  it.each([
+    { toolKind: 'subagent' }, { toolKind: 'command_execution' },
+    { callId: 'foreign' }, { id: 'foreign' }, { threadId: '' }, { status: 'running' }, { isError: true },
+    { output: { ...host, objective: 'PRIVATE_INPUT', todo: [{ content: 'PRIVATE_INPUT' }] } }
+  ])('rejects an unadmitted specialized selector %j', patch => {
+    const result = chatBlockFromItem({ ...item, ...patch } as CoreTurnItemJson)
+    expect(result?.kind === 'tool' ? result.meta?.localResult : undefined).toBeUndefined()
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_INPUT')
+  })
+  it.each([['list_jobs', 'list'], ['bash_output', 'output'], ['kill_shell', 'kill'], ['wait', 'wait']] as const)(
+    'carries %s recorded %s data through strict hydration and live items', async (toolName, operation) => {
+      const job = taskJobSummaryV1({ id: 'job-specialized', kind: 'bash', status: 'failed', background: true })
+      const result = operation === 'list' ? { jobs: [job], count: 1 } : operation === 'wait' ? { jobs: [job] } : operation === 'kill' ? { job } :
+        { schemaVersion: 1, availability: 'withheld', jobId: job.id, status: 'failed', outputWithheld: true,
+          reasonCode: 'security_bound_child_output', outputTrustStatus: 'untrusted_child_output', factAnswerAllowed: false,
+          evidenceAuthority: false, canReadOutput: false, canContinueParent: false }
+      const output = { ...host, projectionKind: 'task_job_result', taskJob: { operation, result } }
+      const value: CoreTurnItemJson = { ...item, toolName, toolKind: 'command_execution', output }
+      expect(TurnItem.safeParse(value).success).toBe(true)
+      expect(chatBlockFromItem(value)).toMatchObject({ kind: 'tool', status: 'success', meta: { toolName, publicResult: output, localResult: selector } })
+      const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+      await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: item.threadId, turnId: item.turnId, item: value },
+        { ...makeSink(), onTool: event => received.push(event) }, async () => undefined)
+      expect(received[0].meta?.publicResult).toEqual(output); expect(received[0].meta?.localResult).toEqual(selector)
+      for (const patch of [{ toolName: 'foreign' }, { toolKind: 'tool_call' }, { isError: true }, { callId: 'foreign' }]) {
+        const rejected = chatBlockFromItem({ ...value, ...patch } as CoreTurnItemJson)
+        expect(rejected?.kind === 'tool' ? rejected.meta?.publicResult : undefined).toBeUndefined()
+        expect(rejected?.kind === 'tool' ? rejected.meta?.localResult : undefined).toBeUndefined()
+      }
+    })
+
+  it.each(['ls', 'mcp__example__customTool'])('carries actual ordinary %s result identity through GET and live items without a tool-name allowlist', async toolName => {
+    const value = { ...item, toolName }
+    expect(TurnItem.safeParse(value).success).toBe(true)
+    const replay = chatBlockFromItem(value)
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    const sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: item.threadId, turnId: item.turnId, item: value }, sink, async () => undefined)
+    expect(received[0].meta).toEqual(replay?.kind === 'tool' ? replay.meta : undefined)
+    expect(received[0].meta).toMatchObject({ toolName, localResult: selector })
+    for (const kind of ['tool_progress', 'tool_call_finished'] as const) {
+      await dispatchAnalytixRuntimeEvent({ kind, threadId: item.threadId, turnId: item.turnId, callId: item.callId, toolName, status: 'completed' }, sink, async () => undefined)
+      expect(received.at(-1)?.meta).not.toHaveProperty('localResult')
+    }
+  })
+  it('keeps failed Job settlement readable without inventing a successful public Job result', () => {
+    const value: CoreTurnItemJson = { ...item, toolName: 'kill_shell', toolKind: 'command_execution', status: 'failed', isError: true,
+      output: { ...host, status: 'failed', code: 'tool_failed', messageKey: 'tool_failed' } }
+    expect(TurnItem.safeParse(value).success).toBe(true)
+    expect(chatBlockFromItem(value)).toMatchObject({ kind: 'tool', status: 'error', meta: { toolName: 'kill_shell', localResult: selector } })
+    for (const toolName of ['kill_shell', 'restart_job']) {
+      const wrongKind = chatBlockFromItem({ ...value, toolName, toolKind: 'tool_call' })
+      expect(wrongKind?.kind === 'tool' ? wrongKind.meta?.localResult : undefined).toBeUndefined()
+    }
+  })
+  it('keeps a settled child result on its own coordinates while the parent remains active', async () => {
+    const value: CoreTurnItemJson = { ...item, toolName: 'ls', threadId: child.childThreadId!, turnId: child.childTurnId!,
+      callId: 'call_host_' + 'c'.repeat(64), id: 'item_result_' + 'd'.repeat(64) }
+    const activeChild: CoreChildRuntimeMetadataJson = { ...child, childStatus: 'running' }
+    const ownSelector = { turnId: value.turnId, callId: value.callId, resultItemId: value.id }
+    expect(chatBlockFromItem(value, activeChild)).toMatchObject({ kind: 'tool', meta: { localResult: ownSelector, recordThreadId: value.threadId } })
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: value.threadId, turnId: value.turnId, item: value, child: activeChild },
+      { ...makeSink(), onTool: event => received.push(event) }, async () => undefined)
+    expect(projectToolEventForRenderer(received[0])).toMatchObject({ toolKind: 'tool_call', status: 'success',
+      meta: { toolName: 'ls', localResult: ownSelector, recordThreadId: value.threadId } })
+  })
+  it('rejects foreign, unsettled and payload-bearing child locators at the final live projector', async () => {
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: item.threadId, turnId: item.turnId,
+      item: { ...item, toolName: 'run_skill' }, child }, { ...makeSink(), onTool: event => received.push(event) }, async () => undefined)
+    const event = received[0], meta = event.meta!
+    for (const patch of [
+      { runtimeStatus: 'tool_progress' }, { sourceItemId: 'foreign-result' }, { recordThreadId: 'foreign-thread' },
+      { localResult: { ...selector, turnId: 'foreign-turn' } }, { localResult: { ...selector, callId: 'call_host_' + 'c'.repeat(64) } },
+      { localResult: { ...selector, resultItemId: 'item_result_' + 'd'.repeat(64) } },
+      { localResult: { ...selector, inputJSON: 'PRIVATE_INPUT' } }, { child: { ...child, parentToolCallId: 'foreign-call' } }
+    ]) {
+      const projected = projectToolEventForRenderer({ ...event, meta: { ...meta, ...patch } })
+      expect(projected?.meta).not.toHaveProperty('localResult')
+      expect(projected?.meta).not.toHaveProperty('toolName')
+      expect(JSON.stringify(projected)).not.toContain('PRIVATE_INPUT')
+    }
+    expect(projectToolEventForRenderer({ ...event, status: 'running' })?.meta).not.toHaveProperty('localResult')
+    expect(projectToolEventForRenderer({ ...event, toolKind: 'subagent' })?.meta).not.toHaveProperty('localResult')
+    const wrongChild = chatBlockFromItem({ ...item, toolName: 'run_skill' }, { ...child, parentToolCallId: 'foreign-call' })
+    expect(wrongChild?.kind === 'tool' ? wrongChild.meta : undefined).not.toHaveProperty('localResult')
+  })
+})
+
+
+describe('conversation record physical identity admission', () => {
+  const base = { threadId: 'record-thread', turnId: 'record-turn', callId: 'record-call', toolName: 'get_goal', toolKind: 'tool_call', createdAt: '2026-10-09T00:00:00Z' } as const
+  const args = { schemaVersion: 1, projectionKind: 'withheld', disclosure: 'metadata_only', messageKey: 'tool_arguments_withheld',
+    privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false } as const
+  const output = { schemaVersion: 1, projectionKind: 'host_status', disclosure: 'metadata_only', status: 'completed', code: 'tool_completed',
+    messageKey: 'tool_completed', privatePayloadWithheld: true, factAnswerAllowed: false, evidenceAuthority: false } as const
+  it('retains strict call and result witnesses through actual live item dispatch and the final restricted projector', async () => {
+    const received: Array<Parameters<ThreadEventSink['onTool']>[0]> = []
+    const sink = { ...makeSink(), onTool: (event: Parameters<ThreadEventSink['onTool']>[0]) => received.push(event) }
+    const call: CoreTurnItemJson = { ...base, id: 'physical-call', kind: 'tool_call', role: 'assistant', status: 'running', arguments: args }
+    const result: CoreTurnItemJson = { ...base, id: 'physical-result', kind: 'tool_result', role: 'tool', status: 'completed', output, isError: false }
+    for (const item of [call, result]) {
+      await dispatchAnalytixRuntimeEvent({ kind: 'item_completed', threadId: base.threadId, turnId: base.turnId, item }, sink, async () => undefined)
+    }
+    expect(received).toHaveLength(2)
+    expect(received[0].meta?.toolCallIdentity).toEqual({ threadId: base.threadId, turnId: base.turnId, callId: base.callId, itemId: call.id })
+    expect(received[1].meta?.toolResultIdentity).toEqual({ threadId: base.threadId, turnId: base.turnId, callId: base.callId, itemId: result.id })
+    const projected = projectToolEventForRenderer({ ...received[1], meta: { ...received[1].meta, runtimeStatus: 'tool_progress' } })
+    expect(projected?.meta?.toolResultIdentity).toEqual(received[1].meta?.toolResultIdentity)
+    expect(projected?.meta?.toolResultItemId).toBe(result.id)
+    const mismatched = projectToolEventForRenderer({ ...received[1], meta: { ...received[1].meta, runtimeStatus: 'tool_progress', sourceItemId: 'unrelated-progress' } })
+    expect(mismatched?.meta).not.toHaveProperty('toolResultIdentity')
+    await dispatchAnalytixRuntimeEvent({ kind: 'tool_call_ready', threadId: base.threadId, turnId: base.turnId, callId: base.callId, toolName: base.toolName, itemId: call.id }, sink, async () => undefined)
+    expect(received.at(-1)?.meta).not.toHaveProperty('toolCallIdentity')
+  })
+})
+
+
+describe('output cap committed batch and history projection', () => {
+  function cappedBatch(empty = false): Record<string, unknown> {
+    const batch = typedGeneralTerminalBatch()
+    const events = batch.events as Array<Record<string, unknown>>
+    events[2].endReason = { kind: 'max-tokens' }
+    if (empty) {
+      batch.events = events.slice(1)
+      batch.firstSeq = 12
+      batch.eventManifest = (batch.eventManifest as unknown[]).slice(1)
+    }
+    return batch
+  }
+  it('maps a closed cap fact only from the validated terminal batch', () => {
+    expect(generalTerminalProjectionBatchFromRuntime(cappedBatch())?.terminal.endReason).toEqual({ kind: 'max-tokens' })
+    const batch = cappedBatch()
+    ;(batch.events as Array<Record<string, unknown>>)[2].endReason = { kind: 'max-tokens', private: 'raw' }
+    expect(generalTerminalProjectionBatchFromRuntime(batch)).toBeNull()
+  })
+  it('replays an empty cap as the same two-slot user association without inventing assistant text', () => {
+    const item = { id: 'cap-user', kind: 'user_message', role: 'user', threadId: 'thr_general', turnId: 'turn_general', status: 'completed',
+      createdAt: '2026-07-20T02:00:00Z', text: 'Review code.' }
+    const replay = createOrdinaryHistoryReplay('thr_general', 13)
+    replay.accept([{ kind: 'item_completed', seq: 1, timestamp: item.createdAt, threadId: item.threadId, turnId: item.turnId, item }])
+    replay.accept([cappedBatch(true)])
+    const snapshot = chatBlockFromItem(item as CoreTurnItemJson)!
+    const blocks = replay.mergeSnapshot([snapshot], { threadId: 'thr_general' })
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ kind: 'user', generalTerminalProjectionReceipt: {
+      threadId: 'thr_general', turnId: 'turn_general', itemId: 'cap-user', firstSeq: 12, lastSeq: 13, endReason: { kind: 'max-tokens' }
+    } })
+    expect(replay.mergeSnapshot([{ ...snapshot, text: 'Changed identity text' } as ChatBlock], { threadId: 'thr_general' })[0]).not.toHaveProperty('generalTerminalProjectionReceipt')
+  })
+})
+
+
+describe('ordinary compaction interrupted history', () => {
+  it('keeps a start without committed evidence unknown while live starts still run', async () => {
+    const event: CoreRuntimeEventJson = { kind: 'compaction_started', schemaVersion: 3, threadId: 'thr_unknown', turnId: 'turn_unknown', itemId: 'compaction_unknown', compactionId: 'compaction_unknown',
+      auto: false, startedAt: '2026-10-09T00:00:00Z', timestamp: '2026-10-09T00:00:00Z', seq: 1 }
+    const replay = createOrdinaryHistoryReplay('thr_unknown', 1)
+    replay.accept([event])
+    expect(replay.mergeSnapshot([], { threadId: 'thr_unknown' })).toMatchObject([{ kind: 'compaction', id: 'compaction_unknown', status: 'unknown', summary: '' }])
+    const compactions: CompactionEventPayload[] = []
+    await dispatchAnalytixRuntimeEvent(event, { ...makeSink(), onCompaction: ev => compactions.push(ev) }, async () => undefined)
+    expect(compactions).toMatchObject([{ itemId: 'compaction_unknown', status: 'running' }])
+  })
+})
+
+it('keeps initial loaded skills item-owned during hydration and clears absent facts', () => {
+  const context = { activeSkillIds: ['turn-wide-claim'] };
+  const user = { id:'user-one',createdAt:'2026-10-17T00:00:00Z',turnId:'turn-one',threadId:'thread-one',role:'user',status:'completed',kind:'user_message',text:'/review',activeSkillIds:['review'] } as const;
+  const first = chatBlockFromItem({...user, activeSkillIds:['review']}, undefined, context);
+  const second = chatBlockFromItem({...user, id:'user-two',activeSkillIds:undefined}, undefined, context);
+  expect(first).toMatchObject({meta:{activeSkillIds:['review']}});
+  expect(second).toMatchObject({meta:{activeSkillIds:[]}});
+});

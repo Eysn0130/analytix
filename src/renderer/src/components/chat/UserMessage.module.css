@@ -1,0 +1,126 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+/* User geometry follows the pinned MessageItem; native editing and references
+   retain their existing Analytix payload and authority. */
+.row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+  gap: 6px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+  max-width: min(calc(var(--dsh-chat-content-width, 748px) * 0.702), 82%);
+  gap: 8px;
+}
+
+.bubble {
+  min-width: 0;
+  max-width: 100%;
+  padding: 10px 16px;
+  border-radius: var(--dsw-radius-xl, 20px);
+  background: var(--dsw-specific-bubble, var(--ds-bubble-user));
+  color: var(--dsw-alias-label-primary, var(--ds-bubble-user-fg));
+  font-family: var(--dsw-font-family, inherit);
+  font-size: var(--dsh-content-font-size, 14px);
+  font-weight: 400;
+  line-height: calc(22px + var(--dsh-content-font-delta, 0px));
+  overflow-wrap: anywhere;
+  text-align: left;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Override only the assistant tail's offsets; action dimensions, SVG sizing,
+   clock tier and history hover/focus reveal remain in TurnState. */
+.row .actions {
+  align-self: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+.row .editAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.row button:focus-visible {
+  outline: 1.5px solid var(--dsw-focus-ring-color, var(--ds-accent));
+  outline-offset: 2px;
+}
+
+.editor {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+
+.attachments {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.referenceChip {
+  display: inline;
+  max-width: 100%;
+  margin: 0 2px;
+  color: var(--dsw-alias-state-business-primary, var(--ds-accent));
+  font-weight: 500;
+  white-space: inherit;
+  overflow-wrap: anywhere;
+  text-align: inherit;
+}
+
+.referenceIcon,
+.referenceImage {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 4px;
+  vertical-align: -0.125em;
+}
+
+.referenceImage {
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+/* DSH user-text inline references; only validated references become buttons. */
+.referenceAction {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-link, var(--ds-accent));
+  font: inherit;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.referenceAction:hover,
+.referenceAction:focus {
+  text-decoration: underline dotted var(--dsw-alias-link, var(--ds-accent));
+  text-underline-offset: 3px;
+}
+
+.slashChip {
+  font-family: var(--dsw-font-markdown-code-font-family, var(--ds-font-family-code));
+}

@@ -2,9 +2,7 @@ package contextepoch
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -77,14 +75,11 @@ func TestActivatedDynamicContextRequiresDigestAndBudget(t *testing.T) {
 	}
 	reader := &contextSourceReaderStub{content: contextsourceport.Content{Text: content, Digest: entry.Digest}}
 	providerContext, err := BuildProviderContext(context.Background(), state, reader)
-	if err != nil || len(providerContext.Dynamic) != 1 || providerContext.Dynamic[0].Content != content || len(providerContext.Unavailable) != 0 {
-		t.Fatalf("valid selected content was not admitted: %#v err=%v", providerContext, err)
+	if err != nil || reader.calls != 1 || len(providerContext.StablePrefix) != 0 || len(providerContext.Dynamic) != 1 || len(providerContext.TurnTail) != 0 || len(providerContext.Unavailable) != 0 {
+		t.Fatalf("valid selected content was not admitted to its dynamic boundary: context=%#v calls=%d err=%v", providerContext, reader.calls, err)
 	}
-	serialized, _ := json.Marshal(providerContext)
-	for _, forbidden := range []string{entry.SourceID, entry.Reference, entry.Digest} {
-		if strings.Contains(string(serialized), forbidden) {
-			t.Fatalf("registry metadata must remain prompt-invisible (%q): %s", forbidden, serialized)
-		}
+	if fragment := providerContext.Dynamic[0]; fragment.SourceID != entry.SourceID || fragment.Kind != entry.Kind || fragment.Boundary != entry.PromptBoundary || fragment.Content != content {
+		t.Fatalf("selected plan must retain source identity, boundary, and verified content: %#v", fragment)
 	}
 
 	reader.content = contextsourceport.Content{Text: "different content"}

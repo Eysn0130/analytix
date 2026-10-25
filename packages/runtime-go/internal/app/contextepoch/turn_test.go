@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
@@ -158,5 +159,24 @@ func turnSecurityRecordForTest(context domainsecurity.TurnSecurityContext) map[s
 		"sourceManifestHash": context.SourceManifestHash, "contextEpoch": context.ContextEpoch, "issuedAt": context.IssuedAt,
 		"contextDigest": context.ContextDigest, "publicationPolicy": context.PublicationPolicy,
 		"riskAuthorityBinding": context.RiskAuthorityBinding,
+	}
+}
+
+func TestInitialSkillSelectionDoesNotMutateCompactionVerifier(t *testing.T) {
+	at := time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC)
+	security := newContextEpochTSCV2(t, domainsecurity.TurnSecurityContextInput{ThreadID: "initial-source-thread", TurnID: "turn-first", WorkspaceRealPath: "/workspace", ContextEpoch: 1, IssuedAt: at})
+	entry := domaincontextepoch.SourceEntry{Version: 1, SourceID: "initial-skill:test", Kind: InitialUserSkillKind, Digest: domaincontextepoch.SHA256Hex([]byte("instructions")), TrustState: domaincontextepoch.TrustUntrusted, PromptBoundary: domaincontextepoch.BoundaryDynamicContext, ActivationState: domaincontextepoch.ActivationActive, TokenBudget: 100}
+	first, err := PrepareTurn(PrepareTurnInput{Thread: map[string]any{}, SecurityContext: security, At: at, Sources: []domaincontextepoch.SourceEntry{entry}, ReplaceInitialSkills: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := map[string]any{"contextEpochState": PublicState(first.State)}
+	verified, err := PrepareTurn(PrepareTurnInput{Thread: thread, SecurityContext: first.SecurityContext, At: at})
+	if err != nil || verified.Changed || len(verified.State.Registry) != 2 {
+		t.Fatal("pure epoch verification cleared skill source", err)
+	}
+	cleared, err := PrepareTurn(PrepareTurnInput{Thread: thread, SecurityContext: first.SecurityContext, At: at, ReplaceInitialSkills: true})
+	if err != nil || !cleared.Changed || len(cleared.State.Registry) != 1 {
+		t.Fatal("next initial admission retained old skill", err)
 	}
 }

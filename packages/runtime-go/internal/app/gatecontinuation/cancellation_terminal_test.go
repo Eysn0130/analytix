@@ -671,3 +671,102 @@ func (store *cancellationGateStore) HasRecords(context.Context) (bool, error) {
 	defer store.mu.Unlock()
 	return len(store.receipts) > 0 || len(store.dispositions) > 0, nil
 }
+
+func TestTerminalNativeQuestionSettlementPrecedesTerminalAndReplaysLostAcknowledgements(t *testing.T) {
+	for _, toolName := range []string{"user_input", "request_user_input"} {
+		for _, cut := range []string{"result_ack_lost", "before_terminal", "terminal_ack_lost"} {
+			t.Run(toolName+"/"+cut, func(t *testing.T) {
+				now := time.Now().UTC()
+				pending := cancellationPendingFixture(t, domaincontinuation.KindUserInput, now)
+				pending.Call.Name = toolName
+				pending.ToolScope = []string{toolName}
+				scope, _ := json.Marshal(pending.ToolScope)
+				pending.ExecutionGrant = domainsecurity.NewExecutionGrant(domainsecurity.ExecutionGrantInput{
+					Context: pending.SecurityContext, Provider: pending.ProviderID, ServerIdentity: "host:builtin",
+					ToolName: toolName, ToolCallID: pending.Call.ID, ArgsHash: domainsecurity.CanonicalJSONHash(pending.Call.Arguments),
+					SchemaHash: pending.ExecutionGrant.SchemaHash, ScopeHash: domainsecurity.SHA256Hex(scope),
+					ApprovalState: "not_required", ReadOnly: false, IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute),
+				})
+				store := newCancellationGateStore()
+				continuations := continuationapp.NewService(newCancellationAuthority(), store)
+				registry := controlapp.NewGateRegistry[appmodel.PendingToolCall]()
+				manager := controlapp.NewApprovalUserInputManager()
+				gateID := controlapp.SecureGateID(domaincontinuation.KindUserInput, pending.ThreadID, pending.TurnID, pending.SecurityContext.ContextDigest, pending.ExecutionGrant.GrantID, pending.Call.ID)
+				itemID := "item_" + gateID
+				receipt, err := continuations.IssuePendingHost(domaincontinuation.KindUserInput, gateID, itemID, pending, now)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record := controlapp.GateRecord{ThreadID: pending.ThreadID, TurnID: pending.TurnID, ItemID: itemID, ToolName: toolName, ContinuationReceiptID: receipt.ReceiptID}
+				store.getThread = func(string) (map[string]any, error) { return gateThreadFixture(record, "pending"), nil }
+				if !registry.RegisterPendingUserInput(gateID, record, pending) {
+					t.Fatal("register native Question")
+				}
+				manager.RequestUserInput(gateID, "Continue?")
+				injected := errors.New("injected terminal Question acknowledgement failure")
+				resultCalls, terminalCalls, cancellations := 0, 0, 0
+				terminal, resultWritten := false, false
+				var disposedAt string
+				dependencies := Dependencies{
+					Store: store, Registry: registry, Manager: manager, Continuations: continuations,
+					TerminalStatus:      func(string, string) (string, bool, error) { return "aborted", terminal, nil },
+					RecordCancellations: func([]controlapp.PendingGateCancellation, string) error { cancellations++; return nil },
+					SettleTerminalQuestion: func(ctx context.Context, gate controlapp.DrainedGate[appmodel.PendingToolCall]) error {
+						resultCalls++
+						_, disposition, err := continuations.ResolveTrustedDisposition(ctx, gate.ID)
+						if err != nil || cancellations == 0 || store.PatchCalls() == 0 || gate.TerminalStatus != disposition.Status || gate.TerminalReasonCode != disposition.ReasonCode {
+							t.Fatalf("result preceded signed gate/UI settlement: disposition=%#v err=%v", disposition, err)
+						}
+						if disposedAt != "" && disposedAt != disposition.DisposedAt {
+							t.Fatal("retry changed the signed cancellation time")
+						}
+						disposedAt, resultWritten = disposition.DisposedAt, true
+						if cut == "result_ack_lost" && resultCalls == 1 {
+							return injected
+						}
+						return nil
+					},
+					RecordFailure: func(appmodel.PendingToolCall, error) error {
+						terminalCalls++
+						if !resultWritten {
+							t.Fatal("terminal preceded Question result settlement")
+						}
+						if cut == "before_terminal" && terminalCalls == 1 {
+							return injected
+						}
+						terminal = true
+						if cut == "terminal_ack_lost" && terminalCalls == 1 {
+							return injected
+						}
+						return nil
+					},
+					Finalize: func(context.Context, appmodel.PendingToolCall, apploop.RuntimeAgentLoopResult, evidenceapp.TerminalReason) error {
+						t.Fatal("ordinary Question invoked case Finalize")
+						return nil
+					},
+					Complete: func(context.Context, appmodel.PendingToolCall, any, bool) (apploop.RuntimeAgentLoopResult, error) {
+						t.Fatal("terminal Question resumed the provider")
+						return apploop.RuntimeAgentLoopResult{}, nil
+					},
+				}
+				drained := registry.DrainForTurn(pending.ThreadID, pending.TurnID)
+				if err := CloseDrainedForShutdown(context.Background(), drained, dependencies); !errors.Is(err, injected) {
+					t.Fatalf("first close did not retain its blocker: %v", err)
+				}
+				if cut == "result_ack_lost" && terminalCalls != 0 {
+					t.Fatal("failed result settlement terminalized the turn")
+				}
+				if !registry.RestoreDrained(drained) {
+					t.Fatal("retain exact terminal claim")
+				}
+				retry := registry.DrainForTurn(pending.ThreadID, pending.TurnID)
+				if err := CloseDrainedForShutdown(context.Background(), retry, dependencies); err != nil {
+					t.Fatalf("terminal Question retry failed: %v", err)
+				}
+				if !terminal || resultCalls != 2 || (cut == "terminal_ack_lost" && terminalCalls != 2) {
+					t.Fatalf("retry repeated terminal or lost result: terminal=%v resultCalls=%d terminalCalls=%d", terminal, resultCalls, terminalCalls)
+				}
+			})
+		}
+	}
+}

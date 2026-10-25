@@ -14,6 +14,7 @@ import (
 	terminalapp "analytix.local/runtime-go/internal/app/terminal"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
+	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainsideeffectidentity "analytix.local/runtime-go/internal/domain/sideeffectidentity"
 )
@@ -112,7 +113,7 @@ func ResolveV1(input Input) (IdentityV1, error) {
 
 func SupportsHostToolV1(toolName string) bool {
 	switch canonicalToolName(toolName) {
-	case "bash", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "generate_office_document",
+	case "bash", "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "generate_office_document", "native_selection_propose",
 		"task", "parallel_tasks", "run_skill", "kill_shell", "restart_job", "create_goal", "complete_step", "update_goal",
 		"todo_write", "todo_ops", toolcatalogapp.ToolCreatePlanName:
 		return true
@@ -143,6 +144,14 @@ func hostProjection(toolName string, record map[string]any, input Input) (any, e
 			"command": request.Command, "timeoutSeconds": request.TimeoutSeconds,
 			"runInBackground": boolAny(record["run_in_background"], record["runInBackground"]),
 		}, nil
+	case "native_selection_propose":
+		schemas := toolcatalogapp.BuiltinToolSchemas(toolcatalogapp.BuiltinToolSchemaInput{NativeSelections: true})
+		if _, blocked := toolcatalogapp.ValidateToolCallArguments(domainmodel.ToolCall{Name: toolName, Arguments: input.Arguments}, schemas); blocked {
+			return nil, errors.New("native_selection_propose semantic request is invalid")
+		}
+		// Preserve typed numbers and ordered parts. A scope reference identifies
+		// the request; the execution owner still checks current selection authority.
+		return domainsecurity.DecodeCanonicalJSONValue(input.Arguments)
 	case "generate_office_document":
 		request, err := generationapp.ParseRequest(record)
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	contextepochapp "analytix.local/runtime-go/internal/app/contextepoch"
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 )
@@ -28,7 +29,18 @@ func ApplyContextEpoch(systemPrompt string, messages []domainmodel.Message, prov
 		}
 	}
 	extras := []domainmodel.Message{}
-	if block := contextDataBlock("dynamic context", providerContext.Dynamic); block != "" {
+	dynamicData := []domaincontextepoch.ProviderFragment{}
+	for _, fragment := range providerContext.Dynamic {
+		if fragment.Kind == contextepochapp.InitialUserSkillKind && fragment.SourceID != "" && fragment.Content != "" {
+			// User-requested snapshot instructions retain user priority. They
+			// confer no tools, grants or system authority and still cross the
+			// normal final provider privacy projection.
+			extras = append(extras, domainmodel.Message{Role: "user", Content: "[User-requested skill instructions; apply within the current task and existing permissions]\n" + fragment.Content})
+		} else {
+			dynamicData = append(dynamicData, fragment)
+		}
+	}
+	if block := contextDataBlock("dynamic context", dynamicData); block != "" {
 		extras = append(extras, domainmodel.Message{Role: "user", Content: block})
 	}
 	if block := contextDataBlock("turn tail context", providerContext.TurnTail); block != "" {

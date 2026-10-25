@@ -1,3 +1,9 @@
+import { createUserInputWaitTransportV1 } from './runtime/user-input-wait-owner'
+import { invalidateProcessLocalDisplaysV1 } from './ipc/process-local-display-ipc'
+import { PROCESS_LOCAL_DISPLAY_READ_PATH_V1, PROCESS_LOCAL_DISPLAY_TARGET_PATH_V1, PROCESS_LOCAL_DISPLAY_MAX_BYTES_V1 } from '../../packages/runtime/src/contracts/protected-process-local-display'
+import { invalidateToolResultLocalDisplaysV1 } from './ipc/tool-result-local-display-ipc'
+import { USER_INPUT_LOCAL_DISPLAY_PATH_V1, USER_INPUT_LOCAL_DISPLAY_MAX_BYTES_V1 } from '../../packages/runtime/src/contracts/user-input-local-display'
+import { TOOL_RESULT_LOCAL_DISPLAY_PATH_V1, TOOL_RESULT_LOCAL_WEB_DISPLAY_MAX_BYTES_V1 } from '../../packages/runtime/src/contracts/tool-result-local-display'
 import { registerBrowserGuest } from './browser/browser-selection'
 import { clearWriteRetrievalCache } from './services/write-retrieval-service'
 import {
@@ -9,6 +15,8 @@ import {
   nativeImage,
   Notification,
   powerSaveBlocker,
+  protocol,
+  session,
   shell,
   Tray,
   type IpcMainInvokeEvent
@@ -72,7 +80,11 @@ import type { GuiUpdateState } from '../shared/gui-update'
 import { isAllowedDevPreviewUrl } from '../shared/dev-preview-url'
 import { MACOS_TRAFFIC_LIGHT_POSITION } from '../shared/window-chrome'
 import { WINDOW_STARTUP_SURFACE_READY_CHANNEL } from '../shared/window-startup'
-import { isAuthorizedPrototypeFileUrl } from './services/prototype-embed-registry'
+import {
+  PROTOTYPE_PREVIEW_SCHEME, PROTOTYPE_PREVIEW_PRIVILEGES, PROTOTYPE_PREVIEW_CSP,
+  setPrototypeSessionFactory, reservePrototypeGuest, bindPrototypeGuest,
+  isPrototypeSession, isPrototypeRequestAllowed, isPrototypeGrantCurrent, installProtectedPrototypeGuestGuards, readPrototypeResource, revokePrototypeGrant
+} from './services/prototype-embed-registry'
 import { fetchUpstreamModelIds } from './upstream-models'
 import {
   analytixRuntimeAdapter,
@@ -103,14 +115,18 @@ import {
   configureAnalytixProcessMainPrivatePaths,
   resolveBuiltInComputerUseMcpCommand,
   resolveAnalytixDataDir,
+  resolveDocumentCodecLaunch,
   setAnalytixUnexpectedExitHandler,
+  prepareGuiManagedAnalytixSettingsTransition,
+  acquireGuiConfigWrite,
+  configureGuiManagedAnalytixSettingsReader,
   type AnalytixUnexpectedExitInfo
 } from './analytix-process'
 import {
   captureOpenComputerUseAgentBaselineV1,
   stopOwnedOpenComputerUseAppAgentV1
 } from './open-computer-use-agent-lifecycle'
-import { RestartBudget, restartAfterPendingEnsure } from './analytix-runtime-supervisor'
+import { RestartBudget, restartAfterPendingEnsure, SettingsRuntimeStopHandoff } from './analytix-runtime-supervisor'
 import {
   runtimeErrorPublicDiagnosticV1,
   type RuntimeErrorPublicDiagnosticV1
@@ -136,6 +152,7 @@ import {
   type ClawScheduleMcpLaunchConfig
 } from './claw-schedule-mcp-config'
 import { registerAppIpcHandlers } from './ipc/register-app-ipc-handlers'
+import { createExcelPreviewCopyReaderV1 } from './services/excel-preview-copy-service'
 import { createPrivateMediaRuntimeRequest } from './services/private-media-runtime-request'
 import {
   accountCredentialExpectedState,
@@ -210,7 +227,7 @@ import {
   installPackagedRendererProtocol,
   isPackagedRendererNavigationURL,
   packagedRendererURL,
-  registerPackagedRendererScheme
+  PACKAGED_RENDERER_SCHEME
 } from './packaged-renderer-protocol'
 import {
   applyDesktopLoginItemSettings,
@@ -506,6 +523,7 @@ async function stopManagedRuntimesForQuit(): Promise<void> {
 }
 
 async function stopManagedRuntimes(): Promise<void> {
+  runtimeSettingsStopHandoff.cancel()
   clearWriteRetrievalCache()
   if (!managedRuntimesStopPromise) {
     managedRuntimesStopPromise = (async () => {
@@ -516,6 +534,7 @@ async function stopManagedRuntimes(): Promise<void> {
       const dataAnalysisStop = dataAnalysisBackendManager?.stopAndWait() ?? Promise.resolve()
       stopWeixinBridgeRuntime()
       await bundledFundsActivation.waitForInFlight()
+      await waitForQueuedRuntimeSettingsApply()
       const results = await Promise.allSettled([dataAnalysisStop, analytixRuntimeAdapter.stopAndWait()])
       const computerUseAgentStop = await stopOwnedOpenComputerUseAppAgentV1({
         command: resolveBuiltInComputerUseMcpCommand(),
@@ -576,33 +595,72 @@ async function readGuiUpdateState(): Promise<GuiUpdateState> {
 
 
 function installDevPreviewWebviewGuards(): void {
+  setPrototypeSessionFactory(grant => {
+    const isolated = session.fromPartition(grant.partition, { cache: false })
+    isolated.protocol.handle(PROTOTYPE_PREVIEW_SCHEME, async request => {
+      const resource = await readPrototypeResource(grant.grantId, request.url, request.method)
+      if (!resource.ok || !isPrototypeGrantCurrent(grant.grantId)) return new Response(null, { status: 403 })
+      return new Response(new Uint8Array(resource.bytes), { headers: {
+        'Content-Type': resource.mimeType, 'Content-Security-Policy': PROTOTYPE_PREVIEW_CSP,
+        'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store'
+      } })
+    })
+    isolated.webRequest.onBeforeRequest((details, callback) => callback({
+      cancel: !isPrototypeRequestAllowed(grant.grantId, details.url, details.method)
+    }))
+    isolated.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    isolated.setPermissionCheckHandler(() => false)
+    const denyDownload = (event: Electron.Event): void => event.preventDefault()
+    isolated.on('will-download', denyDownload)
+    return { session: isolated, dispose: async () => {
+      isolated.protocol.unhandle(PROTOTYPE_PREVIEW_SCHEME)
+      await isolated.closeAllConnections()
+      await isolated.clearStorageData()
+      await isolated.clearCache()
+      isolated.removeListener('will-download', denyDownload)
+    } }
+  })
   app.on('web-contents-created', (_, contents) => {
-    contents.on('did-attach-webview', (_event, guest) => registerBrowserGuest(contents, guest))
+    contents.on('did-attach-webview', (_event, guest) => {
+      if (!isPrototypeSession(guest.session)) { registerBrowserGuest(contents, guest); return }
+      const grant = bindPrototypeGuest(contents.id, guest.session, guest.id, () => {
+        if (!guest.isDestroyed()) guest.close()
+      })
+      if (!grant) { guest.close(); return }
+      installProtectedPrototypeGuestGuards(grant.grantId, guest)
+      const retire = (): void => { revokePrototypeGrant(grant.grantId, contents.id) }
+      guest.once('destroyed', retire)
+      // The first load belongs to this grant. Every subsequent document exit
+      // retires it; the explicit Reload action obtains a fresh grant/session.
+      guest.once('did-finish-load', () => guest.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+        if (mainFrame && !inPlace) retire()
+      }))
+      guest.setWindowOpenHandler(() => ({ action: 'deny' }))
+    })
     contents.on('will-attach-webview', (event, webPreferences, params) => {
       const src = typeof params.src === 'string' ? params.src : ''
-      // Prototype embeds are file:// pages the renderer authorized through
-      // write:authorize-prototype right before attaching.
-      if (!isAllowedDevPreviewUrl(src) && !isAuthorizedPrototypeFileUrl(src)) {
-        event.preventDefault()
-        return
+      const prototype = !isAllowedDevPreviewUrl(src)
+      if (prototype && !reservePrototypeGuest(src, contents.id, params.partition ?? '')) {
+        event.preventDefault(); return
       }
-
       delete webPreferences.preload
       delete (webPreferences as { preloadURL?: string }).preloadURL
       webPreferences.nodeIntegration = false
+      webPreferences.nodeIntegrationInSubFrames = false
+      webPreferences.nodeIntegrationInWorker = false
       webPreferences.contextIsolation = true
       webPreferences.sandbox = true
       webPreferences.webSecurity = true
       webPreferences.allowRunningInsecureContent = false
+      if (prototype) webPreferences.webviewTag = false
     })
-
     contents.on('will-navigate', (event, navigationUrl) => {
       if (contents.getType() !== 'webview') return
-      if (!isAllowedDevPreviewUrl(navigationUrl)) event.preventDefault()
+      if (isPrototypeSession(contents.session) || !isAllowedDevPreviewUrl(navigationUrl)) event.preventDefault()
     })
-
     contents.setWindowOpenHandler(({ url }) => {
       if (contents.getType() !== 'webview') return { action: 'allow' }
+      if (isPrototypeSession(contents.session)) return { action: 'deny' }
       return isAllowedDevPreviewUrl(url) ? { action: 'allow' } : { action: 'deny' }
     })
   })
@@ -1063,6 +1121,8 @@ let runtimeEnsureFingerprint: string | null = null
 let runtimeReadyFingerprint: string | null = null
 let runtimeRestartPromise: Promise<void> | null = null
 let runtimeSettingsApplyPromise: Promise<void> | null = null
+let runtimeSettingsCommitGeneration = 0
+const runtimeSettingsStopHandoff = new SettingsRuntimeStopHandoff()
 let lastAppliedSettings: AppSettingsV1 | null = null
 
 const RUNTIME_WATCHDOG_INTERVAL_MS = 30_000
@@ -1118,6 +1178,10 @@ const bundledFundsActivation = createBundledFundsOnDemandActivationV1({
 
 function publishRuntimeStatus(input: RuntimeStatusPublicV1Input): void {
   const full = createRuntimeStatusPublicV1(input)
+  if (full.state !== 'running') {
+    invalidateToolResultLocalDisplaysV1()
+    invalidateProcessLocalDisplaysV1()
+  }
   lastRuntimeStatus = full
   const { message: _message, at: _at, ...publicDiagnostic } = full
   logWarn('runtime-status', full.code, publicDiagnostic)
@@ -1290,7 +1354,7 @@ function queueRuntimeSettingsApply(
   const anchor = lastAppliedSettings ?? prev
   lastAppliedSettings = next
   const startupConfigChanged = runtimeStartupConfigChanged(anchor, next)
-  if (!startupConfigChanged) return runtimeSettingsApplyPromise
+  if (!startupConfigChanged && !runtimeSettingsApplyPromise && !runtimeSettingsStopHandoff.hasPending()) return null
   runtimeReadyFingerprint = null
   traceStartup('runtime settings apply:queued')
 
@@ -1301,7 +1365,7 @@ function queueRuntimeSettingsApply(
       await bundledFundsActivation.waitForInFlight()
       const current = lastAppliedSettings ?? next
       traceStartup('runtime settings apply:begin')
-      await restartManagedRuntimeForSettingsChange(anchor, current)
+      await restartManagedRuntimeForSettingsChange(anchor, current, runtimeSettingsCommitGeneration)
       traceStartup('runtime settings apply:done')
     })
     .catch((error: unknown) => {
@@ -1422,13 +1486,22 @@ async function ensureRuntimeOnce(settings: AppSettingsV1): Promise<AppSettingsV1
 
 async function resolveManagedAnalytixLaunchSettings(
   settings: AppSettingsV1,
-  source: string
+  source: string,
+  expectedGeneration?: number,
+  expectedOwner?: () => boolean
 ): Promise<AppSettingsV1> {
   const runtime = getAnalytixRuntimeSettings(settings)
   const resolved = await analytixRuntimeAdapter.resolveAvailablePort(runtime.port)
   if (!resolved.changed) return settings
 
-  const next = await store.patch({ runtime: { port: resolved.port } })
+  let updated = false
+  const next = await store.patch(current => {
+    if ((expectedOwner && !expectedOwner()) || (expectedGeneration !== undefined && expectedGeneration !== runtimeSettingsCommitGeneration) ||
+        !analytixRuntimeSettingsEqual(current, settings)) return null
+    updated = true
+    return { runtime: { port: resolved.port } }
+  })
+  if (!updated || (expectedOwner && !expectedOwner()) || (expectedGeneration !== undefined && expectedGeneration !== runtimeSettingsCommitGeneration)) return next
   lastAppliedSettings = next
   logWarn(source, `Analytix port ${runtime.port} is unavailable; using ${resolved.port} for the managed runtime`, {
     previousPort: runtime.port,
@@ -1506,6 +1579,7 @@ type RuntimeRestartOptions = {
 }
 
 async function restartRuntime(settings: AppSettingsV1, options: RuntimeRestartOptions = {}): Promise<void> {
+  runtimeSettingsStopHandoff.cancel()
   if (!options.activationOwned && bundledFundsActivation.isInFlight()) {
     return bundledFundsActivation.runAfterInFlight(() => restartRuntime(settings, options))
   }
@@ -1702,6 +1776,25 @@ function runtimeStartupConfigChanged(prev: AppSettingsV1, next: AppSettingsV1): 
   return analytixRuntimeConfigChanged(prev, next) || clawScheduleMcpSettingsChanged(prev, next)
 }
 
+async function syncGuiRuntimeSettingsBeforeCommit(
+  current: AppSettingsV1,
+  next: AppSettingsV1
+): Promise<void | (() => void)> {
+  const validationError = validateRuntimeSettingsForApply(next)
+  if (validationError) throw new Error(`Invalid runtime settings: ${validationError}`)
+  if (!isManagedGoRuntimeBackend() || !analytixRuntimeConfigChanged(current, next)) return
+  const runtime = getAnalytixRuntimeSettings(next)
+  const dataDir = resolveAnalytixDataDir(runtime)
+  const previousDataDir = resolveAnalytixDataDir(getAnalytixRuntimeSettings(current))
+  if (previousDataDir !== dataDir) return acquireGuiConfigWrite(previousDataDir)
+  return prepareGuiManagedAnalytixSettingsTransition(dataDir, current, next)
+}
+
+function noteRuntimeSettingsCommit(current: AppSettingsV1, next: AppSettingsV1): void {
+  if (runtimeStartupConfigChanged(current, next)) runtimeSettingsCommitGeneration += 1
+  if (!getAnalytixRuntimeSettings(next).autoStart) runtimeSettingsStopHandoff.cancel()
+}
+
 /**
  * Reject runtime-affecting values that would persist a config analytix can
  * never boot with. Runs before the settings patch is written to disk.
@@ -1727,21 +1820,38 @@ function validateRuntimeSettingsForApply(next: AppSettingsV1): string | null {
 
 async function restartManagedRuntimeForSettingsChange(
   prev: AppSettingsV1,
-  next: AppSettingsV1
+  next: AppSettingsV1,
+  generation: number
 ): Promise<void> {
-  if (!runtimeStartupConfigChanged(prev, next)) return
-
+  const admitted = (): boolean => generation === runtimeSettingsCommitGeneration &&
+    !isQuitting && !managedRuntimesStoppedForQuit && !managedRuntimesStopPromise && !hubStandaloneStopInFlight
+  if (!admitted()) return
   const runtime = resolveAnalytixRuntimeSettings(next)
   const adapter = analytixRuntimeAdapter
-  const wasRunning = adapter.isChildRunning()
-
-  if (!wasRunning) return
-
-  await waitForManagedRuntimeReadyBeforeStop(prev, 'settings-apply')
-  traceStartup('runtime settings apply:restart begin')
-  terminalPtyController?.disposeAll()
-  await adapter.stopAndWait()
+  let receipt = runtimeSettingsStopHandoff.admit(generation, runtimeSettingsCommitGeneration)
+  if (!runtime.autoStart && !adapter.isChildRunning()) {
+    publishRuntimeStatus({ code: 'settings_apply_stopped', source: 'settings-apply' })
+    return
+  }
+  if (!runtimeStartupConfigChanged(prev, next) && !receipt) return
+  const child = adapter.runningChildIdentity()
+  if (child) {
+    const stopped = runtimeSettingsStopHandoff.begin(child, generation)
+    await waitForManagedRuntimeReadyBeforeStop(prev, 'settings-apply')
+    if (!admitted() || !runtimeSettingsStopHandoff.owns(stopped) || adapter.runningChildIdentity() !== child) return
+    traceStartup('runtime settings apply:restart begin')
+    terminalPtyController?.disposeAll()
+    await adapter.stopAndWait()
+    if (!runtimeSettingsStopHandoff.confirmStopped(stopped, adapter.runningChildIdentity())) return
+    receipt = runtimeSettingsStopHandoff.admit(generation, runtimeSettingsCommitGeneration, stopped)
+  }
+  if (!receipt || !admitted()) return
+  const stopReceipt = receipt
+  const stopOwner = (): boolean => runtimeSettingsStopHandoff.owns(stopReceipt) &&
+    !isQuitting && !managedRuntimesStoppedForQuit && !managedRuntimesStopPromise && !hubStandaloneStopInFlight
+  const currentOwner = (): boolean => admitted() && stopOwner()
   if (!runtime.autoStart) {
+    runtimeSettingsStopHandoff.complete(receipt)
     publishRuntimeStatus({
       code: 'settings_apply_stopped',
       source: 'settings-apply'
@@ -1750,19 +1860,30 @@ async function restartManagedRuntimeForSettingsChange(
   }
 
   publishRuntimeStatus({ code: 'settings_apply_restart_scheduled', source: 'settings-apply' })
+  let failedSettings = next
   try {
-    const launchSettings = await resolveManagedAnalytixLaunchSettings(next, 'settings-apply')
-    await adapter.ensureRunning(launchSettings)
+    const launchSettings = await runtimeSettingsStopHandoff.startAfterPort(
+      stopReceipt,
+      () => resolveManagedAnalytixLaunchSettings(next, 'settings-apply', generation, currentOwner),
+      currentOwner,
+      async (launch) => { failedSettings = launch; await adapter.ensureRunning(launch) }
+    )
+    if (!launchSettings || !currentOwner()) return
     const healthy = await waitForAnalytixHealth(launchSettings, 20_000)
+    if (!currentOwner()) return
     if (!healthy) {
       throw new Error('Analytix did not become healthy after the settings change')
     }
     noteRuntimeHealthy('settings-apply')
     traceStartup('runtime settings apply:restart done')
   } catch (e) {
+    if (!currentOwner()) return
     const diagnostic = runtimeErrorPublicDiagnosticV1(e)
     logWarn('settings-apply', 'Analytix restart failed after settings change', diagnostic)
-    await rollbackRuntimeSettingsAfterFailedApply(prev, diagnostic)
+    const settledGeneration = await rollbackRuntimeSettingsAfterFailedApply(prev, failedSettings, generation, diagnostic, stopOwner)
+    if (adapter.runningChildIdentity() || settledGeneration === runtimeSettingsCommitGeneration) {
+      runtimeSettingsStopHandoff.complete(stopReceipt)
+    }
   }
 }
 
@@ -1774,22 +1895,51 @@ async function restartManagedRuntimeForSettingsChange(
  */
 async function rollbackRuntimeSettingsAfterFailedApply(
   prev: AppSettingsV1,
-  failureDiagnostic: RuntimeErrorPublicDiagnosticV1
-): Promise<void> {
+  failed: AppSettingsV1,
+  generation: number,
+  failureDiagnostic: RuntimeErrorPublicDiagnosticV1,
+  expectedOwner: () => boolean
+): Promise<number | null> {
   const adapter = analytixRuntimeAdapter
-  let base: AppSettingsV1 = prev
+  let base: AppSettingsV1
+  let restored = false
+  let rollbackCommitGeneration = generation
+  let rollbackOwner = expectedOwner
   try {
-    base = await store.patch({
-      runtime: getAnalytixRuntimeSettings(prev),
-      provider: prev.provider
+    base = await store.patch((current) => {
+      // This predicate runs under the settings commit lock. An older failed
+      // restart must never roll back a later accepted runtime configuration.
+      if (!expectedOwner() || generation !== runtimeSettingsCommitGeneration || !analytixRuntimeSettingsEqual(current, failed)) return null
+      const runtime = getAnalytixRuntimeSettings(prev)
+      const profiles = { ...runtime.subagents.profiles }
+      const removed = Object.fromEntries(Object.keys(getAnalytixRuntimeSettings(current).subagents.profiles)
+        .filter(name => !Object.hasOwn(profiles, name)).map(name => [name, null]))
+      restored = true
+      return { runtime: { ...runtime, subagents: { ...runtime.subagents, profiles: { ...profiles, ...removed } } },
+        provider: prev.provider }
+    }, syncGuiRuntimeSettingsBeforeCommit, (current, next) => {
+      const ownedCommit = expectedOwner()
+      noteRuntimeSettingsCommit(current, next)
+      rollbackCommitGeneration = runtimeSettingsCommitGeneration
+      if (ownedCommit) {
+        const currentEpoch = runtimeSettingsStopHandoff.cancellationWitness()
+        rollbackOwner = () => currentEpoch() && !isQuitting && !managedRuntimesStoppedForQuit &&
+          !managedRuntimesStopPromise && !hubStandaloneStopInFlight
+      }
     })
+    if (!restored || !rollbackOwner() || rollbackCommitGeneration !== runtimeSettingsCommitGeneration) return null
     lastAppliedSettings = base
   } catch (error) {
+    if (!rollbackOwner() || rollbackCommitGeneration !== runtimeSettingsCommitGeneration) return null
     logWarn(
       'settings-apply',
       'failed to restore previous runtime settings on disk',
       runtimeErrorPublicDiagnosticV1(error)
     )
+    // A failed durable rollback does not authorize launching stale settings.
+    publishRuntimeStatus({ code: 'settings_apply_failed', source: 'settings-apply-rollback',
+      ...runtimeErrorPublicDiagnosticV1(error) })
+    return rollbackCommitGeneration
   }
   if (!getAnalytixRuntimeSettings(base).autoStart) {
     publishRuntimeStatus({
@@ -1798,15 +1948,17 @@ async function rollbackRuntimeSettingsAfterFailedApply(
       rolledBack: true,
       ...failureDiagnostic
     })
-    return
+    return rollbackCommitGeneration
   }
   try {
-    const launchSettings = await resolveManagedAnalytixLaunchSettings(base, 'settings-apply-rollback')
+    const launchSettings = await resolveManagedAnalytixLaunchSettings(base, 'settings-apply-rollback', rollbackCommitGeneration, rollbackOwner)
+    if (!rollbackOwner() || rollbackCommitGeneration !== runtimeSettingsCommitGeneration) return null
     await adapter.ensureRunning(launchSettings)
     const healthy = await waitForAnalytixHealth(launchSettings, 20_000)
     if (!healthy) {
       throw new Error('previous configuration did not become healthy')
     }
+    if (!rollbackOwner() || rollbackCommitGeneration !== runtimeSettingsCommitGeneration) return null
     noteRuntimeHealthy('settings-apply-rollback')
     publishRuntimeStatus({
       code: 'settings_rollback_ready',
@@ -1815,6 +1967,7 @@ async function rollbackRuntimeSettingsAfterFailedApply(
       ...failureDiagnostic
     })
   } catch (error) {
+    if (!rollbackOwner() || rollbackCommitGeneration !== runtimeSettingsCommitGeneration) return null
     publishRuntimeStatus({
       code: 'settings_rollback_failed',
       source: 'settings-apply-rollback',
@@ -1822,9 +1975,13 @@ async function rollbackRuntimeSettingsAfterFailedApply(
       ...runtimeErrorPublicDiagnosticV1(error)
     })
   }
+  return rollbackCommitGeneration
 }
 
 async function restartManagedRuntimeForMcpConfigChange(settings: AppSettingsV1): Promise<void> {
+  if (runtimeSettingsStopHandoff.hasPending()) {
+    return restartManagedRuntimeForSettingsChange(settings, settings, runtimeSettingsCommitGeneration)
+  }
   const runtime = resolveAnalytixRuntimeSettings(settings)
   const adapter = analytixRuntimeAdapter
   const wasRunning = adapter.isChildRunning()
@@ -1921,6 +2078,12 @@ async function localDisplayRuntimeRequest(
   if (!isLocalDisplayRuntimePathV1(path)) {
     return { ok: false, status: 400, body: '' }
   }
+  const protectedResponseMaxBytes = path === '/v1/runtime/task-jobs/steer' || path === '/v1/local-display/schedule-admission' ? 4096 : path === USER_INPUT_LOCAL_DISPLAY_PATH_V1
+    ? USER_INPUT_LOCAL_DISPLAY_MAX_BYTES_V1
+    : path === TOOL_RESULT_LOCAL_DISPLAY_PATH_V1
+    ? TOOL_RESULT_LOCAL_WEB_DISPLAY_MAX_BYTES_V1
+    : path === PROCESS_LOCAL_DISPLAY_READ_PATH_V1 || path === PROCESS_LOCAL_DISPLAY_TARGET_PATH_V1
+      ? PROCESS_LOCAL_DISPLAY_MAX_BYTES_V1 : null
   try {
     if (signal?.aborted) return { ok: false, status: 499, body: '' }
     const ensuredSettings = await ensureRuntime(settings)
@@ -1958,13 +2121,34 @@ async function localDisplayRuntimeRequest(
           method: 'POST',
           headers,
           body,
+          ...(protectedResponseMaxBytes !== null ? { redirect: 'error' as const, cache: 'no-store' as const } : {}),
           signal: AbortSignal.any([
             ...(signal ? [signal] : []),
             AbortSignal.timeout(path === '/v1/local-display/funds-import/stage' ||
               path === '/v1/local-display/funds-import/confirm' ? 180_000 : 60_000)
           ])
         })
-        const responseBody = await response.text()
+        let responseBody: string
+        if (protectedResponseMaxBytes !== null) {
+          const reader = response.body?.getReader()
+          if (!reader) return { ok: false, status: 502, body: '' }
+          const chunks: Uint8Array[] = []
+          let size = 0
+          try {
+            for (;;) {
+              const chunk = await reader.read()
+              if (chunk.done) break
+              size += chunk.value.byteLength
+              if (size > protectedResponseMaxBytes || signal?.aborted ||
+                  !isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
+                await reader.cancel()
+                return { ok: false, status: 502, body: '' }
+              }
+              chunks.push(chunk.value)
+            }
+            responseBody = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))
+          } finally { reader.releaseLock() }
+        } else responseBody = await response.text()
         if (signal?.aborted || !isCurrentFinalPublicationAuthorityPin(runtimeAuthority)) {
           return { ok: false, status: 409, body: '' }
         }
@@ -1987,7 +2171,12 @@ if (runningClawScheduleMcpServer) {
     process.exit(1)
   })
 } else if (gotSingleInstanceLock) {
-registerPackagedRendererScheme()
+// Electron accepts one scheme-registration call before readiness. Preserve
+// packaged renderer privileges while adding the isolated preview origin.
+protocol.registerSchemesAsPrivileged([
+  ...(app.isPackaged ? [{ scheme: PACKAGED_RENDERER_SCHEME, privileges: PROTOTYPE_PREVIEW_PRIVILEGES }] : []),
+  { scheme: PROTOTYPE_PREVIEW_SCHEME, privileges: PROTOTYPE_PREVIEW_PRIVILEGES }
+])
 app.whenReady().then(async () => {
   traceStartup('app.whenReady:start')
   applyDesktopProtocolRegistrations(
@@ -2009,8 +2198,9 @@ app.whenReady().then(async () => {
   store = new JsonSettingsStore(app.getPath('userData'), {
     homeRoot: desktopStateHomeRoot
   })
+  configureGuiManagedAnalytixSettingsReader(() => store.loadFresh())
   traceStartup('settings load:start')
-  const initial = await store.load()
+  const initial = await store.ensureScheduleInternalAuthentication()
   retainTerminalRuntimeProtectedRoots(initial)
   traceStartup('settings load:done')
   traceStartup('desktop private history migration:start')
@@ -2048,7 +2238,15 @@ app.whenReady().then(async () => {
     })
   }
   traceStartup('native host registration:done')
-  scheduleRuntime = createScheduleRuntime({ store, runtimeRequest, logError, powerSaveBlocker })
+  scheduleRuntime = createScheduleRuntime({
+    store, runtimeRequest, localDisplayRequest: localDisplayRuntimeRequest, logError, powerSaveBlocker,
+    onCommittedChange: () => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win.isDestroyed() || win.webContents.isDestroyed()) continue
+        win.webContents.send('query-cache:invalidate', { queryKey: ['schedule', 'tasks'] })
+      }
+    }
+  })
   scheduleRuntime.sync(initial)
   const mainAccountRuntimeRequest = async (path: string, method?: string, body?: string) => {
     const settings = await store.load()
@@ -2466,7 +2664,7 @@ app.whenReady().then(async () => {
 
   traceStartup('ipc registration:start')
   const applySettingsPatch = async (partial: AppSettingsPatch): Promise<AppSettingsV1> => {
-    const prev = await store.load()
+    let prev = await store.load()
     const { runtime: runtimePatch, provider: providerPatch, ...restPatch } = partial
     const next = normalizeAppSettings({
       ...applyAnalytixRuntimePatch(prev, runtimePatch),
@@ -2496,6 +2694,10 @@ app.whenReady().then(async () => {
     retainTerminalRuntimeProtectedRoots(prev)
     retainTerminalRuntimeProtectedRoots(next)
     const startupConfigChanged = runtimeStartupConfigChanged(prev, next)
+    if (startupConfigChanged || prev.workspaceRoot !== next.workspaceRoot) {
+      invalidateToolResultLocalDisplaysV1()
+      invalidateProcessLocalDisplaysV1()
+    }
     let releaseTerminalCreates = startupConfigChanged
       ? terminalPtyController?.suspendCreates() ?? null
       : null
@@ -2504,7 +2706,11 @@ app.whenReady().then(async () => {
       if (releaseTerminalCreates) {
         await new Promise<void>((resolveReady) => setImmediate(resolveReady))
       }
-      saved = await store.patch(partial)
+      saved = await store.patch(partial, async (current, proposed) => {
+        const release = await syncGuiRuntimeSettingsBeforeCommit(current, proposed)
+        prev = current
+        return release
+      }, noteRuntimeSettingsCommit)
       if (startupConfigChanged || saved.write.inlineCompletion.enabled === false || saved.write.inlineCompletion.retrievalEnabled === false) {
         clearWriteRetrievalCache()
       } else if (prev.workspaceRoot && prev.workspaceRoot !== saved.workspaceRoot) {
@@ -2570,8 +2776,10 @@ app.whenReady().then(async () => {
             }
             await bundledFundsActivation.runAfterInFlight(async () => {
               hubStandaloneStopInFlight = true
+              runtimeSettingsStopHandoff.cancel()
               try {
                 terminalPtyController?.disposeAll()
+                await waitForQueuedRuntimeSettingsApply()
                 await analytixRuntimeAdapter.stopAndWait()
                 publishRuntimeStatus({
                   code: 'hub_account_signed_out',
@@ -2604,6 +2812,7 @@ app.whenReady().then(async () => {
   }
 
   registerAppIpcHandlers({
+    excelPreviewCopyReader: createExcelPreviewCopyReaderV1(resolveDocumentCodecLaunch),
     store,
     loadHubAccountService,
     getMainWindow: () => mainWindow,
@@ -2650,6 +2859,19 @@ app.whenReady().then(async () => {
         dataDirectory: resolveAnalytixDataDir(getAnalytixRuntimeSettings(settings))
       }),
       authHeaders: runtimeAuthHeaders
+    }),
+    captureProcessDisplayRuntimeOwner: () => {
+      const pin = captureCurrentFinalPublicationAuthorityPin()
+      return pin ? { isCurrent: () => isCurrentFinalPublicationAuthorityPin(pin) } : null
+    },
+    userInputWaitTransport: createUserInputWaitTransportV1({
+      loadSettings: () => store.load(),
+      ensureRuntime,
+      captureAuthorityPin: captureCurrentFinalPublicationAuthorityPin,
+      isCurrentAuthorityPin: isCurrentFinalPublicationAuthorityPin,
+      getBaseUrl: getRuntimeBaseUrlForSettings,
+      authHeaders: runtimeAuthHeaders,
+      privateDisplayRequest: localDisplayRuntimeRequest
     }),
     localDisplayRequest: async (path, body, signal) => {
       const settings = await store.load()
@@ -2804,6 +3026,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   isQuitting = true
+  runtimeSettingsStopHandoff.cancel()
   // The updater can stop owned runtimes before its special quit sequence.
   if (managedRuntimesStoppedForQuit) {
     nativeOfficeQuitPhase = 'committed'

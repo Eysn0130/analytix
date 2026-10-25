@@ -491,3 +491,83 @@ func steeringExecutionContext(t *testing.T) domainsecurity.TurnSecurityContext {
 	}
 	return securityContext
 }
+
+type prefixRaceStoreForTest struct {
+	promotionStoreStub
+	afterRace []map[string]any
+	raceErr   error
+}
+
+func (store *prefixRaceStoreForTest) PromotePendingSteeringEntryPrefixForContext(a, b, c string, expected []domainsteering.PendingEntryExpectationV1) ([]map[string]any, []map[string]any, error) {
+	if store.promotionCalls == 0 {
+		store.promotionCalls++
+		store.pending = store.afterRace
+		return nil, nil, store.raceErr
+	}
+	return store.promotionStoreStub.PromotePendingSteeringEntryPrefixForContext(a, b, c, expected)
+}
+
+func TestProviderPrefixRefreshAfterDiscardRecomputesAuthorityAndContent(t *testing.T) {
+	frozen := steeringExecutionContext(t)
+	head := steeringBatchPendingForTest("steer-head", "discarded ordinary content", domainsecurity.LogicalEffectOrdinary, true)
+	tail := steeringBatchPendingForTest("steer-tail", "remaining case content", domainsecurity.LogicalEffectCaseData, false)
+	for _, test := range []struct {
+		name      string
+		remaining []map[string]any
+		wantError bool
+		unchanged bool
+		revoke    bool
+	}{
+		{name: "head discarded", remaining: []map[string]any{tail}},
+		{name: "all discarded"},
+		{name: "unrelated failure", remaining: []map[string]any{tail}, wantError: true},
+		{name: "unchanged prefix", remaining: []map[string]any{head, tail}, wantError: true, unchanged: true},
+		{name: "authority revoked", remaining: []map[string]any{tail}, wantError: true, revoke: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &prefixRaceStoreForTest{promotionStoreStub: promotionStoreStub{pending: []map[string]any{head, tail}, promoted: []map[string]any{{"id": "steer-tail", "text": "remaining case content"}}, items: []map[string]any{{"id": "steer-tail", "text": "remaining case content"}}}, afterRace: test.remaining, raceErr: domainsteering.ErrPendingPrefixMismatch}
+			if test.name == "unrelated failure" {
+				store.raceErr = errors.New("not a prefix race")
+			}
+			validations := 0
+			batch, err := PromoteCurrentForProviderBatch(context.Background(), frozen, Dependencies{Store: store, AcquireContextEffect: func(ctx context.Context, _ domainsecurity.TurnSecurityContext) (context.Context, func(), error) {
+				return ctx, func() {}, nil
+			}, ValidateCurrent: func(context.Context, domainsecurity.TurnSecurityContext) error {
+				validations++
+				if test.revoke && validations > 1 {
+					return errors.New("scope changed")
+				}
+				return nil
+			}})
+			if test.wantError {
+				if err == nil || store.promotionCalls != 1 || len(batch.Messages) != 0 {
+					t.Fatal("unverified race was swallowed", err)
+				}
+				return
+			}
+			if err != nil || validations != 2 {
+				t.Fatal("race did not revalidate", err)
+			}
+			if len(test.remaining) == 0 {
+				if len(batch.Messages) != 0 || batch.Prompt != "" || store.recordCalls != 0 {
+					t.Fatal("all-discarded queue sent a stale prompt")
+				}
+				return
+			}
+			if batch.Prompt != "remaining case content" || batch.LogicalEffect != domainsecurity.LogicalEffectCaseData || batch.OrdinaryWork || len(batch.Messages) != 1 || store.promotionCalls != 2 || store.prefix[0].ID != "steer-tail" {
+				t.Fatal("refresh reused cancelled content/effect")
+			}
+		})
+	}
+}
+
+func TestProviderPrefixDoesNotRefreshAfterCommittedEventFailure(t *testing.T) {
+	frozen := steeringExecutionContext(t)
+	store := &promotionStoreStub{pending: []map[string]any{steeringBatchPendingForTest("steer-1", "synthetic", domainsecurity.LogicalEffectOrdinary, true)}, promoted: []map[string]any{{"id": "steer-1", "text": "synthetic"}}, items: []map[string]any{{"id": "steer-1", "text": "synthetic"}}, recordErr: domainsteering.ErrPendingPrefixMismatch}
+	_, err := PromoteCurrentForProviderBatch(context.Background(), frozen, Dependencies{Store: store, AcquireContextEffect: func(ctx context.Context, _ domainsecurity.TurnSecurityContext) (context.Context, func(), error) {
+		return ctx, func() {}, nil
+	}, ValidateCurrent: func(context.Context, domainsecurity.TurnSecurityContext) error { return nil }})
+	if !errors.Is(err, domainsteering.ErrPendingPrefixMismatch) || store.promotionCalls != 1 || store.pendingCalls != 1 {
+		t.Fatal("committed promotion was retried", err)
+	}
+}

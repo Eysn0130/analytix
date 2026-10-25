@@ -182,8 +182,9 @@ func newCompatibilityRuntimeServerHandler(config RuntimeServerConfig) http.Handl
 			continuationAuthority, attachmentAuthorityStore,
 			func(context.Context, domainsecurity.TurnSecurityContext) error { return nil },
 		),
-		Memories:      memoryStore,
-		CaseFinalizer: caseFinalizer,
+		Memories:        memoryStore,
+		CaseFinalizer:   caseFinalizer,
+		WorkspaceReader: filestore.CaseBindingReader{},
 		TurnSecurity: turnsecurityapp.WorkspaceSecurityAuthority{
 			Identity: testIdentityAuthority(),
 		},

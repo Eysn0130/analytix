@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"os"
 
 	httpapi "analytix.local/runtime-go/internal/adapters/inbound/httpapi"
 	inboundsse "analytix.local/runtime-go/internal/adapters/inbound/sse"
@@ -180,6 +181,11 @@ func (h *runtimeServerHandler) runtimeSessionService() *sessionapp.Service {
 }
 
 func (h *runtimeServerHandler) handleThreadEvents(w http.ResponseWriter, r *http.Request, threadID string) {
+	var replayDiagnostics *inboundsse.FiniteReplayDiagnostics
+	if r.Method == http.MethodGet && !inboundsse.WantsLive(r) && os.Getenv("ANALYTIX_FINITE_REPLAY_DIAGNOSTICS") == "1" {
+		replayDiagnostics = inboundsse.NewFiniteReplayDiagnostics(os.Stderr)
+		defer func() { replayDiagnostics.Finish(r.Context().Err() != nil) }()
+	}
 	if r.Method != http.MethodGet {
 		httpapi.MethodNotAllowed(w)
 		return
@@ -188,7 +194,10 @@ func (h *runtimeServerHandler) handleThreadEvents(w http.ResponseWriter, r *http
 		httpapi.WriteJSON(w, http.StatusNotFound, map[string]any{"code": "not_found", "message": "thread not found"})
 		return
 	}
-	if thread, err := h.store.GetThread(threadID); err != nil || thread == nil || stringField(thread, "id") != threadID {
+	finishValidateThread := replayDiagnostics.Begin(inboundsse.ReplayValidateThread)
+	thread, err := h.store.GetThread(threadID)
+	finishValidateThread(1)
+	if err != nil || thread == nil || stringField(thread, "id") != threadID {
 		httpapi.WriteJSON(w, http.StatusNotFound, map[string]any{"code": "not_found", "message": "thread not found"})
 		return
 	}
@@ -224,6 +233,7 @@ func (h *runtimeServerHandler) handleThreadEvents(w http.ResponseWriter, r *http
 				return result.Events, nil
 			},
 			SubscribeEvents:               h.store.SubscribeEvents,
+			InitialGoalActivation:         h.initialGoalActivationV1,
 			SealAcceptedFinalDelivery:     threadapp.NewAcceptedFinalDeliverySealer(r.Context(), h.publicProjector),
 			ValidateAcceptedFinalDelivery: threadapp.NewAcceptedFinalDeliveryValidator(r.Context(), h.publicProjector),
 			PreflightPublic:               threadapp.NewPublicProjectionPreflight(h.store, h.publicProjector),
@@ -231,5 +241,6 @@ func (h *runtimeServerHandler) handleThreadEvents(w http.ResponseWriter, r *http
 		},
 		HeartbeatInterval: h.heartbeatInterval,
 		SanitizeError:     apploop.SanitizeProviderRetryMessage,
+		ReplayDiagnostics: replayDiagnostics,
 	}.ServeHTTP(w, r, threadID)
 }

@@ -13,13 +13,14 @@ type PendingToolProviderResolver interface {
 }
 
 type PendingToolCallRebuildInput struct {
-	Event                 map[string]any
-	Thread                map[string]any
-	ProviderResolver      PendingToolProviderResolver
-	RuntimeApprovalPolicy string
-	RuntimeSandboxMode    string
-	PrivateArguments      json.RawMessage
-	SteeringAuthority     finalauthorityport.Verifier
+	Event                      map[string]any
+	Thread                     map[string]any
+	ProviderResolver           PendingToolProviderResolver
+	RuntimeApprovalPolicy      string
+	RuntimeSandboxMode         string
+	PrivateArguments           json.RawMessage
+	ModelVisibleToolDefinition *domainmodel.ToolDefinitionSnapshotV1
+	SteeringAuthority          finalauthorityport.Verifier
 }
 
 func PendingToolCallIDsFromGateEvent(event map[string]any) (string, string, bool) {
@@ -59,21 +60,22 @@ func RebuildPendingToolCallFromGateEvent(input PendingToolCallRebuildInput) (Pen
 		return PendingToolCall{}, false
 	}
 	return BuildPendingToolCall(PendingToolCallInput{
-		Event:             input.Event,
-		Thread:            input.Thread,
-		Turn:              turn,
-		ProviderConfig:    providerConfig,
-		ProviderID:        providerID,
-		Model:             model,
-		Effort:            effort,
-		Workspace:         providerHistoryStringField(input.Thread, "workspace"),
-		ApprovalPolicy:    approvalPolicy,
-		SandboxMode:       sandboxMode,
-		Mode:              normalizePendingTurnMode(firstNonEmptyAnyString(input.Event["mode"], turn["mode"])),
-		Messages:          ProviderHistoryMessagesFromThreadWithSteeringAuthority(input.Thread, input.SteeringAuthority),
-		ToolScope:         StringList(input.Event["toolScope"]),
-		PrivateArguments:  append(json.RawMessage(nil), input.PrivateArguments...),
-		SteeringAuthority: input.SteeringAuthority,
+		Event:                      input.Event,
+		Thread:                     input.Thread,
+		Turn:                       turn,
+		ProviderConfig:             providerConfig,
+		ProviderID:                 providerID,
+		Model:                      model,
+		Effort:                     effort,
+		Workspace:                  providerHistoryStringField(input.Thread, "workspace"),
+		ApprovalPolicy:             approvalPolicy,
+		SandboxMode:                sandboxMode,
+		Mode:                       normalizePendingTurnMode(firstNonEmptyAnyString(input.Event["mode"], turn["mode"])),
+		Messages:                   ProviderHistoryMessagesFromThreadWithSteeringAuthority(input.Thread, input.SteeringAuthority),
+		ToolScope:                  StringList(input.Event["toolScope"]),
+		PrivateArguments:           append(json.RawMessage(nil), input.PrivateArguments...),
+		ModelVisibleToolDefinition: domainmodel.CloneToolDefinitionSnapshotV1(input.ModelVisibleToolDefinition),
+		SteeringAuthority:          input.SteeringAuthority,
 	})
 }
 

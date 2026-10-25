@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatBlock } from '../../agent/types'
-import { groupTurns, sameTurnContent, splitThink, stableTurnKey } from './message-timeline-turns'
+import {
+  groupThreadTurns as groupTurns,
+  sameThreadTurnContent as sameTurnContent,
+  splitThink,
+  stableThreadTurnKey as stableTurnKey
+} from '../../thread/projection/thread-turns'
 
 describe('message timeline turns', () => {
   it('uses stable ids for user and assistant-only turns', () => {

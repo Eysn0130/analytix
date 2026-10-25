@@ -9,6 +9,7 @@ import (
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainterminal "analytix.local/runtime-go/internal/domain/terminal"
 )
 
 const acceptedFinalPublicationEventDomain = "analytix.accepted-final-event/v1\x00"
@@ -74,7 +75,7 @@ func buildAcceptedFinalPublicationPlan(
 	completion := BuildCompletionRecord(CompletionRecordInput{
 		ThreadID: record.ThreadID, TurnID: record.TurnID, Model: intent.Model, AssistantText: renderedText,
 		CreatedAt: intent.CreatedAt, FinishedAt: record.AcceptedAt, Usage: intent.Usage,
-		CacheDiagnostics: intent.CacheDiagnostics, UsageSource: intent.UsageSource, ChildRunID: intent.ChildRunID,
+		CacheDiagnostics: intent.CacheDiagnostics, UsageSource: intent.UsageSource, ChildRunID: intent.ChildRunID, EndReason: intent.EndReason,
 	})
 	acceptedFinalMap := domainevidence.AcceptedFinalRecordMap(record)
 	completion.AssistantItem["acceptedFinal"] = acceptedFinalMap
@@ -106,6 +107,9 @@ func buildAcceptedFinalPublicationPlan(
 		eventDraft{slot: "terminal", draft: acceptedFinalTerminalEvent(intent, record, terminalItem)},
 	)
 	fields := map[string]any{"acceptedFinal": acceptedFinalMap}
+	if intent.EndReason != nil {
+		fields["endReason"] = domainterminal.EndReasonMap(intent.EndReason)
+	}
 	if privateViewMap != nil {
 		fields["acceptedFinalView"] = contracts.CloneMap(privateViewMap)
 	}
@@ -169,6 +173,9 @@ func acceptedFinalTerminalEvent(intent domainevidence.TerminalPublicationIntent,
 	event := map[string]any{
 		"kind": "turn_" + intent.TerminalStatus, "threadId": record.ThreadID, "turnId": record.TurnID,
 		"status": intent.TerminalStatus, "acceptedFinalDigest": record.RecordDigest, "terminalReason": record.TerminalReason,
+	}
+	if intent.EndReason != nil {
+		event["endReason"] = domainterminal.EndReasonMap(intent.EndReason)
 	}
 	if intent.TerminalStatus == "failed" {
 		event["error"] = intent.TerminalMessage

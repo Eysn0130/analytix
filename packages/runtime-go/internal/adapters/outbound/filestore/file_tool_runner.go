@@ -9,6 +9,8 @@ import (
 	"time"
 
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 const (
@@ -21,6 +23,8 @@ const (
 )
 
 type ReadTextToolInput struct {
+	CaptureError      func(string)
+	Capture           func(domaintoolresult.ProtectedCaptureV1)
 	Workspace         string
 	Args              map[string]any
 	ProtectedReadDirs []string
@@ -42,6 +46,9 @@ func ExecuteReadTextTool(input ReadTextToolInput) (map[string]any, string, bool)
 	args := input.Args
 	path := strings.TrimSpace(firstNonEmptyAnyString(args["path"], args["filePath"], args["FilePath"]))
 	if path == "" {
+		if input.CaptureError != nil {
+			input.CaptureError("path is required")
+		}
 		return map[string]any{"code": "validation_error", "error": "path is required"}, "", true
 	}
 	resolved, ok := ResolveReadPathInfo(input.Workspace, path, input.SandboxMode, input.ReadRoots)
@@ -53,10 +60,19 @@ func ExecuteReadTextTool(input ReadTextToolInput) (map[string]any, string, bool)
 	}
 	textFile, err := ReadTextFile(resolved.Path)
 	if errors.Is(err, ErrTextFileIsDirectory) {
+		if input.CaptureError != nil {
+			input.CaptureError(resolved.OutputPath() + " is a directory; use ls to list it")
+		}
 		return map[string]any{"code": "read_failed", "error": resolved.OutputPath() + " is a directory; use ls to list it"}, "", true
 	} else if errors.Is(err, ErrTextFileBinary) {
+		if input.CaptureError != nil {
+			input.CaptureError("read only supports text files")
+		}
 		return map[string]any{"code": "binary_file", "error": "read only supports text files", "path": resolved.OutputPath(), "relative_path": resolved.OutputRelativePath(input.Workspace)}, "", true
 	} else if err != nil {
+		if input.CaptureError != nil {
+			input.CaptureError(resolved.ErrorText(err))
+		}
 		return readPathFailureOutput("read_failed", resolved, path, input.Workspace, err), "", true
 	}
 	offset, hasOffset := numericAny(args["offset"])
@@ -68,6 +84,12 @@ func ExecuteReadTextTool(input ReadTextToolInput) (map[string]any, string, bool)
 		Encoding:     textFile.Encoding,
 		View:         view,
 	})
+	if input.Capture != nil {
+		body, cut := domaintoolresult.BoundProtectedTextV1(filetoolsapp.OriginalReadTextSelectionV1(textFile.Content, view), domaintoolresult.ProtectedSnapshotBodyLimitV1)
+		label, _ := domaintoolresult.BoundProtectedTextV1(resolved.OutputPath(), 1024)
+		input.Capture(domaintoolresult.ProtectedCaptureV1{Kind: "read", Status: "completed", Body: body, Label: label, Truncated: view.Truncated || cut, StartLine: view.StartLine, EndLine: view.EndLine, TotalLines: view.TotalLines,
+			ReadTarget: &domaintoolresult.ProtectedReadTargetV1{Path: resolved.Path, StartLine: max(1, view.StartLine), ContentDigest: domainsecurity.SHA256Hex(textFile.RawBytes)}})
+	}
 	return output, view.RawContent, false
 }
 
@@ -86,16 +108,19 @@ func ExecuteListTool(input WorkspaceSearchToolInput) (any, bool) {
 		return IsWorkspaceHostMetadataEntry(input.Workspace, resolved.Path, name)
 	})
 	if err != nil {
+		domaintoolresult.CaptureProtectedToolErrorV1(input.Context, domaintoolresult.ProjectProtectedOutputErrorV1([]domaintoolresult.ProtectedOutputErrorEntryV1{{Message: resolved.ErrorText(err)}}))
 		return readPathFailureOutput("list_failed", resolved, rawPath, input.Workspace, err), true
 	}
-	return filetoolsapp.BuildListDirToolOutput(filetoolsapp.ListDirToolOutputInput{
+	result := filetoolsapp.ListDirToolOutputInput{
 		Path:         resolved.OutputPath(),
 		RelativePath: resolved.OutputRelativePath(input.Workspace),
 		Entries:      listResult.Entries,
 		Names:        listResult.Names,
 		Truncated:    listResult.Truncated,
 		Limit:        limit,
-	}), false
+	}
+	captureListResultV1(input.Context, result)
+	return filetoolsapp.BuildListDirToolOutput(result), false
 }
 
 func ExecuteFindTool(input WorkspaceSearchToolInput) (any, bool) {
@@ -123,9 +148,10 @@ func ExecuteFindTool(input WorkspaceSearchToolInput) (any, bool) {
 		},
 	})
 	if err != nil {
+		domaintoolresult.CaptureProtectedToolErrorV1(input.Context, domaintoolresult.ProjectProtectedOutputErrorV1([]domaintoolresult.ProtectedOutputErrorEntryV1{{Message: root.ErrorText(err)}}))
 		return readPathFailureOutput("find_failed", root, rawPath, input.Workspace, err), true
 	}
-	return filetoolsapp.BuildFindToolOutput(filetoolsapp.FindToolOutputInput{
+	result := filetoolsapp.FindToolOutputInput{
 		Path:             root.OutputPath(),
 		RelativePath:     root.OutputRelativePath(input.Workspace),
 		Pattern:          pattern,
@@ -133,10 +159,14 @@ func ExecuteFindTool(input WorkspaceSearchToolInput) (any, bool) {
 		SkippedProtected: findResult.SkippedProtected,
 		Truncated:        findResult.LimitReached,
 		Limit:            limit,
-	}), false
+	}
+	captureFindResultV1(input.Context, result)
+	return filetoolsapp.BuildFindToolOutput(result), false
 }
 
-func ExecuteGlobTool(input WorkspaceSearchToolInput) (any, bool) {
+func ExecuteGlobTool(input WorkspaceSearchToolInput) (output any, failed bool) {
+	started := time.Now()
+	defer func() { captureSearchFailureV1(input, "paths", output, failed, started) }()
 	args := input.Args
 	pattern := strings.TrimSpace(firstNonEmptyAnyString(args["pattern"]))
 	if pattern == "" {
@@ -165,6 +195,7 @@ func ExecuteGlobTool(input WorkspaceSearchToolInput) (any, bool) {
 	if err != nil {
 		return map[string]any{"code": "glob_failed", "error": root.ErrorText(err)}, true
 	}
+	captureGlobResultV1(input, globResult, started)
 	return filetoolsapp.BuildGlobToolOutput(filetoolsapp.GlobToolOutputInput{
 		Path:              root.OutputPath(),
 		RelativePath:      root.OutputRelativePath(input.Workspace),
@@ -209,7 +240,7 @@ func ExecuteCodeIndexTool(input WorkspaceSearchToolInput) (any, bool) {
 	if err != nil {
 		return map[string]any{"code": "code_index_failed", "error": root.ErrorText(err), "path": root.OutputPath(), "relative_path": root.OutputRelativePath(input.Workspace)}, true
 	}
-	return filetoolsapp.BuildCodeIndexToolOutput(filetoolsapp.CodeIndexToolOutputInput{
+	result := filetoolsapp.ProjectCodeIndexToolOutput(filetoolsapp.CodeIndexToolOutputInput{
 		Request:          request,
 		Path:             root.OutputPath(),
 		RelativePath:     root.OutputRelativePath(input.Workspace),
@@ -217,10 +248,14 @@ func ExecuteCodeIndexTool(input WorkspaceSearchToolInput) (any, bool) {
 		SkippedProtected: scanResult.SkippedProtected,
 		SkippedDirs:      scanResult.SkippedDirs,
 		Truncated:        scanResult.Truncated,
-	}), false
+	})
+	captureCodeIndexResultV1(input.Context, result)
+	return result.ModelOutput(), false
 }
 
-func ExecuteGrepTool(input WorkspaceSearchToolInput) (any, bool) {
+func ExecuteGrepTool(input WorkspaceSearchToolInput) (output any, failed bool) {
+	started := time.Now()
+	defer func() { captureSearchFailureV1(input, "matches", output, failed, started) }()
 	args := input.Args
 	pattern := firstNonEmptyAnyString(args["pattern"])
 	if strings.TrimSpace(pattern) == "" {
@@ -280,6 +315,7 @@ func ExecuteGrepTool(input WorkspaceSearchToolInput) (any, bool) {
 		return map[string]any{"code": "grep_failed", "error": root.ErrorText(err)}, true
 	}
 	timedOut := grepCtx.Err() == context.DeadlineExceeded
+	captureGrepResultV1(input, grepResult, started, timedOut)
 	return filetoolsapp.BuildGrepToolOutput(filetoolsapp.GrepToolOutputInput{
 		Path:             root.OutputPath(),
 		RelativePath:     root.OutputRelativePath(input.Workspace),

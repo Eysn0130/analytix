@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	turnapp "analytix.local/runtime-go/internal/app/turn"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainsteering "analytix.local/runtime-go/internal/domain/steering"
 )
@@ -50,6 +51,15 @@ func VerifyTrustedInventoryV1(ctx context.Context, reader PublicReader, service 
 				seenCommits[commit.CommitID] = struct{}{}
 			}
 		case "cancelled":
+			if domainsteering.HasUserInputDiscardAuthorityV1(entry) {
+				if service.Verify(ctx, entry, record.ContextDigest) != nil {
+					return errors.New("discarded steering authority inventory is invalid")
+				}
+				break
+			}
+			if !turnapp.IsTerminalStatus(record.TurnStatus) || entry["cancelReason"] != record.TurnStatus || entry["cancelledAt"] != record.FinishedAt {
+				return errors.New("terminal steering cancellation binding is invalid")
+			}
 			pending, err := cancelledAdmissionProjectionV1(entry)
 			if err != nil || service.Verify(ctx, pending, record.ContextDigest) != nil {
 				return errors.New("cancelled steering authority inventory is invalid")
@@ -65,6 +75,8 @@ type publicSteeringRecordV1 struct {
 	ThreadID      string
 	TurnID        string
 	ContextDigest string
+	TurnStatus    string
+	FinishedAt    string
 	Entry         map[string]any
 	Item          map[string]any
 }
@@ -197,7 +209,7 @@ func visitPublicSteeringV1(reader PublicReader, visit func(publicSteeringRecordV
 					return errors.New("steering authority inventory status is invalid")
 				}
 				if err := visit(publicSteeringRecordV1{
-					ThreadID: threadID, TurnID: turnID, ContextDigest: contextDigest, Entry: entry, Item: item,
+					ThreadID: threadID, TurnID: turnID, ContextDigest: contextDigest, TurnStatus: inventoryStringV1(turn, "status"), FinishedAt: inventoryStringV1(turn, "finishedAt"), Entry: entry, Item: item,
 				}); err != nil {
 					return err
 				}
@@ -216,7 +228,11 @@ func hasCompleteAuthorityMaterialV1(entry map[string]any) (bool, error) {
 	if err != nil || promotion && !admission {
 		return false, errors.Join(err, errors.New("steering promotion authority is detached from admission"))
 	}
-	return admission || promotion, nil
+	cancellation, err := completeStringTripletV1(entry, "cancellationAuthorityKeyId", "cancellationAuthorityPublicKey", "cancellationAuthoritySignature")
+	if err != nil || cancellation && (!admission || promotion || entry["status"] != "cancelled") || domainsteering.HasUserInputDiscardAuthorityV1(entry) && !cancellation {
+		return false, errors.Join(err, errors.New("steering cancellation authority is incomplete or detached"))
+	}
+	return admission || promotion || cancellation, nil
 }
 
 func completeStringTripletV1(entry map[string]any, keys ...string) (bool, error) {
@@ -256,4 +272,9 @@ func cancelledAdmissionProjectionV1(entry map[string]any) (map[string]any, error
 	}
 	pending["status"] = "pending"
 	return pending, nil
+}
+
+func inventoryStringV1(raw map[string]any, key string) string {
+	value, _ := raw[key].(string)
+	return value
 }

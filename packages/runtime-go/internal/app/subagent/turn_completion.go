@@ -62,6 +62,8 @@ type CompleteTaskInput struct {
 	StartAuthority       ChildTurnStartAuthority
 	CompletionAuthority  ChildCompletionIssuer
 	ForegroundAuthority  ForegroundHandoffIssuer
+
+	CaptureProtectedOutput func(context.Context, domainjob.Record, string, bool) *domainjob.ProtectedOutputSnapshotV1
 }
 
 type CompleteTaskResult struct {
@@ -79,24 +81,24 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		defer input.ForegroundAuthority.Delete(record.ID)
 	}
 	if input.Request.TimeBudgetMSSet && !validTimeBudgetMS(input.Request.TimeBudgetMS) {
-		return CompleteTaskResult{Output: RunOutput(record, "", nil, errInvalidBudget), Record: record, IsError: true}
+		return CompleteTaskResult{Output: RunOutput(record, "", nil, errInvalidBudget), Record: record, IsError: true, Err: errInvalidBudget}
 	}
 	if err := domainmodel.ValidateReasoningEffortV1(input.Effort); err != nil {
-		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true}
+		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true, Err: err}
 	}
 	if err := domainmodel.ValidateReasoningEffortV1(record.Effort); err != nil || input.Effort != record.Effort {
 		err := errors.New("child reasoning effort authority is invalid")
-		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true}
+		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true, Err: err}
 	}
 	if err := domainjob.ValidateExecutableCaseDelegationV1(
 		record.Kind, record.Name, record.Label, record.Prompt, record.SecurityBinding, record.CaseDelegation,
 	); err != nil {
-		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true}
+		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true, Err: err}
 	}
 	driver := input.Driver
 	if driver == nil {
 		err := errors.New("subagent completion driver is required")
-		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true}
+		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true, Err: err}
 	}
 	if input.StartAuthority == nil {
 		err := errors.New("child turn start authority is required")
@@ -106,7 +108,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 			record = updated
 		}
 		driver.RecordProgress(record, string(domainjob.StatusInterrupted), domainjob.FailureChildInterrupted)
-		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true}
+		return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true, Err: err}
 	}
 	if input.Request.TimeBudgetMSSet && input.Request.TimeBudgetMS > 0 {
 		var cancel context.CancelFunc
@@ -139,7 +141,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		InternalUsageSource:       usageapp.SourceSubagent,
 		InternalSystemPrompt:      SystemPromptForRequest(input.Request),
 		InternalChildRunID:        record.ID,
-		InternalOutputTokenBudget: input.Request.TokenBudget,
+		InternalOutputTokenBudget: 0,
 	}
 	var response map[string]any
 	var authorizeErr, validationErr error
@@ -175,6 +177,13 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 			}
 			turnRequest.InternalToolScope = append([]string(nil), record.ToolScope...)
 		}
+		// Ordinary task budgets remain soft reporting metadata. Only the
+		// host-bound foreground contract owns a provider output-token limit.
+		if input.Request.ForegroundHandoff && ValidateForegroundHandoffRequest(input.Request) == nil &&
+			foregroundSubmitOnlyRecord(record) && len(turnRequest.InternalToolScope) == 1 &&
+			turnRequest.InternalToolScope[0] == toolcatalogForegroundSubmitToolName {
+			turnRequest.InternalOutputTokenBudget = input.Request.TokenBudget
+		}
 		var startErr error
 		response, startErr = driver.StartTurn(ctx, turnRequest)
 		return startErr
@@ -185,7 +194,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		if IsJobStartClaimError(authorizeErr) {
 			status := firstNonEmptyAnyString(record.Status, string(domainjob.StatusInterrupted))
 			driver.RecordProgress(record, status, childFailureCodeV1(record, status))
-			return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, authorizeErr), true)
+			return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, authorizeErr), true, authorizeErr)
 		}
 		if updated, updateErr := driver.UpdateChildRun(record.ID, domainjob.UpdateRequest{
 			Status: string(domainjob.StatusInterrupted), FailureCode: domainjob.FailureChildInterrupted,
@@ -193,7 +202,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 			record = updated
 		}
 		driver.RecordProgress(record, string(domainjob.StatusInterrupted), domainjob.FailureChildInterrupted)
-		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, authorizeErr), true)
+		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, authorizeErr), true, authorizeErr)
 	}
 	if validationErr != nil {
 		if updated, updateErr := driver.UpdateChildRun(record.ID, domainjob.UpdateRequest{
@@ -202,7 +211,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 			record = updated
 		}
 		driver.RecordProgress(record, string(domainjob.StatusFailed), domainjob.FailureChildExecutionFailed)
-		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, validationErr), true)
+		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, validationErr), true, validationErr)
 	}
 	if err != nil {
 		status := string(domainjob.StatusFailed)
@@ -215,7 +224,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		}
 		status = firstNonEmptyAnyString(record.Status, status)
 		driver.RecordProgress(record, status, childFailureCodeV1(record, status))
-		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, err), true)
+		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, err), true, err)
 	}
 	childTurnID := firstNonEmptyAnyString(response["turnId"])
 	if firstNonEmptyAnyString(response["status"]) == "waiting" {
@@ -227,7 +236,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		}
 		status := firstNonEmptyAnyString(record.Status, string(domainjob.StatusFailed))
 		driver.RecordProgress(record, status, childFailureCodeV1(record, status))
-		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, err), true)
+		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, err), true, err)
 	}
 	latest, loadErr := driver.LoadChildRun(record.ID)
 	if loadErr != nil {
@@ -242,7 +251,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 	record = latest
 	if latest.Status == string(domainjob.StatusKilled) {
 		driver.RecordProgress(record, string(domainjob.StatusKilled), childFailureCodeV1(record, record.Status))
-		return completeTaskResult(ctx, input, record, RunOutput(record, record.Output, record.Usage, ErrorForTerminalRecord(record, "subagent killed")), true)
+		return completeTaskResult(ctx, input, record, RunOutput(record, record.Output, record.Usage, ErrorForTerminalRecord(record, "subagent killed")), true, ErrorForTerminalRecord(record, "subagent killed"))
 	}
 	summary, toolInvocations, readErr := driver.TurnCompletion(record.ChildThreadID, childTurnID)
 	if readErr != nil {
@@ -260,7 +269,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		}
 		status := firstNonEmptyAnyString(record.Status, string(domainjob.StatusFailed))
 		driver.RecordProgress(record, status, childFailureCodeV1(record, status))
-		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, err), true)
+		return completeTaskResult(ctx, input, record, RunOutput(record, "", nil, err), true, err)
 	}
 	usage := mapFromStartTurnResponse(response, "usage")
 	if usage == nil {
@@ -325,12 +334,19 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 			return CompleteTaskResult{Output: RunOutput(record, "", nil, err), Record: record, IsError: true, Err: err}
 		}
 	}
+	var protectedOutput *domainjob.ProtectedOutputSnapshotV1
+	if SecurityBoundChildOutput(record) && input.CaptureProtectedOutput != nil {
+		producer := record
+		producer.Status, producer.ChildTurnID = string(domainjob.StatusCompleted), childTurnID
+		protectedOutput = input.CaptureProtectedOutput(ctx, producer, summary, false)
+	}
 	if updated, updateErr := driver.UpdateChildRun(record.ID, domainjob.UpdateRequest{
 		Status:                        string(domainjob.StatusCompleted),
 		ChildTurnID:                   childTurnID,
 		ChildCompletionReceipt:        completionReceipt,
 		ForegroundChildHandoffReceipt: foregroundReceipt,
 		Output:                        persistedSummary,
+		ProtectedOutputSnapshot:       protectedOutput,
 		Usage:                         persistedUsage,
 		ToolInvocations:               &toolInvocations,
 	}); updateErr == nil {
@@ -343,7 +359,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		status := firstNonEmptyAnyString(record.Status, string(domainjob.StatusFailed))
 		message := childFailureCodeV1(record, status)
 		driver.RecordProgress(record, status, message)
-		return completeTaskResult(ctx, input, record, RunOutput(record, record.Output, record.Usage, ErrorForTerminalRecord(record, message)), true)
+		return completeTaskResult(ctx, input, record, RunOutput(record, record.Output, record.Usage, ErrorForTerminalRecord(record, message)), true, ErrorForTerminalRecord(record, message))
 	}
 	driver.RecordProgress(record, string(domainjob.StatusCompleted), "")
 	if foregroundReceipt != nil {
@@ -351,7 +367,7 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		if consumeErr != nil {
 			input.ForegroundAuthority.Delete(record.ID)
 			driver.RecordProgress(record, string(domainjob.StatusCompleted), "foreground child handoff capability could not be consumed")
-			return CompleteTaskResult{Output: SecurityBoundChildOutputProjection(record), Record: record, IsError: true}
+			return CompleteTaskResult{Output: SecurityBoundChildOutputProjection(record), Record: record, IsError: true, Err: consumeErr}
 		}
 		return CompleteTaskResult{Output: verified.OutputProjection(record), Record: record}
 	}
@@ -359,23 +375,27 @@ func CompleteTask(ctx context.Context, input CompleteTaskInput) CompleteTaskResu
 		rehydrated, rehydrateErr := input.CompletionAuthority.Rehydrate(ctx, record)
 		if rehydrateErr != nil {
 			driver.RecordProgress(record, string(domainjob.StatusCompleted), "child completion receipt could not be rehydrated")
-			return CompleteTaskResult{Output: SecurityBoundChildOutputProjection(record), Record: record, IsError: true}
+			return CompleteTaskResult{Output: SecurityBoundChildOutputProjection(record), Record: record, IsError: true, Err: rehydrateErr}
 		}
 		return CompleteTaskResult{Output: rehydrated.OutputProjection(record), Record: record}
 	}
 	return completeTaskResult(ctx, input, record, RunOutput(record, persistedSummary, persistedUsage, nil), false)
 }
 
-func completeTaskResult(ctx context.Context, input CompleteTaskInput, record domainjob.Record, output map[string]any, isError bool) CompleteTaskResult {
+func completeTaskResult(ctx context.Context, input CompleteTaskInput, record domainjob.Record, output map[string]any, isError bool, sourceErr ...error) CompleteTaskResult {
+	var originalErr error
+	if len(sourceErr) == 1 {
+		originalErr = sourceErr[0]
+	}
 	if SecurityBoundChildOutput(record) {
-		return CompleteTaskResult{Output: SecurityBoundChildOutputProjection(record), Record: record, IsError: isError}
+		return CompleteTaskResult{Output: SecurityBoundChildOutputProjection(record), Record: record, IsError: isError, Err: originalErr}
 	}
 	if updated, ok := SummarizeWorktreeIsolation(ctx, WorktreeIsolationSummaryInput{Manager: input.WorktreeManager, Store: input.Driver, Record: record}); ok {
 		record = updated
 		AddIsolationMetadata(output, updated)
 		input.Driver.RecordProgress(updated, updated.Status, "")
 	}
-	return CompleteTaskResult{Output: output, Record: record, IsError: isError}
+	return CompleteTaskResult{Output: output, Record: record, IsError: isError, Err: originalErr}
 }
 
 func mapFromStartTurnResponse(response map[string]any, key string) map[string]any {

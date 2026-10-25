@@ -301,7 +301,16 @@ func (c *TransportClient) CallToolWithHostContext(ctx context.Context, name stri
 	if authorityErr != nil || grant.ToolName != "mcp__"+strings.TrimSpace(c.spec.ID)+"__"+strings.TrimSpace(name) {
 		return nil, errors.New("MCP host context tool authority is invalid")
 	}
-	params, err := mcpprotocol.ToolCallParamsWithHostContext(name, arguments, envelope)
+	var params map[string]any
+	var err error
+	if c.spec.ID == "gui_schedule" && (name == "gui_schedule_create" || name == "claw_schedule_create") {
+		if c.spec.IdentitySource != "host-schedule-binding-v1" || c.spec.ExpectedServerName != "analytix-schedule" || c.spec.ExpectedServerVersion != "0.1.0" || len(c.spec.Args) != 6 || c.spec.Args[4] != "--secret" || c.spec.Args[5] == "" {
+			return nil, errors.New("native Schedule origin transport binding is unavailable")
+		}
+		params, err = mcpprotocol.ToolCallParamsWithScheduleOriginV1(name, arguments, envelope)
+	} else {
+		params, err = mcpprotocol.ToolCallParamsWithHostContext(name, arguments, envelope)
+	}
 	if err != nil {
 		return nil, err
 	}

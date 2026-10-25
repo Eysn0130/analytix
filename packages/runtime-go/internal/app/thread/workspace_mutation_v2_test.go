@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	contextepochapp "analytix.local/runtime-go/internal/app/contextepoch"
 	threadriskauthorityapp "analytix.local/runtime-go/internal/app/threadriskauthority"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
+
+	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainidentity "analytix.local/runtime-go/internal/domain/identity"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
@@ -251,6 +255,237 @@ func TestFreezeThreadMutationScopeRejectsForeignHostPrincipal(t *testing.T) {
 	); err == nil || err.Error() != "turn_security_identity_mismatch" {
 		t.Fatalf("foreign principal error = %v, want turn_security_identity_mismatch", err)
 	}
+}
+
+func TestFreezeThreadMutationScopeAcceptsRestoredDefaultEmptyEpoch(t *testing.T) {
+	at := time.Date(2026, 7, 12, 22, 10, 0, 123456789, time.UTC)
+	threadID, workspace := "thread-restored-empty-mutation", "/workspace/restored-empty-mutation"
+	thread := mutationRestoredEmptyThread(t, threadID, workspace, at.Add(-time.Hour))
+	before := mutationThreadBytes(t, thread)
+	reader := mutationWorkspaceObserver{observations: map[string]domainsecurity.CaseBindingObservationV1{
+		workspace: mutationObservation(t, workspace, domainsecurity.CaseBindingStateMissing, "", ""),
+	}}
+	riskAuthority := newMutationRiskAuthority()
+	authority := turnsecurityapp.WorkspaceSecurityAuthority{Identity: testIdentityAuthority(), Observer: reader, RiskAuthority: riskAuthority}
+	frozen, err := FreezeThreadMutationScope(thread, threadID, reader, testIdentityPrincipal(), at, authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frozen.Version != domainsecurity.TurnSecurityContextVersionV2 || !domainsecurity.TurnSecurityContextIsGeneral(frozen) ||
+		frozen.ThreadID != threadID || frozen.WorkspaceRealPath != workspace || frozen.ContextEpoch != 1 ||
+		frozen.TurnID == "" || frozen.IssuedAt != at.Format(time.RFC3339Nano) {
+		t.Fatalf("restored default epoch did not freeze a new general V2 scope: %#v", frozen)
+	}
+	head, found := riskAuthority.current[threadID]
+	if !found || domainsecurity.ValidateThreadRiskPolicyV1(head.policy) != nil ||
+		frozen.PublicationPolicy.ThreadRiskPolicyDigest != head.policy.PolicyDigest ||
+		riskAuthority.ValidateCurrent(context.Background(), frozen) != nil {
+		t.Fatal("restored default epoch bypassed signed current risk authority")
+	}
+	if err := turnsecurityapp.ValidateCurrentOrdinaryEffect(turnsecurityapp.CurrentValidationInput{
+		OperationContext: context.Background(), Identity: authority.Identity, Observer: reader,
+		RiskAuthority: riskAuthority, Context: frozen, Workspace: workspace,
+	}); err != nil {
+		t.Fatalf("newly frozen scope lacks ordinary effect authority: %v", err)
+	}
+	if !bytes.Equal(before, mutationThreadBytes(t, thread)) {
+		t.Fatal("scope freeze changed the original thread or restored epoch")
+	}
+}
+
+func TestFreezeThreadMutationScopeRejectsNondefaultOrMalformedEmptyEpoch(t *testing.T) {
+	at := time.Date(2026, 7, 12, 22, 20, 0, 123456789, time.UTC)
+	entry := domaincontextepoch.SourceEntry{
+		Version: domaincontextepoch.ContractVersion, SourceID: "mutation-source", Kind: "memory",
+		Digest: domaincontextepoch.SHA256Hex([]byte("mutation-source")), Sequence: 1,
+		TrustState: domaincontextepoch.TrustTrusted, PromptBoundary: domaincontextepoch.BoundaryDiagnosticsOnly,
+		ActivationState: domaincontextepoch.ActivationInactive,
+	}
+	cases := []struct {
+		name  string
+		alter func(*domaincontextepoch.State)
+		valid bool
+	}{
+		{name: "malformed", alter: func(state *domaincontextepoch.State) { state.Version = 0 }},
+		{name: "integrity-mismatch", alter: func(state *domaincontextepoch.State) {
+			state.StateDigest = domaincontextepoch.SHA256Hex([]byte("tampered"))
+		}},
+		{name: "invalid-accepted-time", alter: func(state *domaincontextepoch.State) {
+			state.AcceptedSnapshot.AcceptedAt = "not-a-time"
+			*state = domaincontextepoch.SealState(*state)
+		}},
+		{name: "foreign-thread", valid: true, alter: func(state *domaincontextepoch.State) {
+			state.ThreadID, state.AcceptedSnapshot.ThreadID = "thread-foreign-epoch", "thread-foreign-epoch"
+			*state = domaincontextepoch.SealState(*state)
+		}},
+		{name: "advanced-epoch", valid: true, alter: func(state *domaincontextepoch.State) {
+			state.AcceptedSnapshot.Epoch = 2
+			*state = domaincontextepoch.SealState(*state)
+		}},
+		{name: "registry-and-snapshot", valid: true, alter: func(state *domaincontextepoch.State) {
+			state.Registry = []domaincontextepoch.SourceEntry{entry}
+			state.AcceptedSnapshot.Sources = []domaincontextepoch.SourceSnapshot{domaincontextepoch.SourceSnapshotFromEntry(entry)}
+			state.AcceptedSnapshot.RegistryDigest = domaincontextepoch.RegistryDigest(state.Registry)
+			state.AcceptedSnapshot.BaselineSequence = 1
+			*state = domaincontextepoch.SealState(*state)
+		}},
+		{name: "recovery", valid: true, alter: func(state *domaincontextepoch.State) {
+			state.AcceptedSnapshot.RecoveryDigest = domaincontextepoch.SHA256Hex([]byte("recovery"))
+			*state = domaincontextepoch.SealState(*state)
+		}},
+		{name: "change-reasons", valid: true, alter: func(state *domaincontextepoch.State) {
+			state.AcceptedSnapshot.ChangeReasons = []domaincontextepoch.ChangeReason{domaincontextepoch.ReasonRestartReconcile}
+			*state = domaincontextepoch.SealState(*state)
+		}},
+		{name: "impact", valid: true, alter: func(state *domaincontextepoch.State) {
+			state.AcceptedSnapshot.Impact.DiagnosticsOnly = true
+			*state = domaincontextepoch.SealState(*state)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			threadID, workspace := "thread-empty-epoch-rejected", "/workspace/empty-epoch-rejected"
+			thread := mutationRestoredEmptyThread(t, threadID, workspace, at)
+			state, err := domaincontextepoch.ParseState(thread["contextEpochState"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.alter(&state)
+			thread["contextEpochState"] = contextepochapp.PublicState(state)
+			if _, err := domaincontextepoch.ParseState(thread["contextEpochState"]); (err == nil) != tc.valid {
+				t.Fatalf("epoch fixture validity differs from intended case: %v", err)
+			}
+			before := mutationThreadBytes(t, thread)
+			reader := mutationWorkspaceObserver{observations: map[string]domainsecurity.CaseBindingObservationV1{
+				workspace: mutationObservation(t, workspace, domainsecurity.CaseBindingStateMissing, "", ""),
+			}}
+			riskAuthority := newMutationRiskAuthority()
+			authority := turnsecurityapp.WorkspaceSecurityAuthority{Identity: testIdentityAuthority(), Observer: reader, RiskAuthority: riskAuthority}
+			if _, err := FreezeThreadMutationScope(thread, threadID, reader, testIdentityPrincipal(), at.Add(time.Hour), authority); err == nil {
+				t.Fatal("nondefault or malformed epoch acquired a new mutation scope")
+			}
+			if len(riskAuthority.current) != 0 || !bytes.Equal(before, mutationThreadBytes(t, thread)) {
+				t.Fatal("rejected epoch reached risk issuance or changed the input")
+			}
+		})
+	}
+}
+
+func TestFreezeThreadMutationScopeDefaultEpochRequiresActualEmptyHistory(t *testing.T) {
+	at := time.Date(2026, 7, 12, 22, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		turns   any
+		missing bool
+	}{
+		{name: "missing", missing: true},
+		{name: "null"},
+		{name: "wrong-type", turns: []map[string]any{}},
+		{name: "nonempty", turns: []any{map[string]any{"id": "turn-existing", "status": "completed", "items": []any{}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			threadID, workspace := "thread-empty-history-required", "/workspace/empty-history-required"
+			thread := mutationRestoredEmptyThread(t, threadID, workspace, at)
+			if tc.missing {
+				delete(thread, "turns")
+			} else {
+				thread["turns"] = tc.turns
+			}
+			before := mutationThreadBytes(t, thread)
+			reader := mutationWorkspaceObserver{observations: map[string]domainsecurity.CaseBindingObservationV1{
+				workspace: mutationObservation(t, workspace, domainsecurity.CaseBindingStateMissing, "", ""),
+			}}
+			riskAuthority := newMutationRiskAuthority()
+			authority := turnsecurityapp.WorkspaceSecurityAuthority{Identity: testIdentityAuthority(), Observer: reader, RiskAuthority: riskAuthority}
+			if _, err := FreezeThreadMutationScope(thread, threadID, reader, testIdentityPrincipal(), at.Add(time.Hour), authority); err == nil {
+				t.Fatal("default epoch authorized a thread without actual empty []any history")
+			}
+			if len(riskAuthority.current) != 0 || !bytes.Equal(before, mutationThreadBytes(t, thread)) {
+				t.Fatal("rejected history reached risk issuance or changed the input")
+			}
+		})
+	}
+}
+
+func TestFreezeThreadMutationScopeDefaultEpochPreservesAuthorityFailures(t *testing.T) {
+	at := time.Date(2026, 7, 12, 22, 40, 0, 0, time.UTC)
+	threadID, workspace := "thread-empty-authority-required", "/workspace/empty-authority-required"
+	reader := mutationWorkspaceObserver{observations: map[string]domainsecurity.CaseBindingObservationV1{
+		workspace: mutationObservation(t, workspace, domainsecurity.CaseBindingStateMissing, "", ""),
+	}}
+	foreign, err := domainidentity.NewPrincipalV1(domainsecurity.SHA256Hex([]byte("foreign-empty-thread-host")), domainidentity.LocalTenantID, domainidentity.LocalUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name     string
+		alter    func(*turnsecurityapp.WorkspaceSecurityAuthority, *domainidentity.PrincipalV1, map[string]any)
+		boundary bool
+	}{
+		{name: "missing-host", alter: func(authority *turnsecurityapp.WorkspaceSecurityAuthority, _ *domainidentity.PrincipalV1, _ map[string]any) {
+			authority.Identity = nil
+		}},
+		{name: "foreign-host", alter: func(_ *turnsecurityapp.WorkspaceSecurityAuthority, principal *domainidentity.PrincipalV1, _ map[string]any) {
+			*principal = foreign
+		}},
+		{name: "missing-observer", alter: func(authority *turnsecurityapp.WorkspaceSecurityAuthority, _ *domainidentity.PrincipalV1, _ map[string]any) {
+			authority.Observer = nil
+		}},
+		{name: "observer-failed", alter: func(authority *turnsecurityapp.WorkspaceSecurityAuthority, _ *domainidentity.PrincipalV1, _ map[string]any) {
+			authority.Observer = mutationWorkspaceObserver{}
+		}},
+		{name: "missing-risk", alter: func(authority *turnsecurityapp.WorkspaceSecurityAuthority, _ *domainidentity.PrincipalV1, _ map[string]any) {
+			authority.RiskAuthority = nil
+		}},
+		{name: "risk-resolution-failed", boundary: true, alter: func(authority *turnsecurityapp.WorkspaceSecurityAuthority, _ *domainidentity.PrincipalV1, _ map[string]any) {
+			authority.RiskAuthority = mutationOrdinaryCurrentRiskAuthority{}
+		}},
+		{name: "malformed-security-state", alter: func(_ *turnsecurityapp.WorkspaceSecurityAuthority, _ *domainidentity.PrincipalV1, thread map[string]any) {
+			thread["securityState"] = map[string]any{"version": 2}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			thread := mutationRestoredEmptyThread(t, threadID, workspace, at)
+			principal := testIdentityPrincipal()
+			authority := turnsecurityapp.WorkspaceSecurityAuthority{Identity: testIdentityAuthority(), Observer: reader, RiskAuthority: newMutationRiskAuthority()}
+			tc.alter(&authority, &principal, thread)
+			before := mutationThreadBytes(t, thread)
+			frozen, err := FreezeThreadMutationScope(thread, threadID, reader, principal, at.Add(time.Hour), authority)
+			if tc.boundary {
+				if err != nil || !domainsecurity.TurnSecurityContextIsBoundaryOnly(frozen) || domainsecurity.TurnSecurityContextIsGeneral(frozen) ||
+					domainsecurity.ValidateTurnSecurityContextForExecution(frozen) == nil || frozen.PublicationPolicy.BlockerCode == domainsecurity.PublicationBlockerNone {
+					t.Fatalf("risk failure did not retain quarantined boundary semantics: context=%#v err=%v", frozen, err)
+				}
+			} else if err == nil {
+				t.Fatal("default epoch swallowed an authority or persisted security-state failure")
+			}
+			if !bytes.Equal(before, mutationThreadBytes(t, thread)) {
+				t.Fatal("failed authority freeze changed the original thread or epoch")
+			}
+		})
+	}
+}
+
+func mutationRestoredEmptyThread(t *testing.T, threadID, workspace string, at time.Time) map[string]any {
+	t.Helper()
+	thread := map[string]any{"id": threadID, "workspace": workspace, "turns": []any{}}
+	state, changed, err := contextepochapp.RestoreThreadState(context.Background(), thread, threadID, nil, at)
+	if err != nil || !changed {
+		t.Fatalf("restore did not backfill the empty thread epoch: changed=%v err=%v", changed, err)
+	}
+	thread["contextEpochState"] = contextepochapp.PublicState(state)
+	return thread
+}
+
+func mutationThreadBytes(t *testing.T, thread map[string]any) []byte {
+	t.Helper()
+	body, err := json.Marshal(thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
 }
 
 func TestBoundaryDerivedMutationTargetsNeverBecomeGeneral(t *testing.T) {

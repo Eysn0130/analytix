@@ -28,6 +28,11 @@ func BuiltinToolSchemas(input BuiltinToolSchemaInput) []domainmodel.ToolSchema {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"1-based line number to start reading from (default 1)","minimum":1},"limit":{"type":"integer","description":"Maximum lines to return (default 2000)","minimum":1}},"required":["path"],"additionalProperties":false}`),
 		},
 		{
+			Name:        "present",
+			Description: "Declare existing files as deliverables for the user. Prefer a final reply when a separate file is unnecessary. Present opens the current file and does not copy its contents. Relative paths use the active workspace; configured read roots and their aliases follow the normal read policy.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"files":{"type":"array","minItems":1,"maxItems":8,"description":"Prefer 1 or 2 important files; 4 is the recommended per-call count.","items":{"type":"object","properties":{"path":{"type":"string","minLength":1,"maxLength":4096,"description":"Path of an existing regular file."},"description":{"type":"string","maxLength":4096,"description":"Brief description for the user."}},"required":["path"],"additionalProperties":false}}},"required":["files"],"additionalProperties":false}`),
+		},
+		{
 			Name:        "bash",
 			Description: "Execute a shell command in the workspace using the host platform shell. When the user supplies an exact command string, copy it unchanged into command. Do not add timeout unless the user explicitly requests a timeout. Windows uses PowerShell when available and falls back to cmd.exe, so prefer host-appropriate syntax. Requires approval unless policy is auto.",
 			Parameters:  bashParameters,

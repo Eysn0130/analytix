@@ -1,25 +1,37 @@
+import type { ConversationPresentationPhase } from './ConversationWidthControls'
+import type { ProcessPaneRoute } from './presentation/chat/ProtectedProcessPane'
+import { ConversationRecords, ConversationRecordDetails, ConversationRecordsToolbar, type ConversationViewMode } from './presentation/chat/ConversationRecords'
+import { TrajectoryPanel } from '../trajectory/TrajectoryPanel'
+import type { TrajectoryToolIdentity } from '../trajectory/trajectory-adapter'
+import { toolResultLocalSelectorSchemaV1 } from '../../../../../packages/runtime/src/contracts/tool-result-local-display'
+import { conversationCallRecords, conversationRecordTurns, locateConversationCall, type ConversationCallRecord, type ConversationInspectRequest } from './presentation/chat/models/conversation-record-model'
+import { sharedActiveCaseContextTransitionPending, subscribeBeforeSharedActiveCaseContextChange } from '../../data-analysis/services/analysis/stats-case-overview-resource'
+import { ChatView } from './presentation/chat/ChatView'
+import { usePerformanceUsageMode, type PerformanceUsageMode } from './presentation/chat/TurnUsagePanel'
+import { ProtectedToolInspectorSelection } from './presentation/ProtectedToolResult'
+import { useTurnTiming } from './presentation/chat/use-turn-timing'
+import { GateResponseContext } from './message-timeline-bubbles'
 import type { ProfilerOnRenderCallback, ReactElement, RefObject } from 'react'
-import { Profiler, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Profiler, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import type { ChatBlock, RuntimeConnectionStatus } from '../../agent/types'
+import type { ChatBlock, RuntimeConnectionStatus, ThreadUsageSnapshot } from '../../agent/types'
 import { useChatStore } from '../../store/chat-store'
+import type { TurnForkOwner } from '../../store/chat-store-types'
+import { useThreadUsageState } from '../../hooks/use-thread-usage'
+import type { ConversationUsageV1, ProviderBillingV1 } from '../../../../../packages/runtime/src/contracts/usage'
 import { useTimelineStores } from './use-timeline-stores'
 import { TIMELINE_AT_BOTTOM_PX, useTimelineScroll, type TimelineStreamingPhase } from './use-timeline-scroll'
-import { deriveTurnSections, type TurnSections } from './derive-turn-sections'
+import type { TurnSections } from '../../thread/projection/derive-turn-sections'
 import { MessageTimelineEmptyHero, ThreadForkBanner, ThreadForkPoint } from './message-timeline-empty'
-import { GeneratedFilesPanel, MessageBubble } from './message-timeline-bubbles'
-import { ReviewPlanCard, ReviewSummaryCard, TurnChangeSummary, WorkMetaRow } from './message-timeline-cards'
-import { CompactionStatusRow, ProcessSectionRow, groupProcessSections } from './message-timeline-process'
+import { MessageBubble } from './message-timeline-bubbles'
+import { ReviewSummaryCard, TurnChangeSummary } from './message-timeline-cards'
 import { ThreadUserMessageNavigationRail } from './ThreadUserMessageNavigationRail'
 import { InjectedMemoryLookupProvider } from './injected-memory-lookup'
-import { Loader2 } from '../../design/AnalytixUiIcons'
-import { useUiPluginWorkLabel } from '../../store/ui-plugin-store'
-import { extractPlanMetadataFromBlock } from '../../plan/plan-tool'
-import { planDisplayNameFromRelativePath } from '../../plan/plan-path'
+import { SubmittedPlanCards } from './presentation/chat/SubmittedPlanCards'
 import { buildThreadProjection } from '../../thread/projection/thread-projection-store'
 import {
-  groupThreadTurns, stableThreadTurnKey,
-  sameThreadTurnContent as sameTurnContent,
+  groupThreadTurns, runtimeTurnId, stableThreadTurnKey,
   type ThreadTurn as Turn
 } from '../../thread/projection/thread-turns'
 import { computeVirtualThreadWindow } from '../../thread/virtualizer/analytix-thread-virtualizer'
@@ -33,13 +45,29 @@ import {
 } from '../../thread/tracing/thread-performance-trace'
 import {
   useActiveStreamEstimateMetrics,
+  isPendingActiveStreamTurnId,
+  useActiveStreamMetrics,
   useActiveStreamSnapshot
 } from '../../thread/streaming/active-stream-store'
 
-export { summarizeToolBlock } from './message-timeline-process'
+export { summarizeToolBlock } from './presentation/chat/chat-view-model'
 
-const LIVE_PROCESS_TEXT_MAX_CHARS = 12000
 const ESTIMATED_INITIAL_VIEWPORT_HEIGHT = 720
+const EMPTY_LOCAL_TIMING_MAP: Record<string, number> = {}
+
+type TimelineInspectRequest = ConversationInspectRequest & {
+  view: 'result' | 'inspect'
+  trajectory?: { generation: number; recordKey: string; sourceScope: string }
+}
+
+// Bind one explicit click to the existing physical identity and disclosure scope.
+// This contains only the public selector, never a protected payload.
+function trajectoryInspectorSource(record: ConversationCallRecord): string {
+  const { block } = record
+  const selector = toolResultLocalSelectorSchemaV1.safeParse({ ...(block.meta?.localResult ?? {}), threadId: record.threadId })
+  return JSON.stringify([record.key, Boolean(block.meta?.localResult), selector.success ? selector.data : null,
+    block.status, block.meta?.toolName ?? null, block.toolKind ?? null])
+}
 
 export function shouldShowReturnToBottomButton({
   bottomDistance,
@@ -68,23 +96,11 @@ export type TimelineRuntimeStateOverride = Partial<Pick<
   | 'currentTurnUserId'
   | 'turnStartedAtByUserId'
   | 'turnDurationByUserId'
+  | 'authoritativeTurnTimings'
+  | 'authoritativeTurnStatuses'
+  | 'lastTurnUsage'
+  | 'turnUsageById'
 >>
-
-function blockRuntimeTurnId(block: ChatBlock | undefined): string | null {
-  const meta = (block as { meta?: Record<string, unknown> } | undefined)?.meta
-  const turnId = typeof meta?.turnId === 'string' ? meta.turnId.trim() : ''
-  return turnId || null
-}
-
-function runtimeTurnId(turn: Turn): string | null {
-  const userTurnId = blockRuntimeTurnId(turn.user)
-  if (userTurnId) return userTurnId
-  for (const block of turn.blocks) {
-    const turnId = blockRuntimeTurnId(block)
-    if (turnId) return turnId
-  }
-  return null
-}
 
 type Props = {
   blocks: ChatBlock[]
@@ -92,31 +108,31 @@ type Props = {
   activeThreadId: string | null
   runtimeConnection: RuntimeConnectionStatus
   runtimeError?: string | null
+  conversationPhase?: ConversationPresentationPhase
   onRetryConnection: () => void
   onOpenSettings: () => void
   onSelectSuggestion?: (prompt: string) => void
-  focusModeEnabled?: boolean
   devPreviewCard?: ReactElement | null
-  /** Disables the inline Review Plan card's Build action while a turn runs. */
-  planActionsBusy?: boolean
-  /** Runs the active plan (Build button on the inline Review Plan card). */
-  onBuildPlan?: () => void
-  /** Opens/focuses the Plan panel (Open button on the inline card). */
-  onOpenPlan?: () => void
   compactCards?: boolean
   edgeAlignedScroll?: boolean
   contentClassName?: string
+  processPaneRoute?: ProcessPaneRoute
   runtimeStateOverride?: TimelineRuntimeStateOverride
+  captureForkOwner?: () => TurnForkOwner | null
+  conversationUsage?: ConversationUsageV1 | null
   focusRequestId?: string | null
   onRequestFocused?: () => void
   onReturnToBottomStateChange?: (state: TimelineReturnToBottomState | null) => void
+  /** Undefined retains the local toolbar; null waits for its resident header seat. */
+  conversationTabsTarget?: HTMLElement | null
 }
 
 const TURN_PAGE_SIZE = 18
 const AUTO_COLLAPSE_THRESHOLD = 24
 const VIRTUALIZER_ROW_THRESHOLD = 48
 const VIRTUALIZER_OVERSCAN_PX = 1600
-const VIRTUALIZER_ROW_GAP_PX = 32
+const CHAT_TURN_GAP_PX = 16
+const ASSISTANT_PANEL_ROW_GAP_PX = 32
 const MIN_LIVE_RESPONSE_SPACER_PX = 72
 const MAX_LIVE_RESPONSE_SPACER_PX = 180
 
@@ -155,79 +171,11 @@ function blockScrollStamp(block: ChatBlock | undefined): string {
   }
 }
 
-function sameProjectionBlock(left: ChatBlock, right: ChatBlock): boolean {
-  if (left === right) return true
-  if (left.kind !== right.kind || left.id !== right.id) return false
-  switch (left.kind) {
-    case 'assistant':
-    case 'user':
-    case 'system':
-      return 'text' in right && left.text === right.text
-    case 'tool':
-      return right.kind === 'tool' &&
-        left.status === right.status &&
-        left.summary === right.summary &&
-        left.detail === right.detail &&
-        left.filePath === right.filePath
-    case 'compaction':
-      return right.kind === 'compaction' &&
-        left.status === right.status &&
-        left.summary === right.summary &&
-        left.detail === right.detail
-    case 'review':
-      return right.kind === 'review' &&
-        left.status === right.status &&
-        left.title === right.title &&
-        left.reviewText === right.reviewText
-    case 'approval':
-      return right.kind === 'approval' &&
-        left.status === right.status &&
-        left.summary === right.summary &&
-        left.errorMessage === right.errorMessage
-    case 'user_input':
-      return right.kind === 'user_input' &&
-        left.status === right.status &&
-        left.questions === right.questions &&
-        left.answers === right.answers
-  }
-  return false
-}
-
-function sameBlockList(left: readonly ChatBlock[], right: readonly ChatBlock[]): boolean {
-  if (left === right) return true
-  if (left.length !== right.length) return false
-  for (let index = 0; index < left.length; index += 1) {
-    const leftBlock = left[index]
-    const rightBlock = right[index]
-    if (!leftBlock || !rightBlock || !sameProjectionBlock(leftBlock, rightBlock)) return false
-  }
-  return true
-}
-
-function sameTurnSections(left: TurnSections, right: TurnSections): boolean {
-  return sameBlockList(left.processBlocks, right.processBlocks) &&
-    sameBlockList(left.assistantContentBlocks, right.assistantContentBlocks) &&
-    sameBlockList(left.compactionBlocks, right.compactionBlocks) &&
-    sameBlockList(left.generatedFileBlocks, right.generatedFileBlocks) &&
-    sameBlockList(left.turnFileChanges, right.turnFileChanges)
-}
-
 function turnPreview(turn: Turn, fallback: string): string {
   const text = turn.user?.text.trim() ?? ''
   if (!text) return fallback
   const oneLine = text.replace(/\s+/g, ' ')
   return oneLine.length > 48 ? `${oneLine.slice(0, 47).trimEnd()}...` : oneLine
-}
-
-function processBlockHasError(block: ChatBlock): boolean {
-  return (
-    (block.kind === 'tool' && block.status === 'error') ||
-    (block.kind === 'compaction' && block.status === 'error') ||
-    (block.kind === 'review' && block.status === 'error') ||
-    (block.kind === 'approval' && block.status === 'error') ||
-    (block.kind === 'user_input' && block.status === 'error') ||
-    (block.kind === 'system' && block.severity === 'error')
-  )
 }
 
 function findContentSearchUnit(root: HTMLElement, itemId: string): HTMLElement | null {
@@ -273,24 +221,27 @@ export function MessageTimeline({
   activeThreadId,
   runtimeConnection,
   runtimeError,
+  conversationPhase,
   onRetryConnection,
   onOpenSettings,
   onSelectSuggestion,
-  focusModeEnabled = false,
   devPreviewCard,
-  planActionsBusy,
-  onBuildPlan,
-  onOpenPlan,
   compactCards = false,
   edgeAlignedScroll = false,
   contentClassName,
   runtimeStateOverride,
+  captureForkOwner,
+  conversationUsage: suppliedConversationUsage,
+  processPaneRoute,
   onReturnToBottomStateChange,
+  conversationTabsTarget,
   focusRequestId,
   onRequestFocused
 }: Props): ReactElement {
   const { t } = useTranslation('common')
+  const rowGapPx = edgeAlignedScroll || processPaneRoute !== undefined ? CHAT_TURN_GAP_PX : ASSISTANT_PANEL_ROW_GAP_PX
   const timelineStores = useTimelineStores(activeThreadId)
+  const performanceUsageMode = usePerformanceUsageMode()
   const {
     route,
     workspaceRoot,
@@ -302,11 +253,59 @@ export function MessageTimeline({
     turnStartedAtByUserId,
     turnDurationByUserId,
     activeThreadGoal,
-    activeThread
+    activeThread,
+    turnUsageById
   } = {
     ...timelineStores,
-    ...(runtimeStateOverride ?? {})
+    ...(runtimeStateOverride ? { turnStartedAtByUserId: EMPTY_LOCAL_TIMING_MAP, turnDurationByUserId: EMPTY_LOCAL_TIMING_MAP, turnUsageById: {}, ...runtimeStateOverride } : {})
   }
+
+  const [processPaneOwnerKey] = useState(() => crypto.randomUUID())
+  const mainThreadId = useChatStore(state => state.activeThreadId)
+  const secondaryProcessContext = useContext(GateResponseContext)
+  const usageRefreshKey = useChatStore(state => state.usageRefreshKey)
+  const rewoundTurnIds = useChatStore(state => state.rewoundTurnIds)
+  const wholeLog = useThreadUsageState(activeThreadId,
+    suppliedConversationUsage === undefined && runtimeConnection === 'ready' && !secondaryProcessContext && activeThreadId === mainThreadId,
+    `${usageRefreshKey}:${busy ? 'running' : 'settled'}:${currentTurnId ?? ''}`,
+    `${runtimeConnection}:${JSON.stringify(Object.keys(rewoundTurnIds ?? {}).sort())}`)
+  const conversationUsage = suppliedConversationUsage === undefined ? wholeLog.conversationUsage : suppliedConversationUsage
+  const turnBilling = (turnId: string | null): ProviderBillingV1 | undefined => {
+    if (!turnId || !conversationUsage) return undefined
+    const matches = conversationUsage.turns.filter(turn => turn.turnId === turnId)
+    return matches.length === 1 ? matches[0].billing : undefined
+  }
+  const resolvedProcessPaneRoute = useMemo<ProcessPaneRoute | undefined>(() => {
+    if (processPaneRoute !== undefined) return processPaneRoute
+    // This is the current main transcript's mounting signature, not authority.
+    if (!edgeAlignedScroll || secondaryProcessContext || !activeThreadId || activeThreadId !== mainThreadId) return undefined
+    return { surface: 'main', ownerKey: processPaneOwnerKey, selectionKey: JSON.stringify([route, activeThreadId]), visible: true }
+  }, [processPaneRoute, edgeAlignedScroll, secondaryProcessContext, activeThreadId, mainThreadId, processPaneOwnerKey, route])
+
+  // Local committed selection token, independent of tool/Question authority.
+  const forkSelectionKey = JSON.stringify([activeThreadId, route, resolvedProcessPaneRoute?.selectionKey,
+    resolvedProcessPaneRoute?.visible, Boolean(secondaryProcessContext)])
+  const forkToken = useMemo(() => ({ selectionKey: forkSelectionKey }), [forkSelectionKey])
+  const committedForkToken = useRef<object | null>(null)
+  useLayoutEffect(() => {
+    committedForkToken.current = forkToken
+    return () => { if (committedForkToken.current === forkToken) committedForkToken.current = null }
+  }, [forkToken])
+  const captureTimelineForkOwner = useCallback((): TurnForkOwner | null => {
+    if (!activeThreadId || committedForkToken.current !== forkToken || resolvedProcessPaneRoute?.visible === false) return null
+    const external = captureForkOwner?.()
+    if (!external && (secondaryProcessContext || activeThreadId !== useChatStore.getState().activeThreadId)) return null
+    return {
+      isCurrent: () => committedForkToken.current === forkToken && (external?.isCurrent() ?? useChatStore.getState().activeThreadId === activeThreadId),
+      getSnapshot: () => {
+        if (committedForkToken.current !== forkToken) return null
+        if (external) return external.getSnapshot()
+        const state = useChatStore.getState()
+        return state.activeThreadId === activeThreadId ? { blocks: state.blocks, busy: state.busy,
+          latestSeq: state.lastSeq, rewoundTurnIds: state.rewoundTurnIds } : null
+      }
+    }
+  }, [activeThreadId, forkToken, captureForkOwner, resolvedProcessPaneRoute?.visible, secondaryProcessContext])
 
   const heroRoute: 'chat' | 'claw' = route === 'claw' ? 'claw' : 'chat'
   const endRef = useRef<HTMLDivElement>(null)
@@ -333,8 +332,157 @@ export function MessageTimeline({
     )
   }, [])
 
-  const turns = useMemo(() => groupThreadTurns(blocks), [blocks])
+  const recordScope = JSON.stringify([activeThreadId, workspaceRoot, route, runtimeConnection, resolvedProcessPaneRoute?.ownerKey,
+    resolvedProcessPaneRoute?.selectionKey, resolvedProcessPaneRoute?.surface, resolvedProcessPaneRoute?.visible])
+  const [recordsState, setRecordsState] = useState<{ scope: string; mode: ConversationViewMode; request: TimelineInspectRequest | null; applied: number | null } | null>(null)
+  const recordVersion = useRef(0)
+  const recordsCurrent = recordsState?.scope === recordScope ? recordsState : null
+  const viewMode = recordsCurrent?.mode ?? 'conversation'
+  const recordsMode = viewMode === 'records'
+  const trajectoryMode = viewMode === 'trajectory'
+  const currentViewMode = useRef(viewMode)
+  currentViewMode.current = viewMode
+  const viewSeat = useRef({ scope: recordScope, mode: viewMode, generation: 0 })
+  if (viewSeat.current.scope !== recordScope || viewSeat.current.mode !== viewMode) {
+    viewSeat.current = { scope: recordScope, mode: viewMode, generation: viewSeat.current.generation + 1 }
+  }
+  const viewGeneration = viewSeat.current.generation
+  const turns = useMemo(() => recordsMode ? conversationRecordTurns(activeThreadId, blocks) : groupThreadTurns(blocks), [recordsMode, activeThreadId, blocks])
+  const recordRequest = recordsMode ? recordsCurrent?.request ?? null : null
+  const trajectoryRequest = trajectoryMode ? recordsCurrent?.request ?? null : null
+  const records = useMemo(() => conversationCallRecords(activeThreadId, blocks), [activeThreadId, blocks])
+  const currentRecords = useRef(records)
+  currentRecords.current = records
+  const trajectoryLocated = trajectoryRequest ? locateConversationCall(records, trajectoryRequest) : null
+  const trajectoryRecord = trajectoryLocated?.kind === 'found' && trajectoryRequest?.trajectory?.generation === viewGeneration &&
+    trajectoryLocated.record.key === trajectoryRequest.trajectory.recordKey &&
+    trajectoryInspectorSource(trajectoryLocated.record) === trajectoryRequest.trajectory.sourceScope ? trajectoryLocated.record : null
+  const locatedRecord = recordRequest ? locateConversationCall(records, recordRequest) : null
+  const foundRecord = locatedRecord?.kind === 'found' ? locatedRecord.record : null
+  const selectedRecord = recordsCurrent?.applied === recordRequest?.version ? foundRecord : null
+  const currentRecordScope = useRef(recordScope)
+  currentRecordScope.current = recordScope
+  const currentRecordRequest = useRef(recordRequest ?? trajectoryRequest)
+  currentRecordRequest.current = recordRequest ?? trajectoryRequest
+  const trajectoryClose = useRef<{ scope: string; generation: number; version: number; close: () => void } | null>(null)
+  const pauseRecordScroll = useRef<() => void>(() => undefined)
+  const pauseViewScroll = useRef<() => void>(() => undefined)
+  const viewScroll = useRef<{ scope: string; positions: Partial<Record<ConversationViewMode, number>> }>({ scope: recordScope, positions: {} })
+  const captureViewScroll = useCallback(() => {
+    if (currentRecordScope.current !== recordScope || currentViewMode.current !== viewMode) return
+    if (viewScroll.current.scope !== recordScope) viewScroll.current = { scope: recordScope, positions: {} }
+    const el = containerRef.current
+    if (el) viewScroll.current.positions[viewMode] = el.scrollTop
+    pauseViewScroll.current()
+  }, [recordScope, viewMode])
+  const recordFocusedRow = useRef<HTMLElement | null>(null)
+  const recordReturnFocus = useRef<HTMLElement | null>(null)
+  const visibleRecordsRoot = useCallback(() => {
+    if (document.hidden || sharedActiveCaseContextTransitionPending() || resolvedProcessPaneRoute?.visible === false) return false
+    const root = containerRef.current
+    if (!root?.isConnected) return false
+    for (let node: HTMLElement | null = root; node; node = node.parentElement) {
+      const style = getComputedStyle(node)
+      if (node.hidden || node.inert || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+    }
+    return true
+  }, [resolvedProcessPaneRoute?.visible])
+  const retireRecordRequest = useCallback(() => {
+    recordVersion.current += 1
+    if (currentRecordRequest.current) pauseRecordScroll.current()
+    const request = currentRecordRequest.current
+    const inline = trajectoryClose.current
+    currentRecordRequest.current = null
+    trajectoryClose.current = null
+    if (inline && request && inline.version === request.version && inline.scope === currentRecordScope.current && inline.generation === viewSeat.current.generation) inline.close()
+    setRecordsState(current => current ? { ...current, request: null, applied: null } : null)
+  }, [])
+  useLayoutEffect(() => {
+    retireRecordRequest()
+    setRecordsState(current => current?.scope === recordScope ? current : null)
+    const api = window.analytix?.runtime
+    const off = api?.onToolResultLocalDisplayInvalidated?.(id => { if (id === null) retireRecordRequest() })
+    const runtimeOff = api?.onRuntimeStatus?.(status => { if (status.state !== 'running') retireRecordRequest() })
+    const caseOff = subscribeBeforeSharedActiveCaseContextChange(retireRecordRequest)
+    const hidden = () => { if (document.hidden) retireRecordRequest() }
+    const observer = new MutationObserver(() => { if (!visibleRecordsRoot()) retireRecordRequest() })
+    for (let node: HTMLElement | null = containerRef.current; node; node = node.parentElement) observer.observe(node, { attributes: true, attributeFilter: ['hidden', 'inert', 'aria-hidden', 'style', 'class'] })
+    document.addEventListener('visibilitychange', hidden)
+    return () => { currentRecordRequest.current = null; recordVersion.current += 1; off?.(); runtimeOff?.(); caseOff(); observer.disconnect(); document.removeEventListener('visibilitychange', hidden) }
+  }, [recordScope, retireRecordRequest, visibleRecordsRoot])
+  const inspectConversationCall = useCallback((turnId: string, callId: string, physical?: ConversationCallRecord, view: 'result' | 'inspect' = 'inspect') => {
+    if (!activeThreadId || currentRecordScope.current !== recordScope || currentViewMode.current !== viewMode || viewSeat.current.generation !== viewGeneration || !visibleRecordsRoot()) return
+    captureViewScroll()
+    recordReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const matches = records.filter(record => record.threadId === activeThreadId && record.turnId === turnId && record.callId === callId)
+    const source = physical ?? (matches.length === 1 ? matches[0] : undefined)
+    const request: TimelineInspectRequest = { threadId: activeThreadId, turnId, callId, view, version: ++recordVersion.current,
+      ...(source?.toolCallItemId ? { toolCallItemId: source.toolCallItemId } : {}), ...(source?.toolResultItemId ? { toolResultItemId: source.toolResultItemId } : {}) }
+    currentRecordRequest.current = request
+    setRecordsState({ scope: recordScope, mode: 'records', request, applied: null })
+  }, [activeThreadId, recordScope, records, visibleRecordsRoot, viewMode, captureViewScroll, viewGeneration])
+  const changeConversationView = useCallback((mode: ConversationViewMode) => {
+    if (!activeThreadId || mode === viewMode || currentRecordScope.current !== recordScope || currentViewMode.current !== viewMode || viewSeat.current.generation !== viewGeneration || !visibleRecordsRoot()) return
+    captureViewScroll()
+    retireRecordRequest()
+    setRecordsState({ scope: recordScope, mode, request: null, applied: null })
+  }, [activeThreadId, viewMode, recordScope, visibleRecordsRoot, captureViewScroll, retireRecordRequest, viewGeneration])
+  const mainConversation = route === 'chat' && !secondaryProcessContext && activeThreadId === mainThreadId
+  const hideBlankMainTabs = mainConversation && (conversationPhase === 'hero' || conversationPhase === 'settling')
+  const viewToolbar = activeThreadId && !hideBlankMainTabs ? <ConversationRecordsToolbar key={recordScope} mode={viewMode}
+    pending={recordRequest && !selectedRecord ? locatedRecord?.kind === 'ambiguous' ? 'ambiguous' : 'missing' : undefined}
+    onModeChange={changeConversationView} /> : null
+  const residentTabsTarget = mainConversation ? conversationTabsTarget : undefined
+  const inspectTrajectoryCall = useCallback((identity: TrajectoryToolIdentity) => {
+    if (currentViewMode.current !== 'trajectory' || viewSeat.current.generation !== viewGeneration || currentRecordScope.current !== recordScope || identity.threadId !== activeThreadId || !identity.toolResultItemId || !visibleRecordsRoot()) return
+    const found = locateConversationCall(currentRecords.current, identity)
+    if (found.kind !== 'found') return
+    recordReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const source = found.record
+    const request: TimelineInspectRequest = { threadId: source.threadId, turnId: source.turnId, callId: source.callId,
+      ...(source.toolCallItemId ? { toolCallItemId: source.toolCallItemId } : {}), toolResultItemId: source.toolResultItemId,
+      view: 'inspect', version: ++recordVersion.current,
+      trajectory: { generation: viewGeneration, recordKey: source.key, sourceScope: trajectoryInspectorSource(source) } }
+    currentRecordRequest.current = request
+    setRecordsState({ scope: recordScope, mode: 'trajectory', request, applied: null })
+  }, [activeThreadId, recordScope, visibleRecordsRoot, viewGeneration])
+  useLayoutEffect(() => {
+    if (trajectoryRequest && (!trajectoryRecord || !visibleRecordsRoot())) retireRecordRequest()
+  }, [trajectoryRequest, trajectoryRecord, visibleRecordsRoot, retireRecordRequest])
+  const renderTrajectoryInspector = useCallback((identity: TrajectoryToolIdentity, close: () => void) => {
+    const request = trajectoryRequest
+    const expected = request?.trajectory
+    const current = () => {
+      const active = currentRecordRequest.current
+      return Boolean(request && expected && active && currentRecordScope.current === recordScope &&
+        currentViewMode.current === 'trajectory' && viewSeat.current.generation === expected.generation &&
+        active.version === request.version && active.trajectory?.recordKey === expected.recordKey &&
+        active.trajectory.sourceScope === expected.sourceScope)
+    }
+    if (!current() || !request || !expected || !trajectoryRecord || identity.threadId !== activeThreadId ||
+      !identity.toolResultItemId || !visibleRecordsRoot()) return null
+    const found = locateConversationCall(currentRecords.current, identity)
+    if (found.kind !== 'found' || found.record.key !== expected.recordKey ||
+      trajectoryInspectorSource(found.record) !== expected.sourceScope) return null
+    trajectoryClose.current = { scope: recordScope, generation: expected.generation, version: request.version, close }
+    const retire = () => { if (current()) retireRecordRequest() }
+    return <ConversationRecordDetails key={expected.recordKey + ':' + request.version} record={found.record}
+      requestVersion={request.version} initialView="inspect" presentation="embedded" onRetire={retire} onClose={() => {
+        if (!current()) return
+        retireRecordRequest()
+        const target = recordReturnFocus.current
+        if (target?.isConnected && visibleRecordsRoot()) target.focus({ preventScroll: true })
+      }} />
+  }, [trajectoryRequest, trajectoryRecord, recordScope, activeThreadId, visibleRecordsRoot, retireRecordRequest])
+  const closeRecordDetails = useCallback(() => {
+    retireRecordRequest()
+    const target = recordReturnFocus.current?.isConnected ? recordReturnFocus.current : recordFocusedRow.current
+    if (target?.isConnected && visibleRecordsRoot()) target.focus({ preventScroll: true })
+  }, [retireRecordRequest, visibleRecordsRoot])
   const activeStreamForScroll = useActiveStreamEstimateMetrics(activeThreadId, currentTurnId)
+  const currentRuntimeStream = useActiveStreamMetrics(activeThreadId, currentTurnId)
+  const runtimeRunning = Boolean(currentTurnId && !isPendingActiveStreamTurnId(currentTurnId) &&
+    currentRuntimeStream.threadId === activeThreadId && currentRuntimeStream.turnId === currentTurnId && currentRuntimeStream.runtimeRunning)
   const latestBlock = blocks[blocks.length - 1]
   const scrollContentKey = [
     activeThreadId ?? '',
@@ -361,6 +509,8 @@ export function MessageTimeline({
     collapseEarlierTurns,
     preserveBottomOnResize,
     scrollToBottom,
+    pauseFollowForNavigation,
+    pauseForViewChange,
     snapToBottomIfNearLive
   } = useTimelineScroll({
     containerRef,
@@ -369,6 +519,7 @@ export function MessageTimeline({
     autoCollapseThreshold: AUTO_COLLAPSE_THRESHOLD,
     totalTurns: turns.length,
     busy,
+    suspended: trajectoryMode,
     scrollDeps: {
       contentKey: scrollContentKey,
       streaming: hasLegacyLiveStream || hasActiveStreamShell,
@@ -377,6 +528,21 @@ export function MessageTimeline({
     },
     onAnchorCorrected: recordAnchorCorrection
   })
+  pauseRecordScroll.current = pauseFollowForNavigation
+  pauseViewScroll.current = pauseForViewChange
+  useLayoutEffect(() => {
+    if (viewScroll.current.scope !== recordScope) {
+      viewScroll.current = { scope: recordScope, positions: {} }
+      return
+    }
+    const saved = viewScroll.current.positions[viewMode]
+    const el = containerRef.current
+    if (!el) return
+    if (saved !== undefined || trajectoryMode) {
+      if (!trajectoryMode) pauseFollowForNavigation()
+      el.scrollTop = saved ?? 0
+    }
+  }, [recordScope, viewMode, trajectoryMode, pauseFollowForNavigation])
   const hasLiveActivity = hasLegacyLiveStream || hasActiveStreamShell
   const effectiveResponseSpacerHeightPx = hasLiveResponseSpacer
     ? responseSpacerHeightPx || MIN_LIVE_RESPONSE_SPACER_PX
@@ -386,6 +552,7 @@ export function MessageTimeline({
   }, [scrollToBottom])
 
   useLayoutEffect(() => {
+    if (trajectoryMode) return
     if (!hasLiveResponseSpacer) {
       setResponseSpacerHeightPx(0)
       return
@@ -401,7 +568,7 @@ export function MessageTimeline({
     const observer = new ResizeObserver(updateSpacerHeight)
     observer.observe(node)
     return () => observer.disconnect()
-  }, [hasLiveResponseSpacer, liveResponseSpacerHeight])
+  }, [hasLiveResponseSpacer, liveResponseSpacerHeight, trajectoryMode])
 
   useLayoutEffect(() => {
     const wasLive = previousLiveResponseSpacerRef.current
@@ -423,14 +590,9 @@ export function MessageTimeline({
     }
   }, [hasLiveResponseSpacer, snapToBottomIfNearLive])
 
-  // Tick a clock while a turn is running so the live "Worked for Xs" updates.
-  const [tickNow, setTickNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!busy || !currentTurnUserId) return
-    setTickNow(Date.now())
-    const id = window.setInterval(() => setTickNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [busy, currentTurnUserId])
+  const timingSettlementKey = `${busy ? 'running' : 'settled'}:${currentTurnId ?? ''}:${turns.length}`
+  const { timings: authoritativeTimings, statuses: authoritativeStatuses } = useTurnTiming(activeThreadId, timingSettlementKey,
+    runtimeStateOverride?.authoritativeTurnTimings, runtimeStateOverride?.authoritativeTurnStatuses)
 
   const projection = useMemo(
     () =>
@@ -445,8 +607,10 @@ export function MessageTimeline({
         turnStartedAtByUserId,
         turnDurationByUserId,
         busy,
-        tickNow,
-        hiddenTurnCount,
+        authoritativeTurnTimings: authoritativeTimings,
+        authoritativeTurnStatuses: authoritativeStatuses,
+        runtimeRunning,
+        hiddenTurnCount: turns.length > AUTO_COLLAPSE_THRESHOLD ? hiddenTurnCount : 0,
         pageSize: TURN_PAGE_SIZE,
         autoCollapseThreshold: AUTO_COLLAPSE_THRESHOLD,
         activeThreadGoal,
@@ -471,7 +635,9 @@ export function MessageTimeline({
       hiddenTurnCount,
       live,
       t,
-      tickNow,
+      authoritativeTimings,
+      authoritativeStatuses,
+      runtimeRunning,
       turnDurationByUserId,
       turnStartedAtByUserId,
       turns,
@@ -486,6 +652,7 @@ export function MessageTimeline({
 
   useEffect(() => {
     if (!onReturnToBottomStateChange) return
+    if (trajectoryMode) { onReturnToBottomStateChange(null); return }
     onReturnToBottomStateChange({
       show: showReturnToBottom,
       hasLiveActivity,
@@ -495,7 +662,8 @@ export function MessageTimeline({
     handleReturnToBottomClick,
     hasLiveActivity,
     onReturnToBottomStateChange,
-    showReturnToBottom
+    showReturnToBottom,
+    trajectoryMode
   ])
 
   useEffect(() => {
@@ -518,6 +686,10 @@ export function MessageTimeline({
   }, [activeThreadId, blocks.length, live, projection.rows.length, turns.length])
 
   const rowCacheRef = useRef(createMeasuredRowCache())
+  useLayoutEffect(() => {
+    rowCacheRef.current.prune([])
+    setMeasurementRevision(value => value + 1)
+  }, [viewMode])
   const rowObserverRef = useRef<ResizeObserver | null>(null)
   const rowNodeByIdRef = useRef(new Map<string, Element>())
   const rowIdByNodeRef = useRef(new WeakMap<Element, string>())
@@ -592,11 +764,14 @@ export function MessageTimeline({
   ])
 
   useEffect(() => {
+    if (trajectoryMode) return
     const el = containerRef.current
     if (!el) return
     let frame: number | null = null
+    let retired = false
     const update = (): void => {
       frame = null
+      if (retired || currentViewMode.current === 'trajectory') return
       setViewportMetrics({
         scrollTop: el.scrollTop,
         viewportHeight: el.clientHeight
@@ -614,11 +789,12 @@ export function MessageTimeline({
         : new ResizeObserver(() => scheduleUpdate())
     observer?.observe(el)
     return () => {
+      retired = true
       el.removeEventListener('scroll', scheduleUpdate)
       observer?.disconnect()
       if (frame !== null) window.cancelAnimationFrame(frame)
     }
-  }, [containerRef])
+  }, [containerRef, trajectoryMode])
 
   useEffect(() => {
     if (typeof ResizeObserver === 'undefined') return
@@ -665,10 +841,10 @@ export function MessageTimeline({
         scrollTop: viewportMetrics.scrollTop,
         viewportHeight,
         overscanPx: VIRTUALIZER_OVERSCAN_PX,
-        rowGapPx: VIRTUALIZER_ROW_GAP_PX
+        rowGapPx
       })
     },
-    [measurementRevision, projection.rows, viewportMetrics.scrollTop, viewportMetrics.viewportHeight]
+    [measurementRevision, projection.rows, viewportMetrics.scrollTop, viewportMetrics.viewportHeight, rowGapPx]
   )
   const virtualizerEnabled =
     projection.rows.length > VIRTUALIZER_ROW_THRESHOLD
@@ -743,6 +919,7 @@ export function MessageTimeline({
   }, [])
 
   const scrollToEstimatedTurn = useCallback((turnKey: string, behavior: ScrollBehavior): boolean => {
+    if (currentViewMode.current === 'trajectory') return false
     const container = containerRef.current
     if (!container) return false
 
@@ -758,21 +935,22 @@ export function MessageTimeline({
         container.scrollTo({ top: targetTop, behavior })
         return true
       }
-      offsetTop += height + (index < projection.rows.length - 1 ? VIRTUALIZER_ROW_GAP_PX : 0)
+      offsetTop += height + (index < projection.rows.length - 1 ? rowGapPx : 0)
     }
 
     const target = turnRefMap.current.get(turnKey)
     if (!target) return false
     target.scrollIntoView({ behavior, block: 'center' })
     return true
-  }, [projection.rows])
+  }, [projection.rows, rowGapPx])
 
   const waitForNavigationTarget = useCallback(async (
     item: ThreadUserMessageNavigationItem,
+    isCurrent: () => boolean,
     timeoutMs = 2000
   ): Promise<HTMLElement | null> => {
     const startedAt = performance.now()
-    while (performance.now() - startedAt <= timeoutMs) {
+    while (isCurrent() && performance.now() - startedAt <= timeoutMs) {
       const target = findNavigationTarget(item.id)
       if (target) return target
       await nextAnimationFrame()
@@ -785,6 +963,8 @@ export function MessageTimeline({
     options?: { behavior?: ScrollBehavior }
   ): void => {
     void (async () => {
+      const isCurrent = () => currentRecordScope.current === recordScope && currentViewMode.current === 'conversation' && viewSeat.current.generation === viewGeneration && visibleRecordsRoot()
+      if (!isCurrent()) return
       const behavior = options?.behavior ?? 'smooth'
       const target = findNavigationTarget(item.id)
       if (target) {
@@ -796,7 +976,8 @@ export function MessageTimeline({
       if (!scrollToEstimatedTurn(item.turnKey, 'auto')) return
       await nextAnimationFrame()
       await nextAnimationFrame()
-      const renderedTarget = await waitForNavigationTarget(item)
+      const renderedTarget = await waitForNavigationTarget(item, isCurrent)
+      if (!isCurrent()) return
       if (renderedTarget) {
         renderedTarget.scrollIntoView({ behavior, block: 'center' })
         highlightNavigationTarget(renderedTarget)
@@ -806,10 +987,45 @@ export function MessageTimeline({
       const turnTarget = turnRefMap.current.get(item.turnKey)
       turnTarget?.scrollIntoView({ behavior, block: 'center' })
     })()
-  }, [findNavigationTarget, scrollToEstimatedTurn, waitForNavigationTarget])
+  }, [findNavigationTarget, scrollToEstimatedTurn, waitForNavigationTarget, recordScope, viewGeneration, visibleRecordsRoot])
+
+  useLayoutEffect(() => {
+    if (!recordRequest || recordsCurrent?.applied === recordRequest.version || !foundRecord) return
+    const target = foundRecord
+    const matches = turns.map((turn, index) => ({ turn, index })).filter(({ turn }) => runtimeTurnId(turn) === target.turnId && turn.blocks.includes(target.block))
+    if (matches.length !== 1 || !visibleRecordsRoot()) return
+    pauseFollowForNavigation()
+    const { turn, index } = matches[0]
+    if (turns.length - index > visibleTurnCount) {
+      loadEarlierTurns({ userInitiated: true, preserveScroll: false })
+      return
+    }
+    const current = () => currentRecordScope.current === recordScope && currentRecordRequest.current?.version === recordRequest.version &&
+      currentRecordRequest.current?.threadId === activeThreadId && visibleRecordsRoot()
+    if (!current()) return
+    scrollToEstimatedTurn(stableThreadTurnKey(turn, index), 'auto')
+    let cancelled = false
+    void (async () => {
+      const started = performance.now()
+      while (!cancelled && current() && performance.now() - started < 2000) {
+        const nodes = Array.from(containerRef.current?.querySelectorAll<HTMLElement>('[data-conversation-call-key]') ?? [])
+          .filter(node => node.dataset.conversationCallKey === target.key && node.closest<HTMLElement>('[data-conversation-record-turn]')?.dataset.conversationRecordTurn === target.turnId)
+        if (nodes.length === 1 && current()) {
+          nodes[0].scrollIntoView({ behavior: 'auto', block: 'center' })
+          recordFocusedRow.current = nodes[0]
+          nodes[0].focus({ preventScroll: true })
+          setRecordsState(value => value?.scope === recordScope && value.request?.version === recordRequest.version ? { ...value, applied: recordRequest.version } : value)
+          return
+        }
+        await nextAnimationFrame()
+      }
+    })()
+    return () => { cancelled = true }
+  }, [recordRequest, foundRecord, recordsCurrent?.applied,
+    turns, visibleTurnCount, loadEarlierTurns, pauseFollowForNavigation, scrollToEstimatedTurn, recordScope, activeThreadId, visibleRecordsRoot])
 
   useEffect(() => {
-    if (!focusRequestId) return undefined
+    if (trajectoryMode || !focusRequestId) return undefined
     const turnIndex = turns.findIndex(turn => turn.blocks.some(block =>
       (block.kind === 'user_input' && block.requestId === focusRequestId) ||
       (block.kind === 'approval' && block.approvalId === focusRequestId)))
@@ -821,13 +1037,15 @@ export function MessageTimeline({
     const row = projection.rows.find(row => row.kind === 'turn' && row.turn.key === stableThreadTurnKey(turns[turnIndex], turnIndex))
     if (row?.kind === 'turn') scrollToEstimatedTurn(row.turn.key, 'auto')
     let cancelled = false
+    const isCurrent = () => !cancelled && currentRecordScope.current === recordScope && currentViewMode.current === viewMode && viewSeat.current.generation === viewGeneration && visibleRecordsRoot()
     void (async () => {
       // The existing virtualizer renders the requested row after scrolling.
       const started = performance.now()
-      while (!cancelled && performance.now() - started < 2000) {
-        const gate = Array.from(containerRef.current?.querySelectorAll<HTMLElement>('[data-gate-request-id]') ?? [])
+      while (isCurrent() && performance.now() - started < 2000) {
+        const gate = Array.from(document.querySelectorAll<HTMLElement>('[data-analytix-gate-composer] [data-gate-request-id]'))
+          .find(node => node.dataset.gateRequestId === focusRequestId && node.closest<HTMLElement>('[data-analytix-gate-composer]')?.dataset.gateThreadId === activeThreadId) ?? Array.from(containerRef.current?.querySelectorAll<HTMLElement>('[data-gate-request-id]') ?? [])
           .find(node => node.dataset.gateRequestId === focusRequestId)
-        if (gate) {
+        if (gate && isCurrent()) {
           gate.scrollIntoView({ behavior: 'auto', block: 'center' })
           const control = gate.querySelector<HTMLElement>('button:not(:disabled), textarea:not(:disabled)')
           ;(control ?? gate).focus({ preventScroll: true })
@@ -838,33 +1056,39 @@ export function MessageTimeline({
       }
     })()
     return () => { cancelled = true }
-  }, [activeThreadId, focusRequestId, turns, visibleTurnCount, loadEarlierTurns, projection.rows, scrollToEstimatedTurn, onRequestFocused])
+  }, [activeThreadId, focusRequestId, turns, visibleTurnCount, loadEarlierTurns, projection.rows, scrollToEstimatedTurn, onRequestFocused, trajectoryMode, recordScope, viewMode, viewGeneration, visibleRecordsRoot])
 
   return (
     <Profiler id="message-timeline" onRender={recordReactCommit}>
       <InjectedMemoryLookupProvider workspaceRoot={workspaceRoot}>
+      <ProtectedToolInspectorSelection scopeKey={recordScope + ':' + viewMode}>
+      {residentTabsTarget ? createPortal(viewToolbar, residentTabsTarget, recordScope) : null}
       <div
         ref={containerRef}
         data-analytix-message-timeline-scroller
+        data-conversation-composer-overlay={viewMode !== 'conversation' ? '' : undefined}
+        data-conversation-view={viewMode}
         className={`ds-no-drag relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden ${
           edgeAlignedScroll ? 'ds-stage-scroll-edge' : ''
         }`}
         style={{ overflowAnchor: 'none' }}
       >
-      <ThreadUserMessageNavigationRail
+      {viewMode === 'conversation' ? <ThreadUserMessageNavigationRail
         items={projection.userMessageNavigationItems}
         containerRef={containerRef}
         railLabel={t('timelineJumpRailLabel')}
         noContentLabel={t('timelineUserMessageNavigationNoContent')}
         itemAriaLabel={(item) => t('timelineJumpTurn', { index: item.position })}
         onSelectItem={revealNavigationItem}
-      />
+      /> : null}
       <div
         data-analytix-message-timeline-content
-        className={`ds-message-timeline-content ds-chat-column-inset mx-auto flex w-full min-w-0 max-w-4xl flex-col pt-8 ${contentClassName ?? ''} ${
+        className={`ds-message-timeline-content ds-chat-column-inset mx-auto flex w-full min-w-0 ${trajectoryMode ? 'max-w-none min-h-0 flex-1' : 'max-w-4xl'} flex-col ${route === 'chat' && edgeAlignedScroll && viewMode === 'conversation' ? 'pt-4' : 'pt-8'} ${contentClassName ?? ''} ${
         goalTimelinePaddingClass(heroRoute, Boolean(activeThreadGoal))
       }`}
       >
+        {residentTabsTarget === undefined ? viewToolbar : null}
+        {trajectoryMode && activeThreadId ? <TrajectoryPanel threadId={activeThreadId} onInspectTool={inspectTrajectoryCall} renderToolInspector={renderTrajectoryInspector} /> : <>
         {virtualizerEnabled && virtualWindow.beforeHeight > 0 ? (
           <div aria-hidden style={{ height: virtualWindow.beforeHeight }} className="w-full shrink-0" />
         ) : null}
@@ -874,16 +1098,17 @@ export function MessageTimeline({
             case 'emptyHero':
               content = (
                 <MessageTimelineEmptyHero
+                  phase={conversationPhase}
                   route={heroRoute}
                   ready={runtimeConnection === 'ready'}
                   hasWorkspace={!!workspaceRoot}
+                  hasComposerWorkspacePicker={route === 'chat' && edgeAlignedScroll && !secondaryProcessContext}
                   runtimeError={runtimeError}
                   activeClawChannel={activeClawChannel}
                   onPickWorkspace={() => void chooseWorkspace()}
                   onRetry={onRetryConnection}
                   onOpenSettings={onOpenSettings}
                   onSelectSuggestion={onSelectSuggestion}
-                  focusModeEnabled={focusModeEnabled}
                 />
               )
               break
@@ -907,10 +1132,17 @@ export function MessageTimeline({
               )
               break
             case 'turn':
-              content = (
+              content = recordsMode && activeThreadId && runtimeTurnId(row.turn.turn) ? <ConversationRecords threadId={activeThreadId} turnId={runtimeTurnId(row.turn.turn)!}
+                blocks={[...(row.turn.turn.user ? [row.turn.turn.user] : []), ...row.turn.turn.blocks]} request={recordRequest} selected={selectedRecord?.key ?? null}
+                onInspect={record => inspectConversationCall(record.turnId, record.callId, record, 'result')} /> : (
                 <MemoMessageTurn
+                  processPaneRoute={resolvedProcessPaneRoute}
+                  runtimeAvailable={runtimeConnection === 'ready'}
+                  ownerBusy={busy}
+                  captureForkOwner={captureForkOwner || !secondaryProcessContext && activeThreadId === mainThreadId ? captureTimelineForkOwner : undefined}
                   activeThreadId={activeThreadId}
                   isLatest={row.turn.isLatest || row.turn.isLiveTurn}
+                  isLiveTurn={row.turn.isLiveTurn}
                   activeStreamTurnId={
                     row.turn.isLiveTurn ? currentTurnId ?? runtimeTurnId(row.turn.turn) : runtimeTurnId(row.turn.turn)
                   }
@@ -919,15 +1151,19 @@ export function MessageTimeline({
                   isProcessing={row.turn.isProcessing}
                   liveContent={row.turn.liveContent}
                   durationMs={row.turn.timing.durationMs}
+                  runningStartedAt={row.turn.timing.runningStartedAt}
+                  turnStatus={row.turn.timing.status}
+                  billing={turnBilling(runtimeTurnId(row.turn.turn))}
+                  performanceUsageMode={performanceUsageMode}
+                  usage={turnUsageById?.[runtimeTurnId(row.turn.turn) ?? '']?.threadId === activeThreadId
+                    ? turnUsageById[runtimeTurnId(row.turn.turn) ?? ''].snapshot : undefined}
                   userNavigationItemId={row.turn.userNavigationItemId}
                   devPreviewCard={row.turn.devPreviewCard}
-                  planActionsBusy={planActionsBusy}
-                  onBuildPlan={onBuildPlan}
-                  onOpenPlan={onOpenPlan}
                   viewportRef={containerRef}
                   compactCards={compactCards}
                   sections={row.turn.sections}
                   reviewBlocks={row.turn.reviewBlocks}
+                  onInspect={inspectConversationCall}
                   onAssistantFinalized={snapToBottomIfNearLive}
                 />
               )
@@ -950,9 +1186,15 @@ export function MessageTimeline({
             case 'liveOnlyTurn':
               content = (
                 <MemoMessageTurn
+                  processPaneRoute={resolvedProcessPaneRoute}
+                  runtimeAvailable={runtimeConnection === 'ready'}
+                  ownerBusy={busy}
+                  captureForkOwner={captureForkOwner || !secondaryProcessContext && activeThreadId === mainThreadId ? captureTimelineForkOwner : undefined}
                   activeThreadId={activeThreadId}
                   isLatest
+                  isLiveTurn
                   activeStreamTurnId={row.turnId ?? null}
+                  performanceUsageMode={performanceUsageMode}
                   workspaceRoot={workspaceRoot}
                   turn={{ blocks: [] }}
                   isProcessing={row.isProcessing}
@@ -961,8 +1203,12 @@ export function MessageTimeline({
                   viewportRef={containerRef}
                   compactCards={compactCards}
                   durationMs={row.timing.durationMs}
+                  runningStartedAt={row.timing.runningStartedAt}
+                  turnStatus={row.timing.status}
+                  billing={turnBilling(row.turnId ?? null)}
                   sections={row.sections}
                   reviewBlocks={row.reviewBlocks}
+                  onInspect={inspectConversationCall}
                   onAssistantFinalized={snapToBottomIfNearLive}
                 />
               )
@@ -996,7 +1242,7 @@ export function MessageTimeline({
               data-analytix-timeline-row={row.kind}
               data-turn-key={row.kind === 'turn' ? row.turn.key : undefined}
               data-content-search-turn-key={row.kind === 'turn' ? row.turn.key : undefined}
-              style={index < projection.rows.length - 1 ? { marginBottom: VIRTUALIZER_ROW_GAP_PX } : undefined}
+              style={index < projection.rows.length - 1 ? { marginBottom: rowGapPx } : undefined}
             >
               {content}
             </div>
@@ -1005,282 +1251,78 @@ export function MessageTimeline({
         {virtualizerEnabled && virtualWindow.afterHeight > 0 ? (
           <div aria-hidden style={{ height: virtualWindow.afterHeight }} className="w-full shrink-0" />
         ) : null}
+        </>}
       </div>
       </div>
+      {selectedRecord && recordRequest ? <ConversationRecordDetails key={selectedRecord.key + ':' + recordRequest.version}
+        record={selectedRecord} requestVersion={recordRequest.version} initialView={recordRequest.view} onViewChange={view => {
+          const request = currentRecordRequest.current
+          if (request?.version !== recordRequest.version) return
+          currentRecordRequest.current = { ...request, view }
+          setRecordsState(current => current?.request?.version === recordRequest.version
+            ? { ...current, request: { ...current.request, view } } : current)
+        }} onRetire={() => {
+          if (currentRecordRequest.current?.version === recordRequest.version) retireRecordRequest()
+        }} onClose={() => {
+          if (currentRecordRequest.current?.version === recordRequest.version) closeRecordDetails()
+        }} /> : null}
+      </ProtectedToolInspectorSelection>
       </InjectedMemoryLookupProvider>
     </Profiler>
   )
 }
 
-function MessageTurn({
-  activeThreadId,
-  isLatest,
-  activeStreamTurnId,
-  workspaceRoot,
-  turn,
-  isProcessing,
-  liveContent,
-  durationMs,
-  userNavigationItemId,
-  devPreviewCard,
-  planActionsBusy,
-  onBuildPlan,
-  onOpenPlan,
-  viewportRef,
-  compactCards = false,
-  sections,
-  reviewBlocks,
-  onAssistantFinalized
-}: {
-  activeThreadId: string | null
-  isLatest: boolean
-  activeStreamTurnId?: string | null
-  workspaceRoot: string
-  turn: Turn
-  isProcessing: boolean
-  liveContent: string
-  durationMs?: number
-  userNavigationItemId?: string
-  devPreviewCard?: ReactElement | null
-  planActionsBusy?: boolean
-  onBuildPlan?: () => void
-  onOpenPlan?: () => void
-  viewportRef: RefObject<HTMLDivElement | null>
-  compactCards?: boolean
-  sections: TurnSections
-  reviewBlocks: Extract<ChatBlock, { kind: 'review' }>[]
-  onAssistantFinalized?: () => void
+function MessageTurn({ activeThreadId, isLatest, isLiveTurn, activeStreamTurnId, turn, isProcessing, liveContent,
+  durationMs, turnStatus, usage, billing, performanceUsageMode, userNavigationItemId, devPreviewCard,
+  viewportRef, compactCards = false, sections, reviewBlocks,
+  onAssistantFinalized, processPaneRoute, runtimeAvailable, ownerBusy, captureForkOwner, onInspect }: {
+  activeThreadId: string | null; isLatest: boolean; isLiveTurn: boolean; activeStreamTurnId?: string | null
+  workspaceRoot: string; turn: Turn; isProcessing: boolean; liveContent: string
+  durationMs?: number; runningStartedAt?: number; turnStatus?: import('../../agent/types').AuthoritativeTurnStatus; usage?: ThreadUsageSnapshot
+  billing?: ProviderBillingV1
+  performanceUsageMode: PerformanceUsageMode
+  userNavigationItemId?: string; devPreviewCard?: ReactElement | null
+  viewportRef: RefObject<HTMLDivElement | null>; compactCards?: boolean; sections: TurnSections
+  reviewBlocks: Extract<ChatBlock, { kind: 'review' }>[]; onAssistantFinalized?: () => void
+  processPaneRoute?: ProcessPaneRoute; runtimeAvailable: boolean; ownerBusy: boolean; captureForkOwner?: () => TurnForkOwner | null
+  onInspect?: (turnId: string, callId: string) => void
 }): ReactElement {
-  const activeThreadGoal = useChatStore((s) => s.activeThreadGoal)
-  const forkThreadFromTurn = useChatStore((s) => s.forkThreadFromTurn)
-  const rollbackWorkspaceToCheckpoint = useChatStore((s) => s.rollbackWorkspaceToCheckpoint)
-  const turnId = activeStreamTurnId ?? runtimeTurnId(turn)
-  const activeStreamEstimate = useActiveStreamEstimateMetrics(isLatest ? activeThreadId : null, isLatest ? turnId : null)
+  const mainThreadId = useChatStore(state => state.activeThreadId)
+  const secondary = useContext(GateResponseContext)
+  const forkThreadFromTurn = useChatStore(state => state.forkThreadFromTurn)
+  const rollbackWorkspaceToCheckpoint = useChatStore(state => state.rollbackWorkspaceToCheckpoint)
   const [forking, setForking] = useState(false)
-  const [rollingBackCheckpointId, setRollingBackCheckpointId] = useState<string | null>(null)
-  // Inline Review Plan card: surfaced under a turn that produced a
-  // successful `create_plan` result so the user can open/build the plan
-  // without leaving the conversation.
-  const planResult = useMemo(() => {
-    if (isProcessing) return null
-    for (let index = turn.blocks.length - 1; index >= 0; index -= 1) {
-      const block = turn.blocks[index]
-      if (block.kind !== 'tool' || block.status !== 'success') continue
-      const meta = extractPlanMetadataFromBlock(block)
-      if (meta) return meta
-    }
-    return null
-  }, [turn.blocks, isProcessing])
-  const [workExpandedOverride, setWorkExpandedOverride] = useState<boolean | null>(null)
-
-  const {
-    processBlocks,
-    assistantContentBlocks,
-    compactionBlocks,
-    generatedFileBlocks,
-    turnFileChanges
-  } = sections
-  const preferActiveLiveProcess = isLatest && activeStreamEstimate.processLength > 0
-  const displayProcessBlocks = useMemo(
-    () =>
-      preferActiveLiveProcess
-        ? processBlocks.filter((block) => block.id !== 'live-reasoning' && block.id !== 'live-assistant')
-        : processBlocks,
-    [preferActiveLiveProcess, processBlocks]
-  )
-  const liveProcessStepCount = preferActiveLiveProcess ? 1 : 0
-  const hasProcessError = displayProcessBlocks.some(processBlockHasError)
-  const sectionsHaveLiveProcess = displayProcessBlocks.some(
-    (block) => block.id === 'live-reasoning' || block.id === 'live-assistant'
-  )
-  const hasPendingInteractiveProcess = displayProcessBlocks.some(
-    (block) =>
-      (block.kind === 'tool' && block.status === 'running') ||
-      (block.kind === 'approval' && block.status === 'pending') ||
-      (block.kind === 'user_input' && block.status === 'pending')
-  )
-  const effectiveProcessing = isProcessing || preferActiveLiveProcess
-  const forceExpandForError = effectiveProcessing && hasProcessError
-  const hasFinalAnswer = assistantContentBlocks.length > 0
-  const workExpanded = forceExpandForError ||
-    (workExpandedOverride ?? (effectiveProcessing || hasPendingInteractiveProcess || (hasProcessError && !hasFinalAnswer)))
-
-  const processSections = useMemo(
-    () => (workExpanded ? groupProcessSections(displayProcessBlocks) : []),
-    [displayProcessBlocks, workExpanded]
-  )
-  // Live assistant text belongs in the normal answer flow while the turn is
-  // still running; turn_completed only solidifies it into a persisted block.
-  const forkTurnId = turnId?.trim() ?? ''
-  const forkActionBlockId =
-    !effectiveProcessing && forkTurnId
-      ? assistantContentBlocks[assistantContentBlocks.length - 1]?.id
-      : undefined
-  const rollbackCheckpointId = turn.user?.meta?.workspaceCheckpointId?.trim() ?? ''
-  const rollbackActionBlockId =
-    !isProcessing && rollbackCheckpointId
-      ? assistantContentBlocks[assistantContentBlocks.length - 1]?.id
-      : undefined
-  const forkFromTurn = async (): Promise<void> => {
-    if (!forkTurnId || forking) return
-    setForking(true)
-    try {
-      await forkThreadFromTurn(forkTurnId)
-    } finally {
-      setForking(false)
-    }
-  }
-  const rollbackWorkspace = async (checkpointId: string): Promise<void> => {
-    const targetCheckpointId = checkpointId.trim()
-    if (!targetCheckpointId || rollingBackCheckpointId) return
-    setRollingBackCheckpointId(targetCheckpointId)
-    try {
-      await rollbackWorkspaceToCheckpoint(targetCheckpointId)
-    } finally {
-      setRollingBackCheckpointId(null)
-    }
-  }
-
-  // Keep pure completed reasoning tucked away, but surface concrete tool,
-  // approval, user-input, and runtime process rows so turns never look final-only.
-
-  const hasProcess = effectiveProcessing || displayProcessBlocks.length > 0
-
-  return (
-    <div className="flex min-w-0 flex-col gap-4">
-      {turn.user ? (
-        <div data-content-search-unit-key={userNavigationItemId}>
-          <MessageBubble block={turn.user} />
-        </div>
-      ) : null}
-
-      {hasProcess ? (
-        <div className="flex flex-col gap-1 pb-2">
-          <WorkMetaRow
-            processing={effectiveProcessing}
-            stepCount={displayProcessBlocks.length + liveProcessStepCount}
-            durationMs={durationMs}
-            expanded={workExpanded}
-            collapsible={!forceExpandForError && displayProcessBlocks.length > 0}
-            onToggle={() => setWorkExpandedOverride(!workExpanded)}
-          />
-          {workExpanded && processSections.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              {processSections.map((section) => (
-                <ProcessSectionRow
-                  key={section.id}
-                  section={section}
-                  processing={effectiveProcessing}
-                  viewportRef={viewportRef}
-                />
-              ))}
-            </div>
-          ) : null}
-          {isLatest && workExpanded && !sectionsHaveLiveProcess ? (
-            <LiveProcessRows
-              activeThreadId={activeThreadId}
-              turnId={turnId}
-              workspaceRoot={workspaceRoot}
-              isProcessing={isProcessing}
-              durationMs={durationMs}
-              viewportRef={viewportRef}
-              showMeta={false}
-            />
-          ) : null}
-        </div>
-      ) : null}
-
-      {!hasProcess && isLatest ? (
-        <LiveProcessRows
-          activeThreadId={activeThreadId}
-          turnId={turnId}
-          workspaceRoot={workspaceRoot}
-          isProcessing={isProcessing}
-          durationMs={durationMs}
-          viewportRef={viewportRef}
-          showMeta
-        />
-      ) : null}
-
-      {assistantContentBlocks.map((block) => (
-        <MessageBubble
-          key={block.id}
-          block={block}
-          onAssistantFinalized={onAssistantFinalized}
-          forkAction={
-            block.id === forkActionBlockId
-              ? {
-                  busy: forking,
-                  onFork: () => {
-                    void forkFromTurn()
-                  }
-                }
-              : undefined
-          }
-          rollbackAction={
-            block.id === rollbackActionBlockId
-              ? {
-                  busy: rollingBackCheckpointId === rollbackCheckpointId,
-                  onRollback: () => {
-                    void rollbackWorkspace(rollbackCheckpointId)
-                  }
-                }
-              : undefined
-          }
-        />
-      ))}
-
-      {compactionBlocks.map((block) => (
-        <CompactionStatusRow key={block.id} block={block} />
-      ))}
-
-      {isLatest ? (
-        <LiveAssistantBubble
-          activeThreadId={activeThreadId}
-          turnId={turnId}
-          fallbackText={liveContent}
-        />
-      ) : liveContent.trim() ? (
-        <MessageBubble block={{ kind: 'assistant', id: 'live-assistant', text: liveContent }} />
-      ) : null}
-
-      <GeneratedFilesPanel blocks={generatedFileBlocks} />
-
-      {reviewBlocks.map((review) => (
-        <ReviewSummaryCard key={review.id} review={review} />
-      ))}
-
-      {isProcessing ? <LiveTurnProgressRow hasActiveGoal={Boolean(activeThreadGoal)} /> : null}
-
-      {!isProcessing && devPreviewCard ? devPreviewCard : null}
-
-      {planResult ? (
-        <ReviewPlanCard
-          title={planResult.title?.trim() || planDisplayNameFromRelativePath(planResult.relativePath)}
-          relativePath={planResult.relativePath}
-          busy={planActionsBusy === true}
-          onOpen={onOpenPlan}
-          onBuild={onBuildPlan}
-        />
-      ) : null}
-
-      {!isProcessing && turnFileChanges.length > 0 ? (
-        <TurnChangeSummary changes={turnFileChanges} viewportRef={viewportRef} compact={compactCards} />
-      ) : null}
-    </div>
-  )
-}
-
-function LiveTurnProgressRow({ hasActiveGoal }: { hasActiveGoal: boolean }): ReactElement {
-  const { t, i18n } = useTranslation('common')
-  const label = useUiPluginWorkLabel('working', i18n.language ?? 'zh') ?? t('working')
-
-  return (
-    <div className={liveTurnProgressClass(hasActiveGoal)} data-analytix-live-progress role="status">
-      <Loader2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      <span className="ds-shiny-text">{label}</span>
-    </div>
-  )
+  const [rollingBack, setRollingBack] = useState(false)
+  const turnId = activeStreamTurnId ?? runtimeTurnId(turn)
+  const streamTiming = useActiveStreamMetrics(activeThreadId, turnId)
+  const localStartedAt = isProcessing && streamTiming.runtimeRunning && streamTiming.threadId === activeThreadId && streamTiming.turnId === turnId
+    && streamTiming.startedAt !== null && Number.isFinite(streamTiming.startedAt) ? streamTiming.startedAt : undefined
+  const owned = Boolean(activeThreadId && activeThreadId === mainThreadId && !secondary)
+  const checkpoint = turn.user?.meta?.workspaceCheckpointId?.trim()
+  return <ChatView onInspect={onInspect} runtimeAvailable={runtimeAvailable} processPaneRoute={processPaneRoute} processPaneAutoAcquire={isLatest} threadId={activeThreadId} turnId={turnId} turn={turn} sections={sections}
+    processing={isProcessing} running={Boolean(isLiveTurn && isProcessing && turnId && !isPendingActiveStreamTurnId(turnId) &&
+      (turnStatus === 'running' || streamTiming.threadId === activeThreadId && streamTiming.turnId === turnId && streamTiming.runtimeRunning))}
+    turnStatus={turnStatus} completedDurationMs={durationMs} runningStartedAt={localStartedAt}
+    usage={usage} billing={billing} performanceUsageMode={performanceUsageMode} tailReveal={isLatest ? 'always' : 'hover'} userNavigationItemId={userNavigationItemId} onAssistantFinalized={onAssistantFinalized}
+    liveAnswer={isLiveTurn ? <LiveAssistantBubble activeThreadId={activeThreadId} turnId={turnId} fallbackText={liveContent} /> : null}
+    fork={!isProcessing && activeThreadId && turnId && captureForkOwner ? { busy: forking, unavailable: !runtimeAvailable || ownerBusy, run: boundary => {
+      if (forking || boundary.threadId !== activeThreadId || boundary.turnId !== turnId) return
+      const sourceOwner = captureForkOwner()
+      if (!sourceOwner || !sourceOwner.isCurrent()) return
+      setForking(true); void forkThreadFromTurn(turnId, { ...boundary, ...sourceOwner }).finally(() => setForking(false))
+    }} : undefined}
+    rollback={!isProcessing && owned && checkpoint ? { busy: rollingBack, run: () => {
+      if (rollingBack) return
+      setRollingBack(true); void rollbackWorkspaceToCheckpoint(checkpoint).finally(() => setRollingBack(false))
+    }} : undefined}
+    deliveries={<>
+      {reviewBlocks.map(review => <ReviewSummaryCard key={review.id} review={review} />)}
+      {!isProcessing ? devPreviewCard : null}
+      {!isProcessing ? <SubmittedPlanCards threadId={activeThreadId} turnId={turnId} blocks={turn.blocks}
+        presented={runtimeAvailable && processPaneRoute?.visible !== false} /> : null}
+      {!isProcessing && sections.turnFileChanges.length ? <TurnChangeSummary changes={sections.turnFileChanges}
+        viewportRef={viewportRef} compact={compactCards} /> : null}
+    </>} />
 }
 
 const LiveAssistantBubble = memo(function LiveAssistantBubble({
@@ -1297,54 +1339,9 @@ const LiveAssistantBubble = memo(function LiveAssistantBubble({
   if (!text.trim()) return null
   return (
     <div data-analytix-live-assistant>
-      <MessageBubble block={{ kind: 'assistant', id: 'live-assistant', text }} />
+      <MessageBubble block={{ kind: 'assistant', id: 'live-assistant', text }} threadId={activeThreadId} />
     </div>
   )
 })
 
-const LiveProcessRows = memo(function LiveProcessRows({
-  activeThreadId,
-  turnId,
-  workspaceRoot,
-  isProcessing,
-  durationMs,
-  viewportRef,
-  showMeta
-}: {
-  activeThreadId: string | null
-  turnId: string | null
-  workspaceRoot: string
-  isProcessing: boolean
-  durationMs?: number
-  viewportRef: RefObject<HTMLDivElement | null>
-  showMeta: boolean
-}): ReactElement | null {
-  void activeThreadId
-  void turnId
-  void workspaceRoot
-  void isProcessing
-  void durationMs
-  void viewportRef
-  void showMeta
-  return null
-})
-
-const MemoMessageTurn = memo(MessageTurn, (prev, next) => (
-  prev.activeThreadId === next.activeThreadId &&
-  prev.isLatest === next.isLatest &&
-  prev.activeStreamTurnId === next.activeStreamTurnId &&
-  prev.workspaceRoot === next.workspaceRoot &&
-  sameTurnContent(prev.turn, next.turn) &&
-  prev.isProcessing === next.isProcessing &&
-  prev.liveContent === next.liveContent &&
-  prev.durationMs === next.durationMs &&
-  prev.userNavigationItemId === next.userNavigationItemId &&
-  prev.devPreviewCard === next.devPreviewCard &&
-  prev.planActionsBusy === next.planActionsBusy &&
-  prev.onBuildPlan === next.onBuildPlan &&
-  prev.onOpenPlan === next.onOpenPlan &&
-  prev.compactCards === next.compactCards &&
-  prev.viewportRef === next.viewportRef &&
-  sameTurnSections(prev.sections, next.sections) &&
-  sameBlockList(prev.reviewBlocks, next.reviewBlocks)
-))
+const MemoMessageTurn = memo(MessageTurn)

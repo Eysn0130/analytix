@@ -3,7 +3,7 @@
 Status: Operational / reference
 Applies to: 项目内 Markdown 的分类、入口、历史保留和碎片治理
 Current as of: 2026-10-03
-Source of truth: `docs/analytix/README.md` 的证据治理规则和当前文件树
+Source of truth: [文档地图](README.md)的证据治理规则和当前文件树
 Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并入口
 
 ## 1. 为什么不直接大规模移动
@@ -34,7 +34,6 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 | `docs/analytix/upstreams/` | Reference ledger | intake、审计、吸收和 benchmark 分开表达。 |
 | `docs/analytix/runtime/` | Operational/runtime reference | 当前命令和合同需重新核验。 |
 | `docs/legacy/` | Historical | 只作为迁移/来源历史，不作为当前实现。 |
-| `重构升级方案.md` | Historical decision ledger | 只读顶部 currentness；长编号章节不能覆盖代码/spec。 |
 | `plugins/*/references/` | Plugin reference | 不等于 production contract；重复副本需哈希核对。 |
 | `build/` 中被跟踪的 entitlements、icons、NSIS 脚本 | Maintained build source | 是安装包输入，不能作为缓存删除。 |
 | `build/` 中生成的 native/backend 资源、`dist*`、`output/`、`release/legacy/` | Generated/historical | 不是 maintained source；精确区分当前资源、可再生输出与需保留的历史证据。 |
@@ -46,14 +45,12 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
 
 | 文件 | 约行数 | 风险 | 当前入口 |
 | --- | ---: | --- | --- |
-| `重构升级方案.md` | 14,742 | 多时期互相矛盾的阶段结论 | 只读顶部状态，并回到代码/spec |
 | `upstreams/reasonix-sync.md` | 12,888 | 长期同步流水和历史 pin | `upstreams/README.md` + 最新 marker |
 | `upstreams/conflict-decisions.md` | 12,214 | ADR 与历史决策混杂 | 按 decision id 查阅 |
 | `qa/release-evidence-gate-2026-06-21.md` | 11,278 | 文件名像最终门，但仅为日期证据 | `qa/README.md` |
 | `upstreams/go-runtime-conformance.md` | 8,814 | 含 Go cutover 前历史假设 | 当前 Go 代码/tests |
 | `specs/08-upstream-absorption-and-go-runtime.md` | 8,552 | 规范长、含历史解释 | 规范目标，不是 current pass |
 | `benchmarks/upstream-scorecard.md` | 8,223 | 多批次主观分数和旧结论 | 未来 CapabilityBenchmarkV1 |
-| `upstreams/kun-sync.md` | 7,362 | 历史同步流水 | 当前 source marker |
 | `upstreams/absorption-ledger.md` | 6,975 | 旧批次完成语气 | active OpenSpec tasks |
 | `specs/09-agent-quality-product-benchmark.md` | 6,715 | 目标 benchmark | 可执行 benchmark artifact |
 
@@ -67,14 +64,64 @@ Supersedes: 不直接废弃任何现有文件；本登记为后续逐项归并�
    不把消费副本当无效代码删除，也不借此恢复 dormant MCP。
 2. upstream、QA、benchmark 多份日期报告使用 `final`、`closure`、`passed`
    命名。保留原始证据，但引用必须经过目录 README 的 currentness 规则。
-3. `docs/legacy/kun` 包含中英文历史材料。已增加 `docs/legacy/README.md`，
-   不再让搜索结果看起来像当前 Analytix 规范。
-4. `.agents`、`.claude`、`.cursor`、`.kunsdd` 内的 Markdown 属于工具/工作流
+3. [Kun 历史指针](../legacy/kun/README.md) 取代中英文旧手册正文，原文从固定
+   Git 提交恢复；[legacy index](../legacy/README.md) 保留历史检索边界。
+4. `.agents`、`.claude`、`.cursor` 内的 Markdown 属于工具/工作流
    配置，不应并入产品规范。
 5. 包内 `node_modules` 的 README/LICENSE 是依赖材料，不纳入产品文档数量和
    整理范围。
 
 ## 5. 后续整理队列
+
+### 2026-10-22 治理收官台账
+
+Historical：固定基线 `2c549464` 的[阶段0机器台账](governance-closeout.json)
+记录当时35项PR、94分支、74项大文件；各部分使用自身UTC，整理时间不是统一采集
+时刻，也不代表当前库存。旧unused的1522身份/1933次数保留为历史算法诊断。
+
+后继 [PR85](https://github.com/Eysn0130/analytix/pull/85) 已合并为 `fca67b41`。
+当前身份、次数与guard以[机器基线](../../scripts/unused-findings-baseline.json)为准，
+命令与合同只见[操作owner](development-baseline.md#unused-finding-ratchet)；
+[历史2339路径清单](qa/unused-scan-2c549464.json)不作当前扫描白名单。
+安全后台证据仍未完成；功能与Privacy冻结。台账不是产品验收或独立合并授权。
+治理续建先读同台账的 `standing_execution_rules` 与当前交付记录；历史库存仍绑定
+各自SHA和UTC。2026-10-22的逐批确认纪律属于该时点记录；2026-10-24当前用户
+已对列明事项授予条件满足后正常合并的常设授权，不适用于未列明事项。
+
+### 2026-10-20 runtime 启动与凭据指引纠偏
+
+基线 `e2e8d34c0531f36eb069a36c1547759f5ba3cae7`。仅修根 `AGENTS.md` 与
+runtime 中英文 README：按 [CLI 解析](../../packages/runtime/src/cli/serve.ts)、
+[Go launcher](../../packages/runtime/src/cli/serve-entry.ts) 和
+[Electron adapter](../../src/main/runtime/analytix-adapter.ts)
+澄清退役 backend 拒绝、argv 凭据拒绝、runtime token 配置兼容及旧 Provider
+参数只解析不转发；不改产品源码、测试、历史 checklist 或凭据 authority。
+
+直接验证限 diff、路径和链接检查；复用该基线 Application CI 已覆盖的 8 个
+CLI / backend 合成用例，相关产品源码、测试与执行配置保持不变。候选与 CI 状态以
+对应 commit/PR 为准；不据此声明真实 Provider、原生打包或全仓治理完成。
+回滚使用普通 revert，本批四文件纠偏完成即停止，不混入模块搬迁或旧代码清退。
+
+### 2026-10-20 请求缓存死叶清退
+
+基线 `e9122a9d5128f20c44eaa7825d1607abe4c9a706`。本批 P2 仅删除 renderer
+`data-analysis/features/flow/graph/model/flow-cache.ts` 与
+`data-analysis/features/analysis/model/stats-chart-request-model.ts`，共 91 行。
+全 tracked 文件的路径与导出符号核对未发现外部消费者；Vite 动态资源枚举、
+renderer 入口与 builder 配置均未将二者作为独立输入。
+
+保留现行 [flow-stats-link](../../src/renderer/src/data-analysis/services/analysis/flow-stats-link.ts)
+及其[行为测试](../../src/renderer/src/data-analysis/services/analysis/flow-stats-link.test.ts)：
+重复与并发 warm 请求独立，切换案件时取消旧请求；不恢复旧缓存或 inflight 去重。
+最小验证为引用复核、根 typecheck、该 focused 测试与文档链接/diff 检查；
+实际结果、候选与 CI 状态以对应 commit/PR 为准。出现新消费者或回归即停止删除，
+回滚使用普通 revert，不修改公共合同、隐私、authority、持久化或必需 CI。
+
+后续先在新 main 核定 `AnalysisRepository` 的稳定职责切口与验证基础设施的
+实际复用边界，再选下一批。Python 死 helper/import、未挂载字号控件与文档分类
+漂移是已识别 P2 候选，不各自强制形成一个 PR，也不因此关闭全仓治理目标。
+活跃大文件可按职责重构；体积本身不构成拆分或删除依据。以下日期记录与较早
+文档建议保留各自范围，不代表当前施工顺序或验收。
 
 ### 2026-10-03 普通维护 D1/D2/D3
 
@@ -210,7 +257,6 @@ Historical evidence: [consolidation 170–177](documentation-delivery-review-202
 | 优先级 | 动作 | 最小完成证据 |
 | --- | --- | --- |
 | P0-doc | 为会被当作当前入口的旧 `final/closure` 报告加 historical banner | 无正文改写；链接检查通过 |
-| P1-doc | 把 `重构升级方案.md` 的 current-state 摘要拆为短索引，原文件保留 decision ledger | 所有旧 anchor 可追踪 |
 | P1-doc | 为 upstream 大 ledger 生成按 source/date/decision-id 的机器可读索引 | marker 与 commit 校验 |
 | 已完成本轮 | Funds references 单源生成/完整漂移检查 | 现有合同模块与 gate；完整 25 对字节保持，证据见本轮条目 |
 | P2-doc | 将 QA 证据元数据统一为 commit/platform/command/result/skips | checker 验证 |

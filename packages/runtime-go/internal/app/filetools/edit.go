@@ -1,6 +1,7 @@
 package filetools
 
 import (
+	runtimediff "analytix.local/runtime-go/internal/diff"
 	"fmt"
 	"strings"
 )
@@ -118,10 +119,6 @@ func BuildWriteToolOutput(input WriteToolOutputInput) map[string]any {
 }
 
 func BuildMoveToolOutput(input MoveToolOutputInput) map[string]any {
-	message := "source_path is already at destination_path; no changes made"
-	if input.Moved {
-		message = "moved " + input.SourceRelativePath + " to " + input.DestinationRelativePath
-	}
 	return map[string]any{
 		"path":                      input.DestinationPath,
 		"source_path":               input.SourcePath,
@@ -130,11 +127,23 @@ func BuildMoveToolOutput(input MoveToolOutputInput) map[string]any {
 		"destination_relative_path": input.DestinationRelativePath,
 		"bytes_moved":               float64(input.BytesMoved),
 		"moved":                     input.Moved,
-		"message":                   message,
+		"message":                   MoveToolResultMessage(input),
 	}
 }
 
+func MoveToolResultMessage(input MoveToolOutputInput) string {
+	if input.Moved {
+		return "moved " + input.SourceRelativePath + " to " + input.DestinationRelativePath
+	}
+	return "source_path is already at destination_path; no changes made"
+}
+
 func BuildNotebookEditToolOutput(input NotebookEditToolOutputInput) map[string]any {
+	output, _ := BuildNotebookEditToolOutputWithChange(input)
+	return output
+}
+
+func BuildNotebookEditToolOutputWithChange(input NotebookEditToolOutputInput) (map[string]any, runtimediff.Change) {
 	output := map[string]any{
 		"path":               input.Path,
 		"relative_path":      input.RelativePath,
@@ -149,11 +158,17 @@ func BuildNotebookEditToolOutput(input NotebookEditToolOutputInput) map[string]a
 	if input.Request.CellID != "" {
 		output["cell_id"] = input.Request.CellID
 	}
-	MergeDiffOutput(output, input.RelativePath, input.Before, input.Change.After, DiffModify)
-	return output
+	change := runtimediff.Build(input.RelativePath, input.Before, input.Change.After, DiffModify)
+	MergeDiffChangeOutput(output, change)
+	return output, change
 }
 
 func BuildDeleteRangeToolOutput(input DeleteRangeToolOutputInput) map[string]any {
+	output, _ := BuildDeleteRangeToolOutputWithChange(input)
+	return output
+}
+
+func BuildDeleteRangeToolOutputWithChange(input DeleteRangeToolOutputInput) (map[string]any, runtimediff.Change) {
 	output := map[string]any{
 		"path":               input.Path,
 		"relative_path":      input.RelativePath,
@@ -165,11 +180,17 @@ func BuildDeleteRangeToolOutput(input DeleteRangeToolOutputInput) map[string]any
 		"encoding":           input.Encoding,
 		"inclusive":          input.Change.Inclusive,
 	}
-	MergeDiffOutput(output, input.RelativePath, input.Before, input.Change.After, DiffModify)
-	return output
+	change := runtimediff.Build(input.RelativePath, input.Before, input.Change.After, DiffModify)
+	MergeDiffChangeOutput(output, change)
+	return output, change
 }
 
 func BuildDeleteSymbolToolOutput(input DeleteSymbolToolOutputInput) map[string]any {
+	output, _ := BuildDeleteSymbolToolOutputWithChange(input)
+	return output
+}
+
+func BuildDeleteSymbolToolOutputWithChange(input DeleteSymbolToolOutputInput) (map[string]any, runtimediff.Change) {
 	output := map[string]any{
 		"path":               input.Path,
 		"relative_path":      input.RelativePath,
@@ -184,8 +205,9 @@ func BuildDeleteSymbolToolOutput(input DeleteSymbolToolOutputInput) map[string]a
 	if input.Change.Match.Parent != "" {
 		output["parent"] = input.Change.Match.Parent
 	}
-	MergeDiffOutput(output, input.RelativePath, input.Before, input.Change.After, DiffModify)
-	return output
+	change := runtimediff.Build(input.RelativePath, input.Before, input.Change.After, DiffModify)
+	MergeDiffChangeOutput(output, change)
+	return output, change
 }
 
 func ParseEditInstructions(args map[string]any) ([]EditInstruction, error) {

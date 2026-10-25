@@ -107,3 +107,17 @@ describe('conversation composer drafts', () => {
     expect(original.fileReferences).toEqual([next])
   })
 })
+
+
+it('composer closure removes failed upload bytes only from the captured draft', async () => {
+  await render()
+  const upload = { id: 'failed-file', attemptId: 'first', file: new File(['synthetic'], 'local.pdf'), status: 'failed' as const, error: 'Synthetic failure' }
+  await act(async () => useChatStore.getState().updateComposerDraft(composerDraftKey('/synthetic/a', 'a'), draft => ({ ...draft, attachmentUploads: [upload] })))
+  const remove = current.removeAttachmentUpload
+  await render('/synthetic/a', 'b')
+  await act(async () => remove(upload.id))
+  expect(current.draft.attachmentUploads).toBeUndefined()
+  await render()
+  expect(current.draft.attachmentUploads).toEqual([])
+  expect(current.draft.attachmentUploadError).toBeNull()
+})

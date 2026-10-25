@@ -2,10 +2,14 @@ package officeediting
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	managededitingapp "analytix.local/runtime-go/internal/app/managedediting"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	fileport "analytix.local/runtime-go/internal/ports/objectediting"
 )
@@ -15,6 +19,8 @@ import (
 type fakeNativeEditing struct {
 	*fakeEditing
 	draft                       fileport.NativeChangeDraft
+	version                     int
+	origin                      string
 	prepared, committed, undone bool
 	prepareErr                  error
 	onUndo                      func()
@@ -36,9 +42,20 @@ func (f *fakeNativeEditing) PrepareNativeChange(_ context.Context, id string, dr
 	f.prepared = true
 	return f.changeStatus(), nil
 }
+
+// Match the real Service: a historical committed receipt conflicts when its
+// revision is no longer current, including a save receipt after successful Undo.
+func (f *fakeNativeEditing) Status(ctx context.Context, id, operation string) (fileport.Receipt, error) {
+	receipt, err := f.fakeEditing.Status(ctx, id, operation)
+	if err == nil && receipt.Status == fileport.StatusCommitted && f.document.Revision != receipt.Revision {
+		receipt.Status = fileport.StatusConflict
+		return receipt, fileport.ErrConflict
+	}
+	return receipt, err
+}
 func (f *fakeNativeEditing) changeStatus() fileport.NativeChangeStatus {
 	d := f.draft
-	status := fileport.NativeChangeStatus{ChangeID: d.ChangeID, ThreadID: d.ThreadID, ProposalID: d.ProposalID, BaseRevision: d.BaseRevision, BeforeText: d.BeforeText, AfterText: d.AfterText, SaveOperationID: "native_save_" + d.ChangeID, UndoOperationID: "native_undo_" + d.ChangeID, Status: "prepared", CreatedAt: "2026-09-15T00:00:00Z"}
+	status := fileport.NativeChangeStatus{Version: f.version, Origin: f.origin, ChangeID: d.ChangeID, ThreadID: d.ThreadID, ProposalID: d.ProposalID, BaseRevision: d.BaseRevision, BeforeText: d.BeforeText, AfterText: d.AfterText, SaveOperationID: "native_save_" + d.ChangeID, UndoOperationID: "native_undo_" + d.ChangeID, Status: "prepared", CreatedAt: "2026-09-15T00:00:00Z"}
 	status.CanCancel = !f.committed
 	if f.committed {
 		status.Status = "committed"
@@ -373,5 +390,436 @@ func TestNativePreparedChangeCancellationIsThreadBound(t *testing.T) {
 		if call == "commit" || call == "native-commit" {
 			t.Fatal("cancellation wrote document")
 		}
+	}
+}
+
+// This optional wrapper leaves the legacy approval fake and its readiness intact.
+type fakeManualEditing struct{ *fakeNativeEditing }
+
+func (f *fakeManualEditing) PrepareNativeManual(_ context.Context, id string, d fileport.NativeManualDraft) (fileport.NativeChangeStatus, error) {
+	if f.prepareErr != nil {
+		return fileport.NativeChangeStatus{}, f.prepareErr
+	}
+	if id != f.document.SessionID {
+		return fileport.NativeChangeStatus{}, editingapp.ErrSession
+	}
+	f.draft = fileport.NativeChangeDraft{ChangeID: d.ChangeID, ThreadID: d.ThreadID, BaseRevision: d.BaseRevision}
+	f.prepared = true
+	f.version, f.origin = 2, "manual"
+	status := f.changeStatus()
+	status.Version, status.Origin = 2, "manual"
+	return status, nil
+}
+
+func TestNativeManualBeginObserverIsFailureOnlyAndPreservesResult(t *testing.T) {
+	for _, name := range []string{"dependencies", "capture_path", "baseline_open", "baseline_session", "baseline_revision", "prepare", "prepared_contract", "success"} {
+		t.Run(name, func(t *testing.T) {
+			a, base, _, leases := selectionFixture(t)
+			fake := &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+			a.service = fake
+			// Only the baseline Open error bypasses the Registry's deliberate
+			// ErrCaptureFailed wrapper in the diagnostic callback.
+			a.manualCapture = func(_ context.Context, _, _ string, read func() error) (func(), error) {
+				if read() != nil {
+					return nil, managededitingapp.ErrCaptureFailed
+				}
+				*leases++
+				return func() { *leases-- }, nil
+			}
+			var observed []NativeManualBeginPhaseV1
+			var causes []error
+			a.manualBeginObserver = func(state NativeManualBeginPhaseV1, cause error) {
+				observed = append(observed, state)
+				causes = append(causes, cause)
+			}
+			request := map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "operationId": "manual_phase_001", "baseRevision": base.document.Revision}
+			want := NativeManualBeginPhaseV1{Version: 1, ManualServicePresent: true, CaptureBound: true}
+			wantCause := ErrUnavailable
+			code := "unavailable"
+			switch name {
+			case "dependencies":
+				a.service = base
+				want.Phase, want.ManualServicePresent = "dependencies", false
+			case "capture_path":
+				a.manualCapture = func(context.Context, string, string, func() error) (func(), error) {
+					return nil, managededitingapp.ErrUnsafePath
+				}
+				want.Phase, want.CaptureEntered, wantCause = "capture", true, managededitingapp.ErrUnsafePath
+			case "baseline_open", "baseline_session", "baseline_revision":
+				want.Phase, wantCause = name, managededitingapp.ErrCaptureFailed
+				want.CaptureEntered, want.BaselineEntered = true, true
+				want.BaselineOpenOK, want.SessionMatch, want.RevisionMatch = true, true, true
+				if name == "baseline_open" {
+					base.err = fmt.Errorf("SYNTH_PRIVATE_MANUAL_TRACE: %w", os.ErrPermission)
+					wantCause, want.BaselineOpenOK, want.SessionMatch, want.RevisionMatch = base.err, false, false, false
+				} else if name == "baseline_session" {
+					base.document.SessionID, want.SessionMatch = strings.Repeat("e", 48), false
+				} else {
+					base.document.Revision, want.RevisionMatch = strings.Repeat("e", 64), false
+				}
+			case "prepare", "prepared_contract", "success":
+				want.Phase = name
+				want.CaptureEntered, want.BaselineEntered, want.BaselineOpenOK = true, true, true
+				want.SessionMatch, want.RevisionMatch, want.CaptureAcquired, want.PrepareEntered = true, true, true, true
+				if name == "prepare" {
+					fake.prepareErr = errors.New("SYNTH_PRIVATE_MANUAL_TRACE /private/example token=hidden")
+					wantCause = fake.prepareErr
+				} else if name == "prepared_contract" {
+					fake.committed, want.PrepareOK, wantCause, code = true, true, fileport.ErrConflict, "conflict"
+				}
+			}
+			base.calls = nil
+			out := nativeInvoke(t, a, "begin-manual-edit", request)
+			if name == "success" {
+				if out["ok"] != true || len(observed) != 0 || len(causes) != 0 || *leases != 1 || !fake.prepared {
+					t.Fatal("successful_begin_changed_or_emitted_diagnostic")
+				}
+			} else {
+				if out["ok"] != false || out["code"] != code || *leases != 0 || len(out) != 3 {
+					t.Fatal("diagnostic_changed_response_or_capture_cleanup")
+				}
+				if len(observed) != 1 || len(causes) != 1 || observed[0] != want || causes[0] != wantCause {
+					t.Fatal("diagnostic_state_or_original_cause_changed")
+				}
+				if name == "baseline_open" && (!errors.Is(causes[0], os.ErrPermission) || errors.Is(causes[0], managededitingapp.ErrCaptureFailed)) {
+					t.Fatal("baseline_open_cause_was_replaced_by_capture_wrapper")
+				}
+			}
+			opens := 0
+			for _, call := range base.calls {
+				if call == "open" {
+					opens++
+				}
+			}
+			if opens > 1 || (want.BaselineEntered && opens != 1) || (!want.BaselineEntered && opens != 0) {
+				t.Fatal("diagnostic_added_baseline_reads")
+			}
+		})
+	}
+}
+
+func TestNativeManualBeginObserverBindingIsStartupOnly(t *testing.T) {
+	observer := func(NativeManualBeginPhaseV1, error) {}
+	a := New("docx", nil, func(context.Context) bool { return true })
+	if err := a.BindManualBeginObserverV1(nil); !errors.Is(err, ErrBinding) {
+		t.Fatal("nil_manual_begin_observer_accepted")
+	}
+	if err := a.BindManualBeginObserverV1(observer); err != nil {
+		t.Fatal("manual_begin_observer_binding_failed")
+	}
+	if err := a.BindManualBeginObserverV1(observer); !errors.Is(err, ErrBinding) {
+		t.Fatal("manual_begin_observer_rebinding_accepted")
+	}
+	opened, _, _, _ := selectionFixture(t)
+	if err := opened.BindManualBeginObserverV1(observer); !errors.Is(err, ErrBinding) {
+		t.Fatal("manual_begin_observer_bound_after_session_opened")
+	}
+}
+
+func TestNativeManualBeginWithoutObserverPreservesFailure(t *testing.T) {
+	for _, name := range []string{"dependencies", "baseline_session", "baseline_revision", "prepare"} {
+		t.Run(name, func(t *testing.T) {
+			a, base, _, leases := selectionFixture(t)
+			if a.manualBeginObserver != nil {
+				t.Fatal("manual_begin_observer_should_be_optional")
+			}
+			request := map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "operationId": "manual_no_observer_001", "baseRevision": base.document.Revision}
+			fake := &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+			if name != "dependencies" {
+				a.service = fake
+			}
+			a.manualCapture = func(_ context.Context, _, _ string, read func() error) (func(), error) {
+				if read() != nil {
+					return nil, managededitingapp.ErrCaptureFailed
+				}
+				*leases++
+				return func() { *leases-- }, nil
+			}
+			switch name {
+			case "baseline_session":
+				base.document.SessionID = strings.Repeat("e", 48)
+			case "baseline_revision":
+				base.document.Revision = strings.Repeat("e", 64)
+			case "prepare":
+				fake.prepareErr = errors.New("SYNTH_PRIVATE_MANUAL_TRACE")
+			}
+			base.calls = nil
+			out := nativeInvoke(t, a, "begin-manual-edit", request)
+			if !reflect.DeepEqual(out, map[string]any{"ok": false, "code": "unavailable", "message": "The object operation could not be completed."}) || *leases != 0 || fake.prepared {
+				t.Fatal("absent_observer_changed_operation_result_or_capture_cleanup")
+			}
+			opens := 0
+			for _, call := range base.calls {
+				if call == "open" {
+					opens++
+				}
+			}
+			if name == "dependencies" && opens != 0 || name != "dependencies" && opens != 1 {
+				t.Fatal("absent_observer_changed_baseline_reads")
+			}
+		})
+	}
+}
+
+func TestNativeManualBeginRequiresOwnerAndRetainsOnlyUnsettledLease(t *testing.T) {
+	a, base, _, leases := selectionFixture(t)
+	request := map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "operationId": "manual_begin_001", "baseRevision": base.document.Revision}
+	manualCapture := a.manualCapture
+	a.manualCapture = nil
+	a.service = &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+	if out := nativeInvoke(t, a, "begin-manual-edit", request); out["code"] != "unavailable" || *leases != 0 {
+		t.Fatal("missing explicit manual binding used strict fallback", out)
+	}
+	a.manualCapture = manualCapture
+	a.service = a.service.(*fakeManualEditing).fakeNativeEditing
+	if out := nativeInvoke(t, a, "begin-manual-edit", request); out["code"] != "unavailable" || *leases != 0 {
+		t.Fatal("missing manual owner fallback", out)
+	}
+	fake := &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+	a.service = fake
+	out := nativeInvoke(t, a, "begin-manual-edit", request)
+	if out["ok"] != true || *leases != 1 {
+		t.Fatal("begin", out, *leases)
+	}
+	authority := out["manual"].(map[string]any)
+	if authority["origin"] != "manual" || authority["version"] != float64(2) || authority["baseRevision"] != base.document.Revision || authority["saveOperationId"] != "native_save_"+authority["changeId"].(string) {
+		t.Fatal("manual correlation", authority)
+	}
+	if replay := nativeInvoke(t, a, "begin-manual-edit", request); replay["ok"] != true || *leases != 1 {
+		t.Fatal("begin replay reacquired lease", replay, *leases)
+	}
+	other := map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "operationId": "manual_begin_002", "baseRevision": base.document.Revision}
+	if out := nativeInvoke(t, a, "begin-manual-edit", other); out["code"] != "conflict" {
+		t.Fatal("different begin replaced lease", out)
+	}
+	fields := nativeCommitFields("docx", []byte("saved manual bytes"))
+	fields["threadId"], fields["changeId"], fields["operationId"] = request["threadId"], authority["changeId"], authority["saveOperationId"]
+	base.receipt = fileport.Receipt{OperationID: authority["saveOperationId"].(string), Revision: strings.Repeat("e", 64), Status: fileport.StatusCommitted, SavedAt: "2026-10-15T00:00:00Z"}
+	if out := nativeInvoke(t, a, "commit-object", fields); out["ok"] != true || *leases != 0 {
+		t.Fatal("acknowledged save retained stale inode lease", out, *leases)
+	}
+}
+
+func beginManualLeaseTest(t *testing.T, a *Adapter, base *fakeEditing, operation string) map[string]any {
+	t.Helper()
+	out := nativeInvoke(t, a, "begin-manual-edit", map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "operationId": operation, "baseRevision": base.document.Revision})
+	if out["ok"] != true {
+		t.Fatal("begin manual lease", out)
+	}
+	return out["manual"].(map[string]any)
+}
+
+func TestNativeManualOldSaveStatusCannotReleaseNewCapture(t *testing.T) {
+	a, base, _, leases := selectionFixture(t)
+	fake := &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+	a.service = fake
+	first := beginManualLeaseTest(t, a, base, "manual_first_001")
+	fields := nativeCommitFields("docx", []byte("first saved manual bytes"))
+	fields["changeId"], fields["operationId"] = first["changeId"], first["saveOperationId"]
+	base.receipt = fileport.Receipt{OperationID: first["saveOperationId"].(string), Revision: strings.Repeat("e", 64), Status: fileport.StatusCommitted, SavedAt: "2026-10-15T00:00:00Z"}
+	if out := nativeInvoke(t, a, "commit-object", fields); out["ok"] != true || *leases != 0 {
+		t.Fatal("first save", out, *leases)
+	}
+	// The single-draft fake starts the next transaction; retain A's receipt for
+	// the late status query. Real continuous-save persistence is covered in FS.
+	fake.prepared, fake.committed, fake.undone = false, false, false
+	second := beginManualLeaseTest(t, a, base, "manual_second_002")
+	out := nativeInvoke(t, a, "object-status", map[string]any{"sessionId": base.document.SessionID, "operationId": first["saveOperationId"]})
+	if out["ok"] != true || out["receipt"].(map[string]any)["operationId"] != first["saveOperationId"] {
+		t.Fatal("late status lost completed receipt", out)
+	}
+	session := a.sessions[base.document.SessionID]
+	if *leases != 1 || session.manualChangeID != second["changeId"] || session.release == nil {
+		t.Fatal("old status retired the new capture", *leases, session.manualChangeID)
+	}
+	fields = nativeCommitFields("docx", []byte("second saved manual bytes"))
+	fields["changeId"], fields["operationId"], fields["baseRevision"] = second["changeId"], second["saveOperationId"], base.document.Revision
+	base.receipt = fileport.Receipt{OperationID: second["saveOperationId"].(string), Revision: strings.Repeat("f", 64), Status: fileport.StatusCommitted, SavedAt: "2026-10-15T00:01:00Z"}
+	if out := nativeInvoke(t, a, "commit-object", fields); out["ok"] != true || *leases != 0 {
+		t.Fatal("own acknowledged save did not release capture", out, *leases)
+	}
+}
+
+func TestNativeManualOtherThreadRecoveryCannotReleaseCapture(t *testing.T) {
+	a, base, _, leases := selectionFixture(t)
+	a.service = &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+	manual := beginManualLeaseTest(t, a, base, "manual_owner_001")
+	out := nativeInvoke(t, a, "object-recovery", map[string]any{"sessionId": base.document.SessionID, "threadId": "other_legal_thread"})
+	if out["ok"] != true {
+		t.Fatal("other authorized thread query", out)
+	}
+	recovery := out["recovery"].(map[string]any)
+	if recovery["current"] != nil || recovery["pending"] != nil {
+		t.Fatal("other thread received manual state", out)
+	}
+	session := a.sessions[base.document.SessionID]
+	if *leases != 1 || session.manualChangeID != manual["changeId"] || session.release == nil {
+		t.Fatal("empty foreign-thread recovery retired capture", *leases)
+	}
+	out = nativeInvoke(t, a, "object-recovery", map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main"})
+	if out["ok"] != true || out["recovery"].(map[string]any)["pending"].(map[string]any)["changeId"] != manual["changeId"] || *leases != 1 {
+		t.Fatal("owner pending projection", out, *leases)
+	}
+	out = nativeInvoke(t, a, "cancel-change", map[string]any{"sessionId": base.document.SessionID, "threadId": "thread_main", "changeId": manual["changeId"], "baseRevision": base.document.Revision})
+	if out["ok"] != true || *leases != 0 || session.manualChangeID != "" || session.release != nil {
+		t.Fatal("own cancellation did not release capture", out, *leases)
+	}
+}
+
+func TestNativeManualLeaseAllowsDiscussionButCannotAuthorizeAgentEdits(t *testing.T) {
+	a, base, _, leases := selectionFixture(t)
+	fake := &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+	a.service = fake
+	manual := beginManualLeaseTest(t, a, base, "manual_purpose_001")
+	fields := captureFields(base, false)
+	out := nativeInvoke(t, a, "capture-selection", fields)
+	if out["ok"] != true || *leases != 1 {
+		t.Fatal("manual lease blocked read-only discussion", out)
+	}
+	scope := out["scope"].(map[string]any)
+	if out := nativeInvoke(t, a, "model-selection-read", modelFields(scope)); out["ok"] != true {
+		t.Fatal("discussion read lost its route", out)
+	}
+	fields["editable"] = true
+	if out := nativeInvoke(t, a, "capture-selection", fields); out["code"] != "conflict" || *leases != 1 {
+		t.Fatal("editable reference inherited manual lease", out)
+	}
+	// Even a retained editable flag cannot substitute for the strict lease.
+	a.scopes[scope["scopeId"].(string)].Editable = true
+	model := modelFields(scope)
+	model["operationId"], model["parts"] = "agent_proposal_001", []editingapp.PatchPart{{Kind: "literal", Text: "Replacement"}}
+	if out := nativeInvoke(t, a, "model-selection-propose", model); out["code"] != "scope_invalid" {
+		t.Fatal("AI proposal inherited manual purpose", out)
+	}
+	// The same in-memory manual lease cannot grant a legacy persisted change.
+	fake.version, fake.origin = 0, ""
+	commit := nativeCommitFields("docx", []byte("candidate"))
+	commit["changeId"], commit["operationId"] = manual["changeId"], manual["saveOperationId"]
+	before := len(fake.calls)
+	if out := nativeInvoke(t, a, "commit-object", commit); out["code"] != "conflict" {
+		t.Fatal("legacy mutation inherited manual lease", out)
+	}
+	for _, called := range fake.calls[before:] {
+		if called == "native-commit" {
+			t.Fatal("wrong-purpose mutation reached persistence")
+		}
+	}
+}
+
+func TestNativeMutationAdmissionUsesPersistedPurposeAndBindings(t *testing.T) {
+	for _, operation := range []string{"commit-object", "resume-change", "undo-change"} {
+		for _, variant := range []string{"manual", "agent_v1", "missing_origin", "wrong_version", "wrong_thread", "wrong_base"} {
+			t.Run(operation+"/"+variant, func(t *testing.T) {
+				base := &fakeEditing{document: editingapp.Opened{SessionID: strings.Repeat("b", 48), ObjectID: strings.Repeat("d", 64), Path: "/workspace/report.docx", Revision: strings.Repeat("c", 64)}}
+				change := strings.Repeat("a", 64)
+				fake := &fakeNativeEditing{fakeEditing: base, prepared: true, version: 2, origin: "manual", draft: fileport.NativeChangeDraft{ChangeID: change, ThreadID: "thread_main", BaseRevision: base.document.Revision}}
+				base.receipt = fileport.Receipt{OperationID: "native_save_" + change, Revision: strings.Repeat("e", 64), Status: fileport.StatusCommitted}
+				input := nativeCommitFields("docx", []byte("candidate"))
+				input["changeId"], input["operationId"] = change, base.receipt.OperationID
+				if operation != "commit-object" {
+					delete(input, "content")
+					delete(input, "operationId")
+				}
+				if operation == "undo-change" {
+					fake.committed = true
+					base.document.Revision = base.receipt.Revision
+					input["baseRevision"] = base.receipt.Revision
+				}
+				switch variant {
+				case "agent_v1":
+					fake.version, fake.origin = 0, ""
+				case "missing_origin":
+					fake.origin = ""
+				case "wrong_version":
+					fake.version = 1
+				case "wrong_thread":
+					fake.draft.ThreadID = "thread_other"
+				case "wrong_base":
+					if operation == "undo-change" {
+						input["baseRevision"] = strings.Repeat("f", 64)
+					} else {
+						fake.draft.BaseRevision = strings.Repeat("f", 64)
+					}
+				}
+				a := New("docx", fake, func(context.Context) bool { return true })
+				strictCalls, manualCalls := 0, 0
+				if err := a.BindSelectionHost(&nativeTestProjector{}, func(context.Context, string, string, func() error) (func(), error) {
+					strictCalls++
+					return nil, managededitingapp.ErrUncontainedExecution
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := a.BindManualHost(func(_ context.Context, _, _ string, read func() error) (func(), error) {
+					manualCalls++
+					if err := read(); err != nil {
+						return nil, err
+					}
+					return func() {}, nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if out := nativeInvoke(t, a, "open-object", map[string]any{"object": map[string]any{"workspace": "/workspace", "path": "report.docx"}}); out["ok"] != true {
+					t.Fatal(out)
+				}
+				out := nativeInvoke(t, a, operation, input)
+				if variant == "manual" {
+					if out["ok"] != true || manualCalls != 1 || strictCalls != 0 {
+						t.Fatal("trusted manual record did not select manual purpose", out, manualCalls, strictCalls)
+					}
+					if replay := nativeInvoke(t, a, operation, input); replay["ok"] != true || manualCalls != 2 || strictCalls != 0 {
+						t.Fatal("manual replay lost persisted purpose binding", replay, manualCalls, strictCalls)
+					}
+					if operation == "undo-change" {
+						input["baseRevision"] = strings.Repeat("f", 64)
+						if wrong := nativeInvoke(t, a, operation, input); wrong["ok"] != false || manualCalls != 2 {
+							t.Fatal("settled Undo admitted an unrelated save revision", wrong, manualCalls)
+						}
+						input["baseRevision"] = base.receipt.Revision
+						base.document.Revision = strings.Repeat("f", 64)
+						callsBefore := len(fake.calls)
+						if changed := nativeInvoke(t, a, operation, input); changed["code"] != "conflict" {
+							t.Fatal("settled Undo replay ignored external bytes", changed)
+						}
+						for _, called := range fake.calls[callsBefore:] {
+							if called == "native-undo" {
+								t.Fatal("external version conflict reached Undo")
+							}
+						}
+					}
+				} else {
+					if out["ok"] != false || manualCalls != 0 || (variant == "agent_v1" && strictCalls != 1) || (variant != "agent_v1" && strictCalls != 0) {
+						t.Fatal("untrusted purpose reached optimistic admission", out, manualCalls, strictCalls)
+					}
+					for _, called := range fake.calls {
+						if called == "native-commit" || called == "native-undo" {
+							t.Fatal("rejected authority reached mutation")
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestNativeManualConflictAndUnknownRetainTransaction(t *testing.T) {
+	a, base, _, leases := selectionFixture(t)
+	fake := &fakeManualEditing{fakeNativeEditing: a.service.(*fakeNativeEditing)}
+	a.service = fake
+	manual := beginManualLeaseTest(t, a, base, "manual_retained_001")
+	input := nativeCommitFields("docx", []byte("manual candidate"))
+	input["changeId"], input["operationId"] = manual["changeId"], manual["saveOperationId"]
+	fake.onCommit = func() { fake.err = fileport.ErrConflict }
+	if out := nativeInvoke(t, a, "commit-object", input); out["code"] != "conflict" {
+		t.Fatal("version conflict changed", out)
+	}
+	fake.err = nil
+	fake.onCommit = nil
+	fake.receipt = fileport.Receipt{OperationID: manual["saveOperationId"].(string), Status: fileport.StatusUnknown}
+	out := nativeInvoke(t, a, "commit-object", input)
+	if out["ok"] != true || out["receipt"].(map[string]any)["status"] != "unknown" {
+		t.Fatal("unknown became a successful save", out)
+	}
+	if !fake.prepared || fake.committed || *leases != 1 || a.sessions[base.document.SessionID].leasePurpose != nativeLeaseManual || a.sessions[base.document.SessionID].manualChangeID != manual["changeId"] {
+		t.Fatal("conflict/unknown discarded manual draft or authority")
 	}
 }

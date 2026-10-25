@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
-import { ExternalLink, Image as ImageIcon, RotateCw, ZoomIn, ZoomOut } from '../../design/AnalytixUiIcons'
+import { createPortal } from 'react-dom'
+import { ChevronDown, ExternalLink, RotateCw, ZoomIn, ZoomOut } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
 import type { ImageRegion } from '../../../../../packages/runtime/src/contracts/object-editing'
 import { useWriteWorkspaceStore } from '../../write/write-workspace-store'
@@ -23,6 +24,7 @@ const IMAGE_MAX_ZOOM = 300
 const IMAGE_ZOOM_STEP = 25
 
 type WriteImagePreviewProps = {
+  zoomControlTarget?: HTMLElement | null
   src: string
   filePath: string
   mimeType: string
@@ -43,6 +45,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function WriteImagePreview({
+  zoomControlTarget,
   src,
   filePath,
   mimeType,
@@ -55,6 +58,15 @@ export function WriteImagePreview({
   const shutdownFrozen = useWriteWorkspaceStore(state => state.shutdownFrozen)
   const navigationFrozen = useSyncExternalStore(subscribeImageThreadNavigation, isImageThreadNavigationFrozen)
   const frozen = shutdownFrozen || navigationFrozen
+  const zoomMenuRef = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    const dismiss = (event: PointerEvent): void => {
+      const menu = zoomMenuRef.current
+      if (menu && event.target instanceof Node && !menu.contains(event.target)) menu.open = false
+    }
+    document.addEventListener('pointerdown', dismiss)
+    return () => document.removeEventListener('pointerdown', dismiss)
+  }, [])
   const imageRef = useRef<HTMLImageElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
@@ -168,21 +180,17 @@ export function WriteImagePreview({
     void window.analytix.workspace.openEditorPath({ path: filePath, workspaceRoot, editorId: 'system' }).catch(() => undefined)
   }
 
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-ds-canvas">
-      <div className="flex min-h-[54px] shrink-0 items-center justify-between gap-3 border-b border-ds-border-muted px-4 py-2.5 sm:px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-            <ImageIcon className="h-[18px] w-[18px]" strokeWidth={1.9} />
-          </span>
-          <div className="min-w-0">
-            <div className="truncate text-[14px] font-semibold text-ds-ink">{fileName}</div>
-            <div className="mt-1 truncate text-[12px] text-ds-faint" title={relativePath}>
-              {relativePath}
-            </div>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1 rounded-xl border border-ds-border-muted bg-white/48 p-1 dark:bg-white/[0.035]">
+  const zoomControls = <details ref={zoomMenuRef} key={`${workspaceRoot}:${filePath}`}
+    className="ds-file-viewer-menu write-image-zoom-menu"
+    onKeyDown={event => {
+      if (event.key !== 'Escape' || !event.currentTarget.open) return
+      event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false
+      event.currentTarget.querySelector('summary')?.focus()
+    }}>
+    <summary aria-label={t('writeImageZoom')}>
+      <span>{fitMode === 'fit' ? t('writeImageFitShort') : `${zoom}%`}</span><ChevronDown size={16} aria-hidden="true" />
+    </summary>
+    <div className="ds-file-viewer-menu-content write-image-zoom-controls">
           <button
             type="button"
             onClick={() => {
@@ -203,7 +211,7 @@ export function WriteImagePreview({
             step={IMAGE_ZOOM_STEP}
             value={zoom}
             aria-label={t('writeImageZoom')}
-            className="h-8 w-24 accent-[var(--ds-accent)]"
+            className="h-9 min-w-0 flex-1 accent-[var(--ds-accent)]"
             onChange={(event) => {
               cancelDrag()
               setFitMode('actual')
@@ -237,17 +245,21 @@ export function WriteImagePreview({
             onClick={() => { if (!frozenRef.current) { cancelDrag(); setRotation(value => ((value + 90) % 360) as ImagePreviewRotation) } }}>
             <RotateCw className="h-4 w-4" strokeWidth={1.85} />
           </button>
+    </div>
+  </details>
+
+  return (
+    <div className="write-image-preview flex h-full min-h-0 min-w-0 flex-col bg-ds-canvas">
+      {zoomControlTarget ? createPortal(zoomControls, zoomControlTarget) : <header className="ds-file-viewer-header">
+        <div className="ds-file-viewer-identity">
+          <span className="min-w-0 truncate text-sm" title={relativePath}>{fileName}</span>
         </div>
-        <button
-          type="button"
-          onClick={openImage}
-          className={toolbarIconButtonClass()}
-          title={t('writeImageOpenExternal')}
-          aria-label={t('writeImageOpenExternal')}
-        >
+        {zoomControls}
+        <button type="button" onClick={openImage} className={toolbarIconButtonClass()}
+          title={t('writeImageOpenExternal')} aria-label={t('writeImageOpenExternal')}>
           <ExternalLink className="h-4 w-4" strokeWidth={1.85} />
         </button>
-      </div>
+      </header>}
 
       <div ref={viewportRef} className="ds-page-scroll-edge min-h-0 flex-1 overflow-auto p-4 sm:p-6">
         <div className="flex min-h-full items-center justify-center">
@@ -279,7 +291,7 @@ export function WriteImagePreview({
           />
           {owner && !editor.stale && snapshot ? editor.regions.map(entry => entry.region ? <div key={entry.regionId}
             data-testid={entry.regionId === editor.selectedRegionId ? 'image-region-overlay' : 'image-region-inactive-overlay'}
-            className={`pointer-events-none absolute border-2 ${entry.regionId === editor.selectedRegionId ? 'border-blue-600 bg-blue-500/15' : 'border-amber-500 bg-amber-500/10'}`}
+            className={`pointer-events-none absolute border-2 ${entry.regionId === editor.selectedRegionId ? 'border-accent bg-accent/15' : 'border-amber-500 bg-amber-500/10'}`}
             style={{ left: `${entry.region.x / snapshot.width * 100}%`, top: `${entry.region.y / snapshot.height * 100}%`,
               width: `${entry.region.width / snapshot.width * 100}%`, height: `${entry.region.height / snapshot.height * 100}%` }} /> : null) : null}
           </div>

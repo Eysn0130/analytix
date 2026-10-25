@@ -13,7 +13,9 @@ import (
 	controlapp "analytix.local/runtime-go/internal/app/control"
 	usageapp "analytix.local/runtime-go/internal/app/usage"
 	domainjob "analytix.local/runtime-go/internal/domain/job"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	jobsecuritytest "analytix.local/runtime-go/internal/testsupport/jobsecurity"
+	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
 
 type foregroundCleanupIssuerStub struct {
@@ -44,7 +46,7 @@ func TestCompleteTaskDestroysForegroundCapabilityOnEveryEarlyFailure(t *testing.
 		Record: domainjob.Record{ID: "foreground-run", ToolScope: []string{toolcatalogForegroundSubmitToolName}},
 		Effort: "invalid", ForegroundAuthority: authority,
 	})
-	if !result.IsError || len(authority.deleted) != 1 || authority.deleted[0] != "foreground-run" {
+	if !result.IsError || result.Err == nil || len(authority.deleted) != 1 || authority.deleted[0] != "foreground-run" {
 		t.Fatalf("early foreground failure retained a live capability: result=%#v deleted=%#v", result, authority.deleted)
 	}
 }
@@ -75,25 +77,132 @@ func TestCompleteTaskDestroysForegroundCapabilityOnCanceledAndTimedOutStart(t *t
 }
 
 func TestCompleteTaskCarriesForegroundOutputTokenBudgetToChildTurn(t *testing.T) {
-	record := domainjob.Record{
-		ID: "foreground-budget", ChildThreadID: "foreground-budget-thread",
-		Status: string(domainjob.StatusRunning), Effort: "medium",
-		ToolScope: []string{toolcatalogForegroundSubmitToolName},
+	for _, budget := range []int{512, 4096} {
+		t.Run(fmt.Sprintf("budget_%d", budget), func(t *testing.T) {
+			request, err := foregroundCompletionBudgetRequest(t, budget)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := domainjob.Record{
+				ID: "foreground-budget", ChildThreadID: "foreground-budget-thread",
+				Status: string(domainjob.StatusRunning), Effort: "medium",
+				ToolScope: []string{toolcatalogForegroundSubmitToolName},
+			}
+			driver := newCompletionDriverStub(record)
+			driver.startResponse = map[string]any{"turnId": "foreground-budget-turn", "status": "completed"}
+			driver.summary = "Foreground child result submitted."
+			result := CompleteTask(context.Background(), CompleteTaskInput{
+				Request: request, Record: record, ToolScope: []string{toolcatalogForegroundSubmitToolName},
+				ProviderID: "provider", Model: "model", Effort: "medium",
+				Driver: driver, StartAuthority: NewBackgroundJobStartBarrier(),
+				ForegroundAuthority: &foregroundCleanupIssuerStub{},
+			})
+			if !result.IsError || len(driver.startRequests) != 1 || driver.startRequests[0].InternalOutputTokenBudget != budget {
+				t.Fatalf("foreground token budget did not reach child turn: result=%#v requests=%#v", result, driver.startRequests)
+			}
+		})
 	}
-	driver := newCompletionDriverStub(record)
-	driver.startResponse = map[string]any{"turnId": "foreground-budget-turn", "status": "completed"}
-	driver.summary = "Foreground child result submitted."
-	result := CompleteTask(context.Background(), CompleteTaskInput{
-		Request: TaskRequest{
-			Prompt: "bounded", MaxSteps: 2, MaxStepsSet: true,
-			TokenBudget: 512, TokenBudgetSet: true, TimeBudgetMS: 30000, TimeBudgetMSSet: true,
-		},
-		Record: record, ProviderID: "provider", Model: "model", Effort: "medium",
-		Driver: driver, StartAuthority: NewBackgroundJobStartBarrier(),
-		ForegroundAuthority: &foregroundCleanupIssuerStub{},
+	t.Run("reject_4097", func(t *testing.T) {
+		if _, err := foregroundCompletionBudgetRequest(t, 4097); err == nil {
+			t.Fatal("host foreground admission accepted a budget above 4096")
+		}
 	})
-	if !result.IsError || len(driver.startRequests) != 1 || driver.startRequests[0].InternalOutputTokenBudget != 512 {
-		t.Fatalf("foreground token budget did not reach child turn: result=%#v requests=%#v", result, driver.startRequests)
+}
+
+func foregroundCompletionBudgetRequest(t *testing.T, budget int) (TaskRequest, error) {
+	t.Helper()
+	parent, err := securitycontexttest.HostGeneralOnlyExecutionContextV2(domainsecurity.TurnSecurityContextInput{
+		ThreadID: "parent-thread", TurnID: "parent-turn", WorkspaceRealPath: t.TempDir(),
+		ContextEpoch: 1, IssuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return BindForegroundHandoffRequest(parent, TaskRequest{
+		Prompt: "bounded", MaxSteps: 2, MaxStepsSet: true,
+		TokenBudget: budget, TokenBudgetSet: true, TimeBudgetMS: 30000, TimeBudgetMSSet: true,
+	})
+}
+
+func TestCompleteTaskWithholdsForegroundBudgetOutsideBoundAuthority(t *testing.T) {
+	for _, fault := range []string{"missing_host_marker", "over_limit", "record_scope", "turn_scope", "request_scope", "refreshed_record_scope"} {
+		t.Run(fault, func(t *testing.T) {
+			request, err := foregroundCompletionBudgetRequest(t, 512)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := domainjob.Record{
+				ID: "foreground-budget", ChildThreadID: "foreground-budget-thread",
+				Status: string(domainjob.StatusRunning), Effort: "medium",
+				ToolScope: []string{toolcatalogForegroundSubmitToolName},
+			}
+			scope := []string{toolcatalogForegroundSubmitToolName}
+			switch fault {
+			case "missing_host_marker":
+				request.ForegroundHandoff = false
+			case "over_limit":
+				request.TokenBudget = 4097
+			case "record_scope":
+				record.ToolScope = []string{"read_file"}
+			case "turn_scope":
+				scope = []string{"read_file"}
+			case "request_scope":
+				request.Tools = []string{"read_file"}
+			}
+			driver := newCompletionDriverStub(record)
+			driver.summary = "Synthetic completion."
+			input := CompleteTaskInput{
+				Request: request, Record: record, ToolScope: scope,
+				ProviderID: "provider", Model: "model", Effort: "medium",
+				Driver: driver, StartAuthority: NewBackgroundJobStartBarrier(),
+			}
+			if fault == "refreshed_record_scope" {
+				input.AuthorizeStart = func(current domainjob.Record) (domainjob.Record, error) {
+					current.ToolScope = []string{"read_file"}
+					return current, nil
+				}
+			}
+			_ = CompleteTask(context.Background(), input)
+			if len(driver.startRequests) != 1 || driver.startRequests[0].InternalOutputTokenBudget != 0 {
+				t.Fatalf("%s obtained foreground output-budget authority: %#v", fault, driver.startRequests)
+			}
+		})
+	}
+}
+
+func TestCompleteTaskStartsOrdinaryBackgroundWithSoftTokenBudget(t *testing.T) {
+	for _, budget := range []int{512, 4097} {
+		t.Run(fmt.Sprintf("budget_%d", budget), func(t *testing.T) {
+			request := TaskRequest{Prompt: "ordinary background", RunInBackground: true, TokenBudget: budget, TokenBudgetSet: true}
+			record := domainjob.Record{
+				ID: "background-budget", ChildThreadID: "background-budget-thread",
+				Status: string(domainjob.StatusRunning), Effort: "medium", Background: true, TokenBudget: budget,
+			}
+			driver := newCompletionDriverStub(record)
+			driver.startResponse = map[string]any{
+				"turnId": "background-budget-turn", "status": "completed",
+				"usage": map[string]any{"totalTokens": float64(budget + 1)},
+			}
+			driver.summary = "Synthetic background complete."
+			result := CompleteTask(context.Background(), CompleteTaskInput{
+				Request: request, Record: record, ToolScope: []string{"read_file"},
+				ProviderID: "provider", Model: "model", Effort: "medium",
+				Driver: driver, StartAuthority: NewBackgroundJobStartBarrier(),
+			})
+			if result.IsError || result.Err != nil || result.Record.Status != string(domainjob.StatusCompleted) ||
+				len(driver.startRequests) != 1 || driver.startRequests[0].InternalOutputTokenBudget != 0 {
+				t.Fatalf("ordinary background soft budget prevented completion: result=%#v requests=%#v", result, driver.startRequests)
+			}
+			if request.TokenBudget != budget || !request.TokenBudgetSet || result.Record.TokenBudget != budget ||
+				result.Record.Usage["totalTokens"] != float64(budget+1) {
+				t.Fatalf("soft budget or actual usage was changed: request=%#v record=%#v", request, result.Record)
+			}
+			// Public child output remains withheld under the existing contract;
+			// preserving soft budget metadata does not grant a new projection.
+			if result.Output["outputWithheld"] != true || result.Output["budgetExceeded"] != nil {
+				t.Fatalf("soft budget changed the child output boundary: %#v", result.Output)
+			}
+		})
 	}
 }
 

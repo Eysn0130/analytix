@@ -1,6 +1,7 @@
 import {
   DEFAULT_DEEPSEEK_BASE_URL,
   type ClawImProvider,
+  type ClawScheduleKind,
   type ClawRunMode,
   type ScheduleKind,
   type ScheduleModel,
@@ -63,6 +64,11 @@ export function normalizeScheduleReasoningEffort(value: unknown): ScheduleReason
 }
 
 export function normalizeScheduleKind(value: unknown): ScheduleKind {
+  if (value === 'interval' || value === 'daily' || value === 'at' || value === 'weekly' || value === 'cron') return value
+  return 'manual'
+}
+
+export function normalizeClawScheduleKind(value: unknown): ClawScheduleKind {
   if (value === 'interval' || value === 'daily' || value === 'at') return value
   return 'manual'
 }

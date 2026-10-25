@@ -97,6 +97,8 @@ export type WriteWorkspaceState = ImageRegionActions & {
       message?: string
       animate?: boolean
       force?: boolean
+      /** Explicit discard compares its retained owner/content again after the read. */
+      expectedContent?: string
       /** When true, surface the change as a red/green diff review instead of applying it. */
       reviewAsDiff?: boolean
     }
@@ -108,7 +110,7 @@ export type WriteWorkspaceState = ImageRegionActions & {
   beginExport: () => { settled: Promise<void>; release: () => void }
   flushSave: (workspaceRoot: string) => Promise<boolean>
   resolveFileConflict: (comparison: WriteConflictComparison, choice: 'keep-draft' | 'use-disk') => Promise<boolean>
-  createFile: (workspaceRoot: string, path: string, content?: string) => Promise<string | null>
+  createFile: (workspaceRoot: string, path: string, content?: string, options?: { openAfterCreate?: boolean }) => Promise<string | null>
   createDirectory: (workspaceRoot: string, path: string) => Promise<string | null>
   renameEntry: (workspaceRoot: string, path: string, newName: string) => Promise<string | null>
   deleteEntry: (workspaceRoot: string, path: string) => Promise<boolean>

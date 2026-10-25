@@ -22,6 +22,7 @@ const VALID_SOURCE_BY_CODE = {
   watchdog_restart_failed: 'watchdog',
   settings_apply_stopped: 'settings-apply',
   settings_apply_restart_scheduled: 'settings-apply',
+  settings_apply_failed: 'settings-apply-rollback',
   settings_rollback_stopped: 'settings-apply-rollback',
   settings_rollback_ready: 'settings-apply-rollback',
   settings_rollback_failed: 'settings-apply-rollback',
@@ -52,7 +53,11 @@ describe('RuntimeStatusPublicV1', () => {
       const value = createRuntimeStatusPublicV1(inputFor(code))
       expect(value.code).toBe(code)
       expect(value.at).toBe(AT)
-      expect(value.message).toMatch(/^Analytix|^Previous/u)
+      if (code === 'settings_apply_failed') {
+        expect(value.message).toBe('Runtime settings could not be applied or restored.')
+      } else {
+        expect(value.message).toMatch(/^Analytix|^Previous/u)
+      }
       expect(parseRuntimeStatusPublicV1(value)).toEqual(value)
       expect(isRuntimeStatusPublicV1(value)).toBe(true)
     }
@@ -138,4 +143,12 @@ describe('RuntimeStatusPublicV1', () => {
       at: AT
     })).toThrow('invalid_runtime_status_public_v1_input')
   })
+})
+
+
+it('reports an unsuccessful durable settings rollback without claiming restoration', () => {
+  const payload = createRuntimeStatusPublicV1({ code: 'settings_apply_failed', source: 'settings-apply-rollback', at: AT })
+  expect(payload.state).toBe('failed')
+  expect(payload.rolledBack).toBeUndefined()
+  expect(isRuntimeStatusPublicV1({ ...payload, rolledBack: true })).toBe(false)
 })

@@ -136,47 +136,71 @@ func PromoteCurrentForProviderBatch(
 		return ProviderSteeringBatch{}, ErrAuthorityUnavailable
 	}
 	defer release()
-	if err := deps.ValidateCurrent(effectCtx, securityContext); err != nil {
-		return ProviderSteeringBatch{}, CurrentAuthorityError{Cause: err}
+	var stale []domainsteering.PendingEntryExpectationV1
+	for {
+		if err := deps.ValidateCurrent(effectCtx, securityContext); err != nil {
+			return ProviderSteeringBatch{}, CurrentAuthorityError{Cause: err}
+		}
+		if err := effectCtx.Err(); err != nil {
+			return ProviderSteeringBatch{}, err
+		}
+		pending, err := deps.Store.PendingSteeringEntriesForContext(
+			securityContext.ThreadID, securityContext.TurnID, securityContext.ContextDigest,
+		)
+		if err != nil {
+			return ProviderSteeringBatch{}, err
+		}
+		if len(pending) == 0 {
+			return ProviderSteeringBatch{}, nil
+		}
+		selected, expected, batch, err := providerSteeringPrefixV1(pending, securityContext)
+		if err != nil {
+			return ProviderSteeringBatch{}, err
+		}
+		if stale != nil {
+			same := len(stale) == len(expected)
+			for index := range stale {
+				if !same || stale[index] != expected[index] {
+					same = false
+					break
+				}
+			}
+			if same {
+				return ProviderSteeringBatch{}, domainsteering.ErrPendingPrefixMismatch
+			}
+		}
+		if err := subagentapp.ValidateRuntimeTaskJobSteersForPromotion(
+			deps.Jobs, selected, securityContext.ThreadID, securityContext.TurnID, securityContext.ContextDigest,
+		); err != nil {
+			return ProviderSteeringBatch{}, err
+		}
+		messages, entries, items, err := appmodel.PromoteSteeringPrefixForProviderWithEntries(
+			deps.Store, securityContext.ThreadID, securityContext.TurnID, securityContext.ContextDigest, expected,
+		)
+		if err != nil {
+			// Only a CAS that returned no committed entries/items/events may be
+			// refreshed. The next iteration revalidates authority and the prefix.
+			if errors.Is(err, domainsteering.ErrPendingPrefixMismatch) && len(messages) == 0 && len(entries) == 0 && len(items) == 0 {
+				stale = expected
+				continue
+			}
+			return ProviderSteeringBatch{}, err
+		}
+		if len(entries) != len(selected) || len(items) != len(selected) || len(messages) != len(selected) {
+			return ProviderSteeringBatch{}, errors.New("steering promotion did not preserve the selected prefix")
+		}
+		commits, err := taskJobPromotionCommitsV1(effectCtx, securityContext, entries, items, deps.VerifyAuthority)
+		if err != nil {
+			return ProviderSteeringBatch{}, err
+		}
+		if err := subagentapp.RecordRuntimeTaskJobSteersAdmitted(
+			subagentapp.TaskJobSteerRuntimeDeps{Jobs: deps.Jobs, RecordEvent: deps.RecordEvent}, commits,
+		); err != nil {
+			return ProviderSteeringBatch{}, err
+		}
+		batch.Messages = messages
+		return batch, nil
 	}
-	pending, err := deps.Store.PendingSteeringEntriesForContext(
-		securityContext.ThreadID, securityContext.TurnID, securityContext.ContextDigest,
-	)
-	if err != nil {
-		return ProviderSteeringBatch{}, err
-	}
-	if len(pending) == 0 {
-		return ProviderSteeringBatch{}, nil
-	}
-	selected, expected, batch, err := providerSteeringPrefixV1(pending, securityContext)
-	if err != nil {
-		return ProviderSteeringBatch{}, err
-	}
-	if err := subagentapp.ValidateRuntimeTaskJobSteersForPromotion(
-		deps.Jobs, selected, securityContext.ThreadID, securityContext.TurnID, securityContext.ContextDigest,
-	); err != nil {
-		return ProviderSteeringBatch{}, err
-	}
-	messages, entries, items, err := appmodel.PromoteSteeringPrefixForProviderWithEntries(
-		deps.Store, securityContext.ThreadID, securityContext.TurnID, securityContext.ContextDigest, expected,
-	)
-	if err != nil {
-		return ProviderSteeringBatch{}, err
-	}
-	if len(entries) != len(selected) || len(items) != len(selected) || len(messages) != len(selected) {
-		return ProviderSteeringBatch{}, errors.New("steering promotion did not preserve the selected prefix")
-	}
-	commits, err := taskJobPromotionCommitsV1(effectCtx, securityContext, entries, items, deps.VerifyAuthority)
-	if err != nil {
-		return ProviderSteeringBatch{}, err
-	}
-	if err := subagentapp.RecordRuntimeTaskJobSteersAdmitted(
-		subagentapp.TaskJobSteerRuntimeDeps{Jobs: deps.Jobs, RecordEvent: deps.RecordEvent}, commits,
-	); err != nil {
-		return ProviderSteeringBatch{}, err
-	}
-	batch.Messages = messages
-	return batch, nil
 }
 
 func providerSteeringPrefixV1(

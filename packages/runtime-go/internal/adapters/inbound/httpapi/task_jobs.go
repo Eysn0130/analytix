@@ -269,9 +269,82 @@ func (h TaskJobHandlers) handleRecover(w http.ResponseWriter, r *http.Request) {
 	writeTaskJobServiceResult(w, h.Service.RecoverTaskJob(parentThreadID, request), request.JobID)
 }
 
+// The origin capsule is established only by this HTTP adapter, not by JSON,
+// model arguments, or a public binding object. Existing RuntimeToken and typed
+// local-display authorization are checked by the Host callback.
+type childInputHTTPOriginKeyV1 struct{}
+type childInputHTTPOriginV1 struct {
+	authorization string
+	displayHeader []string
+}
+
+func HostChildInputHTTPAuthorizedV1(ctx context.Context, runtimeToken string) bool {
+	if ctx == nil || strings.TrimSpace(runtimeToken) == "" {
+		return false
+	}
+	origin, ok := ctx.Value(childInputHTTPOriginKeyV1{}).(childInputHTTPOriginV1)
+	if !ok || len(origin.displayHeader) != 1 || origin.displayHeader[0] != LocalDisplayHeaderValueV1 {
+		return false
+	}
+	request := &http.Request{Header: make(http.Header)}
+	request.Header.Set("Authorization", origin.authorization)
+	return Authorized(request, runtimeToken, false)
+}
+
+func (h TaskJobHandlers) handleHostChildInputV1(w http.ResponseWriter, r *http.Request, body map[string]any) {
+	request, err := subagentapp.ChildInputRequestFromArgsV1(body)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]any{"code": "validation_error", "message": "invalid child input request"})
+		return
+	}
+	service, ok := h.Service.(interface {
+		HostChildInputV1(context.Context, subagentapp.ChildInputRequestV1) subagentapp.TaskJobServiceResult
+	})
+	if !ok {
+		WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"schemaVersion": 1, "capabilities": subagentapp.ChildInputCapabilitiesV1{Send: "disabled", ReasonCode: "authority_unavailable"}, "code": "child_input_unknown"})
+		return
+	}
+	origin := childInputHTTPOriginV1{authorization: r.Header.Get("Authorization"), displayHeader: append([]string(nil), r.Header.Values(LocalDisplayHeaderV1)...)}
+	result := service.HostChildInputV1(context.WithValue(r.Context(), childInputHTTPOriginKeyV1{}, origin), request)
+	status := http.StatusOK
+	switch result.ErrorCode {
+	case subagentapp.TaskJobErrorValidation:
+		status = http.StatusBadRequest
+	case subagentapp.TaskJobErrorForbidden:
+		status = http.StatusForbidden
+	case subagentapp.TaskJobErrorNotFound:
+		status = http.StatusNotFound
+	case subagentapp.TaskJobErrorConflict:
+		status = http.StatusConflict
+	default:
+		if result.IsError {
+			status = http.StatusServiceUnavailable
+		}
+	}
+	response, decodeErr := subagentapp.DecodeChildInputResponseV1(result.Response)
+	if decodeErr != nil {
+		status = http.StatusServiceUnavailable
+		response = subagentapp.ChildInputResponseV1{SchemaVersion: 1, Capabilities: subagentapp.ChildInputCapabilitiesV1{Send: "disabled", ReasonCode: "authority_unavailable"}, Code: "child_input_unknown"}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
 func (h TaskJobHandlers) handleSteer(w http.ResponseWriter, r *http.Request) {
 	body, ok := strictTaskJobSteerBody(w, r)
 	if !ok {
+		return
+	}
+	mode := stringField(body, "mode")
+	if mode == subagentapp.ChildInputInspectV1 || mode == subagentapp.ChildInputStartOrSteerV1 {
+		h.handleHostChildInputV1(w, r, body)
+		return
+	}
+	if (mode != "" && mode != "steer") || body["expectedRunId"] != nil || body["expectedChildTurnId"] != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]any{"code": "validation_error", "message": "invalid task job steer mode"})
 		return
 	}
 	request, validation, invalid := subagentapp.TaskJobSteerRequestFromArgs(body)
@@ -305,7 +378,7 @@ func (h TaskJobHandlers) handleSteer(w http.ResponseWriter, r *http.Request) {
 
 const (
 	maxTaskJobSteerRequestBytes = 24 * 1024
-	maxTaskJobSteerStringBytes  = 8 * 1024
+	maxTaskJobSteerStringBytes  = 4 * subagentapp.DefaultTaskJobSteerMaxRunes
 )
 
 func strictTaskJobSteerBody(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
@@ -323,6 +396,7 @@ func strictTaskJobSteerBody(w http.ResponseWriter, r *http.Request) (map[string]
 	allowed := map[string]struct{}{
 		"job_id": {}, "jobId": {}, "id": {}, "message": {}, "text": {},
 		"client_message_id": {}, "clientMessageId": {}, "parentThreadId": {}, "threadId": {},
+		"mode": {}, "expectedRunId": {}, "expectedChildTurnId": {},
 	}
 	for _, aliases := range [][]string{
 		{"job_id", "jobId", "id"}, {"message", "text"}, {"client_message_id", "clientMessageId"}, {"parentThreadId", "threadId"},

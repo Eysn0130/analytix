@@ -55,8 +55,12 @@ func settlementProjectionSemanticsValidV1(projection PublicToolResultProjectionV
 		default:
 			return false
 		}
+	case ProjectionWebFetchStatus:
+		return projection.Web != nil && isError == (projection.Web.Outcome != "success")
 	case ProjectionArtifactStatus:
 		return projection.Status == "completed" && projection.MessageKey == "artifact_created" && !isError
+	case ProjectionTaskJobResult:
+		return projection.Status == "completed" && projection.MessageKey == "tool_completed" && !isError
 	case ProjectionPlanStatus:
 		return (projection.Status == "completed" && projection.MessageKey == "plan_updated" && !isError) ||
 			(projection.Status == "failed" && projection.MessageKey == "plan_failed" && isError)

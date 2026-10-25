@@ -7,7 +7,7 @@ import {
   ExternalLink,
   Globe2,
   Loader2,
-  MoreHorizontal,
+  MessageSquarePlus,
   Plus,
   RefreshCw,
   ArrowRight as Send,
@@ -32,6 +32,7 @@ import {
 import { useChatStore } from '../store/chat-store'
 import { useNativeReferenceStore } from '../office/native-reference-store'
 import { browserScopeSchema } from '../../../../packages/runtime/src/contracts/browser-selection'
+import { WorkspaceViewerHeader, WorkspaceViewerIconButton, WorkspaceViewerMenu, type WorkspaceViewerControls } from './workbench/WorkspaceViewerHeader'
 
 type DevWebviewTag = HTMLElement & {
   getWebContentsId(): number
@@ -127,7 +128,9 @@ export function DevBrowserPanel({
   preferredUrl,
   className,
   onCollapse,
-  onSubmitPrompt
+  onSubmitPrompt,
+  viewerControls,
+  visible = true
 }: {
   blocks?: ChatBlock[]
   detectedUrls?: string[]
@@ -135,6 +138,8 @@ export function DevBrowserPanel({
   className?: string
   onCollapse: () => void
   onSubmitPrompt?: (prompt: string, references: NativeReference[]) => void
+  viewerControls?: WorkspaceViewerControls
+  visible?: boolean
 }): ReactElement {
   const { t } = useTranslation('common')
   const webviewRef = useRef<DevWebviewTag | null>(null)
@@ -441,154 +446,61 @@ export function DevBrowserPanel({
       style={{ containerType: 'inline-size' }}
       className={`ds-browser-pane ds-no-drag flex min-h-0 flex-col border-l border-ds-border-muted bg-ds-canvas backdrop-blur-xl ${className ?? ''}`}
     >
-      <div className="shrink-0 border-b border-ds-border-muted bg-ds-canvas">
-        <form onSubmit={submitUrl} className="ds-browser-addressbar flex h-12 min-w-0 items-center gap-1.5 px-2">
-          <div className="ds-browser-history flex shrink-0 items-center gap-1 rounded-full p-0.5">
-            <button
-              type="button"
-              onClick={goBack}
-              disabled={!canNavigateBack}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-default disabled:opacity-35"
-              aria-label={t('browserBack')}
-              title={t('browserBack')}
-            >
-              <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              onClick={goForward}
-              disabled={!canNavigateForward}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-default disabled:opacity-35"
-              aria-label={t('browserForward')}
-              title={t('browserForward')}
-            >
-              <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              onClick={reload}
-              disabled={!activeUrl}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink disabled:cursor-default disabled:opacity-35"
-              aria-label={t('browserReload')}
-              title={t('browserReload')}
-            >
-              {loading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
-              )}
-            </button>
-          </div>
-
-          <div title={tabLabel}
-            className="ds-browser-address-field flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full border border-ds-border-muted px-3 text-ds-muted transition">
-            <Globe2 className="ds-browser-address-icon h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-            <input
-              value={draftUrl}
-              onChange={(event) => setDraftUrl(event.target.value)}
-              className="h-full w-full min-w-0 bg-transparent text-[13px] font-medium text-ds-ink outline-none"
-              aria-label={t('browserAddressPlaceholder')}
-              placeholder={t('browserAddressPlaceholder')}
-              spellCheck={false}
-            />
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="submit"
-              className="ds-browser-open-inline inline-flex h-8 w-8 items-center justify-center rounded-full text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
-              aria-label={t('browserOpen')}
-              title={t('browserOpen')}
-            >
-              <Send className="h-3.5 w-3.5" strokeWidth={1.8} />
-            </button>
-            <details className="ds-browser-actions relative" onKeyDown={(event) => {
-              if (event.key !== 'Escape') return
-              event.preventDefault(); event.stopPropagation()
-              event.currentTarget.open = false
-              event.currentTarget.querySelector('summary')?.focus()
-            }} onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false
-            }} onClick={(event) => {
-              if (event.target instanceof Element && event.target.closest('button')) event.currentTarget.open = false
-            }}>
-              <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full text-ds-faint hover:bg-ds-hover hover:text-ds-ink [&::-webkit-details-marker]:hidden"
-                aria-label={t('browserMore')} title={t('browserMore')}>
-                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-              </summary>
-              <div style={{ width: 'min(14rem, calc(100cqw - 16px))' }} className="absolute right-0 top-full z-50 mt-1 flex flex-col gap-1 rounded-xl border border-ds-border bg-ds-elevated p-1 text-[12px] [box-shadow:var(--ax-shadow-popover)]">
-                <div className="ds-browser-compact-actions flex-col gap-1">
-                  <button type="button" onClick={goBack} disabled={!canNavigateBack}
-                    className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-35"
-                    aria-label={t('browserBack')}>
-                    <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />{t('browserBack')}
-                  </button>
-                  <button type="button" onClick={goForward} disabled={!canNavigateForward}
-                    className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-35"
-                    aria-label={t('browserForward')}>
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />{t('browserForward')}
-                  </button>
-                  <button type="button" onClick={reload} disabled={!activeUrl}
-                    className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-35"
-                    aria-label={t('browserReload')}>
-                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />{t('browserReload')}
-                  </button>
-                  <button type="submit"
-                    className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
-                    aria-label={t('browserOpen')}>
-                    <Send className="h-3.5 w-3.5" aria-hidden="true" />{t('browserOpen')}
-                  </button>
-                </div>
-                <button type="button" onClick={() => setAutoFollow((value) => !value)}
-                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
-                  aria-label={t('browserAutoFollow')} aria-pressed={autoFollow}>
-                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{t('browserAutoFollow')}
-                </button>
-                <button type="button" onClick={resetPreview}
-                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
-                  aria-label={t('browserReset')}>
-                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />{t('browserReset')}
-                </button>
-                <button type="button" onClick={openExternal} disabled={!activeUrl}
-                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-35"
-                  aria-label={t('browserOpenExternal')}>
-                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />{t('browserOpenExternal')}
-                </button>
-                {useElectronWebview ? <button type="button" onClick={() => void captureSelection()} disabled={capturingSelection}
-                  className="min-h-8 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-50">{t('browserQuoteSelection')}</button> : null}
-                {useElectronWebview && onSubmitPrompt ? <button type="button" onClick={() => void captureSelection(t('browserExplainPrompt'))} disabled={capturingSelection}
-                  className="min-h-8 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover disabled:opacity-50">{t('browserExplainSelection')}</button> : null}
-                <button type="button" onClick={onCollapse}
-                  className="flex min-h-8 items-center gap-2 rounded-lg px-2 text-left text-ds-muted hover:bg-ds-hover"
-                  aria-label={t('browserCloseTab')}>
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />{t('browserCloseTab')}
-                </button>
-              </div>
-            </details>
-          </div>
+      <div className="shrink-0 bg-ds-canvas">
+        <form onSubmit={submitUrl} className="ds-browser-addressbar">
+          <WorkspaceViewerHeader className="ds-browser-workspace-toolbar" title={tabLabel} viewerControls={visible ? viewerControls : undefined} status={pageTitle || undefined}
+            leading={<div className="ds-browser-history ds-browser-history-inline flex shrink-0 items-center gap-1">
+              <WorkspaceViewerIconButton compact onClick={goBack} disabled={!canNavigateBack} label={t('browserBack')}>
+                <ArrowLeft aria-hidden="true" />
+              </WorkspaceViewerIconButton>
+              <WorkspaceViewerIconButton compact onClick={goForward} disabled={!canNavigateForward} label={t('browserForward')}>
+                <ArrowRight aria-hidden="true" />
+              </WorkspaceViewerIconButton>
+              <WorkspaceViewerIconButton compact onClick={reload} disabled={!activeUrl} label={t('browserReload')}>
+                {loading ? <Loader2 className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+              </WorkspaceViewerIconButton>
+            </div>}
+            titleControl={<div title={tabLabel}
+              className="ds-browser-address-field flex h-8 w-full min-w-0 items-center gap-2 rounded-full border border-ds-border-muted px-3 text-ds-muted transition">
+              <Globe2 className="ds-browser-address-icon h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+              <input value={draftUrl} onChange={event => setDraftUrl(event.target.value)}
+                className="h-full w-full min-w-0 bg-transparent text-[13px] font-medium text-ds-ink outline-none"
+                aria-label={t('browserAddressPlaceholder')} placeholder={t('browserAddressPlaceholder')} spellCheck={false} />
+            </div>}
+            actions={<>
+              <WorkspaceViewerIconButton compact type="submit" className="ds-browser-open-inline" label={t('browserOpen')}>
+                <Send aria-hidden="true" />
+              </WorkspaceViewerIconButton>
+              {useElectronWebview ? <WorkspaceViewerIconButton compact onClick={() => void captureSelection()}
+                disabled={!visible || capturingSelection} label={t('browserQuoteSelection')}>
+                <MessageSquarePlus aria-hidden="true" />
+              </WorkspaceViewerIconButton> : null}
+              <WorkspaceViewerMenu label={t('browserMore')} ownerKey={JSON.stringify([activeUrl, useChatStore.getState().activeThreadId, useChatStore.getState().workspaceRoot])} enabled={visible}>
+                {detectedUrls.map(url => <WorkspaceViewerIconButton key={url} role="menuitem" className="!w-full !justify-start"
+                  data-browser-detected-url={url} label={url} onClick={() => loadUrl(url, { keepAutoFollow: url === latestDetectedUrl })}>
+                  <Globe2 aria-hidden="true" /><span className="min-w-0 truncate">{formatDevPreviewUrlLabel(url)}</span>
+                </WorkspaceViewerIconButton>)}
+                <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={() => setAutoFollow(value => !value)}
+                  label={t('browserAutoFollow')} aria-pressed={autoFollow}>
+                  <Sparkles aria-hidden="true" /><span>{t('browserAutoFollow')}</span>
+                </WorkspaceViewerIconButton>
+                <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={resetPreview} label={t('browserReset')}>
+                  <Plus aria-hidden="true" /><span>{t('browserReset')}</span>
+                </WorkspaceViewerIconButton>
+                <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={openExternal} disabled={!activeUrl} label={t('browserOpenExternal')}>
+                  <ExternalLink aria-hidden="true" /><span>{t('browserOpenExternal')}</span>
+                </WorkspaceViewerIconButton>
+                {useElectronWebview && onSubmitPrompt ? <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={() => void captureSelection(t('browserExplainPrompt'))}
+                  disabled={capturingSelection} label={t('browserExplainSelection')}>
+                  <Sparkles aria-hidden="true" /><span>{t('browserExplainSelection')}</span>
+                </WorkspaceViewerIconButton> : null}
+                {!viewerControls ? <WorkspaceViewerIconButton role="menuitem" className="!w-full !justify-start" onClick={onCollapse} label={t('browserCloseTab')}>
+                  <X aria-hidden="true" /><span>{t('browserCloseTab')}</span>
+                </WorkspaceViewerIconButton> : null}
+              </WorkspaceViewerMenu>
+            </>} />
         </form>
 
-        {pageTitle ? (
-          <div className="min-w-0 truncate px-3 pb-2 text-[11px] font-medium leading-4 text-ds-muted">
-            {pageTitle}
-          </div>
-        ) : null}
-
-        {detectedUrls.length > 0 ? (
-          <div className="flex min-w-0 gap-1.5 overflow-x-auto px-3 pb-2">
-            {detectedUrls.map((url) => (
-              <button
-                key={url}
-                type="button"
-                onClick={() => loadUrl(url, { keepAutoFollow: url === latestDetectedUrl })}
-                className="shrink-0 rounded-full border border-ds-border-muted bg-ds-surface-subtle px-2.5 py-1 text-[10.5px] font-medium text-ds-muted transition hover:border-ds-border-strong hover:text-ds-ink dark:bg-white/[0.06]"
-                title={url}
-              >
-                {formatDevPreviewUrlLabel(url)}
-              </button>
-            ))}
-          </div>
-        ) : null}
       </div>
 
       {loadError ? (

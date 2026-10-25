@@ -62,6 +62,12 @@ func ThreadSummary(thread map[string]any) map[string]any {
 			summary[key] = CloneValue(value)
 		}
 	}
+	// Empty model is valid for local-only threads. Durable normalization may
+	// omit it, but the public summary contract requires the known string field.
+	// Preserve present values so malformed types still fail closed validation.
+	if _, present := summary["model"]; !present {
+		summary["model"] = ""
+	}
 	summary["turnCount"] = float64(len(turns))
 	summary["messageCount"] = float64(countUserMessages(turns))
 	if strings.TrimSpace(StringField(summary, "preview")) == "" {

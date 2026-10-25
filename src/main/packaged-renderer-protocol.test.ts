@@ -164,11 +164,24 @@ describe('packaged renderer protocol', () => {
   it('wires the privileged scheme before ready and never loads the packaged renderer through file', () => {
     const source = readFileSync(resolve('src/main/index.ts'), 'utf8')
     const ownerBranchIndex = source.indexOf('} else if (gotSingleInstanceLock) {')
-    const registerIndex = source.indexOf('registerPackagedRendererScheme()', ownerBranchIndex)
+    const registerIndex = source.indexOf('protocol.registerSchemesAsPrivileged([', ownerBranchIndex)
     const readyIndex = source.indexOf('app.whenReady().then')
     const installIndex = source.indexOf('installPackagedRendererProtocol()', readyIndex)
     const createIndex = source.indexOf('createWindow({', readyIndex)
+    const privilegesSource = readFileSync(resolve('src/main/services/prototype-embed-registry.ts'), 'utf8')
 
+    expect(ownerBranchIndex).toBeGreaterThanOrEqual(0)
+    expect(source.match(/protocol\.registerSchemesAsPrivileged\(/g)).toHaveLength(1)
+    expect(source).not.toContain('registerPackagedRendererScheme()')
+    expect(source.slice(registerIndex, readyIndex)).toBe(
+      'protocol.registerSchemesAsPrivileged([\n' +
+      '  ...(app.isPackaged ? [{ scheme: PACKAGED_RENDERER_SCHEME, privileges: PROTOTYPE_PREVIEW_PRIVILEGES }] : []),\n' +
+      '  { scheme: PROTOTYPE_PREVIEW_SCHEME, privileges: PROTOTYPE_PREVIEW_PRIVILEGES }\n' +
+      '])\n'
+    )
+    expect(privilegesSource).toMatch(
+      /export const PROTOTYPE_PREVIEW_PRIVILEGES = \{\s*standard: true,\s*secure: true,\s*supportFetchAPI: true,\s*corsEnabled: true\s*\} as const/
+    )
     expect(registerIndex).toBeGreaterThan(ownerBranchIndex)
     expect(registerIndex).toBeLessThan(readyIndex)
     expect(installIndex).toBeGreaterThan(readyIndex)

@@ -224,7 +224,7 @@ export function TurnDiffSummarySegment({
         <button
           type="button"
           onClick={onOpenChanges}
-          className="flex min-w-0 cursor-pointer items-center gap-1 rounded-sm text-[13px] font-medium leading-none text-ds-muted transition hover:text-ds-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-accent"
+          className="flex min-w-0 cursor-pointer items-center gap-1 rounded-sm text-[13px] font-medium leading-none text-ds-muted transition hover:text-ds-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           aria-label={t('turnDiffFilesChanged', { count: summary.fileCount })}
           title={t('turnDiffFilesChanged', { count: summary.fileCount })}
         >

@@ -1,0 +1,22 @@
+diff --git a/node_modules/superdoc/dist/chunks/create-super-doc-ui-8UTu16Lw.es.js b/node_modules/superdoc/dist/chunks/create-super-doc-ui-8UTu16Lw.es.js
+--- a/node_modules/superdoc/dist/chunks/create-super-doc-ui-8UTu16Lw.es.js
++++ b/node_modules/superdoc/dist/chunks/create-super-doc-ui-8UTu16Lw.es.js
+@@ -11907,6 +11907,7 @@
+ 		},
+ 		restore: (capture) => {
+ 			const done = (result) => {
++				if (result.ok) selectionEpoch += 1;
+ 				recompute();
+ 				return {
+ 					...result,
+diff --git a/node_modules/superdoc/dist/chunks/create-super-doc-ui-bTFGKVRb.cjs b/node_modules/superdoc/dist/chunks/create-super-doc-ui-bTFGKVRb.cjs
+--- a/node_modules/superdoc/dist/chunks/create-super-doc-ui-bTFGKVRb.cjs
++++ b/node_modules/superdoc/dist/chunks/create-super-doc-ui-bTFGKVRb.cjs
+@@ -11908,6 +11908,7 @@
+ 		},
+ 		restore: (capture) => {
+ 			const done = (result) => {
++				if (result.ok) selectionEpoch += 1;
+ 				recompute();
+ 				return {
+ 					...result,

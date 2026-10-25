@@ -1,0 +1,82 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+.block {
+  overflow: hidden;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr);
+  padding: 6px 0 20px;
+  font: var(--dsw-font-markdown-code-block);
+  overflow-x: auto;
+}
+
+.line {
+  box-sizing: border-box;
+  min-height: 1lh;
+  padding: 0 22px;
+  white-space: pre;
+}
+
+.block[data-code-wrap='true'] .body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.block[data-code-wrap='true'] .line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.path {
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 500;
+}
+
+.gap {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.del::before {
+  content: '- ';
+}
+
+.del {
+  color: var(--ds-danger);
+  background: var(--ds-diff-removed-soft);
+  box-shadow: inset 3px 0 0 var(--ds-danger);
+}
+
+.add::before {
+  content: '+ ';
+}
+
+.add {
+  color: var(--ds-success);
+  background: var(--ds-diff-added-soft);
+  box-shadow: inset 3px 0 0 var(--ds-success);
+}
+
+.context {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.context::before {
+  content: '  ';
+}
+
+.expand {
+  display: block;
+  width: 100%;
+  padding: 0 22px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.expand:hover {
+  color: var(--dsw-alias-label-secondary);
+}

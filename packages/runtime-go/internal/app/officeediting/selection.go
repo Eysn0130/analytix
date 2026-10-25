@@ -37,11 +37,22 @@ func nativeUTF16Length(text string) int {
 	return units
 }
 
+type nativeLeasePurpose uint8
+
+const (
+	nativeLeaseNone nativeLeasePurpose = iota
+	nativeLeaseStrict
+	nativeLeaseManual
+)
+
 type nativeSession struct {
-	document  editingapp.Opened
-	principal identitydomain.PrincipalV1
-	workspace string
-	release   func()
+	leasePurpose       nativeLeasePurpose
+	manualChangeID     string
+	manualBaseRevision string
+	document           editingapp.Opened
+	principal          identitydomain.PrincipalV1
+	workspace          string
+	release            func()
 }
 type nativeScope struct {
 	ID, SessionID, ThreadID, SelectionToken, BaseRevision string
@@ -227,6 +238,25 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		if !nativeThread.MatchString(thread) || !nativeSelectionToken.MatchString(token) || !revisionPattern.MatchString(revision) || !ok || len(text) > editingapp.MaxSelectionBytes || !utf8.ValidString(text) || !editableOK || !numberOK || err != nil || sequence < 0 || sequence > 9007199254740991 {
 			return failure(fileport.ErrInvalidInput)
 		}
+		// A discussion reference has no mutation lease. An editable reference
+		// must obtain its original strict lease and cannot inherit manual purpose.
+		if editable {
+			if session.release != nil && session.leasePurpose != nativeLeaseStrict {
+				return failure(fileport.ErrConflict)
+			}
+			if session.manualChangeID != "" {
+				return failure(fileport.ErrConflict)
+			}
+			if recovery, ok := a.service.(NativeRecoveryService); ok && (a.kind == "docx" || a.kind == "xlsx") {
+				state, err := recovery.NativeRecovery(ctx, sessionID, thread)
+				if err != nil {
+					return failure(err)
+				}
+				if state.Pending != nil && (state.Pending.Version == 2 && a.kind == "docx" || state.Pending.Version == 3 && a.kind == "xlsx") {
+					return failure(fileport.ErrConflict)
+				}
+			}
+		}
 		if editable && input["workbook"] == nil && input["presentation"] == nil && nativeUTF16Length(text) > MaxNativeSelectionUTF16 {
 			return failure(editingapp.ErrProposal)
 		}
@@ -297,7 +327,7 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			if err != nil {
 				return failure(editingapp.ErrProjection)
 			}
-			session.release = release
+			session.release, session.leasePurpose = release, nativeLeaseStrict
 		}
 		if err := a.validateScope(ctx, scope, call.Principal); err != nil {
 			return failure(err)
@@ -391,13 +421,14 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		encoded, _ := json.Marshal(input)
 		hash := sha256.Sum256(append([]byte(call.Operation), encoded...))
 		digest := hex.EncodeToString(hash[:])
-		if previous, exists := scope.operations[op]; exists && previous != digest {
+		previous, replay := scope.operations[op]
+		if replay && previous != digest {
 			return failure(fileport.ErrOperationMismatch)
 		}
 		if proposal.Status != "proposed" && (proposal.decisionDigest != digest || proposal.decisionOperation != op) {
 			return failure(editingapp.ErrProposal)
 		}
-		if len(scope.operations) >= editingapp.MaxProposalOperations {
+		if !replay && len(scope.operations) >= editingapp.MaxProposalOperations {
 			return failure(editingapp.ErrCapacity)
 		}
 		if call.Operation == "proposal-reject" {
@@ -407,7 +438,7 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 			scope.operations[op] = digest
 			return output(map[string]any{"ok": true, "proposal": proposalOutput(proposal)})
 		}
-		if !scope.Editable {
+		if !scope.Editable || session.release == nil || session.leasePurpose != nativeLeaseStrict {
 			return failure(editingapp.ErrScope)
 		}
 		replacement, err := renderNativeProposal(scope, proposal.Parts)
@@ -434,11 +465,19 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		if !ok {
 			return failure(ErrUnavailable)
 		}
+		if proposal.Review != nil {
+			if _, ok := a.service.(nativeWorkbookCandidateService); a.kind != "xlsx" || !ok {
+				return failure(ErrUnavailable)
+			}
+		}
 		changeHash := sha256.Sum256([]byte("analytix.native-change/v1\x00" + session.document.ObjectID + "\x00" + scope.ThreadID + "\x00" + id + "\x00" + op))
 		changeID := hex.EncodeToString(changeHash[:])
 		prepared, err := recovery.PrepareNativeChange(ctx, sessionID, fileport.NativeChangeDraft{ChangeID: changeID, ThreadID: scope.ThreadID, ProposalID: id, BaseRevision: revision, BeforeText: beforeText, AfterText: replacement, Workbook: proposal.Review, Presentation: proposal.PresentationReview})
 		if err != nil {
 			return failure(err)
+		}
+		if proposal.Review != nil && (prepared.ChangeID != changeID || prepared.ThreadID != scope.ThreadID || prepared.BaseRevision != revision || prepared.SaveOperationID != "native_save_"+changeID || prepared.Status != "prepared") {
+			return failure(fileport.ErrOperationMismatch)
 		}
 		proposal.Status = "approved"
 		proposal.decisionDigest = digest
@@ -447,6 +486,13 @@ func (a *Adapter) invokeSelection(ctx context.Context, call adapterport.Call, in
 		result := map[string]any{"proposalId": id, "operationId": op, "changeId": prepared.ChangeID, "saveOperationId": prepared.SaveOperationID, "text": replacement, "selectionToken": token, "changeSequence": sequence, "baseRevision": revision}
 		if proposal.Review != nil {
 			result["workbook"] = proposal.Review
+			candidate, err := a.preparedWorkbookCandidate(ctx, sessionID, scope.ThreadID, prepared.ChangeID, prepared.SaveOperationID, revision)
+			if err != nil {
+				// The user's approval and durable preparation already happened.
+				// Retain the decision operation for an exact live retry or cancel.
+				return failure(err)
+			}
+			result["candidate"] = candidate
 		}
 		if proposal.PresentationReview != nil {
 			result["presentation"] = proposal.PresentationReview
@@ -520,7 +566,7 @@ func (a *Adapter) modelSelectionLocked(ctx context.Context, principal identitydo
 		}
 		return out, nil
 	}
-	if !scope.Editable || !operationPattern.MatchString(operationID) {
+	if !scope.Editable || !operationPattern.MatchString(operationID) || a.sessions[scope.SessionID].release == nil || a.sessions[scope.SessionID].leasePurpose != nativeLeaseStrict {
 		return nil, editingapp.ErrScope
 	}
 	var review *office.WorkbookReview

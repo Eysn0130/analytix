@@ -1,16 +1,29 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NormalizedThread, ThreadEventSink } from '../agent/types'
-import type { ChatState, ChatStoreGet, ChatStoreSet, GuiPlanMessageContext, QueuedUserMessage } from './chat-store-types'
+import { afterEach, beforeEach, describe, expect, inject, it, vi } from 'vitest'
+import type { AgentProvider, ChatBlock, NormalizedThread, ThreadEventSink, ThreadExecutionPolicy, ThreadGoal, ThreadUsageSnapshot } from '../agent/types'
+import type { ChatState, ChatStoreGet, ChatStoreSet, GuiPlanMessageContext, QueuedUserMessage, ThreadSelectionReceipt } from './chat-store-types'
 import type { ThreadHandoffOperation } from '@shared/thread-handoff'
+import { AnalytixRuntimeProvider } from '../agent/analytix-runtime'
+import { getThreadBinding } from './chat-store-thread-binding'
+import { queuedMessagesForThread, queuedPauseReason } from './chat-store-queue'
+import { composerDraftKey, emptyComposerDraft } from './composer-drafts'
+import { defaultAnalytixRuntimeSettings, type AppSettingsV1 } from '@shared/app-settings'
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { readThreadWorktreeRegistry } from '../lib/thread-worktree-registry'
 import { formatRuntimeError } from '../lib/format-runtime-error'
-import { runtimeErrorToError } from '@shared/runtime-error'
+import { invalidateThreadDetailCache } from '../lib/thread-detail-cache'
+import { getDefaultThreadTitle } from '../lib/thread-title'
+import { projectPublicRuntimeHTTPError, runtimeErrorToError } from '@shared/runtime-error'
 import i18n from '../i18n'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { composeWritePrompt } from '../write/quoted-selection'
 import { emptySelection } from '../write/write-workspace-store-helpers'
 import { objectEditingRequestSchema, objectEditingResponseSchema, type ObjectEditingRequest } from '../../../../packages/runtime/src/contracts/object-editing'
+
+declare module 'vitest' {
+  export interface ProvidedContext {
+    auditRewindFailure?: { ok: boolean; status: number; body: string; primaryCommitted: boolean; rewindSSE: boolean }
+  }
+}
 
 vi.mock('electron', () => ({ clipboard: {} }))
 
@@ -23,6 +36,8 @@ vi.mock('../agent/registry', () => ({
 }))
 
 import { createThreadActions } from './chat-store-thread-actions'
+import { buildThreadEventSink, clearWatchedCompletionNotifications } from './chat-store-runtime'
+import { clearBusyWatchdog } from './chat-store-schedulers'
 import { createMaintenanceActions } from './chat-store-maintenance-actions'
 import {
   clearActiveStream,
@@ -81,6 +96,11 @@ function buildHarness(): {
     lastSeq: 0,
     loadComposerModels: vi.fn(async () => undefined),
     queuedMessages: [],
+    queuedMessagePauses: {},
+    composerPickList: [],
+    composerModelGroups: [],
+    watchTurnCompletion: {},
+    unreadThreadIds: {},
     drainQueuedMessages: vi.fn(async () => undefined),
     recoverActiveTurn: vi.fn(async () => true),
     refreshThreads: vi.fn(async () => undefined),
@@ -121,6 +141,55 @@ async function waitForAssertion(assertion: () => void): Promise<void> {
 }
 
 describe('chat-store-thread-actions queued messages', () => {
+  it('keeps frozen selections without scanning assembled queue edits', async () => {
+    registryMock.getProvider.mockReturnValue({steerUserMessage:vi.fn(),sendUserMessage:vi.fn()});
+    const h=buildHarness();
+    const requested=['review'];
+    expect(await h.actions.sendMessage('assembled /injected',undefined,{deliveryIntent:'queue',requestedSkillIds:requested})).toBe(true);
+    requested.push('late-mutation');
+    const queued=h.state.queuedMessages[0]!;
+    expect(queued.requestedSkillIds).toEqual(['review']);
+    h.actions.editQueuedMessage('thr_existing',queued.id,queued.text);
+    expect(h.state.queuedMessages[0]!.requestedSkillIds).toEqual(['review']);
+    h.actions.editQueuedMessage('thr_existing',queued.id,'/new-review');
+    expect(h.state.queuedMessages[0]!.requestedSkillIds).toEqual([]);
+  });
+
+  it('composer closure honors explicit queue without steer or optimistic history', async () => {
+    const provider = { steerUserMessage: vi.fn(), sendUserMessage: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    state.currentTurnId = 'active-turn'
+    await expect(actions.sendMessage('Wait for the next turn', 'agent', { deliveryIntent: 'queue' })).resolves.toBe(true)
+    expect(provider.steerUserMessage).not.toHaveBeenCalled()
+    expect(provider.sendUserMessage).not.toHaveBeenCalled()
+    expect(state.blocks).toEqual([])
+    expect(state.queuedMessages).toEqual([expect.objectContaining({ text: 'Wait for the next turn' })])
+    expect(state.queuedMessages[0]).not.toHaveProperty('deliveryIntent')
+  })
+  it('composer closure keeps explicit steer best-effort and preserves its admission semantics', async () => {
+    const provider = { steerUserMessage: vi.fn(async (input: { threadId: string; turnId: string; clientUserMessageId?: string }) => ({
+      threadId: input.threadId, turnId: input.turnId, clientUserMessageId: input.clientUserMessageId, admittedSeq: 42
+    })) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    state.currentTurnId = 'active-turn'
+    await expect(actions.sendMessage('Apply this now', 'agent', { deliveryIntent: 'steer' })).resolves.toBe(true)
+    expect(provider.steerUserMessage).toHaveBeenCalledOnce()
+    expect(state.queuedMessages).toEqual([])
+    expect(state.blocks[0]).toMatchObject({ kind: 'user', meta: { steeringStatus: 'admitted' } })
+  })
+  it.each(['queue', 'steer'] as const)('composer closure refuses a scoped busy submission before %s delivery', async deliveryIntent => {
+    const provider = { steerUserMessage: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    await expect(actions.sendMessage('Scoped selection', 'agent', { deliveryIntent,
+      submissionGuard: { isCurrent: () => true, validateBeforeSend: async () => true } })).resolves.toBe(false)
+    expect(provider.steerUserMessage).not.toHaveBeenCalled()
+    expect(state.queuedMessages).toEqual([])
+    expect(state.blocks).toEqual([])
+  })
+
   it('opens, edits, saves and reopens a real synthetic file, then sends its selection in the existing conversation', async () => {
     // Load host fixtures at runtime so Node/Electron ambient globals do not
     // change the renderer's browser type environment.
@@ -371,13 +440,13 @@ describe('chat-store-thread-actions queued messages', () => {
     const sendMessage = vi.fn(async () => true)
     state.busy = false
     state.sendMessage = sendMessage as unknown as ChatState['sendMessage']
-    state.queuedMessages = [{ id: 'q-sensitive', text: `account=${account}` }]
+    state.queuedMessages = [{ threadId: 'thr_existing', id: 'q-sensitive', text: `account=${account}` }]
 
     await actions.drainQueuedMessages()
 
     expect(sendMessage).not.toHaveBeenCalled()
     expect(state.queuedMessages).toEqual([])
-    expect(state.queuedMessagesPausedReason).toBe('failed')
+    expect(queuedPauseReason(state)).toBe('failed')
     expect(state.error).toBe(i18n.t('common:queuedMessageSensitiveInputBlocked'))
   })
 
@@ -420,7 +489,7 @@ describe('chat-store-thread-actions queued messages', () => {
     state.sendMessage = sendMessage as unknown as ChatState['sendMessage']
     state.queuedMessages = [
       {
-        id: 'q-plan',
+        threadId: 'thr_existing', id: 'q-plan',
         text: 'internal plan prompt',
         mode: 'plan',
         guiPlan: {
@@ -431,7 +500,7 @@ describe('chat-store-thread-actions queued messages', () => {
         }
       },
       {
-        id: 'q-user',
+        threadId: 'thr_existing', id: 'q-user',
         text: 'normal follow-up',
         mode: 'agent'
       }
@@ -441,7 +510,8 @@ describe('chat-store-thread-actions queued messages', () => {
 
     expect(state.queuedMessages).toEqual([])
     expect(sendMessage).toHaveBeenCalledWith('normal follow-up', 'agent', {
-      queued: expect.objectContaining({ id: 'q-user' })
+      queued: expect.objectContaining({ threadId: 'thr_existing', id: 'q-user', sending: true }),
+      submissionGuard: expect.objectContaining({ isCurrent: expect.any(Function), validateBeforeSend: expect.any(Function) })
     })
   })
 
@@ -449,7 +519,7 @@ describe('chat-store-thread-actions queued messages', () => {
     const { actions, state } = buildHarness()
     state.queuedMessages = [
       {
-        id: 'q-a',
+        threadId: 'thr_existing', id: 'q-a',
         text: 'first',
         mode: 'agent',
         model: 'deepseek-v4-pro',
@@ -470,22 +540,23 @@ describe('chat-store-thread-actions queued messages', () => {
         }]
       },
       {
-        id: 'q-b',
+        threadId: 'thr_existing', id: 'q-b',
         text: 'second',
         mode: 'plan',
         model: 'gpt-5',
         providerId: 'openai'
       }
     ]
-    state.queuedMessagesPausedReason = 'failed'
+    state.queuedMessagePauses = { thr_existing: 'failed' }
 
-    actions.editQueuedMessage('q-a', ' revised first ')
-    actions.reorderQueuedMessages(['q-b', 'q-a'])
-    actions.removeQueuedMessage('q-b')
+    actions.editQueuedMessage('thr_existing', 'q-a', ' revised first ')
+    actions.reorderQueuedMessages('thr_existing', ['q-b', 'q-a'])
+    actions.removeQueuedMessage('thr_existing', 'q-b')
+    actions.removeQueuedMessage('thr_existing', 'already-removed')
 
     expect(state.queuedMessages).toEqual([
       expect.objectContaining({
-        id: 'q-a',
+        threadId: 'thr_existing', id: 'q-a',
         text: 'revised first',
         mode: 'agent',
         model: 'deepseek-v4-pro',
@@ -496,13 +567,13 @@ describe('chat-store-thread-actions queued messages', () => {
         fileReferences: [expect.objectContaining({ relativePath: 'src/App.tsx' })]
       })
     ])
-    expect(state.queuedMessagesPausedReason).toBe('failed')
+    expect(queuedPauseReason(state)).toBe('failed')
   })
 
   it('sends a queued message immediately with its original metadata', async () => {
     const { actions, state } = buildHarness()
     const queued: QueuedUserMessage = {
-      id: 'q-now',
+      threadId: 'thr_existing', id: 'q-now',
       text: 'send now',
       mode: 'agent' as const,
       model: 'deepseek-v4-pro',
@@ -521,22 +592,23 @@ describe('chat-store-thread-actions queued messages', () => {
     })
     state.busy = false
     state.queuedMessages = [queued]
-    state.queuedMessagesPausedReason = 'interrupted'
+    state.queuedMessagePauses = { thr_existing: 'interrupted' }
     state.sendMessage = sendMessage as unknown as ChatState['sendMessage']
 
-    await expect(actions.sendQueuedMessageNow('q-now')).resolves.toBe(true)
+    await expect(actions.sendQueuedMessageNow('thr_existing', 'q-now')).resolves.toBe(true)
 
     expect(sendMessage).toHaveBeenCalledWith('send now', 'agent', {
       queued: expect.objectContaining({
-        id: 'q-now',
+        threadId: 'thr_existing', id: 'q-now',
         model: 'deepseek-v4-pro',
         providerId: 'deepseek',
         reasoningEffort: 'medium',
         fileReferences: [expect.objectContaining({ relativePath: 'src/App.tsx' })]
-      })
+      }),
+      submissionGuard: expect.objectContaining({ isCurrent: expect.any(Function), validateBeforeSend: expect.any(Function) })
     })
     expect(state.queuedMessages).toEqual([])
-    expect(state.queuedMessagesPausedReason).toBeNull()
+    expect(queuedPauseReason(state)).toBeNull()
   })
 
   it('keeps an explicit queued message when immediate steer admission fails', async () => {
@@ -548,7 +620,7 @@ describe('chat-store-thread-actions queued messages', () => {
     registryMock.getProvider.mockReturnValue(provider)
     const { actions, state } = buildHarness()
     const queued = {
-      id: 'q-steer-fail',
+      threadId: 'thr_existing', id: 'q-steer-fail',
       text: 'retry this follow-up',
       mode: 'agent' as const,
       fileReferences: [{
@@ -563,43 +635,43 @@ describe('chat-store-thread-actions queued messages', () => {
     state.currentTurnId = 'turn_active'
     state.queuedMessages = [queued]
 
-    await expect(actions.sendQueuedMessageNow('q-steer-fail')).resolves.toBe(false)
+    await expect(actions.sendQueuedMessageNow('thr_existing', 'q-steer-fail')).resolves.toBe(false)
 
     expect(provider.steerUserMessage).toHaveBeenCalled()
     expect(state.blocks).toEqual([])
     expect(state.queuedMessages).toEqual([queued])
-    expect(state.queuedMessagesPausedReason).toBe('failed')
+    expect(queuedPauseReason(state)).toBe('failed')
     expect(state.error).toBe(formatRuntimeError(new Error('turn inactive')))
   })
 
   it('keeps and pauses a queued message when immediate steer is unsupported while busy', async () => {
     registryMock.getProvider.mockReturnValue({})
     const { actions, state } = buildHarness()
-    const queued = { id: 'q-no-steer', text: 'retry later', mode: 'agent' as const }
+    const queued = { threadId: 'thr_existing', id: 'q-no-steer', text: 'retry later', mode: 'agent' as const }
     state.busy = true
     state.activeThreadId = 'thr_existing'
     state.currentTurnId = 'turn_active'
     state.queuedMessages = [queued]
 
-    await expect(actions.sendQueuedMessageNow('q-no-steer')).resolves.toBe(false)
+    await expect(actions.sendQueuedMessageNow('thr_existing', 'q-no-steer')).resolves.toBe(false)
 
     expect(state.blocks).toEqual([])
     expect(state.queuedMessages).toEqual([queued])
-    expect(state.queuedMessagesPausedReason).toBe('failed')
+    expect(queuedPauseReason(state)).toBe('failed')
   })
 
   it('does not drain queued messages while the queue is paused', async () => {
     const { actions, state } = buildHarness()
     const sendMessage = vi.fn(async () => true)
     state.busy = false
-    state.queuedMessagesPausedReason = 'interrupted'
-    state.queuedMessages = [{ id: 'q-paused', text: 'later', mode: 'agent' }]
+    state.queuedMessagePauses = { thr_existing: 'interrupted' }
+    state.queuedMessages = [{ threadId: 'thr_existing', id: 'q-paused', text: 'later', mode: 'agent' }]
     state.sendMessage = sendMessage as unknown as ChatState['sendMessage']
 
     await actions.drainQueuedMessages()
 
     expect(sendMessage).not.toHaveBeenCalled()
-    expect(state.queuedMessages).toEqual([{ id: 'q-paused', text: 'later', mode: 'agent' }])
+    expect(state.queuedMessages).toEqual([{ threadId: 'thr_existing', id: 'q-paused', text: 'later', mode: 'agent' }])
   })
 
   it('blocks thread handoff while queued messages exist', async () => {
@@ -611,7 +683,7 @@ describe('chat-store-thread-actions queued messages', () => {
       }
     })
     const { actions, state } = buildHarness()
-    state.queuedMessages = [{ id: 'q-blocker', text: 'finish me first', mode: 'agent' }]
+    state.queuedMessages = [{ threadId: 'thr_existing', id: 'q-blocker', text: 'finish me first', mode: 'agent' }]
     state.threadHandoffOperations = []
 
     await expect(actions.startThreadHandoff({
@@ -1175,6 +1247,35 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(state.blocks).toEqual([expect.objectContaining({ id: 'user_stale' })])
   })
 
+  it('hydrates valid old turn usage after new SSE without reviving Host-rewound history', async () => {
+    type Detail = Awaited<ReturnType<AgentProvider['getThreadDetail']>>
+    let resolve!: (detail: Detail) => void, sink!: ThreadEventSink
+    const provider = { getThreadDetail: vi.fn(() => new Promise<Detail>(done => { resolve = done })),
+      subscribeThreadEvents: vi.fn((_id: string, _seq: number, bound: ThreadEventSink) => { sink = bound; return new Promise<void>(() => undefined) }) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    state.blocks = []; state.turnUsageById = {}; state.rewoundTurnIds = {}
+    const pending = actions.subscribeThreadEventsLive('thr_existing')
+    await waitForAssertion(() => expect(provider.getThreadDetail).toHaveBeenCalledOnce())
+    sink.onThreadRewound?.({ threadId: 'thr_existing', turnId: 'removed', removedTurnIds: ['removed'],
+      removedTurns: 1, remainingTurns: 1, seq: 8 })
+    sink.onTurnStarted?.({ turnId: 'live', seq: 9 }); sink.onSeq(11)
+    const usage: ThreadUsageSnapshot = { inputTokens: 2, outputTokens: 1, totalTokens: 3, reasoningTokens: 0,
+      cachedTokens: 0, cacheMissTokens: 2, cacheHitRate: null, costUsd: null, costCny: null,
+      priceConfigured: false, tokenEconomySavingsTokens: 0, turns: 1 }
+    const entry = (turnId: string, firstSeq: number, lastSeq: number) => ({ threadId: 'thr_existing', turnId, firstSeq, lastSeq, snapshot: usage })
+    const live = entry('live', 9, 11), older = entry('older', 1, 3), removed = entry('removed', 4, 6)
+    state.turnUsageById = { live }
+    resolve({ blocks: [{ kind: 'user', id: 'old-user', text: 'valid history', meta: { turnId: 'older' } },
+      { kind: 'user', id: 'removed-user', text: 'removed history', meta: { turnId: 'removed' } }],
+      latestSeq: 6, threadStatus: 'idle', turnUsageById: { older, removed }, turnUsageThroughSeq: 6 })
+    await pending
+    expect(state.turnUsageById).toEqual({ older, live })
+    expect(state.blocks.map(block => block.id)).toContain('old-user')
+    expect(state.blocks.map(block => block.id)).not.toContain('removed-user')
+    expect(state.lastSeq).toBe(11); expect(state.currentTurnId).toBe('live')
+  })
+
   it('withholds live assistant drafts while getThreadDetail is pending and after stale detail returns', async () => {
     let resolveDetail: (value: {
       blocks: Array<{ kind: 'user'; id: string; text: string }>
@@ -1474,6 +1575,138 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(state.blocks.map((block) => block.id)).toContain('user_live')
   })
 
+  it('delivers a current selection receipt after restored history and the real subscription are bound', async () => {
+    const blocks: ChatBlock[] = [{ kind: 'user', id: 'selected-user', text: 'Selected target history' }]
+    const provider = {
+      getThreadDetail: vi.fn(async () => ({ thread: { ...thread('thr_selected'), status: 'idle' }, blocks, latestSeq: 7, threadStatus: 'idle' })),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    let receipt!: ThreadSelectionReceipt
+    let boundAtCallback: AbortController | null = null
+    let subscribedAtCallback = 0
+    const onSelected = vi.fn((selected: ThreadSelectionReceipt) => {
+      receipt = selected
+      boundAtCallback = sseAbortRef.current
+      subscribedAtCallback = provider.subscribeThreadEvents.mock.calls.length
+    })
+    await actions.selectThread('thr_selected', { onSelected })
+    expect(onSelected).toHaveBeenCalledOnce()
+    expect(state.activeThreadId).toBe('thr_selected')
+    expect(state.blocks).toMatchObject(blocks)
+    expect(state.lastSeq).toBe(7)
+    expect(boundAtCallback).toBe(sseAbortRef.current)
+    expect(boundAtCallback).not.toBeNull()
+    expect(subscribedAtCallback).toBe(1)
+    expect(receipt.threadId).toBe('thr_selected')
+    expect(receipt.isCurrent()).toBe(true)
+    getThreadBinding(sseAbortRef).submissionGeneration += 1
+    expect(receipt.isCurrent()).toBe(false)
+    sseAbortRef.current?.abort()
+  })
+
+  it('keeps a real selection receipt current after normal EOF retires its shared binding controller', async () => {
+    let closeStream!: () => void
+    const provider = {
+      getThreadDetail: vi.fn(async () => ({ blocks: [], latestSeq: 7, threadStatus: 'idle' })),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(resolve => { closeStream = resolve }))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    let receipt!: ThreadSelectionReceipt
+    try {
+      await actions.selectThread('thr_existing', { onSelected: selected => { receipt = selected } })
+      const controller = sseAbortRef.current!
+      const binding = getThreadBinding(sseAbortRef), generation = binding.generation
+      expect(receipt.isCurrent()).toBe(true)
+      closeStream()
+      await waitForAssertion(() => expect(sseAbortRef.current).toBeNull())
+      expect(controller.signal.aborted).toBe(true)
+      expect(getThreadBinding(sseAbortRef)).toBe(binding)
+      expect(binding.naturallyRetired.has(controller)).toBe(true)
+      expect(binding.generation).toBe(generation)
+      expect(state.activeThreadId).toBe('thr_existing')
+      expect(receipt.isCurrent()).toBe(true)
+    } finally { sseAbortRef.current?.abort(); closeStream?.() }
+  })
+
+  it('rejects a replaced selection receipt when its old stream later reaches EOF', async () => {
+    const closeStreams = new Map<string, () => void>()
+    const provider = {
+      getThreadDetail: vi.fn(async () => ({ blocks: [], latestSeq: 7, threadStatus: 'idle' })),
+      subscribeThreadEvents: vi.fn((threadId: string) => new Promise<void>(resolve => { closeStreams.set(threadId, resolve) }))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    let replaced!: ThreadSelectionReceipt, current!: ThreadSelectionReceipt
+    try {
+      await actions.selectThread('thr_existing', { onSelected: selected => { replaced = selected } })
+      const oldController = sseAbortRef.current!
+      await actions.selectThread('thr_next', { onSelected: selected => { current = selected } })
+      const newController = sseAbortRef.current
+      expect(oldController.signal.aborted).toBe(true)
+      expect(replaced.isCurrent()).toBe(false)
+      closeStreams.get('thr_existing')!()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(getThreadBinding(sseAbortRef).naturallyRetired.has(oldController)).toBe(false)
+      expect(sseAbortRef.current).toBe(newController)
+      expect(state.activeThreadId).toBe('thr_next')
+      expect(replaced.isCurrent()).toBe(false)
+      expect(current.isCurrent()).toBe(true)
+    } finally { sseAbortRef.current?.abort(); for (const close of closeStreams.values()) close() }
+  })
+
+  it('preserves a failed selection error and emits no receipt for the still-active thread', async () => {
+    const failure = new Error('Synthetic target selection failed')
+    const provider = {
+      getThreadDetail: vi.fn(async () => { throw failure }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    const onSelected = vi.fn()
+    await actions.selectThread('thr_failed_target', { onSelected })
+    expect(onSelected).not.toHaveBeenCalled()
+    expect(state.activeThreadId).toBe('thr_existing')
+    expect(state.error).toBe(formatRuntimeError(failure))
+    expect(provider.subscribeThreadEvents).not.toHaveBeenCalled()
+  })
+
+  it('retires an earlier selection receipt across A to B to A and withholds the late B receipt', async () => {
+    type Detail = { blocks: ChatBlock[]; latestSeq: number; threadStatus: string }
+    let resolveB!: (detail: Detail) => void
+    const provider = {
+      getThreadDetail: vi.fn()
+        .mockResolvedValueOnce({ blocks: [{ kind: 'user', id: 'first-a', text: 'First A' }], latestSeq: 7, threadStatus: 'idle' })
+        .mockImplementationOnce(() => new Promise<Detail>(resolve => { resolveB = resolve }))
+        .mockResolvedValueOnce({ blocks: [{ kind: 'user', id: 'current-a', text: 'Current A' }], latestSeq: 20, threadStatus: 'idle' }),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    let firstA!: ThreadSelectionReceipt, currentA!: ThreadSelectionReceipt
+    await actions.selectThread('thr_existing', { onSelected: receipt => { firstA = receipt } })
+    expect(firstA.isCurrent()).toBe(true)
+    const onLateB = vi.fn()
+    const lateB = actions.selectThread('thr_next', { onSelected: onLateB })
+    await waitForAssertion(() => expect(provider.getThreadDetail).toHaveBeenCalledTimes(2))
+    expect(firstA.isCurrent()).toBe(false)
+    await actions.selectThread('thr_existing', { onSelected: receipt => { currentA = receipt } })
+    expect(currentA.isCurrent()).toBe(true)
+    expect(firstA.isCurrent()).toBe(false)
+    resolveB({ blocks: [{ kind: 'user', id: 'late-b', text: 'Late B' }], latestSeq: 10, threadStatus: 'idle' })
+    await lateB
+    expect(onLateB).not.toHaveBeenCalled()
+    expect(state.activeThreadId).toBe('thr_existing')
+    expect(state.blocks.map(block => block.id)).toEqual(['current-a'])
+    expect(state.lastSeq).toBe(20)
+    expect(currentA.isCurrent()).toBe(true)
+    expect(firstA.isCurrent()).toBe(false)
+    expect(provider.subscribeThreadEvents).toHaveBeenCalledTimes(2)
+    sseAbortRef.current?.abort()
+  })
+
   it('restores missing registered-thread metadata together with its history', async () => {
     const restored = { ...thread('thr_restored'), title: 'Restored SDD', workspace: '/Users/synthetic/plan-workspace', historyAuthority: 'case_boundary_only_v1' as const }
     const blocks = [{ kind: 'user' as const, id: 'restored-user', text: 'Synthetic request' }]
@@ -1493,6 +1726,94 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(state.threads).toEqual([other, restored])
     expect(state.blocks).toMatchObject(blocks)
     expect(state.lastSeq).toBe(7)
+  })
+
+  it('keeps Goal/history with the detail cursor and refreshes activation on the actual live attach signal', async () => {
+    const timestamp = '2026-10-11T00:00:00Z'
+    const recorded: ThreadGoal = { threadId: 'thr_existing', id: 'goal-current', revision: 2, objective: 'Recorded objective', status: 'paused', maxGoalRounds: 8, roundsStarted: 1, tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: null, createdAt: timestamp, updatedAt: timestamp }
+    const pause: Extract<ChatBlock, { kind: 'goal' }> = { kind: 'goal', id: 'recorded-pause', operation: 'pause', goal: recorded }
+    const current = { ...recorded, revision: 3, status: 'active' as const, roundsStarted: 2 }
+    const round: Extract<ChatBlock, { kind: 'goal' }> = { kind: 'goal', id: 'recorded-round', operation: 'round_started', goal: current }
+    let attached = false
+    const getGoalState = vi.fn(async () => attached
+      ? { goal: current, activation: { id: current.id!, revision: 3, activation: 'armed' as const }, historyBlocks: [pause, round] }
+      : { goal: { ...recorded, revision: 1, status: 'active' as const }, activation: { id: current.id!, revision: 1, activation: 'armed' as const }, historyBlocks: [] })
+    let sink!: ThreadEventSink
+    const provider = {
+      getThreadGoalState: getGoalState,
+      getThreadDetail: vi.fn(async () => ({ blocks: [pause], latestSeq: 20, threadStatus: 'idle', goal: recorded })),
+      subscribeThreadEvents: vi.fn((_id: string, _seq: number, next: ThreadEventSink) => { sink = next; return new Promise<void>(() => undefined) })
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    state.composerPickList = []; state.composerModelGroups = []
+    await actions.selectThread('thr_existing')
+    expect(getGoalState).not.toHaveBeenCalled()
+    expect(state.lastSeq).toBe(20)
+    expect(state.activeThreadGoal).toEqual(recorded)
+    expect(state.activeGoalActivation).toBeNull()
+    expect(state.blocks).toContainEqual(pause)
+    expect(provider.subscribeThreadEvents).toHaveBeenCalledWith('thr_existing', 20, expect.anything(), expect.anything())
+    attached = true
+    sink.onGoalActivation?.({ threadId: 'thr_existing', activation: { id: current.id!, revision: 3, activation: 'armed' } })
+    await waitForAssertion(() => expect(state.activeThreadGoal).toEqual(current))
+    expect(getGoalState).toHaveBeenCalledExactlyOnceWith('thr_existing')
+    expect(state.activeGoalActivation?.activation).toBe('armed')
+    expect(state.blocks.filter(block => block.kind === 'goal')).toEqual([pause, round])
+    sseAbortRef.current?.abort()
+  })
+
+  it.each([['same-thread', 'ready'], ['different-thread', 'ready'], ['same-thread', 'offline'], ['different-thread', 'offline']] as const)('keeps the latest selection when a previous %s detail resolves later while %s', async (choice, runtimeConnection) => {
+    type Detail = { blocks: Array<{ kind: 'user'; id: string; text: string }>; latestSeq: number; threadStatus: string }
+    let oldResolve!: (detail: Detail) => void
+    let newResolve!: (detail: Detail) => void
+    const provider = {
+      connect: vi.fn(async () => undefined),
+      getThreadDetail: vi.fn().mockImplementationOnce(() => new Promise<Detail>(resolve => { oldResolve = resolve }))
+        .mockImplementationOnce(() => new Promise<Detail>(resolve => { newResolve = resolve })),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    state.runtimeConnection = runtimeConnection
+    state.composerPickList = []; state.composerModelGroups = []
+    const nextId = choice === 'same-thread' ? 'thr_existing' : 'thr_next'
+    const old = actions.selectThread('thr_existing')
+    await waitForAssertion(() => expect(provider.getThreadDetail).toHaveBeenCalledTimes(1))
+    const next = actions.selectThread(nextId)
+    await waitForAssertion(() => expect(provider.getThreadDetail).toHaveBeenCalledTimes(2))
+    newResolve({ blocks: [{ kind: 'user', id: 'new', text: 'latest' }], latestSeq: 20, threadStatus: 'idle' })
+    await next
+    expect(state.error).toBeNull()
+    const currentBlocks = state.blocks, currentController = sseAbortRef.current
+    oldResolve({ blocks: [{ kind: 'user', id: 'old', text: 'obsolete' }], latestSeq: 10, threadStatus: 'running' })
+    await old
+    expect(state.activeThreadId).toBe(nextId); expect(state.lastSeq).toBe(20); expect(state.busy).toBe(false)
+    expect(state.blocks).toBe(currentBlocks); expect(sseAbortRef.current).toBe(currentController)
+    expect(provider.subscribeThreadEvents).toHaveBeenCalledTimes(1)
+    sseAbortRef.current?.abort()
+  })
+
+  it('does not overwrite same-thread live progress with a delayed selection detail', async () => {
+    type Detail = { blocks: Array<{ kind: 'user'; id: string; text: string }>; latestSeq: number; threadStatus: string }
+    let resolve!: (detail: Detail) => void
+    const provider = {
+      getThreadDetail: vi.fn(() => new Promise<Detail>(done => { resolve = done })),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    const pending = actions.selectThread('thr_existing')
+    await waitForAssertion(() => expect(provider.getThreadDetail).toHaveBeenCalledTimes(1))
+    const sink = buildThreadEventSink(update => Object.assign(state, typeof update === 'function' ? update(state) : update), () => state,
+      { threadId: 'thr_existing' })
+    sink.onUserMessage({ itemId: 'live-user', text: 'live', turnId: 'live-turn' })
+    sink.onTurnStarted?.({ turnId: 'live-turn', seq: 100 }); sink.onSeq(100)
+    const blocks = state.blocks
+    resolve({ blocks: [], latestSeq: 99, threadStatus: 'idle' })
+    await pending
+    expect(state.lastSeq).toBe(100); expect(state.blocks).toBe(blocks); expect(state.busy).toBe(true)
+    expect(provider.subscribeThreadEvents).not.toHaveBeenCalled()
   })
 
   it('refuses mismatched detail metadata without adopting its history', async () => {
@@ -1750,7 +2071,7 @@ describe('chat-store-thread-actions queued messages', () => {
     state.currentTurnId = 'turn_case'
     state.currentTurnUserId = 'user_case'
     state.lastSeq = 7
-    state.queuedMessages = [{ id: 'queued_case', text: 'next request' }]
+    state.queuedMessages = [{ threadId: 'thr_existing', id: 'queued_case', text: 'next request' }]
 
     await expect(actions.recoverActiveTurn()).resolves.toBe(false)
 
@@ -1761,7 +2082,7 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(state.currentTurnId).toBe('turn_case')
     expect(state.currentTurnUserId).toBe('user_case')
     expect(state.error).toBe(i18n.t('common:runtimeFinalSnapshotUnavailable'))
-    expect(state.queuedMessagesPausedReason).toBe('failed')
+    expect(queuedPauseReason(state)).toBe('failed')
     expect(state.drainQueuedMessages).not.toHaveBeenCalled()
   })
 
@@ -2030,7 +2351,7 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(provider.createThread).toHaveBeenCalledWith(expect.objectContaining({
       workspace: '/workspace/analytix-worktrees/pool-1'
     }))
-    expect(state.selectThread).toHaveBeenCalledWith('thr_worktree')
+    expect(state.selectThread).toHaveBeenCalledExactlyOnceWith('thr_worktree', { onSelected: expect.any(Function) })
     expect(readThreadWorktreeRegistry(localStorage).worktrees.thr_worktree).toMatchObject({
       projectPath: '/workspace/analytix',
       poolIndex: 1,
@@ -2084,7 +2405,7 @@ describe('chat-store-thread-actions queued messages', () => {
       currentTurnUserId: 'user-1',
       liveAssistant: 'partial',
       lastSeq: 19,
-      queuedMessages: [{ id: 'queued-1', text: 'follow-up' }],
+      queuedMessages: [{ threadId: 'thr_existing', id: 'queued-1', text: 'follow-up' }],
       watchTurnCompletion: { thr_other: true },
       workspaceRoot: '/workspace/old'
     })
@@ -2104,7 +2425,8 @@ describe('chat-store-thread-actions queued messages', () => {
     expect(state.liveAssistant).toBe('')
     expect('liveReasoning' in state).toBe(false)
     expect(state.lastSeq).toBe(0)
-    expect(state.queuedMessages).toEqual([])
+    expect(state.queuedMessages).toEqual([{ threadId: 'thr_existing', id: 'queued-1', text: 'follow-up' }])
+    expect(queuedMessagesForThread(state)).toEqual([])
     expect(state.watchTurnCompletion).toEqual({ thr_other: true, thr_existing: true })
     expect(state.workspaceRoot).toBe('/workspace/analytix')
     expect(state.route).toBe('chat')
@@ -2345,4 +2667,936 @@ describe('send receipt acknowledgement and housekeeping', () => {
     } else expect(state).toMatchObject({ busy: false, currentTurnId: null, currentTurnUserId: null })
     sseAbortRef.current?.abort()
   })
+})
+
+
+describe('real edit resend to runtime request boundary', () => {
+  beforeEach(() => { rendererRuntimeClient.invalidateSettings(); vi.stubGlobal('localStorage', memoryStorage()) })
+  afterEach(() => { clearActiveStream(); rendererRuntimeClient.invalidateSettings(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  function combinedHarness() {
+    const { actions, state, sseAbortRef } = buildHarness()
+    const id = `att_${'c'.repeat(24)}`
+    const metadata = { id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2,
+      scope: 'thread', createdAt: '2026-10-05', updatedAt: '2026-10-05' }
+    Object.assign(state, { busy: false, workspaceRoot: '/workspace/analytix', composerDrafts: {},
+      blocks: [{ kind: 'user', id: 'old_user', text: 'old text', meta: { turnId: 'old_turn', attachmentIds: [id],
+        attachments: [{ ...metadata, documentText: 'PRIVATE_TEXT', previewUrl: 'PRIVATE_URL' }],
+        fileReferences: [{ path: '/workspace/analytix/fixture.txt', relativePath: 'fixture.txt', name: 'fixture.txt', kind: 'file' }] } }] })
+    state.updateComposerDraft = (key, update) => { state.composerDrafts = { ...state.composerDrafts,
+      [key]: update(state.composerDrafts[key] ?? emptyComposerDraft) } }
+    const runtimeRequest = vi.fn(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: metadata }) }
+      if (path.endsWith('/rewind')) return { ok: true, status: 200, body: JSON.stringify({ ok: true }) }
+      if (path.endsWith('/turns')) return { ok: true, status: 202, body: JSON.stringify({ threadId: 'thr_existing', turnId: 'new_turn', userMessageItemId: 'new_user' }) }
+      throw new Error('unexpected fixture route')
+    })
+    vi.stubGlobal('window', { analytix: { runtime: { runtimeRequest }, logs: { error: vi.fn(async () => undefined) } } })
+    const settings = { workspaceRoot: '/workspace/analytix', runtime: defaultAnalytixRuntimeSettings(), codePromptPrefix: '' } as AppSettingsV1
+    const getSettings = vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue(settings)
+    const adapter = new AnalytixRuntimeProvider()
+    const provider = { getAttachmentMetadata: adapter.getAttachmentMetadata.bind(adapter),
+      rewindThread: vi.fn(async (_threadId: string, _turnId: string): Promise<unknown> => undefined), sendUserMessage: vi.fn(adapter.sendUserMessage.bind(adapter)),
+      subscribeThreadEvents: vi.fn((_threadId: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) => new Promise<void>(() => undefined)) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const set: ChatStoreSet = partial => Object.assign(state, typeof partial === 'function' ? partial(state) : partial)
+    const maintenance = createMaintenanceActions({ set, get: () => state, sseAbortRef })
+    return { actions, maintenance, state, sseAbortRef, provider, runtimeRequest, getSettings, settings, id }
+  }
+
+  it('keeps the closed edit payload for a postcommit canonical 404 without rewind SSE', async () => {
+    const h = combinedHarness()
+    // The audit supplies this packet from the actual durable Go owner/HTTP
+    // fault fixture. Ordinary CI also exercises the identical public contract.
+    const fixture = inject('auditRewindFailure') ?? {
+      ok: false, status: 404, primaryCommitted: true, rewindSSE: false,
+      body: JSON.stringify({ code: 'not_found', message: 'The requested resource was not found.' })
+    }
+    expect(fixture).toMatchObject({ ok: false, status: 404, primaryCommitted: true, rewindSSE: false })
+    const failure = { ok: false, status: fixture.status,
+      body: JSON.stringify(projectPublicRuntimeHTTPError(fixture.status, JSON.parse(fixture.body))) }
+    const originalRequest = h.runtimeRequest.getMockImplementation()!
+    h.runtimeRequest.mockImplementation(async path => path.endsWith('/rewind') ? failure : originalRequest(path))
+    const adapter = new AnalytixRuntimeProvider()
+    h.provider.rewindThread.mockImplementation(adapter.rewindThread.bind(adapter))
+    await h.maintenance.rewindAndResend('old_user', 'edited after postcommit 404')
+    expect(h.state.blocks[0].id).toBe('old_user')
+    expect(h.runtimeRequest.mock.calls.filter(call => call[0].endsWith('/rewind'))).toHaveLength(1)
+    expect(h.runtimeRequest.mock.calls.some(call => call[0].endsWith('/turns'))).toBe(false)
+    expect(h.provider.sendUserMessage).not.toHaveBeenCalled()
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft?.input).toBe('edited after postcommit 404')
+    expect(draft.attachments.map(item => item.id)).toEqual([h.id])
+    expect(draft.fileReferences[0].name).toBe('fixture.txt')
+    expect(h.state.error).toBe(i18n.t('common:rewindResendOutcomeUnknown'))
+    expect(JSON.stringify(draft)).not.toMatch(/PRIVATE_TEXT|PRIVATE_URL/)
+  })
+
+  it('keeps attachment IDs and safe display metadata through optimistic state, the actual POST and acknowledgement', async () => {
+    const h = combinedHarness()
+    await h.maintenance.rewindAndResend('old_user', 'edited text')
+    expect(h.provider.sendUserMessage).toHaveBeenCalledTimes(1)
+    const post = h.runtimeRequest.mock.calls.find(call => call[0].endsWith('/turns'))!
+    expect(post).toBeDefined()
+    const body = JSON.parse((post as unknown as [string, string, string])[2])
+    expect(body.attachmentIds).toEqual([h.id]); expect(body.fileReferences).toEqual([
+      { path: '/workspace/analytix/fixture.txt', relativePath: 'fixture.txt', name: 'fixture.txt', kind: 'file' }
+    ])
+    expect(body).not.toHaveProperty('submissionIsCurrent')
+    expect(body).not.toHaveProperty('attachments')
+    const block = h.state.blocks.find(block => block.id === 'new_user')!
+    expect(block.kind).toBe('user')
+    if (block.kind !== 'user') throw new Error('Expected acknowledged user message')
+    expect(block.meta?.attachmentIds).toEqual([h.id])
+    expect(block.meta?.attachments?.[0].id).toBe(h.id)
+    expect(block.meta?.turnId).toBe('new_turn')
+    for (const token of ['PRIVATE_TEXT', 'PRIVATE_URL']) expect(JSON.stringify({ body, block })).not.toContain(token)
+    expect(h.state.composerDrafts).toEqual({})
+  })
+
+  it.each(['A-B-A', 'disconnect'])('blocks the actual POST after adapter second-settings await when %s revokes ownership', async change => {
+    const h = combinedHarness()
+    let release!: (settings: AppSettingsV1) => void
+    const settingsWait = new Promise<AppSettingsV1>(resolve => { release = resolve })
+    h.getSettings.mockResolvedValueOnce(h.settings).mockReturnValueOnce(settingsWait)
+    const pending = h.maintenance.rewindAndResend('old_user', 'edited text')
+    await waitForAssertion(() => expect(h.getSettings).toHaveBeenCalledTimes(2))
+    if (change === 'A-B-A') {
+      h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation++
+      h.state.activeThreadId = 'thr_existing'; getThreadBinding(h.sseAbortRef).generation++
+      h.state.blocks = [{ kind: 'assistant', id: 'fresh-view', text: 'keep' }]
+      h.state.busy = false; h.state.currentTurnId = null; h.state.currentTurnUserId = null
+      h.state.error = 'fresh error'
+    } else h.state.runtimeConnection = 'offline'
+    release(h.settings); await pending
+    expect(h.runtimeRequest.mock.calls.filter(call => call[0].endsWith('/turns'))).toEqual([])
+    if (change === 'A-B-A') { expect(h.state.blocks[0].id).toBe('fresh-view'); expect(h.state.error).toBe('fresh error') }
+    expect(h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')].input).toBe('edited text')
+  })
+
+  it.each([{ phase: 'started', refresh: 'normal' }, { phase: 'terminal', refresh: 'normal' }, { phase: 'started', refresh: 'reject' }, { phase: 'started', refresh: 'pending' }])('recovers durable acceptance after its own $phase SSE despite $refresh refresh', async ({ phase, refresh }) => {
+    const h = combinedHarness()
+    let failPost!: () => void
+    h.runtimeRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: {
+        id: h.id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2, scope: 'thread', createdAt: '', updatedAt: '' } }) }
+      await new Promise<void>(resolve => { failPost = resolve })
+      return { ok: false, status: 503, body: JSON.stringify({ code: 'runtime_request_failed', message: 'bounded fixture transport failure' }) }
+    })
+    const pending = h.maintenance.rewindAndResend('old_user', 'edited text')
+    await waitForAssertion(() => expect(h.runtimeRequest.mock.calls.some(call => call[0].endsWith('/turns'))).toBe(true))
+    const sink = h.provider.subscribeThreadEvents.mock.calls[0][2]
+    expect(sink.onTurnStarted).toBeTypeOf('function')
+    sink.onTurnStarted!({ threadId: 'thr_existing', turnId: 'new_turn', seq: 1, createdAt: '2026-10-05T00:00:00Z' })
+    if (phase === 'terminal') await sink.onTurnComplete({ threadId: 'thr_existing', turnId: 'new_turn', seq: 2 })
+    const controller = h.sseAbortRef.current
+    const generation = getThreadBinding(h.sseAbortRef).generation
+    h.state.recoverActiveTurn = vi.fn(async () => {
+      h.state.blocks = [{ kind: 'user', id: 'accepted_user', text: 'edited text', meta: { turnId: 'new_turn', attachmentIds: [h.id] } }]
+      h.state.busy = false
+      return false
+    })
+    if (refresh === 'reject') h.state.refreshThreads = vi.fn(async () => { throw new Error('bounded synthetic sidebar failure') })
+    if (refresh === 'pending') h.state.refreshThreads = vi.fn(() => new Promise<void>(() => undefined))
+    failPost()
+    const completed = await Promise.race([pending.then(() => true), new Promise<boolean>(resolve => setTimeout(() => resolve(false), 50))])
+    expect(completed).toBe(true)
+    expect(h.state.recoverActiveTurn).toHaveBeenCalledTimes(1)
+    expect(h.state.blocks[0].id).toBe('accepted_user')
+    expect(h.state.composerDrafts).toEqual({})
+    expect(controller?.signal.aborted).toBe(false)
+    expect(getThreadBinding(h.sseAbortRef).generation).toBe(generation)
+    expect(h.provider.sendUserMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([false, true])('does not restore a checkpoint after another normal send reuses a healthy subscription (completed=%s)', async completed => {
+    const h = combinedHarness()
+    const original = h.provider.getAttachmentMetadata
+    let release!: () => void
+    const validation = new Promise<void>(resolve => { release = resolve })
+    vi.spyOn(h.provider, 'getAttachmentMetadata').mockImplementation(async (...args) => { await validation; return original(...args) })
+    const restoreGitCheckpoint = vi.fn(async () => ({ ok: true }))
+    Object.assign(window.analytix, { workspace: { restoreGitCheckpoint } })
+    const old = h.state.blocks[0]
+    if (old.kind !== 'user') throw new Error('Expected original user')
+    old.meta = { ...old.meta, workspaceCheckpointId: 'gcp_fixture' }
+    h.sseAbortRef.current = new AbortController()
+    const generation = getThreadBinding(h.sseAbortRef).generation
+    const edit = h.maintenance.rewindAndResend('old_user', 'edited text')
+    await expect(h.actions.sendMessage('concurrent ordinary message')).resolves.toBe(true)
+    expect(getThreadBinding(h.sseAbortRef).generation).toBe(generation)
+    if (completed) {
+      Object.assign(h.provider, { getThreadDetail: vi.fn(async () => ({ blocks: h.state.blocks, latestSeq: 2, threadStatus: 'completed', latestTurnId: 'new_turn' })) })
+      const sink = buildThreadEventSink(partial => Object.assign(h.state, typeof partial === 'function' ? partial(h.state) : partial), () => h.state, { threadId: 'thr_existing', signal: h.sseAbortRef.current!.signal })
+      await sink.onTurnComplete({ threadId: 'thr_existing', turnId: 'new_turn', seq: 2 })
+      expect(h.state.busy).toBe(false)
+    }
+    release(); await edit
+    expect(restoreGitCheckpoint).not.toHaveBeenCalled(); expect(h.provider.rewindThread).not.toHaveBeenCalled()
+    expect(h.provider.sendUserMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not overwrite a fresh A-B-A idle view after lost-ACK recovery returns', async () => {
+    const h = combinedHarness()
+    h.runtimeRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: {
+        id: h.id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2, scope: 'thread', createdAt: '', updatedAt: '' } }) }
+      return { ok: false, status: 503, body: JSON.stringify({ code: 'runtime_request_failed', message: 'bounded fixture transport failure' }) }
+    })
+    let finishRecovery!: () => void
+    h.state.recoverActiveTurn = vi.fn(() => {
+      getThreadBinding(h.sseAbortRef).generation++
+      return new Promise<boolean>(resolve => { finishRecovery = () => resolve(false) })
+    })
+    const pending = h.maintenance.rewindAndResend('old_user', 'edited text')
+    await waitForAssertion(() => expect(h.state.recoverActiveTurn).toHaveBeenCalledTimes(1))
+    h.state.activeThreadId = 'thr_other'; getThreadBinding(h.sseAbortRef).generation++
+    h.state.activeThreadId = 'thr_existing'; getThreadBinding(h.sseAbortRef).generation++
+    h.state.blocks = [{ kind: 'assistant', id: 'fresh-idle', text: 'keep' }]
+    h.state.busy = false; h.state.error = null
+    finishRecovery(); await pending
+    expect(h.state.blocks[0].id).toBe('fresh-idle'); expect(h.state.error).toBeNull()
+  })
+
+  it('keeps the original editable payload after coded transport failure advances the send binding without confirming acceptance', async () => {
+    const h = combinedHarness()
+    h.runtimeRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: {
+        id: h.id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2, scope: 'thread', createdAt: '', updatedAt: '' } }) }
+      return { ok: false, status: 503, body: JSON.stringify({ code: 'runtime_request_failed', message: 'bounded fixture transport failure' }) }
+    })
+    const startingGeneration = getThreadBinding(h.sseAbortRef).generation
+    await h.maintenance.rewindAndResend('old_user', 'edited text')
+    expect(getThreadBinding(h.sseAbortRef).generation).toBeGreaterThan(startingGeneration + 1)
+    expect(h.state.recoverActiveTurn).toHaveBeenCalledTimes(1)
+    expect(h.state.blocks).toEqual([])
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft?.input).toBe('edited text'); expect(draft.attachments[0].id).toBe(h.id)
+  })
+
+  it('recovers a retryable draft after the actual POST fails without rebuilding removed canonical history', async () => {
+    const h = combinedHarness()
+    h.runtimeRequest.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/attachments/')) return { ok: true, status: 200, body: JSON.stringify({ attachment: {
+        id: h.id, name: 'fixture.png', kind: 'image', mimeType: 'image/png', byteSize: 2, scope: 'thread', createdAt: '', updatedAt: '' } }) }
+      throw new Error('bounded synthetic send failure')
+    })
+    await h.maintenance.rewindAndResend('old_user', 'edited text')
+    expect(h.state.blocks).toEqual([])
+    const draft = h.state.composerDrafts[composerDraftKey('/workspace/analytix', 'thr_existing')]
+    expect(draft.input).toBe('edited text'); expect(draft.attachments[0].id).toBe(h.id)
+    expect(h.state.error).toBe(i18n.t('common:rewindResendFailed'))
+  })
+})
+
+
+describe('thread-owned Queue public action boundaries', () => {
+  type Receipt = { threadId: string; turnId: string; userMessageItemId: string }
+  const pendingReceipt = () => {
+    let resolve!: (value: Receipt) => void
+    let reject!: (reason: Error) => void
+    const promise = new Promise<Receipt>((accept, decline) => { resolve = accept; reject = decline })
+    return { promise, resolve, reject }
+  }
+  const installBridge = () => vi.stubGlobal('window', { analytix: {
+    settings: { getSettings: vi.fn(async () => ({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' })) },
+    logs: { error: vi.fn(async () => undefined) }
+  } })
+  const navigationProvider = (a: NormalizedThread, b: NormalizedThread) => ({
+    getThreadDetail: vi.fn(async (id: string) => ({ thread: id === a.id ? a : b, blocks: [], latestSeq: 20,
+      threadStatus: 'idle', turnDurationByUserId: {} })),
+    subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined))
+  })
+  beforeEach(() => {
+    rendererRuntimeClient.invalidateSettings()
+    registryMock.getProvider.mockReset()
+    vi.stubGlobal('localStorage', memoryStorage())
+    installBridge()
+  })
+  afterEach(() => {
+    clearActiveStream(); clearBusyWatchdog(); clearWatchedCompletionNotifications()
+    rendererRuntimeClient.invalidateSettings(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  })
+
+  it('automatically sends the queued file follow-up when the completed stream ends during its preflight', async () => {
+    let closeInitial!: () => void
+    const initialStream = new Promise<void>(resolve => { closeInitial = resolve })
+    const provider = {
+      subscribeThreadEvents: vi.fn((_id: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) =>
+        new Promise<void>(() => undefined)).mockImplementationOnce(() => initialStream),
+      getThreadDetail: vi.fn(async () => ({ blocks: [], latestSeq: 22, threadStatus: 'idle' })),
+      sendUserMessage: vi.fn(async (_id: string, _text: string, _options?: unknown) => ({ threadId: 'thr_existing', turnId: 'turn_followup', userMessageItemId: 'user_followup' }))
+        .mockResolvedValueOnce({ threadId: 'thr_existing', turnId: 'turn_initial', userMessageItemId: 'user_initial' })
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    const drain = vi.fn(actions.drainQueuedMessages)
+    Object.assign(state, { busy: false, error: null, drainQueuedMessages: drain,
+      recoverActiveTurn: vi.fn(actions.recoverActiveTurn) })
+    let releaseSettings!: (settings: AppSettingsV1) => void
+    try {
+      await expect(actions.sendMessage('initial synthetic request', 'agent')).resolves.toBe(true)
+      const initialController = sseAbortRef.current!
+      const initialSink = provider.subscribeThreadEvents.mock.calls[0][2]
+      initialSink.onSeq(19)
+      const fileReferences = [{ path: '/workspace/queue-fixture.txt', relativePath: 'queue-fixture.txt', name: 'queue-fixture.txt', kind: 'file' as const }]
+      await expect(actions.sendMessage('queued synthetic follow-up', 'agent', { fileReferences })).resolves.toBe(true)
+      const draft = state.queuedMessages[0]
+      const settings = new Promise<AppSettingsV1>(resolve => { releaseSettings = resolve })
+      vi.spyOn(rendererRuntimeClient, 'getSettings').mockReturnValueOnce(settings)
+      await initialSink.onGeneralTerminalBatch?.({ batchDigest: 'a'.repeat(64), threadId: 'thr_existing',
+        turnId: 'turn_initial', firstSeq: 20, lastSeq: 22,
+        terminalItem: { kind: 'assistant', id: 'initial_final', text: 'Synthetic initial final.', meta: { turnId: 'turn_initial' } },
+        usage: { inputTokens: 2, outputTokens: 1, reasoningTokens: 0, cachedTokens: 0, cacheMissTokens: 0,
+          cacheHitRate: null, totalTokens: 3, costUsd: 0, costCny: 0, priceConfigured: false, tokenEconomySavingsTokens: 0, turns: 1 },
+        terminal: { status: 'completed', createdAt: '2026-10-14T01:08:55Z', terminalReason: 'success' } })
+      expect(drain).toHaveBeenCalledOnce()
+      expect(state.queuedMessages[0]).toMatchObject({ id: draft.id, sending: true })
+      expect(isPendingActiveStreamTurnId(state.currentTurnId)).toBe(true)
+      closeInitial()
+      await waitForAssertion(() => expect(initialController.signal.aborted).toBe(true))
+      releaseSettings({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' } as AppSettingsV1)
+      await drain.mock.results[0].value
+
+      expect(state.recoverActiveTurn).not.toHaveBeenCalled()
+      expect(provider.sendUserMessage).toHaveBeenCalledTimes(2)
+      expect(provider.sendUserMessage.mock.calls[1]).toEqual(['thr_existing', 'queued synthetic follow-up',
+        expect.objectContaining({ fileReferences, submissionIsCurrent: expect.any(Function) })])
+      expect(state.queuedMessages).toEqual([])
+      expect(queuedPauseReason(state)).toBeNull()
+      expect(state.currentTurnId).toBe('turn_followup')
+      expect(state.blocks).toContainEqual(expect.objectContaining({ id: 'initial_final', text: 'Synthetic initial final.' }))
+      expect(provider.subscribeThreadEvents).toHaveBeenCalledTimes(2)
+      expect(provider.subscribeThreadEvents.mock.calls[1][1]).toBe(22)
+      expect(sseAbortRef.current?.signal.aborted).toBe(false)
+    } finally { closeInitial(); sseAbortRef.current?.abort() }
+  })
+
+  it.each(['same pending submission', 'later stable turn'] as const)('still recovers EOF for the %s', async phase => {
+    let closeStream!: () => void
+    const stream = new Promise<void>(resolve => { closeStream = resolve })
+    const provider = {
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined)).mockImplementationOnce(() => stream),
+      sendUserMessage: vi.fn(async () => ({ threadId: 'thr_existing', turnId: 'turn_stable', userMessageItemId: 'user_stable' }))
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    Object.assign(state, { busy: false, error: null })
+    let releaseSettings!: (settings: AppSettingsV1) => void
+    try {
+      if (phase === 'later stable turn') {
+        await actions.sendMessage('previous synthetic turn', 'agent')
+        Object.assign(state, { busy: false, currentTurnId: null, currentTurnUserId: null })
+      } else {
+        vi.spyOn(rendererRuntimeClient, 'getSettings').mockReturnValueOnce(new Promise<AppSettingsV1>(resolve => {
+          releaseSettings = resolve
+        }))
+      }
+      const send = actions.sendMessage('current synthetic turn', 'agent')
+      if (phase === 'later stable turn') {
+        await send
+        expect(state.currentTurnId).toBe('turn_stable')
+      } else expect(isPendingActiveStreamTurnId(state.currentTurnId)).toBe(true)
+      closeStream()
+      await waitForAssertion(() => expect(state.recoverActiveTurn).toHaveBeenCalledOnce())
+      if (phase === 'same pending submission') {
+        releaseSettings({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' } as AppSettingsV1)
+        await send
+      }
+    } finally { closeStream(); sseAbortRef.current?.abort() }
+  })
+
+  it('retains actual enqueue owners, metadata and pauses through A-B-A and a live rebind', async () => {
+    const a = thread('thr_queue_a'), b = thread('thr_queue_b')
+    const provider = { ...navigationProvider(a, b), sendUserMessage: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    Object.assign(state, { activeThreadId: a.id, threads: [a, b], busy: true })
+    state.drainQueuedMessages = actions.drainQueuedMessages
+    try {
+      await expect(actions.sendMessage('same follow-up', 'agent', { model: 'deepseek-v4-pro', providerId: 'deepseek',
+        reasoningEffort: 'high', displayText: 'first visible draft', attachmentIds: ['att-1'],
+        fileReferences: [{ path: '/workspace/fixture/a.ts', relativePath: 'a.ts', name: 'a.ts', kind: 'file' }] })).resolves.toBe(true)
+      const first = queuedMessagesForThread(state, a.id)[0]
+      actions.setQueuedMessagesPausedReason('failed', a.id)
+      await actions.selectThread(b.id)
+      state.busy = true
+      await expect(actions.sendMessage('same follow-up', 'agent')).resolves.toBe(true)
+      const second = queuedMessagesForThread(state, b.id)[0]
+      actions.setQueuedMessagesPausedReason('interrupted', b.id)
+      await actions.selectThread(a.id)
+      await actions.subscribeThreadEventsLive(a.id)
+      expect(queuedMessagesForThread(state)).toEqual([first])
+      expect(queuedMessagesForThread(state, b.id)).toEqual([second])
+      expect(first).toMatchObject({ threadId: a.id, text: 'same follow-up', displayText: 'first visible draft',
+        model: 'deepseek-v4-pro', providerId: 'deepseek', reasoningEffort: 'high', attachmentIds: ['att-1'],
+        fileReferences: [expect.objectContaining({ relativePath: 'a.ts' })] })
+      expect(first.id).not.toBe(second.id)
+      expect(state.queuedMessagePauses).toEqual({ [a.id]: 'failed', [b.id]: 'interrupted' })
+      actions.editQueuedMessage(b.id, second.id, 'stale edit')
+      actions.removeQueuedMessage(b.id, second.id)
+      await expect(actions.sendQueuedMessageNow(b.id, second.id)).resolves.toBe(false)
+      expect(queuedMessagesForThread(state, b.id)).toEqual([second])
+      expect(provider.sendUserMessage).not.toHaveBeenCalled()
+    } finally { sseAbortRef.current?.abort() }
+  })
+
+  it.each(['accepted', 'rejected'] as const)('settles a late %s receipt only against its origin ticket', async outcome => {
+    const a = thread('thr_late_a'), b = thread('thr_late_b'), receipt = pendingReceipt()
+    const provider = { ...navigationProvider(a, b), sendUserMessage: vi.fn((_threadId: string, _text: string, _options?: unknown) => receipt.promise) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    const first: QueuedUserMessage = { threadId: a.id, id: 'same-id', text: 'A draft', model: 'deepseek-v4-pro' }
+    const second: QueuedUserMessage = { threadId: b.id, id: 'same-id', text: 'B draft' }
+    Object.assign(state, { activeThreadId: a.id, threads: [a, b], busy: false,
+      queuedMessages: [first, second], queuedMessagePauses: { [b.id]: 'interrupted' } })
+    state.drainQueuedMessages = actions.drainQueuedMessages
+    try {
+      const pending = actions.drainQueuedMessages(a.id)
+      await waitForAssertion(() => expect(provider.sendUserMessage).toHaveBeenCalledOnce())
+      expect(queuedMessagesForThread(state, a.id)[0].sending).toBe(true)
+      await actions.selectThread(b.id)
+      if (outcome === 'accepted') receipt.resolve({ threadId: a.id, turnId: 'turn_late', userMessageItemId: 'user_late' })
+      else receipt.reject(new Error('Synthetic late failure'))
+      await pending
+      expect(state.activeThreadId).toBe(b.id)
+      expect(queuedMessagesForThread(state, b.id)).toEqual([second])
+      expect(queuedPauseReason(state, b.id)).toBe('interrupted')
+      expect(queuedMessagesForThread(state, a.id)).toEqual(outcome === 'accepted' ? [] : [first])
+      expect(queuedPauseReason(state, a.id)).toBe(outcome === 'accepted' ? null : 'failed')
+      expect(provider.sendUserMessage.mock.calls[0][0]).toBe(a.id)
+      expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+    } finally { sseAbortRef.current?.abort() }
+  })
+
+  it('revokes a queued send at the real asynchronous preflight after navigation', async () => {
+    const a = thread('thr_preflight_a'), b = thread('thr_preflight_b')
+    let resolveSettings!: (settings: AppSettingsV1) => void
+    const settings = new Promise<AppSettingsV1>(resolve => { resolveSettings = resolve })
+    vi.spyOn(rendererRuntimeClient, 'getSettings').mockReturnValue(settings)
+    const provider = { ...navigationProvider(a, b), sendUserMessage: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    const draft: QueuedUserMessage = { threadId: a.id, id: 'q-preflight', text: 'A only' }
+    Object.assign(state, { activeThreadId: a.id, threads: [a, b], busy: false, queuedMessages: [draft] })
+    try {
+      const pending = actions.sendQueuedMessageNow(a.id, draft.id)
+      await waitForAssertion(() => expect(rendererRuntimeClient.getSettings).toHaveBeenCalled())
+      await actions.selectThread(b.id)
+      resolveSettings({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' } as AppSettingsV1)
+      await expect(pending).resolves.toBe(false)
+      expect(provider.sendUserMessage).not.toHaveBeenCalled()
+      expect(queuedMessagesForThread(state, a.id)).toEqual([draft])
+      expect(queuedPauseReason(state, a.id)).toBeNull()
+      expect(state.activeThreadId).toBe(b.id)
+    } finally { sseAbortRef.current?.abort() }
+  })
+
+  it('retains one failed intent and concurrent queue edits until explicit resume and a real receipt', async () => {
+    const receipt = pendingReceipt()
+    const provider = { sendUserMessage: vi.fn((_threadId: string, _text: string, _options?: unknown) => receipt.promise),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined)) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    const first: QueuedUserMessage = { threadId: 'thr_existing', id: 'retry-owner', text: 'first', mode: 'agent',
+      model: 'deepseek-v4-pro', providerId: 'deepseek', modelLabel: 'Original model', reasoningEffort: 'high',
+      displayText: 'visible first', attachmentIds: ['att-1'],
+      fileReferences: [{ path: '/workspace/fixture/a.ts', relativePath: 'a.ts', name: 'a.ts', kind: 'file' }] }
+    Object.assign(state, { busy: false, queuedMessages: [first,
+      { threadId: 'thr_existing', id: 'edit-owner', text: 'second' },
+      { threadId: 'thr_existing', id: 'drop-owner', text: 'drop' }] })
+    state.drainQueuedMessages = actions.drainQueuedMessages
+    try {
+      const pending = actions.sendQueuedMessageNow(first.threadId, first.id)
+      await waitForAssertion(() => expect(provider.sendUserMessage).toHaveBeenCalledOnce())
+      await expect(actions.sendQueuedMessageNow(first.threadId, first.id)).resolves.toBe(false)
+      actions.editQueuedMessage(first.threadId, 'edit-owner', 'edited while waiting')
+      actions.removeQueuedMessage(first.threadId, 'drop-owner')
+      await expect(actions.sendMessage('new while waiting', 'agent')).resolves.toBe(true)
+      const added = queuedMessagesForThread(state).find(message => message.text === 'new while waiting')!
+      receipt.reject(new Error('Synthetic retryable failure'))
+      await expect(pending).resolves.toBe(false)
+      expect(queuedMessagesForThread(state)).toEqual([first,
+        expect.objectContaining({ id: 'edit-owner', text: 'edited while waiting' }), added])
+      expect(queuedPauseReason(state)).toBe('failed')
+      await actions.drainQueuedMessages()
+      expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+      provider.sendUserMessage.mockImplementationOnce(async () => ({ threadId: first.threadId, turnId: 'turn_retry', userMessageItemId: 'user_retry' }))
+      actions.resumeInterruptedQueue(first.threadId)
+      await waitForAssertion(() => expect(provider.sendUserMessage).toHaveBeenCalledTimes(2))
+      await waitForAssertion(() => expect(queuedMessagesForThread(state).some(message => message.id === first.id)).toBe(false))
+      expect(provider.sendUserMessage.mock.calls[1]).toEqual([first.threadId, first.text,
+        expect.objectContaining({ model: first.model, providerId: first.providerId, reasoningEffort: 'high',
+          displayText: first.displayText, attachmentIds: first.attachmentIds, fileReferences: first.fileReferences,
+          submissionIsCurrent: expect.any(Function) })])
+      expect(queuedMessagesForThread(state)).toEqual([expect.objectContaining({ id: 'edit-owner', text: 'edited while waiting' }), added])
+    } finally { sseAbortRef.current?.abort() }
+  })
+
+  it('keeps a recovered retry when its older steer admission arrives later', async () => {
+    type Admission = { threadId: string; turnId: string; clientUserMessageId: string; admittedSeq: number }
+    let admit!: (value: Admission) => void
+    const admission = new Promise<Admission>(resolve => { admit = resolve })
+    const provider = { steerUserMessage: vi.fn(() => admission) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    const draft: QueuedUserMessage = { threadId: 'thr_existing', id: 'client_retry', text: 'retain this constraint',
+      mode: 'agent', model: 'deepseek-v4-pro', providerId: 'deepseek', modelLabel: 'Synthetic', reasoningEffort: 'high' }
+    Object.assign(state, { busy: true, currentTurnId: 'turn_active', currentTurnUserId: 'original_user',
+      queuedMessages: [draft], blocks: [{ kind: 'user', id: 'original_user', text: 'original request', meta: { turnId: 'turn_active' } }] })
+    const pending = actions.sendQueuedMessageNow(draft.threadId, draft.id)
+    expect(provider.steerUserMessage).toHaveBeenCalledOnce()
+    const set: ChatStoreSet = partial => { Object.assign(state, typeof partial === 'function' ? partial(state) : partial) }
+    const sink = buildThreadEventSink(set, () => state, { threadId: draft.threadId,
+      getThreadDetail: async () => ({ blocks: state.blocks, latestSeq: 20, latestTurnId: 'turn_active', threadStatus: 'completed' }) })
+    await sink.onTurnComplete()
+    const recovered = queuedMessagesForThread(state, draft.threadId)
+    expect(recovered).toEqual([expect.objectContaining(draft)])
+    expect(recovered[0].sending).not.toBe(true)
+    expect(queuedPauseReason(state)).toBe('failed')
+    admit({ threadId: draft.threadId, turnId: 'turn_active', clientUserMessageId: draft.id, admittedSeq: 7 })
+    await pending
+    expect(queuedMessagesForThread(state, draft.threadId)).toEqual(recovered)
+    expect(queuedPauseReason(state)).toBe('failed')
+    expect(state.blocks.some(block => block.kind === 'user' && block.id === draft.id)).toBe(false)
+  })
+
+  it('wakes the returned thread once after its obsolete drain releases', async () => {
+    const receipt = pendingReceipt(), a = thread('thr_wake_a'), b = thread('thr_wake_b')
+    const provider = { ...navigationProvider(a, b), sendUserMessage: vi.fn((_id: string, text: string) =>
+      text === 'first' ? receipt.promise : Promise.resolve({ threadId: a.id, turnId: 'turn_second', userMessageItemId: 'user_second' })) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    Object.assign(state, { activeThreadId: a.id, threads: [a, b], busy: false,
+      queuedMessagePauses: { [b.id]: 'interrupted' }, queuedMessages: [
+        { threadId: a.id, id: 'q-first', text: 'first' }, { threadId: a.id, id: 'q-second', text: 'second' },
+        { threadId: b.id, id: 'q-b', text: 'stay in B' }] })
+    state.drainQueuedMessages = actions.drainQueuedMessages
+    try {
+      const oldDrain = actions.drainQueuedMessages(a.id)
+      await waitForAssertion(() => expect(provider.sendUserMessage).toHaveBeenCalledOnce())
+      await actions.selectThread(b.id)
+      await actions.selectThread(a.id)
+      // Actual selection requests the wake while the old drain still owns the lock.
+      expect(provider.sendUserMessage).toHaveBeenCalledOnce()
+      receipt.resolve({ threadId: a.id, turnId: 'turn_first', userMessageItemId: 'user_first' })
+      await oldDrain
+      await waitForAssertion(() => expect(provider.sendUserMessage).toHaveBeenCalledTimes(2))
+      expect(provider.sendUserMessage.mock.calls.map(([id, text]) => [id, text])).toEqual([[a.id, 'first'], [a.id, 'second']])
+      expect(queuedMessagesForThread(state, b.id)).toEqual([expect.objectContaining({ id: 'q-b', text: 'stay in B' })])
+    } finally { sseAbortRef.current?.abort() }
+  })
+
+  it.each(['ordinary', 'queued'] as const)('recognizes real consumed SSE when the %s steer HTTP acknowledgement is lost', async route => {
+    let reject!: (error: Error) => void
+    const admission = new Promise<never>((_resolve, decline) => { reject = decline })
+    const provider = { steerUserMessage: vi.fn((_input: { clientUserMessageId?: string }) => admission) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state } = buildHarness()
+    Object.assign(state, { busy: true, currentTurnId: 'turn_consumed', currentTurnUserId: 'initial-user',
+      blocks: [{ kind: 'user', id: 'initial-user', text: 'initial', meta: { turnId: 'turn_consumed' } }] })
+    const draft: QueuedUserMessage = { threadId: 'thr_existing', id: 'client_consumed', text: 'follow-up' }
+    if (route === 'queued') state.queuedMessages = [draft]
+    const pending = route === 'queued' ? actions.sendQueuedMessageNow(draft.threadId, draft.id) : actions.sendMessage(draft.text, 'agent')
+    const clientUserMessageId = provider.steerUserMessage.mock.calls[0][0].clientUserMessageId!
+    const set: ChatStoreSet = partial => { Object.assign(state, typeof partial === 'function' ? partial(state) : partial) }
+    buildThreadEventSink(set, () => state, { threadId: draft.threadId }).onUserMessage({
+      itemId: 'item_consumed', turnId: 'turn_consumed', text: draft.text, seq: 1,
+      meta: { turnId: 'turn_consumed', clientUserMessageId, delivery: 'steer' }
+    })
+    reject(new Error('Synthetic lost HTTP acknowledgement'))
+    await expect(pending).resolves.toBe(true)
+    expect(state.queuedMessages).toEqual([])
+    expect(state.blocks).toContainEqual(expect.objectContaining({ id: 'item_consumed', meta: expect.objectContaining({
+      turnId: 'turn_consumed', clientUserMessageId, steeringStatus: 'accepted' }) }))
+    expect(provider.steerUserMessage).toHaveBeenCalledOnce()
+    expect(queuedPauseReason(state)).toBeNull()
+  })
+
+  it.each(['select', 'recover', 'live'] as const)('consumes only exact accepted intent IDs from the trusted %s snapshot', async entry => {
+    const accepted: ChatBlock = { kind: 'user', id: 'item_snapshot', text: 'same text', meta: {
+      turnId: 'turn_snapshot', clientUserMessageId: 'snapshot-intent', steeringStatus: 'accepted' } }
+    const provider = { getThreadDetail: vi.fn(async () => ({ blocks: [accepted], latestSeq: 20, threadStatus: 'idle' })),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined)) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    const remaining = { threadId: 'thr_existing', id: 'different-intent', text: 'same text' }
+    const other = { threadId: 'thr_other', id: 'snapshot-intent', text: 'same text' }
+    Object.assign(state, { busy: false, queuedMessagePauses: { thr_existing: 'failed', thr_other: 'interrupted' },
+      queuedMessages: [{ threadId: 'thr_existing', id: 'snapshot-intent', text: 'same text' }, remaining, other] })
+    try {
+      if (entry === 'select') await actions.selectThread('thr_existing')
+      else if (entry === 'recover') await actions.recoverActiveTurn()
+      else await actions.subscribeThreadEventsLive('thr_existing')
+      expect(state.queuedMessages).toEqual([remaining, other])
+      expect(state.queuedMessagePauses).toEqual({ thr_existing: 'failed', thr_other: 'interrupted' })
+      expect(state.blocks).toContainEqual(expect.objectContaining({ id: accepted.id }))
+    } finally { sseAbortRef.current?.abort() }
+  })
+
+  it('keeps Stop irreversible while a queued preflight is pending and resumes only after settlement', async () => {
+    let resolveSettings!: (settings: AppSettingsV1) => void
+    const settings = new Promise<AppSettingsV1>(resolve => { resolveSettings = resolve })
+    vi.spyOn(rendererRuntimeClient, 'getSettings').mockReturnValue(settings)
+    const { actions, state, sseAbortRef } = buildHarness()
+    const provider = { sendUserMessage: vi.fn(async () => ({ threadId: 'thr_existing', turnId: 'turn_resumed', userMessageItemId: 'user_resumed' })),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined)),
+      getThreadDetail: vi.fn(async () => ({ blocks: [], latestSeq: 20, latestTurnId: state.currentTurnId ?? undefined, threadStatus: 'aborted' })) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const draft: QueuedUserMessage = { threadId: 'thr_existing', id: 'preflight-stop', text: 'resume explicitly' }
+    Object.assign(state, { busy: false, queuedMessages: [draft] })
+    const drain = vi.fn(actions.drainQueuedMessages)
+    state.drainQueuedMessages = drain
+    const set: ChatStoreSet = partial => { Object.assign(state, typeof partial === 'function' ? partial(state) : partial) }
+    const maintenance = createMaintenanceActions({ set, get: () => state, sseAbortRef })
+    try {
+      const pending = actions.sendQueuedMessageNow(draft.threadId, draft.id)
+      await waitForAssertion(() => expect(rendererRuntimeClient.getSettings).toHaveBeenCalled())
+      await maintenance.interrupt()
+      const priorDrains = drain.mock.calls.length
+      actions.resumeInterruptedQueue(draft.threadId)
+      expect(drain).toHaveBeenCalledTimes(priorDrains)
+      expect(queuedPauseReason(state)).toBe('interrupted')
+      resolveSettings({ runtime: { providerId: 'synthetic', model: 'synthetic' }, codePromptPrefix: '' } as AppSettingsV1)
+      await expect(pending).resolves.toBe(false)
+      expect(provider.sendUserMessage).not.toHaveBeenCalled()
+      expect(state.queuedMessages).toEqual([draft])
+      expect(queuedPauseReason(state)).toBe('interrupted')
+      actions.resumeInterruptedQueue(draft.threadId)
+      await waitForAssertion(() => expect(provider.sendUserMessage).toHaveBeenCalledOnce())
+      await waitForAssertion(() => expect(state.queuedMessages).toEqual([]))
+    } finally { sseAbortRef.current?.abort() }
+  })
+
+  it('revokes an ordinary in-flight steer on Stop even when the queue was empty', async () => {
+    let reject!: (error: Error) => void
+    const admission = new Promise<never>((_resolve, decline) => { reject = decline })
+    const provider = { steerUserMessage: vi.fn(() => admission), interruptTurn: vi.fn(async () => undefined),
+      getThreadDetail: vi.fn(async () => ({ blocks: [], latestSeq: 20, latestTurnId: 'turn_stopped', threadStatus: 'aborted' })) }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    Object.assign(state, { busy: true, currentTurnId: 'turn_stopped', currentTurnUserId: 'original-user', blocks: [
+      { kind: 'user', id: 'original-user', text: 'initial', meta: { turnId: 'turn_stopped' } }] })
+    const set: ChatStoreSet = partial => { Object.assign(state, typeof partial === 'function' ? partial(state) : partial) }
+    const maintenance = createMaintenanceActions({ set, get: () => state, sseAbortRef })
+    const pending = actions.sendMessage('late follow-up', 'agent')
+    expect(provider.steerUserMessage).toHaveBeenCalledOnce()
+    expect(state.queuedMessages).toEqual([])
+    await maintenance.interrupt()
+    reject(new Error('Synthetic late steer rejection'))
+    await expect(pending).resolves.toBe(false)
+    expect(state.queuedMessages).toEqual([])
+    expect(state.recoverActiveTurn).not.toHaveBeenCalled()
+    expect(provider.interruptTurn).toHaveBeenCalledWith('thr_existing', 'turn_stopped', { discard: false })
+  })
+})
+
+
+describe('local Word Core ownership',()=>{
+  beforeEach(()=>{
+    rendererRuntimeClient.invalidateSettings();vi.stubGlobal('localStorage',memoryStorage())
+    vi.stubGlobal('window',{analytix:{logs:{error:vi.fn(async()=>undefined)}}})
+    vi.spyOn(rendererRuntimeClient,'getSettings').mockResolvedValue({workspaceRoot:'/workspace/analytix',runtime:defaultAnalytixRuntimeSettings()} as AppSettingsV1)
+  })
+  afterEach(()=>{clearActiveStream();clearBusyWatchdog();rendererRuntimeClient.invalidateSettings();vi.restoreAllMocks();vi.unstubAllGlobals()})
+  it('creates and selects a real Core owner without Provider readiness while AI send stays blocked',async()=>{
+    const created={...thread('thr_local_word_core'),model:'',status:'idle',messageCount:0}
+    const provider={connect:vi.fn(async()=>undefined),createThread:vi.fn(async()=>created),
+      getThreadDetail:vi.fn(async()=>({thread:created,blocks:[],latestSeq:0,threadStatus:'idle'})),
+      subscribeThreadEvents:vi.fn(()=>new Promise<void>(()=>undefined)),sendUserMessage:vi.fn()}
+    registryMock.getProvider.mockReturnValue(provider)
+    const {actions,state,sseAbortRef}=buildHarness()
+    Object.assign(state,{activeThreadId:null,threads:[],busy:false,workspaceRoot:'/workspace/analytix',runtimeConnection:'offline',createThread:actions.createThread,selectThread:actions.selectThread})
+    let receipt:ThreadSelectionReceipt|undefined
+    await actions.createThread({workspaceRoot:'/workspace/analytix',forceNew:true,localDocument:true,isCurrent:()=>true,onSelected:value=>{receipt=value}})
+    expect(provider.createThread).toHaveBeenCalledExactlyOnceWith({workspace:'/workspace/analytix',title:expect.any(String),mode:'agent',localDocument:true})
+    expect(provider.connect).toHaveBeenCalledTimes(2)
+    expect(state.activeThreadId).toBe(created.id);expect(receipt?.isCurrent()).toBe(true);expect(state.runtimeConnection).toBe('offline')
+    await expect(actions.sendMessage('Do not send a model request')).resolves.toBe(false)
+    expect(provider.sendUserMessage).not.toHaveBeenCalled()
+    state.activeThreadId='another-owner';expect(receipt?.isCurrent()).toBe(false);sseAbortRef.current?.abort()
+  })
+  it.each(['idle', 'offline'] as const)('selects existing local history through the ordinary sidebar while %s and keeps AI gated', async runtimeConnection => {
+    const existing = { ...thread(`thr_local_existing_${runtimeConnection}`), model: '', status: 'idle', messageCount: 0 }
+    const provider = { connect: vi.fn(async () => undefined), createThread: vi.fn(),
+      getThreadDetail: vi.fn(async () => ({ thread: existing, blocks: [], latestSeq: 0, threadStatus: 'idle' })),
+      subscribeThreadEvents: vi.fn(() => new Promise<void>(() => undefined)),
+      sendUserMessage: vi.fn(), steerUserMessage: vi.fn(), reviewThread: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    Object.assign(state, { runtimeConnection, busy: false, threads: [existing] })
+    let receipt: ThreadSelectionReceipt | undefined
+    await actions.selectThread(existing.id, { onSelected: value => { receipt = value } })
+    expect(provider.connect).toHaveBeenCalledOnce()
+    expect(provider.getThreadDetail).toHaveBeenCalledExactlyOnceWith(existing.id)
+    expect(provider.createThread).not.toHaveBeenCalled()
+    expect(state.activeThreadId).toBe(existing.id)
+    expect(receipt?.isCurrent()).toBe(true)
+    expect(state.runtimeConnection).toBe(runtimeConnection)
+    await expect(actions.sendMessage('Do not send a model request')).resolves.toBe(false)
+    await expect(actions.reviewActiveThread({ kind: 'uncommittedChanges' })).resolves.toBe(false)
+    expect(provider.sendUserMessage).not.toHaveBeenCalled()
+    expect(provider.steerUserMessage).not.toHaveBeenCalled()
+    expect(provider.reviewThread).not.toHaveBeenCalled()
+    sseAbortRef.current?.abort()
+  })
+  it.each(['connect', 'detail'] as const)('ignores an ordinary local history selection when its provider changes during %s', async boundary => {
+    let finish!: () => void
+    const deferred = new Promise<void>(resolve => { finish = resolve })
+    const provider = { connect: vi.fn(async () => { if (boundary === 'connect') await deferred }),
+      getThreadDetail: vi.fn(async () => { if (boundary === 'detail') await deferred; return { blocks: [], latestSeq: 0, threadStatus: 'idle' } }),
+      subscribeThreadEvents: vi.fn() }
+    registryMock.getProvider.mockReturnValue(provider)
+    const { actions, state, sseAbortRef } = buildHarness()
+    state.runtimeConnection = 'offline'
+    const blocks = state.blocks, error = state.error, selected = vi.fn()
+    const pending = actions.selectThread('thr_obsolete_local', { onSelected: selected })
+    if (boundary === 'detail') await waitForAssertion(() => expect(provider.getThreadDetail).toHaveBeenCalledOnce())
+    registryMock.getProvider.mockReturnValue({})
+    finish()
+    await pending
+    expect(state.activeThreadId).toBe('thr_existing')
+    expect(state.blocks).toBe(blocks)
+    expect(state.error).toBe(error)
+    expect(provider.subscribeThreadEvents).not.toHaveBeenCalled()
+    expect(selected).not.toHaveBeenCalled()
+    expect(sseAbortRef.current).toBeNull()
+  })
+  it('does not create or select when Core connection fails',async()=>{
+    const provider={connect:vi.fn(async()=>{throw Error(JSON.stringify({code:'runtime_unavailable',message:'SYNTHETIC_CORE_UNAVAILABLE'}))}),createThread:vi.fn(),getThreadDetail:vi.fn()}
+    registryMock.getProvider.mockReturnValue(provider)
+    const {actions,state}=buildHarness();Object.assign(state,{activeThreadId:null,runtimeConnection:'offline'})
+    await actions.createThread({workspaceRoot:'/workspace/analytix',localDocument:true})
+    expect(state.activeThreadId).toBeNull();expect(state.route).toBe('chat');expect(state.runtimeConnection).toBe('offline');expect(provider.createThread).not.toHaveBeenCalled();expect(provider.getThreadDetail).not.toHaveBeenCalled()
+  })
+  it('does not select a local owner after its originating file intent was revoked during connect',async()=>{
+    let finish!:()=>void,current=true
+    const provider={connect:vi.fn(()=>new Promise<void>(resolve=>{finish=resolve})),getThreadDetail:vi.fn()}
+    registryMock.getProvider.mockReturnValue(provider)
+    const {actions,state}=buildHarness();state.runtimeConnection='offline'
+    const selected=vi.fn(),pending=actions.selectThread('thr_local_word_late',{localDocument:true,isCurrent:()=>current,onSelected:selected})
+    current=false;finish();await pending
+    expect(state.activeThreadId).toBe('thr_existing');expect(provider.getThreadDetail).not.toHaveBeenCalled();expect(selected).not.toHaveBeenCalled()
+  })
+  it('preserves normal new-conversation lazy creation',async()=>{
+    const provider={connect:vi.fn(),createThread:vi.fn()};registryMock.getProvider.mockReturnValue(provider)
+    const {actions,state}=buildHarness();state.busy=false
+    await actions.createThread({workspaceRoot:'/workspace/analytix'})
+    expect(state.activeThreadId).toBeNull();expect(provider.connect).not.toHaveBeenCalled();expect(provider.createThread).not.toHaveBeenCalled()
+  })
+})
+
+describe('thread policy authority at public thread actions', () => {
+  const full: ThreadExecutionPolicy = { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }
+  const readOnly: ThreadExecutionPolicy = { approvalPolicy: 'never', sandboxMode: 'read-only' }
+  const harnesses: ReturnType<typeof buildHarness>[] = []
+  type Detail = Awaited<ReturnType<AgentProvider['getThreadDetail']>>
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(accept => { resolve = accept })
+    return { promise, resolve }
+  }
+
+  function policyHarness(realAdapter = false) {
+    const h = buildHarness()
+    harnesses.push(h)
+    Object.assign(h.state, { busy: false, workspaceRoot: '/workspace/analytix', composerDrafts: {},
+      threads: [{ ...thread('thr_existing'), status: 'idle', executionPolicyVersion: 2, ...full }] })
+    const settings = { workspaceRoot: '/workspace/analytix', runtime: defaultAnalytixRuntimeSettings(), codePromptPrefix: '' } as AppSettingsV1
+    const getSettings = vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue(settings)
+    const runtimeRequest = vi.fn(async (_path: string, _method?: string, _body?: string) => ({ ok: true, status: 202,
+      body: JSON.stringify({ threadId: 'thr_existing', turnId: 'turn_policy', userMessageItemId: 'user_policy' }) }))
+    vi.stubGlobal('window', { analytix: { runtime: { runtimeRequest }, logs: { error: vi.fn(async () => undefined) } } })
+    const provider = {
+      createThread: vi.fn(),
+      sendUserMessage: vi.fn<AgentProvider['sendUserMessage']>(async id => ({ threadId: id, turnId: 'turn_policy', userMessageItemId: 'user_policy' })),
+      subscribeThreadEvents: vi.fn((_id: string, _seq: number, _sink: ThreadEventSink, _signal: AbortSignal) => new Promise<void>(() => undefined)),
+      getThreadDetail: vi.fn<AgentProvider['getThreadDetail']>(async id => ({
+        thread: h.state.threads.find(item => item.id === id), blocks: [], latestSeq: 0, threadStatus: 'idle'
+      })),
+      updateThreadExecutionPolicy: vi.fn(async (id: string, policy: ThreadExecutionPolicy): Promise<NormalizedThread> => ({
+        ...thread(id), ...policy, status: 'idle', executionPolicyVersion: 2, updatedAt: '2026-10-20T00:01:00Z'
+      }))
+    }
+    if (realAdapter) {
+      const adapter = new AnalytixRuntimeProvider()
+      provider.sendUserMessage.mockImplementation((id, text, options) => {
+        const { mode, ...request } = options ?? {}
+        if (mode !== undefined && mode !== 'agent' && mode !== 'plan') throw new Error('Unsupported fixture thread mode')
+        return adapter.sendUserMessage(id, text, { ...request, mode })
+      })
+    }
+    registryMock.getProvider.mockReturnValue(provider)
+    const set: ChatStoreSet = partial => Object.assign(h.state, typeof partial === 'function' ? partial(h.state) : partial)
+    const maintenance = createMaintenanceActions({ set, get: () => h.state, sseAbortRef: h.sseAbortRef })
+    return { ...h, provider, maintenance, settings, getSettings, runtimeRequest }
+  }
+
+  beforeEach(() => {
+    registryMock.getProvider.mockReset()
+    rendererRuntimeClient.invalidateSettings()
+    invalidateThreadDetailCache()
+    vi.stubGlobal('localStorage', memoryStorage())
+  })
+  afterEach(() => {
+    for (const h of harnesses.splice(0)) h.sseAbortRef.current?.abort()
+    clearActiveStream(); clearBusyWatchdog(); clearWatchedCompletionNotifications()
+    invalidateThreadDetailCache(); rendererRuntimeClient.invalidateSettings()
+    vi.restoreAllMocks(); vi.unstubAllGlobals()
+  })
+
+  it.each([full, readOnly, { approvalPolicy: 'untrusted', sandboxMode: 'read-only' }] satisfies ThreadExecutionPolicy[])(
+    'keeps the exact sealed $approvalPolicy/$sandboxMode pair through the real send adapter', async policy => {
+      const h = policyHarness(true)
+      h.state.threads = [{ ...thread('thr_existing'), executionPolicyVersion: 2, ...policy }]
+      await expect(h.actions.sendMessage('use this thread policy', 'agent')).resolves.toBe(true)
+      expect(h.runtimeRequest).toHaveBeenCalledOnce()
+      const [path, method, payload] = h.runtimeRequest.mock.calls[0]!
+      expect(path).toBe('/v1/threads/thr_existing/turns'); expect(method).toBe('POST')
+      const body = JSON.parse(payload!)
+      expect(body).toMatchObject(policy)
+      expect(body).not.toHaveProperty('executionPolicy')
+      expect(body).not.toHaveProperty('executionPolicyVersion')
+      expect(body).not.toHaveProperty('submissionIsCurrent')
+    }
+  )
+
+  it.each([
+    { name: 'legacy full access', metadata: full },
+    { name: 'missing approval', metadata: { executionPolicyVersion: 2, sandboxMode: 'read-only' } },
+    { name: 'missing sandbox', metadata: { executionPolicyVersion: 2, approvalPolicy: 'never' } },
+    { name: 'missing pair', metadata: { executionPolicyVersion: 2 } }
+  ] satisfies Array<{ name: string; metadata: Partial<NormalizedThread> }>)(
+    'leaves $name policy resolution to Core rather than promoting global defaults', async ({ metadata }) => {
+      const h = policyHarness(true)
+      h.state.threads = [{ ...thread('thr_existing'), ...metadata }]
+      await expect(h.actions.sendMessage('retain Core authority')).resolves.toBe(true)
+      expect(h.runtimeRequest).toHaveBeenCalledOnce()
+      const body = JSON.parse(h.runtimeRequest.mock.calls[0]![2]!)
+      expect(body).not.toHaveProperty('approvalPolicy'); expect(body).not.toHaveProperty('sandboxMode')
+    }
+  )
+
+  it('reads policy at actual queue dispatch after a real policy mutation', async () => {
+    const h = policyHarness(true)
+    h.state.busy = true; h.state.currentTurnId = 'previous_turn'
+    await expect(h.actions.sendMessage('queued follow-up', 'agent', { deliveryIntent: 'queue' })).resolves.toBe(true)
+    const queued = h.state.queuedMessages[0]!
+    expect(queued).not.toHaveProperty('executionPolicy')
+    expect(await h.maintenance.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(true)
+    h.state.busy = false; h.state.currentTurnId = null
+    await expect(h.actions.sendQueuedMessageNow('thr_existing', queued.id)).resolves.toBe(true)
+    expect(JSON.parse(h.runtimeRequest.mock.calls[0]![2]!)).toMatchObject(readOnly)
+    expect(h.state.queuedMessages).toEqual([])
+  })
+
+  it.each(['pending', 'uncertain'] as const)('refuses %s target policy without consuming a draft or queue entry', async phase => {
+    const h = policyHarness()
+    const key = composerDraftKey('/workspace/analytix', 'thr_existing')
+    const draft = { ...emptyComposerDraft, input: 'keep this draft', inputRevision: 4 }
+    const queued: QueuedUserMessage = { threadId: 'thr_existing', id: 'q_policy', text: 'keep this queued follow-up' }
+    h.state.composerDrafts = { [key]: draft }; h.state.queuedMessages = [queued]
+    if (phase === 'pending') getThreadBinding(h.sseAbortRef).threadPolicyPending.add('thr_existing')
+    else h.state.threads[0] = { ...h.state.threads[0]!, executionPolicyUncertain: true }
+    await expect(h.actions.sendMessage(draft.input)).resolves.toBe(false)
+    await expect(h.actions.sendQueuedMessageNow('thr_existing', queued.id)).resolves.toBe(false)
+    expect(h.state.composerDrafts[key]).toBe(draft)
+    expect(h.state.queuedMessages).toEqual([queued]); expect(h.state.blocks).toEqual([])
+    expect(h.state.busy).toBe(false)
+    expect(h.provider.sendUserMessage).not.toHaveBeenCalled(); expect(h.getSettings).not.toHaveBeenCalled()
+  })
+
+  it('does not block a send because another thread policy is unknown or pending', async () => {
+    const h = policyHarness(true)
+    h.state.threads.push({ ...thread('thr_other'), executionPolicyUncertain: true })
+    getThreadBinding(h.sseAbortRef).threadPolicyPending.add('thr_other')
+    await expect(h.actions.sendMessage('send only to the current owner')).resolves.toBe(true)
+    expect(h.runtimeRequest.mock.calls[0]![0]).toBe('/v1/threads/thr_existing/turns')
+  })
+
+  it.each(['epoch', 'pending', 'uncertain'] as const)(
+    'fences an ordinary unguarded send at the actual POST after %s changes during adapter settings', async change => {
+      const h = policyHarness(true), settingsWait = deferred<AppSettingsV1>()
+      const key = composerDraftKey('/workspace/analytix', 'thr_existing')
+      const draft = { ...emptyComposerDraft, input: 'preserve this unsent text', inputRevision: 7 }
+      h.state.composerDrafts = { [key]: draft }
+      h.getSettings.mockResolvedValueOnce(h.settings).mockReturnValueOnce(settingsWait.promise)
+      const pending = h.actions.sendMessage(draft.input, 'agent')
+      await waitForAssertion(() => expect(h.getSettings).toHaveBeenCalledTimes(2))
+      expect(h.provider.sendUserMessage.mock.calls[0]![2]?.submissionIsCurrent).toBeTypeOf('function')
+      const binding = getThreadBinding(h.sseAbortRef)
+      if (change === 'epoch') {
+        expect(await h.maintenance.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(true)
+      } else if (change === 'pending') binding.threadPolicyPending.add('thr_existing')
+      else h.state.threads[0] = { ...h.state.threads[0]!, executionPolicyUncertain: true }
+      settingsWait.resolve(h.settings)
+      await expect(pending).resolves.toBe(false)
+      expect(h.runtimeRequest).not.toHaveBeenCalled()
+      expect(h.state.composerDrafts[key]).toBe(draft); expect(h.state.blocks).toEqual([])
+      expect(h.state.busy).toBe(false)
+    }
+  )
+
+  it('preserves pending B selection when only A policy metadata changes', async () => {
+    const h = policyHarness(), detail = deferred<Detail>()
+    const b = { ...thread('thr_policy_b'), status: 'idle' }
+    h.state.threads.push(b)
+    h.provider.getThreadDetail.mockReturnValueOnce(detail.promise)
+    const onSelected = vi.fn()
+    const selection = h.actions.selectThread(b.id, { onSelected })
+    await waitForAssertion(() => expect(h.provider.getThreadDetail).toHaveBeenCalledWith(b.id))
+    expect(await h.maintenance.updateThreadExecutionPolicy('thr_existing', readOnly)).toBe(true)
+    detail.resolve({ thread: b, blocks: [{ kind: 'user', id: 'b_history', text: 'B history' }], latestSeq: 2, threadStatus: 'idle' })
+    await selection
+    expect(h.state.activeThreadId).toBe(b.id)
+    expect(h.state.blocks.map(block => block.id)).toEqual(['b_history'])
+    expect(onSelected).toHaveBeenCalledOnce()
+  })
+
+  it('retires old A detail after policy mutation and permits a fresh A selection', async () => {
+    const h = policyHarness(), oldDetail = deferred<Detail>()
+    const oldA = h.state.threads[0]!, b = { ...thread('thr_policy_b'), status: 'idle' }
+    h.state.threads.push(b); h.state.activeThreadId = b.id
+    h.provider.getThreadDetail.mockReturnValueOnce(oldDetail.promise)
+    const staleSelected = vi.fn()
+    const selection = h.actions.selectThread(oldA.id, { onSelected: staleSelected })
+    await waitForAssertion(() => expect(h.provider.getThreadDetail).toHaveBeenCalledWith(oldA.id))
+    expect(await h.maintenance.updateThreadExecutionPolicy(oldA.id, readOnly)).toBe(true)
+    oldDetail.resolve({ thread: oldA, blocks: [{ kind: 'user', id: 'stale_a', text: 'Old A' }], latestSeq: 1, threadStatus: 'idle' })
+    await selection
+    expect(h.state.activeThreadId).toBe(b.id); expect(staleSelected).not.toHaveBeenCalled()
+    expect(h.provider.subscribeThreadEvents).not.toHaveBeenCalled()
+    const currentA = h.state.threads.find(item => item.id === oldA.id)!
+    h.provider.getThreadDetail.mockResolvedValueOnce({ thread: currentA,
+      blocks: [{ kind: 'user', id: 'fresh_a', text: 'Fresh A' }], latestSeq: 2, threadStatus: 'idle' })
+    await h.actions.selectThread(oldA.id)
+    expect(h.provider.getThreadDetail).toHaveBeenCalledTimes(2)
+    expect(h.state.activeThreadId).toBe(oldA.id)
+    expect(h.state.blocks.map(block => block.id)).toEqual(['fresh_a'])
+    expect(h.state.threads.find(item => item.id === oldA.id)).toMatchObject({ ...readOnly, executionPolicyVersion: 2 })
+  })
+
+  it.each(['denied', 'retired', 'accepted'] as const)(
+    'applies %s materialize admission to the real reusable thread before selection', async decision => {
+      const h = policyHarness()
+      const reusable = { ...thread('thr_reusable_policy'), title: getDefaultThreadTitle(), status: 'idle', workspace: '/workspace/analytix' }
+      h.state.threads.push(reusable)
+      const selectThread = vi.fn<ChatState['selectThread']>(async () => undefined)
+      h.state.selectThread = selectThread
+      let current = true
+      const beforeSelect = vi.fn(() => {
+        if (decision === 'retired') current = false
+        return decision !== 'denied'
+      })
+      await h.actions.createThread({ workspaceRoot: '/workspace/analytix', materialize: true,
+        beforeSelect, isCurrent: () => current })
+      expect(h.provider.getThreadDetail).toHaveBeenCalledExactlyOnceWith(reusable.id)
+      expect(beforeSelect).toHaveBeenCalledExactlyOnceWith({ threadId: reusable.id, workspace: reusable.workspace })
+      expect(h.provider.createThread).not.toHaveBeenCalled()
+      if (decision === 'accepted') expect(selectThread).toHaveBeenCalledExactlyOnceWith(reusable.id,
+        { onSelected: undefined, isCurrent: expect.any(Function) })
+      else expect(selectThread).not.toHaveBeenCalled()
+      expect(h.state.activeThreadId).toBe('thr_existing')
+    }
+  )
 })

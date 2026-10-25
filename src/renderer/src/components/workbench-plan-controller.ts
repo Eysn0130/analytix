@@ -37,6 +37,7 @@ type PlanTurnOverrides = Pick<
   | 'attachmentIds'
   | 'attachments'
   | 'displayText'
+  | 'requestedSkillIds'
   | 'fileReferences'
   | 'guiPlan'
   | 'model'

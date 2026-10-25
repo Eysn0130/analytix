@@ -1,12 +1,21 @@
 package server
 
 import (
+	cachetelemetrystore "analytix.local/runtime-go/internal/adapters/outbound/cachetelemetrystore"
+	finalauthorityadapter "analytix.local/runtime-go/internal/adapters/outbound/finalauthority"
+	cachetelemetryapp "analytix.local/runtime-go/internal/app/cachetelemetry"
+	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	cachetelemetryport "analytix.local/runtime-go/internal/ports/cachetelemetry"
+	privatecastest "analytix.local/runtime-go/internal/testsupport/privatecas"
+	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -722,4 +731,201 @@ func mapFieldAny(record map[string]any, key string) map[string]any {
 		return map[string]any{}
 	}
 	return value
+}
+
+func TestConversationUsagePublicQueryIncludesOpenAttemptsAndRebuildsAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewTempDurableEventSessionStore(filepath.Join(root, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := store.CreateThread(map[string]any{"title": "Synthetic usage projection"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadID := stringField(thread, "id")
+	const turnID = "turn_usage_projection"
+	start := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	frozen, err := securitycontexttest.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: threadID, TurnID: turnID, WorkspaceRealPath: root, ContextEpoch: 1, IssuedAt: start.Add(-time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(frozen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frozenMap map[string]any
+	if err := json.Unmarshal(body, &frozenMap); err != nil {
+		t.Fatal(err)
+	}
+	turn := map[string]any{"id": turnID, "threadId": threadID, "status": "running", "securityContext": frozenMap, "items": []any{}}
+	if err := store.AppendTurnToThread(threadID, turn, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	// Real freezing stores authority at the event's top level; the embedded
+	// pre-freeze turn intentionally has no securityContext.
+	if _, _, err := store.RecordEvent(map[string]any{"kind": "turn_started", "status": "running", "threadId": threadID, "turnId": turnID, "turn": map[string]any{"id": turnID, "items": []any{}}, "securityContext": frozenMap}); err != nil {
+		t.Fatal(err)
+	}
+	authority, err := finalauthorityadapter.OpenOrCreateFileAuthority(filepath.Join(root, "authority", "usage-key.json"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledgerRoot := filepath.Join(root, "provider-usage")
+	access, err := privatecastest.NewAccessAuthority(ledgerRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := cachetelemetrystore.NewStore(ledgerRoot, access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := cachetelemetryapp.NewDurableService(authority, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := cachetelemetryport.AttemptRegistrationInputV1{SecurityContext: frozen, UsageSource: domaincache.ProviderUsageSourceTurn, Channel: domaincache.ProviderChannelPrimary, LogicalSequence: 1, OuterAttempt: 1, PhysicalAttempt: 1, ProviderFamily: domaincache.ProviderFamilyDeepSeek, EndpointFormat: domaincache.EndpointFormatChatCompletions, Model: []byte("synthetic-model"), Endpoint: []byte("https://provider.invalid/v1/chat"), WireBody: []byte(`{"messages":[]}`), WireHeaders: []byte(`{}`), CredentialScope: []byte("synthetic-credential-scope"), ProviderConfig: []byte(`{}`), StepStartedAt: start, StartedAt: start, PublicAttribution: domaincache.ProviderPublicAttributionV1{Provider: "synthetic", Model: "synthetic-model"}}
+	first, err := recorder.BeginAttempt(ctx, registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement := cachetelemetryport.AttemptSettlementInputV1{Handle: first, DispatchState: domaincache.ProviderDispatchStateSent, Status: domaincache.ProviderCallStatusFailed, Usage: domaincache.ProviderUsageV1{NativeCounterPresence: true, OutputTokensFinality: domaincache.ProviderOutputTokensFinalV1, ReasoningTokensFinality: domaincache.ProviderOutputTokensFinalV1, InputTokens: domaincache.TokenCountV1{Known: true, Value: 100}, OutputTokens: domaincache.TokenCountV1{Known: true, Value: 10}, ReasoningTokens: domaincache.TokenCountV1{Known: true}}, SafeReasonCode: "provider_failed", FirstTokenAt: start.Add(200 * time.Millisecond), SettledAt: start.Add(time.Second)}
+	if err := recorder.SettleAttempt(ctx, settlement); err != nil {
+		t.Fatal(err)
+	}
+	if err := recorder.SettleAttempt(ctx, settlement); err != nil {
+		t.Fatal(err)
+	}
+	registration.OuterAttempt, registration.StartedAt = 2, start.Add(2*time.Second)
+	second, err := recorder.BeginAttempt(ctx, registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &runtimeServerHandler{store: store, providerUsage: recorder}
+	query := func(h *runtimeServerHandler) map[string]any {
+		t.Helper()
+		response := httptest.NewRecorder()
+		h.handleUsage(response, httptest.NewRequest(http.MethodGet, "/v1/usage?group_by=thread&thread_id="+threadID, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("usage query failed: %d %s", response.Code, response.Body.String())
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+			t.Fatal(err)
+		}
+		buckets := decoded["buckets"].([]any)
+		if len(buckets) != 1 {
+			t.Fatalf("open usage must be available without terminal usage index: %#v", decoded)
+		}
+		if decoded["totals"].(map[string]any)["total_tokens"] != float64(0) {
+			t.Fatal("conversation projection changed old totals")
+		}
+		return buckets[0].(map[string]any)["conversationUsage"].(map[string]any)
+	}
+	open := query(handler)
+	billing := open["billing"].(map[string]any)
+	total := billing["totalTokens"].(map[string]any)
+	if billing["inventoryComplete"] != true || billing["closed"] != false || billing["attemptCount"] != float64(2) || total["reportedValue"] != float64(110) || total["complete"] != false {
+		t.Fatalf("pending attempt hidden or last result used: %#v", open)
+	}
+	secondSettlement := settlement
+	secondSettlement.Handle = second
+	secondSettlement.Status = domaincache.ProviderCallStatusSucceeded
+	secondSettlement.SafeReasonCode = "provider_succeeded"
+	secondSettlement.Usage.OutputTokens.Value = 20
+	secondSettlement.FirstTokenAt = start.Add(2500 * time.Millisecond)
+	secondSettlement.SettledAt = start.Add(4 * time.Second)
+	if err := recorder.SettleAttempt(ctx, secondSettlement); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recorder.CloseTurn(ctx, frozen, domaincache.ProviderTurnTerminalSuccessV1, start.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// Attempt settlement proves billing, but an old log without logical facts
+	// cannot prove either closed-step counts or assistant assembly timings.
+	legacy := query(handler)
+	legacyMetrics := legacy["metrics"].(map[string]any)
+	legacyLLM := legacyMetrics["llmMs"].(map[string]any)
+	if legacyMetrics["turnCount"] != nil || legacyMetrics["stepCount"] != nil ||
+		legacyLLM["knownStepCount"] != float64(0) || legacyLLM["complete"] != false {
+		t.Fatalf("legacy attempt ledger fabricated closed logical metrics: %#v", legacyMetrics)
+	}
+	const logicalStepID = "f13e1680-e522-4d40-bc18-40dde3bb66ea"
+	if _, _, err := store.RecordEventsAtomic([]map[string]any{
+		{"kind": "pipeline_stage", "threadId": threadID, "turnId": turnID, "stage": "post_start",
+			"timestamp": start.Format(time.RFC3339Nano),
+			"details":   map[string]any{"logicalStepMetricsVersion": float64(1)}},
+		{"kind": "pipeline_stage", "threadId": threadID, "turnId": turnID, "stage": "logical_step_started",
+			"timestamp": start.Format(time.RFC3339Nano),
+			"details":   map[string]any{"schemaVersion": float64(1), "logicalStepId": logicalStepID}},
+		{"kind": "pipeline_stage", "threadId": threadID, "turnId": turnID, "stage": "logical_step_closed",
+			"timestamp": start.Add(4 * time.Second).Format(time.RFC3339Nano),
+			"details": map[string]any{"schemaVersion": float64(1), "logicalStepId": logicalStepID,
+				"assistantMessageAssembled": true, "llmMs": float64(4000), "ttftMs": float64(200),
+				"decodeMs": float64(3800), "decodeTokens": float64(20)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	closed := query(handler)
+	metrics := closed["metrics"].(map[string]any)
+	llm := metrics["llmMs"].(map[string]any)
+	if metrics["turnCount"] != float64(1) || metrics["stepCount"] != float64(1) ||
+		llm["reportedValue"] != float64(4000) || llm["knownStepCount"] != float64(1) || llm["complete"] != true ||
+		metrics["ttftMs"] != float64(200) || metrics["ttftSteps"] != float64(1) || metrics["decodeTokens"] != float64(20) || metrics["decodeMs"] != float64(3800) || metrics["decodeSteps"] != float64(1) {
+		t.Fatalf("assembled result output/timing not paired: %#v", metrics)
+	}
+	closedBilling := closed["billing"].(map[string]any)
+	if !reflect.DeepEqual(closedBilling, legacy["billing"]) || closedBilling["closed"] != true ||
+		closedBilling["attemptCount"] != float64(2) || closedBilling["settledAttemptCount"] != float64(2) ||
+		closedBilling["inputTokens"].(map[string]any)["reportedValue"] != float64(200) ||
+		closedBilling["outputTokens"].(map[string]any)["reportedValue"] != float64(30) ||
+		closedBilling["totalTokens"].(map[string]any)["reportedValue"] != float64(230) || closedBilling["reasoningTokens"].(map[string]any)["complete"] != true {
+		t.Fatalf("exact attempt billing lost: %#v", closedBilling)
+	}
+	reopenedStore, err := NewTempDurableEventSessionStore(filepath.Join(root, "events"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedLedger, err := cachetelemetrystore.NewStore(ledgerRoot, access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopenedRecorder, err := cachetelemetryapp.NewDurableService(authority, reopenedLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopenedStore.EnsureUsageIndex(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := &runtimeServerHandler{store: reopenedStore, providerUsage: reopenedRecorder}
+	if got := query(reopened); !reflect.DeepEqual(got, closed) {
+		t.Fatalf("reopen/index rebuild lost conversation usage: before=%#v after=%#v", closed, got)
+	}
+	if _, err := recorder.ObserveTurnInventoriesV1(ctx, []domainsecurity.TurnSecurityContext{frozen, frozen}); err == nil {
+		t.Fatal("duplicate scope could multiply billing")
+	}
+	contexts, err := conversationUsageContextsV1(map[string]any{"id": threadID, "turns": []any{map[string]any{"id": turnID, "items": []any{}}}}, []map[string]any{{"kind": "turn_started", "threadId": threadID, "turnId": turnID, "turn": map[string]any{"id": turnID}, "securityContext": frozenMap}})
+	if err != nil || len(contexts) != 1 {
+		t.Fatalf("top-level frozen start scope lost: %#v err=%v", contexts, err)
+	}
+	metadataOnly := []map[string]any{{"kind": "turn_started", "threadId": threadID, "turnId": turnID}}
+	if _, err := conversationUsageContextsV1(map[string]any{"id": threadID, "turns": []any{turn}}, metadataOnly); err != nil {
+		t.Fatalf("protected metadata-only start rejected: %v", err)
+	}
+	// Simulate the owning compaction's removed current turns without mutating
+	// its implementation. The full log still contains the original scope.
+	rawThread, err := reopenedStore.GetThread(threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawThread["turns"] = []any{}
+	replay, err := reopenedStore.LoadEventsSince(threadID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	historical, err := usageapp.ObserveConversationUsageV1(ctx, rawThread, replay.Events, reopened.conversationUsageCommittedContextsV1(), reopenedRecorder)
+	if err != nil || historical.Billing.TotalTokens.ReportedValue != 230 || !historical.Billing.Closed {
+		t.Fatalf("compaction window lost full-log billing: %#v err=%v", historical, err)
+	}
 }

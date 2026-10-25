@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppSettingsV1 } from '@shared/app-settings'
 import { SPEECH_TRANSCRIPTION_MAX_DURATION_MS } from '@shared/speech-to-text'
@@ -42,15 +42,19 @@ export function useSpeechToTextEnabled(): boolean {
 }
 
 export function useVoiceDictation({
-  onText
+  onText,
+  ownerKey
 }: {
-  onText: (text: string, intent: VoiceDictationIntent) => void
+  onText: (text: string, intent: VoiceDictationIntent, isCurrent: () => boolean) => void
+  ownerKey: string
 }): {
   status: VoiceDictationStatus
   error: string | null
   startedAtMs: number
   start: () => void
   stop: (intent?: VoiceDictationIntent) => void
+  /** Discard the current recording and retire any pending permission or transcript. */
+  cancel: () => void
   toggle: () => void
   /** Current microphone level (0..1) for waveform rendering. Safe to call every frame. */
   getLevel: () => number
@@ -65,12 +69,13 @@ export function useVoiceDictation({
   const analyserRef = useRef<AnalyserNode | null>(null)
   const levelDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null)
   const stopIntentRef = useRef<VoiceDictationIntent>('insert')
-  const maxDurationTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const maxDurationTimerRef = useRef<ReturnType<Window['setTimeout']> | null>(null)
   const startedAtRef = useRef(0)
   const onTextRef = useRef(onText)
   const mountedRef = useRef(true)
+  const operationRef = useRef(0)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onTextRef.current = onText
   }, [onText])
 
@@ -101,40 +106,60 @@ export function useVoiceDictation({
     return Math.min(1, Math.sqrt(sumSquares / data.length) * 3)
   }, [])
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-      recorderRef.current?.stop()
-      releaseStream()
+  const cancel = useCallback((): void => {
+    operationRef.current += 1
+    const recorder = recorderRef.current
+    if (recorder) { recorder.onstop = null; recorder.ondataavailable = null }
+    releaseStream()
+    if (recorder?.state === 'recording') recorder.stop()
+    if (mountedRef.current) {
+      setStatus('idle')
+      setError(null)
+      setStartedAtMs(0)
     }
   }, [releaseStream])
 
-  const transcribeBlob = useCallback(async (blob: Blob, durationMs: number, intent: VoiceDictationIntent): Promise<void> => {
+  useLayoutEffect(() => {
+    mountedRef.current = true
+    operationRef.current += 1
+    setStatus('idle')
+    setError(null)
+    setStartedAtMs(0)
+    return () => {
+      mountedRef.current = false
+      cancel()
+    }
+  }, [ownerKey, cancel])
+
+  const transcribeBlob = useCallback(async (blob: Blob, durationMs: number, intent: VoiceDictationIntent, isCurrent: () => boolean): Promise<void> => {
     try {
+      if (!isCurrent()) return
       const wav = await encodeBlobAsWav(blob)
+      if (!isCurrent()) return
       const result = await window.analytix.speech.transcribe({
         audioBase64: wav.base64,
         mimeType: 'audio/wav',
         durationMs: Math.min(durationMs, SPEECH_TRANSCRIPTION_MAX_DURATION_MS)
       })
-      if (!mountedRef.current) return
+      if (!isCurrent()) return
       if (result.ok) {
-        onTextRef.current(result.text, intent)
+        onTextRef.current(result.text, intent, isCurrent)
       } else {
         setError(t('composerVoiceFailed', { message: result.message }))
       }
     } catch (cause) {
-      if (mountedRef.current) {
+      if (isCurrent()) {
         setError(t('composerVoiceFailed', { message: cause instanceof Error ? cause.message : String(cause) }))
       }
     } finally {
-      if (mountedRef.current) setStatus('idle')
+      if (isCurrent()) setStatus('idle')
     }
   }, [t])
 
   const start = useCallback((): void => {
     if (recorderRef.current) return
+    const operation = ++operationRef.current
+    const isCurrent = () => mountedRef.current && operationRef.current === operation
     setError(null)
     void (async () => {
       let stream: MediaStream
@@ -143,14 +168,14 @@ export function useVoiceDictation({
       } catch (cause) {
         const denied = cause instanceof DOMException &&
           (cause.name === 'NotAllowedError' || cause.name === 'SecurityError')
-        if (mountedRef.current) {
+        if (isCurrent()) {
           setError(denied
             ? t('composerVoiceMicDenied')
             : t('composerVoiceFailed', { message: cause instanceof Error ? cause.message : String(cause) }))
         }
         return
       }
-      if (!mountedRef.current) {
+      if (!isCurrent()) {
         stream.getTracks().forEach((track) => track.stop())
         return
       }
@@ -163,18 +188,18 @@ export function useVoiceDictation({
         if (event.data.size > 0) chunks.push(event.data)
       }
       recorder.onstop = () => {
+        if (!isCurrent()) return
         const durationMs = Date.now() - startedAtRef.current
         const intent = stopIntentRef.current
         const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
         releaseStream()
-        if (!mountedRef.current) return
         if (durationMs < MIN_RECORDING_MS || blob.size === 0) {
           setStatus('idle')
           setError(t('composerVoiceTooShort'))
           return
         }
         setStatus('transcribing')
-        void transcribeBlob(blob, durationMs, intent)
+        void transcribeBlob(blob, durationMs, intent, isCurrent)
       }
       try {
         const audioContext = new AudioContext()
@@ -216,7 +241,7 @@ export function useVoiceDictation({
     }
   }, [start, status, stop])
 
-  return { status, error, startedAtMs, start, stop, toggle, getLevel }
+  return { status, error, startedAtMs, start, stop, cancel, toggle, getLevel }
 }
 
 /**

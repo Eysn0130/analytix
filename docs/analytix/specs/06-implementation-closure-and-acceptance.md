@@ -28,19 +28,9 @@ The goal is not to add another broad redesign. The goal is to close the loop:
 
 ## 2. Inputs
 
-Implementation must read these documents before editing:
-
-```text
-/Users/sun/Projects/analytix/重构升级方案.md
-/Users/sun/Projects/analytix/docs/analytix/specs/01-identity-runtime-schema-reset.md
-/Users/sun/Projects/analytix/docs/analytix/specs/02-release-packaging-channels.md
-/Users/sun/Projects/analytix/docs/analytix/specs/03-brand-assets-visual-system.md
-/Users/sun/Projects/analytix/docs/analytix/specs/04-analytix-derived-thread-virtualizer.md
-/Users/sun/Projects/analytix/docs/analytix/specs/05-architecture-code-upgrade-inventory.md
-/Users/sun/Projects/analytix/docs/analytix/specs/06-implementation-closure-and-acceptance.md
-```
-
-`AGENTS.md` and `docs/AGENTS.md` must be read only to identify stale Kun instructions and update them. They must not override the user-confirmed analytix decisions when they still mention `kun/`, `window.kunGui`, `agents.kun`, or `kun serve`.
+Start with [the documentation map](../README.md), applicable `AGENTS.md`, and
+fresh Git state. Read only the accepted scope and real dependencies selected
+there; current code and fresh evidence establish implementation.
 
 ## 3. Frozen Decisions
 
@@ -583,8 +573,8 @@ Remaining old-name hits are allowed only in these files/classes of files:
 | `docs/analytix/specs/` specs `01` through `10` | Kun, `kun serve`, `agents.kun`, `window.kunGui`, old release identifiers, upstream source names | These specs describe the reset from the old architecture, desktop acceptance, upstream absorption, benchmark policy, control-plane evolution, and forbidden current-product terms. | Keep while specs explain migration history and active policy; use each file's lifecycle/currentness note. |
 | `docs/analytix/upstreams/` | Kun, Reasonix, CodexDesktop-Rebuild, upstream version/commit names | Required sync ledgers and conflict decisions for future upstream absorption. | Keep while upstream absorption remains active. |
 | `docs/analytix/benchmarks/` | Kun, Reasonix, upstream comparison terms | Required benchmark scenarios, quality gates, and scorecards for proving analytix is stronger after upstream absorption. | Keep while benchmark-based release claims remain active. |
-| `docs/legacy/kun/` | Kun and `kun` paths | Historical legacy-kun notes with explicit banner; retained only for migration background. | Remove after migration support is retired. |
-| `release/legacy/release-v0.2.*.md` | DeepSeek GUI, Kun, legacy release env/commands | Historical release archaeology for pre-analytix versions. | Keep archived; never link as current release docs. |
+| [Kun history pointer](../../legacy/kun/README.md) | Kun and `kun` paths | Old manuals are recoverable from the linked Git snapshot. | Keep historical references recoverable; migration support is unchanged. |
+| [Release history pointer](../../../release/legacy/README.md) | Pre-analytix release identifiers | Old v0.2.x notes are recoverable from the linked Git snapshot. | Never link as current release docs. |
 | `src/main/legacy-data-migration.ts` and `.test.ts` | `Kun`, `DeepSeek GUI` directory names | Exact legacy userData names required to find old installs. | Remove after the legacy import/migration window ends. |
 | `src/main/settings-store.ts` | `DeepSeek GUI` userData fallback | Fallback read for legacy settings when directory migration was skipped. | Remove with legacy migration cleanup. |
 | `src/renderer/src/plan/plan-prompts.ts` and plan prompt tests | `DeepSeek GUI is asking...` | Recognition of old stored internal GUI plan prompts so they do not become user requests. | Remove after stored legacy thread prompts are rewritten or no longer supported. |
@@ -644,8 +634,9 @@ docs/legacy/kun/
 
 The docs root no longer contains `docs/kun-architecture*.md`,
 `docs/kun-cache-optimization*.md`, `docs/kun-contributing*.md`, or
-`docs/kun-hooks*.md`. `docs/legacy/kun/README.md` marks them as historical
-migration background only. README documentation maps may link to that index as
+`docs/kun-hooks*.md`. The [historical pointer](../../legacy/kun/README.md) now
+links to their Git snapshot after retirement from the working tree.
+README documentation maps may link to that index as
 legacy background, but current architecture instructions remain `AGENTS.md`,
 `docs/AGENTS*.md`, and `docs/analytix/specs/` specs `01` through `10`.
 

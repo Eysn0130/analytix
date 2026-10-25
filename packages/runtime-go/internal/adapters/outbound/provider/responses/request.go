@@ -29,11 +29,18 @@ func ApplyReasoning(body map[string]any, request domainmodel.Request) {
 		return
 	}
 	effort := providerschema.NormalizeRequestReasoningEffort(request.ReasoningEffort)
+	var reasoning map[string]any
 	switch effort {
 	case "low", "medium":
-		body["reasoning"] = map[string]any{"effort": effort}
+		reasoning = map[string]any{"effort": effort}
 	case "high", "max":
-		body["reasoning"] = map[string]any{"effort": "high"}
+		reasoning = map[string]any{"effort": "high"}
+	}
+	if reasoning != nil {
+		if protocol == "openai-responses" {
+			reasoning["summary"] = "auto"
+		}
+		body["reasoning"] = reasoning
 	}
 }
 

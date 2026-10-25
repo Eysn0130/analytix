@@ -1,6 +1,11 @@
 package mcp
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	domainmcp "analytix.local/runtime-go/internal/domain/mcp"
+)
 
 func TestHostScheduleMCPBindingOwnsExactLoopbackAndReadOnlyPolicy(t *testing.T) {
 	configured := hostScheduleMCPBindingFixtureV1()
@@ -20,6 +25,19 @@ func TestHostScheduleMCPBindingOwnsExactLoopbackAndReadOnlyPolicy(t *testing.T) 
 	configured.Args[3] = "http://127.0.0.1:9788"
 	if hostScheduleLoopbackPortV1(bound[0]) != 9787 {
 		t.Fatal("bound schedule policy retained mutable caller input")
+	}
+}
+
+func TestHostScheduleReceiptRequiresBindingStillPresentAfterTransport(t *testing.T) {
+	manager, client, input := scheduleReceiptManagerFixtureV1(t, scheduleReceiptRawV1("success", false))
+	client.afterCall = func() { manager.mu.Lock(); manager.specs[0].IdentitySource = ""; manager.mu.Unlock() }
+	envelope, err := domainmcp.NewHostContextEnvelope(input.SecurityContext, input.ExecutionGrant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := manager.CallToolSecurityBoundContext(context.Background(), input.ToolName, true, envelope, input.Arguments)
+	if lossless, ok := output[domainmcp.HostRawToolResultKey].(domainmcp.LosslessToolResult); ok && lossless.HostPrivate != nil {
+		t.Fatal("removed native binding retained receipt authority")
 	}
 }
 
@@ -183,5 +201,49 @@ func hostScheduleMCPBindingFixtureV1() ServerSpec {
 		Env:        map[string]string{"ELECTRON_RUN_AS_NODE": "1"},
 		TrustScope: "user",
 		TimeoutMS:  hostScheduleMCPTimeoutMSV1,
+	}
+}
+
+type scheduleOriginCaptureClientV1 struct {
+	*scheduleReceiptClientV1
+	origin map[string]any
+}
+
+func (c *scheduleOriginCaptureClientV1) CallToolWithHostContext(ctx context.Context, name string, args map[string]any, envelope domainmcp.HostContextEnvelope) (any, error) {
+	origin, e := envelope.ScheduleOriginRecordV1()
+	if e != nil {
+		return nil, e
+	}
+	c.origin = origin
+	return c.CallTool(name, args)
+}
+func TestNativeScheduleOriginRequiresExactAuthenticatedBindingV1(t *testing.T) {
+	manager, client, input := scheduleReceiptManagerFixtureV1(t, scheduleReceiptRawV1("success", false))
+	capture := &scheduleOriginCaptureClientV1{scheduleReceiptClientV1: client}
+	manager.clients["gui_schedule"] = capture
+	configured := hostScheduleMCPBindingFixtureV1()
+	configured.Args = append(configured.Args, "--secret", "synthetic-private-secret")
+	manager.specs = BindHostScheduleMCPServerV1([]ServerSpec{configured}, &configured)
+	envelope, e := domainmcp.NewHostContextEnvelope(input.SecurityContext, input.ExecutionGrant)
+	if e != nil {
+		t.Fatal(e)
+	}
+	output := manager.CallToolSecurityBoundContext(context.Background(), input.ToolName, true, envelope, input.Arguments)
+	if capture.origin == nil || len(capture.origin) != 5 || capture.origin["grantId"] != input.ExecutionGrant.GrantID || capture.origin["threadId"] != input.SecurityContext.ThreadID || output["executed"] != true {
+		t.Fatal("native creation tuple did not follow current bound transport")
+	}
+	capture.origin = nil
+	manager.specs[0].IdentitySource = ""
+	manager.CallToolSecurityBoundContext(context.Background(), input.ToolName, true, envelope, input.Arguments)
+	if capture.origin != nil {
+		t.Fatal("lookalike server received native origin")
+	}
+	legacy := hostScheduleMCPBindingFixtureV1()
+	bound := BindHostScheduleMCPServerV1([]ServerSpec{legacy}, &legacy)[0]
+	if hostScheduleCreateOriginAllowedV1(bound, "gui_schedule_create") {
+		t.Fatal("missing helper secret accepted origin")
+	}
+	if hostScheduleCreateOriginAllowedV1(manager.specs[0], "gui_schedule_delete") {
+		t.Fatal("non-create call accepted origin")
 	}
 }

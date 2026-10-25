@@ -22,6 +22,7 @@ import (
 	domaincontextepoch "analytix.local/runtime-go/internal/domain/contextepoch"
 	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainevidence "analytix.local/runtime-go/internal/domain/evidence"
+	domaingoal "analytix.local/runtime-go/internal/domain/goal"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainordinaryresult "analytix.local/runtime-go/internal/domain/ordinaryresult"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -112,6 +113,7 @@ func projectPublicThreadWithRetainedFactsV1(thread map[string]any, trusted *gate
 	delete(projected, "forkedFromTitle")
 	delete(projected, "preview")
 	delete(projected, "goal")
+	delete(projected, "goalHistory")
 	delete(projected, "todos")
 	if todos, _ := thread["todos"].(map[string]any); todos != nil {
 		projectedAt := strings.TrimSpace(contracts.StringField(thread, "updatedAt"))
@@ -289,6 +291,9 @@ func projectPublicThreadWithRetainedFactsV1(thread map[string]any, trusted *gate
 						publicTurn["acceptedFinalView"] = contracts.CloneValue(trustedPublicView)
 						publicTurn["status"] = trustedRecord.PublicationIntent.TerminalStatus
 						publicTurn["finishedAt"] = trustedRecord.AcceptedFinal.AcceptedAt
+						if trustedRecord.PublicationIntent.EndReason != nil {
+							publicTurn["endReason"] = domainterminal.EndReasonMap(trustedRecord.PublicationIntent.EndReason)
+						}
 					}
 					acceptedAssistantCount++
 					if trustedAuthority != nil {
@@ -499,6 +504,9 @@ func projectCaseHistoryGeneralTerminalV1(
 	})
 	publicTurn["id"] = turnID
 	publicTurn["threadId"] = threadID
+	if authority.Commit.TerminalEvent["endReason"] != nil {
+		publicTurn["endReason"] = contracts.CloneValue(authority.Commit.TerminalEvent["endReason"])
+	}
 	if err := projectCasePublicTurnReasoningEffortV1(publicTurn, turn); err != nil {
 		return nil, err
 	}
@@ -629,7 +637,7 @@ func projectOrdinaryPublicThread(thread map[string]any) (map[string]any, error) 
 		"id", "title", "autoTitle", "workspace", "model", "providerId", "mode", "status",
 		"executionPolicyVersion", "approvalPolicy", "sandboxMode", "costBudgetUsd", "costBudgetWarningSent",
 		"relation", "parentThreadId", "forkedFromThreadId", "forkedFromTitle", "forkedAt",
-		"forkedFromMessageCount", "forkedFromTurnCount", "runtimeStepLimits", "goal", "todos",
+		"forkedFromMessageCount", "forkedFromTurnCount", "runtimeStepLimits", "goal", "goalHistory", "todos",
 		"createdAt", "updatedAt", "turns",
 	})
 	if rawGoal, present := projected["goal"]; present {
@@ -638,6 +646,47 @@ func projectOrdinaryPublicThread(thread map[string]any) (map[string]any, error) 
 			return nil, errors.New("ordinary public goal is outside the closed projection")
 		}
 		projected["goal"] = goal
+	}
+	if raw, present := projected["goalHistory"]; present {
+		history, ok := raw.([]any)
+		if !ok || len(history) > 500 {
+			return nil, errors.New("Goal history is outside the closed snapshot")
+		}
+		out := make([]any, 0, len(history))
+		for _, rawEntry := range history {
+			entry, ok := rawEntry.(map[string]any)
+			if !ok || !validNonemptyPublicStringV1(entry["id"]) || !oneOfPublicValue(contracts.StringField(entry, "operation"), "create", "edit", "pause", "resume", "clear", "legacy_update", "legacy_clear", "evidence", "model_update", "round_limit", "round_started") || !validPublicStringV1(entry, "createdAt", true) {
+				return nil, errors.New("Goal history entry is invalid")
+			}
+			value := selectPublicFields(entry, []string{"id", "operation", "createdAt", "ref"})
+			if rawRef, present := value["ref"]; present {
+				ref, ok := rawRef.(map[string]any)
+				if !ok || len(ref) != 2 {
+					return nil, errors.New("Goal history ref is invalid")
+				}
+				if _, valid := domaingoal.RefFromRecordV1(ref); !valid {
+					return nil, errors.New("Goal history ref is invalid")
+				}
+			}
+			value["goal"] = nil
+			if entry["goal"] != nil {
+				goal, valid := projectOrdinaryPublicGoalV1(entry["goal"])
+				if !valid {
+					return nil, errors.New("Goal history snapshot is invalid")
+				}
+				value["goal"] = goal
+			}
+			if value["goal"] != nil && value["ref"] != nil {
+				goal := value["goal"].(map[string]any)
+				actual, known := domaingoal.RefFromRecordV1(goal)
+				expected, _ := domaingoal.RefFromRecordV1(value["ref"].(map[string]any))
+				if !known || actual != expected || contracts.StringField(goal, "threadId") != contracts.StringField(projected, "id") {
+					return nil, errors.New("Goal history snapshot binding is invalid")
+				}
+			}
+			out = append(out, value)
+		}
+		projected["goalHistory"] = out
 	}
 	if status := strings.TrimSpace(contracts.StringField(projected, "status")); status != "" {
 		if !oneOfPublicValue(status, "idle", "running", "archived", "deleted") {
@@ -691,6 +740,9 @@ func projectOrdinaryPublicThread(thread map[string]any) (map[string]any, error) 
 		}
 		turnID := strings.TrimSpace(contracts.StringField(turn, "id"))
 		authority, governed := authorities[turnID]
+		if authority.Terminal && authority.Commit.TerminalEvent["endReason"] != nil {
+			turn["endReason"] = contracts.CloneValue(authority.Commit.TerminalEvent["endReason"])
+		}
 		if governed {
 			seenAuthorities[turnID] = true
 		}
@@ -914,7 +966,7 @@ func projectOrdinaryPublicGoalV1(value any) (map[string]any, bool) {
 	// Durable research state carries only a private opaque reference. Do not
 	// synthesize the retired operational paths expected by legacy clients.
 	projected := selectPublicFields(goal, []string{
-		"id", "threadId", "objective", "status", "tokenBudget", "tokensUsed", "timeUsedSeconds",
+		"id", "revision", "maxGoalRounds", "roundsStarted", "threadId", "objective", "status", "tokenBudget", "tokensUsed", "timeUsedSeconds",
 		"evidenceLedger", "blockedReason", "blockedCount", "blockedTurnId", "strictCompletion",
 		"selfCheckRequired", "selfCheckCompleted", "selfCheckTurnId", "createdAt", "updatedAt",
 	})
@@ -929,6 +981,22 @@ func projectOrdinaryPublicGoalV1(value any) (map[string]any, bool) {
 	}
 	if rawID, present := projected["id"]; present && !validNonemptyPublicStringV1(rawID) {
 		return nil, false
+	}
+	for _, key := range []string{"revision", "maxGoalRounds", "roundsStarted"} {
+		if raw, present := projected[key]; present {
+			minimum := 1
+			if key == "roundsStarted" {
+				minimum = 0
+			}
+			if _, valid := domaingoal.IntegerV1(raw, minimum); !valid {
+				return nil, false
+			}
+		}
+	}
+	if maximum, ok := domaingoal.IntegerV1(projected["maxGoalRounds"], 1); ok {
+		if started, known := domaingoal.IntegerV1(projected["roundsStarted"], 0); known && started > maximum {
+			return nil, false
+		}
 	}
 	if rawBudget, present := projected["tokenBudget"]; present && rawBudget != nil && !validPublicIntegerV1(rawBudget, true) {
 		return nil, false
@@ -1289,4 +1357,110 @@ func selectPublicFields(record map[string]any, fields []string) map[string]any {
 		}
 	}
 	return selected
+}
+
+// Close only the already validated public copy. Question carrier fields must
+// survive the existing privacy/codec checks, but are never part of the wire
+// SteeringEntrySchema. No durable entry or source authority is changed here.
+func closePublicThreadSteeringV1(thread map[string]any) (map[string]any, error) {
+	invalid := errors.New("public steering is outside the closed wire schema")
+	turns, ok := thread["turns"].([]any)
+	if !ok {
+		return nil, invalid
+	}
+	for _, rawTurn := range turns {
+		turn, ok := rawTurn.(map[string]any)
+		if !ok {
+			return nil, invalid
+		}
+		rawSteering, present := turn["steering"]
+		if !present {
+			continue
+		}
+		steering, ok := rawSteering.([]any)
+		if !ok {
+			return nil, invalid
+		}
+		closed := make([]any, 0, len(steering))
+		for _, raw := range steering {
+			if legacy, ok := raw.(string); ok {
+				closed = append(closed, legacy)
+				continue
+			}
+			entry, ok := raw.(map[string]any)
+			if !ok || entry == nil {
+				return nil, invalid
+			}
+			if err := validateForkHistoryCancellationV1(entry); err != nil {
+				return nil, invalid
+			}
+			// Only the final public copy uses the existing display-only wire key.
+			// Internal primary/seed producers retain the inert history namespace.
+			if reason, present := entry[forkHistoryCancellationReasonV1]; present {
+				entry = contracts.CloneMap(entry)
+				entry["cancelReason"] = reason
+			}
+			entry = selectPublicFields(entry, []string{
+				"id", "clientUserMessageId", "text", "displayText", "attachmentIds", "fileReferences",
+				"admittedAt", "status", "promotedAt", "promotedItemId", "cancelledAt", "cancelReason",
+			})
+			for _, key := range []string{"text", "id", "clientUserMessageId", "displayText", "admittedAt", "status", "promotedAt", "promotedItemId", "cancelledAt", "cancelReason"} {
+				value, present := entry[key]
+				if !present {
+					if key == "text" {
+						return nil, invalid
+					}
+					continue
+				}
+				text, ok := value.(string)
+				if !ok || (key == "text" || key == "id" || key == "clientUserMessageId" || key == "promotedItemId") && text == "" {
+					return nil, invalid
+				}
+			}
+			if status, present := entry["status"]; present && !oneOfPublicValue(status.(string), "pending", "promoted", "cancelled") {
+				return nil, invalid
+			}
+			for _, key := range []string{"attachmentIds", "fileReferences"} {
+				if _, present := entry[key]; !present {
+					entry[key] = []any{}
+				}
+			}
+			attachments, ok := entry["attachmentIds"].([]any)
+			if !ok {
+				return nil, invalid
+			}
+			for _, rawID := range attachments {
+				if id, ok := rawID.(string); !ok || id == "" {
+					return nil, invalid
+				}
+			}
+			references, ok := entry["fileReferences"].([]any)
+			if !ok {
+				return nil, invalid
+			}
+			publicReferences := make([]any, 0, len(references))
+			for _, rawReference := range references {
+				reference, ok := rawReference.(map[string]any)
+				if !ok || reference == nil {
+					return nil, invalid
+				}
+				reference = selectPublicFields(reference, []string{"path", "relativePath", "name", "kind"})
+				for _, key := range []string{"path", "relativePath", "name"} {
+					if text, ok := reference[key].(string); !ok || text == "" {
+						return nil, invalid
+					}
+				}
+				if value, present := reference["kind"]; present {
+					if kind, ok := value.(string); !ok || !oneOfPublicValue(kind, "file", "directory") {
+						return nil, invalid
+					}
+				}
+				publicReferences = append(publicReferences, reference)
+			}
+			entry["fileReferences"] = publicReferences
+			closed = append(closed, entry)
+		}
+		turn["steering"] = closed
+	}
+	return thread, nil
 }

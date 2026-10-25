@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatBlock } from '../../agent/types'
-import { deriveTurnSections } from './derive-turn-sections'
-import type { Turn } from './message-timeline-turns'
+import { deriveTurnSections } from '../../thread/projection/derive-turn-sections'
+import type { ThreadTurn as Turn } from '../../thread/projection/thread-turns'
 
 function sections(blocks: ChatBlock[]) {
   return deriveTurnSections({
@@ -171,7 +171,7 @@ describe('deriveTurnSections', () => {
     expect(result.processBlocks.map((block) => block.kind)).toEqual(['tool'])
   })
 
-  it('keeps compaction markers out of work process step counts', () => {
+  it('keeps compaction in process order without counting it as a tool', () => {
     const result = sections([
       {
         kind: 'compaction',
@@ -190,8 +190,21 @@ describe('deriveTurnSections', () => {
       }
     ])
 
-    expect(result.processBlocks.map((block) => block.id)).toEqual(['tool_1'])
-    expect(result.compactionBlocks.map((block) => block.id)).toEqual(['compact_1'])
+    expect(result.processBlocks.map((block) => block.id)).toEqual(['compact_1', 'tool_1'])
+    expect(result.processBlocks.filter(block => block.kind === 'tool')).toHaveLength(1)
+    expect(result.compactionBlocks).toEqual([])
+  })
+
+  it('keeps compaction before or after the final answer according to actual event order', () => {
+    const compact: ChatBlock = { kind: 'compaction', id: 'compact', summary: 'Context compacted', status: 'success' }
+    const tool: ChatBlock = { kind: 'tool', id: 'first', summary: 'Read', status: 'success', toolKind: 'tool_call' }
+    const answer: ChatBlock = { kind: 'assistant', id: 'answer', text: 'Approved answer' }
+    const before = sections([tool, compact, { ...tool, id: 'second' }, answer])
+    expect(before.processBlocks.map(block => block.id)).toEqual(['first', 'compact', 'second'])
+    expect(before.assistantContentBlocks.map(block => block.id)).toEqual(['answer']); expect(before.compactionBlocks).toEqual([])
+    const after = sections([tool, answer, compact])
+    expect(after.processBlocks.map(block => block.id)).toEqual(['first']); expect(after.compactionBlocks.map(block => block.id)).toEqual(['compact'])
+    expect(processingSections({ blocks: [tool, compact, answer] }).processBlocks.map(block => block.id)).toEqual(['first', 'compact', 'answer'])
   })
 
   it('surfaces generated media blocks outside the collapsed process work', () => {
@@ -457,4 +470,18 @@ describe('deriveTurnSections', () => {
     expect(result.assistantContentBlocks).toEqual([])
     expect(result.processBlocks.map((block) => block.id)).toEqual(['tool_1', 'answer', 'tool_2'])
   })
+})
+
+
+it('retains the exact boundary of an extracted reply without closing later tool work', () => {
+  const before: ChatBlock = { kind: 'tool', id: 'before-reply', summary: 'Read before', status: 'running' }
+  const after: ChatBlock = { kind: 'tool', id: 'after-reply', summary: 'Read after', status: 'running' }
+  const reply: ChatBlock = { kind: 'assistant', id: 'reply-boundary', text: 'Actual public reply' }
+  const result = sections([before, reply, after])
+  expect(result.processBlocks).toEqual([before, after])
+  expect(result.processReplyBoundaryAfterIds).toEqual([before.id])
+  expect(sections([before, reply]).processReplyBoundaryAfterIds).toEqual([before.id])
+  expect(processingSections({ blocks: [before, reply, after] }).processReplyBoundaryAfterIds).toEqual([])
+  expect(sections([before, { ...reply, text: '   ' }, after]).processReplyBoundaryAfterIds).toEqual([])
+  expect(sections([before, { ...reply, text: `cer1_${'a'.repeat(64)}` }, after]).processReplyBoundaryAfterIds).toEqual([])
 })

@@ -1,6 +1,7 @@
 package sse
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -27,6 +28,86 @@ import (
 	domainturnterminal "analytix.local/runtime-go/internal/domain/turnterminal"
 	securitycontexttest "analytix.local/runtime-go/internal/testsupport/securitycontext"
 )
+
+func TestGoalLiveAttachSignalsCurrentStateAfterSubscriptionWithoutAdvancingCursor(t *testing.T) {
+	live := make(chan map[string]any, 2)
+	unsubscribed := make(chan struct{})
+	subscribed := false
+	metadata := func(activation any) map[string]any {
+		return map[string]any{"kind": "goal_activation_changed", "threadId": "goal-thread", "timestamp": "2026-10-11T00:00:00Z", "activation": activation}
+	}
+	handler := ThreadEventsHandler{Store: identityThreadEventStore(ThreadEventStore{
+		HighestSeq: func(string) (int, error) { return 7, nil },
+		LoadEventsSince: func(string, int) ([]map[string]any, error) {
+			return []map[string]any{{"kind": "cursor_advanced", "threadId": "goal-thread", "seq": float64(7), "reason": "restricted_content_removed", "timestamp": "2026-10-11T00:00:00Z"}}, nil
+		},
+		SubscribeEvents: func(threadID string) (<-chan map[string]any, func()) {
+			if threadID != "goal-thread" {
+				t.Error("wrong subscription thread")
+			}
+			subscribed = true
+			return live, func() { close(unsubscribed) }
+		},
+		InitialGoalActivation: func(threadID string) map[string]any {
+			if !subscribed || threadID != "goal-thread" {
+				t.Error("activation read preceded subscription or used wrong thread")
+			}
+			// A later clear remains in the already established live queue.
+			live <- metadata(nil)
+			live <- map[string]any{"kind": "cursor_advanced", "threadId": threadID, "seq": float64(8), "reason": "restricted_content_removed", "timestamp": "2026-10-11T00:00:01Z"}
+			close(live)
+			return metadata(map[string]any{"id": "goal", "revision": 2, "activation": "disarmed"})
+		},
+	})}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.ServeHTTP(w, r, "goal-thread") }))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"?live=1&since_seq=6", nil)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	scanner := bufio.NewScanner(response.Body)
+	var events []map[string]any
+	eventID := ""
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			eventID = ""
+			continue
+		}
+		if strings.HasPrefix(line, "id:") {
+			eventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &event); err != nil {
+			t.Fatal(err)
+		}
+		if event["kind"] == "goal_activation_changed" {
+			if eventID != "" || event["seq"] != nil {
+				t.Fatal("attach metadata acquired durable cursor", event)
+			}
+		}
+		events = append(events, event)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 4 || events[0]["seq"] != float64(7) || events[1]["activation"].(map[string]any)["activation"] != "disarmed" || events[2]["activation"] != nil || events[3]["seq"] != float64(8) {
+		t.Fatal("replay/current activation/newer live order changed", events)
+	}
+	select {
+	case <-unsubscribed:
+	case <-ctx.Done():
+		t.Fatal("closed stream did not unsubscribe")
+	}
+}
 
 func TestSetupErrorEventUsesTerminalContract(t *testing.T) {
 	event := SetupErrorEvent(SetupErrorInput{
@@ -86,6 +167,60 @@ func TestSSETraceNeverMutatesAtomicTerminalBatch(t *testing.T) {
 	ordinary := handler.withSSETrace(map[string]any{"kind": "heartbeat", "seq": float64(4)})
 	if _, present := ordinary["trace"]; !present {
 		t.Fatalf("ordinary SSE event lost enabled trace metadata: %#v", ordinary)
+	}
+}
+
+func TestSSETracePreservesClosedLogicalStepEvents(t *testing.T) {
+	t.Setenv("ANALYTIX_THREAD_TRACE", "1")
+	handler := ThreadEventsHandler{Now: func() time.Time {
+		return time.Date(2026, 10, 13, 5, 0, 0, 0, time.UTC)
+	}}
+	for _, stage := range []string{"logical_step_started", "logical_step_assembled", "logical_step_closed"} {
+		t.Run(stage, func(t *testing.T) {
+			label := "Logical step started"
+			details := map[string]any{"schemaVersion": 1, "logicalStepId": "12345678-1234-4234-8234-123456789abc"}
+			if stage == "logical_step_assembled" {
+				label = "Logical step assembled"
+			}
+			if stage == "logical_step_closed" {
+				label = "Logical step closed"
+				details["assistantMessageAssembled"] = true
+				details["llmMs"] = 24
+			}
+			event := map[string]any{"kind": "pipeline_stage", "seq": 10,
+				"timestamp": "2026-10-13T05:00:00Z", "threadId": "thread_trace", "turnId": "turn_trace",
+				"stage": stage, "label": label, "details": details}
+			before, _ := json.Marshal(event)
+			for _, projected := range []map[string]any{handler.withSSETrace(event), handler.withSSETraceEvents([]map[string]any{event})[0]} {
+				after, _ := json.Marshal(projected)
+				if string(after) != string(before) {
+					t.Fatal("SSE tracing changed a closed logical-step event")
+				}
+			}
+			after, _ := json.Marshal(event)
+			if string(after) != string(before) {
+				t.Fatal("SSE tracing mutated its input")
+			}
+		})
+	}
+}
+
+// The kind-level fence also leaves existing legacy replay untouched. It does
+// not add a schema version or claim a V3 summary for the older event shapes.
+func TestSSETracePreservesLegacyCompactionReplay(t *testing.T) {
+	t.Setenv("ANALYTIX_THREAD_TRACE", "1")
+	handler := ThreadEventsHandler{}
+	for _, event := range []map[string]any{
+		{"kind": "compaction_started", "threadId": "legacy", "seq": 1},
+		{"kind": "compaction_completed", "schemaVersion": 2, "threadId": "legacy", "seq": 2},
+	} {
+		before, _ := json.Marshal(event)
+		for _, projected := range []map[string]any{handler.withSSETrace(event), handler.withSSETraceEvents([]map[string]any{event})[0]} {
+			after, _ := json.Marshal(projected)
+			if string(before) != string(after) {
+				t.Fatal("SSE trace changed legacy compaction replay")
+			}
+		}
 	}
 }
 
@@ -1476,7 +1611,7 @@ func acceptedFinalSSEFixtureWithAuthority(t *testing.T) (map[string]any, ed25519
 
 func TestThreadEventReplayPropagatesCancelledRequestContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
 	called := false
 	handler := ThreadEventsHandler{Store: ThreadEventStore{
 		HighestSeq:      func(string) (int, error) { return 1, nil },
@@ -1486,6 +1621,12 @@ func TestThreadEventReplayPropagatesCancelledRequestContext(t *testing.T) {
 		},
 		LoadPublicEventsSinceContext: func(observed context.Context, _ string, _ int) ([]map[string]any, error) {
 			called = true
+			if observed != ctx {
+				t.Fatal("loader did not receive the exact request context")
+			}
+			// A request cancelled before entry now stops before I/O. Cancel
+			// inside the loader to retain the context/error propagation check.
+			cancel()
 			if !errors.Is(observed.Err(), context.Canceled) {
 				t.Fatalf("loader received a live context after request cancellation: %v", observed.Err())
 			}

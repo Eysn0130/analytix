@@ -1,3 +1,4 @@
+import { useDocxEditorStore } from '../office/docx-editor-store'
 import { useNativeOfficeStore } from '../office/native-office-store'
 import { useChatStore } from '../store/chat-store'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
@@ -55,13 +56,16 @@ export function BuiltinOfficePlugins({ query }: { query: string }) {
   })
   const openDocument = async (pkg: PluginPackageView) => {
     const extension = pkg.packageId === 'analytix-documents' ? 'docx' : pkg.packageId === 'analytix-spreadsheets' ? 'xlsx' : 'pptx'
-    const root = useChatStore.getState().workspaceRoot
+    const chat=useChatStore.getState(),threadId=chat.activeThreadId
+    const root = chat.workspaceRoot
     if (!root || !(await useWriteWorkspaceStore.getState().flushSave(root))) return
     try {
       const picked = await window.analytix.office.pickFile({ kind: extension, workspace: root })
       if (!picked.ok) { if (mounted.current) setFailed(true); return }
       if (!picked.path) return
-      useNativeOfficeStore.getState().select(root, picked.path)
+      if (extension==='docx') {
+        if (!await useDocxEditorStore.getState().select(root,picked.path,threadId ?? undefined,()=>mounted.current && (!threadId || useChatStore.getState().activeThreadId===threadId))) return
+      } else await useNativeOfficeStore.getState().select(root, picked.path)
       await useChatStore.getState().openWrite()
     } catch { if (mounted.current) setFailed(true) }
   }

@@ -1,6 +1,9 @@
 package usage
 
 import (
+	"encoding/json"
+	"math"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -204,4 +207,80 @@ func containsAnyString(items []any, expected string) bool {
 		}
 	}
 	return false
+}
+
+func TestConversationProjectionDoesNotChangeLegacyCounters(t *testing.T) {
+	legacy := []Record{{ThreadID: "thread-known", Model: "model", Provider: "provider", CompletedAt: "2026-07-14T00:00:00Z", Usage: Snapshot{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, Turns: 1}}}
+	projection := ConversationUsageV1{SchemaVersion: "conversation-usage.v1"}
+	combined := append(append([]Record{}, legacy...), Record{ThreadID: "thread-open", ProjectionOnly: true, Conversation: &projection})
+	if SumRecords(combined).TotalTokens != 12 || len(BySourceResponse(combined)) != len(BySourceResponse(legacy)) {
+		t.Fatal("projection changed legacy usage")
+	}
+	response := ThreadResponse(combined)
+	if response["totals"].(map[string]any)["thread_count"] != 1 || len(response["buckets"].([]any)) != 2 {
+		t.Fatalf("legacy totals drift: %#v", response)
+	}
+	for _, raw := range response["buckets"].([]any) {
+		row := raw.(map[string]any)
+		if row["thread_id"] == "thread-open" && row["conversationUsage"] != &projection {
+			t.Fatal("open usage projection was lost")
+		}
+	}
+}
+
+func TestSnapshotFromMapIntegerBounds(t *testing.T) {
+	precise := int64(1<<53 + 1)
+	preciseWant := 0
+	if precise <= int64(math.MaxInt) {
+		preciseWant = int(precise)
+	}
+	safeMaximum := int64(1<<53 - 1)
+	safeWant := 0
+	if safeMaximum <= int64(math.MaxInt) {
+		safeWant = int(safeMaximum)
+	}
+	upper := -float64(math.MinInt)
+	lastFloat := math.Trunc(math.Nextafter(upper, 0))
+	for _, test := range []struct {
+		name  string
+		value any
+		want  int
+	}{
+		{"int", int(7), 7},
+		{"int64", int64(7), 7},
+		{"float64", float64(7), 7},
+		{"float32", float32(7), 7},
+		{"json_integer", json.Number("7"), 7},
+		{"zero", 0, 0},
+		{"negative", int64(-1), 0},
+		{"negative_float", -1.5, 0},
+		{"fraction", 7.75, 7},
+		{"float32_fraction", float32(7.75), 7},
+		{"json_fraction", json.Number("7.75"), 7},
+		{"json_exponent", json.Number("7e1"), 70},
+		{"json_fraction_exponent", json.Number("7.75e1"), 77},
+		{"safe_maximum", safeMaximum, safeWant},
+		{"precise_int64", precise, preciseWant},
+		{"precise_json", json.Number(strconv.FormatInt(precise, 10)), preciseWant},
+		{"host_maximum_int", math.MaxInt, math.MaxInt},
+		{"host_maximum_int64", int64(math.MaxInt), math.MaxInt},
+		{"host_maximum_json", json.Number(strconv.Itoa(math.MaxInt)), math.MaxInt},
+		{"last_host_float", lastFloat, int(lastFloat)},
+		{"host_int_upper", upper, 0},
+		{"host_int_upper_json", json.Number(strconv.FormatUint(uint64(math.MaxInt)+1, 10)), 0},
+		{"nan", math.NaN(), 0},
+		{"positive_infinity", math.Inf(1), 0},
+		{"negative_infinity", math.Inf(-1), 0},
+		{"huge", 1e100, 0},
+		{"huge_json_exponent", json.Number("1e100"), 0},
+		{"nil", nil, 0},
+		{"string", "7", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := SnapshotFromMap(map[string]any{"promptTokens": test.value, "totalTokens": test.value})
+			if snapshot.PromptTokens != test.want || snapshot.TotalTokens != test.want {
+				t.Fatalf("usage integer(%v) = prompt %d, total %d; want %d", test.value, snapshot.PromptTokens, snapshot.TotalTokens, test.want)
+			}
+		})
+	}
 }

@@ -29,6 +29,12 @@ export function useThreadComposerDraft(workspace: string, threadId: string | nul
       ...current, fileReferences: typeof action === 'function' ? action(current.fileReferences) : action
     }))
   }, [key, update])
+  const removeAttachmentUpload = useCallback((id: string) => {
+    update(key, current => ({ ...current,
+      attachmentUploads: current.attachmentUploads?.filter(item => item.id !== id),
+      attachmentUploadError: null
+    }))
+  }, [key, update])
   const setAttachmentUploadError = useCallback((error: string | null) => {
     update(key, current => current.attachmentUploadError === error ? current : { ...current, attachmentUploadError: error })
   }, [key, update])
@@ -53,5 +59,5 @@ export function useThreadComposerDraft(workspace: string, threadId: string | nul
       ...draft, attachments: submitted.attachments, fileReferences: submitted.fileReferences
     }, submitted.includeInput))
   }, [key, draft, update])
-  return { draft, setInput, setAttachments, setFileReferences, clearSubmitted, beginAttachmentUpload, setAttachmentUploadError }
+  return { draft, setInput, setAttachments, setFileReferences, clearSubmitted, beginAttachmentUpload, setAttachmentUploadError, removeAttachmentUpload }
 }

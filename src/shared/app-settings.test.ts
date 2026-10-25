@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  APP_ACCENT_COLORS,
   applyAnalytixRuntimePatch,
   analytixToolPermissionModeFromSettings,
   analytixToolPermissionModeSettings,
@@ -1703,5 +1704,138 @@ describe('write agent presets', () => {
       { id: 'coordinator', name: '我的统筹', emoji: '🧭', persona: '' },
       { id: 'custom-1', name: '', emoji: '🤖', persona: '专属人设' }
     ])
+  })
+})
+
+it('keys explicit model reasoning preferences into normal runtime rebuilds without altering legacy defaults', () => {
+  const base = settings()
+  const on = normalizeAppSettings({ ...base, provider: { ...base.provider, modelPreferences: [{
+    id: 'provider-alpha', baseUrl: 'https://provider.invalid/v1', endpointFormat: 'chat_completions',
+    modelProfiles: { 'model-alpha': { reasoning: { supportedEfforts: ['off', 'high'], defaultEffort: 'high', requestProtocol: 'deepseek-chat-completions' } } }
+  }] } })
+  expect(buildAnalytixRuntimeSettingsKey(on)).not.toBe(buildAnalytixRuntimeSettingsKey(base))
+  const off = normalizeAppSettings({ ...on, provider: { ...on.provider, modelPreferences: [{
+    ...on.provider.modelPreferences![0], modelProfiles: { 'model-alpha': { reasoning: null } }
+  }] } })
+  expect(buildAnalytixRuntimeSettingsKey(off)).not.toBe(buildAnalytixRuntimeSettingsKey(on))
+  expect(buildAnalytixRuntimeSettingsKey({ ...off, locale: 'zh' })).toBe(buildAnalytixRuntimeSettingsKey(off))
+  expect(base.provider).not.toHaveProperty('modelPreferences')
+})
+
+
+it('includes own prototype-named model preferences in the runtime startup fingerprint', () => {
+  const base = settings()
+  const profiles = Object.fromEntries([['__proto__', { reasoning: null }]])
+  const off = normalizeAppSettings({ ...base, provider: { ...base.provider, modelPreferences: [{
+    id: 'provider-alpha', baseUrl: 'https://provider.invalid/v1', endpointFormat: 'chat_completions', modelProfiles: profiles
+  }] } })
+  const on = normalizeAppSettings({ ...off, provider: { ...off.provider, modelPreferences: [{
+    ...off.provider.modelPreferences![0], modelProfiles: Object.fromEntries([['__proto__', { reasoning: {
+      supportedEfforts: ['off', 'high'], defaultEffort: 'high', requestProtocol: 'deepseek-chat-completions'
+    } }]])
+  }] } })
+  expect(Object.hasOwn(off.provider.modelPreferences![0].modelProfiles, '__proto__')).toBe(true)
+  expect(buildAnalytixRuntimeSettingsKey(off)).not.toBe(buildAnalytixRuntimeSettingsKey(on))
+})
+
+
+it('preserves closed model preferences through migration and rejects expanded metadata', () => {
+  const base = settings()
+  const binding: NonNullable<AppSettingsV1['provider']['modelPreferences']>[number] = {
+    id: 'provider-alpha', baseUrl: 'https://provider.invalid/v1', endpointFormat: 'chat_completions',
+    modelProfiles: { 'model-alpha': { reasoning: {
+      supportedEfforts: ['off', 'high'], defaultEffort: 'high', requestProtocol: 'deepseek-chat-completions'
+    } } }
+  }
+  const off = { ...binding, modelProfiles: { 'model-alpha': { reasoning: null } } }
+  const inherited = { ...binding, modelProfiles: { 'model-alpha': { aliases: ['alpha'] } } }
+  for (const entry of [binding, off, inherited]) {
+    const migrated = migrateLegacyAppSettings({ ...base, provider: { ...base.provider, modelPreferences: [entry] } })
+    expect(migrated.provider?.modelPreferences).toEqual([entry])
+    expect(migrated.provider?.providers).toEqual(base.provider.providers)
+  }
+  expect(migrateLegacyAppSettings(base).provider).not.toHaveProperty('modelPreferences')
+  for (const entry of [
+    { ...binding, apiKey: 'synthetic-rejected-credential' },
+    { ...binding, models: ['unadmitted-model'] },
+    { ...binding, modelProfiles: { 'model-alpha': { supportsToolCalling: true } } }
+  ]) {
+    const input = { ...base, provider: { ...base.provider, modelPreferences: [entry] } }
+    const migrated = migrateLegacyAppSettings(input as Parameters<typeof migrateLegacyAppSettings>[0])
+    expect(migrated.provider).not.toHaveProperty('modelPreferences')
+  }
+})
+
+describe('normal user-input settings policy', () => {
+  it('keeps absent configuration absent during normalization and unrelated patches', () => {
+    const normalized = normalizeAppSettings(settings())
+    expect(normalized.runtime.userInput).toBeUndefined()
+    expect(JSON.stringify(normalized.runtime)).not.toContain('userInput')
+    expect(mergeAnalytixRuntimeSettings(normalized.runtime, { model: normalized.runtime.model }).userInput).toBeUndefined()
+  })
+  it('preserves a configured atom on an unrelated patch and replaces it atomically', () => {
+    const current = { ...defaultAnalytixRuntimeSettings(), userInput: { policy: 'timed' as const, defaultTimeoutSeconds: -1 } }
+    expect(mergeAnalytixRuntimeSettings(current, { model: current.model }).userInput).toEqual(current.userInput)
+    expect(mergeAnalytixRuntimeSettings(current, { userInput: { policy: 'legacy' } }).userInput).toEqual({ policy: 'legacy' })
+    expect(mergeAnalytixRuntimeSettings(current, { userInput: { policy: 'timed', defaultTimeoutSeconds: null } }).userInput).toEqual({ policy: 'timed', defaultTimeoutSeconds: null })
+  })
+  it.each([{}, { defaultTimeoutSeconds: 60 }, { policy: 'timed', defaultTimeoutSeconds: 0 },
+    { policy: 'timed', defaultTimeoutSeconds: 2147484 }, { policy: 'legacy', extra: 'synthetic' }])('does not silently normalize an invalid atom %j', userInput => {
+    expect(() => mergeAnalytixRuntimeSettings(defaultAnalytixRuntimeSettings(), { userInput } as never)).toThrow('Invalid user input settings.')
+  })
+  it('includes an explicit policy in startup identity without changing the unconfigured identity', () => {
+    const current = settings()
+    const original = buildAnalytixRuntimeSettingsKey(current)
+    expect(buildAnalytixRuntimeSettingsKey({ ...current, runtime: mergeAnalytixRuntimeSettings(current.runtime, {}) })).toBe(original)
+    expect(buildAnalytixRuntimeSettingsKey({ ...current, runtime: { ...current.runtime, userInput: { policy: 'timed' } } })).not.toBe(original)
+  })
+})
+
+
+describe('performance and usage display preference', () => {
+  it('defaults existing settings to Detailed and preserves both canonical choices through migration', () => {
+    expect(normalizeAppSettings(settings()).performanceUsageMode).toBe('detailed')
+    for (const performanceUsageMode of ['compact', 'detailed'] as const) {
+      const value = { ...settings(), performanceUsageMode }
+      expect(normalizeAppSettings(value).performanceUsageMode).toBe(performanceUsageMode)
+      expect(normalizeAppSettings({ ...settings(), ...migrateLegacyAppSettings(value) }).performanceUsageMode).toBe(performanceUsageMode)
+    }
+    expect(normalizeAppSettings({ ...settings(), performanceUsageMode: 'verbose' as AppSettingsV1['performanceUsageMode'] }).performanceUsageMode).toBe('detailed')
+  })
+})
+
+describe('Schedule calendar normalization compatibility', () => {
+  it('retains missing legacy daily zone through rename, enable and serialized reload', () => {
+    const current = normalizeScheduleSettings({ tasks: [{ id: 'old', title: 'Old', schedule: { kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '' } }] })
+    const edited = mergeScheduleSettings(current, { tasks: [{ ...current.tasks[0], title: 'Renamed', enabled: false }] })
+    const reloaded = normalizeScheduleSettings(JSON.parse(JSON.stringify(edited)))
+    expect(reloaded.tasks[0].schedule).toEqual(current.tasks[0].schedule)
+    expect(Object.hasOwn(reloaded.tasks[0].schedule, 'timeZone')).toBe(false)
+  })
+  it('roundtrips sorted weekly and canonical cron fields without migrating Claw', () => {
+    const weekly = { kind: 'weekly' as const, everyMinutes: 60, timeOfDay: '09:00', atTime: '', timeZone: 'UTC', weekdays: [7, 1, 5] }
+    const schedule = normalizeScheduleSettings({ tasks: [{ schedule: weekly }, { schedule: { kind: 'cron', everyMinutes: 60, timeOfDay: '09:00', atTime: '', timeZone: 'UTC', expression: '0 9 * * 7' } }] })
+    expect(schedule.tasks[0].schedule.weekdays).toEqual([1, 5, 7])
+    expect(schedule.tasks[1].schedule.expression).toBe('0 9 * * 0')
+    const claw = normalizeAppSettings({ ...settings(), claw: { ...defaultClawSettings(), tasks: [{ schedule: { kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '', timeZone: 'UTC' } }] } } as unknown as AppSettingsV1)
+    expect(claw.claw.tasks[0].schedule).toEqual({ kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '' })
+  })
+  it('does not downgrade an explicitly damaged calendar zone', () => {
+    expect(() => normalizeScheduleSettings({ tasks: [{ schedule: { kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '', timeZone: '' } }] })).toThrow()
+  })
+})
+
+
+describe('saved accent color preference', () => {
+  it.each([undefined, null, 'custom', '#123456', 123])('defaults invalid or legacy accent %j to blue', accentColor => {
+    const raw = { ...settings(), accentColor } as unknown as AppSettingsV1
+    expect(normalizeAppSettings(raw).accentColor).toBe('blue')
+  })
+  it.each(APP_ACCENT_COLORS)('preserves %s through normalization and legacy migration without changing runtime identity', accentColor => {
+    const original = settings()
+    const themed = { ...original, accentColor }
+    expect(normalizeAppSettings(themed).accentColor).toBe(accentColor)
+    expect(migrateLegacyAppSettings(themed).accentColor).toBe(accentColor)
+    expect(buildAnalytixRuntimeSettingsKey(themed)).toBe(buildAnalytixRuntimeSettingsKey(original))
   })
 })

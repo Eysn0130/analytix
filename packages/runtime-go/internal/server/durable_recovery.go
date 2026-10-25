@@ -4,16 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
 
+	eventlog "analytix.local/runtime-go/internal/adapters/outbound/eventlog"
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	threadapp "analytix.local/runtime-go/internal/app/thread"
 	turnrecoveryapp "analytix.local/runtime-go/internal/app/turn"
+	domainevent "analytix.local/runtime-go/internal/domain/event"
 	domainjsonstrict "analytix.local/runtime-go/internal/domain/jsonstrict"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 	domainthread "analytix.local/runtime-go/internal/domain/thread"
 	recoveryport "analytix.local/runtime-go/internal/ports/generalterminalrecovery"
 )
@@ -162,6 +167,9 @@ func (s *DurableEventSessionStore) upsertThreadNoLockWithAtomicWriteAuthority(
 	if err != nil {
 		return err
 	}
+	if err := s.preserveOrdinaryCompactionReceiptsBeforeWriteNoLock(thread); err != nil {
+		return err
+	}
 	write := func() error { return filestore.WritePrivateFileAtomic(s.threadPath(id), data) }
 	if authorize != nil {
 		err = authorize(write)
@@ -200,6 +208,79 @@ func (s *DurableEventSessionStore) AllThreadIDs() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.threadIDsFromFilesystemNoLock()
+}
+
+// Startup closes only operations with actual committed checkpoint evidence.
+// Missing evidence stays unknown; recovery never reissues a Provider request.
+func (s *DurableEventSessionStore) RecoverOrdinaryCompactions(ctx context.Context) error {
+	ids, err := s.AllThreadIDs()
+	if err != nil {
+		return err
+	}
+	for _, threadID := range ids {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.recoverOrdinaryCompactionsInThread(ctx, threadID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *DurableEventSessionStore) recoverOrdinaryCompactionsInThread(ctx context.Context, threadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.restartPreserved != nil && s.restartPreserved.OwnsThread(threadID) {
+		return nil
+	}
+	thread, err := s.readThreadNoLock(threadID)
+	if err != nil {
+		return err
+	}
+	caseSensitive, classificationErr := domainsecurity.ClassifyCaseSensitiveThread(thread)
+	if classificationErr != nil || caseSensitive || s.caseThreads != nil && (s.caseThreads.IsCaseThread(threadID) || s.caseThreads.RestartPreservesThreadV1(threadID)) {
+		return nil
+	}
+	replay, err := s.loadEventsSinceFileNoLock(threadID, 0)
+	if err != nil {
+		return err
+	}
+	started, closed := map[string]map[string]any{}, map[string]bool{}
+	for _, event := range replay.Events {
+		id := stringField(event, "compactionId")
+		if !domainthread.IsCanonicalRecordID(id) {
+			continue
+		}
+		switch stringField(event, "kind") {
+		case "compaction_started":
+			if version, ok := numericSeq(event["schemaVersion"]); ok && version == 3 {
+				started[id] = event
+			}
+		case "compaction_completed", "compaction_failed":
+			closed[id] = true
+		}
+	}
+	operationIDs := make([]string, 0, len(started))
+	for id := range started {
+		if !closed[id] {
+			operationIDs = append(operationIDs, id)
+		}
+	}
+	sort.Strings(operationIDs)
+	for _, id := range operationIDs {
+		event, err := threadapp.OrdinaryCompactionCompletedEventV3(thread, stringField(started[id], "turnId"))
+		if err != nil || stringField(event, "compactionId") != id {
+			continue
+		}
+		if _, _, err := s.recordOrdinaryCompactionCompletionNoLock(event); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type GeneralTerminalPublicationRecoveryPlanV1 = turnrecoveryapp.GeneralTerminalPublicationRecoveryPlanV1
@@ -298,6 +379,9 @@ func (s *DurableEventSessionStore) threadIDsFromFilesystemReadOnlyNoLock() ([]st
 			return nil, errors.New("durable thread inventory contains an unknown entry")
 		}
 		thread, err := s.readThreadNoLock(entry.Name())
+		if errors.Is(err, errForkCreationPendingV1) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -410,6 +494,13 @@ func (s *DurableEventSessionStore) readThreadNoLock(threadID string) (map[string
 	if err := json.Unmarshal(data, &thread); err != nil {
 		return nil, err
 	}
+	if stringField(thread, "id") != threadID {
+		return nil, errors.New("durable thread route and body identity mismatch")
+	}
+	if err := s.verifyForkCreationPrimaryNoLockV1(thread); err != nil {
+		return nil, err
+	}
+	delete(thread, forkCreationPendingFieldV1)
 	thread, err = normalizeThreadForRead(threadID, thread)
 	if err != nil {
 		return nil, err
@@ -668,4 +759,68 @@ func (s *DurableEventSessionStore) messagesPath(threadID string) string {
 
 func (s *DurableEventSessionStore) metaPath() string {
 	return filepath.Join(s.root, "durable-meta.json")
+}
+
+func (s *DurableEventSessionStore) preflightQuestionRecoveryNoLockV1(thread map[string]any) error {
+	bodies, err := domainevent.QuestionReplyBodiesV1(thread)
+	if err != nil {
+		return err
+	}
+	if len(bodies) == 0 || threadapp.ThreadHasCaseAuthorityMarkers(thread) {
+		return nil
+	}
+	// Only this detached capacity preview uses longest valid timestamps.
+	// Real primary/sidecar timestamps are still generated by their old writers.
+	preview := cloneMap(thread)
+	previewTime := time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).Format(time.RFC3339Nano)
+	preview["updatedAt"] = previewTime
+	metadata, err := threadapp.MetadataSidecarEntryCheckedV1(preview, previewTime)
+	if err != nil {
+		return fmt.Errorf("Question recovery metadata: %w", err)
+	}
+	if metadata == nil {
+		return fmt.Errorf("%w: metadata producer returned nil", domainevent.ErrQuestionReplyContentV1)
+	}
+	// Normal startup validates every JSONL frame, including metadata/messages,
+	// against the same 4MiB encoded-plus-LF bound as event replay.
+	if _, err := eventlog.EncodeEventJSONLFrameV1(metadata); err != nil {
+		return err
+	}
+	expected, err := domainevent.QuestionReplyBodiesV1(threadapp.StripItemsForSidecar(thread))
+	if err != nil {
+		return err
+	}
+	actual, err := domainevent.QuestionReplyBodiesV1(metadata)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(expected, actual) {
+		return fmt.Errorf("%w: metadata bodies expected=%d actual=%d", domainevent.ErrQuestionReplyContentV1, len(expected), len(actual))
+	}
+	items, _, err := threadapp.MissingMessageSidecarItems(thread, map[string]string{})
+	if err != nil {
+		return err
+	}
+	expectedItems, actualItems := []any{}, []any{}
+	for _, item := range threadapp.ThreadItemsInOrder(thread) {
+		expectedItems = append(expectedItems, item)
+	}
+	for _, item := range items {
+		if _, err := eventlog.EncodeEventJSONLFrameV1(item); err != nil {
+			return err
+		}
+		actualItems = append(actualItems, item)
+	}
+	expected, err = domainevent.QuestionReplyBodiesV1(expectedItems)
+	if err != nil {
+		return err
+	}
+	actual, err = domainevent.QuestionReplyBodiesV1(actualItems)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(expected, actual) {
+		return fmt.Errorf("%w: message bodies expected=%d actual=%d", domainevent.ErrQuestionReplyContentV1, len(expected), len(actual))
+	}
+	return nil
 }

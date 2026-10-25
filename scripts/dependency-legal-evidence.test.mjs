@@ -13,12 +13,14 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const loaded = loadCatalog(root)
 const record = loaded.catalog.packages.find(record => record.name === 'exif-parser')
 
-function fixture(name = 'exif-parser') {
-  const record = loaded.catalog.packages.find(record => record.name === name)
+function fixture(name = 'exif-parser', instancePath) {
+  const record = loaded.catalog.packages.find(record => record.name === name &&
+    (!instancePath || record.bindings.some(binding => binding.path === instancePath)))
   const entries = { 'dependency-legal/manifest.json': loaded.bytes }
   for (const lock of loaded.catalog.locks) entries[`dependency-legal/${lock.file}`] = readFileSync(join(root, lock.path))
   for (const material of record.materials) entries[`dependency-legal/${material.file}`] = readFileSync(join(loaded.root, material.file))
-  const prefix = record.bindings.find(binding => binding.lock === 'package-lock.json').path
+  const prefix = record.bindings.find(binding => binding.lock === 'package-lock.json' &&
+    (!instancePath || binding.path === instancePath)).path
   entries[`${prefix}/package.json`] = readFileSync(join(root, prefix, 'package.json'))
   for (const pin of record.signingTransforms || []) {
     entries[`${prefix}/${pin.file}`] = readFileSync(join(root, prefix, pin.file))
@@ -69,17 +71,33 @@ test('OR selects the bound MIT branch and retains CC0; AND and WITH are not down
   }
 })
 
-test('fixed AWS and xml-naming sources supply only the exact reviewed license and instances', () => {
-  for (const name of ['@aws-sdk/credential-provider-http', '@aws-sdk/credential-provider-login',
-    '@aws-sdk/nested-clients', 'xml-naming', '@nodable/entities', 'html-parse-stringify']) {
-    const f = fixture(name)
+test('fixed AWS, xml-naming and entities sources supply only the exact reviewed license and instances', () => {
+  const entities = [
+    { name: '@nodable/entities', path: 'node_modules/@nodable/entities', version: '3.1.0' },
+    { name: '@nodable/entities', path: 'node_modules/@aws-sdk/xml-builder/node_modules/@nodable/entities', version: '2.2.0' }
+  ]
+  const sources = ['@aws-sdk/credential-provider-http', '@aws-sdk/credential-provider-login',
+    '@aws-sdk/nested-clients', 'xml-naming', 'html-parse-stringify'].map(name => ({ name }))
+  for (const { name, path, version } of [...sources, ...entities]) {
+    const f = fixture(name, path)
+    if (version) {
+      for (const file of Object.keys(f.record.files)) {
+        f.entries[`${path}/${file}`] = readFileSync(join(root, path, file))
+      }
+    }
     const selected = name.startsWith('@aws-sdk/') ? 'Apache-2.0' : 'MIT'
     assert.equal(verify(f).selectedLicense, selected)
+    if (version) {
+      assert.equal(f.record.version, version)
+      const other = entities.find(instance => instance.path !== path)
+      const entry = `${other.path}/package.json`
+      assert.throws(() => verify({ ...f, entry, entries: { ...f.entries, [entry]: f.entries[f.entry] } }), /instance_not_bound/)
+    }
     const wrongOwner = {...f, entry: `packages/runtime/${f.entry}`}
     wrongOwner.entries[wrongOwner.entry] = f.entries[f.entry]
     assert.throws(() => verify(wrongOwner), /instance_not_bound/)
     for (const material of f.record.materials) {
-      const changed = fixture(name)
+      const changed = fixture(name, path)
       changed.entries[`dependency-legal/${material.file}`] = 'different source'
       assert.throws(() => verify(changed), /material_changed/)
     }

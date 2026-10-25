@@ -13,6 +13,17 @@ import type {
   ScheduledTaskV1
 } from '../shared/app-settings'
 import {
+  scheduleTaskEditMatches,
+  type ScheduleTaskCreateInput,
+  type ScheduleTaskEditPatch,
+  type ScheduleTaskUpdateRequest,
+  type ScheduleTaskDeleteRequest,
+  type ScheduleTaskWriteResult,
+  type ScheduleTaskDeleteResult
+} from '../shared/schedule-task-mutation'
+import { validateScheduleCalendarRule } from '../../packages/runtime/src/contracts/schedule-rule'
+import { scheduleTaskCreatePayloadSchema, scheduleTaskEditPatchSchema } from './ipc/app-ipc-schemas'
+import {
   DEFAULT_SCHEDULE_MODEL,
   DEFAULT_SCHEDULE_REASONING_EFFORT,
   buildClawRuntimePrompt,
@@ -30,6 +41,18 @@ import {
   TASK_RESPONSE_TIMEOUT_MS,
   asString,
   computeScheduleNextRunAt,
+  normalizeScheduleTaskOrigin,
+  normalizeScheduleDeliveryRecord,
+  canonicalScheduleUTC,
+  requestScheduleAdmission,
+  scheduleAdmissionRequestSchemaV1,
+  type ScheduleAdmissionRequestV1,
+  type ScheduleAdmissionResponseV1,
+  scheduleTaskReadView,
+  scheduleTaskReceiptView,
+  scheduleNativeOriginSchemaV1,
+  type ScheduleTaskOriginV1,
+  type StoredScheduledTaskV1,
   hasEnabledScheduledTask,
   internalUrl,
   isRunningStatus,
@@ -119,7 +142,7 @@ export class ScheduleRuntime {
     this.syncInternalServer(settings)
     this.startScheduler()
     this.syncPowerSaveBlocker(settings)
-    void this.ensureNextRuns(settings)
+    void this.ensureNextRuns()
   }
 
   stop(): void {
@@ -187,7 +210,7 @@ export class ScheduleRuntime {
         ? await detectClawScheduledTaskRequest(text, detection.text ?? '')
         : null
       if (!request) return { kind: 'noop' }
-      const task = buildScheduledTaskFromDetectedRequest({
+      const task: ScheduledTaskV1 = buildScheduledTaskFromDetectedRequest({
         request,
         workspaceRoot,
         providerId: modelConfig.providerId,
@@ -197,13 +220,11 @@ export class ScheduleRuntime {
         id: randomUUID()
       })
       task.clawChannelId = clawChannel?.id ?? ''
-      const saved = await this.deps.store.patch({
-        schedule: {
-          enabled: true,
-          tasks: [...settings.schedule.tasks, task]
-        }
-      })
-      this.sync(saved)
+      if (task.schedule.kind === 'daily') {
+        task.schedule = { ...task.schedule, timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone }
+        task.nextRunAt = computeScheduleNextRunAt(task, new Date())
+      }
+      await this.createTask(task)
       return {
         kind: 'created',
         taskId: task.id,
@@ -220,35 +241,43 @@ export class ScheduleRuntime {
     }
   }
 
+  private async mutateTasks<T>(mutator: (latest: AppSettingsV1) => { tasks: ScheduledTaskV1[]; enabled?: boolean; value: T }): Promise<{ settings: AppSettingsV1; value: T; changed: boolean }> {
+    const result = await this.deps.store.mutateScheduleTasks(mutator)
+    if (result.changed) this.deps.onCommittedChange?.()
+    return result
+  }
+
   async listTasks(): Promise<ScheduledTaskV1[]> {
+    const settings = await this.deps.store.loadFresh()
+    return settings.schedule.tasks.map(scheduleTaskReadView)
+  }
+
+  async readTaskHistory(request: import('../shared/schedule-task-mutation').ScheduleTaskHistoryRequest): Promise<import('../shared/schedule-task-mutation').ScheduleTaskHistoryResult> {
     const settings = await this.deps.store.load()
-    return settings.schedule.tasks
+    const task = settings.schedule.tasks.find(item => item.id === request.taskId) as StoredScheduledTaskV1 | undefined
+    if (!task) return { kind: 'not_found', message: 'Task unavailable.' }
+    const records = task.hostDelivery?.records ?? []
+    const end = request.before === undefined ? records.length : records.findIndex(item => item.attemptId === request.before)
+    if (end < 0) return { kind: 'conflict', message: 'History changed. Refresh the records.' }
+    const start = Math.max(0, end - 20), page = records.slice(start, end).reverse()
+    return { kind: 'success', records: page, ...(start > 0 ? { nextBefore: page[page.length - 1].attemptId } : {}),
+      deliveryKind: task.hostDelivery ? 'origin-delivery' : 'legacy-headless' }
   }
 
   async createTask(task: ScheduledTaskV1): Promise<ScheduledTaskV1> {
-    const settings = await this.deps.store.load()
-    const saved = await this.deps.store.patch({
-      schedule: {
-        enabled: true,
-        tasks: [...settings.schedule.tasks, task]
-      }
-    })
-    this.sync(saved)
-    return saved.schedule.tasks.find((item) => item.id === task.id) ?? task
+    const result = await this.mutateTasks((latest) => ({
+      enabled: true,
+      tasks: [...latest.schedule.tasks, task],
+      value: task
+    }))
+    this.sync(result.settings)
+    return result.settings.schedule.tasks.find((item) => item.id === task.id)!
   }
 
-  async createTaskFromInput(input: {
-    title: string
-    prompt: string
-    workspaceRoot?: string
-    providerId?: string
-    model?: string
-    reasoningEffort?: ScheduleReasoningEffort
-    mode?: ScheduleRunMode
-    clawChannelId?: string
-    enabled?: boolean
-    schedule: Partial<ScheduledTaskV1['schedule']> & { kind: ScheduledTaskV1['schedule']['kind'] }
-  }): Promise<ScheduledTaskV1> {
+  // The second parameter is Main-internal and must come from authenticated native
+  // outer metadata. It is never read from renderer or MCP business arguments.
+  async createTaskFromInput(input: ScheduleTaskCreateInput, origin?: ScheduleTaskOriginV1): Promise<ScheduledTaskV1> {
+    validateScheduleCalendarRule(input.schedule)
     const settings = await this.deps.store.load()
     const clawChannel = this.resolveClawChannel(settings, input.clawChannelId)
     const modelConfig = this.resolveScheduleModelConfig(settings, {
@@ -274,7 +303,10 @@ export class ScheduleRuntime {
         kind: input.schedule.kind,
         everyMinutes: typeof input.schedule.everyMinutes === 'number' ? input.schedule.everyMinutes : 60,
         timeOfDay: input.schedule.timeOfDay?.trim() || '09:00',
-        atTime: input.schedule.atTime?.trim() || ''
+        atTime: input.schedule.atTime?.trim() || '',
+        ...(Object.prototype.hasOwnProperty.call(input.schedule, 'timeZone') ? { timeZone: input.schedule.timeZone } : {}),
+        ...(input.schedule.weekdays ? { weekdays: [...input.schedule.weekdays].sort((a, b) => a - b) } : {}),
+        ...(input.schedule.expression ? { expression: input.schedule.expression } : {})
       },
       createdAt: now,
       updatedAt: now,
@@ -284,44 +316,80 @@ export class ScheduleRuntime {
       lastMessage: 'schedule_task_idle',
       lastThreadId: ''
     }
+    if (origin !== undefined) (task as StoredScheduledTaskV1).hostDelivery = { schemaVersion: 1, origin: normalizeScheduleTaskOrigin(origin), records: [] }
+    task.nextRunAt = computeScheduleNextRunAt(task, new Date(now))
     const saved = await this.createTask(task)
-    await this.ensureNextRuns(await this.deps.store.load())
-    return saved
+    await this.ensureNextRuns()
+    return scheduleTaskReceiptView(saved)
   }
 
-  async updateTaskById(taskId: string, patch: Partial<ScheduledTaskV1>): Promise<ScheduledTaskV1 | null> {
-    const settings = await this.deps.store.load()
-    const task = settings.schedule.tasks.find((item) => item.id === taskId)
-    if (!task) return null
-    const now = new Date().toISOString()
-    const shouldRecomputeNextRun =
-      Object.prototype.hasOwnProperty.call(patch, 'enabled') || patch.schedule !== undefined
-    const nextTask: ScheduledTaskV1 = {
-      ...task,
-      ...patch,
-      schedule: patch.schedule ? { ...task.schedule, ...patch.schedule } : task.schedule,
-      ...(shouldRecomputeNextRun ? { nextRunAt: '' } : {}),
-      updatedAt: now
-    }
-    const saved = await this.deps.store.patch({
-      schedule: {
-        tasks: settings.schedule.tasks.map((item) => (item.id === taskId ? nextTask : item))
+  async updateTaskConfiguration(request: ScheduleTaskUpdateRequest): Promise<ScheduleTaskWriteResult> {
+    const patch = scheduleTaskEditPatchSchema.parse(request.patch)
+    const result = await this.mutateTasks<ScheduleTaskWriteResult>((latest) => {
+      const task = latest.schedule.tasks.find((item) => item.id === request.taskId)
+      if (!task) return { tasks: latest.schedule.tasks, value: { kind: 'not_found', message: 'Task not found.' } }
+      if (!scheduleTaskEditMatches(task, request.expected)) {
+        return { tasks: latest.schedule.tasks, value: { kind: 'conflict', message: 'Task configuration changed. Refresh and try again.' } }
       }
+      if (Object.keys(patch).length === 0) return { tasks: latest.schedule.tasks, value: { kind: 'success', task } }
+      const next = this.applyTaskEdit(task, patch)
+      return { tasks: latest.schedule.tasks.map((item) => item.id === task.id ? next : item), value: { kind: 'success', task: next } }
     })
-    this.sync(saved)
-    return saved.schedule.tasks.find((item) => item.id === taskId) ?? nextTask
+    if (result.changed) this.sync(result.settings)
+    if (result.value.kind === 'success') {
+      return { kind: 'success', task: scheduleTaskReadView(result.settings.schedule.tasks.find((task) => task.id === request.taskId)!) }
+    }
+    return result.value
+  }
+
+  private applyTaskEdit(task: ScheduledTaskV1, patch: ScheduleTaskEditPatch): ScheduledTaskV1 {
+    return {
+      ...task, ...patch,
+      schedule: patch.schedule ? {
+        kind: patch.schedule.kind!, everyMinutes: patch.schedule.everyMinutes ?? task.schedule.everyMinutes,
+        timeOfDay: patch.schedule.timeOfDay ?? task.schedule.timeOfDay, atTime: patch.schedule.atTime ?? task.schedule.atTime,
+        ...(Object.prototype.hasOwnProperty.call(patch.schedule, 'timeZone') ? { timeZone: patch.schedule.timeZone } : {}),
+        ...(patch.schedule.weekdays ? { weekdays: [...patch.schedule.weekdays].sort((a, b) => a - b) } : {}),
+        ...(patch.schedule.expression ? { expression: patch.schedule.expression } : {})
+      } : task.schedule,
+      ...(Object.prototype.hasOwnProperty.call(patch, 'enabled') || patch.schedule ? { nextRunAt: '' } : {}),
+      updatedAt: new Date().toISOString()
+    }
+  }
+
+  async updateTaskById(taskId: string, input: ScheduleTaskEditPatch): Promise<ScheduledTaskV1 | null> {
+    const patch = scheduleTaskEditPatchSchema.parse(input)
+    const result = await this.mutateTasks((latest) => {
+      const task = latest.schedule.tasks.find((item) => item.id === taskId)
+      if (!task) return { tasks: latest.schedule.tasks, value: null }
+      const next = this.applyTaskEdit(task, patch)
+      return { tasks: latest.schedule.tasks.map((item) => item.id === taskId ? next : item), value: next }
+    })
+    if (result.changed) this.sync(result.settings)
+    return result.value ? result.settings.schedule.tasks.find((item) => item.id === taskId)! : null
+  }
+
+  async deleteTask(request: ScheduleTaskDeleteRequest): Promise<ScheduleTaskDeleteResult> {
+    const result = await this.mutateTasks<ScheduleTaskDeleteResult>((latest) => {
+      const task = latest.schedule.tasks.find((item) => item.id === request.taskId)
+      if (!task) return { tasks: latest.schedule.tasks, value: { kind: 'not_found', message: 'Task not found.' } }
+      if (!scheduleTaskEditMatches(task, request.expected)) {
+        return { tasks: latest.schedule.tasks, value: { kind: 'conflict', message: 'Task configuration changed. Refresh and try again.' } }
+      }
+      return { tasks: latest.schedule.tasks.filter((item) => item.id !== request.taskId), value: { kind: 'success', taskId: request.taskId } }
+    })
+    if (result.changed) this.sync(result.settings)
+    return result.value
   }
 
   async deleteTaskById(taskId: string): Promise<boolean> {
-    const settings = await this.deps.store.load()
-    if (!settings.schedule.tasks.some((item) => item.id === taskId)) return false
-    const saved = await this.deps.store.patch({
-      schedule: {
-        tasks: settings.schedule.tasks.filter((item) => item.id !== taskId)
-      }
-    })
-    this.sync(saved)
-    return saved.schedule.tasks.every((item) => item.id !== taskId)
+    const result = await this.mutateTasks((latest) => ({
+      tasks: latest.schedule.tasks.some((item) => item.id === taskId)
+        ? latest.schedule.tasks.filter((item) => item.id !== taskId) : latest.schedule.tasks,
+      value: latest.schedule.tasks.some((item) => item.id === taskId)
+    }))
+    if (result.changed) this.sync(result.settings)
+    return result.value
   }
 
   private startScheduler(): void {
@@ -334,75 +402,158 @@ export class ScheduleRuntime {
   }
 
   private async tick(): Promise<void> {
-    const settings = await this.deps.store.load()
-    if (!settings.schedule.enabled) return
-    await this.ensureNextRuns(settings)
+    await this.ensureNextRuns()
     const fresh = await this.deps.store.load()
     const now = Date.now()
     for (const task of fresh.schedule.tasks) {
-      if (!task.enabled || task.schedule.kind === 'manual') continue
       if (this.runningTaskIds.has(task.id)) continue
+      // An unresolved submission is queried even after disable/manual edits.
+      // Query is read-only and must never create a replacement attempt.
+      if ((task as StoredScheduledTaskV1).hostDelivery?.pending) {
+        void this.runTaskInternal(task, true)
+        continue
+      }
+      if (!fresh.schedule.enabled || !task.enabled || task.schedule.kind === 'manual') continue
       const dueAt = Date.parse(task.nextRunAt)
       if (!Number.isFinite(dueAt) || dueAt > now) continue
       void this.runTaskInternal(task, true)
     }
   }
 
-  private async ensureNextRuns(settings: AppSettingsV1): Promise<void> {
-    if (!settings.schedule.enabled) {
-      this.syncPowerSaveBlocker(settings)
-      return
-    }
-    let changed = false
-    const now = new Date()
-    const tasks = settings.schedule.tasks.map((task) => {
-      const wasInterrupted = task.lastStatus === 'running' && !this.runningTaskIds.has(task.id)
-      if (!task.enabled || task.schedule.kind === 'manual' || this.runningTaskIds.has(task.id)) {
-        if (!wasInterrupted) return task
+  private async ensureNextRuns(): Promise<void> {
+    const result = await this.mutateTasks((latest) => {
+      if (!latest.schedule.enabled) return { tasks: latest.schedule.tasks, value: undefined }
+      let changed = false
+      const now = new Date()
+      const tasks = latest.schedule.tasks.map((task) => {
+        if ((task as StoredScheduledTaskV1).hostDelivery?.pending) return task
+        const wasInterrupted = task.lastStatus === 'running' && !this.runningTaskIds.has(task.id)
+        if (!task.enabled || task.schedule.kind === 'manual' || this.runningTaskIds.has(task.id)) {
+          if (!wasInterrupted) return task
+          changed = true
+          return {
+            ...task,
+            ...(task.schedule.kind === 'at' ? { enabled: false } : {}),
+            nextRunAt: task.schedule.kind === 'at' ? '' : task.nextRunAt,
+            lastStatus: 'error' as const,
+            lastMessage: 'schedule_task_interrupted' as const,
+            updatedAt: now.toISOString()
+          }
+        }
+        if (task.nextRunAt && !wasInterrupted) return task
         changed = true
         return {
           ...task,
-          ...(task.schedule.kind === 'at' ? { enabled: false } : {}),
-          nextRunAt: task.schedule.kind === 'at' ? '' : task.nextRunAt,
-          lastStatus: 'error' as const,
-          lastMessage: 'schedule_task_interrupted' as const,
-          updatedAt: now.toISOString()
+          nextRunAt: computeScheduleNextRunAt(task, now),
+          ...(wasInterrupted
+            ? {
+                lastStatus: 'error' as const,
+                lastMessage: 'schedule_task_interrupted' as const,
+                updatedAt: now.toISOString()
+              }
+            : {})
         }
-      }
-      if (task.nextRunAt && !wasInterrupted) return task
-      changed = true
-      return {
-        ...task,
-        nextRunAt: computeScheduleNextRunAt(task, now),
-        ...(wasInterrupted
-          ? {
-              lastStatus: 'error' as const,
-              lastMessage: 'schedule_task_interrupted' as const,
-              updatedAt: now.toISOString()
-            }
-          : {})
-      }
+      })
+      return { tasks: changed ? tasks : latest.schedule.tasks, value: undefined }
     })
-    if (!changed) {
-      this.syncPowerSaveBlocker(settings)
-      return
-    }
-    const saved = await this.deps.store.patch({ schedule: { ...settings.schedule, tasks } })
-    this.syncPowerSaveBlocker(saved)
+    this.syncPowerSaveBlocker(result.settings)
   }
 
   private async updateTask(
     taskId: string,
     updater: (task: ScheduledTaskV1, settings: AppSettingsV1) => ScheduledTaskV1
   ): Promise<AppSettingsV1> {
-    const settings = await this.deps.store.load()
-    const tasks = settings.schedule.tasks.map((task) => task.id === taskId ? updater(task, settings) : task)
-    const saved = await this.deps.store.patch({ schedule: { ...settings.schedule, tasks } })
-    this.syncPowerSaveBlocker(saved)
-    return saved
+    const result = await this.mutateTasks((latest) => ({
+      tasks: latest.schedule.tasks.some((task) => task.id === taskId)
+        ? latest.schedule.tasks.map((task) => task.id === taskId ? updater(task, latest) : task)
+        : latest.schedule.tasks,
+      value: undefined
+    }))
+    this.syncPowerSaveBlocker(result.settings)
+    return result.settings
+  }
+
+  /** Freeze before dispatch. Unknown outcomes are recovered only by exact query. */
+  private async runOriginTask(taskId: string, scheduled: boolean): Promise<ScheduleRunResult> {
+    if (this.runningTaskIds.has(taskId)) return { ok: false, message: 'Task is already running.' }
+    this.runningTaskIds.add(taskId)
+    try {
+      const frozen = await this.mutateTasks<{ request: ScheduleAdmissionRequestV1; query: boolean } | null>(latest => {
+        const task = latest.schedule.tasks.find(item => item.id === taskId) as StoredScheduledTaskV1 | undefined
+        if (!task?.hostDelivery) return { tasks: latest.schedule.tasks, value: null }
+        if (task.hostDelivery.pending) return { tasks: latest.schedule.tasks, value: { request: task.hostDelivery.pending, query: true } }
+        const now = new Date()
+        if (scheduled && (!latest.schedule.enabled || !task.enabled || task.schedule.kind === 'manual' || !task.nextRunAt || Date.parse(task.nextRunAt) > now.getTime())) return { tasks: latest.schedule.tasks, value: null }
+        const target = scheduled ? task.nextRunAt : now.toISOString()
+        let scheduledAt: string
+        try { scheduledAt = canonicalScheduleUTC(target) }
+        catch { scheduledAt = canonicalScheduleUTC(new Date(target).toISOString()) }
+        const model = normalizeTaskModel(task.model)
+        const request = scheduleAdmissionRequestSchemaV1.parse({
+          schemaVersion: 1, kind: 'submit', taskId, origin: task.hostDelivery.origin,
+          attemptId: randomUUID(), scheduledAt, prompt: task.prompt,
+          execution: { ...(task.providerId?.trim() ? { providerId: task.providerId.trim() } : {}),
+            ...(model ? { model } : {}), reasoningEffort: task.reasoningEffort, mode: task.mode }
+        })
+        const next: StoredScheduledTaskV1 = { ...task, nextRunAt: '', lastStatus: 'running',
+          lastMessage: 'schedule_task_running', updatedAt: now.toISOString(),
+          hostDelivery: { ...task.hostDelivery, pending: request } }
+        return { tasks: latest.schedule.tasks.map(item => item.id === taskId ? next : item), value: { request, query: false } }
+      })
+      if (!frozen.value) return { ok: false, message: 'Task is not available for delivery.' }
+      const request = frozen.value.request
+      const outcome = await requestScheduleAdmission(this.deps, frozen.settings,
+        { ...request, kind: frozen.value.query ? 'query' : 'submit' })
+      const committed = await this.settleOriginAttempt(request, outcome)
+      if (!committed) return { ok: false, message: 'Task changed before delivery was recorded.' }
+      if (outcome.status === 'accepted' && outcome.receipt) return {
+        ok: true, threadId: outcome.receipt.threadId, turnId: outcome.receipt.turnId, message: 'Accepted by the original session.'
+      }
+      const messages = {
+        unknown: 'Delivery acceptance is unknown. The saved attempt will be queried.',
+        not_found: 'No acceptance receipt is available. The saved attempt will be queried.',
+        rejected: 'Original-session delivery was rejected.',
+        conflict: 'Original-session delivery identity conflicts with the saved attempt.',
+        invalid: 'Original-session delivery request was rejected as invalid.',
+        accepted: 'Delivery acceptance is unavailable.'
+      }
+      return { ok: false, message: messages[outcome.status] }
+    } catch {
+      // If dispatch might have happened, the durable pending request survives.
+      return { ok: false, message: 'Original-session delivery is unavailable.' }
+    } finally { this.runningTaskIds.delete(taskId) }
+  }
+
+  private async settleOriginAttempt(request: ScheduleAdmissionRequestV1, outcome: ScheduleAdmissionResponseV1): Promise<boolean> {
+    const result = await this.mutateTasks(latest => {
+      const task = latest.schedule.tasks.find(item => item.id === request.taskId) as StoredScheduledTaskV1 | undefined
+      if (!task?.hostDelivery?.pending || JSON.stringify(task.hostDelivery.pending) !== JSON.stringify(request)) return { tasks: latest.schedule.tasks, value: false }
+      // No receipt means no History, last-run timestamp or inferred message.
+      if (outcome.status === 'unknown' || outcome.status === 'not_found') return { tasks: latest.schedule.tasks, value: true }
+      const { pending: _pending, ...state } = task.hostDelivery
+      void _pending
+      const now = new Date()
+      const receipt = outcome.receipt
+      const accepted = outcome.status === 'accepted' && receipt !== undefined
+      const record = accepted ? normalizeScheduleDeliveryRecord({ attemptId: receipt.attemptId,
+        scheduledAt: receipt.scheduledAt, deliveredAt: receipt.deliveredAt,
+        messageId: receipt.messageId, prompt: request.prompt }) : undefined
+      const next: StoredScheduledTaskV1 = { ...task,
+        ...(task.schedule.kind === 'at' ? { enabled: false } : {}),
+        nextRunAt: task.schedule.kind === 'at' ? '' : computeScheduleNextRunAt(task, now),
+        lastStatus: accepted ? 'success' : 'error',
+        lastMessage: accepted ? 'schedule_task_accepted' : 'schedule_task_failed',
+        ...(accepted ? { lastRunAt: receipt.deliveredAt, lastThreadId: receipt.threadId } : {}),
+        updatedAt: now.toISOString(), hostDelivery: { ...state, records: record ? [...state.records, record] : state.records }
+      }
+      return { tasks: latest.schedule.tasks.map(item => item.id === request.taskId ? next : item), value: true }
+    })
+    this.syncPowerSaveBlocker(result.settings)
+    return result.value
   }
 
   private async runTaskInternal(task: ScheduledTaskV1, scheduled: boolean): Promise<ScheduleRunResult> {
+    if ((task as StoredScheduledTaskV1).hostDelivery) return this.runOriginTask(task.id, scheduled)
     if (this.runningTaskIds.has(task.id)) {
       return { ok: false, message: 'Task is already running.' }
     }
@@ -713,7 +864,7 @@ export class ScheduleRuntime {
       }
 
       if (url.pathname === '/schedule/internal/list') {
-        const tasks = await this.listTasks()
+        const tasks = (await this.listTasks()).map(scheduleTaskReceiptView)
         writeJson(res, 200, { ok: true, tasks })
         return
       }
@@ -726,37 +877,28 @@ export class ScheduleRuntime {
       }
 
       if (url.pathname === '/schedule/internal/create') {
-        const input = nestedRecord(payload.input)
-        if (!input || Object.keys(input).length === 0) {
-          writeJson(res, 400, { ok: false, message: 'Missing task input.' })
-          return
+        const originDeclared = Object.hasOwn(payload, 'origin')
+        const marked = req.headers['x-analytix-schedule-origin'] === 'typed-v1'
+        if (Object.keys(payload).some(key => key !== 'input' && key !== 'origin') || marked !== originDeclared) {
+          writeJson(res, 400, { ok: false, message: 'Invalid native Schedule envelope.' }); return
         }
-        const title = asString(input.title)
-        const prompt = asString(input.prompt)
-        const schedule = nestedRecord(input.schedule)
-        const kind = asString(schedule.kind) as ScheduledTaskV1['schedule']['kind']
-        if (!prompt || !kind) {
-          writeJson(res, 400, { ok: false, message: 'Missing prompt or schedule.kind.' })
-          return
-        }
-        const saved = await this.createTaskFromInput({
-          title,
-          prompt,
-          workspaceRoot: asString(input.workspaceRoot) || undefined,
-          clawChannelId: asString(input.clawChannelId) || undefined,
-          providerId: asString(input.providerId) || undefined,
-          model: asString(input.model) || undefined,
-          reasoningEffort: (asString(input.reasoningEffort) as ScheduleReasoningEffort) || undefined,
-          mode: (asString(input.mode) as ScheduleRunMode) || undefined,
-          enabled: input.enabled === false ? false : true,
-          schedule: {
-            kind,
-            everyMinutes: Number(schedule.everyMinutes),
-            timeOfDay: asString(schedule.timeOfDay),
-            atTime: asString(schedule.atTime)
+        let origin: ScheduleTaskOriginV1 | undefined
+        if (originDeclared) {
+          const secret = settings.schedule.internal.secret.trim()
+          if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+            writeJson(res, 401, { ok: false, message: 'Authenticated native Schedule helper is required.' }); return
           }
-        })
-        writeJson(res, 200, { ok: true, task: saved })
+          const source = scheduleNativeOriginSchemaV1.safeParse(payload.origin)
+          if (!source.success) { writeJson(res, 400, { ok: false, message: 'Invalid native Schedule origin.' }); return }
+          origin = source.data
+        }
+        const parsed = scheduleTaskCreatePayloadSchema.safeParse(payload.input)
+        if (!parsed.success) {
+          writeJson(res, 400, { ok: false, message: 'Invalid task input.' })
+          return
+        }
+        const saved = await this.createTaskFromInput(parsed.data, origin)
+        writeJson(res, 200, { ok: true, task: scheduleTaskReceiptView(saved) })
         return
       }
 
@@ -767,12 +909,12 @@ export class ScheduleRuntime {
           writeJson(res, 400, { ok: false, message: 'Missing taskId.' })
           return
         }
-        const updated = await this.updateTaskById(taskId, patch as Partial<ScheduledTaskV1>)
+        const updated = await this.updateTaskById(taskId, patch as ScheduleTaskEditPatch)
         if (!updated) {
           writeJson(res, 404, { ok: false, message: 'Task not found.' })
           return
         }
-        writeJson(res, 200, { ok: true, task: updated })
+        writeJson(res, 200, { ok: true, task: scheduleTaskReceiptView(updated) })
         return
       }
 

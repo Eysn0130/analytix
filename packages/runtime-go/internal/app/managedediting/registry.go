@@ -23,7 +23,15 @@ var (
 	sessionPattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 )
 
+type capturePurpose uint8
+
+const (
+	strictCapture capturePurpose = iota + 1
+	manualCapture
+)
+
 type capture struct {
+	purpose   capturePurpose
 	path      string
 	identity  filesport.Identity
 	ancestors []filesport.Identity
@@ -49,7 +57,7 @@ func New(coordinator *workspacemutation.Coordinator, files filesport.Files) *Reg
 // capture for the same session/path/inode is an independent reference; rebinding
 // a live session to a different path or externally replaced inode is rejected.
 func (r *Registry) Capture(ctx context.Context, sessionID, canonicalAbsolutePath string) (func(), error) {
-	return r.withCapture(ctx, sessionID, canonicalAbsolutePath, nil)
+	return r.withCapture(ctx, sessionID, canonicalAbsolutePath, nil, strictCapture)
 }
 
 // WithCapture registers the lease and calls readBaseline while still holding the
@@ -61,11 +69,22 @@ func (r *Registry) WithCapture(ctx context.Context, sessionID, canonicalAbsolute
 	if readBaseline == nil {
 		return nil, ErrCaptureFailed
 	}
-	return r.withCapture(ctx, sessionID, canonicalAbsolutePath, readBaseline)
+	return r.withCapture(ctx, sessionID, canonicalAbsolutePath, readBaseline, strictCapture)
 }
 
-func (r *Registry) withCapture(ctx context.Context, sessionID, path string, readBaseline func() error) (func(), error) {
-	if r == nil || r.coordinator == nil || r.files == nil || ctx == nil || !sessionPattern.MatchString(sessionID) {
+// WithManualCapture is trusted Core admission for an explicit user transaction.
+// It preserves file identity, the shared coordinator and governed-mutation guard,
+// but makes no exclusivity promise against previously started external writers.
+// Their changes must conflict at the existing native version/CAS boundary.
+func (r *Registry) WithManualCapture(ctx context.Context, sessionID, path string, readBaseline func() error) (func(), error) {
+	if readBaseline == nil {
+		return nil, ErrCaptureFailed
+	}
+	return r.withCapture(ctx, sessionID, path, readBaseline, manualCapture)
+}
+
+func (r *Registry) withCapture(ctx context.Context, sessionID, path string, readBaseline func() error, purpose capturePurpose) (func(), error) {
+	if r == nil || r.coordinator == nil || r.files == nil || ctx == nil || !sessionPattern.MatchString(sessionID) || (purpose != strictCapture && purpose != manualCapture) {
 		return nil, ErrUnavailable
 	}
 	unlock, err := r.coordinator.Acquire(ctx)
@@ -77,7 +96,7 @@ func (r *Registry) withCapture(ctx context.Context, sessionID, path string, read
 		return nil, ErrUnavailable
 	}
 	r.mu.Lock()
-	if r.opaqueObserved {
+	if purpose == strictCapture && r.opaqueObserved {
 		r.mu.Unlock()
 		return nil, ErrUncontainedExecution
 	}
@@ -86,14 +105,20 @@ func (r *Registry) withCapture(ctx context.Context, sessionID, path string, read
 		r.mu.Unlock()
 		return nil, ErrUnsafePath
 	}
+	for _, held := range r.captures {
+		if held.purpose != purpose && (held.path == path || r.files.SameFile(held.identity, identity)) {
+			r.mu.Unlock()
+			return nil, ErrCaptureActive
+		}
+	}
 	current := r.captures[sessionID]
 	if current != nil {
-		if current.path != path || !r.files.SameFile(current.identity, identity) {
+		if current.purpose != purpose || current.path != path || !r.files.SameFile(current.identity, identity) {
 			r.mu.Unlock()
 			return nil, ErrSessionMismatch
 		}
 	} else {
-		current = &capture{path: path, identity: identity, ancestors: ancestors}
+		current = &capture{purpose: purpose, path: path, identity: identity, ancestors: ancestors}
 		r.captures[sessionID] = current
 	}
 	current.refs++
@@ -190,8 +215,8 @@ func (r *Registry) CheckMutation(paths ...string) error {
 
 // BeginOpaque records that an uncontained process/tool may continue writing
 // after its invocation returns. There is deliberately no decrement/reset API.
-// Repeated opaque tools remain usable, but capture requires a fresh runtime
-// registry after normal application restart if no containment proof exists.
+// Repeated opaque tools remain usable. Strict Agent capture stays unavailable;
+// explicit manual transactions retain optimistic version/CAS semantics.
 func (r *Registry) BeginOpaque(ctx context.Context) error {
 	if r == nil || r.coordinator == nil || ctx == nil {
 		return ErrUnavailable

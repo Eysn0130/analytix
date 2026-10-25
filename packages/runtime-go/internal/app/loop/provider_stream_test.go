@@ -11,11 +11,13 @@ import (
 	"time"
 
 	appmodel "analytix.local/runtime-go/internal/app/model"
+	privacyprojectionapp "analytix.local/runtime-go/internal/app/privacyprojection"
 	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
 	domainfailure "analytix.local/runtime-go/internal/domain/failure"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainreasoningmarkup "analytix.local/runtime-go/internal/domain/reasoningmarkup"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainstreamframe "analytix.local/runtime-go/internal/domain/streamframe"
 )
 
 func TestProviderFirstTokenLatencyUsesBoundedHostTrace(t *testing.T) {
@@ -47,6 +49,8 @@ type providerStreamResponse struct {
 	callbackChunks []domainmodel.Chunk
 	resultChunks   []domainmodel.Chunk
 	cacheTelemetry []domaincache.ProviderCallObservationV1
+	nativePresence bool
+	nativeContent  bool
 	err            error
 }
 
@@ -151,6 +155,10 @@ func (stub *providerStreamStub) Stream(_ context.Context, request domainmodel.Re
 			return domainmodel.Result{}, err
 		}
 	}
+	nativeTiming := domainmodel.ProviderTiming{FirstContentPresenceKnown: response.nativePresence}
+	if response.nativeContent {
+		nativeTiming.FirstContentAt = time.Now()
+	}
 	for _, chunk := range response.callbackChunks {
 		if request.OnChunk != nil {
 			if err := request.OnChunk(chunk); err != nil {
@@ -158,7 +166,7 @@ func (stub *providerStreamStub) Stream(_ context.Context, request domainmodel.Re
 			}
 		}
 	}
-	return domainmodel.Result{Chunks: response.resultChunks, CacheObservations: response.cacheTelemetry}, response.err
+	return domainmodel.Result{Chunks: response.resultChunks, CacheObservations: response.cacheTelemetry, HostTiming: nativeTiming}, response.err
 }
 
 func TestProviderContextHardLimitMakesZeroProviderCalls(t *testing.T) {
@@ -776,7 +784,7 @@ func TestStreamProviderWithRetryRetriesBeforeVisibleOutput(t *testing.T) {
 	if !reflect.DeepEqual(attempts, []int{1, 2}) {
 		t.Fatalf("provider authority was not revalidated before every attempt: %#v", attempts)
 	}
-	if output.StreamedDeltas || !output.Result.HasFirstTokenLatency || output.Result.Chunks[0].Text != "final" {
+	if output.StreamedDeltas || output.Result.HasFirstTokenLatency || output.Result.Chunks[0].Text != "final" {
 		t.Fatalf("unexpected retry output: %#v", output)
 	}
 	if len(output.Result.CacheObservations) != 2 ||
@@ -1527,5 +1535,804 @@ func BenchmarkProviderStreamChunking(b *testing.B) {
 				})
 			}
 		}
+	}
+}
+
+func processFrameChunkForTest(kind string, attempt uint64, nativeIndex int, text string) domainmodel.Chunk {
+	chunk := domainmodel.Chunk{
+		Kind: domainmodel.ChunkReasoning,
+		ProcessFrame: &domainmodel.ProcessFrameV1{
+			Kind: kind, Attempt: attempt, NativeIndex: nativeIndex, Text: text,
+		},
+	}
+	if kind == "delta" {
+		chunk.Text = text
+	}
+	return chunk
+}
+
+func TestStreamProviderProcessCallbackPanicCannotAlterContinuationOrOutcome(t *testing.T) {
+	const reasoning = "PRIVATE_ORIGINAL_CONTINUATION_TEXT"
+	const signature = "PRIVATE_ORIGINAL_CONTINUATION_SIGNATURE"
+	chunks := []domainmodel.Chunk{
+		processFrameChunkForTest("start", 1, 8, ""),
+		processFrameChunkForTest("delta", 1, 8, reasoning),
+		{Kind: domainmodel.ChunkReasoning, Signature: signature},
+		processFrameChunkForTest("end", 1, 8, ""),
+		{Kind: domainmodel.ChunkText, Text: "verified public answer"},
+	}
+	provider := &providerStreamStub{responses: []providerStreamResponse{{
+		callbackChunks: chunks,
+		resultChunks: []domainmodel.Chunk{
+			{Kind: domainmodel.ChunkReasoning, Text: reasoning, Signature: signature},
+			{Kind: domainmodel.ChunkText, Text: "verified public answer"},
+		},
+	}}}
+	var delivered []string
+	public := ""
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider,
+		Callbacks: ProviderStreamCallbacks{
+			OnProcessFrame: func(frame domainmodel.ProcessFrameV1) {
+				if frame.Kind != "start" && frame.Kind != "delta" && frame.Kind != "end" {
+					return
+				}
+				delivered = append(delivered, frame.Kind)
+				frame.Text = "CALLBACK_MUTATED_PRIVATE_TEXT"
+				if frame.Kind == "delta" {
+					panic("display sink unavailable")
+				}
+			},
+			OnTextDelta: func(text string) error {
+				public += text
+				return nil
+			},
+		},
+	})
+	if err != nil || len(provider.requests) != 1 || output.Text != "verified public answer" || public != output.Text {
+		t.Fatalf("display callback changed provider completion: calls=%d public=%q err=%v", len(provider.requests), public, err)
+	}
+	if !reflect.DeepEqual(delivered, []string{"start", "delta", "end"}) ||
+		output.Reasoning != reasoning || output.ReasoningSignature != signature {
+		t.Fatal("display panic or mutation changed native framing or continuation")
+	}
+	if chunks[1].Text != reasoning || chunks[1].ProcessFrame.Text != reasoning {
+		t.Fatal("callback received mutable access to the provider continuation")
+	}
+}
+
+func TestStreamProviderProcessAttemptsRemainMonotonicAcrossTransportAndOuterRetry(t *testing.T) {
+	const first = "PRIVATE_OUTER_ONE_PHYSICAL_ONE"
+	const second = "PRIVATE_OUTER_ONE_PHYSICAL_TWO"
+	const final = "PRIVATE_OUTER_TWO_PHYSICAL_ONE"
+	provider := &providerStreamStub{responses: []providerStreamResponse{
+		{
+			callbackChunks: []domainmodel.Chunk{
+				processFrameChunkForTest("reset", 1, -1, ""),
+				processFrameChunkForTest("start", 1, 8, ""),
+				processFrameChunkForTest("delta", 1, 8, first),
+				processFrameChunkForTest("terminal", 1, -1, ""),
+				{Kind: domainmodel.ChunkRetrying, RetryAttempt: 2, RetryMax: 2},
+				processFrameChunkForTest("reset", 2, -1, ""),
+				processFrameChunkForTest("start", 2, 8, ""),
+				processFrameChunkForTest("delta", 2, 8, second),
+				processFrameChunkForTest("terminal", 2, -1, ""),
+			},
+			err: fakeProviderRetryError{retryable: true},
+		},
+		{
+			callbackChunks: []domainmodel.Chunk{
+				processFrameChunkForTest("reset", 1, -1, ""),
+				processFrameChunkForTest("start", 1, 8, ""),
+				processFrameChunkForTest("delta", 1, 8, final),
+				processFrameChunkForTest("end", 1, 8, ""),
+				{Kind: domainmodel.ChunkText, Text: "verified replacement"},
+			},
+			resultChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkText, Text: "verified replacement"}},
+		},
+	}}
+	var frames []domainmodel.ProcessFrameV1
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider, MaxAttempts: 2,
+		Callbacks: ProviderStreamCallbacks{OnProcessFrame: func(frame domainmodel.ProcessFrameV1) {
+			frames = append(frames, frame)
+		}},
+	})
+	if err != nil || len(provider.requests) != 2 || output.Text != "verified replacement" || output.Reasoning != final {
+		t.Fatalf("nested retry did not isolate replacement continuation: calls=%d err=%v", len(provider.requests), err)
+	}
+	var deltaAttempts []uint64
+	var deltaText []string
+	lastAttempt := uint64(0)
+	resetAttempt := uint64(0)
+	for _, frame := range frames {
+		if frame.Attempt < lastAttempt || frame.Attempt == 0 {
+			t.Fatalf("physical process attempt regressed: %#v", frames)
+		}
+		lastAttempt = frame.Attempt
+		if frame.Kind == "reset" {
+			resetAttempt = frame.Attempt
+		}
+		if frame.Kind == "delta" {
+			if resetAttempt != frame.Attempt || frame.NativeIndex != 8 {
+				t.Fatalf("replacement bytes arrived before their physical reset: %#v", frames)
+			}
+			deltaAttempts = append(deltaAttempts, frame.Attempt)
+			deltaText = append(deltaText, frame.Text)
+		}
+		if frame.Kind != "delta" && frame.Text != "" {
+			t.Fatal("process lifecycle frame retained private bytes")
+		}
+	}
+	if !reflect.DeepEqual(deltaAttempts, []uint64{1, 2, 3}) || !reflect.DeepEqual(deltaText, []string{first, second, final}) {
+		t.Fatalf("nested physical sends were not independently identified: %#v", frames)
+	}
+}
+
+func TestStreamProviderSummaryFramesStayPrivateAcrossRetryAndRejectLateAttempts(t *testing.T) {
+	summary := func(kind string, attempt uint64, text string) domainmodel.Chunk {
+		return domainmodel.Chunk{Kind: domainmodel.ChunkReasoning, ProcessFrame: &domainmodel.ProcessFrameV1{Source: "provider_reasoning", ReasoningForm: "summary", Kind: kind, Attempt: attempt, HostSegmentOrdinal: 1, Text: text}}
+	}
+	invalidForm := summary("delta", 1, "INVALID_FORM_CANARY")
+	invalidForm.ProcessFrame.ReasoningForm = "full"
+	invalidSource := summary("delta", 1, "INVALID_SOURCE_CANARY")
+	invalidSource.ProcessFrame.Source = "assistant_draft"
+	provider := &providerStreamStub{responses: []providerStreamResponse{
+		{
+			callbackChunks: []domainmodel.Chunk{
+				invalidForm, invalidSource,
+				summary("start", 1, ""), summary("delta", 1, "first summary"),
+				{Kind: domainmodel.ChunkRetrying, RetryAttempt: 2, RetryMax: 2},
+				summary("delta", 1, "LATE_OLD_ATTEMPT_CANARY"),
+				summary("start", 2, ""), summary("delta", 2, "second summary"),
+			},
+			err: fakeProviderRetryError{retryable: true},
+		},
+		{
+			callbackChunks: []domainmodel.Chunk{
+				summary("start", 0, ""), summary("delta", 0, "replacement summary"), summary("end", 0, ""),
+				{Kind: domainmodel.ChunkText, Text: "verified answer"},
+			},
+			resultChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkText, Text: "verified answer"}},
+		},
+	}}
+	var frames []domainmodel.ProcessFrameV1
+	public := ""
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider, MaxAttempts: 2,
+		Callbacks: ProviderStreamCallbacks{
+			OnProcessFrame: func(frame domainmodel.ProcessFrameV1) { frames = append(frames, frame) },
+			OnTextDelta:    func(text string) error { public += text; return nil },
+		},
+	})
+	if err != nil || len(provider.requests) != 2 || output.Text != "verified answer" || public != output.Text || output.Reasoning != "" || output.ReasoningSignature != "" {
+		t.Fatalf("summary entered continuation or changed retry/publication: calls=%d err=%v", len(provider.requests), err)
+	}
+	var attempts []uint64
+	var bodies []string
+	reset := uint64(0)
+	for _, frame := range frames {
+		if frame.Kind == "reset" {
+			reset = frame.Attempt
+		}
+		if frame.Kind == "reset" || frame.Kind == "terminal" {
+			if frame.ReasoningForm != "" || frame.Text != "" {
+				t.Fatal("lifecycle carried summary identity or text")
+			}
+			continue
+		}
+		if frame.Source != "provider_reasoning" || frame.ReasoningForm != "summary" || frame.NativeIndex != 0 || frame.NativeID != "" || frame.HostSegmentOrdinal != 1 || frame.Attempt != reset {
+			t.Fatal("summary lost its immutable form or physical attempt")
+		}
+		if frame.Kind == "delta" {
+			attempts = append(attempts, frame.Attempt)
+			bodies = append(bodies, frame.Text)
+		}
+	}
+	if !reflect.DeepEqual(attempts, []uint64{1, 2, 3}) || !reflect.DeepEqual(bodies, []string{"first summary", "second summary", "replacement summary"}) {
+		t.Fatal("summary retries merged attempts or admitted rejected/late content")
+	}
+	for _, chunk := range output.Result.Chunks {
+		if chunk.ProcessFrame != nil || chunk.Kind == domainmodel.ChunkReasoning {
+			t.Fatal("summary sidecar entered retained result")
+		}
+	}
+}
+
+type lateProcessFrameProviderStub struct {
+	cancel      context.CancelFunc
+	callbackErr error
+}
+
+func (stub *lateProcessFrameProviderStub) Stream(_ context.Context, request domainmodel.Request) (domainmodel.Result, error) {
+	stub.cancel()
+	late := processFrameChunkForTest("delta", 1, 8, "PRIVATE_CANCELLED_PROCESS_FRAME")
+	if request.OnChunk != nil {
+		stub.callbackErr = request.OnChunk(late)
+	}
+	return domainmodel.Result{Chunks: []domainmodel.Chunk{late}, StreamCompleted: true}, nil
+}
+
+func TestStreamProviderSuppressesLateNativeProcessFramesAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := &lateProcessFrameProviderStub{cancel: cancel}
+	nativeFrames := 0
+	output, err := StreamProviderWithRetry(ctx, ProviderStreamInput{
+		Provider: provider,
+		Callbacks: ProviderStreamCallbacks{OnProcessFrame: func(frame domainmodel.ProcessFrameV1) {
+			if frame.Kind == "start" || frame.Kind == "delta" || frame.Kind == "end" {
+				nativeFrames++
+			}
+		}},
+	})
+	if !errors.Is(err, context.Canceled) || !errors.Is(provider.callbackErr, context.Canceled) || nativeFrames != 0 ||
+		output.Text != "" || output.Reasoning != "" || len(output.Result.Chunks) != 0 {
+		t.Fatal("cancelled producer bytes crossed the process display callback or result")
+	}
+}
+
+func TestStreamProviderProcessFramesRequireNativeEvidenceAndBindZeroAttempt(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(fmt.Sprintf("native=%t", native), func(t *testing.T) {
+			const reasoning = "PRIVATE_FRAME_EVIDENCE_REASONING"
+			chunks := []domainmodel.Chunk{{Kind: domainmodel.ChunkReasoning, Text: reasoning}}
+			if native {
+				chunks = []domainmodel.Chunk{
+					processFrameChunkForTest("start", 0, 8, ""),
+					processFrameChunkForTest("delta", 0, 8, reasoning),
+					processFrameChunkForTest("end", 0, 8, ""),
+				}
+			}
+			provider := &providerStreamStub{responses: []providerStreamResponse{{callbackChunks: chunks}}}
+			var nativeFrames []domainmodel.ProcessFrameV1
+			output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+				Provider: provider,
+				Callbacks: ProviderStreamCallbacks{OnProcessFrame: func(frame domainmodel.ProcessFrameV1) {
+					if frame.Kind == "start" || frame.Kind == "delta" || frame.Kind == "end" {
+						nativeFrames = append(nativeFrames, frame)
+					}
+				}},
+			})
+			if err != nil || output.Reasoning != reasoning {
+				t.Fatal("process evidence changed the original continuation")
+			}
+			if !native && len(nativeFrames) != 0 {
+				t.Fatal("ordinary reasoning chunks fabricated native display evidence")
+			}
+			if native {
+				if len(nativeFrames) != 3 {
+					t.Fatalf("explicit native boundaries were lost: %#v", nativeFrames)
+				}
+				for _, frame := range nativeFrames {
+					if frame.Attempt != 1 || frame.NativeIndex != 8 {
+						t.Fatalf("zero local attempt was not bound to the current physical send: %#v", frame)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestStreamProviderProcessSecretHintsUsePreparedRequestAuthority(t *testing.T) {
+	const initialKey = "PRIVATE_INITIAL_PROVIDER_KEY"
+	const preparedKey = "PRIVATE_PREPARED_PROVIDER_KEY"
+	const forgedKey = "PRIVATE_FORGED_FRAME_SECRET_HINT"
+	chunks := []domainmodel.Chunk{
+		processFrameChunkForTest("reset", 1, -1, ""),
+		processFrameChunkForTest("start", 1, 8, ""),
+		processFrameChunkForTest("delta", 1, 8, "private continuation"),
+		processFrameChunkForTest("end", 1, 8, ""),
+		processFrameChunkForTest("terminal", 1, -1, ""),
+	}
+	for _, chunk := range chunks {
+		chunk.ProcessFrame.ProjectionSecrets = []string{forgedKey}
+	}
+	provider := &providerStreamStub{responses: []providerStreamResponse{{callbackChunks: chunks}}}
+	settlements := 0
+	var kinds []string
+	var hints [][]string
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider,
+		Request:  domainmodel.Request{APIKey: initialKey},
+		Callbacks: ProviderStreamCallbacks{
+			PrepareProviderAttempt: func(_ context.Context, _ int, request domainmodel.Request) (domainmodel.Request, ProviderAttemptSettlement, error) {
+				request.APIKey = preparedKey
+				return request, func(context.Context, string, string) error {
+					settlements++
+					return nil
+				}, nil
+			},
+			OnProcessFrame: func(frame domainmodel.ProcessFrameV1) {
+				kinds = append(kinds, frame.Kind)
+				hints = append(hints, append([]string(nil), frame.ProjectionSecrets...))
+			},
+		},
+	})
+	if err != nil || len(provider.requests) != 1 || provider.requests[0].APIKey != preparedKey ||
+		settlements != 1 || output.Reasoning != "private continuation" {
+		t.Fatalf("prepared provider authority or continuation changed: calls=%d settlements=%d err=%v", len(provider.requests), settlements, err)
+	}
+	if !reflect.DeepEqual(kinds, []string{"reset", "start", "delta", "end", "terminal"}) {
+		t.Fatalf("expected every display lifecycle callback: %#v", kinds)
+	}
+	for _, actual := range hints {
+		if !reflect.DeepEqual(actual, []string{preparedKey}) {
+			t.Fatal("process projection trusted an incoming hint or initial request key over prepared authority")
+		}
+	}
+}
+
+func TestStreamProviderOversizedProcessFrameClosesCaptureWithoutChangingContinuation(t *testing.T) {
+	reasoning := strings.Repeat("x", 1024*1024+1)
+	provider := &providerStreamStub{responses: []providerStreamResponse{{
+		callbackChunks: []domainmodel.Chunk{
+			processFrameChunkForTest("start", 1, 8, ""),
+			processFrameChunkForTest("delta", 1, 8, reasoning),
+			processFrameChunkForTest("end", 1, 8, ""),
+			{Kind: domainmodel.ChunkText, Text: "completed public answer"},
+		},
+		resultChunks: []domainmodel.Chunk{
+			{Kind: domainmodel.ChunkReasoning, Text: reasoning},
+			{Kind: domainmodel.ChunkText, Text: "completed public answer"},
+		},
+	}}}
+	var kinds []string
+	capturedBytes := 0
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider,
+		Callbacks: ProviderStreamCallbacks{OnProcessFrame: func(frame domainmodel.ProcessFrameV1) {
+			kinds = append(kinds, frame.Kind)
+			capturedBytes += len(frame.Text)
+		}},
+	})
+	if err != nil || len(provider.requests) != 1 || output.Reasoning != reasoning || output.Text != "completed public answer" {
+		t.Fatal("display capture size limit changed the original provider continuation or outcome")
+	}
+	if !reflect.DeepEqual(kinds, []string{"reset", "start", "terminal"}) || capturedBytes != 0 {
+		t.Fatalf("oversized native block was truncated or marked complete: kinds=%#v capturedBytes=%d", kinds, capturedBytes)
+	}
+	var resultReasoning strings.Builder
+	for _, chunk := range output.Result.Chunks {
+		if chunk.Kind == domainmodel.ChunkReasoning {
+			resultReasoning.WriteString(chunk.Text)
+		}
+	}
+	if resultReasoning.String() != reasoning {
+		t.Fatal("display capture bound truncated the original provider result")
+	}
+}
+
+func TestStreamProviderStripsReturnedDisplaySidecarsBeforeResultRetention(t *testing.T) {
+	frame := &domainmodel.ProcessFrameV1{
+		Kind: "delta", Attempt: 1, NativeIndex: 8,
+		Text: "private continuation", ProjectionSecrets: []string{"FORGED_RETURNED_SECRET"},
+	}
+	resultChunks := []domainmodel.Chunk{
+		{Kind: domainmodel.ChunkReasoning, Text: "private continuation", ProcessFrame: frame},
+		{Kind: domainmodel.ChunkText, Text: "public answer"},
+	}
+	provider := &providerStreamStub{responses: []providerStreamResponse{{
+		callbackChunks: []domainmodel.Chunk{
+			processFrameChunkForTest("start", 1, 8, ""),
+			processFrameChunkForTest("delta", 1, 8, "private continuation"),
+			processFrameChunkForTest("end", 1, 8, ""),
+			{Kind: domainmodel.ChunkText, Text: "public answer"},
+		},
+		resultChunks: resultChunks,
+	}}}
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider})
+	if err != nil || output.Text != "public answer" || output.Reasoning != "private continuation" {
+		t.Fatal("private result cleanup changed provider continuation or completion")
+	}
+	if len(output.Result.Chunks) != 2 {
+		t.Fatal("private result cleanup changed existing chunk count")
+	}
+	for _, chunk := range output.Result.Chunks {
+		if chunk.ProcessFrame != nil {
+			t.Fatal("display sidecar or projection secrets entered retained result")
+		}
+	}
+	if resultChunks[0].ProcessFrame != frame || len(frame.ProjectionSecrets) != 1 || frame.ProjectionSecrets[0] != "FORGED_RETURNED_SECRET" {
+		t.Fatal("result cleanup mutated a provider-owned sidecar")
+	}
+}
+
+type frozenProviderDelayError struct {
+	reads *int
+	delay time.Duration
+}
+
+func (err frozenProviderDelayError) Error() string   { return "synthetic retry" }
+func (err frozenProviderDelayError) Retryable() bool { return true }
+func (err frozenProviderDelayError) RetryAfterDelay() time.Duration {
+	*err.reads++
+	if *err.reads > 1 {
+		return time.Hour
+	}
+	return err.delay
+}
+
+func TestOuterRetryLifecycleFreezesActualTimerAndInvocation(t *testing.T) {
+	reads := 0
+	provider := &providerStreamStub{responses: []providerStreamResponse{{err: frozenProviderDelayError{&reads, 20 * time.Millisecond}}, {}}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var retries []domainmodel.ProviderRetryV1
+	settled := 0
+	_, err := StreamProviderWithRetry(ctx, ProviderStreamInput{Provider: provider, ContinuationAuthority: ProviderContinuationAuthorityInput{Sequence: 9}, Callbacks: ProviderStreamCallbacks{
+		PrepareProviderAttempt: func(_ context.Context, _ int, request domainmodel.Request) (domainmodel.Request, ProviderAttemptSettlement, error) {
+			return request, func(context.Context, string, string) error { settled++; return nil }, nil
+		},
+		OnProviderRetryLifecycle: func(retry domainmodel.ProviderRetryV1, max int, _ error) error {
+			if settled != 1 || len(provider.requests) != 1 || max != 2 {
+				t.Fatal("retry precedes failed settlement or true invocation")
+			}
+			retries = append(retries, retry)
+			return nil
+		},
+	}})
+	if err != nil || reads != 1 || len(provider.requests) != 2 || len(retries) != 2 {
+		t.Fatalf("timer/invocation mismatch: err=%v delayReads=%d calls=%d retries=%#v", err, reads, len(provider.requests), retries)
+	}
+	a, b := retries[0], retries[1]
+	if a.Phase != "scheduled" || b.Phase != "started" || a.Source != "provider_retry" || a.LogicalSequence != 9 || a.OuterAttempt != 2 || a.PhysicalAttempt != 0 || *a.DelayMs != 20 || *a.DeadlineUnixMs != a.At.Add(20*time.Millisecond).UnixMilli() || b.At.UnixMilli() < *a.DeadlineUnixMs {
+		t.Fatalf("frozen timer metadata=%#v started=%#v", a, b)
+	}
+}
+
+func TestOuterRetryLifecycleCancellationAndRejection(t *testing.T) {
+	for _, name := range []string{"context_cancelled", "deadline_exceeded", "attempt_rejected", "scheduled_record_failure", "started_record_failure", "settlement_failure"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if name == "deadline_exceeded" {
+				ctx, cancel = context.WithTimeout(context.Background(), 15*time.Millisecond)
+				defer cancel()
+			}
+			delay := time.Duration(0)
+			if name == "deadline_exceeded" {
+				delay = time.Second
+			}
+			provider := &providerStreamStub{responses: []providerStreamResponse{{err: fakeProviderRetryError{retryable: true, delay: delay}}, {}}}
+			var retries []domainmodel.ProviderRetryV1
+			_, err := StreamProviderWithRetry(ctx, ProviderStreamInput{Provider: provider, ContinuationAuthority: ProviderContinuationAuthorityInput{Sequence: 1}, Callbacks: ProviderStreamCallbacks{
+				PrepareProviderAttempt: func(_ context.Context, _ int, request domainmodel.Request) (domainmodel.Request, ProviderAttemptSettlement, error) {
+					return request, func(context.Context, string, string) error {
+						if name == "settlement_failure" {
+							return errors.New("settlement blocked")
+						}
+						return nil
+					}, nil
+				},
+				BeforeProviderInvocation: func(attempt int) error {
+					if attempt == 2 && name == "attempt_rejected" {
+						return errors.New("authority rejected")
+					}
+					return nil
+				},
+				OnProviderRetryLifecycle: func(retry domainmodel.ProviderRetryV1, _ int, _ error) error {
+					retries = append(retries, retry)
+					if retry.Phase == "scheduled" && name == "context_cancelled" {
+						cancel()
+					}
+					if (retry.Phase == "scheduled" && name == "scheduled_record_failure") || (retry.Phase == "started" && name == "started_record_failure") {
+						return errors.New("event recorder failed")
+					}
+					return nil
+				},
+			}})
+			if err == nil || len(provider.requests) != 1 {
+				t.Fatalf("exit crossed invocation: err=%v calls=%d", err, len(provider.requests))
+			}
+			if strings.HasSuffix(name, "record_failure") {
+				return
+			}
+			if name == "settlement_failure" {
+				if len(retries) != 0 {
+					t.Fatal("unsettled failure scheduled retry")
+				}
+				return
+			}
+			if len(retries) != 2 || retries[0].Phase != "scheduled" || retries[1].Phase != "cancelled" || retries[1].CancelReason != name {
+				t.Fatalf("cancel lifecycle=%#v", retries)
+			}
+		})
+	}
+}
+
+func TestRetryStartedAndCancelledDoNotResetNativeAttempt(t *testing.T) {
+	seq := uint64(4)
+	makeRetry := func(phase string) *domainmodel.ProviderRetryV1 {
+		return &domainmodel.ProviderRetryV1{SchemaVersion: 1, Source: "transport_reconnect", Phase: phase, LogicalSequence: seq, OuterAttempt: 1, PhysicalAttempt: 2, At: time.Now().UTC()}
+	}
+	provider := &providerStreamStub{responses: []providerStreamResponse{{callbackChunks: []domainmodel.Chunk{
+		{Kind: domainmodel.ChunkRetrying, RetryAttempt: 2, RetryMax: 2, Retry: makeRetry("scheduled")},
+		{Kind: domainmodel.ChunkRetrying, RetryAttempt: 2, RetryMax: 2, Retry: makeRetry("started")},
+		{Kind: domainmodel.ChunkReasoning, Text: "new private draft"},
+		{Kind: domainmodel.ChunkRetrying, RetryAttempt: 2, RetryMax: 2, Retry: makeRetry("cancelled")},
+	}}}}
+	resets := 0
+	legacy := 0
+	lifecycle := 0
+	out, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider, Callbacks: ProviderStreamCallbacks{OnProcessFrame: func(frame domainmodel.ProcessFrameV1) {
+		if frame.Kind == "reset" {
+			resets++
+		}
+	}, OnProviderRetrying: func(int, int, error) error { legacy++; return nil }, OnProviderRetryLifecycle: func(domainmodel.ProviderRetryV1, int, error) error { lifecycle++; return nil }}})
+	if err != nil || resets != 1 || legacy != 1 || lifecycle != 3 || out.Reasoning != "new private draft" {
+		t.Fatalf("phase reset/discard leaked: reset=%d legacy=%d lifecycle=%d reasoning=%q err=%v", resets, legacy, lifecycle, out.Reasoning, err)
+	}
+}
+
+func TestRetryCancelReasonPreservesCurrentHostAuthority(t *testing.T) {
+	for _, tt := range []struct {
+		ctxErr, cause error
+		want          string
+	}{
+		{context.Canceled, context.DeadlineExceeded, "context_cancelled"},
+		{context.DeadlineExceeded, context.Canceled, "deadline_exceeded"},
+		{nil, context.Canceled, "context_cancelled"},
+		{nil, context.DeadlineExceeded, "deadline_exceeded"},
+		{nil, errors.New("admission rejected"), "attempt_rejected"},
+	} {
+		if got := domainmodel.ProviderRetryCancelReasonV1(tt.ctxErr, tt.cause); got != tt.want {
+			t.Fatalf("host=%v cause=%v got=%s want=%s", tt.ctxErr, tt.cause, got, tt.want)
+		}
+	}
+}
+
+func TestRetryLegacyCallbackRejectionClosesAcceptedSchedule(t *testing.T) {
+	for _, source := range []string{"provider_retry", "transport_reconnect"} {
+		t.Run(source, func(t *testing.T) {
+			response := providerStreamResponse{err: fakeProviderRetryError{retryable: true}}
+			if source == "transport_reconnect" {
+				response = providerStreamResponse{callbackChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkRetrying, RetryAttempt: 2, RetryMax: 2, Retry: &domainmodel.ProviderRetryV1{SchemaVersion: 1, Source: source, Phase: "scheduled", LogicalSequence: 1, OuterAttempt: 1, PhysicalAttempt: 2, At: time.Now().UTC()}}}}
+			}
+			provider := &providerStreamStub{responses: []providerStreamResponse{response, {}}}
+			var retries []domainmodel.ProviderRetryV1
+			_, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider, ContinuationAuthority: ProviderContinuationAuthorityInput{Sequence: 1}, Callbacks: ProviderStreamCallbacks{
+				OnProviderRetryLifecycle: func(retry domainmodel.ProviderRetryV1, _ int, _ error) error {
+					retries = append(retries, retry)
+					return nil
+				},
+				OnProviderRetrying: func(int, int, error) error { return errors.New("legacy admission rejected") },
+			}})
+			if err == nil || len(provider.requests) != 1 || len(retries) != 2 || retries[0].Phase != "scheduled" || retries[1].Phase != "cancelled" || retries[1].CancelReason != "attempt_rejected" {
+				t.Fatalf("legacy callback left schedule unresolved: calls=%d retries=%#v err=%v", len(provider.requests), retries, err)
+			}
+		})
+	}
+}
+
+func TestProviderProcessSidecarsShareHostIssuerAndStayPrivateV1(t *testing.T) {
+	const rawID = "raw_preparation_call"
+	const reasoning = "PRIVATE_REASONING_SENTINEL"
+	const partial = `{"path":"draft.txt","content":"A`
+	const finalArgs = `{"path":"draft.txt","content":"A😀"}`
+	const publicText = "verified public answer"
+	reasoningChunk := func(kind, text string) domainmodel.Chunk {
+		chunk := domainmodel.Chunk{Kind: domainmodel.ChunkReasoning, ProcessFrame: &domainmodel.ProcessFrameV1{Source: "provider_reasoning", Kind: kind, HostSegmentOrdinal: 1, Text: text}}
+		if kind == "delta" {
+			chunk.Text = text
+		}
+		return chunk
+	}
+	preparationChunk := func(kind, arguments string) domainmodel.Chunk {
+		return domainmodel.Chunk{Kind: domainmodel.ChunkReasoning, ProcessFrame: &domainmodel.ProcessFrameV1{Source: "tool_preparation", Kind: kind, ToolPreparation: &domainstreamframe.ToolPreparationV1{Index: 0, CallID: rawID, ToolName: "write", Arguments: arguments}}}
+	}
+	origin := preparationChunk("start", "")
+	origin.ProcessFrame.ToolPreparation.ToolName = ""
+	// An early optional wire hint is not the later actual call identity. It
+	// must not consume a second issuer identity or bind a visible preparation.
+	origin.ProcessFrame.ToolPreparation.CallID = "raw_before_named_id"
+	callbackChunks := []domainmodel.Chunk{
+		origin,
+		reasoningChunk("start", ""), reasoningChunk("delta", reasoning), reasoningChunk("end", ""),
+		preparationChunk("delta", partial),
+		{Kind: domainmodel.ChunkToolCallStart, ToolCall: domainmodel.ToolCall{ID: rawID, Name: "write"}},
+		preparationChunk("end", finalArgs),
+		{Kind: domainmodel.ChunkToolCall, ToolCall: domainmodel.ToolCall{ID: rawID, Name: "write", Arguments: []byte(finalArgs)}},
+		{Kind: domainmodel.ChunkText, Text: publicText},
+	}
+	resultChunks := []domainmodel.Chunk{reasoningChunk("delta", reasoning), callbackChunks[7], {Kind: domainmodel.ChunkText, Text: publicText}}
+	provider := &providerStreamStub{responses: []providerStreamResponse{{callbackChunks: callbackChunks, resultChunks: resultChunks}}}
+	var frames []domainmodel.ProcessFrameV1
+	var publicChunks []domainmodel.Chunk
+	startID := ""
+	output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+		Provider: provider, MaxAttempts: 1,
+		toolCallIDRandom: bytes.NewReader(bytes.Repeat([]byte{0x41}, domainmodel.HostToolCallIDEntropyBytesV1)),
+		Callbacks: ProviderStreamCallbacks{
+			OnProcessFrame:  func(frame domainmodel.ProcessFrameV1) { frames = append(frames, frame) },
+			OnToolCallStart: func(call domainmodel.ToolCall) error { startID = call.ID; return nil },
+			OnTextChunk:     func(chunk domainmodel.Chunk) error { publicChunks = append(publicChunks, chunk); return nil },
+		},
+	})
+	if err != nil || len(provider.requests) != 1 || len(output.Result.Chunks) != 3 {
+		t.Fatalf("sidecar changed provider completion: calls=%d err=%v", len(provider.requests), err)
+	}
+	finalID := output.Result.Chunks[1].ToolCall.ID
+	if !domainmodel.IsHostToolCallIDV1(startID) || startID != finalID || startID == rawID {
+		t.Fatalf("issuer diverged: start=%q final=%q", startID, finalID)
+	}
+	var lifecycle, preparationArguments []string
+	reasoningText := ""
+	for _, frame := range frames {
+		if frame.Attempt != 1 {
+			t.Fatalf("frame escaped the actual attempt: %#v", frame)
+		}
+		lifecycle = append(lifecycle, frame.Source+"/"+frame.Kind)
+		switch frame.Source {
+		case "tool_preparation":
+			prep := frame.ToolPreparation
+			if frame.Kind == "start" {
+				if prep == nil || prep.CallID != "" || prep.ToolName != "" || prep.Arguments != "" || prep.Index != 0 || frame.Text != "" {
+					t.Fatal("control origin minted an identity or carried bytes")
+				}
+				continue
+			}
+			if prep == nil || prep.CallID != startID || prep.Index != 0 || prep.ToolName != "write" || frame.Text != "" || frame.NativeID != "" || frame.NativeIndex != 0 {
+				t.Fatalf("preparation lost its host coordinate: %#v", frame)
+			}
+			preparationArguments = append(preparationArguments, prep.Arguments)
+		case "provider_reasoning":
+			if frame.HostSegmentOrdinal != 1 || frame.NativeID != "" || frame.NativeIndex != 0 {
+				t.Fatalf("reasoning fabricated native identity: %#v", frame)
+			}
+			if frame.Kind == "delta" {
+				reasoningText += frame.Text
+			} else if frame.Text != "" {
+				t.Fatal("reasoning boundary carried body text")
+			}
+		}
+	}
+	wantLifecycle := []string{"/reset", "tool_preparation/start", "provider_reasoning/start", "provider_reasoning/delta", "provider_reasoning/end", "tool_preparation/delta", "tool_preparation/end", "/terminal"}
+	if !reflect.DeepEqual(lifecycle, wantLifecycle) || !reflect.DeepEqual(preparationArguments, []string{partial, finalArgs}) || reasoningText != reasoning {
+		t.Fatalf("private sidecar lifecycle changed: %v", lifecycle)
+	}
+	if output.Reasoning != reasoning || output.Text != publicText || !reflect.DeepEqual(publicChunks, []domainmodel.Chunk{{Kind: domainmodel.ChunkText, Text: publicText}}) {
+		t.Fatal("private process content crossed the public publication seam")
+	}
+	for _, chunk := range output.Result.Chunks {
+		if chunk.ProcessFrame != nil {
+			t.Fatal("process sidecar entered retained provider continuation")
+		}
+	}
+	if callbackChunks[4].ProcessFrame.ToolPreparation.CallID != rawID || callbackChunks[0].ProcessFrame.ToolPreparation.CallID != "raw_before_named_id" || resultChunks[0].ProcessFrame == nil {
+		t.Fatal("host normalization mutated provider-owned sidecars")
+	}
+}
+
+func TestNativeFirstContentPresenceSurvivesNormalizationAndCannotUseDisplayFallback(t *testing.T) {
+	for _, present := range []bool{false, true} {
+		provider := &providerStreamStub{responses: []providerStreamResponse{{nativePresence: true, nativeContent: present, callbackChunks: []domainmodel.Chunk{{Kind: domainmodel.ChunkText, Text: "display"}}}}}
+		output, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{Provider: provider, Request: domainmodel.Request{}})
+		if err != nil || !output.Result.HostTiming.FirstContentPresenceKnown || output.Result.HasFirstTokenLatency != present || output.Result.HostTiming.FirstContentAt.IsZero() == present {
+			t.Fatalf("native presence lost or inferred from display: present=%v output=%#v err=%v", present, output.Result, err)
+		}
+	}
+}
+
+type providerDiagnosticOpaqueError struct{}
+
+func (providerDiagnosticOpaqueError) Error() string {
+	panic("diagnostic must not read error text")
+}
+
+func TestProviderFailureDiagnosticUsesOnlyTypedClosedLabels(t *testing.T) {
+	const secret = "synthetic-secret-diagnostic-sentinel"
+	privacyErrors := []struct {
+		err   error
+		cause string
+	}{
+		{privacyprojectionapp.ErrProviderPrivacyAuthorityUnavailable, "provider_privacy_authority_unavailable"},
+		{privacyprojectionapp.ErrUninspectableProviderPart, "uninspectable_provider_part"},
+		{privacyprojectionapp.ErrProviderSchemaContainsPII, "provider_schema_contains_pii"},
+		{privacyprojectionapp.ErrOrdinaryProviderContainsCaseEffect, "ordinary_provider_contains_case_effect"},
+		{privacyprojectionapp.ErrProviderLogicalEffectInvalid, "provider_logical_effect_invalid"},
+	}
+	for _, privacy := range privacyErrors {
+		for _, err := range []error{privacy.err, ProviderStreamCallbackError{Err: privacy.err}, errors.Join(providerDiagnosticOpaqueError{}, privacy.err)} {
+			stage, cause := ProviderFailureDiagnosticV1(err)
+			if stage != "privacy_projection" || cause != privacy.cause {
+				t.Fatalf("privacy classification = %q/%q", stage, cause)
+			}
+		}
+	}
+	for _, code := range []string{
+		"turn_security_authority_unavailable", "turn_security_identity_mismatch",
+		"turn_security_workspace_mismatch", "turn_security_case_binding_mismatch",
+		"turn_security_dataset_snapshot_mismatch", "turn_security_risk_policy_mismatch",
+		"turn_security_context_invalid", "source_probe_unavailable", "tool_source_unavailable",
+	} {
+		failure := TurnFailureError{Code: code, Message: secret, Details: map[string]any{"secret": secret}}
+		for _, err := range []error{failure, &failure, errors.Join(providerDiagnosticOpaqueError{}, ProviderStreamCallbackError{Err: failure})} {
+			stage, cause := ProviderFailureDiagnosticV1(err)
+			if stage != "unknown" || cause != code {
+				t.Fatalf("typed classification = %q/%q", stage, cause)
+			}
+		}
+	}
+	for _, err := range []error{
+		nil, providerDiagnosticOpaqueError{}, errors.New("source_probe_unavailable " + secret),
+		TurnFailureError{Code: "source_probe_unavailable "},
+		TurnFailureError{Code: secret, Details: map[string]any{"code": "source_probe_unavailable"}},
+		ProviderStreamCallbackError{Err: errors.New(secret)},
+	} {
+		stage, cause := ProviderFailureDiagnosticV1(err)
+		if stage != "unknown" || cause != "unknown" {
+			t.Fatalf("untyped or unlisted failure classification = %q/%q", stage, cause)
+		}
+	}
+	for _, test := range []struct {
+		err          error
+		stage, cause string
+	}{
+		{errors.Join(context.Canceled, providerDiagnosticOpaqueError{}), "unknown", "context_canceled"},
+		{ProviderStreamCallbackError{Err: context.DeadlineExceeded}, "unknown", "context_deadline_exceeded"},
+		{errors.Join(context.Canceled, providerAttemptAcquireError{Err: providerDiagnosticOpaqueError{}}), "acquire", "unknown"},
+		{ProviderStreamCallbackError{Err: errors.Join(providerAttemptPrepareError{Err: context.DeadlineExceeded}, privacyprojectionapp.ErrProviderSchemaContainsPII)}, "prepare", "context_deadline_exceeded"},
+	} {
+		stage, cause := ProviderFailureDiagnosticV1(test.err)
+		if stage != test.stage || cause != test.cause {
+			t.Fatalf("wrapped/joined marker classification = %q/%q, want %q/%q", stage, cause, test.stage, test.cause)
+		}
+	}
+}
+
+func TestProviderFailureDiagnosticPresendBoundariesMakeZeroProviderCalls(t *testing.T) {
+	for _, stage := range []string{"acquire", "prepare", "privacy_projection"} {
+		t.Run(stage, func(t *testing.T) {
+			provider := &providerStreamStub{}
+			active := false
+			settlements := 0
+			cause := error(context.Canceled)
+			wantCause := "context_canceled"
+			if stage == "prepare" {
+				cause = TurnFailureError{Code: "source_probe_unavailable", Message: "synthetic-secret-diagnostic-sentinel"}
+				wantCause = "source_probe_unavailable"
+			} else if stage == "privacy_projection" {
+				cause = privacyprojectionapp.ErrUninspectableProviderPart
+				wantCause = "uninspectable_provider_part"
+			}
+			_, err := StreamProviderWithRetry(context.Background(), ProviderStreamInput{
+				Provider: provider, OrdinaryEffect: true,
+				SecurityContext: newLoopGeneralContextV2(t, "thread-diagnostic", "turn-diagnostic", t.TempDir()),
+				Request:         domainmodel.Request{Messages: []domainmodel.Message{{Role: "user", Content: "synthetic prompt"}}},
+				Callbacks: ProviderStreamCallbacks{
+					AcquireProviderAttempt: func(ctx context.Context, _ int) (context.Context, func(), error) {
+						if stage == "acquire" {
+							return nil, nil, cause
+						}
+						active = true
+						return ctx, func() { active = false }, nil
+					},
+					PrepareProviderAttempt: func(_ context.Context, _ int, request domainmodel.Request) (domainmodel.Request, ProviderAttemptSettlement, error) {
+						if stage == "prepare" {
+							return domainmodel.Request{}, nil, cause
+						}
+						request.Messages[0].Parts = []domainmodel.MessagePart{{Type: "image", Data: "synthetic-secret-diagnostic-sentinel"}}
+						return request, func(_ context.Context, status, reason string) error {
+							settlements++
+							if status != "failed" || reason != "privacy_projection_failed" {
+								t.Fatal("projection settlement changed")
+							}
+							return errors.New("synthetic-secret-settlement-sentinel")
+						}, nil
+					},
+				},
+			})
+			gotStage, gotCause := ProviderFailureDiagnosticV1(err)
+			if gotStage != stage || gotCause != wantCause || len(provider.requests) != 0 || active {
+				t.Fatalf("presend boundary = %q/%q, calls=%d active=%v", gotStage, gotCause, len(provider.requests), active)
+			}
+			if stage != "prepare" && !errors.Is(err, cause) {
+				t.Fatal("original sentinel no longer unwraps")
+			}
+			if stage == "privacy_projection" && settlements != 1 || stage != "privacy_projection" && settlements != 0 {
+				t.Fatalf("settlements = %d at %s", settlements, stage)
+			}
+		})
 	}
 }

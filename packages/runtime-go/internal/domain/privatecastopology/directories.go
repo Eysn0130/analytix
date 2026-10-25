@@ -162,9 +162,9 @@ func ValidateRuntimeDirectorySlotsV1() error {
 	scanParents := CreateRecoveryScanParentPathsV1()
 	shards := CanonicalShardComponentsV1()
 	ownerGroups := RecoverableOwnerDirectoryGroupsV1()
-	if len(slots) != 78 || len(fixedParents) != 22 || len(shardParents) != 57 ||
-		len(scanParents) != 79 || len(shards) != 256 || len(ownerGroups) != 16 ||
-		MaximumCreateResidueCandidateLocationsV1() != 14_670 {
+	if len(slots) != 80 || len(fixedParents) != 22 || len(shardParents) != 59 ||
+		len(scanParents) != 81 || len(shards) != 256 || len(ownerGroups) != 16 ||
+		MaximumCreateResidueCandidateLocationsV1() != 15_184 {
 		return errors.New("runtime private CAS directory topology count changed")
 	}
 	seenPaths := make(map[string]DirectorySlotV1, len(slots))
@@ -195,7 +195,7 @@ func ValidateRuntimeDirectorySlotsV1() error {
 			topLevel++
 		}
 	}
-	if casRoots != 57 || topLevel != 21 {
+	if casRoots != 59 || topLevel != 23 {
 		return errors.New("runtime private CAS directory root classification changed")
 	}
 	seenOwners := make(map[string]struct{}, len(ownerGroups))

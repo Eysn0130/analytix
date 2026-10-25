@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   loadWorkspaceMentionPathSuggestions,
+  loadWorkspaceMentionDirectorySuggestions,
   mentionQueryDirectory,
   mergeMentionCandidates
 } from './workspace-file-index'
@@ -90,6 +91,29 @@ describe('loadWorkspaceMentionPathSuggestions', () => {
     const candidates = mergeMentionCandidates([], onDemand)
     const filtered = filterWorkspaceFileMentionSuggestions(candidates, 'src/a/b/c/d/e/f/g/VeryDeep', [])
     expect(filtered.map((ref) => ref.relativePath)).toContain('src/a/b/c/d/e/f/g/VeryDeep.ts')
+  })
+})
+
+describe('drilled workspace directory candidates', () => {
+  it('lists only actual direct children, retaining directory type and the existing file filter', async () => {
+    const root = '/ws-drill-directory'
+    const list = installListDirectory(({ path }) => ({ ok: true, entries: path === 'src' ? [
+      entry(`${root}/src/nested`, 'directory'), entry(`${root}/src/note.md`, 'file'),
+      entry(`${root}/src/image.png`, 'file'), entry(`${root}/src/node_modules`, 'directory')
+    ] : [] }))
+    const references = await loadWorkspaceMentionDirectorySuggestions(root, 'src/')
+    expect(list).toHaveBeenCalledExactlyOnceWith({ workspaceRoot: root, path: 'src' })
+    expect(references).toEqual([
+      { path: `${root}/src/nested`, relativePath: 'src/nested', name: 'nested', type: 'directory' },
+      { path: `${root}/src/note.md`, relativePath: 'src/note.md', name: 'note.md', type: 'file' }
+    ])
+  })
+
+  it('returns to the workspace root through a real directory listing', async () => {
+    const root = '/ws-drill-root'
+    const list = installListDirectory(() => ({ ok: true, entries: [entry(`${root}/src`, 'directory')] }))
+    expect((await loadWorkspaceMentionDirectorySuggestions(root, '')).map(reference => reference.relativePath)).toEqual(['src'])
+    expect(list).toHaveBeenCalledExactlyOnceWith({ workspaceRoot: root, path: root })
   })
 })
 

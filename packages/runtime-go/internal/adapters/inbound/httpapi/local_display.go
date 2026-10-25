@@ -13,6 +13,7 @@ import (
 	fundscsvadmissionapp "analytix.local/runtime-go/internal/app/fundscsvadmission"
 	localdisplayapp "analytix.local/runtime-go/internal/app/localdisplay"
 	domainlocaldisplay "analytix.local/runtime-go/internal/domain/localdisplay"
+	admission "analytix.local/runtime-go/internal/domain/scheduleadmission"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
 )
 
@@ -30,10 +31,14 @@ type FrozenSecurityContextLoaderV1 func(threadID, turnID string) (domainsecurity
 type CurrentSecurityContextLoaderV1 func(threadID string) (domainsecurity.TurnSecurityContext, error)
 
 type LocalDisplayMuxV1 struct {
-	RuntimeToken string
-	Insecure     bool
-	Next         http.Handler
-	LocalDisplay http.Handler
+	ScheduleAdmissions http.Handler
+	Processes          http.Handler
+	ToolResults        http.Handler
+	UserInputs         http.Handler
+	RuntimeToken       string
+	Insecure           bool
+	Next               http.Handler
+	LocalDisplay       http.Handler
 }
 
 func (mux LocalDisplayMuxV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -53,16 +58,51 @@ func (mux LocalDisplayMuxV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Private packaged asset admission never inherits diagnostic insecure mode.
 	insecure := mux.Insecure
+	if r.URL.Path == ScheduleAdmissionPathV1 || r.URL.Path == UserInputLocalDisplayPathV1 || r.URL.Path == ToolResultLocalDisplayPathV1 || r.URL.Path == ProcessLocalDisplayReadPathV1 || r.URL.Path == ProcessLocalDisplayTargetPathV1 {
+		insecure = false
+	}
 	if r.URL.Path == OfficePrivateAdmissionPath || r.URL.Path == BrowserSelectionPath {
 		insecure = false
 	}
-	if ((r.URL.Path == OfficePrivateAdmissionPath || r.URL.Path == BrowserSelectionPath) && strings.TrimSpace(mux.RuntimeToken) == "") || !Authorized(r, mux.RuntimeToken, insecure) {
+	if ((r.URL.Path == ScheduleAdmissionPathV1 || r.URL.Path == OfficePrivateAdmissionPath || r.URL.Path == BrowserSelectionPath) && strings.TrimSpace(mux.RuntimeToken) == "") || !Authorized(r, mux.RuntimeToken, insecure) {
 		WriteJSON(w, http.StatusUnauthorized, map[string]any{"code": "unauthorized", "message": "unauthorized"})
 		return
 	}
 	values := r.Header.Values(LocalDisplayHeaderV1)
 	if len(values) != 1 || values[0] != LocalDisplayHeaderValueV1 {
 		WriteJSON(w, http.StatusForbidden, map[string]any{"code": "local_display_forbidden", "message": "typed local display authority is required"})
+		return
+	}
+	if r.URL.Path == ScheduleAdmissionPathV1 {
+		if mux.ScheduleAdmissions == nil {
+			writeScheduleAdmissionV1(w, admission.ResultV1("unknown", nil))
+			return
+		}
+		mux.ScheduleAdmissions.ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == ProcessLocalDisplayReadPathV1 || r.URL.Path == ProcessLocalDisplayTargetPathV1 {
+		if strings.TrimSpace(mux.RuntimeToken) == "" || mux.Processes == nil {
+			writeLocalDisplayUnavailableV1(w)
+			return
+		}
+		mux.Processes.ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == UserInputLocalDisplayPathV1 {
+		if strings.TrimSpace(mux.RuntimeToken) == "" || mux.UserInputs == nil {
+			writeLocalDisplayUnavailableV1(w)
+			return
+		}
+		mux.UserInputs.ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == ToolResultLocalDisplayPathV1 {
+		if strings.TrimSpace(mux.RuntimeToken) == "" || mux.ToolResults == nil {
+			writeLocalDisplayUnavailableV1(w)
+			return
+		}
+		mux.ToolResults.ServeHTTP(w, r)
 		return
 	}
 	if mux.LocalDisplay == nil {
@@ -73,6 +113,10 @@ func (mux LocalDisplayMuxV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (mux LocalDisplayMuxV1) Shutdown(ctx context.Context) error {
+	var processErr error
+	if lifecycle, ok := mux.Processes.(interface{ Shutdown(context.Context) error }); ok {
+		processErr = lifecycle.Shutdown(ctx)
+	}
 	if handler, ok := mux.LocalDisplay.(LocalDisplayHandlerV1); ok {
 		if handler.FundsCleaning != nil {
 			_ = handler.FundsCleaning.Close()
@@ -81,10 +125,17 @@ func (mux LocalDisplayMuxV1) Shutdown(ctx context.Context) error {
 			_ = handler.FundsCSVAdmission.Close()
 		}
 	}
+	var nextErr error
 	if lifecycle, ok := mux.Next.(interface{ Shutdown(context.Context) error }); ok {
-		return lifecycle.Shutdown(ctx)
+		nextErr = lifecycle.Shutdown(ctx)
 	}
-	return nil
+	if nextErr != nil {
+		return errors.Join(nextErr, processErr)
+	}
+	if lifecycle, ok := mux.ToolResults.(interface{ Shutdown(context.Context) error }); ok {
+		return errors.Join(lifecycle.Shutdown(ctx), processErr)
+	}
+	return processErr
 }
 
 type LocalDisplayHandlerV1 struct {

@@ -33,6 +33,7 @@ import {
   analytixThreadSteerPath
 } from '@shared/analytix-endpoints'
 import { rendererRuntimeClient } from './runtime-client'
+import { desktopQueryCache } from '../lib/desktop-query-cache'
 
 function settings(workspaceRoot = '/tmp/workspace'): AppSettingsV1 {
   return {
@@ -54,6 +55,12 @@ function settings(workspaceRoot = '/tmp/workspace'): AppSettingsV1 {
     codePromptPrefix: '',
     disabledSkillIds: []
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(accept => { resolve = accept })
+  return { promise, resolve }
 }
 
 afterEach(() => {
@@ -119,6 +126,105 @@ describe('rendererRuntimeClient', () => {
     expect(cached).toBe(next)
     expect(getSettings).toHaveBeenCalledTimes(1)
     expect(setSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads fresh Host settings independently without replacing a warm cache or notifying', async () => {
+    const cached = settings('/tmp/cached')
+    const firstHost = settings('/tmp/first-host')
+    const secondHost = settings('/tmp/second-host')
+    const getSettings = vi.fn<() => Promise<AppSettingsV1>>()
+      .mockResolvedValueOnce(cached)
+      .mockResolvedValueOnce(firstHost)
+      .mockResolvedValueOnce(secondHost)
+    const invalidateQueryCache = vi.fn(async () => undefined)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings, setSettings: vi.fn() },
+      app: { invalidateQueryCache }
+    } })
+    const onInvalidated = vi.fn()
+    const unsubscribe = desktopQueryCache.subscribe(onInvalidated)
+    try {
+      expect(await rendererRuntimeClient.getSettings()).toBe(cached)
+      const first = rendererRuntimeClient.readSettingsFromHost()
+      const second = rendererRuntimeClient.readSettingsFromHost()
+      expect(getSettings).toHaveBeenCalledTimes(3)
+      expect(await first).toBe(firstHost)
+      expect(await second).toBe(secondHost)
+      expect(await rendererRuntimeClient.getSettings()).toBe(cached)
+      expect(getSettings).toHaveBeenCalledTimes(3)
+      expect(onInvalidated).not.toHaveBeenCalled()
+      expect(invalidateQueryCache).not.toHaveBeenCalled()
+    } finally { unsubscribe() }
+  })
+
+  it('leaves a pending cached settings read intact when a separate Host read completes', async () => {
+    const cached = settings('/tmp/pending-cache')
+    const host = settings('/tmp/raw-host')
+    const pendingCache = deferred<AppSettingsV1>()
+    const pendingHost = deferred<AppSettingsV1>()
+    const getSettings = vi.fn<() => Promise<AppSettingsV1>>()
+      .mockImplementationOnce(() => pendingCache.promise)
+      .mockImplementationOnce(() => pendingHost.promise)
+    const invalidateQueryCache = vi.fn(async () => undefined)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings, setSettings: vi.fn() },
+      app: { invalidateQueryCache }
+    } })
+    const onInvalidated = vi.fn()
+    const unsubscribe = desktopQueryCache.subscribe(onInvalidated)
+    try {
+      const initial = rendererRuntimeClient.getSettings()
+      const raw = rendererRuntimeClient.readSettingsFromHost()
+      const joined = rendererRuntimeClient.getSettings()
+      expect(getSettings).toHaveBeenCalledTimes(2)
+      pendingHost.resolve(host)
+      expect(await raw).toBe(host)
+      expect(desktopQueryCache.getQueryData(['settings'])).toBeUndefined()
+      const stillJoined = rendererRuntimeClient.getSettings()
+      expect(getSettings).toHaveBeenCalledTimes(2)
+      pendingCache.resolve(cached)
+      expect(await initial).toBe(cached)
+      expect(await joined).toBe(cached)
+      expect(await stillJoined).toBe(cached)
+      expect(await rendererRuntimeClient.getSettings()).toBe(cached)
+      expect(getSettings).toHaveBeenCalledTimes(2)
+      expect(onInvalidated).not.toHaveBeenCalled()
+      expect(invalidateQueryCache).not.toHaveBeenCalled()
+    } finally { unsubscribe() }
+  })
+
+  it('keeps a newer settings write cached when an older Host read finishes', async () => {
+    const cached = settings('/tmp/cached')
+    const oldHost = settings('/tmp/old-host')
+    const written = settings('/tmp/written')
+    const pendingHost = deferred<AppSettingsV1>()
+    const getSettings = vi.fn<() => Promise<AppSettingsV1>>()
+      .mockResolvedValueOnce(cached)
+      .mockImplementationOnce(() => pendingHost.promise)
+    const setSettings = vi.fn(async () => written)
+    const invalidateQueryCache = vi.fn(async () => undefined)
+    vi.stubGlobal('window', { analytix: {
+      settings: { getSettings, setSettings },
+      app: { invalidateQueryCache }
+    } })
+    const onInvalidated = vi.fn()
+    const unsubscribe = desktopQueryCache.subscribe(onInvalidated)
+    try {
+      expect(await rendererRuntimeClient.getSettings()).toBe(cached)
+      const raw = rendererRuntimeClient.readSettingsFromHost()
+      expect(await rendererRuntimeClient.getSettings()).toBe(cached)
+      expect(getSettings).toHaveBeenCalledTimes(2)
+      expect(await rendererRuntimeClient.setSettings({ workspaceRoot: written.workspaceRoot })).toBe(written)
+      expect(await rendererRuntimeClient.getSettings()).toBe(written)
+      expect(invalidateQueryCache).toHaveBeenCalledTimes(1)
+      pendingHost.resolve(oldHost)
+      expect(await raw).toBe(oldHost)
+      expect(await rendererRuntimeClient.getSettings()).toBe(written)
+      expect(getSettings).toHaveBeenCalledTimes(2)
+      expect(setSettings).toHaveBeenCalledTimes(1)
+      expect(onInvalidated).not.toHaveBeenCalled()
+      expect(invalidateQueryCache).toHaveBeenCalledTimes(1)
+    } finally { unsubscribe() }
   })
 
   it('passes top-level runtime settings patches through window.analytix.settings without legacy aliases', async () => {
@@ -283,15 +389,15 @@ describe('rendererRuntimeClient', () => {
     })
 
     await expect(rendererRuntimeClient.steerTaskJob({
-      threadId: 'thr_1',
-      jobId: 'job_1',
-      message: 'narrow the scope'
+      mode: 'start_or_steer', threadId: 'thr_1', jobId: 'job_1',
+      expectedRunId: 'job_1', expectedChildTurnId: 'turn_1',
+      message: 'narrow the scope', clientMessageId: 'd3a26000-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     })).resolves.toEqual(response)
 
     expect(runtimeRequest).toHaveBeenCalledWith(
       ANALYTIX_RUNTIME_TASK_JOBS_STEER_PATH,
       'POST',
-      '{"threadId":"thr_1","jobId":"job_1","message":"narrow the scope"}'
+      '{"mode":"start_or_steer","threadId":"thr_1","jobId":"job_1","expectedRunId":"job_1","expectedChildTurnId":"turn_1","message":"narrow the scope","clientMessageId":"d3a26000-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}'
     )
   })
 
@@ -675,11 +781,61 @@ describe('rendererRuntimeClient', () => {
     expect(rendererRuntimeClient.onSseError(errorHandler)).toBe(offError)
 
     expect(startSse).toHaveBeenCalledWith('thr/with space?x=1#frag', 7, 'stream-renderer')
+    await rendererRuntimeClient.startSse('thread', 0, 'finite', { replayThroughSeq: 12 })
+    expect(startSse).toHaveBeenCalledWith('thread', 0, 'finite', { replayThroughSeq: 12 })
     expect(ackSseEvent).toHaveBeenCalledWith('stream-renderer', 8)
     expect(ackSseEvent).toHaveBeenCalledWith('stream-renderer', 9, acceptedFinalAck)
     expect(stopSse).toHaveBeenCalledWith('stream-renderer')
     expect(onSseEvent).toHaveBeenCalledWith(eventHandler)
     expect(onSseEnd).toHaveBeenCalledWith(endHandler)
     expect(onSseError).toHaveBeenCalledWith(errorHandler)
+  })
+})
+
+
+describe('typed user-input wait facade', () => {
+  it('forwards exact selector and metadata listener through the protected runtime facade', async () => {
+    const selector = { threadId: 'thread-fixture', turnId: 'turn-fixture', itemId: 'item-fixture', requestId: 'input-fixture' }
+    const open = vi.fn(async () => ({ state: 'connecting' as const })), close = vi.fn(async () => undefined), unsubscribe = vi.fn()
+    const listen = vi.fn((_handler: Parameters<typeof rendererRuntimeClient.onUserInputWaitChanged>[0]) => unsubscribe)
+    vi.stubGlobal('window', { analytix: { runtime: { openUserInputWait: open, closeUserInputWait: close, onUserInputWaitChanged: listen } } })
+    const handler = vi.fn()
+    expect(await rendererRuntimeClient.openUserInputWait(selector)).toEqual({ state: 'connecting' })
+    await rendererRuntimeClient.closeUserInputWait(selector)
+    expect(rendererRuntimeClient.onUserInputWaitChanged(handler)).toBe(unsubscribe)
+    expect(open).toHaveBeenCalledWith(selector); expect(close).toHaveBeenCalledWith(selector); expect(listen).toHaveBeenCalledWith(handler)
+  })
+})
+
+describe('Host child-input receipt validation', () => {
+  const request = { mode: 'start_or_steer' as const, threadId: 'parent', jobId: 'old-job', expectedRunId: 'current-job',
+    expectedChildTurnId: 'current-turn', message: 'continue', clientMessageId: 'd3a26000-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
+  const caps = { send: 'steer', stop: true, runId: 'current-job', childThreadId: 'child', childTurnId: 'current-turn' }
+  const receipt = { action: 'steer', admission: 'queued', jobId: 'current-job', childThreadId: 'child', childTurnId: 'current-turn',
+    clientMessageId: request.clientMessageId, messageId: 'message-1' }
+  const setup = (body: unknown, ok = true, status = 200) => {
+    const runtimeRequest = vi.fn(async () => ({ ok, status, body: JSON.stringify(body) }))
+    vi.stubGlobal('window', { analytix: { runtime: { runtimeRequest } } })
+    return runtimeRequest
+  }
+  it('inspects a historical source and accepts a same-key old receipt with newer current capabilities', async () => {
+    const transport = setup({ schemaVersion: 1, capabilities: caps })
+    await expect(rendererRuntimeClient.inspectChildInput('parent', 'old-job', 'child')).resolves.toEqual(caps)
+    expect(transport).toHaveBeenCalledWith(ANALYTIX_RUNTIME_TASK_JOBS_STEER_PATH, 'POST',
+      '{"mode":"inspect","threadId":"parent","jobId":"old-job"}')
+    setup({ schemaVersion: 1, capabilities: { ...caps, runId: 'newer-job', childTurnId: 'newer-turn' }, receipt })
+    await expect(rendererRuntimeClient.submitChildInput(request, 'child')).resolves.toEqual(receipt)
+  })
+  it('requires confirmed phases and exact receipt identity while preserving ambiguous failures', async () => {
+    for (const value of [
+      { schemaVersion: 1, capabilities: caps },
+      { schemaVersion: 1, capabilities: caps, receipt: { ...receipt, admission: 'accepted' } },
+      { schemaVersion: 1, capabilities: caps, receipt: { ...receipt, action: 'start', admission: 'queued' } },
+      { schemaVersion: 1, capabilities: caps, receipt: { ...receipt, childTurnId: 'stale-turn' } },
+      { schemaVersion: 1, capabilities: caps, receipt: { ...receipt, childThreadId: 'other-child' } },
+      { schemaVersion: 1, capabilities: caps, receipt: { ...receipt, clientMessageId: 'd3a26001-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } }
+    ]) { setup(value); await expect(rendererRuntimeClient.submitChildInput(request, 'child')).rejects.toThrow() }
+    setup({ schemaVersion: 1, capabilities: { send: 'disabled', stop: false }, code: 'child_input_unknown' }, false, 503)
+    await expect(rendererRuntimeClient.submitChildInput(request, 'child')).rejects.toThrow(/not confirmed/)
   })
 })

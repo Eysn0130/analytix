@@ -8,23 +8,26 @@ import (
 type ThreadPathHandler func(http.ResponseWriter, *http.Request, string)
 
 type ThreadPathHandlers struct {
-	Summary     ThreadPathHandler
-	Events      ThreadPathHandler
-	Fork        ThreadPathHandler
-	Goal        ThreadPathHandler
-	Todos       ThreadPathHandler
-	Compact     ThreadPathHandler
-	Review      ThreadPathHandler
-	Checkpoints ThreadPathHandler
-	TurnAction  ThreadPathHandler
-	Turns       ThreadPathHandler
-	Rewind      ThreadPathHandler
-	Record      ThreadPathHandler
+	Summary         ThreadPathHandler
+	MessageFeedback ThreadPathHandler
+	Events          ThreadPathHandler
+	Fork            ThreadPathHandler
+	Goal            ThreadPathHandler
+	Todos           ThreadPathHandler
+	Compact         ThreadPathHandler
+	Review          ThreadPathHandler
+	Checkpoints     ThreadPathHandler
+	TurnAction      ThreadPathHandler
+	Turns           ThreadPathHandler
+	Rewind          ThreadPathHandler
+	Record          ThreadPathHandler
 }
 
 func (h ThreadPathHandlers) Handle(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/v1/threads/")
 	switch {
+	case strings.HasSuffix(rest, "/message-feedback") || strings.Contains(rest, "/message-feedback/"):
+		h.dispatch(w, r, rest, h.MessageFeedback)
 	case strings.HasSuffix(rest, "/summary") || strings.Contains(rest, "/summary/tasks/"):
 		h.dispatch(w, r, rest, h.Summary)
 	case strings.HasSuffix(rest, "/events"):

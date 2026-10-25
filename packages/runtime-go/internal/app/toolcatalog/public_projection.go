@@ -27,6 +27,28 @@ func BuildPublicToolResultProjectionV1(toolName string, output any, isError bool
 		return publicHostStatusProjection("blocked", "tool_blocked", duplicate.Code)
 	}
 	record, _ := output.(map[string]any)
+	if operation := domaintoolresult.TaskJobOperationV1(toolName); operation != "" && !isError {
+		if data, err := domaintoolresult.NewTaskJobResultV1(operation, output); err == nil {
+			projection := publicHostStatusProjection("completed", "tool_completed", "tool_completed")
+			projection.ProjectionKind = domaintoolresult.ProjectionTaskJobResult
+			projection.TaskJob = data
+			if domaintoolresult.ValidatePublicToolResultProjectionV1(projection) == nil {
+				return projection
+			}
+		}
+		return publicHostStatusProjection("completed", "tool_completed", "tool_completed")
+	}
+	if toolName == "web_fetch" {
+		if projection, ok := webFetchPublicProjectionV1(record, isError); ok {
+			return projection
+		}
+		// Legacy or malformed measurements cannot override the producer's
+		// error truth through a conflicting untrusted code field.
+		if isError {
+			return publicHostStatusProjection("failed", "tool_failed", "tool_failed")
+		}
+		return publicHostStatusProjection("completed", "tool_completed", "tool_completed")
+	}
 	code := publicToolResultCode(toolName, record, isError)
 	status, messageKey := publicToolResultStatus(code, isError)
 	if MCPToolNeedsAnalytixCaseContext(toolName) {
@@ -48,6 +70,23 @@ func BuildPublicToolResultProjectionV1(toolName string, output any, isError bool
 		return domaintoolresult.WithheldProjectionV1(status, "tool_output_private")
 	}
 	return publicHostStatusProjection(status, messageKey, code)
+}
+
+func webFetchPublicProjectionV1(record map[string]any, isError bool) (domaintoolresult.PublicToolResultProjectionV1, bool) {
+	// Select only host-produced status fields. The normal model result still
+	// retains its existing model text and sources outside this UI projection.
+	metadata := map[string]any{}
+	for _, key := range []string{"outcome", "statusCode", "byteCount", "truncated"} {
+		if value, present := record[key]; present {
+			metadata[key] = value
+		}
+	}
+	web, err := domaintoolresult.ParseWebFetchStatusV1(metadata)
+	if err != nil {
+		return domaintoolresult.PublicToolResultProjectionV1{}, false
+	}
+	projection, err := domaintoolresult.NewWebFetchStatusProjectionV1(web, isError)
+	return projection, err == nil
 }
 
 func publicHostStatusProjection(status string, messageKey string, code string) domaintoolresult.PublicToolResultProjectionV1 {

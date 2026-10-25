@@ -22,9 +22,12 @@ Settings, ordinary IPC snapshots, exports and diagnostics carry key-free
 metadata. Normal credential entry is a dedicated input operation, not a secret
 read API. Source review distinguishes component-local input and its dedicated
 write request from key-free shared settings and read responses; it does not
-establish complete credential-surface acceptance. The remaining contract and
-input-lifetime coverage are recorded in
-[`documentation-delivery-review-2026-09-09.md`](analytix/documentation-delivery-review-2026-09-09.md).
+establish complete credential-surface acceptance. Contract and input-lifetime acceptance remain open: component-local drafts,
+reversible Base64 transport and a dedicated write operation do not prove complete
+cleanup or leakage-negative coverage. The accepted
+[credential authority](../openspec/specs/local-provider-credential-authority/spec.md)
+owns that boundary; current validation must close it without relaxing key-free
+shared-state and read-response requirements.
 Do not treat this distinction as permission for shared/persistent renderer
 credentials or a secret readback API.
 

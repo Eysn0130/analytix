@@ -25,9 +25,13 @@ type InitialProviderMessagesInputV1 struct {
 	CaseTaskContinuationHistory []domainmodel.Message
 	Background                  []domainmodel.Message
 	UserPrompt                  string
-	AttachmentPlanDigest        string
-	ContextEpoch                domaincontextepoch.ProviderContext
-	CaseSensitive               bool
+	// Set only for a Host wake whose real late answer is already admitted to
+	// the existing steering queue. It cannot suppress a nonempty user prompt
+	// or a message carrying an attachment plan.
+	OmitCurrentUserPrompt bool
+	AttachmentPlanDigest  string
+	ContextEpoch          domaincontextepoch.ProviderContext
+	CaseSensitive         bool
 }
 
 type InitialProviderMessagesV1 struct {
@@ -77,11 +81,13 @@ func PrepareInitialProviderMessagesV1(input InitialProviderMessagesInputV1) Init
 	messages := []domainmodel.Message{{Role: "system", Content: baseSystemPrompt}}
 	messages = append(messages, history...)
 	messages = append(messages, background...)
-	userMessage := domainmodel.Message{Role: "user", Content: input.UserPrompt}
-	if strings.TrimSpace(input.AttachmentPlanDigest) != "" {
-		userMessage.PrivateAttachmentPlanDigest = input.AttachmentPlanDigest
+	if !input.OmitCurrentUserPrompt || input.UserPrompt != "" || strings.TrimSpace(input.AttachmentPlanDigest) != "" {
+		userMessage := domainmodel.Message{Role: "user", Content: input.UserPrompt}
+		if strings.TrimSpace(input.AttachmentPlanDigest) != "" {
+			userMessage.PrivateAttachmentPlanDigest = input.AttachmentPlanDigest
+		}
+		messages = append(messages, userMessage)
 	}
-	messages = append(messages, userMessage)
 	baseSystemPrompt, messages = appmodel.ApplyContextEpoch(baseSystemPrompt, messages, input.ContextEpoch)
 	ordinaryLaneMessages := []domainmodel.Message{{Role: "system", Content: baseSystemPrompt}}
 	ordinaryLaneMessages = append(ordinaryLaneMessages, ordinaryHistory...)

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type RefObject } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, Minus, Plus, Search } from '../../design/AnalytixUiIcons'
+import { ChevronLeft, ChevronRight, Loader2, Search } from '../../design/AnalytixUiIcons'
 import { useTranslation } from 'react-i18next'
+import { createPortal } from 'react-dom'
+import { Tooltip } from '../chat/presentation/Tooltip'
+import styles from './write-pdf-viewer.module.css'
 import {
   GlobalWorkerOptions,
   TextLayer,
@@ -25,6 +28,8 @@ type Props = {
   mtimeMs: number
   workspaceRoot: string
   viewerRef?: RefObject<HTMLDivElement | null>
+  /** Only zoom moves into the caller chrome; missing/null keeps the inline control. */
+  zoomControlTarget?: HTMLElement | null
   onSelectionChange: (selection: WriteEditorSelectionState) => void
 }
 
@@ -305,6 +310,7 @@ function WritePdfPage({
   useEffect(() => {
     let cancelled = false
     let renderTask: { cancel: () => void; promise: Promise<unknown> } | null = null
+    let textLayerRenderer: TextLayer | null = null
 
     const renderPage = async (): Promise<void> => {
       const canvas = canvasRef.current
@@ -330,7 +336,11 @@ function WritePdfPage({
 
       textLayer.replaceChildren()
       const textContent = await page.getTextContent()
-      const textLayerRenderer = new TextLayer({
+      if (cancelled) return
+      // pdf.js uses this CSS factor for text sizes and marked-content bounds.
+      // It follows the page viewport, independently of the canvas pixel ratio.
+      textLayer.style.setProperty('--total-scale-factor', String(viewport.scale * viewport.userUnit))
+      textLayerRenderer = new TextLayer({
         textContentSource: textContent,
         container: textLayer,
         viewport
@@ -340,7 +350,7 @@ function WritePdfPage({
         // Whitespace-only spans are often stretched to absurd widths by the
         // text layer; flag them so native selection skips painting them.
         for (const span of Array.from(textLayer.querySelectorAll<HTMLElement>('span'))) {
-          if (!(span.textContent ?? '').trim()) span.classList.add('write-pdf-text-ws')
+          if (!(span.textContent ?? '').trim()) span.classList.add(styles.whitespace)
         }
         const text = textContent.items
           .map((item: TextContentItem) => (typeof item.str === 'string' ? item.str : ''))
@@ -356,12 +366,13 @@ function WritePdfPage({
     return () => {
       cancelled = true
       renderTask?.cancel()
+      textLayerRenderer?.cancel()
     }
   }, [document, onPageText, pageNumber, scale])
 
   return (
     <div
-      className="write-pdf-page"
+      className={styles.page}
       data-write-pdf-page={pageNumber}
       ref={(node) => {
         if (node && pageSize) {
@@ -370,13 +381,13 @@ function WritePdfPage({
         }
       }}
     >
-      <canvas ref={canvasRef} className="write-pdf-canvas" />
-      <div ref={textLayerRef} className="write-pdf-text-layer textLayer" />
-      <div className="write-pdf-overlay-layer" aria-hidden="true">
+      <canvas ref={canvasRef} className={styles.canvas} />
+      <div ref={textLayerRef} className={`${styles.textLayer} textLayer`} />
+      <div className={styles.overlayLayer} aria-hidden="true">
         {selectionRects.map((rect, index) => (
           <span
             key={`${pageNumber}-${index}-${rect.x}-${rect.y}`}
-            className="write-pdf-selection-rect"
+            className={styles.selectionRect}
             style={{
               left: rect.x,
               top: rect.y,
@@ -397,6 +408,7 @@ export function WritePdfViewer({
   mtimeMs,
   workspaceRoot,
   viewerRef,
+  zoomControlTarget,
   onSelectionChange
 }: Props): ReactElement {
   const { t } = useTranslation('common')
@@ -408,10 +420,16 @@ export function WritePdfViewer({
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [scale, setScale] = useState(1.15)
+  const [zoomMode, setZoomMode] = useState<number | 'fit'>('fit')
+  const [fitScale, setFitScale] = useState(1)
+  const scale = zoomMode === 'fit' ? fitScale : zoomMode
   const [pageInput, setPageInput] = useState('1')
   const [currentPage, setCurrentPage] = useState(1)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchTriggerRef = useRef<HTMLButtonElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchPanelRef = useRef<HTMLDivElement>(null)
   const [searchIndex, setSearchIndex] = useState(0)
   const [pageTexts, setPageTexts] = useState<PageText[]>([])
   const [committedSelectionRects, setCommittedSelectionRects] = useState<WriteSelectionPageRect[]>([])
@@ -421,6 +439,7 @@ export function WritePdfViewer({
   const [liveSelection, setLiveSelection] = useState(false)
   const pageCount = pdfDocument?.numPages ?? 0
   const rootRef = viewerRef ?? localViewerRef
+  const currentPageRef = useRef(currentPage); currentPageRef.current = currentPage
 
   useEffect(() => {
     let cancelled = false
@@ -462,6 +481,29 @@ export function WritePdfViewer({
   }, [pdfDocument])
 
   useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller || !pdfDocument) return
+    let cancelled = false
+    let pageWidth = 0
+    const updateFit = (): void => {
+      if (cancelled || !pageWidth) return
+      const style = window.getComputedStyle(scroller)
+      const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0)
+      const available = (scroller.clientWidth || scroller.getBoundingClientRect().width) - padding
+      if (available > 0) setFitScale(available / pageWidth)
+    }
+    void pdfDocument.getPage(1).then(page => {
+      if (cancelled) return
+      pageWidth = page.getViewport({ scale: 1 }).width
+      if (Number.isFinite(pageWidth) && pageWidth > 0) updateFit()
+    }).catch(() => undefined)
+    const observer = new ResizeObserver(updateFit)
+    observer.observe(scroller)
+    window.addEventListener('resize', updateFit)
+    return () => { cancelled = true; observer.disconnect(); window.removeEventListener('resize', updateFit) }
+  }, [pdfDocument])
+
+  useEffect(() => {
     setCommittedSelectionRects([])
     setLiveSelection(false)
     onSelectionChange(emptyPdfSelection())
@@ -498,6 +540,10 @@ export function WritePdfViewer({
   }, [])
 
   const scrollToPage = useCallback((page: number): void => {
+    if (!Number.isFinite(page)) {
+      setPageInput(String(currentPageRef.current))
+      return
+    }
     const clamped = Math.max(1, Math.min(pageCount || 1, Math.round(page)))
     setCurrentPage(clamped)
     setPageInput(String(clamped))
@@ -611,164 +657,108 @@ export function WritePdfViewer({
     }
   }, [])
 
+  useEffect(() => {
+    if (!searchOpen) return
+    searchInputRef.current?.focus()
+    const dismiss = (event: PointerEvent): void => {
+      if (!(event.target instanceof Node)) return
+      if (!searchPanelRef.current?.contains(event.target) && !searchTriggerRef.current?.contains(event.target)) setSearchOpen(false)
+    }
+    window.document.addEventListener('pointerdown', dismiss)
+    return () => window.document.removeEventListener('pointerdown', dismiss)
+  }, [searchOpen])
+
   const beginPdfSelection = useCallback((): void => {
     setCommittedSelectionRects([])
     setLiveSelection(false)
     onSelectionChange(emptyPdfSelection())
   }, [onSelectionChange])
 
+  const zoomControl = <select
+    className={styles.zoomSelect}
+    data-write-pdf-zoom
+    aria-label={`${t('writePdfZoomOut')} / ${t('writePdfZoomIn')}`}
+    value={String(zoomMode)}
+    disabled={!pdfDocument}
+    onChange={event => {
+      const choice = event.target.value
+      if (choice === 'fit') { setZoomMode('fit'); return }
+      setZoomMode(choice === 'out' ? Math.max(.25, Math.min(4, Number((scale - .1).toFixed(2))))
+        : choice === 'in' ? Math.max(.25, Math.min(4, Number((scale + .1).toFixed(2))))
+        : Number.isFinite(Number(choice)) ? Math.max(.25, Math.min(4, Number(choice))) : zoomMode)
+    }}
+  >
+    <option value="fit">{t('writeImageFitShort')}</option>
+    <option value="out" disabled={scale <= .25}>{t('writePdfZoomOut')}</option>
+    {[...new Set([.25, .5, 1, 2, ...(zoomMode === 'fit' ? [] : [zoomMode])])].sort((a, b) => a - b).map(value => <option key={value} value={String(value)}>{Math.round(value * 100)}%</option>)}
+    <option value="in" disabled={scale >= 4}>{t('writePdfZoomIn')}</option>
+  </select>
+
   return (
     <div
       ref={rootRef}
-      className="write-pdf-viewer flex h-full min-h-0 min-w-0 flex-col"
+      className={styles.viewer}
+      aria-label={`${workspaceRoot ? filePath.replace(`${workspaceRoot}/`, '') : filePath} · ${formatSize(size)}`}
       data-live-selection={liveSelection ? '' : undefined}
     >
-      <div className="write-pdf-toolbar shrink-0 border-b border-ds-border-muted bg-white/88 px-3 py-2 dark:bg-ds-card/95">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <div className="min-w-0 flex-1 truncate text-[12px] text-ds-muted">
-            {formatSize(size)} · {workspaceRoot ? filePath.replace(`${workspaceRoot}/`, '') : filePath}
-          </div>
-          <div className="flex items-center gap-1 rounded-lg border border-ds-border-muted bg-ds-surface-subtle p-1 dark:bg-white/6">
-            <button
-              type="button"
-              className="write-pdf-icon-button"
-              title={t('writePdfZoomOut')}
-              aria-label={t('writePdfZoomOut')}
-              onClick={() => setScale((value) => Math.max(0.65, Number((value - 0.1).toFixed(2))))}
-            >
-              <Minus className="h-4 w-4" strokeWidth={1.9} />
-            </button>
-            <span className="min-w-[52px] text-center text-[12px] font-semibold text-ds-muted">
-              {Math.round(scale * 100)}%
-            </span>
-            <button
-              type="button"
-              className="write-pdf-icon-button"
-              title={t('writePdfZoomIn')}
-              aria-label={t('writePdfZoomIn')}
-              onClick={() => setScale((value) => Math.min(2.4, Number((value + 0.1).toFixed(2))))}
-            >
-              <Plus className="h-4 w-4" strokeWidth={1.9} />
-            </button>
-          </div>
-          <div className="flex items-center gap-1 rounded-lg border border-ds-border-muted bg-ds-surface-subtle p-1 dark:bg-white/6">
-            <button
-              type="button"
-              className="write-pdf-icon-button"
-              title={t('writePdfPrevPage')}
-              aria-label={t('writePdfPrevPage')}
-              onClick={() => scrollToPage(currentPage - 1)}
-              disabled={currentPage <= 1}
-            >
-              <ChevronLeft className="h-4 w-4" strokeWidth={1.9} />
-            </button>
-            <form
-              className="flex items-center gap-1"
-              onSubmit={(event) => {
-                event.preventDefault()
-                scrollToPage(Number(pageInput))
-              }}
-            >
-              <input
-                className="write-pdf-page-input"
-                value={pageInput}
-                aria-label={t('writePdfPageInput')}
-                onChange={(event) => setPageInput(event.target.value)}
-              />
-              <span className="text-[12px] text-ds-faint">/ {pageCount || '-'}</span>
-            </form>
-            <button
-              type="button"
-              className="write-pdf-icon-button"
-              title={t('writePdfNextPage')}
-              aria-label={t('writePdfNextPage')}
-              onClick={() => scrollToPage(currentPage + 1)}
-              disabled={!pageCount || currentPage >= pageCount}
-            >
-              <ChevronRight className="h-4 w-4" strokeWidth={1.9} />
-            </button>
-          </div>
-          <div className="flex min-w-[180px] flex-1 items-center gap-1 rounded-lg border border-ds-border-muted bg-ds-surface-subtle px-2 py-1 dark:bg-white/6 sm:max-w-[260px]">
-            <Search className="h-4 w-4 shrink-0 text-ds-faint" strokeWidth={1.9} />
-            <input
-              className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ds-ink outline-none placeholder:text-ds-faint"
-              value={searchQuery}
-              placeholder={t('writePdfSearchPlaceholder')}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-            <span className="shrink-0 text-[11px] text-ds-faint">
-              {searchQuery.trim() ? `${searchMatches.length ? searchIndex + 1 : 0}/${searchMatches.length}` : ''}
-            </span>
-            <button
-              type="button"
-              className="write-pdf-icon-button"
-              title={t('writePdfPrevMatch')}
-              aria-label={t('writePdfPrevMatch')}
-              disabled={searchMatches.length === 0}
-              onClick={() => jumpSearch(-1)}
-            >
-              <ChevronLeft className="h-4 w-4" strokeWidth={1.9} />
-            </button>
-            <button
-              type="button"
-              className="write-pdf-icon-button"
-              title={t('writePdfNextMatch')}
-              aria-label={t('writePdfNextMatch')}
-              disabled={searchMatches.length === 0}
-              onClick={() => jumpSearch(1)}
-            >
-              <ChevronRight className="h-4 w-4" strokeWidth={1.9} />
-            </button>
-          </div>
+      <div className={styles.toolbar} role="toolbar" aria-label={t('writePdfPreview')}>
+        <span className={styles.metadata}>{formatSize(size)}</span>
+        <div className={styles.pageControls}>
+          <Tooltip bubbleClassName={styles.tooltipBubble} label={t('writePdfPrevPage')} side="bottom" portal><button
+            type="button" className={styles.iconButton} aria-label={t('writePdfPrevPage')}
+            onClick={() => scrollToPage(currentPage - 1)} disabled={!pageCount || currentPage <= 1}
+          ><ChevronLeft /></button></Tooltip>
+          <form className={styles.pageForm} onSubmit={event => { event.preventDefault(); scrollToPage(Number(pageInput)) }}>
+            <input className={styles.pageInput} value={pageInput} aria-label={t('writePdfPageInput')}
+              inputMode="numeric" disabled={!pageCount} onChange={event => setPageInput(event.target.value)} />
+            <span>/ {pageCount || '-'}</span>
+          </form>
+          <Tooltip bubbleClassName={styles.tooltipBubble} label={t('writePdfNextPage')} side="bottom" portal><button
+            type="button" className={styles.iconButton} aria-label={t('writePdfNextPage')}
+            onClick={() => scrollToPage(currentPage + 1)} disabled={!pageCount || currentPage >= pageCount}
+          ><ChevronRight /></button></Tooltip>
         </div>
+        {zoomControlTarget ? createPortal(zoomControl, zoomControlTarget) : zoomControl}
+        <Tooltip bubbleClassName={styles.tooltipBubble} label={t('writePdfSearchPlaceholder')} side="bottom" portal><button
+          ref={searchTriggerRef} type="button" className={styles.iconButton}
+          aria-label={t('writePdfSearchPlaceholder')} aria-expanded={searchOpen}
+          disabled={!pdfDocument} onClick={() => setSearchOpen(value => !value)}
+        ><Search /></button></Tooltip>
+        {searchOpen ? <div ref={searchPanelRef} className={styles.searchPanel} role="search"
+          aria-label={t('writePdfSearchPlaceholder')} onKeyDown={event => {
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+              event.preventDefault(); event.stopPropagation(); setSearchOpen(false); searchTriggerRef.current?.focus()
+            }
+          }}>
+          <form className={styles.searchForm} onSubmit={event => { event.preventDefault(); jumpSearch(1) }}>
+            <Search aria-hidden="true" />
+            <input ref={searchInputRef} className={styles.searchInput} value={searchQuery}
+              aria-label={t('writePdfSearchPlaceholder')} placeholder={t('writePdfSearchPlaceholder')}
+              onChange={event => setSearchQuery(event.target.value)} />
+            <span className={styles.matchCount} role="status">{searchQuery.trim() ? `${searchMatches.length ? searchIndex + 1 : 0}/${searchMatches.length}` : ''}</span>
+            <Tooltip bubbleClassName={styles.tooltipBubble} label={t('writePdfPrevMatch')} side="bottom" portal><button type="button"
+              className={styles.iconButton} aria-label={t('writePdfPrevMatch')}
+              disabled={!searchMatches.length} onClick={() => jumpSearch(-1)}><ChevronLeft /></button></Tooltip>
+            <Tooltip bubbleClassName={styles.tooltipBubble} label={t('writePdfNextMatch')} side="bottom" portal><button type="button"
+              className={styles.iconButton} aria-label={t('writePdfNextMatch')}
+              disabled={!searchMatches.length} onClick={() => jumpSearch(1)}><ChevronRight /></button></Tooltip>
+          </form>
+        </div> : null}
       </div>
-      <div
-        ref={scrollerRef}
-        className="write-pdf-scroller ds-page-scroll-edge min-h-0 flex-1 overflow-auto bg-ds-main/55 px-4 py-5 dark:bg-black/20"
-        onPointerDown={beginPdfSelection}
-        onPointerUp={syncSelectionSoon}
-        onMouseUp={syncSelectionSoon}
-        onKeyUp={syncSelectionSoon}
-        onScroll={schedulePageSync}
-      >
-        {loading ? (
-          <div className="flex h-full min-h-[320px] items-center justify-center gap-2 text-[13px] text-ds-muted">
-            <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
-            {t('writePdfLoading')}
-          </div>
-        ) : error ? (
-          <div className="flex h-full min-h-[320px] items-center justify-center text-[13px] text-red-600 dark:text-red-300">
-            {t('writePdfLoadFailed', { message: error })}
-          </div>
-        ) : pdfDocument ? (
-          <div className="mx-auto flex w-max flex-col items-center gap-5">
-            {allPageTextLoaded && !pdfHasText ? (
-              <div className="max-w-[560px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] leading-5 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/36 dark:text-amber-100">
-                {t('writePdfNoTextLayer')}
-              </div>
-            ) : null}
-            {Array.from({ length: pdfDocument.numPages }, (_, index) => index + 1).map((pageNumber) => (
-              <div
-                key={pageNumber}
-                ref={(node) => {
-                  if (node) pageRefs.current.set(pageNumber, node)
-                  else pageRefs.current.delete(pageNumber)
-                }}
-              >
-                <WritePdfPage
-                  document={pdfDocument}
-                  pageNumber={pageNumber}
-                  scale={scale}
-                  selectionRects={committedRectsByPage.get(pageNumber) ?? []}
-                  onPageText={updatePageText}
-                />
-                <div className="mt-1 text-center text-[11px] text-ds-faint">
-                  {t('writePdfPageLabel', { page: pageNumber })}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
+      <div ref={scrollerRef} className={`${styles.scroller} ds-page-scroll-edge`} data-write-pdf-scroller
+        onPointerDown={beginPdfSelection} onPointerUp={syncSelectionSoon} onMouseUp={syncSelectionSoon}
+        onKeyUp={syncSelectionSoon} onScroll={schedulePageSync}>
+        {loading ? <div className={styles.state} role="status"><Loader2 className="animate-spin" />{t('writePdfLoading')}</div>
+          : error ? <div className={styles.state} role="alert">{t('writePdfLoadFailed', { message: error })}</div>
+          : pdfDocument ? <div className={styles.pages}>
+            {allPageTextLoaded && !pdfHasText ? <div className={styles.noText} role="status">{t('writePdfNoTextLayer')}</div> : null}
+            {Array.from({ length: pdfDocument.numPages }, (_, index) => index + 1).map(pageNumber => <div
+              key={pageNumber} ref={node => { if (node) pageRefs.current.set(pageNumber, node); else pageRefs.current.delete(pageNumber) }}>
+              <WritePdfPage document={pdfDocument} pageNumber={pageNumber} scale={scale}
+                selectionRects={committedRectsByPage.get(pageNumber) ?? []} onPageText={updatePageText} />
+              <div className={styles.pageLabel}>{t('writePdfPageLabel', { page: pageNumber })}</div>
+            </div>)}
+          </div> : null}
       </div>
     </div>
   )

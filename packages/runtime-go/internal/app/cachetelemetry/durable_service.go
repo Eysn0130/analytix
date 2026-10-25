@@ -110,14 +110,16 @@ func (service *DurableService) BeginAttempt(ctx context.Context, input cachetele
 		return cachetelemetryport.AttemptHandleV1{}, forbidProviderRetryV1("begin provider attempt", err)
 	}
 	shape := domaincachetelemetry.CacheVisibleShapeV1{
-		SchemaVersion:   domaincachetelemetry.CacheVisibleShapeV1SchemaVersion,
-		ModelInput:      digests.modelInput,
-		LogicalCallHMAC: digests.logicalCallHMAC, Attempt: input.PhysicalAttempt,
+		SchemaVersion:     domaincachetelemetry.CacheVisibleShapeV1SchemaVersion,
+		ModelInput:        digests.modelInput,
+		PublicAttribution: input.PublicAttribution,
+		LogicalCallHMAC:   digests.logicalCallHMAC, Attempt: input.PhysicalAttempt,
 		ProviderFamily: input.ProviderFamily, ModelHMAC: digests.modelHMAC,
 		Endpoint: input.EndpointFormat, EndpointHMAC: digests.endpointHMAC,
 		WireBodyHMAC: digests.wireBodyHMAC, CredentialScopeHMAC: digests.credentialScopeHMAC,
 		ProviderConfigHMAC: digests.providerConfigHMAC, DigestEpoch: providerTelemetryDigestEpochV1(service.authority.KeyID()),
-		StartedAt: input.StartedAt.UTC().Format(time.RFC3339Nano),
+		StartedAt:       input.StartedAt.UTC().Format(time.RFC3339Nano),
+		StepBindingHMAC: digests.stepBindingHMAC, StepStartedAt: digests.stepStartedAt,
 	}
 	intent, err := domaincachetelemetry.NewProviderAttemptIntentV1(domaincachetelemetry.ProviderAttemptIntentInputV1{
 		TurnBindingHMAC: digests.turnBindingHMAC, UsageSource: input.UsageSource,
@@ -170,6 +172,9 @@ func (service *DurableService) SettleAttempt(ctx context.Context, input cachetel
 		SchemaVersion: domaincachetelemetry.ProviderCallObservationV1SchemaVersion,
 		Shape:         intent.Shape, Status: input.Status, Usage: input.Usage,
 		SettledAt: settledAt.Format(time.RFC3339Nano),
+	}
+	if !input.FirstTokenAt.IsZero() {
+		observation.FirstTokenAt = input.FirstTokenAt.UTC().Format(time.RFC3339Nano)
 	}
 	settlement, err := domaincachetelemetry.NewProviderAttemptSettlementV1(domaincachetelemetry.ProviderAttemptSettlementInputV1{
 		Intent: intent, DispatchState: input.DispatchState, Observation: observation,
@@ -458,6 +463,8 @@ func (service *DurableService) ApplyRestartSettlements(ctx context.Context, plan
 }
 
 type providerAttemptDigestsV1 struct {
+	stepBindingHMAC     string
+	stepStartedAt       string
 	modelInput          domaincachetelemetry.ModelInputSegmentsV1
 	turnBindingHMAC     string
 	childRunHMAC        string
@@ -493,7 +500,13 @@ func (service *DurableService) deriveAttemptDigestsV1(ctx context.Context, input
 	logicalCall := providerTelemetryHMACV1(
 		key, "logical-call", []byte(turnBinding), []byte(input.UsageSource), []byte(childRun), []byte(input.Channel), sequence, outerAttempt, laneCallSequence,
 	)
+	stepBinding, stepStartedAt := "", ""
+	if !input.StepStartedAt.IsZero() && input.Channel == domaincachetelemetry.ProviderChannelPrimary {
+		stepBinding = providerTelemetryHMACV1(key, "provider-step", []byte(turnBinding), []byte(input.UsageSource), []byte(childRun), sequence)
+		stepStartedAt = input.StepStartedAt.UTC().Format(time.RFC3339Nano)
+	}
 	return providerAttemptDigestsV1{
+		stepBindingHMAC: stepBinding, stepStartedAt: stepStartedAt,
 		modelInput:      domaincachetelemetry.CaptureModelInputSegmentsV1(input.WireBody, func(label string, body []byte) string { return providerTelemetryHMACV1(key, label, body) }),
 		turnBindingHMAC: turnBinding, childRunHMAC: childRun, logicalCallHMAC: logicalCall,
 		modelHMAC:           providerTelemetryHMACV1(key, "model", input.Model),
@@ -697,6 +710,12 @@ func (service *DurableService) verifyClosureTrustedV1(ctx context.Context, closu
 }
 
 func validateAttemptRegistrationInputV1(input cachetelemetryport.AttemptRegistrationInputV1) error {
+	if err := input.PublicAttribution.Validate(); err != nil {
+		return err
+	}
+	if input.PublicAttribution != (domaincachetelemetry.ProviderPublicAttributionV1{}) && input.PublicAttribution.Model != string(input.Model) {
+		return errors.New("provider public attribution differs from frozen request")
+	}
 	validateSecurityContext := domainsecurity.ValidateTurnSecurityContextForExecution
 	if input.OrdinaryEffect {
 		validateSecurityContext = domainsecurity.ValidateTurnSecurityContextForOrdinaryEffect
@@ -778,4 +797,78 @@ func contextErrorV1(ctx context.Context) error {
 
 func forbidProviderRetryV1(operation string, err error) error {
 	return RetryForbiddenError{Operation: strings.TrimSpace(operation), Err: err}
+}
+
+// ObserveTurnInventoryV1 is the single-turn form of the same fresh fused read.
+func (service *DurableService) ObserveTurnInventoryV1(ctx context.Context, frozen domainsecurity.TurnSecurityContext) (TurnInventoryV1, error) {
+	inventories, err := service.ObserveTurnInventoriesV1(ctx, []domainsecurity.TurnSecurityContext{frozen})
+	if err != nil {
+		return TurnInventoryV1{}, err
+	}
+	return inventories[0], nil
+}
+
+// ObserveTurnInventoriesV1 reads the existing signed ledger once for all selected
+// execution/continuation contexts. It never creates, repairs or caches authority.
+func (service *DurableService) ObserveTurnInventoriesV1(ctx context.Context, contexts []domainsecurity.TurnSecurityContext) ([]TurnInventoryV1, error) {
+	if service == nil || service.authority == nil || service.store == nil {
+		return nil, errors.New("provider billing durable service is unavailable")
+	}
+	for _, frozen := range contexts {
+		if err := domainsecurity.ValidateTurnSecurityContext(frozen); err != nil {
+			return nil, err
+		}
+		if frozen.Version != domainsecurity.TurnSecurityContextVersionV2 {
+			return nil, errors.New("provider billing legacy context is unavailable")
+		}
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if err := contextErrorV1(ctx); err != nil {
+		return nil, err
+	}
+	intents, settlements, closures, err := service.fullInventoryV1(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TurnInventoryV1, 0, len(contexts))
+	seenBindings := map[string]bool{}
+	for _, frozen := range contexts {
+		binding, err := service.turnBindingHMACV1(ctx, frozen)
+		if err != nil {
+			return nil, err
+		}
+		if service.restartPreservesBindingV1(binding) {
+			return nil, ErrRestartPreserved
+		}
+		if seenBindings[binding] {
+			return nil, errors.New("provider billing scope is duplicated")
+		}
+		seenBindings[binding] = true
+		inventory := TurnInventoryV1{observed: true, turnBinding: binding, threadID: frozen.ThreadID, turnID: frozen.TurnID}
+		for _, intent := range intents {
+			if intent.TurnBindingHMAC == binding {
+				inventory.intents = append(inventory.intents, intent)
+			}
+		}
+		for _, settlement := range settlements {
+			if settlement.TurnBindingHMAC == binding {
+				inventory.settlements = append(inventory.settlements, settlement)
+			}
+		}
+		for _, closure := range closures {
+			if closure.TurnBindingHMAC != binding {
+				continue
+			}
+			if inventory.closed {
+				return nil, errors.New("provider billing has duplicate closures")
+			}
+			inventory.closure, inventory.closed = closure, true
+		}
+		if _, err := inventory.BillingV1(); err != nil {
+			return nil, err
+		}
+		out = append(out, inventory)
+	}
+	return out, nil
 }

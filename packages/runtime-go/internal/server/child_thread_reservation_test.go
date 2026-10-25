@@ -3,13 +3,17 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	evidenceapp "analytix.local/runtime-go/internal/app/evidence"
+	threadapp "analytix.local/runtime-go/internal/app/thread"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
 
@@ -199,29 +203,58 @@ func TestChildThreadReservationRejectsCounterOverflowWithoutWrites(t *testing.T)
 }
 
 func TestCopiedChildThreadReservationCannotRetryFailedConsumption(t *testing.T) {
-	root := t.TempDir()
-	store, err := NewTempDurableEventSessionStore(root)
+	h, pending, root, _ := protectedSeamFixtureV1(t, "read", map[string]any{"path": "code.go"}, true)
+	if err := os.WriteFile(filepath.Join(pending.Workspace, "code.go"), []byte("synthetic CASE source"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := h.executeAndSettleRuntimeTool(context.Background(), pending, nil, nil); err != nil || result.IsError {
+		t.Fatal("actual CASE read failed", err)
+	}
+	configureWorkspaceReadFinalAuthority(t, h, t.TempDir(), root, false)
+	boundary, err := h.caseFinalizer.PersistBoundary(context.Background(), evidenceapp.PersistCaseBoundaryInput{
+		Store: h.store, Context: pending.SecurityContext, TerminalReason: evidenceapp.TerminalProviderFailure,
+		ThreadID: pending.ThreadID, TurnID: pending.TurnID, AcceptedAt: time.Now().UTC(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := store.CreateThread(map[string]any{"title": "synthetic source"}, workspacetest.New(t))
+	store, parent := h.store, pending.ThreadID
+	primary, err := store.ReadPrimaryThreadSnapshotV1(context.Background(), parent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := stringField(source, "id")
+	closed := false
+	for _, raw := range listAny(primary.Thread["turns"]) {
+		turn, _ := raw.(map[string]any)
+		if stringField(turn, "id") == pending.TurnID &&
+			stringField(turn, "status") == boundary.PublicationIntent.TerminalStatus &&
+			stringField(turn, "status") != "running" && turn["acceptedFinalView"] != nil {
+			closed = true
+		}
+	}
+	if !closed {
+		t.Fatal("source CASE turn has no real accepted terminal")
+	}
 	reservation, err := store.reserveChildThreadV1(context.Background(), parent, parent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	copied := *reservation
 	before := childThreadReservationTree(t, root)
-	invalid := map[string]any{"parentThreadId": parent, "relation": "side", "turnId": "missing-turn"}
-	if _, err := store.forkReservedChildThreadV1(context.Background(), reservation, parent, invalid); err == nil {
-		t.Fatal("invalid fork unexpectedly succeeded")
+	// Whole-fork admission reaches the existing CASE-side policy only after
+	// consuming the identity; an invalid turn boundary would reject before it.
+	request := map[string]any{"parentThreadId": parent, "relation": "side"}
+	if _, err := store.forkReservedChildThreadV1(context.Background(), reservation, parent, request); !errors.Is(err, threadapp.ErrCaseDerivationAdmissionAuthorityRequired) {
+		t.Fatalf("fork did not reach CASE policy after consumption: %v", err)
 	}
-	valid := map[string]any{"parentThreadId": parent, "relation": "side"}
-	if _, err := store.forkReservedChildThreadV1(context.Background(), &copied, parent, valid); err == nil {
-		t.Error("copied reservation retried a failed consumption")
+	if reservation.claim == nil || !reservation.claim.consumed || copied.claim != reservation.claim {
+		t.Fatal("failed fork did not consume the shared reservation claim")
+	}
+	if !reflect.DeepEqual(before, childThreadReservationTree(t, root)) {
+		t.Fatal("failed reservation wrote durable state")
+	}
+	if _, err := store.forkReservedChildThreadV1(context.Background(), &copied, parent, request); err == nil || err.Error() != "child thread reservation is stale or foreign" {
+		t.Errorf("copied reservation was not rejected by its consumed claim: %v", err)
 	}
 	if !reflect.DeepEqual(before, childThreadReservationTree(t, root)) {
 		t.Error("copied failed reservation wrote durable state")

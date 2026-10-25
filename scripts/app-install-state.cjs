@@ -2,18 +2,20 @@ const { readFileSync, writeFileSync, renameSync, rmSync } = require('node:fs')
 const { join } = require('node:path')
 const { installationInput } = require('./ensure-runtime-install.cjs')
 const { createHash } = require('node:crypto')
+const { dshPreviewPatchInputDigest, requiredDshPreviewPatchesCurrent } = require('./apply-dsh-preview-patches.cjs')
 
 function appInstallationDigest(root) {
   const hash = createHash('sha256').update(installationInput(root).digest)
   // A pull can change native/dependency postinstall behavior without changing
   // dependency versions. Such a pull must invalidate the old installation too.
-  for (const file of ['postinstall.cjs', 'ensure-runtime-install.cjs', 'app-install-state.cjs']) {
+  for (const file of ['postinstall.cjs', 'ensure-runtime-install.cjs', 'app-install-state.cjs', 'apply-dsh-preview-patches.cjs']) {
     hash.update(file).update('\0')
     try { hash.update(readFileSync(join(root, 'scripts', file))) } catch (error) {
       if (error.code !== 'ENOENT') throw error
       hash.update('<absent>')
     }
   }
+  hash.update('dsh-preview-patches\0').update(dshPreviewPatchInputDigest(root))
   return hash.digest('hex')
 }
 
@@ -35,7 +37,7 @@ function installedAppDependencies(root) {
 function appInstallCurrent(root) {
   try {
     const stamp = JSON.parse(readFileSync(join(root, 'node_modules/.analytix-install.json'), 'utf8'))
-    return stamp.digest === appInstallationDigest(root) && installedAppDependencies(root)
+    return stamp.digest === appInstallationDigest(root) && installedAppDependencies(root) && requiredDshPreviewPatchesCurrent(root)
   } catch { return false }
 }
 
@@ -48,7 +50,7 @@ function beginAppInstall(root) {
 // Called only after the root postinstall pipeline succeeds. A doctor check
 // never stamps or mutates an installation merely because node_modules exists.
 function recordAppInstall(root, expectedDigest) {
-  if (appInstallationDigest(root) !== expectedDigest || !installedAppDependencies(root)) {
+  if (appInstallationDigest(root) !== expectedDigest || !installedAppDependencies(root) || !requiredDshPreviewPatchesCurrent(root)) {
     throw new Error('[app-deps] Installation is incomplete or inputs changed; run npm ci after edits finish.')
   }
   const stamp = join(root, 'node_modules/.analytix-install.json')

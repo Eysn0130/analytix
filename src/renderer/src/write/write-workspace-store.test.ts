@@ -260,3 +260,25 @@ describe('active image refresh ownership', () => {
     expect(useWriteWorkspaceStore.getState().fileLoading).toBe(false)
   })
 })
+
+
+it('does not discard a newer local draft while the original explicit disk read is pending',async()=>{
+  let finish!:(value:unknown)=>void
+  let started!:()=>void;const reading=new Promise<void>(resolve=>{started=resolve})
+  const read=vi.fn(()=>{started();return new Promise(resolve=>{finish=resolve})})
+  installDsGui({readWorkspaceFile:read as Window['analytix']['files']['read']})
+  activateTextFile();useWriteWorkspaceStore.setState({workspaceRoot:'/tmp/write',pendingSave:null})
+  useWriteWorkspaceStore.getState().setFileContent('captured explicit discard')
+  const discard=useWriteWorkspaceStore.getState().syncActiveFileFromDisk('/tmp/write',{force:true,animate:false,expectedContent:'captured explicit discard'})
+  await reading
+  useWriteWorkspaceStore.getState().setFileContent('newer retained edit')
+  finish({ok:true,path:'/tmp/write/draft.md',content:'disk bytes',size:10,truncated:false})
+  expect(await discard).toBe(false)
+  expect(useWriteWorkspaceStore.getState().fileContent).toBe('newer retained edit')
+})
+it('refuses an explicit discard after its workspace owner changed without reading another file',async()=>{
+  const read=vi.fn();installDsGui({readWorkspaceFile:read});activateTextFile()
+  useWriteWorkspaceStore.setState({workspaceRoot:'/tmp/other',pendingSave:null})
+  expect(await useWriteWorkspaceStore.getState().syncActiveFileFromDisk('/tmp/write',{force:true,expectedContent:'old content'})).toBe(false)
+  expect(read).not.toHaveBeenCalled()
+})

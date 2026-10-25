@@ -467,6 +467,41 @@ process.exit(1)
     }
   })
 
+  it.each([' M', 'M ', '??'])(
+    'tracks delegated canary source with Git status %s in evidence gates',
+    async (gitStatus) => {
+      const dir = tempDir()
+      const fakeGit = join(dir, process.platform === 'win32' ? 'git.cmd' : 'git')
+      const originalPath = process.env.PATH
+      const entry = `${gitStatus} src/main/runtime/go-runtime-canary.ts`
+      writeExecutable(fakeGit, `#!/usr/bin/env node
+const args = process.argv.slice(2)
+if (args[0] === 'status' && args[1] === '--porcelain=v1') {
+  console.log(${JSON.stringify(entry)})
+  process.exit(0)
+}
+console.error('unexpected git command')
+process.exit(1)
+`)
+
+      try {
+        process.env.PATH = `${dir}${delimiter}${originalPath || ''}`
+        const { relevantEvidenceFinalGateBlockers, worktreeAudit } = await loadWorktreeAudit()
+        const audit = worktreeAudit()
+        const staged = gitStatus === 'M '
+        expect(audit.relevantEvidenceDirtyFiles).toEqual([entry])
+        expect(audit.relevantEvidenceStagedDirtyFiles).toEqual(staged ? [entry] : [])
+        expect(audit.relevantEvidenceUnstagedDirtyFiles).toEqual(staged ? [] : [entry])
+        expect(audit.relevantEvidenceIntentionallyStaged).toBe(staged)
+        expect(relevantEvidenceFinalGateBlockers(audit)).toEqual(
+          staged ? [] : ['evidence:relevant-clean-scope-dirty']
+        )
+      } finally {
+        process.env.PATH = originalPath
+      }
+    }
+  )
+
   it('prints JSON with final gate blockers when executed as a CLI helper', () => {
     const dir = tempDir()
     const fakeGit = join(dir, process.platform === 'win32' ? 'git.cmd' : 'git')

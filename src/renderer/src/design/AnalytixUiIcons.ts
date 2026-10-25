@@ -73,7 +73,6 @@ export const FileText = OpenAiUiIcons.fileDocument
 export const Files = OpenAiUiIcons.folderDocumentsFinder
 export const Filter = OpenAiUiIcons.filter
 export const FlaskConical = OpenAiUiIcons.flask
-export const Focus = createSystemIcon(Lucide.Focus)
 export const Folder = OpenAiUiIcons.folder
 export const FolderOpen = OpenAiUiIcons.folderOpen
 export const FolderPlus = OpenAiUiIcons.folderPlus

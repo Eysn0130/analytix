@@ -17,6 +17,7 @@ import (
 	domainplugin "analytix.local/runtime-go/internal/domain/pluginmaterialization"
 	domainpackage "analytix.local/runtime-go/internal/domain/pluginpackage"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	codecport "analytix.local/runtime-go/internal/ports/documentgeneration"
 	"analytix.local/runtime-go/internal/provider"
 )
@@ -109,7 +110,7 @@ func TestOfficeRuntimeDiscoveryInlineAndPreparedGenerationFollowActivation(t *te
 		t.Run(kind, func(t *testing.T) {
 			h, view := officeRuntimeFixture(t, kind)
 			packageID := toolcatalogapp.OfficeSkillForKind(kind)
-			ctx := context.Background()
+			ctx := domaintoolresult.WithProtectedCaptureV1(context.Background(), &domaintoolresult.ProtectedCaptureCollectorV1{})
 			if !h.runtimeToolCatalog().DocumentGeneration {
 				t.Fatal("enabled generation not advertised")
 			}
@@ -119,6 +120,10 @@ func TestOfficeRuntimeDiscoveryInlineAndPreparedGenerationFollowActivation(t *te
 			args := map[string]any{"name": packageID, "arguments": "Create a synthetic report."}
 			if output, failed := h.executeRuntimeRunSkill(ctx, runtimePendingToolCall{}, args); failed || !strings.Contains(string(mustHostedJSON(t, output)), "generate_office_document") {
 				t.Fatal("real inline body not loaded", output)
+			}
+			capture, present := domaintoolresult.ConsumeProtectedToolResultV1(ctx)
+			if !present || capture.Skill == nil || capture.Skill.Resolved == nil || capture.Skill.Resolved.ID != packageID || capture.Skill.Resolved.RunAs != "inline" || !strings.Contains(capture.Body, "generate_office_document") {
+				t.Fatal("verified hosted instruction not captured")
 			}
 			generationArgs := map[string]any{"kind": kind, "path": "report." + kind}
 			switch kind {

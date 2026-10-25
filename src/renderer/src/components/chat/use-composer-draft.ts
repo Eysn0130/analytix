@@ -16,11 +16,15 @@ type ComposerInputElement = HTMLTextAreaElement | HTMLDivElement
 
 export function useInputComposition() {
   const composing = useRef(false)
+  const composingUntil = useRef(0)
   return {
     onCompositionStart: () => { composing.current = true },
-    onCompositionEnd: () => { composing.current = false },
+    onCompositionEnd: () => {
+      composing.current = false
+      composingUntil.current = Date.now() + 10
+    },
     isComposingEvent: (event: ReactKeyboardEvent<HTMLElement>) =>
-      event.nativeEvent.isComposing || composing.current || event.keyCode === 229
+      event.nativeEvent.isComposing || composing.current || event.keyCode === 229 || Date.now() < composingUntil.current
   }
 }
 

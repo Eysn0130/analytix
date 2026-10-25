@@ -9,6 +9,8 @@ export function WriteConflictReview() {
   const conflict = useWriteWorkspaceStore((s) => s.saveStatus === 'conflict')
   const [comparison, setComparison] = useState<WriteConflictComparison | null>(null)
   const [busy, setBusy] = useState(false)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const dialog = useRef<HTMLDialogElement>(null)
   const titleId = useId()
   useEffect(() => { if (comparison) dialog.current?.showModal() }, [comparison])
@@ -20,14 +22,15 @@ export function WriteConflictReview() {
     try {
       const disk = await openTextObject(snapshot.workspaceRoot, snapshot.activeFilePath)
       const current = useWriteWorkspaceStore.getState()
-      if (disk.legacy || disk.objectId !== snapshot.objectSession.objectId ||
+      if (!mounted.current || disk.legacy || disk.objectId !== snapshot.objectSession.objectId ||
           current.activeFilePath !== snapshot.activeFilePath || current.workspaceRoot !== snapshot.workspaceRoot ||
           current.fileContent !== snapshot.fileContent || current.saveStatus !== 'conflict') return
       setComparison({ sessionId: disk.sessionId, objectId: disk.objectId, revision: disk.revision,
         workspaceRoot: snapshot.workspaceRoot, path: snapshot.activeFilePath,
         diskContent: disk.content, localContent: snapshot.fileContent })
     } catch (error) {
-      useWriteWorkspaceStore.getState().setFileError(error instanceof Error ? error.message : t('writeObjectUnavailable'))
+      const current = useWriteWorkspaceStore.getState()
+      if (mounted.current && current.workspaceRoot === snapshot.workspaceRoot && current.activeFilePath === snapshot.activeFilePath) current.setFileError(error instanceof Error ? error.message : t('writeObjectUnavailable'))
     } finally { setBusy(false) }
   }
   const resolve = async (choice: 'keep-draft' | 'use-disk') => {

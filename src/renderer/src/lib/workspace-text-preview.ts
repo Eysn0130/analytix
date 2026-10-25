@@ -15,6 +15,7 @@ const TEXT_PREVIEW_EXTENSIONS = new Set([
   '.h',
   '.hpp',
   '.html',
+  '.htm',
   '.ini',
   '.java',
   '.js',

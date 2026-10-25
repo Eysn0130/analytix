@@ -10,7 +10,9 @@ import {
   unlink,
   writeFile
 } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
+import { constants } from 'node:fs'
+import { excelFormat, EXCEL_PREVIEW_LIMITS } from '../../shared/excel/format'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
@@ -33,7 +35,8 @@ import type {
   WorkspaceFileWritePayload,
   WorkspaceFileWriteResult,
   WorkspaceImageReadResult,
-  WorkspacePdfReadResult
+  WorkspacePdfReadResult,
+  WorkspaceExcelReadResult
 } from '../../shared/workspace-file'
 import {
   canonicalPath,
@@ -197,6 +200,34 @@ export async function readWorkspacePdf(
       message: error instanceof Error ? error.message : String(error)
     }
   }
+}
+
+/** Complete, suffix-sealed bytes; parsing stays in the disposable renderer Worker. */
+export async function readWorkspaceExcel(payload: WorkspaceFileTarget): Promise<WorkspaceExcelReadResult> {
+  const denied: WorkspaceExcelReadResult = { ok: false, message: 'Spreadsheet preview unavailable or too large.' }
+  try {
+    if (payload.protectedRead || payload.protectedPresent || payload.preview === 'source' || !constants.O_NOFOLLOW) return denied
+    const targetPath = await resolveOpenTargetPath(payload.path, payload.workspaceRoot)
+    const format = excelFormat(targetPath)
+    const handle = await openFile(targetPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      const before = await handle.stat({ bigint: true })
+      if (!before.isFile() || before.size > BigInt(EXCEL_PREVIEW_LIMITS.maxBytes)) return denied
+      const chunks: Buffer[] = [], chunk = Buffer.alloc(64 << 10)
+      let length = 0
+      while (length < Number(before.size)) {
+        const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, Number(before.size) - length), null)
+        if (!bytesRead) break
+        chunks.push(Buffer.from(chunk.subarray(0, bytesRead))); length += bytesRead
+      }
+      const after = await handle.stat({ bigint: true })
+      if (length !== Number(before.size) || after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size ||
+          after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs) return denied
+      const bytes = Buffer.concat(chunks, length)
+      return { ok: true, path: targetPath, format, size: length, dataBase64: bytes.toString('base64'),
+        contentDigest: createHash('sha256').update(bytes).digest('hex'), limits: { ...EXCEL_PREVIEW_LIMITS } }
+    } finally { await handle.close() }
+  } catch { return denied }
 }
 
 export async function writeWorkspaceFile(

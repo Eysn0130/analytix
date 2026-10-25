@@ -137,10 +137,124 @@ export const DailyUsageResponseSchema = z.object({
 })
 export type DailyUsageResponse = z.infer<typeof DailyUsageResponseSchema>
 
+// Whole-log conversation accounting is independent of the retained legacy
+// usage totals. Absence means unavailable; readers must never fill it from them.
+const ConversationUnsignedSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+  .refine((value) => !Object.is(value, -0))
+
+export const ReportedTokenCountV1Schema = z.object({
+  reportedValue: ConversationUnsignedSchema,
+  knownAttemptCount: ConversationUnsignedSchema,
+  attemptCount: ConversationUnsignedSchema,
+  complete: z.boolean()
+}).strict().refine((count) => count.knownAttemptCount <= count.attemptCount &&
+  (count.knownAttemptCount !== 0 || count.reportedValue === 0),
+  { message: 'reported token count is inconsistent' })
+export type ReportedTokenCountV1 = z.infer<typeof ReportedTokenCountV1Schema>
+
+const conversationTokenKeys = [
+  'inputTokens', 'outputTokens', 'uncachedInputTokens', 'cacheReadTokens',
+  'cacheWriteTokens', 'reasoningTokens', 'totalTokens'
+] as const
+
+export const ProviderBillingV1Schema = z.object({
+  inventoryComplete: z.boolean(),
+  closed: z.boolean(),
+  attemptCount: ConversationUnsignedSchema,
+  settledAttemptCount: ConversationUnsignedSchema,
+  inputTokens: ReportedTokenCountV1Schema,
+  outputTokens: ReportedTokenCountV1Schema,
+  uncachedInputTokens: ReportedTokenCountV1Schema,
+  cacheReadTokens: ReportedTokenCountV1Schema,
+  cacheWriteTokens: ReportedTokenCountV1Schema,
+  reasoningTokens: ReportedTokenCountV1Schema,
+  totalTokens: ReportedTokenCountV1Schema,
+  /** Only the attempt's approved frozen public attribution may contribute. */
+  routes: z.array(z.object({ provider: z.string().min(1), model: z.string().min(1) }).strict()).optional()
+}).strict().superRefine((billing, ctx) => {
+  const reject = (message: string): void => ctx.addIssue({ code: 'custom', message })
+  if (billing.settledAttemptCount > billing.attemptCount ||
+      (billing.closed && (!billing.inventoryComplete || billing.settledAttemptCount !== billing.attemptCount))) {
+    reject('billing inventory is inconsistent')
+  }
+  for (const key of conversationTokenKeys) {
+    const count = billing[key]
+    const expectedComplete = billing.inventoryComplete && count.knownAttemptCount === billing.attemptCount &&
+      (billing.attemptCount > 0 || billing.closed)
+    if (count.attemptCount !== billing.attemptCount || count.knownAttemptCount > billing.settledAttemptCount ||
+        (count.complete && !expectedComplete) || (billing.attemptCount === 0 && count.complete !== expectedComplete)) reject(`${key} coverage is inconsistent`)
+  }
+  // Total coverage is the intersection on each physical attempt, never the
+  // sum of independently reported subtotals from different attempts.
+  if (billing.totalTokens.knownAttemptCount > Math.min(billing.inputTokens.knownAttemptCount, billing.outputTokens.knownAttemptCount) ||
+      (billing.totalTokens.complete && (!billing.inputTokens.complete || !billing.outputTokens.complete || billing.totalTokens.reportedValue !== billing.inputTokens.reportedValue + billing.outputTokens.reportedValue))) {
+    reject('total token accounting is inconsistent')
+  }
+  if (billing.outputTokens.complete && billing.reasoningTokens.reportedValue > billing.outputTokens.reportedValue) {
+    reject('reasoning tokens exceed output')
+  }
+  if (billing.inputTokens.complete && billing.uncachedInputTokens.complete && billing.cacheReadTokens.complete && billing.cacheWriteTokens.complete &&
+      billing.inputTokens.reportedValue !== billing.uncachedInputTokens.reportedValue + billing.cacheReadTokens.reportedValue + billing.cacheWriteTokens.reportedValue) {
+    reject('prompt billing buckets do not cover input')
+  }
+})
+export type ProviderBillingV1 = z.infer<typeof ProviderBillingV1Schema>
+
+export const ConversationMetricsV1Schema = z.object({
+  /** Null when legacy or mixed history lacks complete logical-step coverage. */
+  turnCount: ConversationUnsignedSchema.nullable(),
+  /** Counts closed logical steps, independent of the physical billing inventory. */
+  stepCount: ConversationUnsignedSchema.nullable(),
+  llmMs: z.object({
+    reportedValue: ConversationUnsignedSchema,
+    knownStepCount: ConversationUnsignedSchema,
+    complete: z.boolean()
+  }).strict(),
+  toolMs: z.object({
+    reportedValue: ConversationUnsignedSchema,
+    knownCallCount: ConversationUnsignedSchema,
+    callCount: ConversationUnsignedSchema,
+    complete: z.boolean()
+  }).strict(),
+  /** Sum over recorded samples. Mean is ttftMs / ttftSteps when > 0. */
+  ttftMs: ConversationUnsignedSchema,
+  ttftSteps: ConversationUnsignedSchema,
+  /** These three fields describe the same set of paired recorded steps. */
+  decodeMs: ConversationUnsignedSchema,
+  decodeTokens: ConversationUnsignedSchema,
+  decodeSteps: ConversationUnsignedSchema
+}).strict().superRefine((metrics, ctx) => {
+  if ((metrics.stepCount === null && metrics.llmMs.complete) ||
+      (metrics.stepCount !== null && (metrics.llmMs.knownStepCount > metrics.stepCount ||
+       metrics.ttftSteps > metrics.stepCount || metrics.decodeSteps > metrics.stepCount ||
+       metrics.llmMs.complete !== (metrics.llmMs.knownStepCount === metrics.stepCount))) ||
+      metrics.toolMs.knownCallCount > metrics.toolMs.callCount ||
+      metrics.toolMs.complete !== (metrics.toolMs.knownCallCount === metrics.toolMs.callCount) ||
+      (metrics.ttftSteps === 0 && metrics.ttftMs !== 0) ||
+      (metrics.decodeSteps === 0 && (metrics.decodeMs !== 0 || metrics.decodeTokens !== 0))) {
+    ctx.addIssue({ code: 'custom', message: 'conversation timing coverage is inconsistent' })
+  }
+})
+export type ConversationMetricsV1 = z.infer<typeof ConversationMetricsV1Schema>
+
+export const ConversationUsageV1Schema = z.object({
+  schemaVersion: z.literal('conversation-usage.v1'),
+  billing: ProviderBillingV1Schema,
+  turns: z.array(z.object({
+    turnId: z.string().min(1),
+    /** Missing for legacy turns or unavailable trusted inventory. */
+    billing: ProviderBillingV1Schema.optional(),
+    metrics: ConversationMetricsV1Schema.optional()
+  }).strict()),
+  metrics: ConversationMetricsV1Schema.optional()
+}).strict()
+export type ConversationUsageV1 = z.infer<typeof ConversationUsageV1Schema>
+
 export const ThreadUsageBucketSchema = DailyUsageCountersSchema.omit({
   thread_count: true
 }).extend({
   thread_id: z.string().min(1),
+  conversationUsage: ConversationUsageV1Schema.optional(),
   provider: z.string().min(1).optional(),
   /**
    * Cache hit rate of the most recent turn (by completedAt), distinct from the

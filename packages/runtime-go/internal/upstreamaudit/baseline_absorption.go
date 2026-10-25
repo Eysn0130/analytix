@@ -171,7 +171,7 @@ func BuildKunAnalytixBaselineGuard() KunAnalytixBaselineGuard {
 			TriggerPath:                "thread list/read/patch/fork/resume/turn/events",
 			RuntimeContract:            "/v1/threads, /v1/sessions/:id/resume-thread, /v1/threads/:id/events",
 			SettingsSchema:             "runtime workspace/model/provider selections remain current schema.",
-			UISurface:                  "MessageTimeline, MessageBubble, GeneratedFilesPanel, ReviewPlanCard, ReviewSummaryCard, TurnChangeSummary, WorkMetaRow, ProcessSectionRow, MessageTimelineEmptyHero.",
+			UISurface:                  "MessageTimeline, MessageBubble, GeneratedFilesPanel, SubmittedPlanCards, ReviewSummaryCard, TurnChangeSummary, WorkMetaRow, ProcessSectionRow, MessageTimelineEmptyHero.",
 			ProtectionTests:            []string{"packages/runtime/tests/go-runtime-conformance.test.ts", "src/renderer/src/agent/analytix-runtime.test.ts", "src/renderer/src/components/chat/message-timeline-turns.test.ts"},
 			ImmutableProductBaseline:   true,
 			ReasonixEnhancementAllowed: "Go runtime may replace implementation after full route/SSE non-regression.",

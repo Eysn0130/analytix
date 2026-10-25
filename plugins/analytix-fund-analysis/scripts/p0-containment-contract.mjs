@@ -9,6 +9,7 @@ import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { DEVELOPMENT_ONLY_REFERENCE_FILES } from "./runtime-cache-contract.mjs";
 
 // These references are deliberately captured before the permanent JavaScript
 // audit is installed. The calibration below proves the kernel sandbox and the
@@ -1079,13 +1080,7 @@ async function run(authorityTempRoot) {
     resourceDefinitions.length,
     "resource URIs must be unique",
   );
-  const developmentOnlyResourceSuffixes = [
-    "/plugin-benchmark.md",
-    "/mature-plugin-drift-table.md",
-    "/top-pluginization-plan.md",
-    "/blueprint-implementation-matrix.md",
-    "/casegraph-roadmap.md",
-  ];
+  const developmentOnlyResourceSuffixes = DEVELOPMENT_ONLY_REFERENCE_FILES.map((name) => `/${name}`);
   for (const suffix of developmentOnlyResourceSuffixes) {
     assert.equal(
       providerResourceList.some((item) => item.uri.endsWith(suffix)),
@@ -1202,6 +1197,12 @@ async function run(authorityTempRoot) {
   });
   assert.equal(mcpReadResult.contents[0].uri, FUNDS_SOURCE_UNAVAILABLE_RESOURCE_URI);
   assertCaseNeutralProviderResource(mcpReadResult, "P0 boundary MCP resources/read");
+  for (const name of DEVELOPMENT_ONLY_REFERENCE_FILES) {
+    await expectMcpError(providerBoundary.handleRequest({
+      method: "resources/read",
+      params: { uri: `skill://analytix-fund-analysis/references/${name}` },
+    }), -32602);
+  }
   const promptList = await providerBoundary.handleRequest({
     method: "prompts/list",
   });

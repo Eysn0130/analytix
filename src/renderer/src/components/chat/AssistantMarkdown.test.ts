@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import i18n from '../../i18n'
+import { useChatStore } from '../../store/chat-store'
+import { clearFileReferenceValidationCache } from '../../lib/file-reference-validation'
+import { sharedMarkdownFinalizationScheduler } from '../../thread/streaming/markdown-finalization-queue'
+import { PersistedThreadTraceSink } from '../../thread/tracing/thread-performance-trace'
 import {
   AssistantMarkdown,
   getMarkdownFinalizationPolicy,
@@ -29,7 +33,7 @@ describe('getMarkdownFinalizationPolicy', () => {
     })
   })
 
-  it('keeps very heavy code-heavy markdown on the lightweight surface', () => {
+  it('defers very heavy code without discarding markdown semantics', () => {
     const code = 'x'.repeat(17000)
     const text = [
       'Analysis:',
@@ -40,7 +44,7 @@ describe('getMarkdownFinalizationPolicy', () => {
     ].join('\n')
 
     expect(getMarkdownFinalizationPolicy(text)).toMatchObject({
-      mode: 'lightweight',
+      mode: 'defer',
       codeBlockChars: 17001
     })
   })
@@ -90,7 +94,7 @@ const heavyCases = [
   ['aggregate code', '```text\n' + 'x'.repeat(16000) + '\n```']
 ] as const
 
-describe('unchanged heavyweight policy boundaries', () => {
+describe('cost controls settlement timing without a terminal plain-text mode', () => {
   it.each([
     ['characters at limit', 'x'.repeat(24000)],
     ['lines at limit', Array.from({ length: 700 }, () => 'line').join('\n')],
@@ -99,17 +103,79 @@ describe('unchanged heavyweight policy boundaries', () => {
   ])('keeps %s eligible for deferred rich rendering', (_name, text) => {
     expect(getMarkdownFinalizationPolicy(text).mode).toBe('defer')
   })
-  it.each(heavyCases)('keeps %s on the bounded plain surface', (_name, text) => {
-    expect(getMarkdownFinalizationPolicy(text).mode).toBe('lightweight')
+  it.each(heavyCases)('keeps %s eligible for deferred rich rendering', (_name, text) => {
+    expect(getMarkdownFinalizationPolicy(text).mode).toBe('defer')
   })
 })
 
-describe('terminal plain-text fallback on actual DOM', () => {
+const codeBodies = Array.from({ length: 5 }, (_, index) => `code body ${index + 1}`)
+const longCode = 'x'.repeat(17000)
+const longProse = 'x'.repeat(24001)
+const tableRows = Array.from({ length: 701 }, (_, index) => `| Row ${index + 1} | [Link ${index + 1}](https://example.test/${index + 1}) |`)
+const table = ['| Name | Link |', '| --- | --- |', ...tableRows].join('\n')
+const fiveCodeBlocks = codeBodies.map(code => `\`\`\`text\n${code}\n\`\`\``).join('\n\n')
+const reply = (body: string) => `## Complete reply\n\n[Late reference][completion]\n\n${body}\n\n**TAIL_SENTINEL** [Destination](https://example.test/destination) $x^2$\n\n[completion]: https://example.test/final`
+const historyCases = [
+  { name: 'over 24k characters', body: longProse, code: [], rows: 0 },
+  { name: 'over 700 lines of table and links', body: table, code: [], rows: 701 },
+  { name: 'five closed code blocks', body: fiveCodeBlocks, code: codeBodies, rows: 0 },
+  { name: 'over 16k code characters', body: `\`\`\`text\n${longCode}\n\`\`\``, code: [longCode], rows: 0 }
+]
+
+describe('deferred markdown through the actual wrapper and renderer', () => {
   let root: Root
   let container: HTMLDivElement
+  let frames: Map<number, FrameRequestCallback>
+  let idles: Map<number, () => void>
+  let serial: number
+  let previousChat: ReturnType<typeof useChatStore.getState>
+  let enqueue: MockInstance<typeof sharedMarkdownFinalizationScheduler.enqueue>
+  const finalized = vi.fn()
+
+  const render = async (text: string, streaming = false) => act(async () => root.render(createElement(AssistantMarkdown, {
+    text, streaming, rowId: 'public-reply', className: 'ds-markdown', onFinalized: finalized
+  })))
+  async function frame(): Promise<void> {
+    const batch = [...frames.values()]
+    frames.clear()
+    await act(async () => { batch.forEach(callback => callback(0)) })
+  }
+  async function idle(): Promise<void> {
+    const batch = [...idles.values()]
+    idles.clear()
+    await act(async () => { batch.forEach(callback => callback()) })
+  }
+  async function enqueueDeferred() {
+    await act(async () => { vi.advanceTimersByTime(240) })
+    await idle()
+    expect(sharedMarkdownFinalizationScheduler.size).toBe(1)
+    return enqueue.mock.calls.at(-1)![0]
+  }
+  async function settle(): Promise<void> {
+    await enqueueDeferred()
+    await idle()
+    expect(sharedMarkdownFinalizationScheduler.size).toBe(0)
+    await frame()
+    expect(finalized).toHaveBeenCalled()
+  }
+
   beforeEach(async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     await i18n.changeLanguage('en')
+    await import('./DshAssistant')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    frames = new Map(); idles = new Map(); serial = 0
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++serial, callback); return serial })
+    vi.stubGlobal('cancelAnimationFrame', (handle: number) => frames.delete(handle))
+    vi.stubGlobal('requestIdleCallback', (callback: () => void) => { idles.set(++serial, callback); return serial })
+    vi.stubGlobal('cancelIdleCallback', (handle: number) => idles.delete(handle))
+    vi.stubGlobal('analytix', { app: { openExternal: vi.fn().mockResolvedValue(true) }, files: { resolve: vi.fn().mockResolvedValue({ ok: false }) } })
+    previousChat = useChatStore.getState()
+    useChatStore.setState({ workspaceRoot: '/synthetic/workspace' })
+    clearFileReferenceValidationCache()
+    sharedMarkdownFinalizationScheduler.dispose()
+    enqueue = vi.spyOn(sharedMarkdownFinalizationScheduler, 'enqueue')
+    finalized.mockClear()
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -117,31 +183,117 @@ describe('terminal plain-text fallback on actual DOM', () => {
   afterEach(async () => {
     await act(async () => root.unmount())
     container.remove()
+    sharedMarkdownFinalizationScheduler.dispose()
+    useChatStore.setState(previousChat)
+    clearFileReferenceValidationCache()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
     await i18n.changeLanguage('en')
   })
-  it.each(heavyCases)('announces %s fallback and preserves its full literal payload', async (_name, text) => {
-    const finalized = vi.fn()
-    await act(async () => root.render(createElement(AssistantMarkdown, {
-      text, streaming: false, className: 'ds-markdown', onFinalized: finalized
-    })))
-    const note = container.querySelector('[role="note"]')
-    expect(note?.textContent).toBe('Displayed as plain text to keep this long reply responsive.')
-    expect(container.textContent).toContain(text)
-    expect(container.querySelector('[data-streamdown="code-block"]')).toBeNull()
+
+  it.each(historyCases)('restores complete settled semantics on history first mount: $name', async ({ body, code, rows }) => {
+    await render(reply(body))
+    expect(container.querySelector('h2')?.textContent).toBe('Complete reply')
+    expect(container.querySelector('strong')?.textContent).toBe('TAIL_SENTINEL')
+    expect(container.querySelector('.katex')).toBeNull()
+    expect(enqueue).not.toHaveBeenCalled()
     expect(finalized).not.toHaveBeenCalled()
+    await settle()
+    expect(container.querySelector('.katex')).not.toBeNull()
+    expect(container.querySelector('[role="note"]')).toBeNull()
+    expect(container.querySelector('a[href="https://example.test/destination"]')?.textContent).toContain('Destination')
+    expect(container.querySelector('a[href="https://example.test/final"]')?.textContent).toContain('Late reference')
+    expect([...container.querySelectorAll('pre code')].map(node => node.textContent)).toEqual(code)
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(rows)
+    if (body === longProse) expect(container.textContent).toContain(longProse)
+    if (rows) {
+      expect(container.querySelectorAll('tbody a')).toHaveLength(rows)
+      expect(container.querySelector('a[href="https://example.test/701"]')?.textContent).toContain('Link 701')
+      expect(container.querySelector<HTMLButtonElement>('button[aria-label="Copy table"]')?.disabled).toBe(false)
+    }
   })
-  it('keeps the notice off streaming text and removes it when the public text is replaced', async () => {
-    const text = heavyCases[0][1]
-    await act(async () => root.render(createElement(AssistantMarkdown, { text, streaming: true })))
-    expect(container.querySelector('[role="note"]')).toBeNull()
-    await act(async () => root.unmount())
-    root = createRoot(container)
-    await i18n.changeLanguage('zh')
-    await act(async () => root.render(createElement(AssistantMarkdown, { text, streaming: false })))
-    expect(container.querySelector('[role="note"]')?.textContent).toBe('为保持响应，此长回复以纯文本显示。')
-    await act(async () => root.render(createElement(AssistantMarkdown, { text: '', streaming: false })))
-    expect(container.querySelector('[role="note"]')).toBeNull()
-    expect(container.textContent).not.toContain(text)
+
+  it('paces a long stream and self-heals frozen reference links only after queued settlement', async () => {
+    const prefix = '## Complete reply\n\n[Late reference][completion]\n\nFirst block\n\nSecond block\n\nThird block'
+    await render(prefix, true)
+    for (let count = 0; frames.size && count < 100; count++) await frame()
+    const text = reply('First block\n\nSecond block\n\nThird block\n\n' + fiveCodeBlocks + '\n\n' + longProse)
+    await render(text, true)
+    await render(text)
+    await act(async () => { vi.advanceTimersByTime(240) })
+    expect(enqueue).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('TAIL_SENTINEL')
+    for (let count = 0; frames.size && count < 200; count++) await frame()
+    expect(container.querySelector('strong')?.textContent).toBe('TAIL_SENTINEL')
+    expect([...container.querySelectorAll('pre code')].map(node => node.textContent)).toEqual(codeBodies)
+    expect(container.querySelector('a[href="https://example.test/final"]')).toBeNull()
+    expect(container.querySelector('.katex')).toBeNull()
+    expect(finalized).not.toHaveBeenCalled()
+    await settle()
+    expect(container.querySelector('a[href="https://example.test/final"]')?.textContent).toContain('Late reference')
+    expect(container.querySelectorAll('h2')).toHaveLength(1)
+    expect(container.querySelectorAll('strong')).toHaveLength(1)
+    expect(container.textContent).toContain(longProse)
+    expect(container.querySelector('.katex')).not.toBeNull()
+  })
+
+  it('keeps raw HTML/SVG, unsafe URLs and unvalidated files inert in a long settled reply', async () => {
+    await render(reply(longProse + '\n\n<svg data-untrusted="raw"><script>RAW_SENTINEL</script></svg>\n\n[unsafe](javascript:alert%281%29) [denied](/synthetic/denied.ts#L3)\n\n![unsafe image](data:image/svg+xml,unsafe) ![safe image](https://example.test/image.png)\n\n$\\href{javascript:alert(1)}{unsafe}$'))
+    await settle()
+    expect(container.querySelector('script,svg[data-untrusted],a[href^="javascript:"],a[href^="data:"]')).toBeNull()
+    expect(container.textContent).toContain('<svg data-untrusted="raw"><script>RAW_SENTINEL</script></svg>')
+    expect(window.analytix.files.resolve).toHaveBeenCalledWith(expect.objectContaining({ path: '/synthetic/denied.ts', line: 3 }))
+    expect(container.querySelector('.ds-file-reference-link')).toBeNull()
+    expect(container.querySelectorAll('img')).toHaveLength(1)
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('https://example.test/image.png')
+    expect(container.querySelector('img')?.getAttribute('referrerpolicy')).toBe('no-referrer')
+    expect(window.analytix.app.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('cancels a replaced queued reply and ignores its late finalizer', async () => {
+    const text = reply(longProse)
+    await render(text)
+    const oldJob = await enqueueDeferred()
+    const replacement = reply('**NEW_ONLY**\n\n' + 'y'.repeat(24001))
+    await render(replacement)
+    expect(sharedMarkdownFinalizationScheduler.size).toBe(0)
+    await act(async () => oldJob.onFinalize({ rowId: oldJob.rowId, text: oldJob.text }))
+    expect(container.querySelector('.katex')).toBeNull()
+    expect(finalized).not.toHaveBeenCalled()
+    await settle()
+    expect(container.textContent).toContain('NEW_ONLY')
+    expect(container.textContent).not.toContain(longProse)
+  })
+
+  it('rejects a late same-text finalizer after streaming restarts and settles again', async () => {
+    const text = reply(longProse)
+    await render(text)
+    const oldJob = await enqueueDeferred()
+    await render(text, true)
+    await render(text)
+    await act(async () => oldJob.onFinalize({ rowId: oldJob.rowId, text: oldJob.text }))
+    await frame()
+    expect(container.querySelector('.katex')).toBeNull()
+    expect(finalized).not.toHaveBeenCalled()
+    expect(sharedMarkdownFinalizationScheduler.size).toBe(0)
+    await settle()
+  })
+
+  it.each([false, true])('cancels deferred work on unmount, already queued=%s', async queued => {
+    const trace = vi.spyOn(PersistedThreadTraceSink.prototype, 'record')
+    await render(reply(longProse))
+    const job = queued ? await enqueueDeferred() : null
+    await act(async () => root.render(null))
+    await act(async () => {
+      vi.advanceTimersByTime(240)
+      job?.onFinalize({ rowId: job.rowId, text: job.text })
+    })
+    await idle(); await frame()
+    expect(sharedMarkdownFinalizationScheduler.size).toBe(0)
+    expect(container.textContent).toBe('')
+    expect(finalized).not.toHaveBeenCalled()
+    expect(trace).not.toHaveBeenCalled()
+    if (!queued) expect(enqueue).not.toHaveBeenCalled()
   })
 })

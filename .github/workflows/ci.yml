@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      unused_base:
+        description: 'Trusted comparison commit for unused baseline (full SHA)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -37,6 +42,15 @@ jobs:
           go test -count=1 -timeout 5m -tags analytix_dev_credentials ./internal/runtimeapp -run '^TestDevelopmentProviderAuthorityIsolationAndRestart$'
       - name: Verify Windows source profile and shared authority wiring
         run: node --test scripts/dev-launcher-windows.test.mjs
+      - name: Setup Python for the pinned Windows lxml target
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - name: Verify pinned lxml native loading, XML entities and input rejection
+        run: |
+          python -I -B scripts/windows-lxml-native-probe.py run --lock-mode accepted-required --work-dir "$env:RUNNER_TEMP/analytix-lxml-native"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   source-baseline:
     name: Source baseline
@@ -47,6 +61,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
@@ -58,8 +73,34 @@ jobs:
         with:
           go-version: '1.26.4'
           cache-dependency-path: packages/runtime-go/go.sum
+      - name: Check new source file LF budget
+        env:
+          SOURCE_SIZE_EVENT: ${{ github.event_name }}
+          SOURCE_SIZE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SOURCE_SIZE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          node --test scripts/source-file-size-gate.test.mjs
+          node scripts/source-file-size-gate.mjs
       - name: Install locked dependencies (including runtime)
         run: npm ci
+      - name: Check unused finding ratchet against trusted event base
+        env:
+          UNUSED_EVENT: ${{ github.event_name }}
+          UNUSED_BASE: ${{ github.event.pull_request.base.sha || github.event.before || inputs.unused_base }}
+          UNUSED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # Never interpolate untrusted event strings into shell source.
+          [[ "$UNUSED_BASE" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$UNUSED_HEAD" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          checker="$RUNNER_TEMP/unused-findings-gate.mjs"
+          if git cat-file -e "$UNUSED_BASE:scripts/unused-findings-gate.mjs" 2>/dev/null; then
+            git show "$UNUSED_BASE:scripts/unused-findings-gate.mjs" > "$checker"
+          else
+            test "$UNUSED_BASE" = 2c5494642b35f7cdb9cd27939486beec7d5adaaf
+            cp scripts/unused-findings-gate.mjs "$checker"
+          fi
+          node "$checker"
+          node --test scripts/unused-findings-gate.test.mjs
       - name: Inspect actual public candidate ancestry and source policy
         run: node scripts/check-public-push.mjs --candidate
       - name: Validate workflow syntax and security-sensitive expressions
@@ -91,6 +132,13 @@ jobs:
           go-version: '1.26.4'
           cache-dependency-path: packages/runtime-go/go.sum
       - run: npm ci
+      - name: Install pinned scanner dependency
+        run: |
+          rustup toolchain install 1.94.1 --profile minimal
+          ripgrep_root="$RUNNER_TEMP/analytix-ripgrep"
+          cargo +1.94.1 install ripgrep --version 14.1.1 --locked --root "$ripgrep_root"
+          "$ripgrep_root/bin/rg" --version
+          printf '%s\n' "$ripgrep_root/bin" >> "$GITHUB_PATH"
       # vitest.config.ts already bounds workers; do not suppress failing assertions.
       - run: |
           # Private-authority fixtures require owner-only creation, matching the
@@ -272,10 +320,10 @@ jobs:
     timeout-minutes: 25
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 8
       matrix:
-        tags: ['', analytix_prod]
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        tags: ['', analytix_prod]
     env:
       GOTOOLCHAIN: local
       GOMAXPROCS: '2'
@@ -326,6 +374,8 @@ jobs:
           cache-dependency-path: packages/runtime-go/go.sum
       - run: npm ci
       - name: Build the current-source schedule MCP entrypoint without packaging
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build
       - name: Execute synthetic lifecycle and contained schedule contracts
         working-directory: packages/runtime-go
@@ -341,6 +391,30 @@ jobs:
           export ANALYTIX_TEST_SCHEDULE_MCP_ENTRYPOINT_V1="$GITHUB_WORKSPACE/out/main/claw-schedule-mcp-node-entry.js"
           test -f "$ANALYTIX_TEST_SCHEDULE_MCP_ENTRYPOINT_V1"
           node ../../scripts/go-ci-shards.mjs platform
+      - name: Execute native schedule transport settlement contracts
+        working-directory: packages/runtime-go
+        env:
+          TEST_TAGS: ${{ matrix.tags }}
+        run: |
+          set -eo pipefail
+          umask 077
+          GOTMPDIR="$(cd "$RUNNER_TEMP" && pwd -P)"
+          export GOTMPDIR
+          export TMPDIR="$GOTMPDIR"
+          go_args=(-json -count=1 -p 1 -parallel 2 -timeout 20m)
+          if [ -n "$TEST_TAGS" ]; then
+            go_args+=(-tags "$TEST_TAGS")
+          fi
+          # Each anchored group includes all child scenarios. The JSON gate
+          # requires its execution and package pass, rejecting any skip/fail.
+          for test_name in \
+            TestNativeScheduleActualTransportSettlementPrivateHTTPAndRestartV1 \
+            TestNativeScheduleCancellationAfterCASLeavesUnreadableOrphanV1 \
+            TestNativeScheduleActualFailureAndInconsistentTransportV1 \
+            TestNativeScheduleFinalSettlementFailureCannotSealSuccessfulCaptureV1; do
+            go test "${go_args[@]}" -run "^${test_name}$" ./internal/server | \
+              node ../../scripts/go-test-selection.mjs analytix.local/runtime-go/internal/server "$test_name"
+          done
       - name: Execute root protected-process positives in their own package
         if: ${{ matrix.tags == '' }}
         working-directory: packages/runtime-go

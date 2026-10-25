@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Ban, BrainCircuit, Pencil, Plus, Trash2 } from '../design/AnalytixUiIcons'
 import type { CoreMemoryRecordJson } from '../agent/analytix-contract'
 import { SettingsCard, SettingRow } from './settings-controls'
+import { normalizeWorkspaceRoot } from '../lib/workspace-path'
 
 type MemoryScope = 'user' | 'workspace' | 'project'
 
@@ -35,6 +36,21 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   const [draft, setDraft] = useState<MemoryDraft>(EMPTY_DRAFT)
   const [creating, setCreating] = useState(false)
   const [scopeFilter, setScopeFilter] = useState<'all' | MemoryScope>('all')
+  const workspace = normalizeWorkspaceRoot(ctx.form?.workspaceRoot)
+  const editor = useRef({ active: true, workspace, session: 0, revision: 0, save: 0 })
+  useLayoutEffect(() => {
+    const owner = editor.current
+    owner.active = true
+    return () => { owner.active = false; owner.session += 1 }
+  }, [])
+  useLayoutEffect(() => {
+    editor.current.session += 1
+    editor.current.revision += 1
+  }, [workspace])
+  const editDraft = (patch: Partial<MemoryDraft>): void => {
+    editor.current.revision += 1
+    setDraft((previous) => ({ ...previous, ...patch }))
+  }
 
   const filteredRecords = useMemo(() => {
     const records: CoreMemoryRecordJson[] = memoryRecords ?? []
@@ -43,12 +59,16 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   }, [memoryRecords, scopeFilter])
 
   const beginCreate = (): void => {
+    editor.current.workspace = workspace
+    editor.current.session += 1
     setEditingId(null)
     setDraft(EMPTY_DRAFT)
     setCreating(true)
   }
 
   const beginEdit = (record: CoreMemoryRecordJson): void => {
+    editor.current.workspace = workspace
+    editor.current.session += 1
     setCreating(false)
     setEditingId(record.id)
     setDraft({
@@ -60,6 +80,8 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   }
 
   const cancelEditor = (): void => {
+    editor.current.workspace = workspace
+    editor.current.session += 1
     setEditingId(null)
     setCreating(false)
     setDraft(EMPTY_DRAFT)
@@ -73,7 +95,8 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
 
   const saveDraft = async (): Promise<void> => {
     const trimmed = draft.content.trim()
-    if (!trimmed) return
+    if (!trimmed || !editor.current.active || editor.current.workspace !== workspace) return
+    const saved = { ...editor.current, save: ++editor.current.save }
     let ok = false
     if (creating) {
       ok = await createMemoryRecord({
@@ -89,7 +112,9 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
         confidence: draft.confidence
       })
     }
-    if (ok) cancelEditor()
+    if (ok && editor.current.active && editor.current.workspace === saved.workspace &&
+      editor.current.session === saved.session && editor.current.revision === saved.revision &&
+      editor.current.save === saved.save) cancelEditor()
     // On failure, keep the editor open so the user doesn't lose their draft.
     // The error is surfaced via runtimeDiagnosticsNotice in the parent handler.
   }
@@ -140,7 +165,7 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                     onClick={() => setScopeFilter(scope)}
                     className={`rounded-lg px-2 py-1 font-medium transition ${
                       scopeFilter === scope
-                        ? 'bg-ds-ink text-ds-main'
+                        ? 'bg-accent-soft text-accent'
                         : 'text-ds-muted hover:bg-ds-hover hover:text-ds-ink'
                     }`}
                   >
@@ -151,7 +176,7 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
               <button
                 type="button"
                 onClick={beginCreate}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-ds-ink px-2.5 py-1.5 text-[12px] font-semibold text-ds-main transition hover:opacity-85"
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
               >
                 <Plus className="h-3.5 w-3.5" strokeWidth={2} />
                 {t('memoryCreate')}
@@ -165,9 +190,12 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                   <Pencil className="h-3.5 w-3.5" strokeWidth={1.8} />
                   {creating ? t('memoryCreateTitle') : t('memoryEditTitle')}
                 </div>
+                {editor.current.workspace !== workspace ? (
+                  <p className="mb-2 text-[12px] text-ds-muted">{t('memoryScope_workspace')}: {editor.current.workspace || t('memoryScope_all')}</p>
+                ) : null}
                 <textarea
                   value={draft.content}
-                  onChange={(e) => setDraft((prev) => ({ ...prev, content: e.target.value }))}
+                  onChange={(e) => editDraft({ content: e.target.value })}
                   rows={3}
                   placeholder={t('memoryContentPlaceholder')}
                   className="w-full resize-y rounded-lg border border-ds-border-muted bg-ds-main px-2.5 py-2 text-[13px] text-ds-ink outline-none focus:border-ds-ink/40"
@@ -176,7 +204,7 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                   {creating && (
                     <select
                       value={draft.scope}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, scope: e.target.value as MemoryScope }))}
+                      onChange={(e) => editDraft({ scope: e.target.value as MemoryScope })}
                       className="rounded-lg border border-ds-border-muted bg-ds-main px-2 py-1 text-[12px] text-ds-ink outline-none"
                     >
                       <option value="user">{t('memoryScope_user')}</option>
@@ -187,7 +215,7 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                   <input
                     type="text"
                     value={draft.tags}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, tags: e.target.value }))}
+                    onChange={(e) => editDraft({ tags: e.target.value })}
                     placeholder={t('memoryTagsPlaceholder')}
                     className="min-w-[120px] flex-1 rounded-lg border border-ds-border-muted bg-ds-main px-2 py-1 text-[12px] text-ds-ink outline-none"
                   />
@@ -200,7 +228,7 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                       step={0.1}
                       value={draft.confidence}
                       onChange={(e) =>
-                        setDraft((prev) => ({ ...prev, confidence: Number(e.target.value) || 0 }))
+                        editDraft({ confidence: Number(e.target.value) || 0 })
                       }
                       className="w-14 rounded-lg border border-ds-border-muted bg-ds-main px-1.5 py-1 text-[12px] text-ds-ink outline-none"
                     />
@@ -217,8 +245,8 @@ export function MemorySettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                   <button
                     type="button"
                     onClick={() => void saveDraft()}
-                    disabled={!draft.content.trim()}
-                    className="rounded-lg bg-ds-ink px-2.5 py-1 text-[12px] font-semibold text-ds-main transition hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={!draft.content.trim() || editor.current.workspace !== workspace}
+                    className="rounded-lg px-2.5 py-1 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed"
                   >
                     {t('memorySave')}
                   </button>

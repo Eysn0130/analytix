@@ -364,7 +364,27 @@ func runRuntimeOptionalPluginOrdinaryLifecycleModeV1(t *testing.T, fault string,
 		// One full cell additionally proves both producers across the target's
 		// first accepted final and a second fresh composition. The fork cutoff
 		// deliberately excludes later source turns.
-		fork := request(http.MethodPost, "/v1/threads/"+threadID+"/fork", map[string]any{"turnId": turns["coding"]}, http.StatusCreated)
+		// The CASE-bound source has no public event prefix authorizing this cutoff.
+		unavailable := request(http.MethodPost, "/v1/threads/"+threadID+"/fork", map[string]any{"turnId": turns["coding"]}, http.StatusConflict)
+		if contracts.StringField(unavailable, "code") != "fork_boundary_unavailable" {
+			t.Fatal("CASE source did not fail closed at the unavailable fork boundary")
+		}
+		// The real whole-fork producer signs inert inherited history; the bounded
+		// producer can then select the original coding turn from that bridge.
+		bridge := request(http.MethodPost, "/v1/threads/"+threadID+"/fork", map[string]any{}, http.StatusCreated)
+		bridgeID := contracts.StringField(bridge, "id")
+		if bridgeID == "" {
+			t.Fatal("whole fork omitted the inherited bridge identity")
+		}
+		reader, err := finalauthorityadapter.NewAcceptedFinalCASReader(config.ProductionDurableRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bridgeSnapshot, err := reader.ReadPrimaryThreadSnapshotV1(context.Background(), bridgeID)
+		if err != nil || contracts.StringField(bridgeSnapshot.Thread, "activeInheritedHistoryReceipt") == "" {
+			t.Fatal("whole fork omitted signed inherited history")
+		}
+		fork := request(http.MethodPost, "/v1/threads/"+bridgeID+"/fork", map[string]any{"turnId": turns["coding"]}, http.StatusCreated)
 		forkID := contracts.StringField(fork, "id")
 		if forkID == "" {
 			t.Fatal("public fork omitted identity")
@@ -378,7 +398,7 @@ func runRuntimeOptionalPluginOrdinaryLifecycleModeV1(t *testing.T, fault string,
 		beforeFork := request(http.MethodGet, "/v1/threads/"+forkID, nil, http.StatusOK)
 		beforeResume := request(http.MethodGet, "/v1/threads/"+resumedID, nil, http.StatusOK)
 		// Changing the admitted parent must not recapture the immutable old source.
-		run(threadID, "source-after-derive")
+		run(bridgeID, "source-after-derive")
 		server.Close()
 		shutdownOwnedRuntimeHandler(t, handler)
 		fixture.async.assertDrained(t)
@@ -410,10 +430,6 @@ func runRuntimeOptionalPluginOrdinaryLifecycleModeV1(t *testing.T, fault string,
 			// The next target context revokes its earlier epoch just as in
 			// the original thread. Resume from the complete snapshot cursor.
 			runtimeOptionalLifecycleAssertReplayV1(t, client, server.URL, pair.id, sinceSeq, "", turns[pair.phase], false, false)
-		}
-		reader, err := finalauthorityadapter.NewAcceptedFinalCASReader(config.ProductionDurableRoot)
-		if err != nil {
-			t.Fatal(err)
 		}
 		privatePrefix := func() (string, []byte) {
 			t.Helper()

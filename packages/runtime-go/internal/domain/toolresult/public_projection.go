@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
@@ -27,10 +28,12 @@ type PublicProjectionKind string
 const (
 	ProjectionWithheld         PublicProjectionKind = "withheld"
 	ProjectionHostStatus       PublicProjectionKind = "host_status"
+	ProjectionWebFetchStatus   PublicProjectionKind = "web_fetch_status"
 	ProjectionPlanStatus       PublicProjectionKind = "plan_status"
 	ProjectionArtifactStatus   PublicProjectionKind = "artifact_status"
 	ProjectionCaseSourceStatus PublicProjectionKind = "case_source_status"
 	ProjectionMCPDiagnostic    PublicProjectionKind = "mcp_diagnostic"
+	ProjectionTaskJobResult    PublicProjectionKind = "task_job_result"
 )
 
 type PublicToolResultProjectionV1 struct {
@@ -46,6 +49,8 @@ type PublicToolResultProjectionV1 struct {
 	Plan                   *PlanStatusV1          `json:"plan,omitempty"`
 	RPCError               *MCPRPCErrorDiagnostic `json:"rpcError,omitempty"`
 	Artifact               *ArtifactStatusV1      `json:"artifact,omitempty"`
+	Web                    *WebFetchStatusV1      `json:"web,omitempty"`
+	TaskJob                *TaskJobResultV1       `json:"taskJob,omitempty"`
 }
 
 type ArtifactStatusV1 struct {
@@ -187,10 +192,21 @@ func ValidatePublicToolResultProjectionV1(projection PublicToolResultProjectionV
 	if projection.Code != "" && (!publicCodePattern.MatchString(projection.Code) || !validPublicProjectionCode(projection.ProjectionKind, projection.Code)) {
 		return errors.New("public tool result projection code is invalid")
 	}
+	if projection.ProjectionKind != ProjectionWebFetchStatus && projection.Web != nil {
+		return errors.New("tool result contains an incompatible web payload")
+	}
 	if projection.ProjectionKind != ProjectionArtifactStatus && projection.Artifact != nil {
 		return errors.New("tool result contains an incompatible artifact payload")
 	}
+	if projection.ProjectionKind != ProjectionTaskJobResult && projection.TaskJob != nil {
+		return errors.New("tool result contains incompatible job metadata")
+	}
 	switch projection.ProjectionKind {
+	case ProjectionTaskJobResult:
+		if projection.Status != "completed" || projection.MessageKey != "tool_completed" || projection.Code != "tool_completed" || projection.TaskJob == nil ||
+			projection.Plan != nil || projection.RPCError != nil || projection.Web != nil || projection.Artifact != nil || validateTaskJobResultV1(*projection.TaskJob) != nil {
+			return errors.New("task-job result projection is invalid")
+		}
 	case ProjectionWithheld:
 		if projection.MessageKey != "tool_output_withheld" && projection.MessageKey != "legacy_output_withheld" {
 			return errors.New("withheld tool result message key is invalid")
@@ -210,6 +226,15 @@ func ValidatePublicToolResultProjectionV1(projection PublicToolResultProjectionV
 		}
 		if projection.Plan != nil || projection.RPCError != nil {
 			return errors.New("host tool result contains an incompatible payload")
+		}
+	case ProjectionWebFetchStatus:
+		if projection.Web == nil || projection.Plan != nil || projection.RPCError != nil ||
+			ValidateWebFetchStatusV1(*projection.Web) != nil {
+			return errors.New("web fetch tool result projection is invalid")
+		}
+		status, messageKey, code, ok := webFetchLifecycleV1(projection.Web.Outcome)
+		if !ok || projection.Status != status || projection.MessageKey != messageKey || projection.Code != code {
+			return errors.New("web fetch tool result lifecycle is not canonically paired")
 		}
 	case ProjectionArtifactStatus:
 		if projection.MessageKey != "artifact_created" || projection.Code != "artifact_created" || projection.Status != "completed" ||
@@ -252,6 +277,30 @@ func ParsePublicToolResultProjectionV1(value any) (PublicToolResultProjectionV1,
 	data, err := json.Marshal(value)
 	if err != nil {
 		return PublicToolResultProjectionV1{}, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return PublicToolResultProjectionV1{}, err
+	}
+	var kind PublicProjectionKind
+	_ = json.Unmarshal(fields["projectionKind"], &kind)
+	if raw, present := fields["taskJob"]; present && (kind != ProjectionTaskJobResult || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))) {
+		return PublicToolResultProjectionV1{}, errors.New("job metadata is incompatible or null")
+	}
+	if kind == ProjectionTaskJobResult {
+		required := []string{"schemaVersion", "projectionKind", "disclosure", "messageKey", "status", "code", "privatePayloadWithheld", "factAnswerAllowed", "evidenceAuthority", "taskJob"}
+		if len(fields) != len(required) {
+			return PublicToolResultProjectionV1{}, errors.New("job projection shape is invalid")
+		}
+		for _, key := range required {
+			raw, present := fields[key]
+			if !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				return PublicToolResultProjectionV1{}, errors.New("job projection field is missing or null")
+			}
+		}
+	}
+	if web, present := fields["web"]; present && bytes.Equal(bytes.TrimSpace(web), []byte("null")) {
+		return PublicToolResultProjectionV1{}, errors.New("public web payload cannot be null")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -426,6 +475,7 @@ func PrivateDurableToolResultItemRecordV1(item map[string]any) (map[string]any, 
 	reportAdmissionValue, reportAdmissionPresent := item["hostReportAdmission"]
 	privateProtocolObservedValue, privateProtocolObservedPresent := item["privateProtocolObserved"]
 	caseSourceProofValue, caseSourceProofPresent := item[CaseSourceBindingProofFieldV1]
+	snapshotValue, snapshotPresent := item[ProtectedSnapshotBindingFieldV1]
 	isCaseProjection := rawProjectionErr == nil && rawProjection.ProjectionKind == ProjectionCaseSourceStatus
 	if isCaseProjection {
 		if !caseSourceProofPresent || validateCaseSourceBindingProofForItemV1(rawProjection, item) != nil {
@@ -435,7 +485,7 @@ func PrivateDurableToolResultItemRecordV1(item map[string]any) (map[string]any, 
 		return projected, false
 	}
 	if contextDigest == "" && grantID == "" && contextEpoch == 0 && !markerPresent && !reportAdmissionPresent &&
-		!privateProtocolObservedPresent && !caseSourceProofPresent {
+		!privateProtocolObservedPresent && !caseSourceProofPresent && !snapshotPresent {
 		return projected, true
 	}
 	if !domainsecurity.IsSHA256Hex(contextDigest) || !domainsecurity.IsSHA256Hex(grantID) || contextEpoch == 0 ||
@@ -466,6 +516,15 @@ func PrivateDurableToolResultItemRecordV1(item map[string]any) (map[string]any, 
 			return projected, false
 		}
 		projected["hostReportAdmission"] = HostReportAdmissionRecordV1(admission)
+	}
+	if snapshotPresent {
+		binding, err := ParseProtectedSnapshotBindingV1(snapshotValue)
+		name, kind := publicItemString(projected, "toolName"), publicItemString(projected, "toolKind")
+		if err != nil || name == "" || strings.TrimSpace(name) != name || !utf8.ValidString(name) || len(name) > 256 || strings.ContainsRune(name, 0) || kind == "" ||
+			oneOf(name, "web_fetch", "grep", "glob", "create_goal", "get_goal", "update_goal", "todo_write") && kind != "tool_call" || name == "run_skill" && kind != "skill" {
+			return projected, false
+		}
+		projected[ProtectedSnapshotBindingFieldV1] = ProtectedSnapshotBindingRecordV1(binding)
 	}
 	if privateProtocolObservedPresent {
 		observed, ok := privateProtocolObservedValue.(bool)
@@ -526,7 +585,16 @@ func publicProjectionMatchesItem(projection PublicToolResultProjectionV1, item m
 	if err != nil || status != strings.TrimSpace(publicItemString(item, "status")) {
 		return false
 	}
+	if projection.ProjectionKind == ProjectionWebFetchStatus &&
+		(publicItemString(item, "toolName") != "web_fetch" || publicItemString(item, "toolKind") != "tool_call") {
+		return false
+	}
 	if projection.ProjectionKind == ProjectionMCPDiagnostic && !isError {
+		return false
+	}
+	if projection.ProjectionKind == ProjectionTaskJobResult && (projection.TaskJob == nil ||
+		publicItemString(item, "toolName") != taskJobToolNameV1(projection.TaskJob.Operation) || publicItemString(item, "toolKind") != "command_execution" ||
+		isError || !domainmodel.IsHostToolCallIDV1(publicItemString(item, "callId")) || publicItemString(item, "id") != ToolResultItemIDV1(publicItemString(item, "turnId"), publicItemString(item, "callId"))) {
 		return false
 	}
 	_, caseSourceProofPresent := item[CaseSourceBindingProofFieldV1]
@@ -537,6 +605,302 @@ func publicProjectionMatchesItem(projection PublicToolResultProjectionV1, item m
 		return false
 	}
 	return true
+}
+
+var taskJobPublicIDPatternV1 = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
+
+type TaskJobSummaryV1 struct {
+	SchemaVersion     int    `json:"schemaVersion"`
+	ID                string `json:"id"`
+	Kind              string `json:"kind"`
+	Status            string `json:"status"`
+	Background        bool   `json:"background"`
+	Terminal          bool   `json:"terminal"`
+	OutputWithheld    bool   `json:"outputWithheld"`
+	OutputTrustStatus string `json:"outputTrustStatus"`
+	FactAnswerAllowed bool   `json:"factAnswerAllowed"`
+	EvidenceAuthority bool   `json:"evidenceAuthority"`
+	CanReadOutput     bool   `json:"canReadOutput"`
+	CanContinueParent bool   `json:"canContinueParent"`
+}
+type TaskJobOutputV1 struct {
+	SchemaVersion     int    `json:"schemaVersion"`
+	Availability      string `json:"availability"`
+	JobID             string `json:"jobId"`
+	Status            string `json:"status"`
+	ReasonCode        string `json:"reasonCode"`
+	OutputWithheld    bool   `json:"outputWithheld"`
+	OutputTrustStatus string `json:"outputTrustStatus"`
+	FactAnswerAllowed bool   `json:"factAnswerAllowed"`
+	EvidenceAuthority bool   `json:"evidenceAuthority"`
+	CanReadOutput     bool   `json:"canReadOutput"`
+	CanContinueParent bool   `json:"canContinueParent"`
+}
+type TaskJobListV1 struct {
+	Jobs  []TaskJobSummaryV1 `json:"jobs"`
+	Count int                `json:"count"`
+}
+type TaskJobWaitV1 struct {
+	Jobs []TaskJobSummaryV1 `json:"jobs"`
+}
+type TaskJobKillV1 struct {
+	Job TaskJobSummaryV1 `json:"job"`
+}
+
+// One typed result per operation; no arbitrary result object is retained.
+type TaskJobResultV1 struct {
+	Operation string
+	List      *TaskJobListV1
+	Wait      *TaskJobWaitV1
+	Output    *TaskJobOutputV1
+	Kill      *TaskJobKillV1
+}
+
+func (s *TaskJobSummaryV1) UnmarshalJSON(body []byte) error {
+	type record TaskJobSummaryV1
+	if err := decodeClosedRequiredV1(body, (*record)(s), []string{"schemaVersion", "id", "kind", "status", "background", "terminal", "outputWithheld", "outputTrustStatus", "factAnswerAllowed", "evidenceAuthority", "canReadOutput", "canContinueParent"}, nil); err != nil {
+		return err
+	}
+	return validateTaskJobSummaryV1(*s)
+}
+func (o *TaskJobOutputV1) UnmarshalJSON(body []byte) error {
+	type record TaskJobOutputV1
+	if err := decodeClosedRequiredV1(body, (*record)(o), []string{"schemaVersion", "availability", "jobId", "status", "reasonCode", "outputWithheld", "outputTrustStatus", "factAnswerAllowed", "evidenceAuthority", "canReadOutput", "canContinueParent"}, nil); err != nil {
+		return err
+	}
+	return validateTaskJobOutputV1(*o)
+}
+func (l *TaskJobListV1) UnmarshalJSON(body []byte) error {
+	type record TaskJobListV1
+	return decodeClosedRequiredV1(body, (*record)(l), []string{"jobs", "count"}, nil)
+}
+func (w *TaskJobWaitV1) UnmarshalJSON(body []byte) error {
+	type record TaskJobWaitV1
+	return decodeClosedRequiredV1(body, (*record)(w), []string{"jobs"}, nil)
+}
+func (k *TaskJobKillV1) UnmarshalJSON(body []byte) error {
+	type record TaskJobKillV1
+	return decodeClosedRequiredV1(body, (*record)(k), []string{"job"}, nil)
+}
+func taskJobToolNameV1(operation string) string {
+	switch operation {
+	case "list":
+		return "list_jobs"
+	case "wait":
+		return "wait"
+	case "output":
+		return "bash_output"
+	case "kill":
+		return "kill_shell"
+	}
+	return ""
+}
+func TaskJobOperationV1(toolName string) string {
+	switch toolName {
+	case "list_jobs":
+		return "list"
+	case "wait":
+		return "wait"
+	case "bash_output":
+		return "output"
+	case "kill_shell":
+		return "kill"
+	}
+	return ""
+}
+
+// These are already-normalized wire enums from TaskJobStatusV1Schema and
+// TaskJobKindV1Schema. Producers keep their domain/job normalization; this
+// result boundary rejects arbitrary values without importing the producer
+// domain, whose output filtering publishes through event/toolresult.
+func validTaskJobWireStatusV1(value string) bool {
+	return oneOf(value, "queued", "running", "pause_requested", "paused", "resume_requested", "resuming",
+		"completed", "failed", "aborted", "interrupted", "killed", "canceled", "timeout", "unknown")
+}
+func taskJobWireTerminalV1(value string) bool {
+	return oneOf(value, "completed", "failed", "aborted", "interrupted", "killed", "canceled", "timeout")
+}
+func validateTaskJobSummaryV1(s TaskJobSummaryV1) error {
+	if s.SchemaVersion != 1 || !taskJobPublicIDPatternV1.MatchString(s.ID) ||
+		!oneOf(s.Kind, "background-shell", "subagent", "child-run", "parallel-child-run", "task", "parallel_task", "bash", "unknown") || !validTaskJobWireStatusV1(s.Status) ||
+		s.Terminal != taskJobWireTerminalV1(s.Status) || !s.OutputWithheld || s.OutputTrustStatus != "untrusted_child_output" || s.FactAnswerAllowed || s.EvidenceAuthority || s.CanReadOutput || s.CanContinueParent {
+		return errors.New("task-job summary is invalid")
+	}
+	return nil
+}
+func validateTaskJobOutputV1(o TaskJobOutputV1) error {
+	if o.SchemaVersion != 1 || o.Availability != "withheld" || !taskJobPublicIDPatternV1.MatchString(o.JobID) || !validTaskJobWireStatusV1(o.Status) ||
+		o.ReasonCode != "security_bound_child_output" || !o.OutputWithheld || o.OutputTrustStatus != "untrusted_child_output" || o.FactAnswerAllowed || o.EvidenceAuthority || o.CanReadOutput || o.CanContinueParent {
+		return errors.New("task-job output is invalid")
+	}
+	return nil
+}
+func validateTaskJobResultV1(r TaskJobResultV1) error {
+	if (r.List != nil) != (r.Operation == "list") || (r.Wait != nil) != (r.Operation == "wait") || (r.Output != nil) != (r.Operation == "output") || (r.Kill != nil) != (r.Operation == "kill") || taskJobToolNameV1(r.Operation) == "" {
+		return errors.New("task-job operation/result mismatch")
+	}
+	var jobs []TaskJobSummaryV1
+	if r.List != nil {
+		if r.List.Jobs == nil || r.List.Count != len(r.List.Jobs) {
+			return errors.New("task-job list count mismatch")
+		}
+		jobs = r.List.Jobs
+	}
+	if r.Wait != nil {
+		if r.Wait.Jobs == nil {
+			return errors.New("task-job wait needs a list")
+		}
+		jobs = r.Wait.Jobs
+	}
+	if r.Kill != nil {
+		jobs = []TaskJobSummaryV1{r.Kill.Job}
+	}
+	for _, job := range jobs {
+		if err := validateTaskJobSummaryV1(job); err != nil {
+			return err
+		}
+	}
+	if r.Output != nil {
+		return validateTaskJobOutputV1(*r.Output)
+	}
+	return nil
+}
+func (r TaskJobResultV1) MarshalJSON() ([]byte, error) {
+	if err := validateTaskJobResultV1(r); err != nil {
+		return nil, err
+	}
+	var result any
+	switch r.Operation {
+	case "list":
+		result = r.List
+	case "wait":
+		result = r.Wait
+	case "output":
+		result = r.Output
+	case "kill":
+		result = r.Kill
+	}
+	return json.Marshal(struct {
+		Operation string `json:"operation"`
+		Result    any    `json:"result"`
+	}{r.Operation, result})
+}
+func (r *TaskJobResultV1) UnmarshalJSON(body []byte) error {
+	var envelope struct {
+		Operation string          `json:"operation"`
+		Result    json.RawMessage `json:"result"`
+	}
+	if err := decodeClosedRequiredV1(body, &envelope, []string{"operation", "result"}, nil); err != nil {
+		return err
+	}
+	*r = TaskJobResultV1{Operation: envelope.Operation}
+	var target any
+	switch r.Operation {
+	case "list":
+		r.List = &TaskJobListV1{}
+		target = r.List
+	case "wait":
+		r.Wait = &TaskJobWaitV1{}
+		target = r.Wait
+	case "output":
+		r.Output = &TaskJobOutputV1{}
+		target = r.Output
+	case "kill":
+		r.Kill = &TaskJobKillV1{}
+		target = r.Kill
+	default:
+		return errors.New("unknown task-job operation")
+	}
+	if err := json.Unmarshal(envelope.Result, target); err != nil {
+		return err
+	}
+	return validateTaskJobResultV1(*r)
+}
+func NewTaskJobResultV1(operation string, value any) (*TaskJobResultV1, error) {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return nil, errors.New("task-job producer did not return a closed record")
+	}
+	normalized := map[string]any{}
+	if operation == "list" || operation == "wait" {
+		expected := 1
+		if operation == "list" {
+			expected = 2
+		}
+		if len(record) != expected {
+			return nil, errors.New("unknown task-job list fields")
+		}
+		rows, ok := record["jobs"].([]any)
+		if !ok {
+			return nil, errors.New("task-job producer list missing")
+		}
+		jobs := make([]any, 0, len(rows))
+		for _, raw := range rows {
+			summary, err := normalizeTaskJobProducerSummaryV1(raw)
+			if err != nil {
+				return nil, err
+			}
+			jobs = append(jobs, summary)
+		}
+		normalized["jobs"] = jobs
+		if operation == "list" {
+			count, present := record["count"]
+			if !present {
+				return nil, errors.New("task-job count missing")
+			}
+			normalized["count"] = count
+		}
+	} else if operation == "kill" {
+		if len(record) != 1 {
+			return nil, errors.New("unknown task-job kill fields")
+		}
+		summary, err := normalizeTaskJobProducerSummaryV1(record["job"])
+		if err != nil {
+			return nil, err
+		}
+		normalized["job"] = summary
+	} else if operation == "output" {
+		normalized = record
+	} else {
+		return nil, errors.New("unknown task-job operation")
+	}
+	body, err := json.Marshal(struct {
+		Operation string `json:"operation"`
+		Result    any    `json:"result"`
+	}{operation, normalized})
+	if err != nil {
+		return nil, err
+	}
+	var result TaskJobResultV1
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+func normalizeTaskJobProducerSummaryV1(value any) (map[string]any, error) {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return nil, errors.New("task-job summary is not a record")
+	}
+	copy_ := map[string]any{}
+	for key, value := range record {
+		if key == "active" {
+			if _, ok := value.(bool); !ok {
+				return nil, errors.New("task-job active is not a boolean")
+			}
+			continue
+		}
+		copy_[key] = value
+	}
+	body, err := json.Marshal(copy_)
+	if err != nil {
+		return nil, err
+	}
+	var summary TaskJobSummaryV1
+	if err := json.Unmarshal(body, &summary); err != nil {
+		return nil, err
+	}
+	return copy_, nil
 }
 
 func publicItemString(item map[string]any, key string) string {
@@ -630,8 +994,12 @@ func normalizeCode(code string) string {
 
 func validPublicProjectionCode(kind PublicProjectionKind, code string) bool {
 	switch kind {
+	case ProjectionWebFetchStatus:
+		return oneOf(code, "tool_completed", "tool_failed", "tool_blocked", "tool_cancelled", "tool_timeout")
 	case ProjectionArtifactStatus:
 		return code == "artifact_created"
+	case ProjectionTaskJobResult:
+		return code == "tool_completed"
 	case ProjectionWithheld:
 		return oneOf(code, "tool_output_private", "legacy_output_withheld", "tool_projection_invalid")
 	case ProjectionHostStatus:

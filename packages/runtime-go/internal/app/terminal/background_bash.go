@@ -28,6 +28,8 @@ type BackgroundBashRequest struct {
 }
 
 type BackgroundBashCallbacks struct {
+	CaptureProtectedOutput func(context.Context, domainjob.Record, string, bool) *domainjob.ProtectedOutputSnapshotV1
+
 	OnOutput   func(record domainjob.Record, output string, truncated bool)
 	OnProgress func(record domainjob.Record, status string, diagnostic string)
 }
@@ -171,11 +173,18 @@ func CompleteBackgroundBash(ctx context.Context, runner ports.ShellRunner, jobs 
 	if request.IncludeTimedOut {
 		usage["timedOut"] = status == "timeout"
 	}
+	var protectedOutput *domainjob.ProtectedOutputSnapshotV1
+	if record.SecurityBinding != nil && callbacks.CaptureProtectedOutput != nil {
+		producer := record
+		producer.Status = status
+		protectedOutput = callbacks.CaptureProtectedOutput(context.WithoutCancel(ctx), producer, rawOutputText, truncated)
+	}
 	updated, updateErr := jobs.UpdateChildRun(record.ID, domainjob.UpdateRequest{
-		Status: status,
-		Output: outputText,
-		Error:  errorText,
-		Usage:  usage,
+		Status:                  status,
+		Output:                  outputText,
+		ProtectedOutputSnapshot: protectedOutput,
+		Error:                   errorText,
+		Usage:                   usage,
 	})
 	if updateErr != nil {
 		return record, updateErr

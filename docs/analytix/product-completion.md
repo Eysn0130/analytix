@@ -1,6 +1,6 @@
 # Analytix product completion
 
-Status: Operational routing matrix, 2026-10-02 UTC. Accepted targets remain in
+Status: Operational routing matrix, 2026-10-20 UTC. Accepted targets remain in
 [the spec registry](specs/README.md) and scoped OpenSpec requirements. This page
 records candidate/evidence/gaps, not a reduced denominator or release verdict.
 Delivery order remains in [the execution plan](delivery-execution-plan.md).
@@ -8,28 +8,50 @@ Resume with the [canonical handover](handovers/README.md) and fresh Git state.
 
 ## Current candidate and evidence
 
-The integrated source baseline is main `d469a7406d897a97ca7d74f3dbbb29bf635a6ccf`,
-tree `dff7a7727bd18182ba9f62ad2a51e75b484fd856`, refreshed from GitHub on
-2026-10-02. Its own [Development CI](https://github.com/Eysn0130/analytix/actions/runs/37006119582)
-is 52/52 success and [CodeQL](https://github.com/Eysn0130/analytix/actions/runs/37006118751)
-is 4/4 success. The PR28 c2cd/34-tracked/26-untracked checkpoint is historical;
-[its source record](qa/pr28-host-local-cleaning-successor-2026-09-29.md) retains
-that candidate's limits. Current task-owned changes and their PR must establish
-their own evidence. Four unrelated local dirty files are preserved outside this
-source baseline and are not part of its acceptance.
+Published integration baseline, rechecked on 2026-10-20 UTC: GitHub main
+[`a7a29264586b8f8d17822d771828b4f8e8bd1865`](https://github.com/Eysn0130/analytix/commit/a7a29264586b8f8d17822d771828b4f8e8bd1865),
+after merged [PR66](https://github.com/Eysn0130/analytix/pull/66) and
+[PR67](https://github.com/Eysn0130/analytix/pull/67).
+[Development CI367](https://github.com/Eysn0130/analytix/actions/runs/39338637016)
+completed with 52/52 successful jobs; the same commit's
+[CodeQL run](https://github.com/Eysn0130/analytix/actions/runs/39338636827)
+completed with 4/4 successful checks, for 56/56 successful checks in total.
+These are source CI results for that exact main commit. Canonical dirty files
+and later branch work require their own evidence; source CI does not establish
+complete-product, pixel, installed, live-Provider or release acceptance.
 
-Main now includes the scoped maintenance and page-selection repairs documented
-in [shared regression/source-row evidence](qa/shared-regression-source-row-2026-10-01.md)
-and [account-flow/page evidence](qa/account-flow-fidelity-cost-2026-10-02.md).
-Those records retain their exact source, synthetic/native bounds and failures.
-Full installed/product readiness and a same-model gain remain unestablished.
+Historical baseline: main `d469a7406d897a97ca7d74f3dbbb29bf635a6ccf`, tree
+`dff7a7727bd18182ba9f62ad2a51e75b484fd856`, was refreshed on 2026-10-02. Its
+[Development CI](https://github.com/Eysn0130/analytix/actions/runs/37006119582)
+reported 52/52 success and [CodeQL](https://github.com/Eysn0130/analytix/actions/runs/37006118751)
+4/4 success for that source only. The PR28 c2cd/34-tracked/26-untracked checkpoint
+and [its source record](qa/pr28-host-local-cleaning-successor-2026-09-29.md),
+[shared regression/source-row evidence](qa/shared-regression-source-row-2026-10-01.md)
+and [account-flow/page evidence](qa/account-flow-fidelity-cost-2026-10-02.md)
+remain historical, with their original source, synthetic/native bounds and failures.
+They do not establish current candidate CI, installed readiness or same-model gain.
+
+Historical documentation checkpoint, 2026-10-16: `codex/dsh-native-event-hookup`
+at `7dc52552f968cfc45523647eaa226417972a739a`. The three host-local receipts
+below retain that checkpoint's read and hash checks; this update did not rerun
+their commands or recheck their bytes. Sanitized receipt names and SHA-256 identify the
+recorded inputs without publishing private host paths. These limited results do
+not accept the whole current worktree.
 
 | Capability / stage | Candidate / owner | Evidence | Gap / next validation |
 | --- | --- | --- | --- |
-| Ordinary Core, independent of Funds | Integrated main composition; production Go Core, Electron boundary | Main source CI above; this governance repair adds no behavioral acceptance. Exact installed `7dc07bb` plus corrected `032b8a147` observer has two synthetic K10 runs, normal quit and zero residuals in [its dated record](qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md) | Matched startup attribution and applicable installed/live Provider recovery remain independent. Do not reopen the already closed 7dc quit symptom without new evidence. |
-| Funds import / snapshot / Registry | Integrated Go import/snapshot/Registry owners; dated checkpoint applicability remains bounded | [Current source checkpoint](qa/pr28-host-local-cleaning-successor-2026-09-29.md): expected-predecessor guard, actual owner/store successor and disk reopen, plus 13 dependency packages and runtime selections pass in ordinary / production modes | Archive verification; N06/B16 Final issuance/recovery, complete cleaning/epoch chain, authenticated CAS-loser recovery, and installed import→query→Final→display→restart. Whole-profile rollback remains `UNVERIFIED`. |
+| Ordinary Core, independent of Funds | Production Go Core, Electron boundary; published main above | Published main source CI above; this governance repair adds no native acceptance. Exact installed `7dc07bb` plus corrected `032b8a147` observer has two synthetic K10 runs, normal quit and zero residuals in [its dated record](qa/pr28-n03-7dc07bb-installed-diagnostic-2026-09-27.md) | Matched startup attribution and applicable installed/live Provider recovery remain independent. Do not reopen the already closed 7dc quit symptom without new evidence. |
+| Chat native minimum | One development Electron session with synthetic Provider; public UI observations | `chat-native-original-route-v2/receipt.json`, SHA-256 `d531a5ae2831ef80b3bada27de0a38b255c7ee7979326d9f45fd13c82e5ddb7c`: edit cancel/resend, two centered pills and popovers, tool error, five-row trajectory/public Inspect, model tool-request stream Stop | Partial: does not cover cancellation of an executing tool or the full visual/journey scope below. No installed/live-Provider acceptance. |
+| Word manual formatting/save | One development Electron session; fixed synthetic 17-character ASCII DOCX | `word-read-coordination-native-v1/result.json`, SHA-256 `b253b7a45affb0bfbb20046a62a09a7e343c66a198e7c66d2bea2e7e98d7103c`: real selection, Liberation Sans 18 pt, bold/italic/underline and saved-byte proof; actually loaded surface SHA-256 `e87f4e41fb3b3dccdd75b2f439cd137c5458cfec203f8509dcda8f3825eb0daf` | Partial: final result includes independent saved-style proof after the earlier provisional PARTIAL; not full font/script fidelity, reopen, IME or packaged acceptance. |
+| DSH display retirement | Receipt-bound source candidate; two direct suites and four TSX lint targets | `dsh-display-retirement-2ncmyds9/result.json`, SHA-256 `b2c775886314415e28ec79438b908d807306fe453a02c83ba85c0c4e66cbf2c4`: 72/72 tests and lint pass | Focused source evidence only; no native, typecheck or build run. No transfer of earlier native acceptance to changed display inputs. |
+| Funds import / snapshot / Registry | Integrated Go import/snapshot/Registry owners; dated checkpoint applicability remains bounded | [Historical source checkpoint](qa/pr28-host-local-cleaning-successor-2026-09-29.md): expected-predecessor guard, actual owner/store successor and disk reopen, plus 13 dependency packages and runtime selections pass in ordinary / production modes | Archive verification; N06/B16 Final issuance/recovery, complete cleaning/epoch chain, authenticated CAS-loser recovery, and installed import→query→Final→display→restart. Whole-profile rollback remains `UNVERIFIED`. |
 | Exact facts / privacy / local display | Existing Go/DuckDB, aliases, snapshot, egress and typed continuity owners | [7ad835 projection fidelity](qa/pr28-account-flow-projection-fidelity-2026-09-29.md) has a source-isolated decimal/identity oracle and rejects subject-alias substitution. Earlier synthetic chains retain their own evidence in [N01–N09](qa/pr28-next-execution-2026-09-26.md) | Actual computation and entity-matching truth; current authorization at each effect/outlet, revocation and source-version validity. Raw remains protected-local; aliases and historical facts grant no authority. |
 | Cross-thread context / comparative analysis | Accepted scoped continuity and memory requirements; implementation evidence must be read at its owner | No fresh A/B/C/D pilot, noninferiority result or gain claim | Memory must retain source/scope/version/invalidity and be data rather than instructions or permission. Same-model/task/tool/total-budget pilot needs independent truth, holdout isolation and authorized model execution. |
+
+Unverified seams remain open, not recorded failures: complete initial hero,
+light/dark and narrow-screen pixel geometry; full left/right-region journeys;
+other Office edit/save/reopen; installation/upgrade and formal release. Word real
+system IME awaits its original approval and blocks only that IME seam.
 
 ## Delivery scope
 
@@ -42,9 +64,16 @@ retains P0–P5 and broader accepted capabilities. Reachable code and shipped as
 keep their security and license obligations even when a stage excludes a feature.
 No stage is accepted by this document, no test threshold or CI gate is reduced.
 
+Current UI direction: align DSH chat display with fixed pin `5badb150`, retain
+real editing, and present `Analytix 灵鉴` with its own logo and `预览版` label.
+Office plugins use scoped editing controls without a complete Office Ribbon;
+the old NewDoc entry converges into Word. Next close out the remaining general
+Harness/UI seams above. Later Funds/privacy capability evaluation retains all
+existing requirements without displacing this closeout.
+
 The following rows retain the earlier owner/gap inventory for the original
 complete-product obligations. They are **historical source observations requiring
-fresh verification where applicable**, not complete-product passes on current main.
+fresh verification where applicable**, not complete-product passes on the current candidate.
 The complete prior entry, including each recorded outcome, is in [the dated
 snapshot](qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-product-333).
 
@@ -52,30 +81,30 @@ snapshot](qa/pr28-next-execution-2026-09-26.md#snapshot-c2cd-product-333).
 
 | Accepted scope | Existing owner / required result | Evidence status on this candidate |
 | --- | --- | --- |
-| P0 identity, authority and security | Registry, privacy, public projection, caller review and current CodeQL | Current main CodeQL/source CI pass; complete security/product acceptance is separate, and historical finding mappings are not dismissals. |
-| P1 DOCX editing | Native range/structure guards, edit/export/reopen and non-target visual fidelity | Prior refusal and controls retain their original evidence; installed full fidelity not reverified. |
+| P0 identity, authority and security | Registry, privacy, public projection, caller review and current CodeQL | Published main CodeQL/source CI above; broader security/product acceptance remains unverified, and historical finding mappings are not dismissals. |
+| P1 DOCX editing | Native range/structure guards, edit/export/reopen and non-target visual fidelity | Limited native format/save proof is recorded above; prior refusal/controls retain their original evidence. Full fidelity, export/reopen and installed acceptance remain unverified. |
 | P2 image collections | Stable regions, notes, shared budget, CAS, transforms and trusted pixel/metadata projection | Actual GUI/save/conflict/reopen and non-generate editing remain separate required seams. |
 | P2 Browser and PDF | Guest/document lease, isolated selection, opaque Core reference and actual lifecycle | Historical source/fixed-Electron partial checks do not prove current installed lifecycle. |
 | P3 XLSX/PPT | Real pivots, typed cells/formulas, PPT objects, imported pivot/chart relationships and true Diff | Prior imported-object gap and native no-op/edit/reopen obligations require current verification. |
 | P4 Skills lifecycle | Signed materialization, activation/currentness, archive trust, upgrade/revoke/uninstall/restart | Prior incomplete source and installed archive lifecycle are retained obligations. |
 | P4 one conversation | Controlled tools, bounded retrieval, compaction, terminal and semantic history recovery | Preserve one production Core and existing UI; end-to-end authority/recovery remains an independent seam. |
-| P0 Rust correctness | Real `analysis_compute` query/results under its admitted controls | PR38 postmain pagination failure and PR39 repair retain their own evidence; current main Rust CI passes. No broader native/model claim is inferred. |
+| P0 Rust correctness | Real `analysis_compute` query/results under its admitted controls | PR38 postmain pagination failure and PR39 repair retain their own evidence; the historical d469 source CI result remains candidate-bound. No broader native/model claim is inferred. |
 | P5 storage/install | Protected Provider Save, restart/history, upgrade/data compatibility, cleanup | Earlier candidate-specific proofs do not establish this candidate's installed journey. |
-| P5 integration/release | Exact source, CI/review/main, resources/licensing, signing/notarization and release qualification | Current main integration and source CI verified above; resources/licensing, installed and public-release qualification remain separate. |
+| P5 integration/release | Exact source, CI/review/main, resources/licensing, signing/notarization and release qualification | PR66/67 main integration and exact-main source CI are recorded above; resources/licensing, installed and public-release qualification remain separate. |
 
 ## Current acceptance exits
 
 | Exit | Status at this routing checkpoint |
 | --- | --- |
-| SourceReady | Integrated main source CI verified; complete-product SourceReady is not established by this document repair. |
-| PrivateCandidateReady | Not established for the current candidate. 7dc installed evidence is bounded, synthetic and nonpublishable; it does not qualify current B1. |
-| MergeReady | The inherited source is already integrated on main. New task candidates require their own current CI/review; this page grants no merge permission. |
+| SourceReady | Published main source CI passed; complete-product SourceReady is not established by source CI and focused receipts. |
+| PrivateCandidateReady | Not established for published main. Historical `7dc07bb` installed evidence is bounded, synthetic and nonpublishable; it does not qualify this candidate. |
+| MergeReady | PR66/67 are merged. Any next branch needs its own current CI/review and applicable acceptance. This page grants no merge permission. |
 | PublicMacReleaseReady | Not established; no new Developer ID, notarization, release qualification or publication is claimed. |
 
-Current main integration is verified at the SHA above. Byte counts, focused tests, synthetic
-Provider runs, package integrity, installed acceptance and public-release
-qualification remain separate. Old evidence may be reused only at its unchanged
-source/environment/contract seam, never by relabeling the artifact.
+Published main, canonical dirty files and later branches are distinct candidates. Byte counts,
+focused tests, synthetic Provider runs, package integrity, installed acceptance
+and public-release qualification remain separate. Old evidence may be reused only
+at its unchanged source/environment/contract seam, never by relabeling the artifact.
 
 ## Historical entry anchors
 

@@ -6,7 +6,7 @@
     "Main brand assets are copied from the approved analytix-logo source folder.",
     "App icon PNGs are generated from the approved analytix-exact-app-icon exports with the connected light outer canvas made transparent and the visible icon body scaled to the normal dock/taskbar/launcher footprint.",
     "CodexDesktop-Rebuild was inspected only for icon sizing, tray template strategy, empty-state hierarchy, shadow, border, and motion references. No Codex logo assets are shipped from this manifest.",
-    "Legacy mascot/cameo art remains in src/asset/img with cameo/mascot names and is not the product identity source."
+    "Bundled legacy mascot/cameo assets in src/asset/img are retired; their provenance remains recorded in Git history and docs/analytix/upstreams/code-reuse-provenance.md."
   ],
   "assets": [
     {

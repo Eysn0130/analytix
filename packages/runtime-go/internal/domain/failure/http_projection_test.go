@@ -139,3 +139,37 @@ func TestHTTPFailureProjectionRejectsMalformedNewTurnRequiredBoundary(t *testing
 		})
 	}
 }
+
+func TestHTTPFailureProjectionKeepsOnlyClosedQuestion409CodesV1(t *testing.T) {
+	const sentinel = "PRIVATE_SYNTHETIC_ANSWER /private/synthetic.csv 6222021234567890"
+	for code, message := range map[string]string{
+		"timed_wait_unavailable": "The timed Question foreground wait is unavailable.",
+		"late_reply_too_large":   "The complete Question reply exceeds the current turn resource capacity. Original answers remain saved privately; edit and submit a new attempt.",
+		"late_reply_unavailable": "The late Question reply is unavailable under current host authority.",
+	} {
+		body := map[string]any{"code": code, "message": sentinel, "cause": sentinel, "inputId": sentinel, "threadId": sentinel, "turnId": sentinel, "answers": sentinel, "details": sentinel}
+		projected := ProjectHTTPFailure(409, body)
+		encoded, _ := json.Marshal(projected)
+		if len(projected) != 2 || projected["code"] != code || projected["message"] != message || strings.Contains(string(encoded), sentinel) {
+			t.Fatalf("closed Question failure contract drifted: code=%s", code)
+		}
+		for status, expected := range map[int]string{400: "validation_error", 403: CodeForbidden, 404: CodeNotFound, 500: CodeInternalError, 503: CodeInternalError} {
+			projected := ProjectHTTPFailure(status, body)
+			encoded, _ := json.Marshal(projected)
+			if len(projected) != 2 || projected["code"] != expected || strings.Contains(string(encoded), sentinel) {
+				t.Fatalf("Question code survived wrong status or leaked a field: status=%d code=%s", status, code)
+			}
+		}
+	}
+}
+
+func TestHTTPFailureProjectionKeepsOnlyClosedForkBoundary409(t *testing.T) {
+	body := map[string]any{"code": "fork_boundary_unavailable", "message": "PRIVATE_HISTORY", "cause": "PRIVATE_HISTORY", "endSeq": 13, "turnId": "PRIVATE_HISTORY"}
+	for status, code := range map[int]string{409: "fork_boundary_unavailable", 400: "validation_error", 403: CodeForbidden, 404: CodeNotFound, 500: CodeInternalError, 503: CodeInternalError} {
+		projected := ProjectHTTPFailure(status, body)
+		encoded, _ := json.Marshal(projected)
+		if len(projected) != 2 || projected["code"] != code || strings.Contains(string(encoded), "PRIVATE_HISTORY") {
+			t.Fatal("Fork failure code escaped status or content closure")
+		}
+	}
+}

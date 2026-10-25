@@ -8,6 +8,13 @@ import { ImageGenerationSettingsSection } from './settings-section-image-generat
 const labels: Record<string, string> = {
   back: 'Back',
   general: 'General',
+  providers: 'Providers',
+  speechToText: 'Speech to text',
+  settingsTabGeneral: 'General',
+  settingsTabModels: 'Models',
+  settingsTabWorkspace: 'Workspace',
+  settingsTabTools: 'Tools & permissions',
+  settingsSectionLabel: 'Settings section',
   write: 'Write',
   agents: 'AI assistant',
   keyboardShortcuts: 'Keyboard shortcuts',
@@ -68,7 +75,7 @@ describe('ImageGenerationSettingsSection', () => {
     expect(html).toContain('value="240000"')
   })
 
-  it('places the image generation tab between Write and AI assistant', () => {
+  it('selects image generation alongside Providers and transcription in Models', () => {
     const html = renderToStaticMarkup(createElement(SettingsSidebar, {
       category: 'imageGeneration',
       goBack: () => undefined,
@@ -76,11 +83,12 @@ describe('ImageGenerationSettingsSection', () => {
       t
     }))
 
-    const writeIndex = html.indexOf('Write')
-    const imageIndex = html.indexOf('Image generation')
-    const agentsIndex = html.indexOf('AI assistant')
-    expect(writeIndex).toBeGreaterThanOrEqual(0)
-    expect(imageIndex).toBeGreaterThan(writeIndex)
-    expect(agentsIndex).toBeGreaterThan(imageIndex)
+    expect(html.match(/<button[^>]*aria-selected="true"[^>]*>([^<]*)<\/button>/)?.[1]).toBe('Models')
+    expect([...html.matchAll(/<option value="([^"]+)"/g)].map(match => match[1])).toEqual([
+      'providers', 'imageGeneration', 'speechToText'
+    ])
+    expect(html.match(/<option[^>]*selected=""[^>]*>([^<]*)<\/option>/)?.[1]).toBe('Image generation')
+    expect(html).toContain('Providers')
+    expect(html).toContain('Speech to text')
   })
 })

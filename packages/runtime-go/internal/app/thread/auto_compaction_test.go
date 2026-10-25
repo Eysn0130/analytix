@@ -1,6 +1,7 @@
 package thread
 
 import (
+	controlapp "analytix.local/runtime-go/internal/app/control"
 	"context"
 	"encoding/json"
 	"strings"
@@ -71,14 +72,22 @@ func TestAutomaticCompactionRunsOnceAndRecordsAutoContinuation(t *testing.T) {
 	}}
 	var transition *compactionTransitionStub
 	service := NewService(Dependencies{
+		SummarizeCompaction: summaryForCompactionTest, ProjectCompactionHistory: projectedCompactionHistoryForTest,
 		Repository: repo, WorkspaceReader: mutationWorkspaceReaderStub{},
 		BeginTransition: func(_ context.Context, target domainsecurity.TurnSecurityContext) (CompactionTransition, error) {
 			transition = &compactionTransitionStub{target: target}
 			return transition, nil
 		},
 	})
+	controller := controlapp.NewController(nil)
+	witness, release, err := controller.PrepareForegroundWithWitness(context.Background(), current.ThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
 	result, err := service.AutoCompactBeforeTurnV1(context.Background(), AutoCompactionInputV1{
-		ThreadID: current.ThreadID, Prompt: "continue", ContextWindowTokens: 20_000, MainThread: true,
+		Reservation: witness,
+		ThreadID:    current.ThreadID, Prompt: "continue", ContextWindowTokens: 20_000, MainThread: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +107,7 @@ func TestAutomaticCompactionRunsOnceAndRecordsAutoContinuation(t *testing.T) {
 	}
 	projectedItem, ok := projectedThreadItem(repo.thread, stringField(compactionTurn, "id"), stringField(compactionItem, "id"))
 	if !ok {
-		t.Fatalf("automatic V4 compaction item did not survive the closed ordinary projection")
+		t.Fatalf("automatic V5 compaction item did not survive the closed ordinary projection")
 	}
 	if _, err := threaddomain.ParseTaskContinuationSnapshotV1(projectedItem["taskContinuation"]); err != nil {
 		t.Fatalf("projected automatic continuation is invalid: %#v err=%v", projectedItem, err)

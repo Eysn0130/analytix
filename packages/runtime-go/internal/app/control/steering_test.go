@@ -304,6 +304,19 @@ func TestBuildSteeringEntryKeepsExplicitClientID(t *testing.T) {
 	}
 }
 
+func TestTurnSteeredEventRecordsOnlyActualInertAdmission(t *testing.T) {
+	entry := map[string]any{"id": "steer", "clientUserMessageId": "client", "text": "synthetic input", "admittedAt": "2026-10-09T00:00:00Z", "status": "pending", "contextDigest": "private", "executionGrantId": "private", "authority": map[string]any{"signature": "private"}}
+	event := BuildTurnSteeredEvent(TurnSteeredEventInput{ThreadID: "thread", TurnID: "turn", ClientUserMessageID: "client", Text: "synthetic input", Entry: entry})
+	seed := event["steeringEntry"].(map[string]any)
+	if seed["admittedAt"] != entry["admittedAt"] || seed["contextDigest"] != nil || seed["executionGrantId"] != nil || seed["authority"] != nil {
+		t.Fatal("admission producer did not preserve inert bytes and remove authority")
+	}
+	seed["text"] = "changed"
+	if entry["text"] != "synthetic input" {
+		t.Fatal("event seed aliased actual admission")
+	}
+}
+
 func TestTurnSteeredEventAndAcceptedResponse(t *testing.T) {
 	event := BuildTurnSteeredEvent(TurnSteeredEventInput{
 		ThreadID:            " thread ",

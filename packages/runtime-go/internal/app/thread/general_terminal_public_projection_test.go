@@ -216,6 +216,7 @@ func canonicalGeneralTerminalPublicFixture(
 	t *testing.T,
 	status string,
 	reason string,
+	endReasons ...*domainterminal.EndReason,
 ) (map[string]any, []map[string]any, string) {
 	t.Helper()
 	context, err := testsecurity.GeneralExecutionContextV2(domainsecurity.TurnSecurityContextInput{
@@ -281,6 +282,9 @@ func canonicalGeneralTerminalPublicFixture(
 		terminalEvent["cancelled"] = true
 		terminalEvent["cancelledPendingGates"] = 2
 	}
+	if len(endReasons) > 0 {
+		terminalEvent["endReason"] = domainterminal.EndReasonMap(endReasons[0])
+	}
 	commit, err := appturn.BuildGeneralTerminalPublicationCommitForEventsV1(
 		context, binding, itemEvent, usageEvent, terminalEvent, committedAt, true,
 	)
@@ -316,4 +320,34 @@ func canonicalGeneralTerminalPublicFixture(
 		t.Fatal(err)
 	}
 	return thread, events, sentinel
+}
+
+func TestOutputCapHistoryComesOnlyFromExactCommittedTerminal(t *testing.T) {
+	thread, events, _ := canonicalGeneralTerminalPublicFixture(t, "completed", "success", &domainterminal.EndReason{Kind: domainterminal.EndReasonMaxTokens})
+	projected, err := ProjectPublicThread(thread)
+	if err != nil || projected["turns"].([]any)[0].(map[string]any)["endReason"] == nil {
+		t.Fatal("canonical cap history missing")
+	}
+	terminal := events[len(events)-1]
+	publicEvent, visible, err := ProjectPublicThreadEvent("thread-public-terminal", thread, terminal)
+	if err != nil || !visible || publicEvent["endReason"] == nil {
+		t.Fatalf("committed cap lost at public event projection: %#v %v", publicEvent, err)
+	}
+	tampered := contracts.CloneMap(terminal)
+	delete(tampered, "endReason")
+	if publicEvent, visible, err := ProjectPublicThreadEvent("thread-public-terminal", thread, tampered); err != nil || visible || publicEvent != nil {
+		t.Fatal("metadata-stripped terminal escaped its outbox digest")
+	}
+	legacy, _, _ := canonicalGeneralTerminalPublicFixture(t, "completed", "success")
+	legacy["turns"].([]any)[0].(map[string]any)["endReason"] = map[string]any{"kind": "max-tokens"}
+	projected, err = ProjectPublicThread(legacy)
+	if err != nil || projected["turns"].([]any)[0].(map[string]any)["endReason"] != nil {
+		t.Fatal("raw turn field invented historical cap")
+	}
+	unboundThread := map[string]any{"id": "thread-unbound-cap", "turns": []any{}}
+	unbound := map[string]any{"kind": "turn_completed", "threadId": "thread-unbound-cap", "turnId": "turn-unbound-cap", "status": "completed", "endReason": map[string]any{"kind": "max-tokens"}}
+	publicEvent, visible, err = ProjectPublicThreadEvent("thread-unbound-cap", unboundThread, unbound)
+	if err != nil || (visible && publicEvent["endReason"] != nil) {
+		t.Fatal("unbound event invented historical cap")
+	}
 }

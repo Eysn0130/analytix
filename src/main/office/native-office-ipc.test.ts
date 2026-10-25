@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 const state = vi.hoisted(() => ({
   packaged: false, handlers: new Map<string, (...args: any[]) => any>(),
   lifecycle: new Map<string, (...args: any[]) => void>(),
-  freezeAnnotationInput: vi.fn(), hasPendingAnnotations: vi.fn(), flushAnnotations: vi.fn(), request: vi.fn(), getView: vi.fn(), destroy: vi.fn(), create: vi.fn(), dialog: vi.fn(), picker: vi.fn(), quit: vi.fn(), menu: vi.fn(), popup: vi.fn()
+  pointerActions:vi.fn(), freezeAnnotationInput: vi.fn(), hasPendingAnnotations: vi.fn(), flushAnnotations: vi.fn(), openPresent: vi.fn(), request: vi.fn(), getView: vi.fn(), destroy: vi.fn(), create: vi.fn(), dialog: vi.fn(), picker: vi.fn(), quit: vi.fn(), menu: vi.fn(), popup: vi.fn()
 }))
 vi.mock('electron', () => ({
   app: { get isPackaged() { return state.packaged }, getAppPath: () => '/source', getLocale: () => 'en',
@@ -13,11 +13,13 @@ vi.mock('electron', () => ({
 }))
 vi.mock('./native-office-controller', () => ({ createNativeOfficeController: (...args: unknown[]) => {
   state.create(...args)
-  return { freezeAnnotationInput:state.freezeAnnotationInput, hasPendingAnnotations:state.hasPendingAnnotations, flushAnnotations:state.flushAnnotations, request: state.request, getView: state.getView, getViews: () => state.getView() ? [state.getView()] : [], saveAll: state.request, restoreVisibility: vi.fn(), destroy: state.destroy }
+  return { pointerActions:state.pointerActions, freezeAnnotationInput:state.freezeAnnotationInput, hasPendingAnnotations:state.hasPendingAnnotations, flushAnnotations:state.flushAnnotations, request: state.request, openPresent: state.openPresent, getView: state.getView, getViews: () => state.getView() ? [state.getView()] : [], saveAll: state.request, restoreVisibility: vi.fn(), destroy: state.destroy }
 } }))
 import { createWriteShutdownCoordinator } from '../write-shutdown'
 import { createOfficePrivateAdmissionProvider, type OfficePrivateAdmission } from './office-private-admission'
 import { registerNativeOfficeIpc, prepareNativeOfficeQuit, cancelNativeOfficeQuit, waitForNativeOfficeQuitTeardown } from './native-office-ipc'
+vi.mock('../logger', () => ({ logNativeOfficeFailure: vi.fn() }))
+import { logNativeOfficeFailure } from '../logger'
 beforeEach(() => {
   vi.clearAllMocks(); state.packaged = false; state.handlers.clear(); state.lifecycle.clear()
   state.request.mockResolvedValue({ ok: true, view: null }); state.getView.mockReturnValue(null)
@@ -26,11 +28,11 @@ beforeEach(() => {
   state.menu.mockReturnValue({ popup: state.popup })
 })
 afterEach(()=>vi.useRealTimers())
-function setup(privateAdmission?:()=>Promise<OfficePrivateAdmission>) {
+function setup(privateAdmission?:()=>Promise<OfficePrivateAdmission>, resolvePresent?:Parameters<typeof registerNativeOfficeIpc>[3]) {
   const main = Object.assign(new EventEmitter(), { isDestroyed: () => false, close: vi.fn(),
     webContents: Object.assign(new EventEmitter(), { mainFrame: {}, send: vi.fn(), isDestroyed: () => false, isLoadingMainFrame: () => false, setWindowOpenHandler: vi.fn() }) })
   let current: typeof main | null = main
-  registerNativeOfficeIpc(() => current as any, vi.fn(), privateAdmission)
+  registerNativeOfficeIpc(() => current as any, vi.fn(), privateAdmission,resolvePresent)
   const event = { sender: main.webContents, senderFrame: main.webContents.mainFrame }
   const shutdown = createWriteShutdownCoordinator({
     ipc: { handle: (name: string, handler: (...args: any[]) => any) => { state.handlers.set(name, handler) } } as any,
@@ -74,7 +76,7 @@ it('rejects invalid picker intent, foreign frames, wrong file kinds and late pri
   expect(await h.pick({ kind: 'docx', workspace: 'relative' })).toEqual({ ok: false, error: 'invalid_request' })
   expect(await h.pick(undefined, { sender: {}, senderFrame: {} })).toEqual({ ok: false, error: 'unavailable' })
   state.packaged = true
-  expect(await h.pick()).toEqual({ ok: false, error: 'unavailable' })
+  expect(await h.pick({kind:'xlsx',workspace:'/workspace'})).toEqual({ ok: false, error: 'unavailable' })
   expect(state.picker).not.toHaveBeenCalled()
   state.packaged = false
   for (const paths of [['/workspace/example.xlsx'], ['/workspace/a.docx', '/workspace/b.docx'], ['relative.docx']]) {
@@ -350,13 +352,13 @@ it('packaged Office accepts current Main-only Core admission without reading the
   expect(await h.pick()).toEqual({ok:true,path:null})
   transport.mockResolvedValue({ok:false,status:503,body:JSON.stringify({ok:false,code:'unavailable'})})
   expect(await h.invoke()).toMatchObject({ok:false,error:'unavailable'})
-  expect(await h.pick()).toMatchObject({ok:false,error:'unavailable'})
+  expect(await h.pick({kind:'xlsx',workspace:'/workspace'})).toMatchObject({ok:false,error:'unavailable'})
   expect(state.request).toHaveBeenCalledOnce();expect(state.picker).toHaveBeenCalledOnce()
 })
 it('structurally forged tokens cannot bypass the packaged guard',async()=>{
   const h=setup(async()=>({root:'/private',qualificationDigest:'a'.repeat(64)} as unknown as OfficePrivateAdmission));state.packaged=true
   expect(await h.invoke()).toMatchObject({ok:false,error:'unavailable'})
-  expect(await h.pick()).toMatchObject({ok:false,error:'unavailable'})
+  expect(await h.pick({kind:'xlsx',workspace:'/workspace'})).toMatchObject({ok:false,error:'unavailable'})
   expect(state.create).not.toHaveBeenCalled();expect(state.picker).not.toHaveBeenCalled()
 })
 it('an admission response arriving after the owner frame changes cannot create a controller',async()=>{
@@ -389,4 +391,286 @@ it('an admitted controller records the last annotation synchronously before free
   await vi.waitFor(()=>expect(h.main.close).toHaveBeenCalledOnce())
   h.replace();expect(await h.invoke(h.event,request)).toMatchObject({ok:false,error:'unavailable'})
   expect(state.request.mock.calls.filter(([input])=>input.action==='annotationSave')).toHaveLength(1)
+})
+
+it('resolves selector-only Present Office privately and clears its bytes after the controller opens', async () => {
+  const selector = {threadId:'thread-a',turnId:'turn-a',callId:'call_host_'+'a'.repeat(64),resultItemId:'item_result_'+'b'.repeat(64),viewId:'11111111-1111-4111-8111-111111111111',snapshotDigest:'c'.repeat(64),index:0}
+  const bytes = Buffer.from([80,75,3,4,0]), cap = {bytes,path:'/sealed/actual.docx',workspaceRoot:'/sealed',kind:'docx',selector,
+    digest:'d'.repeat(64),size:bytes.length,mtimeMs:1,truncated:false,signal:new AbortController().signal,isCurrent:() => true,guard:async () => true}
+  const resolve = vi.fn(async () => cap as any), h = setup(undefined,resolve)
+  const request = {action:'openPresent',protectedPresent:selector,bounds:{x:0,y:0,width:800,height:600}}
+  state.openPresent.mockImplementationOnce(async (input,snapshot) => {expect(input).toEqual(request);expect(snapshot).toBe(cap);expect(bytes[0]).toBe(80);return {ok:true,view:null}})
+  expect(await h.invoke(h.event,request)).toEqual({ok:true,view:null})
+  expect(resolve).toHaveBeenCalledWith(h.event,selector);expect(state.request).not.toHaveBeenCalled()
+  expect(bytes.every(value => value === 0)).toBe(true)
+  await h.invoke(h.event,{...request,path:'/forged.docx'});expect(resolve).toHaveBeenCalledTimes(1)
+  expect(await h.invoke({sender:{},senderFrame:{}} as any,request)).toMatchObject({ok:false});expect(resolve).toHaveBeenCalledTimes(1)
+})
+it('does not expose bytes when a Present cap completes after native owner replacement', async () => {
+  const selector = {threadId:'thread-a',turnId:'turn-a',callId:'call_host_'+'a'.repeat(64),resultItemId:'item_result_'+'b'.repeat(64),viewId:'11111111-1111-4111-8111-111111111111',snapshotDigest:'c'.repeat(64),index:0}
+  let finish!: (value:any) => void
+  const h = setup(undefined,() => new Promise(resolve => {finish = resolve}))
+  const pending = h.invoke(h.event,{action:'openPresent',protectedPresent:selector,bounds:{x:0,y:0,width:800,height:600}})
+  await vi.waitFor(() => expect(finish).toBeDefined());h.main.webContents.mainFrame = {}
+  const bytes = Buffer.from([80,75,3,4]);finish({bytes})
+  expect(await pending).toMatchObject({ok:false,view:null});expect(bytes.every(value => value === 0)).toBe(true)
+  expect(state.openPresent).not.toHaveBeenCalled()
+})
+
+it('observes admission denial only for an open request', async () => {
+  const h = setup(async () => { throw Error('/private/admission-sentinel') })
+  state.packaged = true
+  expect(await h.invoke(h.event, { action: 'open', workspace: '/workspace', path: 'report.docx', bounds: { x: 0, y: 0, width: 800, height: 600 } })).toMatchObject({ ok: false })
+  expect(logNativeOfficeFailure).toHaveBeenCalledExactlyOnceWith('ipc_admission', 'unavailable', false)
+  expect(state.create).not.toHaveBeenCalled()
+  expect(JSON.stringify(vi.mocked(logNativeOfficeFailure).mock.calls)).not.toContain('/private/admission-sentinel')
+})
+it.each(['missing', 'throwing'] as const)('observes %s protected resolution without changing its result', async mode => {
+  const secret = '/private/present-resolution-sentinel'
+  const h = setup(undefined, async () => { if (mode === 'throwing') throw Error(secret); return null })
+  const selector = { threadId: 'thread-a', turnId: 'turn-a', callId: 'call_host_' + 'a'.repeat(64), resultItemId: 'item_result_' + 'b'.repeat(64), viewId: '11111111-1111-4111-8111-111111111111', snapshotDigest: 'c'.repeat(64), index: 0 }
+  const pending = h.invoke(h.event, { action: 'openPresent', protectedPresent: selector, bounds: { x: 0, y: 0, width: 800, height: 600 } })
+  if (mode === 'throwing') await expect(pending).rejects.toThrow(secret)
+  else expect(await pending).toMatchObject({ ok: false, view: null, error: 'unavailable' })
+  expect(logNativeOfficeFailure).toHaveBeenCalledExactlyOnceWith('ipc_resolve_present', mode === 'throwing' ? 'unexpected' : 'unavailable', true)
+  expect(JSON.stringify(vi.mocked(logNativeOfficeFailure).mock.calls)).not.toContain(secret)
+  expect(state.openPresent).not.toHaveBeenCalled()
+})
+
+it('routes pointer menus only through the DOCX controller range lease and retains owner/frame cancellation',async()=>{
+  const h=setup();await h.invoke()
+  const view={objectId:'a'.repeat(64),revision:'b'.repeat(64),changeSequence:0,kind:'docx'}
+  const payload={objectId:view.objectId,revision:view.revision,expectedChangeSequence:0,pointer:{interactionId:'interaction_id',selectionToken:'selection_token'},actions:[{id:'quote',label:'Quote',enabled:true}]}
+  state.getView.mockReturnValue(view);state.pointerActions.mockResolvedValue('quote')
+  const menu=(request:any=payload)=>state.handlers.get('office:action-menu')!(h.event,request)
+  expect(await menu()).toEqual({actionId:'quote'});expect(state.pointerActions).toHaveBeenCalledWith(payload);expect(state.menu).not.toHaveBeenCalled()
+  for(const next of [{...view,kind:'xlsx'},{...view,protectedPresent:{}}]){state.getView.mockReturnValue(next);expect(await menu()).toEqual({actionId:null})}
+  expect(state.pointerActions).toHaveBeenCalledTimes(1)
+  state.getView.mockReturnValue(view)
+  state.pointerActions.mockImplementation(async()=>{h.main.webContents.mainFrame={};return 'quote'})
+  expect(await menu()).toEqual({actionId:null})
+})
+
+
+it('packaged Word creation reaches only the Core controller without admitting native assets', async () => {
+  const admit = vi.fn(async (): Promise<OfficePrivateAdmission> => { throw Error('synthetic assets unavailable') })
+  const h = setup(admit); state.packaged = true
+  const request = { action: 'create', threadId: 'thread-word', operationId: 'create_operation', fileName: 'report.docx', bounds: { x: 0, y: 0, width: 800, height: 600 } }
+  const receipt = { operationId: request.operationId, workspace: '/workspace', path: '/workspace/report.docx', revision: 'a'.repeat(64), kind: 'docx', byteSize: 7, savedAt: '2026-10-15T00:00:00Z' }
+  state.request.mockResolvedValueOnce({ ok: true, view: null, creation: receipt })
+  expect(await h.invoke(h.event, request)).toEqual({ ok: true, view: null, creation: receipt })
+  expect(state.create).toHaveBeenCalledOnce(); expect(state.request).toHaveBeenCalledExactlyOnceWith(request)
+  expect(admit).not.toHaveBeenCalled(); expect(state.openPresent).not.toHaveBeenCalled()
+  expect(h.main.webContents.send).not.toHaveBeenCalledWith('office:changed', expect.anything())
+})
+
+it('a creation receipt after revoked delivery cannot reattach old views or restore status access', async () => {
+  const h = setup(); await h.invoke()
+  const onChange = state.create.mock.calls[0][0].onChange
+  h.main.webContents.emit('did-start-navigation', {}, 'analytix://app', false, true)
+  const request = { action: 'create', threadId: 'thread-word', operationId: 'create_operation', fileName: 'report.docx', bounds: { x: 0, y: 0, width: 800, height: 600 } }
+  const receipt = { operationId: request.operationId, workspace: '/workspace', path: '/workspace/report.docx', revision: 'a'.repeat(64), kind: 'docx', byteSize: 7, savedAt: '2026-10-15T00:00:00Z' }
+  const oldView = { path: '/workspace/retained.docx', dirty: false }
+  state.request.mockClear()
+  state.request.mockImplementationOnce(async () => { onChange(oldView); return { ok: true, view: null, creation: receipt } })
+  expect(await h.invoke(h.event, request)).toEqual({ ok: true, view: null, creation: receipt })
+  onChange(oldView)
+  expect(await h.invoke()).toEqual({ ok: false, view: null, error: 'unavailable' })
+  expect(state.request).toHaveBeenCalledExactlyOnceWith(request)
+  expect(state.create).toHaveBeenCalledOnce(); expect(state.destroy).not.toHaveBeenCalled()
+  expect(h.main.webContents.send).not.toHaveBeenCalledWith('office:changed', expect.anything())
+  expect(h.main.webContents.listenerCount('did-start-navigation')).toBe(0)
+  expect(h.main.webContents.listenerCount('render-process-gone')).toBe(0)
+  expect(h.main.webContents.listenerCount('destroyed')).toBe(0)
+})
+
+it('a clean active manual transaction still requires the existing quit decision and cancellation retains its owner', async () => {
+  const h = setup(); await h.invoke()
+  const view = { objectId: 'a'.repeat(64), revision: 'b'.repeat(64), status: 'ready', dirty: false, editing: true, changeSequence: 0,
+    manual: { version: 2, origin: 'manual', changeId: 'c'.repeat(64), baseRevision: 'b'.repeat(64), generation: 1, frozen: false } }
+  state.getView.mockReturnValue(view); state.dialog.mockResolvedValue({ response: 2 })
+  expect(await prepareNativeOfficeQuit(h.main as any)).toBe(false)
+  expect(state.dialog).toHaveBeenCalledExactlyOnceWith(h.main, expect.objectContaining({
+    buttons: ['重试后退出', '放弃工作副本并退出', '取消'], defaultId: 2, cancelId: 2
+  }))
+  expect(state.request).toHaveBeenLastCalledWith({ action: 'hide' })
+  expect(state.request.mock.calls.some(([request]) => request.action === 'close')).toBe(false)
+  expect(state.freezeAnnotationInput.mock.calls).toEqual([[true], [false]])
+  expect(state.getView()).toBe(view); expect(state.destroy).not.toHaveBeenCalled()
+  expect(h.main.close).not.toHaveBeenCalled(); expect(state.quit).not.toHaveBeenCalled()
+})
+
+it('manual discard uncertainty blocks quit and retains the owner until the same explicit close succeeds', async () => {
+  const h = setup(); await h.invoke()
+  const view = { objectId: 'a'.repeat(64), revision: 'b'.repeat(64), status: 'ready', dirty: false, editing: true, changeSequence: 0,
+    manual: { version: 2, origin: 'manual', changeId: 'c'.repeat(64), baseRevision: 'b'.repeat(64), generation: 1, frozen: false } }
+  state.getView.mockReturnValue(view); state.dialog.mockResolvedValue({ response: 1 })
+  let closeAttempts = 0
+  state.request.mockImplementation(async request => {
+    if (request.action !== 'close') return { ok: true, view }
+    if (++closeAttempts === 1) return { ok: false, view, error: 'unknown' }
+    state.getView.mockReturnValue(null)
+    return { ok: true, view: null }
+  })
+  const close = { action: 'close', objectId: view.objectId, discard: true }
+  expect(await prepareNativeOfficeQuit(h.main as any)).toBe(false)
+  expect(state.request).toHaveBeenLastCalledWith(close)
+  expect(state.getView()).toBe(view); expect(state.create).toHaveBeenCalledOnce()
+  expect(state.freezeAnnotationInput.mock.calls).toEqual([[true], [false]])
+  expect(state.destroy).not.toHaveBeenCalled(); expect(h.main.close).not.toHaveBeenCalled(); expect(state.quit).not.toHaveBeenCalled()
+  expect(await prepareNativeOfficeQuit(h.main as any)).toBe(true)
+  expect(state.request.mock.calls.filter(([request]) => request.action === 'close').map(([request]) => request)).toEqual([close, close])
+  expect(state.getView()).toBeNull(); expect(state.dialog).toHaveBeenCalledTimes(2)
+  expect(state.freezeAnnotationInput.mock.calls).toEqual([[true], [false], [true]])
+  expect(state.destroy).not.toHaveBeenCalled()
+})
+
+const ipcPointerFormats = [
+  { kind: 'font-family', value: 'Noto Sans CJK SC' }, { kind: 'font-size', value: 16.5 },
+  { kind: 'bold', value: true }, { kind: 'italic', value: false }, { kind: 'underline', value: true }
+] as const
+async function formattingPointerMenu() {
+  const h = setup(); await h.invoke()
+  const rangeLease = { generation: 1, sequence: 0, token: 'selection_token' }
+  const formatState = { fontFamily: 'Aptos', fontSize: 12, bold: null, italic: false, underline: false }
+  const view = { objectId: 'a'.repeat(64), revision: 'b'.repeat(64), changeSequence: 0, kind: 'docx', status: 'ready', dirty: false, editing: true,
+    manual: { version: 2, origin: 'manual', changeId: 'c'.repeat(64), baseRevision: 'b'.repeat(64), generation: 1, frozen: false },
+    selection: { documentId: 'a'.repeat(64), version: 'b'.repeat(64), changeSequence: 0, kind: 'text', text: 'selected text',
+      scope: 'session-text-range-at-version-and-change-sequence', token: rangeLease.token, rangeLease, formatState } }
+  const payload = { objectId: view.objectId, revision: view.revision, expectedChangeSequence: 0,
+    pointer: { interactionId: 'format_interaction', selectionToken: rangeLease.token }, actions: [{ id: 'quote', label: 'Quote', enabled: true }],
+    formatting: { changeId: view.manual.changeId, rangeLease,
+      formatState,
+      labels: { fontFamily: 'Font', fontSize: 'Size', bold: 'Bold', italic: 'Italic', underline: 'Underline', mixed: 'Mixed' } } }
+  state.getView.mockReturnValue(view)
+  const menu = (request: any = payload, event: any = h.event) => state.handlers.get('office:action-menu')!(event, request)
+  return { ...h, view, payload, menu }
+}
+
+it.each(ipcPointerFormats)('relays the typed pointer $kind choice without nesting it inside actionId', async format => {
+  const h = await formattingPointerMenu()
+  const choice = { actionId: null, changeId: h.view.manual.changeId, rangeLease: h.payload.formatting.rangeLease, format }
+  state.pointerActions.mockResolvedValue(choice)
+  expect(await h.menu()).toEqual(choice)
+  expect(state.pointerActions).toHaveBeenCalledExactlyOnceWith(h.payload)
+  expect(state.menu).not.toHaveBeenCalled()
+  expect(state.request).toHaveBeenCalledExactlyOnceWith({ action: 'status' })
+})
+
+it.each(['change', 'generation', 'sequence', 'token', 'action', 'open-command', 'extra-field'] as const)('rejects a controller pointer format result with forged %s', async mismatch => {
+  const h = await formattingPointerMenu()
+  const choice: any = { actionId: null, changeId: h.view.manual.changeId, rangeLease: { ...h.payload.formatting.rangeLease }, format: { kind: 'bold', value: true } }
+  if (mismatch === 'change') choice.changeId = 'd'.repeat(64)
+  if (mismatch === 'generation') choice.rangeLease.generation++
+  if (mismatch === 'sequence') choice.rangeLease.sequence++
+  if (mismatch === 'token') choice.rangeLease.token = 'different_token'
+  if (mismatch === 'action') choice.actionId = 'quote'
+  if (mismatch === 'open-command') choice.format = { kind: 'uno', value: '.uno:Save' }
+  if (mismatch === 'extra-field') choice.dispatch = '.uno:Save'
+  state.pointerActions.mockResolvedValue(choice)
+  expect(await h.menu()).toEqual({ actionId: null })
+  expect(state.pointerActions).toHaveBeenCalledExactlyOnceWith(h.payload)
+  expect(state.menu).not.toHaveBeenCalled()
+})
+
+it.each(['selection', 'protected', 'spreadsheet', 'frozen', 'saving', 'readonly', 'token', 'sample'] as const)('refuses a %s pointer format target before invoking the controller', async reason => {
+  const h = await formattingPointerMenu()
+  const choice = { actionId: null, changeId: h.view.manual.changeId, rangeLease: h.payload.formatting.rangeLease, format: { kind: 'bold', value: true } }
+  state.pointerActions.mockResolvedValue(choice)
+  const view: any = structuredClone(h.view)
+  if (reason === 'selection') view.changeSequence++
+  if (reason === 'protected') view.protectedPresent = {}
+  if (reason === 'spreadsheet') view.kind = 'xlsx'
+  if (reason === 'frozen') view.manual.frozen = true
+  if (reason === 'saving') view.saving = true
+  if (reason === 'readonly') { view.editing = false; delete view.manual }
+  if (reason === 'token') { view.selection.token = 'different_token'; view.selection.rangeLease.token = 'different_token' }
+  if (reason === 'sample') view.selection.formatState.bold = true
+  state.getView.mockReturnValue(view)
+  expect(await h.menu()).toEqual({ actionId: null })
+  expect(state.pointerActions).not.toHaveBeenCalled()
+  expect(state.menu).not.toHaveBeenCalled()
+})
+
+it.each(['frame', 'owner', 'selection', 'frozen', 'saving', 'readonly', 'token', 'sample'] as const)('drops a valid pointer format result after the %s changes while it is pending', async reason => {
+  const h = await formattingPointerMenu()
+  const choice = { actionId: null, changeId: h.view.manual.changeId, rangeLease: h.payload.formatting.rangeLease, format: { kind: 'bold', value: true } }
+  state.pointerActions.mockImplementation(async () => {
+    if (reason === 'frame') h.main.webContents.mainFrame = {}
+    if (reason === 'owner') h.replace()
+    const view: any = structuredClone(h.view)
+    if (reason === 'selection') view.changeSequence++
+    if (reason === 'frozen') view.manual.frozen = true
+    if (reason === 'saving') view.saving = true
+    if (reason === 'readonly') { view.editing = false; delete view.manual }
+    if (reason === 'token') { view.selection.token = 'different_token'; view.selection.rangeLease.token = 'different_token' }
+    if (reason === 'sample') view.selection.formatState.bold = true
+    state.getView.mockReturnValue(view)
+    return choice
+  })
+  expect(await h.menu()).toEqual({ actionId: null })
+  expect(state.pointerActions).toHaveBeenCalledExactlyOnceWith(h.payload)
+  expect(state.menu).not.toHaveBeenCalled()
+  expect(state.request.mock.calls.some(([request]) => request.action === 'hide')).toBe(reason === 'frame' || reason === 'owner')
+})
+
+it.each(['navigation', 'render-process-gone', 'destroyed'] as const)('cancels a stale pointer range without hiding its document and still hides on %s', async reason => {
+  const h = await formattingPointerMenu()
+  const choice = { actionId: null, changeId: h.view.manual.changeId, rangeLease: h.payload.formatting.rangeLease, format: { kind: 'bold', value: true } }
+  let finish!: (value: unknown) => void
+  state.pointerActions.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const stale = h.menu()
+  expect(state.pointerActions).toHaveBeenCalledExactlyOnceWith(h.payload)
+  const nextLease = { ...h.payload.formatting.rangeLease, token: 'next_selection_token' }
+  state.getView.mockReturnValue({ ...h.view, selection: { ...h.view.selection, token: nextLease.token, rangeLease: nextLease } })
+  finish(choice)
+  expect(await stale).toEqual({ actionId: null })
+  expect(state.request).not.toHaveBeenCalledWith({ action: 'hide' })
+  expect(await h.invoke()).toMatchObject({ ok: true })
+
+  // The new native range needs its own current offer; the old choice stays cancelled.
+  const nextPayload = { ...h.payload, pointer: { ...h.payload.pointer, selectionToken: nextLease.token },
+    formatting: { ...h.payload.formatting, rangeLease: nextLease } }
+  const nextChoice = { ...choice, rangeLease: nextLease }
+  state.pointerActions.mockResolvedValueOnce(nextChoice)
+  expect(await h.menu(nextPayload)).toEqual(nextChoice)
+  expect(state.request).not.toHaveBeenCalledWith({ action: 'hide' })
+
+  state.pointerActions.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const revoked = h.menu(nextPayload)
+  if (reason === 'navigation') h.main.webContents.emit('did-start-navigation', {}, 'analytix://app', false, true)
+  else h.main.webContents.emit(reason)
+  expect(state.request).toHaveBeenCalledWith({ action: 'hide' })
+  finish(nextChoice)
+  expect(await revoked).toEqual({ actionId: null })
+  expect(await h.invoke()).toEqual({ ok: false, view: null, error: 'unavailable' })
+  expect(h.main.webContents.listenerCount('did-start-navigation')).toBe(0)
+})
+
+it('refuses unoffered formatting and formatting without a native pointer lease', async () => {
+  const h = await formattingPointerMenu()
+  const choice = { actionId: null, changeId: h.view.manual.changeId, rangeLease: h.payload.formatting.rangeLease, format: { kind: 'bold', value: true } }
+  state.pointerActions.mockResolvedValue(choice)
+  const { pointer: _pointer, ...withoutPointer } = h.payload
+  expect(await h.menu(withoutPointer)).toEqual({ actionId: null })
+  expect(state.pointerActions).not.toHaveBeenCalled(); expect(state.menu).not.toHaveBeenCalled()
+  const { formatting: _formatting, ...quoteOnly } = h.payload
+  expect(await h.menu(quoteOnly)).toEqual({ actionId: null })
+  expect(state.pointerActions).toHaveBeenCalledExactlyOnceWith(quoteOnly)
+  state.pointerActions.mockResolvedValue(null)
+  expect(await h.menu(quoteOnly)).toEqual({ actionId: null })
+})
+
+it('rejects DOCX bridge requests from a foreign renderer or subframe before package access',async()=>{
+  const h=setup(),request=state.handlers.get('docx-editor:request')!
+  const payload={action:'open',workspace:'/workspace',path:'report.docx',threadId:'thread'}
+  expect(await request({sender:{},senderFrame:{}},payload)).toMatchObject({ok:false,error:'unavailable'})
+  expect(await request({...h.event,senderFrame:{}},payload)).toMatchObject({ok:false,error:'unavailable'})
+  expect(state.create).not.toHaveBeenCalled()
+})
+
+it('ordinary DOCX picking does not require old native assets or create a native surface',async()=>{
+  const h=setup();state.packaged=true;state.picker.mockResolvedValue({canceled:false,filePaths:['/workspace/report.docx']})
+  expect(await h.pick()).toEqual({ok:true,path:'/workspace/report.docx'})
+  expect(state.create).not.toHaveBeenCalled()
 })

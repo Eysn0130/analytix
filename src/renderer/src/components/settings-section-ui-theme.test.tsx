@@ -41,12 +41,27 @@ it('keeps real install/activate/remove/reset callbacks in neutral theme manageme
   } finally { await act(async () => root.unmount()); host.remove() }
 })
 
+it.each([false, true])('keeps retired mascot activation on the default theme (desktop API: %s)', async (hasDesktopApi) => {
+  const loadUiPlugin = vi.fn()
+  Object.assign(window, { analytix: { app: hasDesktopApi ? { loadUiPlugin } : {} } })
+  localStorage.setItem('analytix.mascotMode', '1')
+  useUiPluginStore.setState({ ...initial, uiMode: 'mascot' })
+
+  await useUiPluginStore.getState().activateUiMode('mascot')
+
+  expect(useUiPluginStore.getState().uiMode).toBe('default')
+  expect(useUiPluginStore.getState().activeRuntime).toBeNull()
+  expect(loadUiPlugin).not.toHaveBeenCalled()
+  expect(localStorage.getItem('analytix.uiMode')).toBe('default')
+  expect(localStorage.getItem('analytix.mascotMode')).toBe('1')
+})
+
 it('removes the dedicated pet settings navigation while keeping General discoverable', async () => {
   const host = document.createElement('div'); const root = createRoot(host)
   try {
     await act(async () => root.render(createElement(SettingsSidebar, { category: 'general', goBack: () => {}, setCategory: () => {}, t })))
     expect(host.textContent).not.toContain('easterEgg')
-    expect(host.querySelector('[aria-current="page"]')?.textContent).toContain('general')
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(t('settingsTabGeneral'))
   } finally { await act(async () => root.unmount()) }
 })
 

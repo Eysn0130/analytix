@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	docapp "analytix.local/runtime-go/internal/app/documentgeneration"
 	editingapp "analytix.local/runtime-go/internal/app/objectediting"
 	identitydomain "analytix.local/runtime-go/internal/domain/identity"
 	"analytix.local/runtime-go/internal/domain/jsonstrict"
@@ -42,22 +43,26 @@ type EditingService interface {
 }
 
 type Adapter struct {
-	mu        sync.Mutex
-	sessions  map[string]*nativeSession
-	scopes    map[string]*nativeScope
-	projector editingapp.TrustedSelectionProjector
-	capture   func(context.Context, string, string, func() error) (func(), error)
-	packageID string
-	kind      string
-	service   EditingService
-	ready     func(context.Context) bool
+	creator       *docapp.UserCreator
+	mu            sync.Mutex
+	sessions      map[string]*nativeSession
+	scopes        map[string]*nativeScope
+	projector     editingapp.TrustedSelectionProjector
+	capture       func(context.Context, string, string, func() error) (func(), error)
+	manualCapture func(context.Context, string, string, func() error) (func(), error)
+	packageID     string
+	kind          string
+	service       EditingService
+	ready         func(context.Context) bool
+
+	manualBeginObserver func(NativeManualBeginPhaseV1, error)
 }
 
 var _ adapterport.Adapter = (*Adapter)(nil)
 var _ EditingService = (*editingapp.Service)(nil)
 
 // New fixes the package binding; unknown kinds fail closed at every entrypoint.
-// readiness is supplied by trusted composition after local engine verification.
+// readiness is supplied by trusted composition for its owning editor/package.
 func New(kind string, service EditingService, readiness func(context.Context) bool) *Adapter {
 	id := ""
 	switch kind {
@@ -96,6 +101,19 @@ func (a *Adapter) Readiness(ctx context.Context, binding adapterport.Binding) (a
 	if a.projector != nil && a.capture != nil {
 		operations = append(operations, "capture-selection", "selection-read", "selection-revoke", "proposal-read", "proposal-accept", "proposal-reject", "model-selection-read", "model-selection-propose")
 	}
+	if a.kind == "docx" && a.projector != nil && a.manualCapture != nil {
+		if _, ok := a.service.(nativeManualService); ok {
+			operations = append(operations, "begin-manual-edit")
+		}
+		if a.creator.Ready() {
+			operations = append(operations, "create-object")
+		}
+	}
+	if a.kind == "xlsx" && a.projector != nil && a.manualCapture != nil {
+		if _, ok := a.service.(nativeWorkbookManualService); ok {
+			operations = append(operations, "plan-workbook-manual", "prepare-workbook-manual")
+		}
+	}
 	return adapterport.Readiness{Available: a.available(ctx), Operations: operations}, nil
 }
 
@@ -118,9 +136,12 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 	if call.Operation == "annotation-write" {
 		limit, stringLimit = fileport.MaxAnnotationRecordBytes, fileport.MaxAnnotationNoteBytes
 	}
-	if call.Operation == "capture-selection" || call.Operation == "model-selection-propose" {
+	if call.Operation == "capture-selection" || call.Operation == "model-selection-propose" || call.Operation == "prepare-workbook-manual" {
 		limit, stringLimit = (512 << 10), editingapp.MaxSelectionBytes
 		depth, tokens = 6, 16384
+	}
+	if call.Operation == "plan-workbook-manual" {
+		depth = 3
 	}
 	if call.Operation == "commit-object" {
 		limit, stringLimit = MaxInputBytes, base64.StdEncoding.EncodedLen(MaxOfficeBytes)
@@ -134,6 +155,10 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 		return adapterport.Result{}, ErrUnavailable
 	}
 	switch call.Operation {
+	case "plan-workbook-manual", "prepare-workbook-manual":
+		return a.invokeWorkbookManual(ctx, call, input)
+	case "create-object", "begin-manual-edit":
+		return a.invokeManual(ctx, call, input)
 	case "annotation-read", "annotation-write":
 		return a.invokeAnnotation(ctx, call, input)
 	case "object-recovery", "undo-change", "cancel-change", "resume-change":
@@ -163,10 +188,15 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 		} else {
 			previous.document = sessionDoc
 		}
-		return output(struct {
-			OK       bool              `json:"ok"`
-			Document editingapp.Opened `json:"document"`
-		}{true, doc})
+		result := map[string]any{"ok": true, "document": doc}
+		if a.kind == "xlsx" {
+			eligibility := map[string]any{"editable": false, "reason": "unsupported_workbook"}
+			if service, ok := a.service.(nativeWorkbookManualService); ok && service.NativeWorkbookEditing(ctx, doc.SessionID, doc.Revision) == nil {
+				eligibility = map[string]any{"editable": true}
+			}
+			result["workbookEditing"] = eligibility
+		}
+		return output(result)
 	case "commit-object", "object-status":
 		keys := []string{"sessionId", "operationId"}
 		if call.Operation == "commit-object" {
@@ -212,6 +242,11 @@ func (a *Adapter) Invoke(ctx context.Context, call adapterport.Call) (adapterpor
 			return failureReceipt(err, receipt)
 		}
 		if receipt.Status == fileport.StatusCommitted {
+			// Status may replay an older committed operation while a new manual
+			// change is pending. Only this change's correlated save settles it.
+			if session := a.sessions[id]; session != nil && receipt.OperationID == operation && operation == "native_save_"+session.manualChangeID {
+				a.releaseManualCapture(id, session.manualChangeID)
+			}
 			for scopeID, scope := range a.scopes {
 				if scope.SessionID == id && scope.BaseRevision != receipt.Revision {
 					delete(a.scopes, scopeID)

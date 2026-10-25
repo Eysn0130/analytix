@@ -33,7 +33,10 @@ func TestRuntimeServerAutomaticCompactionRunsBeforeAdmissionAndRestoresContinuat
 			`data: [DONE]`,
 		})
 	}
-	provider := newCompleteProviderServer(t, providerFrames)
+	provider, summaryRequests := newCompactionProviderServerForTestV1(t, providerFrames, "Continue the retained objective and unfinished todo.")
+	defer func() {
+		t.Logf("automatic compaction fixture summary_requests=%d foreground_requests=%d", summaryRequests(), provider.RequestCount())
+	}()
 	_, _ = prepareRuntimeServerExplicitProviderRegistryFixture(
 		t, dataDir, provider.URL(), "auto-compact-provider", "large-context",
 	)
@@ -181,6 +184,9 @@ func TestRuntimeServerAutomaticCompactionRunsBeforeAdmissionAndRestoresContinuat
 		"model":      "small-context",
 	}), http.StatusAccepted)
 	triggerTurnID := stringField(trigger, "turnId")
+	if summaryRequests() != 1 {
+		t.Fatalf("threshold rewrite summary requests = %d, want 1", summaryRequests())
+	}
 	if provider.RequestCount() != 4 {
 		t.Fatalf("automatic compaction should admit exactly one provider request after rewrite, got %d", provider.RequestCount())
 	}
@@ -227,6 +233,7 @@ func TestRuntimeServerAutomaticCompactionRunsBeforeAdmissionAndRestoresContinuat
 		t.Fatalf("automatic compaction continuation is not sealed: %s", continuationBeforeJSON)
 	}
 
+	foregroundBeforeRestart, summaryBeforeRestart := provider.RequestCount(), summaryRequests()
 	first.Close()
 	shutdownRuntimeTestHandler(t, firstHandler)
 
@@ -236,6 +243,9 @@ func TestRuntimeServerAutomaticCompactionRunsBeforeAdmissionAndRestoresContinuat
 	continuationAfterJSON := string(mustJSON(t, automaticCompactionContinuationForTest(t, afterRestart)))
 	if continuationAfterJSON != continuationBeforeJSON {
 		t.Fatalf("restart changed the durable task continuation:\nbefore=%s\nafter=%s", continuationBeforeJSON, continuationAfterJSON)
+	}
+	if provider.RequestCount() != foregroundBeforeRestart || summaryRequests() != summaryBeforeRestart {
+		t.Fatal("restart readback dispatched a foreground or summary request")
 	}
 
 	restartPrompt := "简单总结一下 restart"

@@ -36,12 +36,12 @@ func TestRuntimeServerPlanModeContinuesAfterReadBatchAndCreatePlan(t *testing.T)
 	)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + firstReasoning + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + firstReasoning + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_read_one","type":"function","function":{"name":"read","arguments":"{\"path\":\"one.txt\"}"}},{"index":1,"id":"call_read_two","type":"function","function":{"name":"read","arguments":"{\"path\":\"two.txt\"}"}},{"index":2,"id":"call_read_three","type":"function","function":{"name":"read","arguments":"{\"path\":\"three.txt\"}"}},{"index":3,"id":"call_read_four","type":"function","function":{"name":"read","arguments":"{\"path\":\"four.txt\"}"}},{"index":4,"id":"call_read_five","type":"function","function":{"name":"read","arguments":"{\"path\":\"five.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + secondReasoning + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + secondReasoning + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_plan_after_reads","type":"function","function":{"name":"create_plan","arguments":"{\"markdown\":\"# Read batch plan\\n\\nImplement the focused change, preserve the ` + "`http://guides.github.com/overviews/forking/`" + ` target, and run the focused test.\",\"operation\":\"draft\",\"source_request\":\"Plan the focused change\",\"title\":\"Read batch plan\",\"plan_id\":\"plan-read-batch\",\"plan_relative_path\":\".analytixsdd/plan/read-batch.md\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
@@ -93,7 +93,9 @@ func TestRuntimeServerPlanModeContinuesAfterReadBatchAndCreatePlan(t *testing.T)
 		bytes.Contains([]byte(thirdBody), []byte(`"name":"bash"`)) {
 		t.Fatalf("satisfied plan continuation lost its stable read-only tool catalog with %d schemas", len(thirdRequest.Tools))
 	}
-	if strings.Count(thirdBody, firstReasoning) != 1 || strings.Count(thirdBody, secondReasoning) != 1 {
+	if !strings.Contains(thirdBody, `"reasoning_content":"fixture reasoning preview\n`+firstReasoning+`"`) ||
+		!strings.Contains(thirdBody, `"reasoning_content":"fixture reasoning preview\n`+secondReasoning+`"`) ||
+		strings.Count(thirdBody, firstReasoning) != 1 || strings.Count(thirdBody, secondReasoning) != 1 {
 		t.Fatalf("third provider request did not replay both exact reasoning segments")
 	}
 	for _, toolName := range []string{"read", "create_plan"} {
@@ -104,8 +106,15 @@ func TestRuntimeServerPlanModeContinuesAfterReadBatchAndCreatePlan(t *testing.T)
 	if _, err := os.Stat(filepath.Join(workspace, ".analytixsdd", "plan", "read-batch.md")); err != nil {
 		t.Fatalf("create_plan did not persist the reserved plan: %v", err)
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, firstReasoning, secondReasoning)
-	assertRuntimeFilesExcludeValues(t, durableRoot, firstReasoning, secondReasoning)
+	threadDetail := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
+	threadJSON := string(mustJSON(t, threadDetail))
+	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	for _, privateValue := range []string{firstReasoning, secondReasoning, "fixture reasoning preview"} {
+		if strings.Contains(threadJSON, privateValue) || strings.Contains(replay, privateValue) {
+			t.Fatal("private read-plan reasoning crossed a public persistence seam")
+		}
+	}
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{firstReasoning, secondReasoning})
 }
 
 func TestRuntimeServerPlanModeRejectsDuplicateCreatePlanBeforeOneRetry(t *testing.T) {
@@ -125,12 +134,12 @@ func TestRuntimeServerPlanModeRejectsDuplicateCreatePlanBeforeOneRetry(t *testin
 
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + rejectedReasoning + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + rejectedReasoning + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"duplicate_plan_one","type":"function","function":{"name":"create_plan","arguments":"{\"markdown\":\"` + rejectedPlanOne + `\",\"operation\":\"draft\"}"}},{"index":1,"id":"duplicate_plan_two","type":"function","function":{"name":"create_plan","arguments":"{\"markdown\":\"` + rejectedPlanTwo + `\",\"operation\":\"draft\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + acceptedReasoning + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + acceptedReasoning + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"accepted_single_plan","type":"function","function":{"name":"create_plan","arguments":"{\"markdown\":\"# Accepted single plan\\n\\nRun the focused verification.\",\"operation\":\"draft\",\"source_request\":\"Plan the focused repair\",\"title\":\"Accepted single plan\",\"plan_id\":\"accepted-single-plan\",\"plan_relative_path\":\".analytixsdd/plan/accepted-single-plan.md\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
@@ -172,8 +181,15 @@ func TestRuntimeServerPlanModeRejectsDuplicateCreatePlanBeforeOneRetry(t *testin
 	}
 	recoveryBody := provider.Body(1)
 	if !strings.Contains(recoveryBody, "exactly one create_plan") || strings.Contains(recoveryBody, rejectedReasoning) ||
+		strings.Contains(recoveryBody, "fixture reasoning preview") ||
 		strings.Contains(recoveryBody, rejectedPlanOne) || strings.Contains(recoveryBody, rejectedPlanTwo) {
 		t.Fatalf("duplicate correction request was not fixed and data-free: %s", recoveryBody)
+	}
+	continuationBody := provider.Body(2)
+	if !strings.Contains(continuationBody, `"reasoning_content":"fixture reasoning preview\n`+acceptedReasoning+`"`) ||
+		strings.Count(continuationBody, acceptedReasoning) != 1 || strings.Contains(continuationBody, rejectedReasoning) ||
+		strings.Contains(continuationBody, rejectedPlanOne) || strings.Contains(continuationBody, rejectedPlanTwo) {
+		t.Fatal("corrected plan continuation did not preserve only the exact accepted reasoning")
 	}
 	planPath := filepath.Join(workspace, ".analytixsdd", "plan", "accepted-single-plan.md")
 	planBytes, err := os.ReadFile(planPath)
@@ -183,13 +199,14 @@ func TestRuntimeServerPlanModeRejectsDuplicateCreatePlanBeforeOneRetry(t *testin
 	threadDetail := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
 	threadJSON := string(mustJSON(t, threadDetail))
 	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
-	for _, rejected := range []string{rejectedPlanOne, rejectedPlanTwo} {
-		if strings.Contains(threadJSON, rejected) || strings.Contains(replay, rejected) {
-			t.Fatalf("rejected duplicate plan arguments crossed a public persistence seam")
+	for _, privateValue := range []string{rejectedPlanOne, rejectedPlanTwo, rejectedReasoning, acceptedReasoning, "fixture reasoning preview"} {
+		if strings.Contains(threadJSON, privateValue) || strings.Contains(replay, privateValue) {
+			t.Fatal("private duplicate-plan protocol crossed a public persistence seam")
 		}
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, rejectedPlanOne, rejectedPlanTwo, rejectedReasoning, acceptedReasoning)
-	assertRuntimeFilesExcludeValues(t, durableRoot, rejectedPlanOne, rejectedPlanTwo, rejectedReasoning, acceptedReasoning)
+	// The rejected batch's reasoning was already displayed privately; its
+	// rejected plan arguments remain forbidden in every durable file.
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{rejectedReasoning, acceptedReasoning}, rejectedPlanOne, rejectedPlanTwo)
 }
 
 func TestRuntimeServerPlanModeAllowsSequentialReadOnlyInvestigationBeforeCreatePlan(t *testing.T) {
@@ -306,12 +323,12 @@ func TestRuntimeServerPlanModeContinuesAfterMaterializedCreatePlan(t *testing.T)
 	)
 	provider := newCompleteProviderServer(t, [][]string{
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + materializedReadReasoning + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + materializedReadReasoning + `"}}]}`,
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_read_one","type":"function","function":{"name":"read","arguments":"{\"path\":\"one.txt\"}"}},{"index":1,"id":"call_read_two","type":"function","function":{"name":"read","arguments":"{\"path\":\"two.txt\"}"}},{"index":2,"id":"call_read_three","type":"function","function":{"name":"read","arguments":"{\"path\":\"three.txt\"}"}},{"index":3,"id":"call_read_four","type":"function","function":{"name":"read","arguments":"{\"path\":\"four.txt\"}"}},{"index":4,"id":"call_read_five","type":"function","function":{"name":"read","arguments":"{\"path\":\"five.txt\"}"}}]},"finish_reason":"tool_calls"}]}`,
 			`data: [DONE]`,
 		},
 		{
-			`data: {"choices":[{"delta":{"reasoning_content":"` + materializedPlanReasoning + `"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"fixture reasoning preview\n` + materializedPlanReasoning + `"}}]}`,
 			`data: {"choices":[{"delta":{"content":"# Read batch plan\n\nImplement the focused change and run the focused test."},"finish_reason":"stop"}]}`,
 			`data: [DONE]`,
 		},
@@ -381,15 +398,23 @@ func TestRuntimeServerPlanModeContinuesAfterMaterializedCreatePlan(t *testing.T)
 		strings.Count(safeHistory.String(), `"tool":"create_plan"`) != 1 {
 		t.Fatalf("third provider request lost the bounded semantic tool history")
 	}
-	if strings.Contains(thirdBody, materializedReadReasoning) || strings.Contains(thirdBody, materializedPlanReasoning) {
+	if strings.Contains(thirdBody, materializedReadReasoning) || strings.Contains(thirdBody, materializedPlanReasoning) ||
+		strings.Contains(thirdBody, "fixture reasoning preview") || strings.Contains(thirdBody, `"reasoning_content"`) {
 		t.Fatal("third provider request retained private reasoning after host plan materialization")
 	}
 	if _, err := os.Stat(filepath.Join(workspace, ".analytixsdd", "plan", "materialized-read-batch.md")); err != nil {
 		t.Fatalf("materialized create_plan did not persist the reserved plan: %v", err)
 	}
 	threadDetail := assertLiveJSON(t, server.URL, http.MethodGet, "/v1/threads/"+threadID, DefaultRuntimeToken, nil, http.StatusOK)
-	if !strings.Contains(string(mustJSON(t, threadDetail)), "MILESTONE_A_PLAN_OK") {
+	threadJSON := string(mustJSON(t, threadDetail))
+	if !strings.Contains(threadJSON, "MILESTONE_A_PLAN_OK") {
 		t.Fatal("materialized plan continuation did not reach its terminal provider marker")
+	}
+	replay := liveSSE(t, server.URL, "/v1/threads/"+threadID+"/events?since_seq=0", DefaultRuntimeToken, http.StatusOK)
+	for _, privateValue := range []string{materializedReadReasoning, materializedPlanReasoning, "fixture reasoning preview"} {
+		if strings.Contains(threadJSON, privateValue) || strings.Contains(replay, privateValue) {
+			t.Fatal("private materialized-plan reasoning crossed a public persistence seam")
+		}
 	}
 	receipts, dispositions := loadPendingWorkRecords(t, dataDir)
 	statusByWorkID := map[string]string{}
@@ -413,6 +438,5 @@ func TestRuntimeServerPlanModeContinuesAfterMaterializedCreatePlan(t *testing.T)
 	if continuationCount != 2 || !fiveMemberContinuation || !oneMemberContinuation {
 		t.Fatalf("materialized plan did not close both exact provider continuations")
 	}
-	assertRuntimeFilesExcludeValues(t, dataDir, materializedReadReasoning, materializedPlanReasoning)
-	assertRuntimeFilesExcludeValues(t, durableRoot, materializedReadReasoning, materializedPlanReasoning)
+	assertRuntimeFilesExcludeValuesExceptSettledReasoning(t, dataDir, durableRoot, threadID, []string{materializedReadReasoning, materializedPlanReasoning})
 }

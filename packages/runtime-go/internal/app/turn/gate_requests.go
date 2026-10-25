@@ -1,7 +1,9 @@
 package turn
 
 import (
+	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 	"strings"
+	"time"
 
 	privacyprojectionapp "analytix.local/runtime-go/internal/app/privacyprojection"
 )
@@ -18,7 +20,31 @@ type ApprovalRequestInput struct {
 	ContinuationReceiptID string
 }
 
+// TimedWaitViewV1 is closed metadata derived from the signed request.
+// DeadlineAt is an actual JSON null for an unlimited call-bound wait.
+type TimedWaitViewV1 struct {
+	TimeoutSeconds int     `json:"timeoutSeconds"`
+	DeadlineAt     *string `json:"deadlineAt"`
+}
+
+func UserInputTimedWaitViewV1(wait *domaincontinuation.UserInputTimedWaitV1, issuedAt string) *TimedWaitViewV1 {
+	if wait == nil {
+		return nil
+	}
+	issued, err := time.Parse(time.RFC3339Nano, issuedAt)
+	if err != nil || !domaincontinuation.ValidUserInputTimeoutSeconds(wait.TimeoutSeconds) {
+		return nil
+	}
+	view := &TimedWaitViewV1{TimeoutSeconds: wait.TimeoutSeconds}
+	if wait.TimeoutSeconds != -1 {
+		deadline := issued.Add(time.Duration(wait.TimeoutSeconds) * time.Second).UTC().Format(time.RFC3339Nano)
+		view.DeadlineAt = &deadline
+	}
+	return view
+}
+
 type UserInputRequestInput struct {
+	TimedWait             *TimedWaitViewV1
 	ThreadID              string
 	TurnID                string
 	ItemID                string
@@ -89,6 +115,15 @@ func UserInputRequestRecords(input UserInputRequestInput) (map[string]any, map[s
 		"questions":             questions,
 		"continuationReceiptId": receiptID,
 	}
+	if input.TimedWait != nil {
+		var deadline any
+		if input.TimedWait.DeadlineAt != nil {
+			deadline = *input.TimedWait.DeadlineAt
+		}
+		record := map[string]any{"timeoutSeconds": float64(input.TimedWait.TimeoutSeconds), "deadlineAt": deadline}
+		item["timedWait"] = record
+		event["timedWait"] = record
+	}
 	return item, event
 }
 
@@ -122,6 +157,18 @@ func UserInputResolvedOutput(status string, answers []map[string]string, cancell
 	output := map[string]any{"status": strings.TrimSpace(status)}
 	if !cancelled {
 		output["answers"] = privacyprojectionapp.ProjectStringRecords(answers)
+		output["answerCount"] = float64(len(answers))
+	}
+	return output
+}
+
+// UserInputResolvedOutputForQuestions retains only host-bound question IDs.
+// Answer text remains under the existing ordinary/model privacy projection;
+// public tool persistence removes the complete answers field separately.
+func UserInputResolvedOutputForQuestions(status string, answers []map[string]string, cancelled bool, inputID string, questions []map[string]any) map[string]any {
+	output := map[string]any{"status": strings.TrimSpace(status)}
+	if !cancelled {
+		output["answers"] = privacyprojectionapp.ProjectHostValidatedUserInputAnswers(inputID, questions, answers)
 		output["answerCount"] = float64(len(answers))
 	}
 	return output

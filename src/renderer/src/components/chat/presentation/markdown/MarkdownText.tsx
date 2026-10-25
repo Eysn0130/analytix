@@ -22,27 +22,27 @@ import {
   collectReferenceTargets, createReferenceTargets, renderBlocks, renderFootnoteSection,
   wrapBlockChildren,
 } from './render'
-import type { MarkdownFileMentions, MarkdownLabels, MarkdownPathImages, MarkdownRenderContext, ReferenceTargets } from './render'
+import type { MarkdownLabels, MarkdownRenderContext, MarkdownQuestionDetail, ReferenceTargets } from './render'
 import 'katex/dist/katex.min.css'
 import css from './MarkdownText.module.css'
 
-export type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownLabels, MarkdownPathImages } from './render'
+export type { MarkdownCodeLabels, MarkdownLabels, MarkdownQuestionDetail } from './render'
 
 /** One settled full render: parse with math, resolve references, append the footnote section. */
 function renderSettled(
   text: string,
   labels: MarkdownLabels,
-  fileMentions: MarkdownFileMentions | undefined,
-  pathImages: MarkdownPathImages | undefined,
+  viewOnly: boolean,
+  questionDetail?: MarkdownQuestionDetail,
 ): ReactNode[] {
   const root = parseGfmWithMath(text)
   const targets = createReferenceTargets()
   collectReferenceTargets(root.children, targets)
   const context: MarkdownRenderContext = {
     streaming: false,
+    viewOnly,
+    questionDetail,
     labels,
-    fileMentions,
-    pathImages,
     targets,
     footnoteOrder: [],
     footnoteCounts: new Map(),
@@ -77,7 +77,7 @@ class StreamingRenderer {
   private lastRendered: ReactNode[] = []
 
   /** @param labels - Localized Markdown chrome baked into cached elements; the owner replaces the renderer when it changes. */
-  constructor(private readonly labels: MarkdownLabels) {}
+  constructor(private readonly labels: MarkdownLabels, private readonly viewOnly: boolean) {}
 
   /**
    * Render the current accumulated text. Idempotent per text value, so React
@@ -109,9 +109,8 @@ class StreamingRenderer {
     if (newlyFrozen.length > 0) {
       const frozenContext: MarkdownRenderContext = {
         streaming: true,
+        viewOnly: this.viewOnly,
         labels: this.labels,
-        fileMentions: undefined,
-        pathImages: undefined,
         targets: frameTargets,
         footnoteOrder: this.frozenFootnoteOrder,
         footnoteCounts: this.frozenFootnoteCounts,
@@ -128,9 +127,8 @@ class StreamingRenderer {
     }
     const tailContext: MarkdownRenderContext = {
       streaming: true,
+      viewOnly: this.viewOnly,
       labels: this.labels,
-      fileMentions: undefined,
-      pathImages: undefined,
       targets: frameTargets,
       footnoteOrder: [...this.frozenFootnoteOrder],
       footnoteCounts: new Map(this.frozenFootnoteCounts),
@@ -156,47 +154,45 @@ class StreamingRenderer {
  * until the finalize swap so incomplete formulae never flash errors);
  * `labels` forwards localized fence and footnote chrome — pass a
  * reference-stable object (memoized per locale revision), because a new
- * identity discards the streaming render cache mid-message. `fileMentions`
- * links inline-code tokens its resolver recognizes as real files, and
- * `pathImages` rewrites image destinations that are local file paths into
- * displayable URLs its resolver vouches for. Those two vocabularies are the
- * single streaming gate — they apply to settled renders only, because a
- * streaming message's vocabulary is not final and frozen cached elements
- * must not bake in handlers that could go stale. A surrounding
- * `MarkdownDelegateProvider` can delegate ordinary HTTP(S) activation while
- * modified clicks retain native behavior. `variant="compact"` uses secondary
+ * identity discards the streaming render cache mid-message. Settled ordinary
+ * local references and images use the existing workspace Host validation and
+ * preview chain. A surrounding `MarkdownDelegateProvider` can delegate
+ * ordinary HTTP(S) activation while modified clicks retain native behavior.
+ * `variant="compact"` uses secondary
  * text sizing, uniform bold headings, and tight block spacing; the default
  * `body` variant uses the full document typography.
- * The provider's `openFile` enables local Markdown links in settled messages,
- * including `#L24` and `#L24-L30` destinations (ranges open at their first line).
  * @returns A GFM document with TeX math rendered through KaTeX; raw HTML and
- * unsafe protocols are disabled. Local links without an opener remain text;
+ * unsafe protocols are disabled. Local links use validated workspace previews;
  * absolute HTTP(S) images render directly.
  */
 export const MarkdownText = memo(function MarkdownText({
-  text, streaming = false, labels, fileMentions, pathImages, variant = 'body', className,
+  text, streaming = false, labels, variant = 'body', className, viewOnly = false, questionDetail,
 }: {
   text: string
   className?: string
   streaming?: boolean
   labels: MarkdownLabels
-  fileMentions?: MarkdownFileMentions | undefined
-  pathImages?: MarkdownPathImages | undefined
   variant?: 'body' | 'compact'
+  /** No file/network, clipboard, export or portal actions for protected-local content. */
+  viewOnly?: boolean
+  /** Settled Question details retain Copy/Wrap and native actions without public file/export extras. */
+  questionDetail?: MarkdownQuestionDetail
 }) {
   const streamRef = useRef<StreamingRenderer | null>(null)
   const streamLabelsRef = useRef<MarkdownLabels>(labels)
+  const streamViewOnlyRef = useRef(viewOnly)
   const children = useMemo(() => {
-    if (!streaming) {
+    if (!streaming || questionDetail) {
       streamRef.current = null
-      return renderSettled(text, labels, fileMentions, pathImages)
+      return renderSettled(text, labels, viewOnly, questionDetail)
     }
-    if (streamRef.current === null || streamLabelsRef.current !== labels) {
-      streamRef.current = new StreamingRenderer(labels)
+    if (streamRef.current === null || streamLabelsRef.current !== labels || streamViewOnlyRef.current !== viewOnly) {
+      streamRef.current = new StreamingRenderer(labels, viewOnly)
       streamLabelsRef.current = labels
+      streamViewOnlyRef.current = viewOnly
     }
     return streamRef.current.render(text)
-  }, [text, streaming, labels, fileMentions, pathImages])
+  }, [text, streaming, labels, viewOnly, questionDetail])
   return <div className={clsx(css.markdown, variant === 'compact' && css.compact, className)}
-    data-markdown-variant={variant === 'compact' ? variant : undefined}>{children}</div>
+    data-markdown-view-only={viewOnly || undefined} data-markdown-variant={variant === 'compact' ? variant : undefined}>{children}</div>
 })

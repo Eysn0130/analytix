@@ -7,7 +7,6 @@ import {
   canUseElectronWebviewEnvironment,
   resolveInitialDevBrowserUrl
 } from './DevBrowserPanel'
-import devBrowserPanelSource from './DevBrowserPanel.tsx?raw'
 
 describe('DevBrowserPanel webview environment detection', () => {
   it('requires the Electron user agent in addition to the shell bridge', () => {
@@ -79,29 +78,12 @@ describe('DevBrowserPanel initial URL resolution', () => {
   })
 })
 
-describe('DevBrowserPanel titlebar controls', () => {
-  it('keeps browser actions in the address row beneath the shared workspace tabs', () => {
-    const addressbarStart = devBrowserPanelSource.indexOf('<form onSubmit={submitUrl}')
-    const addressbarEnd = devBrowserPanelSource.indexOf('</form>', addressbarStart)
-    const collapseStart = devBrowserPanelSource.indexOf('onClick={onCollapse}')
-
-    expect(devBrowserPanelSource).not.toContain('flex h-[var(--ax-chat-topbar-shell-height)] min-w-0 items-center')
-    expect(addressbarStart).toBeGreaterThan(-1)
-    expect(collapseStart).toBeGreaterThan(addressbarStart)
-    expect(collapseStart).toBeLessThan(addressbarEnd)
-    expect(devBrowserPanelSource.slice(addressbarStart, addressbarEnd)).toContain('onClick={resetPreview}')
-    expect(devBrowserPanelSource.slice(addressbarStart, addressbarEnd)).toContain('onClick={reload}')
-    expect(devBrowserPanelSource.slice(addressbarStart, addressbarEnd)).toContain('captureSelection()')
-    expect(devBrowserPanelSource.slice(addressbarStart, addressbarEnd)).toContain("captureSelection(t('browserExplainPrompt'))")
-  })
-})
-
 vi.mock('react-i18next', async (importOriginal) => ({
   ...await importOriginal<typeof import('react-i18next')>(),
   useTranslation: () => ({ t: (key: string) => key })
 }))
 
-describe('DevBrowserPanel compact toolbar actions', () => {
+describe('DevBrowserPanel shared operation row', () => {
   let element: HTMLDivElement
   let root: Root
   const collapse = vi.fn()
@@ -111,6 +93,7 @@ describe('DevBrowserPanel compact toolbar actions', () => {
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
     vi.clearAllMocks()
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
     localStorage.clear()
     Object.assign(window, { analytix: { app: { openExternal: external } } })
     element = document.createElement('div')
@@ -124,30 +107,74 @@ describe('DevBrowserPanel compact toolbar actions', () => {
     localStorage.clear()
     if (originalBridge === undefined) Reflect.deleteProperty(window, 'analytix')
     else Object.assign(window, { analytix: originalBridge })
-    vi.restoreAllMocks()
+    vi.restoreAllMocks(); vi.unstubAllGlobals()
   })
 
-  async function render() {
+  async function render(props: Partial<Parameters<typeof DevBrowserPanel>[0]> = {}) {
     await act(async () => root.render(createElement(DevBrowserPanel, {
-      preferredUrl: 'http://localhost:3000/one', detectedUrls: [], onCollapse: collapse
+      preferredUrl: 'http://localhost:3000/one', detectedUrls: [], onCollapse: collapse, ...props
     })))
   }
 
-  function button(key: string, compact = true): HTMLButtonElement {
-    const target = compact ? element.querySelector('.ds-browser-compact-actions') : element.querySelector('details')
-    const result = target?.querySelector<HTMLButtonElement>(`button[aria-label="${key}"]`)
+  async function menu() {
+    if (!document.querySelector('[role="menu"]')) {
+      await act(async () => element.querySelector<HTMLButtonElement>('button[aria-label="browserMore"]')!.click())
+    }
+    return document.querySelector<HTMLElement>('[role="menu"]')!
+  }
+
+  async function button(key: string) {
+    const inline = element.querySelector<HTMLButtonElement>(`[data-workspace-viewer-header] button[aria-label="${key}"]`)
+    if (inline) return inline
+    const panel = await menu()
+    const result = panel.querySelector<HTMLButtonElement>(`button[aria-label="${key}"]`)
     expect(result, key).not.toBeNull()
     return result!
   }
 
-  async function click(key: string, compact = true) {
-    await act(async () => button(key, compact).click())
+  async function click(key: string) {
+    const target = await button(key)
+    await act(async () => target.click())
   }
 
-  it('uses the existing submit and iframe history owners from the compact menu', async () => {
+  it('uses exactly one operation row for address, navigation and workspace controls', async () => {
+    const focus = vi.fn(), close = vi.fn()
+    await render({ viewerControls: { focused: false, onToggleFocus: focus, onCollapse: close } })
+    const header = element.querySelector('[data-workspace-viewer-header]')!
+    expect(element.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+    expect(header.closest('form')).toBe(element.querySelector('form'))
+    expect(header.querySelector('input[aria-label="browserAddressPlaceholder"]')).not.toBeNull()
+    expect(header.querySelector('[aria-label="browserQuoteSelection"]')).toBeNull()
+    for (const label of ['browserBack', 'browserForward', 'browserReload', 'browserOpen', 'browserMore', 'workbenchFocus', 'workbenchCollapse']) {
+      expect(header.querySelector(`button[aria-label="${label}"] svg`), label).not.toBeNull()
+    }
+    await act(async () => header.querySelector<HTMLButtonElement>('[aria-label="workbenchFocus"]')!.click())
+    await act(async () => header.querySelector<HTMLButtonElement>('[aria-label="workbenchCollapse"]')!.click())
+    expect(focus).toHaveBeenCalledTimes(1); expect(close).toHaveBeenCalledTimes(1)
+    expect((await menu()).querySelector('[aria-label="browserCloseTab"]')).toBeNull()
+  })
+
+  it('keeps native quote beside address and navigation without duplicating those actions in More', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Electron/41.10.3')
+    await render({ onSubmitPrompt: vi.fn() })
+    const header = element.querySelector('[data-workspace-viewer-header]')!
+    expect(header.classList.contains('ds-browser-workspace-toolbar')).toBe(true)
+    expect(header.querySelector('.ds-browser-history-inline')).not.toBeNull()
+    const inlineLabels = ['browserBack', 'browserForward', 'browserReload', 'browserOpen', 'browserQuoteSelection']
+    for (const label of inlineLabels) {
+      expect(header.querySelectorAll(`button[aria-label="${label}"]`), label).toHaveLength(1)
+      expect(header.querySelector(`button[aria-label="${label}"] svg[aria-hidden="true"]`), label).not.toBeNull()
+    }
+    const panel = await menu()
+    for (const label of inlineLabels) expect(panel.querySelector(`button[aria-label="${label}"]`), label).toBeNull()
+    expect(panel.querySelector('[aria-label="browserExplainSelection"]')).not.toBeNull()
+    expect(document.querySelectorAll('[aria-label="browserQuoteSelection"]')).toHaveLength(1)
+  })
+
+  it('keeps address submission and iframe history attached to the existing handlers', async () => {
     await render()
-    expect(button('browserBack').disabled).toBe(true)
-    expect(button('browserForward').disabled).toBe(true)
+    expect((await button('browserBack')).disabled).toBe(true)
+    expect((await button('browserForward')).disabled).toBe(true)
     const input = element.querySelector('input')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'localhost:3000/two')
@@ -155,21 +182,22 @@ describe('DevBrowserPanel compact toolbar actions', () => {
     })
     await click('browserOpen')
     expect(element.querySelector('iframe')?.getAttribute('src')).toBe('http://localhost:3000/two')
-    expect(button('browserBack').disabled).toBe(false)
+    expect((await button('browserBack')).disabled).toBe(false)
     await click('browserBack')
     expect(input.value).toBe('localhost:3000/one')
-    expect(button('browserBack').disabled).toBe(true)
-    expect(button('browserForward').disabled).toBe(false)
+    expect((await button('browserBack')).disabled).toBe(true)
+    expect((await button('browserForward')).disabled).toBe(false)
     await click('browserForward')
     expect(input.value).toBe('localhost:3000/two')
-    expect(button('browserForward').disabled).toBe(true)
     const beforeReload = element.querySelector('iframe')
     await click('browserReload')
     expect(element.querySelector('iframe')).not.toBe(beforeReload)
     expect(element.querySelectorAll('iframe')).toHaveLength(1)
+    await act(async () => element.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(element.querySelectorAll('iframe')).toHaveLength(1)
   })
 
-  it('dispatches native navigation and reload exactly once through existing guest handlers', async () => {
+  it('dispatches native navigation and reload once through existing guest handlers', async () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Electron/41.10.3')
     await render()
     const guest = element.querySelector('webview')!
@@ -178,38 +206,57 @@ describe('DevBrowserPanel compact toolbar actions', () => {
       getURL: () => 'http://localhost:3000/one', goBack: back, goForward: forward,
       reloadIgnoringCache: reload })
     await act(async () => guest.dispatchEvent(new Event('did-stop-loading')))
-    await click('browserBack')
-    await click('browserForward')
-    await click('browserReload')
-    expect(back).toHaveBeenCalledTimes(1)
-    expect(forward).toHaveBeenCalledTimes(1)
-    expect(reload).toHaveBeenCalledTimes(1)
+    await click('browserBack'); await click('browserForward'); await click('browserReload')
+    expect(back).toHaveBeenCalledTimes(1); expect(forward).toHaveBeenCalledTimes(1); expect(reload).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps reset, auto-follow, external open and close in the existing menu', async () => {
+  it('preserves reset, auto-follow, external open and standalone collapse actions', async () => {
     await render()
-    await click('browserAutoFollow', false)
-    expect(button('browserAutoFollow', false).getAttribute('aria-pressed')).toBe('false')
-    await click('browserOpenExternal', false)
+    await click('browserAutoFollow')
+    expect((await button('browserAutoFollow')).getAttribute('aria-pressed')).toBe('false')
+    await click('browserOpenExternal')
     expect(external).toHaveBeenCalledExactlyOnceWith('http://localhost:3000/one')
-    await click('browserReset', false)
+    await click('browserReset')
     expect(element.querySelector('input')?.value).toBe('')
-    expect(button('browserBack').disabled).toBe(true)
-    expect(button('browserForward').disabled).toBe(true)
-    expect(button('browserReload').disabled).toBe(true)
-    expect(button('browserOpenExternal', false).disabled).toBe(true)
-    await click('browserCloseTab', false)
+    for (const label of ['browserBack', 'browserForward', 'browserReload', 'browserOpenExternal']) expect((await button(label)).disabled).toBe(true)
+    await click('browserCloseTab')
     expect(collapse).toHaveBeenCalledTimes(1)
   })
 
-  it('closes on Escape and returns keyboard focus to More', async () => {
+  it('offers detected URLs only inside More and keeps navigation and auto-follow semantics', async () => {
+    const latest = 'http://localhost:4000/latest', previous = 'http://localhost:5000/previous'
+    localStorage.setItem('analytix.devPreview.autoFollow', 'false')
+    await render({ detectedUrls: [latest, previous] })
+    expect(element.querySelectorAll('[data-workspace-viewer-header]')).toHaveLength(1)
+    expect(element.querySelector('[data-browser-detected-url]')).toBeNull()
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    let panel = await menu()
+    expect(panel.querySelectorAll('[data-browser-detected-url]')).toHaveLength(2)
+    const oldUrl = panel.querySelector<HTMLButtonElement>(`[data-browser-detected-url="${previous}"]`)!
+    expect(oldUrl.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
+    expect(oldUrl.getAttribute('aria-label')).toBe(previous)
+    await act(async () => oldUrl.click())
+    expect(element.querySelector('iframe')?.getAttribute('src')).toBe(previous)
+    expect(localStorage.getItem('analytix.devPreview.autoFollow')).toBe('false')
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    panel = await menu()
+    await act(async () => panel.querySelector<HTMLButtonElement>(`[data-browser-detected-url="${latest}"]`)!.click())
+    expect(element.querySelector('iframe')?.getAttribute('src')).toBe(latest)
+    expect(localStorage.getItem('analytix.devPreview.autoFollow')).toBe('false')
+    expect(element.querySelector('[data-browser-detected-url]')).toBeNull()
+  })
+
+  it('closes the menu on Escape and when the retained browser stops being visible', async () => {
     await render()
-    const details = element.querySelector('details')!
-    details.open = true
-    const reload = button('browserReload')
-    reload.focus()
-    await act(async () => reload.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-    expect(details.open).toBe(false)
-    expect(document.activeElement).toBe(details.querySelector('summary'))
+    const autoFollow = await button('browserAutoFollow')
+    await act(async () => autoFollow.focus())
+    await act(async () => autoFollow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(element.querySelector('[aria-label="browserMore"]'))
+    await menu()
+    await render({ visible: false })
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(element.querySelector<HTMLButtonElement>('[aria-label="browserMore"]')!.disabled).toBe(true)
+    expect(element.querySelectorAll('iframe')).toHaveLength(1)
   })
 })

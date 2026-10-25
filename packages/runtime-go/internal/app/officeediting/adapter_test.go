@@ -357,8 +357,12 @@ func TestNativeCommitAndStatusDelegateToExistingAuthority(t *testing.T) {
 					delete(fields, "threadId")
 					delete(fields, "changeId")
 				}
+				wantCalls := []string{wantCall}
+				if kind == "xlsx" && operation == "commit-object" {
+					wantCalls = []string{"native-recovery", "native-commit"}
+				}
 				out := nativeInvoke(t, a, operation, fields)
-				if out["ok"] != true || !reflect.DeepEqual(fake.calls, []string{wantCall}) || !reflect.DeepEqual(out["receipt"], receiptValue(fake.receipt)) {
+				if out["ok"] != true || !reflect.DeepEqual(fake.calls, wantCalls) || !reflect.DeepEqual(out["receipt"], receiptValue(fake.receipt)) {
 					t.Fatalf("bad receipt/delegation %v %v", out, fake.calls)
 				}
 				if !reflect.DeepEqual(fake.args, want) {

@@ -12,8 +12,8 @@ Status: Operational package reference.
 
 The only production agent core is `packages/runtime-go`. `analytix serve`
 starts the Go `runtime-server` and keeps the public ready-marker/CLI boundary
-stable. `ANALYTIX_RUNTIME_BACKEND=typescript` is retired and must not start a
-TypeScript agent loop.
+stable. Electron rejects `ANALYTIX_RUNTIME_BACKEND=typescript` as retired;
+the public launcher starts Go directly.
 
 See [runtime-go/README.md](../runtime-go/README.md) for production composition,
 runtime ownership, and Go internals. See
@@ -55,8 +55,11 @@ Run from `packages/runtime`:
 npm run typecheck
 npm run test
 npm run build
-npm run serve -- --data-dir ~/.analytix/data
+npm run serve -- --data-dir /path/to/isolated-data
 ```
+
+For `serve`, supply runtime authentication as described below and use an
+isolated data directory.
 
 `npm run build` builds this TypeScript launcher/contracts package. It does not
 compile or validate `packages/runtime-go`. Use focused Go tests for Go changes:
@@ -86,29 +89,34 @@ Effective launcher options include:
 
 | Flag | Meaning | Default |
 | --- | --- | --- |
-| `--config <path>` | Launcher JSON config for supported serve/provider fields | `<data-dir>/config.json` when present |
+| `--config <path>` | Launcher JSON config; its path is also passed to Go for supported settings | `<data-dir>/config.json` when present |
 | `--host <host>` | Runtime bind host | `127.0.0.1` |
 | `--port <port>` | Runtime port | `8899` |
 | `--data-dir <path>` | Runtime durable data root | required by `serve` |
-| `--runtime-token <token>` | Bearer token for `/v1/*` | empty/local insecure semantics depend on launch mode |
-| `--api-key <key>` | Standalone provider API key | empty |
-| `--base-url <url>` | Standalone default provider base URL | `https://api.deepseek.com/beta`; GUI/managed providers override it |
-| `--model-proxy-url <url>` | Upstream model proxy | empty |
-| `--endpoint-format <format>` | `chat_completions`, `responses`, `messages`, or `custom_endpoint` | `chat_completions` |
-| `--model <id>` | Default model id | `deepseek-v4-pro` |
 | `--approval-policy <policy>` | Default tool approval policy | `on-request` |
 | `--sandbox-mode <mode>` | Default application tool/path policy | `workspace-write` |
 | `--insecure` | Disable bearer-token auth for explicit local development | off |
 
-Example:
+`--runtime-token` / `--runtimeToken` and `--api-key` / `--apiKey` are rejected
+in argv. Supply the runtime bearer token through `ANALYTIX_RUNTIME_TOKEN`;
+the parser still reads existing `serve.runtimeToken` config for compatibility.
+A token is required unless `--insecure` is explicitly selected.
+
+Provider credentials use the local data-directory Registry / Secret Store.
+The parser rejects non-blank `ANALYTIX_API_KEY` or `serve.apiKey`, and any
+`apiKey` field on provider entries in `ANALYTIX_MODEL_PROVIDERS` or config
+`modelProviders`.
+`--base-url`, `--model-proxy-url`, `--endpoint-format`, and `--model` remain
+legacy parse-only inputs and are not forwarded as Go Provider configuration.
+
+Example with `ANALYTIX_RUNTIME_TOKEN` already supplied through the environment
+and an isolated data directory:
 
 ```bash
 analytix serve \
   --host 127.0.0.1 \
   --port 8899 \
-  --data-dir ~/.analytix/data \
-  --runtime-token dev-token \
-  --model deepseek-v4-pro
+  --data-dir /path/to/isolated-data
 ```
 
 The desktop normally starts the Go binary directly through Electron main after
@@ -129,8 +137,9 @@ Connect Phone and scheduled-task turns use `never` plus `workspace-write`.
 
 Do not infer production behavior from schema acceptance alone.
 
-- The launcher parses serve/provider values and `modelProviders` from its JSON
-  config and forwards the applicable values to Go.
+- The launcher parses supported serve options from its JSON config and passes
+  the config path to Go as `--mcp-config-path`; legacy Provider CLI defaults
+  are not forwarded.
 - Electron main synchronizes `<dataDir>/config.json` and passes that path to
   the Go core for currently wired capability settings.
 - The Go production composition root is

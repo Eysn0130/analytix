@@ -36,7 +36,7 @@ function setup(){
   expect(allClosedCallbacks).toHaveLength(1)
   const trace:string[]=[]
   const context={isQuitting:false,managedRuntimesStoppedForQuit:false,nativeOfficeQuitPhase:'idle',quitCloseObservationTimer:null as ReturnType<typeof setTimeout>|null,desktopStartupBarrierComplete:true,setTimeout,clearTimeout,queueMicrotask,
-    process:{platform:'linux'},BrowserWindow:{getAllWindows:vi.fn(()=>[])},
+    process:{platform:'linux'},BrowserWindow:{getAllWindows:vi.fn(()=>[])},runtimeSettingsStopHandoff:{cancel:vi.fn()},
     prepareNativeOfficeQuit:vi.fn(async()=>{trace.push('prepare');return true}),
     cancelNativeOfficeQuit:vi.fn(async()=>{trace.push('cancel')}),
     waitForNativeOfficeQuitTeardown:vi.fn(async()=>{trace.push('office-settled')}),
@@ -65,6 +65,8 @@ test('the actual before-quit callback waits for Office preparation and Core stop
   h.context.prepareNativeOfficeQuit.mockImplementation(()=>new Promise(resolve=>{h.trace.push('prepare');prepared=resolve}))
   h.context.stopManagedRuntimesForQuit.mockImplementation(()=>new Promise(resolve=>{h.trace.push('core-stop');stopped=()=>{h.context.managedRuntimesStoppedForQuit=true;resolve()}}))
   expect(h.invoke().preventDefault).toHaveBeenCalledOnce();h.invoke()
+  expect(h.context.runtimeSettingsStopHandoff.cancel).toHaveBeenCalledTimes(2)
+  expect(h.context.runtimeSettingsStopHandoff.cancel.mock.invocationCallOrder[0]).toBeLessThan(h.context.prepareNativeOfficeQuit.mock.invocationCallOrder[0])
   expect(h.trace).toEqual(['prepare']);expect(h.context.stopManagedRuntimesForQuit).not.toHaveBeenCalled();expect(h.context.app.quit).not.toHaveBeenCalled()
   prepared(true);await vi.waitFor(()=>expect(h.context.app.quit).toHaveBeenCalledOnce())
   expect(h.context.stopManagedRuntimesForQuit).not.toHaveBeenCalled()
@@ -186,6 +188,7 @@ test('failed Office teardown keeps Core alive and reports its own failure stage'
 test('an updater-owned runtime stop keeps the existing direct quit path',()=>{
   const h=setup();h.context.managedRuntimesStoppedForQuit=true
   expect(h.invoke().preventDefault).not.toHaveBeenCalled()
+  expect(h.context.runtimeSettingsStopHandoff.cancel).toHaveBeenCalledOnce()
   expect(h.invokeWill().preventDefault).not.toHaveBeenCalled()
   expect(h.context.prepareNativeOfficeQuit).not.toHaveBeenCalled()
 })

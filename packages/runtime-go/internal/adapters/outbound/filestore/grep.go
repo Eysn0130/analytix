@@ -34,12 +34,13 @@ type GrepScanResult struct {
 	SkippedProtected []string
 	SkippedDirs      []string
 	LimitReached     bool
+	ScanComplete     bool
 }
 
 type GrepMatch = filetoolsapp.GrepMatch
 
 func GrepScan(ctx context.Context, request GrepScanRequest) (GrepScanResult, error) {
-	result := GrepScanResult{}
+	result := GrepScanResult{ScanComplete: true}
 	if request.Match == nil {
 		return result, nil
 	}
@@ -95,6 +96,7 @@ func GrepScan(ctx context.Context, request GrepScanRequest) (GrepScanResult, err
 
 	scanFile := func(path string) {
 		if len(result.Matches) >= limit || ctx.Err() != nil {
+			result.ScanComplete = false
 			return
 		}
 		rel := relativePath(path)
@@ -103,6 +105,7 @@ func GrepScan(ctx context.Context, request GrepScanRequest) (GrepScanResult, err
 		}
 		file, err := os.Open(path)
 		if err != nil {
+			result.ScanComplete = false
 			return
 		}
 		defer file.Close()
@@ -118,10 +121,12 @@ func GrepScan(ctx context.Context, request GrepScanRequest) (GrepScanResult, err
 		pendingAfter := []pendingContextAfter{}
 		consumeLine := func(line string) bool {
 			if ctx.Err() != nil {
+				result.ScanComplete = false
 				return true
 			}
 			lineNumber++
 			if strings.IndexByte(line, 0) >= 0 {
+				result.ScanComplete = false
 				return true
 			}
 			if len(pendingAfter) > 0 {
@@ -160,6 +165,7 @@ func GrepScan(ctx context.Context, request GrepScanRequest) (GrepScanResult, err
 				}
 			}
 			if len(result.Matches) >= limit && len(pendingAfter) == 0 {
+				result.ScanComplete = false
 				return true
 			}
 			return false
@@ -172,10 +178,12 @@ func GrepScan(ctx context.Context, request GrepScanRequest) (GrepScanResult, err
 		if looksUTF16Text(peek) {
 			data, err := os.ReadFile(path)
 			if err != nil {
+				result.ScanComplete = false
 				return
 			}
 			content, textOK := decodeText(data)
 			if !textOK {
+				result.ScanComplete = false
 				return
 			}
 			for _, line := range splitTextLines(content) {
@@ -197,23 +205,30 @@ func GrepScan(ctx context.Context, request GrepScanRequest) (GrepScanResult, err
 				return
 			}
 		}
+		if scanner.Err() != nil {
+			result.ScanComplete = false
+		}
 		finishPending()
 	}
 
 	info, err := os.Stat(request.Root)
 	if err != nil {
+		result.ScanComplete = false
 		return result, err
 	}
 	if !info.IsDir() {
 		scanFile(request.Root)
 		result.LimitReached = len(result.Matches) >= limit
+		result.ScanComplete = result.ScanComplete && !result.LimitReached && ctx.Err() == nil
 		return result, nil
 	}
-	_ = filepath.WalkDir(request.Root, func(path string, entry os.DirEntry, walkErr error) error {
+	walkErr := filepath.WalkDir(request.Root, func(path string, entry os.DirEntry, walkErr error) error {
 		if ctx.Err() != nil {
+			result.ScanComplete = false
 			return filepath.SkipAll
 		}
 		if walkErr != nil {
+			result.ScanComplete = false
 			return nil
 		}
 		if entry.IsDir() {
@@ -249,6 +264,7 @@ func GrepScan(ctx context.Context, request GrepScanRequest) (GrepScanResult, err
 		return nil
 	})
 	result.LimitReached = len(result.Matches) >= limit
+	result.ScanComplete = result.ScanComplete && walkErr == nil && !result.LimitReached && ctx.Err() == nil
 	return result, nil
 }
 

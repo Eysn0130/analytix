@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainpendingwork "analytix.local/runtime-go/internal/domain/pendingwork"
@@ -17,10 +18,12 @@ const maxChildRunSequence = int(^uint(0) >> 1)
 type ChildRunReservationV1 struct{ state *childRunReservationV1 }
 
 type childRunReservationV1 struct {
-	owner    *Manager
-	binding  *domainjob.SecurityBinding
-	target   domainpendingwork.ChildProducerTargetV1
-	consumed bool
+	owner              *Manager
+	binding            *domainjob.SecurityBinding
+	hostInput          *domainjob.HostChildInputIdentityV1
+	hostParentThreadID string
+	target             domainpendingwork.ChildProducerTargetV1
+	consumed           bool
 }
 
 func (reservation ChildRunReservationV1) TargetV1() domainpendingwork.ChildProducerTargetV1 {
@@ -84,7 +87,11 @@ func (m *Manager) validateChildRunReservationNoLock(reservation ChildRunReservat
 	if state == nil || state.owner != m || state.consumed || !validPersistedJobID(state.target.JobID) || sequence(state.target.JobID) > m.seq {
 		return errors.New("child-run reservation is stale or foreign")
 	}
-	if m.restartPreservesRecordNoLock(Record{ParentThreadID: state.binding.ParentThreadID, ChildThreadID: state.target.ChildThreadID}) {
+	parentThreadID := state.hostParentThreadID
+	if state.binding != nil {
+		parentThreadID = state.binding.ParentThreadID
+	}
+	if m.restartPreservesRecordNoLock(Record{ParentThreadID: parentThreadID, ChildThreadID: state.target.ChildThreadID}) {
 		return ErrRestartPreserved
 	}
 	records, err := m.readCurrentRestartRecordsNoLock()
@@ -139,4 +146,41 @@ func (m *Manager) consumeChildRunIDNoLock(reservation *ChildRunReservationV1) (s
 	}
 	reservation.state.consumed = true
 	return reservation.state.target.JobID, nil
+}
+
+// ReserveHostChildInputRunV1 allocates identities only. It shares the existing
+// manager counter and reservation; the private Host turn path owns authority.
+func (m *Manager) ReserveHostChildInputRunV1(ctx context.Context, parentThreadID, childThreadID, childTurnID string, identity *domainjob.HostChildInputIdentityV1) (ChildRunReservationV1, error) {
+	if m == nil || ctx == nil || ctx.Err() != nil || domainjob.ValidateHostChildInputIdentityV1(identity) != nil || identity.ClaimedAt != "" ||
+		strings.TrimSpace(parentThreadID) == "" || strings.TrimSpace(childThreadID) == "" || strings.TrimSpace(childTurnID) == "" || parentThreadID == childThreadID {
+		return ChildRunReservationV1{}, errors.New("Host child input reservation is invalid")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return ChildRunReservationV1{}, err
+	}
+	if m.restartPreservesRecordNoLock(Record{ParentThreadID: parentThreadID, ChildThreadID: childThreadID}) {
+		return ChildRunReservationV1{}, ErrRestartPreserved
+	}
+	if _, err := m.readCurrentRestartRecordsNoLock(); err != nil {
+		return ChildRunReservationV1{}, err
+	}
+	id, err := m.nextChildRunIDNoLock()
+	if err != nil {
+		return ChildRunReservationV1{}, err
+	}
+	m.restartEffectsStarted = true
+	return ChildRunReservationV1{state: &childRunReservationV1{owner: m, hostInput: domainjob.CloneHostChildInputIdentityV1(identity), hostParentThreadID: parentThreadID,
+		target: domainpendingwork.ChildProducerTargetV1{Ordinal: 1, JobID: id, ChildThreadID: childThreadID, ChildTurnID: childTurnID}}}, nil
+}
+
+func (m *Manager) StartReservedHostChildInputRunV1(ctx context.Context, request StartRequest, reservation ChildRunReservationV1) (Record, error) {
+	state := reservation.state
+	if m == nil || state == nil || state.owner != m || state.binding != nil || state.hostInput == nil || request.HostChildInput == nil ||
+		*request.HostChildInput != *state.hostInput || request.ParentThreadID != state.hostParentThreadID || request.SecurityBinding != nil ||
+		request.Kind != "subagent" || request.Status != "queued" || request.ChildThreadID != state.target.ChildThreadID || request.ChildTurnID != state.target.ChildTurnID {
+		return Record{}, errors.New("Host child input differs from its process reservation")
+	}
+	return m.startChildRun(ctx, request, &reservation)
 }

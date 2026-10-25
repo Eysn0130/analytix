@@ -116,7 +116,18 @@ func RunDesktopPrivateHistoryMigrationV2(
 	// Reject an invalid retired TypeScript lineage before the first startup
 	// authority namespace directory can be created. The semantic callback
 	// repeats this witness after its normal fixed-point preparation.
-	if err := validateRuntimeRetiredTypeScriptAuditLineageBeforeMutationV1(ctx, roots); err != nil {
+	rootAuthority, ok := lease.FrozenAuthority()
+	if !ok {
+		return errors.New("legacy lineage persistence root authority is unavailable")
+	}
+	entries := make([]persistencefs.EntryRecord, 0, len(managed.snapshot.Entries))
+	for _, entry := range managed.snapshot.Entries {
+		entries = append(entries, persistencefs.EntryRecord{
+			Path: entry.Path, Type: entry.Type, Mode: entry.Mode, Size: entry.Size,
+			ModTimeUnixNano: entry.ModTimeUnixNano, SHA256: entry.SHA256, RecordCount: entry.RecordCount,
+		})
+	}
+	if err := validateRuntimeRetiredTypeScriptAuditLineageBeforeMutationV1(ctx, roots, rootAuthority, entries); err != nil {
 		return err
 	}
 	if !existingAuthority {

@@ -1,14 +1,27 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"math"
 	"time"
 
 	domaincache "analytix.local/runtime-go/internal/domain/cachetelemetry"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainstreamframe "analytix.local/runtime-go/internal/domain/streamframe"
 )
 
 type Message struct {
+	// Minted only from trusted signed original Question settlement or audited
+	// history. It preserves protocol identity, never user content or authority.
+	PrivateUserInputPendingBinding any `json:"-"`
+
+	// This independent, process-only carrier is minted from verified signed
+	// late Question steering. It grants no Case reference or data authority.
+	PrivateUserInputReplyBinding  any  `json:"-"`
+	PrivateUserInputReplyRequired bool `json:"-"`
+
 	Role       string        `json:"role"`
 	Name       string        `json:"name,omitempty"`
 	Content    string        `json:"content,omitempty"`
@@ -123,7 +136,12 @@ type Request struct {
 }
 
 type ProviderTelemetryBindingV1 struct {
-	SecurityContext domainsecurity.TurnSecurityContext
+	// StepStartedAt is host-authored and shared by the outer retries of this
+	// provider step. It is not a physical attempt or provider-supplied clock.
+	StepStartedAt time.Time
+	// PublicAttribution is frozen by the host from the approved execution intent.
+	PublicAttribution domaincache.ProviderPublicAttributionV1
+	SecurityContext   domainsecurity.TurnSecurityContext
 	// OrdinaryEffect is host-owned, process-local effect classification. It
 	// lets durable telemetry observe an ordinary provider call on a witnessed
 	// boundary-only turn without upgrading that call to case execution.
@@ -139,6 +157,146 @@ type ProviderTelemetryBindingV1 struct {
 	LaneCallSequence uint32
 }
 
+// ProviderRetryV1 describes host-owned retry lifecycle observations. Started
+// records a host invocation; signed dispatch telemetry owns network truth.
+// Scheduled deadlines describe only the frozen wait, never request start.
+type ProviderRetryV1 struct {
+	SchemaVersion   int
+	Source          string
+	Phase           string
+	LogicalSequence uint64
+	OuterAttempt    int
+	PhysicalAttempt int
+	DelayMs         *int64
+	DeadlineUnixMs  *int64
+	CancelReason    string
+	At              time.Time
+}
+
+func (retry ProviderRetryV1) Details() map[string]any {
+	details := map[string]any{"schemaVersion": float64(retry.SchemaVersion), "source": retry.Source,
+		"phase": retry.Phase, "logicalSequence": float64(retry.LogicalSequence), "outerAttempt": float64(retry.OuterAttempt)}
+	if retry.PhysicalAttempt > 0 {
+		details["physicalAttempt"] = float64(retry.PhysicalAttempt)
+	}
+	if retry.DelayMs != nil {
+		details["delayMs"] = float64(*retry.DelayMs)
+	}
+	if retry.DeadlineUnixMs != nil {
+		details["deadlineUnixMs"] = float64(*retry.DeadlineUnixMs)
+	}
+	if retry.CancelReason != "" {
+		details["cancelReason"] = retry.CancelReason
+	}
+	return details
+}
+
+func ProviderRetryCancelReasonV1(ctxErr, cause error) string {
+	// Current host cancellation is authoritative over an older provider cause.
+	if ctxErr != nil {
+		cause = ctxErr
+	}
+	if errors.Is(cause, context.DeadlineExceeded) {
+		return "deadline_exceeded"
+	}
+	if errors.Is(cause, context.Canceled) {
+		return "context_cancelled"
+	}
+	return "attempt_rejected"
+}
+
+// ProjectProviderRetryDetailsV1 is shared by the producer and the public
+// SSE/replay boundary. It accepts only closed lifecycle observations; none
+// of these fields authorizes a network dispatch or a new provider call.
+func ProjectProviderRetryDetailsV1(input map[string]any) (map[string]any, bool) {
+	result := make(map[string]any, len(input))
+	for key, value := range input {
+		switch key {
+		case "source":
+			v, ok := providerRetryEnumV1(value, "provider_retry", "transport_reconnect")
+			if !ok {
+				return nil, false
+			}
+			result[key] = v
+		case "phase":
+			v, ok := providerRetryEnumV1(value, "scheduled", "started", "cancelled")
+			if !ok {
+				return nil, false
+			}
+			result[key] = v
+		case "cancelReason":
+			v, ok := providerRetryEnumV1(value, "context_cancelled", "deadline_exceeded", "attempt_rejected")
+			if !ok {
+				return nil, false
+			}
+			result[key] = v
+		case "schemaVersion", "logicalSequence", "outerAttempt", "physicalAttempt", "delayMs", "deadlineUnixMs":
+			n, ok := providerRetryNumberV1(value)
+			if !ok || n < 0 || n > 1e15 || math.Trunc(n) != n || key != "delayMs" && n == 0 {
+				return nil, false
+			}
+			result[key] = n
+		default:
+			return nil, false
+		}
+	}
+	if result["schemaVersion"] != float64(1) || result["source"] == nil || result["phase"] == nil || result["logicalSequence"] == nil || result["outerAttempt"] == nil {
+		return nil, false
+	}
+	if result["source"] == "transport_reconnect" && result["physicalAttempt"] == nil {
+		return nil, false
+	}
+	if result["source"] == "provider_retry" && result["physicalAttempt"] != nil {
+		return nil, false
+	}
+	_, delay := result["delayMs"]
+	_, deadline := result["deadlineUnixMs"]
+	_, reason := result["cancelReason"]
+	if result["phase"] == "scheduled" {
+		if !delay || !deadline || reason {
+			return nil, false
+		}
+	} else if delay || deadline {
+		return nil, false
+	}
+	if (result["phase"] == "cancelled") != reason {
+		return nil, false
+	}
+	return result, true
+}
+
+func providerRetryEnumV1(value any, allowed ...string) (any, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return nil, false
+	}
+	for _, candidate := range allowed {
+		if text == candidate {
+			return text, true
+		}
+	}
+	return nil, false
+}
+
+func providerRetryNumberV1(value any) (float64, bool) {
+	var number float64
+	switch typed := value.(type) {
+	case float64:
+		number = typed
+	case float32:
+		number = float64(typed)
+	case int:
+		number = float64(typed)
+	case int32:
+		number = float64(typed)
+	case int64:
+		number = float64(typed)
+	default:
+		return 0, false
+	}
+	return number, !math.IsNaN(number) && !math.IsInf(number, 0)
+}
+
 type PipelineStage struct {
 	Stage   string
 	At      time.Time
@@ -147,29 +305,36 @@ type PipelineStage struct {
 }
 
 type Usage struct {
-	MessagesInput       domaincache.MessagesInputV1 `json:"-"`
-	UsagePresenceKnown  bool                        `json:"-"`
-	HasPromptTokens     bool                        `json:"-"`
-	HasCompletionTokens bool                        `json:"-"`
-	PromptTokens        int                         `json:"promptTokens"`
-	CompletionTokens    int                         `json:"completionTokens"`
-	ReasoningTokens     int                         `json:"reasoningTokens"`
-	TotalTokens         int                         `json:"totalTokens"`
-	CacheHitTokens      int                         `json:"cacheHitTokens"`
-	CacheMissTokens     int                         `json:"cacheMissTokens"`
-	CacheHitRate        float64                     `json:"cacheHitRate"`
-	HasCacheHit         bool                        `json:"-"`
-	HasCacheMiss        bool                        `json:"-"`
-	FinishReason        string                      `json:"finishReason,omitempty"`
-	CostUSD             float64                     `json:"costUsd,omitempty"`
-	CostCNY             float64                     `json:"costCny,omitempty"`
-	CacheSavingsUSD     float64                     `json:"cacheSavingsUsd,omitempty"`
-	CacheSavingsCNY     float64                     `json:"cacheSavingsCny,omitempty"`
-	Currency            string                      `json:"currency,omitempty"`
-	PriceConfigured     bool                        `json:"priceConfigured,omitempty"`
+	OutputTokensFinality    domaincache.ProviderOutputTokensFinalityV1 `json:"-"`
+	ReasoningTokensFinality domaincache.ProviderOutputTokensFinalityV1 `json:"-"`
+	MessagesInput           domaincache.MessagesInputV1                `json:"-"`
+	UsagePresenceKnown      bool                                       `json:"-"`
+	HasPromptTokens         bool                                       `json:"-"`
+	HasReasoningTokens      bool                                       `json:"-"`
+	HasCompletionTokens     bool                                       `json:"-"`
+	PromptTokens            int                                        `json:"promptTokens"`
+	CompletionTokens        int                                        `json:"completionTokens"`
+	ReasoningTokens         int                                        `json:"reasoningTokens"`
+	TotalTokens             int                                        `json:"totalTokens"`
+	CacheHitTokens          int                                        `json:"cacheHitTokens"`
+	CacheMissTokens         int                                        `json:"cacheMissTokens"`
+	CacheHitRate            float64                                    `json:"cacheHitRate"`
+	HasCacheHit             bool                                       `json:"-"`
+	HasCacheMiss            bool                                       `json:"-"`
+	FinishReason            string                                     `json:"finishReason,omitempty"`
+	CostUSD                 float64                                    `json:"costUsd,omitempty"`
+	CostCNY                 float64                                    `json:"costCny,omitempty"`
+	CacheSavingsUSD         float64                                    `json:"cacheSavingsUsd,omitempty"`
+	CacheSavingsCNY         float64                                    `json:"cacheSavingsCny,omitempty"`
+	Currency                string                                     `json:"currency,omitempty"`
+	PriceConfigured         bool                                       `json:"priceConfigured,omitempty"`
 }
 
 func (u Usage) HasCacheTelemetry() bool {
+	// Native numeric presence is independent of the old comparable cache pair.
+	if u.UsagePresenceKnown {
+		return u.HasPromptTokens && u.HasCacheHit && u.HasCacheMiss
+	}
 	return u.HasCacheHit || u.HasCacheMiss || u.CacheHitTokens > 0 || u.CacheMissTokens > 0
 }
 
@@ -186,15 +351,47 @@ const (
 	ChunkDone          ChunkKind = "done"
 )
 
+// ProcessFrameV1 is an ephemeral, display-only view of reasoning block framing,
+// explicit provider summaries or a classified, still-open assistant draft.
+// It is neither public output nor signed provider continuation. The
+// host supplies ProviderSequence and the original turn/scope binding separately.
+// No signatures, encrypted content, redacted blocks or tool grants belong here.
+type ProcessFrameV1 struct {
+	// Source distinguishes host-observed reasoning and private drafts from native framing.
+	Source string `json:"-"`
+	// ReasoningForm identifies explicitly emitted provider summaries. It never
+	// claims that a summary contains the model's complete private reasoning.
+	ReasoningForm string `json:"-"`
+	// HostSegmentOrdinal labels host-observed reasoning segments or explicit
+	// summary parts within this physical call, never a provider-native index.
+	HostSegmentOrdinal    uint64                               `json:"-"`
+	ToolPreparation       *domainstreamframe.ToolPreparationV1 `json:"-"`
+	ContentClassification string                               `json:"-"`
+	Kind                  string                               `json:"-"`
+	Attempt               uint64                               `json:"-"`
+	NativeIndex           int                                  `json:"-"`
+	NativeID              string                               `json:"-"`
+	Text                  string                               `json:"-"`
+	ProviderSequence      uint64                               `json:"-"`
+	// ProjectionSecrets is replaced by the host from the actual prepared
+	// request. It is used only to project capture and never reaches the UI.
+	ProjectionSecrets []string `json:"-"`
+}
+
 type Chunk struct {
-	Kind         ChunkKind  `json:"kind"`
-	Text         string     `json:"text,omitempty"`
-	ToolCall     ToolCall   `json:"toolCall,omitempty"`
-	Usage        Usage      `json:"usage,omitempty"`
-	Signature    string     `json:"signature,omitempty"`
-	RetryAttempt int        `json:"retryAttempt,omitempty"`
-	RetryMax     int        `json:"retryMax,omitempty"`
-	Trace        ChunkTrace `json:"-"`
+	Kind         ChunkKind        `json:"kind"`
+	Text         string           `json:"text,omitempty"`
+	ToolCall     ToolCall         `json:"toolCall,omitempty"`
+	Usage        Usage            `json:"usage,omitempty"`
+	Signature    string           `json:"signature,omitempty"`
+	RetryAttempt int              `json:"retryAttempt,omitempty"`
+	RetryMax     int              `json:"retryMax,omitempty"`
+	Retry        *ProviderRetryV1 `json:"-"`
+	Trace        ChunkTrace       `json:"-"`
+	ProcessFrame *ProcessFrameV1  `json:"-"`
+	// DiscardedToolMaterial is private host budget input from unfinished capped blocks.
+	// It never represents a tool call, native usage, or model replay.
+	DiscardedToolMaterial string `json:"-"`
 }
 
 type ChunkTrace struct {
@@ -228,9 +425,19 @@ type PrefixShape struct {
 	ToolSchemaEstimator string `json:"toolSchemaEstimator,omitempty"`
 }
 
-// ProviderTiming is process-local Host observation. It is never signed or persisted.
+// ProviderTiming is process-local Host observation. Only an explicitly validated
+// first-content timestamp may be copied into the numeric attempt settlement.
 type ProviderTiming struct {
-	StartedAt, FirstContentAt, LastContentAt, FirstTextAt, LastTextAt, FinishBoundaryAt, FinishedAt time.Time
+	// PresenceKnown distinguishes an installed native observer with no content
+	// from diagnostic clients that report only display callbacks.
+	FirstContentPresenceKnown bool
+	StartedAt                 time.Time
+	FirstContentAt            time.Time
+	LastContentAt             time.Time
+	FirstTextAt               time.Time
+	LastTextAt                time.Time
+	FinishBoundaryAt          time.Time
+	FinishedAt                time.Time
 }
 
 type Result struct {

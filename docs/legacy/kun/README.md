@@ -1,22 +1,10 @@
-# Historical Legacy-Kun Notes
+# Historical Kun Documentation
 
-This directory contains pre-analytix architecture notes retained only for
-migration archaeology and explicit legacy import boundaries.
+Status: Historical pointer.
 
-These files are not current analytix architecture instructions. Current rules
-live in:
+The former Kun architecture, cache optimization, contribution and hooks manuals
+(Chinese and English) were retired from the working tree. Recover the originals
+from [Git at `424fbd3`](https://github.com/Eysn0130/analytix/tree/424fbd3a34f5f51ae516eace34483c560b2eb8d1/docs/legacy/kun).
 
-- `../../../AGENTS.md`
-- `../../analytix/specs/01-identity-runtime-schema-reset.md`
-- `../../analytix/specs/02-release-packaging-channels.md`
-- `../../analytix/specs/03-brand-assets-visual-system.md`
-- `../../analytix/specs/04-analytix-derived-thread-virtualizer.md`
-- `../../analytix/specs/05-architecture-code-upgrade-inventory.md`
-- `../../analytix/specs/06-implementation-closure-and-acceptance.md`
-
-Retained historical files:
-
-- `kun-architecture.md` / `kun-architecture.en.md`
-- `kun-cache-optimization.md` / `kun-cache-optimization.en.md`
-- `kun-contributing.md` / `kun-contributing.en.md`
-- `kun-hooks.md` / `kun-hooks.en.md`
+Current guidance starts at the [Analytix documentation map](../../analytix/README.md).
+This document cleanup does not change legacy import or migration support.

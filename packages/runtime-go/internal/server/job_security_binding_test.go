@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -271,7 +272,7 @@ func TestBackgroundJobCaseSwitchRejectsLateDelivery(t *testing.T) {
 	if !updated.LateCompletionSuppressed || updated.DeadLetterReason != "parent_security_context_mismatch" || updated.CompletionDeliveryStatus != "dead_letter" {
 		t.Fatalf("late case A completion was not dead-lettered: %#v", updated)
 	}
-	output, isError := handler.executeRuntimeTaskJobOutput(runtimePendingToolCall{
+	output, isError := handler.executeRuntimeTaskJobOutput(context.Background(), runtimePendingToolCall{
 		ThreadID: threadID, TurnID: contextB.TurnID, SecurityContext: contextB,
 		Call: domainmodel.ToolCall{ID: "call_output", Name: "bash_output"},
 	}, map[string]any{"job_id": record.ID})

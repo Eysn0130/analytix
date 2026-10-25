@@ -5,6 +5,7 @@ import (
 
 	filestore "analytix.local/runtime-go/internal/adapters/outbound/filestore"
 	filetoolsapp "analytix.local/runtime-go/internal/app/filetools"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 const (
@@ -13,8 +14,14 @@ const (
 	runtimeReadDefaultLimit = filetoolsapp.DefaultReadLimit
 )
 
-func executeReadRuntimeTool(pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string, mode string) (map[string]any, string, bool) {
+func executeReadRuntimeToolWithCapture(ctx context.Context, pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string, mode string) (map[string]any, string, bool) {
 	return filestore.ExecuteReadTextTool(filestore.ReadTextToolInput{
+		CaptureError: func(message string) {
+			domaintoolresult.CaptureProtectedToolErrorV1(ctx, domaintoolresult.ProjectProtectedOutputErrorV1([]domaintoolresult.ProtectedOutputErrorEntryV1{{Message: message}}))
+		},
+		Capture: func(candidate domaintoolresult.ProtectedCaptureV1) {
+			domaintoolresult.CaptureProtectedToolResultV1(ctx, candidate)
+		},
 		Workspace:         pending.Workspace,
 		Args:              args,
 		ProtectedReadDirs: protectedReadDirs,
@@ -24,12 +31,12 @@ func executeReadRuntimeTool(pending runtimePendingToolCall, args map[string]any,
 	})
 }
 
-func executeListRuntimeTool(pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string) (any, bool) {
-	return filestore.ExecuteListTool(runtimeSearchToolInput(nil, pending, args, protectedReadDirs, readRoots))
+func executeListRuntimeTool(ctx context.Context, pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string) (any, bool) {
+	return filestore.ExecuteListTool(runtimeSearchToolInput(ctx, pending, args, protectedReadDirs, readRoots))
 }
 
-func executeFindRuntimeTool(pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string) (any, bool) {
-	return filestore.ExecuteFindTool(runtimeSearchToolInput(nil, pending, args, protectedReadDirs, readRoots))
+func executeFindRuntimeTool(ctx context.Context, pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string) (any, bool) {
+	return filestore.ExecuteFindTool(runtimeSearchToolInput(ctx, pending, args, protectedReadDirs, readRoots))
 }
 
 func executeGlobRuntimeTool(ctx context.Context, pending runtimePendingToolCall, args map[string]any, protectedReadDirs []string, readRoots []string) (any, bool) {

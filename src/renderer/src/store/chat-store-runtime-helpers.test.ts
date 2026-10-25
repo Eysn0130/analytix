@@ -3,13 +3,81 @@ import type { ChatBlock } from '../agent/types'
 import type { NormalizedThread } from '../agent/types'
 import type { ChatState } from './chat-store-types'
 import {
+  clearedThreadSelection,
   findReusableEmptyThreadId,
+  updateUserInputDraftInterruption,
+  forgetUserInputDraftInterruptionsForThread,
+  markDeletedUserInputDraftThread,
+  findUserInputBlockIndex,
+  findUserInputStatusBlockIndex,
+  upsertUserInputBlock,
   hasPendingRuntimeWork,
   settlePendingRuntimeWorkAfterInterrupt,
+  retireProviderRetryStatusesForTurn,
   threadHasPendingRuntimeWork,
   threadSnapshotLooksRunning,
   upsertUserBlock
 } from './chat-store-runtime-helpers'
+
+describe('terminal provider retry retirement', () => {
+  const retry = { attempt: 2, maxAttempt: 3 }
+  const row = (patch: Partial<Extract<ChatBlock, { kind: 'system' }>> = {}): Extract<ChatBlock, { kind: 'system' }> => ({
+    kind: 'system', id: 'retry-current', text: 'Provider request is retrying',
+    meta: { turnId: 'turn-current', providerRetry: retry }, ...patch
+  })
+
+  it('retires only an exact terminal turn and preserves adjacent or unowned object identities', () => {
+    const adjacent = row({ id: 'adjacent', meta: { turnId: 'turn-other', providerRetry: retry } })
+    const unowned = row({ id: 'unowned', meta: { providerRetry: retry } })
+    const ordinary = row({ id: 'ordinary', text: 'Independent observation', meta: { turnId: 'turn-current' } })
+    const blocks = [row(), row({ id: 'retry-zh', text: '模型服务正在重试' }), adjacent, unowned, ordinary]
+    expect(retireProviderRetryStatusesForTurn(blocks, '')).toBe(blocks)
+    expect(retireProviderRetryStatusesForTurn(blocks, 'turn-missing')).toBe(blocks)
+    const retired = retireProviderRetryStatusesForTurn(blocks, 'turn-current')
+    expect(retired).toEqual([adjacent, unowned, ordinary])
+    retired.forEach((block, index) => expect(block).toBe([adjacent, unowned, ordinary][index]))
+    expect(blocks[0].meta?.providerRetry).toBe(retry)
+  })
+
+  it.each([
+    row({ severity: 'error', text: 'Actual provider failure', code: 'provider_unavailable', detail: 'HTTP 503' }),
+    row({ severity: 'warning', text: 'Independent warning', detail: 'Preserve warning detail' }),
+    row({ code: 'independent_code', text: 'Independent coded observation' }),
+    row({ text: 'Independent text without a separate diagnostic field' }),
+    row({ text: 'Independent metadata', meta: { turnId: 'turn-current', providerRetry: retry, displayText: 'Retained display text' } })
+  ])('removes retry metadata without dropping independent error, code, detail or text: $text', original => {
+    const [retired] = retireProviderRetryStatusesForTurn([original], 'turn-current')
+    const meta = { ...original.meta }
+    delete meta.providerRetry
+    expect(retired).toEqual({ ...original, meta })
+    expect(original.meta?.providerRetry).toBe(retry)
+  })
+
+  it.each([undefined, 'error'] as const)('preserves mixed provider errors without their stale retry caption (severity: %s)', severity => {
+    const providerError = { status: 503, retryable: true, hasApiKey: false }
+    const original = row({ severity, code: severity ? 'provider_unavailable' : undefined,
+      meta: { turnId: 'turn-current', providerRetry: retry, providerError } })
+    const [retired] = retireProviderRetryStatusesForTurn([original], 'turn-current')
+    expect(retired).toEqual({ ...original, text: 'Model request details',
+      meta: { turnId: 'turn-current', providerError } })
+  })
+
+  it.each(['providerRetryingStatus', 'common:providerRetryingStatus'])('retires only identified legacy retry captions and preserves mixed errors (%s)', text => {
+    const providerError = { status: 503, retryable: true, hasApiKey: false }
+    const mixed = row({ id: 'legacy-error', text, severity: 'error', code: 'provider_unavailable', detail: 'HTTP 503',
+      meta: { turnId: 'turn-current', providerRetry: retry, providerError } })
+    const adjacent = row({ id: 'adjacent', text, meta: { turnId: 'turn-other', providerRetry: retry } })
+    const ordinary = row({ id: 'ordinary', text, meta: { turnId: 'turn-current' } })
+    const user: ChatBlock = { kind: 'user', id: 'user', text, meta: { turnId: 'turn-current' } }
+    const retired = retireProviderRetryStatusesForTurn([row({ text }), mixed, adjacent, ordinary, user], 'turn-current')
+    expect(retired).toEqual([{ ...mixed, text: 'Model request details', meta: { turnId: 'turn-current', providerError } },
+      adjacent, ordinary, user])
+    expect(retired[1]).toBe(adjacent)
+    expect(retired[2]).toBe(ordinary)
+    expect(retired[3]).toBe(user)
+    expect(mixed.meta?.providerRetry).toBe(retry)
+  })
+})
 
 describe('chat-store-runtime-helpers compaction state', () => {
   it('only marks reconciled user blocks as steering accepted when they belong to a steer admission', () => {
@@ -177,7 +245,7 @@ describe('chat-store-runtime-helpers compaction state', () => {
     expect(settled.map((block) => ('status' in block ? block.status : ''))).toEqual([
       'error',
       'error',
-      'cancelled',
+      'error',
       'success'
     ])
     expect(settled.some(hasPendingRuntimeWork)).toBe(false)
@@ -223,5 +291,95 @@ describe('findReusableEmptyThreadId', () => {
     } as unknown as ChatState
     const reused = await findReusableEmptyThreadId(state, emptyProvider, workspace)
     expect(reused).toBeNull()
+  })
+})
+
+
+describe('user-input identity compatibility boundary', () => {
+  const input = (id: string, requestId: string): Extract<ChatBlock, { kind: 'user_input' }> => ({
+    kind: 'user_input', id, requestId, status: 'pending', questions: []
+  })
+  it('admits exact pairs and the observed request alias when itemId is absent upstream', () => {
+    const blocks = [input('item-a', 'input-a'), input('item-b', 'input-b')]
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'item-b', requestId: 'input-b', status: 'cancelled' })).toBe(1)
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'input-b', requestId: 'input-b', status: 'cancelled' })).toBe(1)
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'item-b', status: 'cancelled' })).toBe(1)
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'input-b', status: 'cancelled' })).toBe(1)
+    expect(findUserInputBlockIndex(blocks, 'item-b', 'input-b')).toBe(1)
+  })
+  it('rejects crossed, unknown, blank and ambiguous restored identities', () => {
+    const blocks = [input('item-a', 'input-a'), input('item-b', 'input-b')]
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'item-a', requestId: 'input-b', status: 'cancelled' })).toBe(-1)
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'unknown', requestId: 'input-b', status: 'cancelled' })).toBe(-1)
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'item-b', requestId: '', status: 'cancelled' })).toBe(-1)
+    const restored = [input('shared', 'input-a'), input('shared', 'input-b')]
+    expect(findUserInputStatusBlockIndex(restored, { itemId: 'shared', status: 'cancelled' })).toBe(-1)
+    expect(findUserInputBlockIndex(restored, 'shared', 'input-b')).toBe(-1)
+    expect(findUserInputStatusBlockIndex([...blocks, { kind: 'user', id: 'item-b', text: 'Synthetic duplicate' }],
+      { itemId: 'input-b', requestId: 'input-b', status: 'cancelled' })).toBe(-1)
+  })
+  it('rejects collisions across item/request namespaces and preserves the admitted pair', () => {
+    const blocks = [input('item-a', 'input-a'), input('item-b', 'input-b')]
+    expect(upsertUserInputBlock(blocks, input('item-a', 'input-c'))).toBe(blocks)
+    expect(upsertUserInputBlock(blocks, input('item-c', 'input-a'))).toBe(blocks)
+    expect(upsertUserInputBlock(blocks, input('input-a', 'input-c'))).toBe(blocks)
+    expect(upsertUserInputBlock(blocks, input('item-c', 'item-a'))).toBe(blocks)
+    expect(upsertUserInputBlock(blocks, input('item-c', 'input-c'))).toHaveLength(3)
+  })
+  it.each(['submitted', 'cancelled', 'continued'] as const)('does not reopen or flip an admitted %s request', status => {
+    const block = { ...input('item-a', 'input-a'), status }
+    const blocks = [block]
+    expect(upsertUserInputBlock(blocks, input('item-a', 'input-a'))).toBe(blocks)
+    expect(upsertUserInputBlock(blocks, input('item-a', 'input-a'))).toMatchObject([{ status }])
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'item-a', requestId: 'input-a', status })).toBe(0)
+    expect(findUserInputStatusBlockIndex(blocks, { itemId: 'item-a', requestId: 'input-a', status: status === 'submitted' ? 'cancelled' : 'submitted' })).toBe(-1)
+  })
+})
+
+describe('bounded Question interruption metadata', () => {
+  const requestId = 'input_' + 'a'.repeat(64)
+  const selector = { threadId: 'thread-a', turnId: 'turn-a', itemId: 'item_' + requestId, requestId }
+  const revision = '11111111-1111-4111-8111-111111111111'
+  // Keys follow the exact normalized schema field order used by the leaf.
+  const normalizedKey = JSON.stringify(selector)
+  it('projects only revision and disposition and rejects malformed owner/revision metadata', () => {
+    const result = updateUserInputDraftInterruption({}, normalizedKey, { revision, unsent: true, raw: 'PRIVATE_RAW_SENTINEL' } as { revision: string; unsent: boolean })
+    expect(Object.values(result)).toEqual([{ revision, unsent: true }]); expect(JSON.stringify(result)).not.toContain('PRIVATE_')
+    expect(updateUserInputDraftInterruption(result, '{}', { revision, unsent: true })).toBe(result)
+    expect(updateUserInputDraftInterruption(result, normalizedKey, { revision: 'invalid', unsent: true })).toBe(result)
+    expect(updateUserInputDraftInterruption(result, normalizedKey, null)).toEqual({})
+  })
+  it('rejects a former leaf write after confirmed deletion but keeps a different owner', () => {
+    const deleted = markDeletedUserInputDraftThread(undefined, 'thread-a')
+    expect(updateUserInputDraftInterruption({}, normalizedKey, { revision, unsent: false }, deleted)).toEqual({})
+    const other = JSON.stringify({ ...selector, threadId: 'thread-b' })
+    expect(updateUserInputDraftInterruption({}, other, { revision: null, unsent: true }, deleted)).toEqual({ [other]: { revision: null, unsent: true } })
+  })
+  it('forgets the deleted thread while retaining another owner', () => {
+    const other = JSON.stringify({ ...selector, threadId: 'thread-b', turnId: 'turn-b' })
+    const records = { ...updateUserInputDraftInterruption({}, normalizedKey, { revision, unsent: false }),
+      ...updateUserInputDraftInterruption({}, other, { revision: null, unsent: true }) }
+    expect(forgetUserInputDraftInterruptionsForThread(records, 'thread-a')).toEqual({ [other]: { revision: null, unsent: true } })
+  })
+})
+
+
+describe('thread selection usage owner cleanup', () => {
+  it('returns an empty historical owner and no stale latest usage for all shared selection-clear callers', () => {
+    const cleared = clearedThreadSelection()
+    expect(cleared).toMatchObject({ activeThreadId: null, blocks: [], turnUsageById: {}, rewoundTurnIds: {}, lastTurnUsage: null })
+  })
+})
+
+
+describe('Queue selection preservation', () => {
+  it('clears the selected timeline without retiring any thread queue or pause', () => {
+    const queuedMessages = [{ threadId: 'thread-a', id: 'a', text: 'A' }, { threadId: 'thread-b', id: 'b', text: 'B' }]
+    const queuedMessagePauses = { 'thread-a': 'interrupted', 'thread-b': 'failed' }
+    const state = { activeThreadId: 'thread-a', queuedMessages, queuedMessagePauses }
+    Object.assign(state, clearedThreadSelection())
+    expect(state.activeThreadId).toBeNull()
+    expect(state.queuedMessages).toBe(queuedMessages)
+    expect(state.queuedMessagePauses).toBe(queuedMessagePauses)
   })
 })

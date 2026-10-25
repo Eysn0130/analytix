@@ -49,6 +49,83 @@ afterEach(async () => {
   await act(async () => { root.unmount(); await canvasPreviewSessions.close() }); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 describe('Canvas object work surface', () => {
+  it('uses one shared header and preserves file and workspace control callbacks', async () => {
+    const onToggleFocus = vi.fn(), onCollapse = vi.fn()
+    const viewerControls = { focused: false, onToggleFocus, onCollapse }
+    pickFile.mockResolvedValue({ ok: true, path: '/project/other.canvas' })
+    await render({ viewerControls })
+    const header = container.querySelector<HTMLElement>('[data-workspace-viewer-header]')!
+    const button = (label: string) => header.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t(label)}"]`)!
+    expect(container.querySelectorAll('header')).toHaveLength(1)
+    expect(header.textContent).toContain('flow.canvas')
+    expect(header.querySelector('[role="status"]')?.textContent).toBe(i18n.t('canvas:canvasLocalPreview'))
+    for (const label of ['canvas:canvasReload', 'canvas:canvasOpen']) {
+      expect(button(label).textContent).toBe('')
+      expect(button(label).querySelector('svg[aria-hidden="true"]')).not.toBeNull()
+      expect(button(label).disabled).toBe(false)
+    }
+    await act(async () => button('canvas:canvasReload').click())
+    expect(request.mock.calls.filter(call => call[0].operation === 'close-object')).toHaveLength(1)
+    expect(request.mock.calls.filter(call => call[0].operation === 'open-object')).toHaveLength(2)
+    await act(async () => button('canvas:canvasOpen').click())
+    expect(pickFile).toHaveBeenCalledExactlyOnceWith({ workspace: '/project' })
+    expect(onOpenObject).toHaveBeenCalledExactlyOnceWith('/project', '/project/other.canvas')
+    await act(async () => button('common:workbenchFocus').click())
+    await act(async () => button('common:workbenchCollapse').click())
+    expect(onToggleFocus).toHaveBeenCalledTimes(1)
+    expect(onCollapse).toHaveBeenCalledTimes(1)
+    await render({ viewerControls: { ...viewerControls, focused: true } })
+    expect(button('common:workbenchDock').getAttribute('aria-pressed')).toBe('true')
+  })
+  it.each([
+    { props: { threadId: null }, reloadDisabled: true, openDisabled: true },
+    { props: { workspaceRoot: '' }, reloadDisabled: true, openDisabled: true },
+    { props: { activeTab: null }, reloadDisabled: true, openDisabled: false },
+    { props: { workspaceRoot: '/other-project' }, reloadDisabled: true, openDisabled: false },
+  ])('keeps header action availability for $props', async ({ props, reloadDisabled, openDisabled }) => {
+    await render(props)
+    const header = container.querySelector('[data-workspace-viewer-header]')!
+    const button = (label: string) => header.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t(`canvas:${label}`)}"]`)!
+    expect(button('canvasReload').disabled).toBe(reloadDisabled)
+    expect(button('canvasOpen').disabled).toBe(openDisabled)
+    await act(async () => button('canvasReload').click())
+    if (openDisabled) await act(async () => button('canvasOpen').click())
+    expect(request).not.toHaveBeenCalled()
+    expect(pickFile).not.toHaveBeenCalled()
+  })
+  it('disables the shared Open action while its file picker is pending', async () => {
+    let finish!: (value: unknown) => void
+    pickFile.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await render()
+    const open = container.querySelector<HTMLButtonElement>(`[data-workspace-viewer-header] button[aria-label="${i18n.t('canvas:canvasOpen')}"]`)!
+    await act(async () => open.click())
+    expect(open.disabled).toBe(true)
+    await act(async () => open.click())
+    expect(pickFile).toHaveBeenCalledTimes(1)
+    await act(async () => finish({ ok: true }))
+    expect(open.disabled).toBe(false)
+  })
+  it('keeps selection actions available while raw JSON is collapsed inside the inspector', async () => {
+    await render()
+    await act(async () => container.querySelector('svg rect')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    const inspector = container.querySelector<HTMLDetailsElement>('.canvas-workspace-inspector')!
+    const json = inspector.querySelector<HTMLDetailsElement>('details')!
+    expect(inspector.open).toBe(true)
+    expect(json.open).toBe(false)
+    expect(json.querySelector('summary')?.textContent).toBe('JSON')
+    expect(json.querySelector('pre')?.textContent).toBe(JSON.stringify(scene.facts.nodes[0], null, 2))
+    expect(inspector.querySelector('select')?.value).toBe('a')
+    for (const label of ['canvasCopySelection', 'canvasQuote']) {
+      const button = inspector.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.t(`canvas:${label}`)}"]`)!
+      expect(button.disabled).toBe(false)
+      expect(button.textContent).toBe('')
+      expect(button.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
+      expect(button.closest('details')).toBe(inspector)
+    }
+    expect(container.querySelector('.canvas-workspace-review')?.textContent).toContain(i18n.t('canvas:canvasReview'))
+    await act(async () => json.querySelector('summary')!.click())
+    expect(json.open).toBe(true)
+  })
   it('reads only through the finite Host, previews as an image and copies exact facts only on explicit action', async () => {
     writeText.mockResolvedValue(undefined)
     await render()
@@ -147,9 +224,9 @@ describe('Canvas object work surface', () => {
     await act(async () => copy.click())
     await act(async () => { if (success) newResolve(); else newReject(new Error('synthetic new failure')) })
     const message = i18n.t(success ? 'canvas:canvasCopied' : 'canvas:canvasCopyFailed')
-    expect(container.querySelector('[role="status"]')?.textContent).toBe(message)
+    expect(container.querySelector('.canvas-workspace-inspector [role="status"]')?.textContent).toBe(message)
     await act(async () => { if (success) oldReject(new Error('synthetic old failure')); else oldResolve() })
-    expect(container.querySelector('[role="status"]')?.textContent).toBe(message)
+    expect(container.querySelector('.canvas-workspace-inspector [role="status"]')?.textContent).toBe(message)
     expect(writeText).toHaveBeenCalledTimes(2)
     expect(request.mock.calls.map(call => call[0].operation)).toEqual(['open-object', 'proposals-list', 'object-recovery'])
   })
@@ -165,7 +242,7 @@ describe('Canvas object work surface', () => {
     expect(container.querySelector('pre')).toBeNull()
     await act(async () => hit.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await act(async () => finish())
-    expect(container.querySelector('[role="status"]')).toBeNull()
+    expect(container.querySelector('.canvas-workspace-inspector [role="status"]')).toBeNull()
     expect(container.querySelector('pre')?.textContent).toContain('9007199254740993.01')
   })
   it('does not use a file-picker reply from before a same-file reload', async () => {
@@ -230,12 +307,17 @@ describe('Canvas quotation and suspended presentation', () => {
     })
     await render()
     const accept = [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === i18n.t('canvas:canvasAccept'))!
+    expect(container.querySelector('[data-workspace-viewer-header] [role="status"]')?.textContent).toBe(i18n.t('canvas:canvasLocalPreview'))
     await act(async () => accept.click())
-    expect(container.querySelector('.canvas-saved-receipt')?.textContent).toContain(i18n.t('canvas:canvasSaved'))
-    expect(container.querySelector('.canvas-saved-receipt')?.textContent).toContain(i18n.t('canvas:canvasSavedRefreshFailed'))
+    const status = container.querySelector('[data-workspace-viewer-header] [role="status"]')!
+    expect(status.textContent).toContain(i18n.t('canvas:canvasSaved'))
+    expect(status.textContent).toContain(i18n.t('canvas:canvasSavedRefreshFailed'))
+    expect(container.querySelector('.canvas-saved-receipt')).toBeNull()
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(i18n.t('canvas:canvasPreviewFailed'))
     expect(container.textContent).not.toContain('private decoder details')
     expect(request.mock.calls.filter(c => c[0].operation === 'proposal-apply')).toHaveLength(1)
+    await render({ threadId: 'thread-b' })
+    expect(container.querySelector('[data-workspace-viewer-header] [role="status"]')?.textContent).toBe(i18n.t('canvas:canvasLocalPreview'))
   })
 
 })

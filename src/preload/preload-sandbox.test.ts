@@ -97,11 +97,12 @@ describe('preload sandbox guard', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/preload/index.ts'), 'utf8')
 
     expect(source).toMatch(
-      /startSse:\s*\(threadId,\s*sinceSeq,\s*streamId\)\s*=>\s*[\r\n\s]*ipcRenderer\.invoke\('runtime:sse:start',\s*\{\s*threadId,\s*sinceSeq,\s*streamId\s*\}\)/m
+      /startSse:\s*\(threadId,\s*sinceSeq,\s*streamId,\s*replay\)\s*=>\s*[\r\n\s]*ipcRenderer\.invoke\('runtime:sse:start',\s*\{\s*threadId,\s*sinceSeq,\s*streamId,\s*\.\.\.\(replay\s*\?\s*\{\s*replayThroughSeq:\s*replay\.replayThroughSeq\s*\}\s*:\s*\{\}\)\s*\}\)/m
     )
     expect(source).toMatch(
       /stopSse:\s*\(streamId\)\s*=>\s*ipcRenderer\.invoke\('runtime:sse:stop',\s*streamId\)/m
     )
+    expect(source.match(/ipcRenderer\.invoke\('runtime:sse:start'/g)).toHaveLength(1)
     expect(source).not.toMatch(/reasonix:sse|kun:sse|runtime:go:sse|workflow:sse/i)
   })
 
@@ -127,10 +128,11 @@ describe('preload sandbox guard', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/shared/analytix-api.ts'), 'utf8')
     const facade = source.match(/export type AnalytixDomainFacade = \{([\s\S]*?)^\}/m)
     const domains = Array.from(
-      facade?.[1].matchAll(/^  ([A-Za-z_$][\w$]*)\s*:/gm) ?? []
+      facade?.[1].matchAll(/^ {2}([A-Za-z_$][\w$]*)\s*:/gm) ?? []
     ).map((match) => match[1])
 
     expect(domains).toEqual([
+      'docxEditor',
       'canvas',
       'office',
       'packageHost',

@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { writePrototypeFilePayloadSchema, writePrototypeAuthorizePayloadSchema, writePrototypeRevokePayloadSchema } from './app-ipc-schemas'
+import { workspaceFileReadPayloadSchema, workspacePresentMediaReadPayloadSchema } from './app-ipc-schemas'
+import { describe, expect, it, vi } from 'vitest'
+import { userInputLocalSelectorSchemaV1 } from '../../../packages/runtime/src/contracts/user-input-local-display'
 import {
   analytixApprovalPath,
   analytixAttachmentContentPath,
   analytixMemoryRecordPath,
+  analytixMessageFeedbackPath,
+  analytixMessageFeedbackItemPath,
   ANALYTIX_RUNTIME_TASK_JOBS_CHILD_TODOS_ACCEPT_PATH,
   ANALYTIX_RUNTIME_TASK_JOBS_CHILD_TODOS_PATH,
   ANALYTIX_RUNTIME_TASK_JOBS_CHILD_TODOS_PROJECT_PATH,
@@ -44,9 +49,13 @@ import {
   clawImTelegramTokenPayloadSchema,
   gitCheckpointCreatePayloadSchema,
   gitCheckpointRestorePayloadSchema,
+  logErrorPayloadSchema,
   isSafeOpenExternalUrl,
   runtimeRequestPayloadSchema,
   scheduleTaskFromTextPayloadSchema,
+  scheduleTaskCreatePayloadSchema,
+  scheduleTaskUpdatePayloadSchema,
+  scheduleTaskDeletePayloadSchema,
   settingsPatchSchema,
   shellOpenExternalUrlSchema,
   skillListPayloadSchema,
@@ -67,7 +76,133 @@ import {
   writeInlineCompletionPayloadSchema
 } from './app-ipc-schemas'
 
+describe('closed renderer SSE rejection logs', () => {
+  const categories = [
+    ['sse-event-active', 'renderer_sse_event_active'],
+    ['sse-event-aborted', 'renderer_sse_event_aborted'],
+    ['sse-event-closed', 'renderer_sse_event_closed'],
+    ['sse-ack_false-active', 'renderer_sse_ack_false_active'],
+    ['sse-ack_false-aborted', 'renderer_sse_ack_false_aborted'],
+    ['sse-ack_false-closed', 'renderer_sse_ack_false_closed'],
+    ['sse-ack_transport-active', 'renderer_sse_ack_transport_active'],
+    ['sse-ack_transport-aborted', 'renderer_sse_ack_transport_aborted'],
+    ['sse-ack_transport-closed', 'renderer_sse_ack_transport_closed']
+  ] as const
+  const privateCanary = 'SSE_LOG_PRIVATE_CANARY_7F3C'
+
+  it('projects every admitted lifecycle category to its exact code and drops all detail extras', () => {
+    for (const [category, code] of categories) {
+      const projected = logErrorPayloadSchema.parse({ category, message: privateCanary,
+        detail: { code: privateCanary, reasonCode: privateCanary,
+          diagnostic: { body: privateCanary }, payload: privateCanary,
+          id: privateCanary, path: `/private/${privateCanary}`, locator: privateCanary,
+          seq: 99, retryable: true, resultCount: 99, sha256: 'a'.repeat(64) } })
+      expect(projected).toEqual({ code })
+      expect(JSON.stringify(projected)).not.toContain(privateCanary)
+    }
+  })
+
+  it('does not read or enumerate hostile detail fields in any admitted lifecycle category', () => {
+    const readExtra = vi.fn(() => { throw new Error(privateCanary) })
+    const enumerate = vi.fn((): never => { throw new Error(privateCanary) })
+    const detail = {}
+    for (const key of ['retryable', 'resultCount', 'diagnostic', 'payload', 'id', 'path', 'locator', 'code', 'reasonCode']) {
+      Object.defineProperty(detail, key, { enumerable: true, get: readExtra })
+    }
+    const hostile = new Proxy(detail, { ownKeys: enumerate })
+    for (const [category, code] of categories) {
+      expect(logErrorPayloadSchema.parse({ category, message: privateCanary, detail: hostile })).toEqual({ code })
+    }
+    expect(readExtra).not.toHaveBeenCalled()
+    expect(enumerate).not.toHaveBeenCalled()
+  })
+
+  it('keeps the existing closed fallback for unknown or spoofed SSE categories', () => {
+    for (const category of ['sse-event-unknown', 'sse-event-active-extra', 'sse-ack_false-active-extra',
+      'sse-ack_transport-closed-extra', 'SSE-event-active', privateCanary]) {
+      expect(logErrorPayloadSchema.parse({ category, message: privateCanary,
+        detail: { retryable: false, resultCount: 3, code: 'renderer_sse_event_active',
+          reasonCode: privateCanary, diagnostic: privateCanary, payload: privateCanary,
+          id: privateCanary, path: `/private/${privateCanary}`, locator: privateCanary } }))
+        .toEqual({ code: 'renderer_diagnostic_failed', retryable: false, resultCount: 3 })
+    }
+  })
+
+  it('keeps strict top-level admission and existing non-SSE scalar projection', () => {
+    const payload = { category: 'sse-event-active', message: privateCanary }
+    expect(logErrorPayloadSchema.parse(payload)).toEqual({ code: 'renderer_sse_event_active' })
+    for (const key of ['diagnostic', 'payload', 'id', 'path', 'locator']) {
+      expect(logErrorPayloadSchema.safeParse({ ...payload, [key]: privateCanary }).success).toBe(false)
+    }
+    expect(logErrorPayloadSchema.parse({ category: 'send-message', message: privateCanary,
+      detail: { retryable: true, resultCount: 2, payload: privateCanary } }))
+      .toEqual({ code: 'renderer_send_message_failed', retryable: true, resultCount: 2 })
+  })
+})
+
 describe('app-ipc-schemas', () => {
+  describe('single message feedback admission', () => {
+    const list = analytixMessageFeedbackPath('thread')
+    const item = analytixMessageFeedbackItemPath('thread', 'message')
+    const version = '11111111-1111-4111-8111-111111111111'
+    const request = (path: string, method: string, body?: unknown) => ({
+      path, method, ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    })
+
+    it('admits only the list and versioned item operations', () => {
+      for (const payload of [
+        request(list, 'GET'),
+        request(item, 'PUT', { rating: 'positive', ifVersion: null }),
+        request(item, 'PUT', { rating: 'negative', ifVersion: version, category: 'other', note: 'Optional synthetic rating detail' }),
+        request(item, 'DELETE', { ifVersion: version })
+      ]) expect(runtimeRequestPayloadSchema.parse(payload)).toEqual(payload)
+    })
+
+    it('rejects route aliases, malformed targets and unsupported methods', () => {
+      for (const path of [
+        `${item}?view=all`, `${item}?`, `${item}#fragment`, `${item}#`, `${item}/extra`, `${item}/`,
+        '/v1/threads/thread/message-feedback/%',
+        '/v1/threads/thread/message-feedback/%2Fmessage',
+        '/v1/threads/thread/message-feedback/%00message',
+        '/v1/threads/thread/message-feedback/.hidden',
+        '/v1/threads/thread/message-feedback/message..alias',
+        `/v1/threads/${'a'.repeat(256)}/message-feedback/message`,
+        `/v1/threads/thread/message-feedback/${'a'.repeat(256)}`,
+        '/v1/threads/thread/message-feedback/alias/../message',
+        '//localhost/v1/threads/thread/message-feedback/message'
+      ]) expect(runtimeRequestPayloadSchema.safeParse(request(path, 'PUT', { rating: 'positive', ifVersion: null })).success).toBe(false)
+      for (const payload of [
+        request(list, 'GET', {}), request(list, 'PUT', { rating: 'positive', ifVersion: null }),
+        request(item, 'GET'), request(item, 'POST', {}), request(item, 'PATCH', {})
+      ]) expect(runtimeRequestPayloadSchema.safeParse(payload).success).toBe(false)
+    })
+
+    it('requires closed bodies, UUIDv4 preconditions and well-formed bounded notes', () => {
+      for (const body of [
+        {}, { rating: 'positive' }, { rating: 'neutral', ifVersion: null },
+        { rating: 'positive', ifVersion: 'not-a-version' },
+        { rating: 'positive', ifVersion: null, extra: true },
+        { rating: 'positive', ifVersion: null, note: null },
+        { rating: 'positive', ifVersion: null, category: null },
+        { rating: 'positive', ifVersion: null, category: 'unrecognized' },
+        { rating: 'positive', ifVersion: null, note: '\ud800' },
+        { rating: 'positive', ifVersion: null, note: '界'.repeat(2731) }
+      ]) expect(runtimeRequestPayloadSchema.safeParse(request(item, 'PUT', body)).success).toBe(false)
+      for (const body of [{}, { ifVersion: null }, { ifVersion: version, extra: true }]) {
+        expect(runtimeRequestPayloadSchema.safeParse(request(item, 'DELETE', body)).success).toBe(false)
+      }
+      expect(runtimeRequestPayloadSchema.safeParse(request(item, 'PUT', { rating: 'positive', ifVersion: null, note: 'x'.repeat(8192) })).success).toBe(true)
+      expect(runtimeRequestPayloadSchema.safeParse(request(item, 'PUT', { rating: 'positive', ifVersion: null, note: 'x'.repeat(8193) })).success).toBe(false)
+      expect(runtimeRequestPayloadSchema.safeParse({ path: item, method: 'PUT', body: '{invalid' }).success).toBe(false)
+      expect(runtimeRequestPayloadSchema.safeParse({ path: item, method: 'PUT', body: ' '.repeat(65537) }).success).toBe(false)
+    })
+
+    it('preserves the raw JSON body for independent Go duplicate-key validation', () => {
+      const body = '{"rating":"positive","rating":"negative","ifVersion":null}'
+      expect(runtimeRequestPayloadSchema.parse({ path: item, method: 'PUT', body }).body).toBe(body)
+    })
+  })
+
   it('normalizes runtime request paths', () => {
     const payload = runtimeRequestPayloadSchema.parse({
       path: 'v1/threads?limit=1',
@@ -150,7 +285,9 @@ describe('app-ipc-schemas', () => {
       expect(runtimeRequestPayloadSchema.parse({
         path,
         method: 'POST',
-        body: '{"jobIds":["job-1"],"jobId":"job-1","threadId":"thr_1","message":"continue"}'
+        body: path === ANALYTIX_RUNTIME_TASK_JOBS_STEER_PATH
+          ? '{"mode":"inspect","jobId":"job-1","threadId":"thr_1"}'
+          : '{"jobIds":["job-1"],"jobId":"job-1","threadId":"thr_1","message":"continue"}'
       }).path).toBe(path)
     }
   })
@@ -237,7 +374,7 @@ describe('app-ipc-schemas', () => {
       { path: analytixThreadCheckpointRewindPlanPath(threadId, checkpointId), method: 'POST', body: '{}' },
       { path: analytixThreadCheckpointRewindApplyPath(threadId, checkpointId), method: 'POST', body: '{}' },
       { path: analytixApprovalPath(approvalId), method: 'POST', body: '{}' },
-      { path: analytixUserInputPath(inputId), method: 'POST', body: '{}' },
+      { path: analytixUserInputPath(inputId), method: 'POST', body: JSON.stringify({ cancelled: true }) },
       { path: analytixSessionResumePath(sessionId), method: 'POST', body: '{}' },
       {
         path: `${analytixAttachmentContentPath(attachmentId)}?thread_id=${encodeURIComponent(threadId)}&workspace=${encodeURIComponent('/tmp/project with spaces')}`,
@@ -686,34 +823,12 @@ describe('app-ipc-schemas', () => {
           port: 9788,
           secret: 'secret'
         },
-        tasks: [{
-          id: 'task-1',
-          title: 'Daily review',
-          enabled: true,
-          prompt: 'Review the repo',
-          workspaceRoot: '/tmp/schedule',
-          clawChannelId: 'channel-1',
-          providerId: 'minimax-token-plan',
-          model: 'auto',
-          reasoningEffort: 'high',
-          mode: 'agent',
-          schedule: {
-            kind: 'daily',
-            everyMinutes: 60,
-            timeOfDay: '09:30',
-            atTime: ''
-          },
-          lastStatus: 'idle'
-        }]
+
       }
     })
 
     expect(payload.schedule?.internal?.port).toBe(9788)
     expect(payload.schedule?.providerId).toBe('minimax-token-plan')
-    expect(payload.schedule?.tasks?.[0]?.schedule?.kind).toBe('daily')
-    expect(payload.schedule?.tasks?.[0]?.reasoningEffort).toBe('high')
-    expect(payload.schedule?.tasks?.[0]?.clawChannelId).toBe('channel-1')
-    expect(payload.schedule?.tasks?.[0]?.providerId).toBe('minimax-token-plan')
 
     const fromText = scheduleTaskFromTextPayloadSchema.parse({
       text: 'Remind me tomorrow morning to ship the review',
@@ -1030,6 +1145,14 @@ describe('app-ipc-schemas', () => {
     ).toThrow(/Unrecognized key/)
   })
 
+  it('accepts an explicit finite SSE boundary and rejects unsafe or reversed cursors', () => {
+    expect(sseStartPayloadSchema.parse({ threadId: 't', sinceSeq: 0, replayThroughSeq: 0 }))
+      .toEqual({ threadId: 't', sinceSeq: 0, replayThroughSeq: 0 })
+    for (const replayThroughSeq of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, 3]) {
+      expect(() => sseStartPayloadSchema.parse({ threadId: 't', sinceSeq: 4, replayThroughSeq })).toThrow()
+    }
+  })
+
   it('accepts long Feishu install device codes', () => {
     const deviceCode = 'x'.repeat(2_048)
     const payload = clawImInstallPollPayloadSchema.parse({
@@ -1182,4 +1305,288 @@ describe('app-ipc-schemas', () => {
     expect(writeExportPayloadSchema.safeParse({ path: '/tmp/workspace/draft.md', format: 'docx', content: '# Draft' }).success).toBe(false)
   })
 
+})
+
+it('never admits protected process or question reads through generic runtime IPC', () => {
+  const requestId = 'input_' + 'a'.repeat(64)
+  const questionRead = userInputLocalSelectorSchemaV1.parse({
+    threadId: 'thread-a', turnId: 'turn-a', itemId: 'item_' + requestId, requestId
+  })
+  for (const path of ['/v1/local-display/process/read', '/v1/local-display/process/target', '/v1/local-display/user-input']) {
+    const body = JSON.stringify(path === '/v1/local-display/user-input' ? questionRead : {})
+    for (const method of ['GET', 'POST', 'PATCH', 'PUT', 'DELETE']) {
+      for (const candidate of [path, path.slice(1), path + '?viewerToken=forged', path + '/', path + '/reveal']) {
+        expect(runtimeRequestPayloadSchema.safeParse({ path: candidate, method, body }).success).toBe(false)
+      }
+    }
+  }
+  expect(runtimeRequestPayloadSchema.safeParse({
+    path: '/v1/local-display/user-input', method: 'POST', body: JSON.stringify(questionRead),
+    headers: { 'X-Analytix-Local-Display': 'typed-v1' }
+  }).success).toBe(false)
+  expect(sseStartPayloadSchema.safeParse({ threadId: 'thread-a', sinceSeq: 0, viewerToken: 'forged' }).success).toBe(false)
+})
+
+it('keeps protected preview reads identity-only and ordinary workspace reads unchanged', () => {
+  const protectedRead = { viewId: '11111111-1111-4111-8111-111111111111', threadId: 'thread-a', turnId: 'turn-a',
+    callId: 'call_host_' + 'a'.repeat(64), resultItemId: 'item_result_' + 'b'.repeat(64), snapshotDigest: 'c'.repeat(64) }
+  expect(workspaceFileReadPayloadSchema.parse({ protectedRead })).toEqual({ protectedRead })
+  const ordinary = { path: '/synthetic/ordinary.go', workspaceRoot: '/synthetic', line: 9 }
+  expect(workspaceFileReadPayloadSchema.parse(ordinary)).toEqual(ordinary)
+  for (const value of [{ ...ordinary, protectedRead }, { protectedRead, preview: 'source' }, { protectedRead: { ...protectedRead, path: '/forged' } }, { preview: 'source', path: '/forged' }, { protectedRead: {} }]) {
+    expect(workspaceFileReadPayloadSchema.safeParse(value).success).toBe(false)
+  }
+})
+
+describe('user-input closed request boundary', () => {
+  const parse = (value: unknown) => runtimeRequestPayloadSchema.safeParse({
+    path: '/v1/user-inputs/input_owned', method: 'POST', body: JSON.stringify(value)
+  }).success
+  it('admits one typed batch, legacy single answer, and whole-request cancellation', () => {
+    expect(parse({ answers: [
+      { id: 'input_owned_1', kind: 'answer', optionIds: ['input_owned_1_option_1'], customText: 'custom' },
+      { id: 'input_owned_2', kind: 'skip' }
+    ] })).toBe(true)
+    expect(parse({ answers: [{ id: 'q1', label: 'Yes', value: 'Yes' }] })).toBe(true)
+    expect(parse({ cancelled: true })).toBe(true)
+  })
+  it.each([
+    {}, { answers: [] },
+    { cancelled: true, answers: [{ id: 'input_owned_1', kind: 'skip' }] },
+    { answers: [{ id: 'input_owned_1', kind: 'skip', customText: 'ignored' }] },
+    { answers: [{ id: 'input_owned_1', kind: 'answer', optionIds: [], customText: '  ' }] },
+    { answers: [{ id: 'input_owned_1', kind: 'answer', optionIds: ['selected'], customText: '' }] },
+    { answers: [{ id: 'input_owned_1', kind: 'answer', optionIds: ['same', 'same'] }] },
+    { answers: [{ id: 'input_owned_1', kind: 'skip' }, { id: 'input_owned_1', kind: 'skip' }] },
+    { answers: [{ id: 'input_owned_1', kind: 'skip' }, { id: 'q1', value: 'legacy' }] },
+    { answers: [{ id: 'q1', value: 'legacy', privateAuthority: 'ignored' }] }
+  ])('rejects malformed, mixed or duplicate answer batches', value => {
+    expect(parse(value)).toBe(false)
+  })
+})
+
+describe('closed model preference settings input', () => {
+  const preference = {
+    id: 'provider-alpha', baseUrl: 'https://provider.invalid/v1', endpointFormat: 'chat_completions',
+    modelProfiles: { 'model-alpha': { aliases: ['alpha'], reasoning: {
+      supportedEfforts: ['off', 'high'], defaultEffort: 'high', requestProtocol: 'deepseek-chat-completions'
+    } } }
+  }
+  it('admits key-free on, explicit off and inherited preferences through normal settings', () => {
+    const patch = { provider: { modelPreferences: [preference] } }
+    expect(settingsPatchSchema.parse(patch)).toEqual(patch)
+    expect(settingsPatchSchema.parse({ provider: { modelPreferences: [{ ...preference,
+      modelProfiles: { 'model-alpha': { reasoning: null } }
+    }] } }).provider?.modelPreferences?.[0].modelProfiles['model-alpha'].reasoning).toBeNull()
+    expect(settingsPatchSchema.parse({ provider: {} }).provider).not.toHaveProperty('modelPreferences')
+  })
+  it.each([
+    { ...preference, apiKey: 'synthetic-rejected-credential' },
+    { ...preference, models: ['unadmitted-model'] },
+    { ...preference, proxy: 'https://proxy.invalid' },
+    { ...preference, endpointFormat: ['messages'] },
+    { ...preference, baseUrl: 'https://provider.invalid/path\\segment' },
+    { ...preference, baseUrl: 'https://user:synthetic@provider.invalid' },
+    { ...preference, baseUrl: 'https://provider.invalid?api_key=synthetic' },
+    { ...preference, modelProfiles: { 'model-alpha': { supportsToolCalling: true } } },
+    { ...preference, modelProfiles: { 'model-alpha': { aliases: Array(51).fill('alias') } } },
+    { ...preference, modelProfiles: { 'model-alpha': { reasoning: { supportedEfforts: ['off'], defaultEffort: 'high', requestProtocol: 'none' } } } },
+    { ...preference, modelProfiles: { 'model-alpha': {}, 'MODEL-ALPHA': {} } }
+  ])('rejects unsupported preference authority or malformed fields %#', (value) => {
+    expect(settingsPatchSchema.safeParse({ provider: { modelPreferences: [value] } }).success).toBe(false)
+  })
+  it('preserves and validates prototype-named own model keys', () => {
+    const profiles = Object.fromEntries([['__proto__', { reasoning: null }]])
+    const parsed = settingsPatchSchema.parse({ provider: { modelPreferences: [{ ...preference, modelProfiles: profiles }] } })
+    const readback = parsed.provider!.modelPreferences![0].modelProfiles
+    expect(Object.hasOwn(readback, '__proto__')).toBe(true)
+    expect(readback['__proto__'].reasoning).toBeNull()
+    const invalid = Object.fromEntries([['__proto__', { apiKey: 'synthetic-rejected' }]])
+    expect(settingsPatchSchema.safeParse({ provider: { modelPreferences: [{ ...preference, modelProfiles: invalid }] } }).success).toBe(false)
+  })
+  it('bounds runtime projection bytes using the existing Go JSON encoding', () => {
+    const modelProfiles = Object.fromEntries(Array.from({ length: 100 }, (_, index) => [`model-${index}`, {
+      aliases: Array.from({ length: 50 }, (_, alias) => '<'.repeat(126) + String(alias).padStart(2, '0'))
+    }]))
+    const value = { ...preference, modelProfiles }
+    expect(new TextEncoder().encode(JSON.stringify({ providers: [value] })).byteLength).toBeLessThan(1_048_576)
+    expect(settingsPatchSchema.safeParse({ provider: { modelPreferences: [value] } }).success).toBe(false)
+  })
+  it('rejects duplicate provider bindings and bounds preference inventories', () => {
+    expect(settingsPatchSchema.safeParse({ provider: { modelPreferences: [preference, preference] } }).success).toBe(false)
+    expect(settingsPatchSchema.safeParse({ provider: { modelPreferences: Array(129).fill(preference) } }).success).toBe(false)
+    const modelProfiles = Object.fromEntries(Array.from({ length: 201 }, (_, index) => [`model-${index}`, {}]))
+    expect(settingsPatchSchema.safeParse({ provider: { modelPreferences: [{ ...preference, modelProfiles }] } }).success).toBe(false)
+  })
+})
+
+describe('normal user-input policy Settings IPC', () => {
+  it.each([{ policy: 'legacy' }, { policy: 'timed' }, { policy: 'timed', defaultTimeoutSeconds: null },
+    { policy: 'timed', defaultTimeoutSeconds: -1 }, { policy: 'timed', defaultTimeoutSeconds: 2147483 }])('admits the strict policy atom %j', userInput => {
+    expect(settingsPatchSchema.parse({ runtime: { userInput } }).runtime?.userInput).toEqual(userInput)
+  })
+  it.each([{}, { defaultTimeoutSeconds: 120 }, { policy: 'timed', defaultTimeoutSeconds: 0 },
+    { policy: 'timed', defaultTimeoutSeconds: 1.5 }, { policy: 'timed', defaultTimeoutSeconds: 2147484 },
+    { policy: 'timed', extra: true }])('rejects incomplete or injected policy %j', userInput => {
+    expect(settingsPatchSchema.safeParse({ runtime: { userInput } }).success).toBe(false)
+  })
+})
+
+describe('timed user-input action transport admission', () => {
+  const path = analytixUserInputPath('input_' + 'a'.repeat(64))
+  it('admits only the closed continue body and bounded late attempt fields', () => {
+    expect(runtimeRequestPayloadSchema.safeParse({ path, method: 'POST', body: JSON.stringify({ action: 'continue' }) }).success).toBe(true)
+    expect(runtimeRequestPayloadSchema.safeParse({ path, method: 'POST', body: JSON.stringify({ action: 'continue', callId: 'injected' }) }).success).toBe(false)
+    expect(runtimeRequestPayloadSchema.safeParse({ path, method: 'GET' }).success).toBe(false)
+  })
+})
+
+
+describe('normal performance and usage settings IPC', () => {
+  it('accepts only the two display modes through the existing strict patch schema', () => {
+    expect(settingsPatchSchema.parse({ performanceUsageMode: 'compact' })).toEqual({ performanceUsageMode: 'compact' })
+    expect(settingsPatchSchema.parse({ performanceUsageMode: 'detailed' })).toEqual({ performanceUsageMode: 'detailed' })
+    for (const performanceUsageMode of ['verbose', null, 0, {}]) {
+      expect(settingsPatchSchema.safeParse({ performanceUsageMode }).success).toBe(false)
+    }
+  })
+})
+
+
+it('rejects old task-array settings writes and validates closed task mutations', () => {
+  for (const tasks of [[], [{ id: 'task-1' }]]) expect(() => settingsPatchSchema.parse({ schedule: { tasks } })).toThrow()
+  const config = { title: 'Daily', enabled: true, prompt: 'Check', workspaceRoot: '/synthetic/work', clawChannelId: '', providerId: '',
+    model: 'deepseek-v4-flash', reasoningEffort: 'high', mode: 'agent', schedule: { kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '' } }
+  const newConfig = { ...config, schedule: { ...config.schedule, timeZone: 'UTC' } }
+  expect(scheduleTaskCreatePayloadSchema.parse(newConfig)).toEqual(newConfig)
+  expect(() => scheduleTaskCreatePayloadSchema.parse(config)).toThrow()
+  expect(() => scheduleTaskCreatePayloadSchema.parse({ ...config, id: 'foreign-id' })).toThrow()
+  expect(() => scheduleTaskUpdatePayloadSchema.parse({ taskId: 'task-1', patch: { title: 'New' }, expected: {} })).toThrow()
+  expect(() => scheduleTaskUpdatePayloadSchema.parse({ taskId: 'task-1', patch: { lastThreadId: 'foreign-thread' }, expected: {} })).toThrow()
+  expect(() => scheduleTaskUpdatePayloadSchema.parse({ taskId: 'task-1', patch: { enabled: true }, expected: { enabled: false } })).toThrow()
+  expect(scheduleTaskUpdatePayloadSchema.parse({ taskId: 'task-1', patch: { title: 'New' }, expected: { title: 'Daily' } }).patch.title).toBe('New')
+  expect(scheduleTaskDeletePayloadSchema.parse({ taskId: 'task-1', expected: config }).expected).toEqual(config)
+})
+
+
+it('keeps Present current-file reads separate from frozen Read and ordinary path requests', () => {
+  const protectedPresent = { viewId: '11111111-1111-4111-8111-111111111111', threadId: 'thread-a', turnId: 'turn-a',
+    callId: 'call_host_' + 'a'.repeat(64), resultItemId: 'item_result_' + 'b'.repeat(64), snapshotDigest: 'c'.repeat(64), index: 0 }
+  expect(workspaceFileReadPayloadSchema.parse({ protectedPresent })).toEqual({ protectedPresent })
+  for (const payload of [{ protectedPresent, path: '/forged' }, { protectedPresent, workspaceRoot: '/forged' },
+    { protectedPresent, protectedRead: protectedPresent }, { protectedPresent: { ...protectedPresent, index: 8 } },
+    { protectedPresent: { ...protectedPresent, path: '/forged' } }]) {
+    expect(workspaceFileReadPayloadSchema.safeParse(payload).success).toBe(false)
+  }
+})
+
+it('validates Schedule calendar writes while retaining old daily CAS expected values', () => {
+  const old = { kind: 'daily', everyMinutes: 60, timeOfDay: '09:00', atTime: '' }
+  const daily = { ...old, timeZone: 'America/New_York' }
+  expect(scheduleTaskUpdatePayloadSchema.safeParse({ taskId: 'a', patch: { schedule: daily }, expected: { enabled: true, schedule: old } }).success).toBe(true)
+  for (const schedule of [{ ...daily, timeZone: '' }, { ...daily, timeZone: 'EST' }, { ...old, kind: 'weekly', timeZone: 'UTC', weekdays: [1, 1] }, { ...old, kind: 'weekly', weekdays: [1] }, { ...old, kind: 'cron', timeZone: 'UTC', expression: '0 0 * * MON' }]) {
+    expect(scheduleTaskCreatePayloadSchema.safeParse({ title: 'A', prompt: 'Synthetic', schedule }).success).toBe(false)
+  }
+  for (const schedule of [{ ...old, kind: 'weekly', timeZone: 'UTC', weekdays: [1, 2, 3, 4, 5] }, { ...old, kind: 'cron', timeZone: 'UTC', expression: '0 9 * * 1-5' }]) {
+    expect(scheduleTaskCreatePayloadSchema.safeParse({ title: 'A', prompt: 'Synthetic', schedule }).success).toBe(true)
+  }
+})
+
+it('keeps Schedule History read bounded and rejects caller-origin or ACK injection', async () => {
+  const { scheduleTaskHistoryPayloadSchema } = await import('./app-ipc-schemas')
+  expect(scheduleTaskHistoryPayloadSchema.parse({ taskId: 'a', limit: 20, before: 'actual-attempt' })).toEqual({ taskId: 'a', limit: 20, before: 'actual-attempt' })
+  for (const request of [{ taskId: 'a', limit: 21 }, { taskId: 'a', limit: 20, origin: { threadId: 'forged' } }, { taskId: 'a', limit: 20, records: [] }]) expect(scheduleTaskHistoryPayloadSchema.safeParse(request).success).toBe(false)
+})
+
+
+it('Present media admits only a current indexed selector or a separate ordinary path request', () => {
+  const protectedPresent = { viewId: '11111111-1111-4111-8111-111111111111', threadId: 'thread-a', turnId: 'turn-a',
+    callId: 'call_host_' + 'a'.repeat(64), resultItemId: 'item_result_' + 'b'.repeat(64), snapshotDigest: 'c'.repeat(64), index: 0 }
+  expect(workspacePresentMediaReadPayloadSchema.parse({ protectedPresent })).toEqual({ protectedPresent })
+  expect(workspacePresentMediaReadPayloadSchema.parse({ path: '/ordinary.png', workspaceRoot: '/ordinary' })).toEqual({ path: '/ordinary.png', workspaceRoot: '/ordinary' })
+  for (const value of [{ protectedPresent, path: '/forged' }, { protectedPresent, workspaceRoot: '/forged' },
+    { protectedPresent, protectedRead: protectedPresent }, { protectedRead: protectedPresent }, { protectedPresent: null },
+    { protectedPresent: { ...protectedPresent, index: 8 } }, { protectedPresent: { ...protectedPresent, path: '/forged' } }]) {
+    expect(workspacePresentMediaReadPayloadSchema.safeParse(value).success).toBe(false)
+  }
+})
+
+
+it('reuses the Present media identity schema for Excel without protected-path or frozen Read mixing', () => {
+  const protectedPresent = { viewId: '11111111-1111-4111-8111-111111111111', threadId: 'thread-a', turnId: 'turn-a',
+    callId: 'call_host_' + 'a'.repeat(64), resultItemId: 'item_result_' + 'b'.repeat(64), snapshotDigest: 'c'.repeat(64), index: 0 }
+  expect(workspacePresentMediaReadPayloadSchema.parse({ protectedPresent })).toEqual({ protectedPresent })
+  for (const extension of ['xlsx', 'xls', 'csv', 'tsv']) {
+    const ordinary = { path: `/ordinary/actual.${extension}`, workspaceRoot: '/ordinary' }
+    expect(workspacePresentMediaReadPayloadSchema.parse(ordinary)).toEqual(ordinary)
+  }
+  for (const payload of [
+    { protectedPresent, path: '/forged/book.xlsx' },
+    { protectedPresent, workspaceRoot: '/forged' },
+    { protectedPresent, preview: 'source' },
+    { protectedPresent, protectedRead: protectedPresent },
+    { protectedRead: protectedPresent },
+    { protectedPresent: { ...protectedPresent, path: '/forged/book.xlsx' } },
+    { protectedPresent: { ...protectedPresent, format: 'xlsx' } },
+    { protectedPresent: { ...protectedPresent, index: 8 } },
+    { path: '/ordinary/actual.csv', preview: 'source' }
+  ]) expect(workspacePresentMediaReadPayloadSchema.safeParse(payload).success).toBe(false)
+})
+
+describe('Host child-input IPC closed intent', () => {
+  const path = ANALYTIX_RUNTIME_TASK_JOBS_STEER_PATH
+  const inspect = { mode: 'inspect', threadId: 'parent', jobId: 'old-job' }
+  const submit = { ...inspect, mode: 'start_or_steer', expectedRunId: 'current-job', expectedChildTurnId: 'current-turn',
+    message: 'continue', clientMessageId: 'd3a26000-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
+  const request = (body: unknown, target = path) => ({ path: target, method: 'POST', body: JSON.stringify(body) })
+  it('admits inspect and exact expected-identity submission without renderer authority', () => {
+    for (const body of [inspect, submit]) expect(runtimeRequestPayloadSchema.safeParse(request(body)).success).toBe(true)
+  })
+  it('rejects implicit legacy modes, caller authority, stale envelope shapes and noncanonical UUIDs', () => {
+    for (const body of [
+      { threadId: 'parent', jobId: 'old-job', message: 'continue' }, { ...submit, mode: 'steer' },
+      { ...inspect, message: 'continue' }, { ...submit, expectedRunId: undefined },
+      { ...submit, sourceTurnId: 'turn' }, { ...submit, sourceToolCallId: 'call' },
+      { ...submit, clientMessageId: 'steer_timestamp' }, { ...submit, runtimeToken: 'FORGED' },
+      { ...submit, message: ' continue ' }, { ...submit, message: '界'.repeat(4001) }
+    ]) expect(runtimeRequestPayloadSchema.safeParse(request(body)).success).toBe(false)
+    for (const target of [path + '?mode=inspect', path + '#fragment', path + '/']) {
+      expect(runtimeRequestPayloadSchema.safeParse(request(inspect, target)).success).toBe(false)
+    }
+  })
+})
+
+describe('HTML preview IPC schemas', () => {
+  it('admits only closed modes and exact grant revocation', () => {
+    expect(writePrototypeFilePayloadSchema.parse({ path: 'page.htm', workspaceRoot: '/workspace', mode: 'workspace-html' }).mode).toBe('workspace-html')
+    for (const extra of [{ mode: 'anything' }, { protectedRead: {} }, { preload: 'unsafe' }]) {
+      expect(writePrototypeFilePayloadSchema.safeParse({ path: 'page.htm', workspaceRoot: '/workspace', ...extra }).success).toBe(false)
+    }
+    expect(writePrototypeRevokePayloadSchema.safeParse({ grantId: 'a'.repeat(48) }).success).toBe(true)
+    for (const payload of [{ grantId: '' }, { grantId: 'persist:session' }, { grantId: 'a'.repeat(48), ownerId: 99 }]) {
+      expect(writePrototypeRevokePayloadSchema.safeParse(payload).success).toBe(false)
+    }
+  })
+})
+
+it('keeps protected prototype authorization separate from external path opening', () => {
+  const protectedPresent = { threadId: 'thread', turnId: 'turn', callId: 'call_host_' + 'a'.repeat(64),
+    resultItemId: 'item_result_' + 'b'.repeat(64), viewId: '11111111-1111-4111-8111-111111111111', snapshotDigest: 'c'.repeat(64), index: 0 }
+  const request = { protectedPresent, mode: 'workspace-html' }
+  expect(writePrototypeAuthorizePayloadSchema.safeParse(request).success).toBe(true)
+  expect(writePrototypeFilePayloadSchema.safeParse(request).success).toBe(false)
+  expect(writePrototypeAuthorizePayloadSchema.safeParse({ ...request, path: '/forged.html' }).success).toBe(false)
+})
+
+
+describe('accent settings IPC', () => {
+  it.each(['blue', 'teal', 'orange', 'magenta', 'green'])('admits the closed preset %s', accentColor => {
+    expect(settingsPatchSchema.parse({ accentColor })).toEqual({ accentColor })
+  })
+  it.each(['custom', '#123456', '', null, 0, {}])('rejects injected or arbitrary accent %j', accentColor => {
+    expect(settingsPatchSchema.safeParse({ accentColor }).success).toBe(false)
+  })
+  it('retains empty patch compatibility', () => {
+    expect(settingsPatchSchema.parse({})).toEqual({})
+  })
 })

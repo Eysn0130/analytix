@@ -4,7 +4,17 @@ import { describe, expect, it } from 'vitest'
 describe('desktop private history migration startup barrier', () => {
   it('completes before runtime supervision, IPC registration, and the first window', () => {
     const source = readFileSync('src/main/index.ts', 'utf8')
-    const load = source.indexOf('const initial = await store.load()')
+    const settingsSource = readFileSync('src/main/settings-store.ts', 'utf8')
+    const authenticationStart = settingsSource.indexOf('  async ensureScheduleInternalAuthentication(): Promise<AppSettingsV1> {')
+    const authenticationEnd = settingsSource.indexOf('\n  async mutateScheduleTasks', authenticationStart)
+    expect(authenticationStart).toBeGreaterThanOrEqual(0)
+    expect(authenticationEnd).toBeGreaterThan(authenticationStart)
+    const authentication = settingsSource.slice(authenticationStart, authenticationEnd)
+    const load = authentication.indexOf('await this.load()')
+    const commit = authentication.indexOf('return this.commitSettings(')
+    expect(load).toBeGreaterThanOrEqual(0)
+    expect(commit).toBeGreaterThan(load)
+    const initial = source.indexOf('const initial = await store.ensureScheduleInternalAuthentication()')
     const migration = source.indexOf(
       "await migrateDesktopPrivateHistoryBeforeStartV2(initial, app.getPath('userData'))"
     )
@@ -12,8 +22,8 @@ describe('desktop private history migration startup barrier', () => {
     const ipc = source.indexOf("traceStartup('ipc registration:start')")
     const barrierRelease = source.indexOf('desktopStartupBarrierComplete = true')
     const window = source.indexOf('createWindow({', ipc)
-    expect(load).toBeGreaterThanOrEqual(0)
-    expect(migration).toBeGreaterThan(load)
+    expect(initial).toBeGreaterThanOrEqual(0)
+    expect(migration).toBeGreaterThan(initial)
     expect(runtimeSupervision).toBeGreaterThan(migration)
     expect(ipc).toBeGreaterThan(runtimeSupervision)
     expect(barrierRelease).toBeGreaterThan(ipc)

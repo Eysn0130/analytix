@@ -10,6 +10,8 @@ import (
 )
 
 type TaskJobHTTPServiceDeps struct {
+	// HostChildInput is separate from the model pending-call/grant steer owner.
+	HostChildInput      func(context.Context, ChildInputRequestV1) TaskJobServiceResult
 	Service             *Service
 	Jobs                TaskJobSteerStore
 	Turns               TurnSteeringStore
@@ -45,6 +47,18 @@ func NewTaskJobHTTPService(deps TaskJobHTTPServiceDeps) TaskJobHTTPService {
 
 func (s TaskJobHTTPService) service() *Service { return s.deps.Service }
 
+// HostChildInputV1 accepts an intent only. The Host callback must validate the
+// private HTTP origin and fresh principal before constructing any carrier.
+func (s TaskJobHTTPService) HostChildInputV1(ctx context.Context, request ChildInputRequestV1) TaskJobServiceResult {
+	if err := ValidateChildInputRequestV1(request); err != nil {
+		return TaskJobServiceResult{IsError: true, ErrorCode: TaskJobErrorValidation, Response: map[string]any{"schemaVersion": 1, "capabilities": ChildInputCapabilitiesV1{Send: "disabled"}, "code": "validation_error"}}
+	}
+	if s.deps.HostChildInput == nil {
+		return TaskJobServiceResult{IsError: true, ErrorCode: "child_input_unknown", Response: map[string]any{"schemaVersion": 1, "capabilities": ChildInputCapabilitiesV1{Send: "disabled", ReasonCode: "authority_unavailable"}, "code": "child_input_unknown"}}
+	}
+	return s.deps.HostChildInput(ctx, request)
+}
+
 func (s TaskJobHTTPService) ListTaskJobs(parentThreadID string, request TaskJobListRequest) TaskJobServiceResult {
 	return s.service().ListTaskJobViews(parentThreadID, request)
 }
@@ -59,7 +73,7 @@ func (s TaskJobHTTPService) OutputTaskJob(parentThreadID string, request TaskJob
 
 func (s TaskJobHTTPService) KillTaskJob(parentThreadID string, request TaskJobKillRequest) TaskJobServiceResult {
 	result := s.service().KillTaskJob(parentThreadID, request)
-	if !result.IsError && strings.TrimSpace(result.Record.ID) != "" && s.deps.RecordLifecycle != nil {
+	if !result.IsError && result.Record.HostChildInput == nil && strings.TrimSpace(result.Record.ID) != "" && s.deps.RecordLifecycle != nil {
 		s.deps.RecordLifecycle(result.Record, result.Record.Status, domainjob.NormalizeFailureCode(result.Record.FailureCode, result.Record.Status, true))
 	}
 	return result
@@ -153,6 +167,13 @@ func (s TaskJobHTTPService) RecoverTaskJob(parentThreadID string, request TaskJo
 }
 
 func (s TaskJobHTTPService) recoverTerminalTaskJob(record domainjob.Record, request TaskJobRecoverRequest, now time.Time) TaskJobServiceResult {
+	if record.HostChildInput != nil {
+		// Host input has no parent tool delivery to recover. Keep the existing
+		// withheld projection and return only the bounded recovery outcome.
+		response := TaskJobRecoverResult(record, "already_terminal", record.Status, now, DefaultTaskJobStalledAfter)
+		response["result"] = "already_terminal"
+		return TaskJobServiceResult{Response: response, Record: record}
+	}
 	if !record.Background || strings.TrimSpace(record.Status) != string(domainjob.StatusCompleted) {
 		return TaskJobServiceResult{
 			Response: TaskJobRecoverResult(record, recoverResultForRecord(record, "already_terminal"), firstNonEmptyAnyString(record.LateCompletionReason, record.Status), now, DefaultTaskJobStalledAfter),

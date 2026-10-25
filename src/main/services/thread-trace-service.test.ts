@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, readdir, stat, truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { THREAD_TRACE_EVENT_NAMES } from '../../shared/thread-trace'
 import {
   appendThreadTraceEvent,
   createRuntimePublicationTraceReceiver,
@@ -64,6 +65,123 @@ describe('thread trace service', () => {
     receiver.write('}\n')
     await flushThreadTraceEventsForTests(userData)
     await expect(readdir(join(userData, 'traces'))).rejects.toThrow()
+  })
+
+  it('persists closed provider loop failures beside terminal timing in the owned trace file', async () => {
+    process.env.ANALYTIX_THREAD_TRACE = '1'
+    const userData = await tempUserData()
+    const ref = `ref-${'a'.repeat(64)}`
+    const turnRef = `ref-${'b'.repeat(64)}`
+    const receiver = createRuntimePublicationTraceReceiver(userData, 42, 3)
+    const causes = [
+      'provider_privacy_authority_unavailable', 'uninspectable_provider_part',
+      'provider_schema_contains_pii', 'ordinary_provider_contains_case_effect',
+      'provider_logical_effect_invalid', 'context_canceled', 'context_deadline_exceeded',
+      'turn_security_authority_unavailable', 'turn_security_identity_mismatch',
+      'turn_security_workspace_mismatch', 'turn_security_case_binding_mismatch',
+      'turn_security_dataset_snapshot_mismatch', 'turn_security_risk_policy_mismatch',
+      'turn_security_context_invalid', 'source_probe_unavailable', 'tool_source_unavailable',
+      'unknown'
+    ]
+    const labels = [
+      { stage: 'acquire', cause: 'context_canceled' },
+      { stage: 'privacy_projection', cause: 'uninspectable_provider_part' },
+      { stage: 'unknown', cause: 'turn_security_context_invalid' },
+      ...causes.map((cause) => ({ stage: 'prepare', cause }))
+    ]
+    for (const data of labels) {
+      const line = `[analytix-thread-trace] ${JSON.stringify({ name: 'thread.provider.loop_failure', threadId: ref, turnId: turnRef, data: { pid: 42, ...data } })}\n`
+      receiver.write(line.slice(0, 45)); receiver.write(line.slice(45))
+    }
+    receiver.write(`[analytix-thread-trace] ${JSON.stringify({ name: 'thread.terminal.core_committed', threadId: ref, turnId: turnRef,
+      data: { pid: 42, timeOrigin: 1000, publicationCommittedMs: 30 } })}\n`)
+    await flushThreadTraceEventsForTests(userData)
+    expect(await readdir(join(userData, 'traces'))).toEqual([`thread-${ref}.jsonl`])
+    const rows = (await readFile(join(userData, 'traces', `thread-${ref}.jsonl`), 'utf8')).trim().split('\n').map((row) => JSON.parse(row))
+    expect(rows).toHaveLength(labels.length + 1)
+    expect(rows.slice(0, labels.length)).toEqual(labels.map((data) => ({
+      name: 'thread.provider.loop_failure', timestamp: expect.any(Number), threadId: ref, turnId: turnRef,
+      data: { pid: 42, ...data, runtimeGeneration: 3, mainReceivedMonotonicMs: expect.any(Number), mainTimeOrigin: expect.any(Number) }
+    })))
+    expect(rows.at(-1)).toMatchObject({ name: 'thread.terminal.core_committed', threadId: ref, turnId: turnRef,
+      data: { pid: 42, timeOrigin: 1000, publicationCommittedMs: 30, runtimeGeneration: 3 } })
+    expect(THREAD_TRACE_EVENT_NAMES).not.toContain('thread.provider.loop_failure')
+    receiver.close()
+  })
+
+  it('rejects unowned or nonclosed provider failure records without retaining private fields', async () => {
+    process.env.ANALYTIX_THREAD_TRACE = '1'
+    const userData = await tempUserData()
+    const event = { name: 'thread.provider.loop_failure', threadId: `ref-${'a'.repeat(64)}`, turnId: `ref-${'b'.repeat(64)}`,
+      data: { pid: 42, stage: 'prepare', cause: 'unknown' } }
+    const secret = 'SYNTHETIC_PRIVATE_ERROR_REQUEST_CONFIG_PATH_SENTINEL'
+    const receiver = createRuntimePublicationTraceReceiver(userData, 42, 3)
+    const rejected = [
+      { ...event, error: secret }, { ...event, threadId: secret },
+      { ...event, turnId: `ref-${'A'.repeat(64)}` }, { ...event, turnId: `ref-${'b'.repeat(63)}` },
+      { ...event, data: { ...event.data, pid: 43 } },
+      { ...event, data: { stage: 'prepare', cause: 'unknown' } },
+      { ...event, data: { pid: 42, cause: 'unknown' } },
+      { ...event, data: { pid: 42, stage: 'prepare' } },
+      { ...event, data: { ...event.data, stage: secret } },
+      { ...event, data: { ...event.data, stage: 'prepare ' } },
+      { ...event, data: { ...event.data, cause: secret } },
+      { ...event, data: { ...event.data, cause: 'source_probe_unavailable ' } },
+      { ...event, data: { ...event.data, stage: true } },
+      { ...event, data: { ...event.data, cause: { error: secret } } },
+      { ...event, data: { pid: 42, stage: 'privacy_projection', cause: 'unknown' } },
+      { ...event, data: { pid: 42, stage: 'unknown', cause: 'provider_schema_contains_pii' } },
+      { ...event, data: null }, { ...event, data: [] },
+      ...['error', 'rawError', 'Details', 'request', 'path', 'provider', 'config', '__proto__'].map((key) => ({ ...event, data: { ...event.data, [key]: secret } }))
+    ]
+    for (const value of rejected) receiver.write(`[analytix-thread-trace] ${JSON.stringify(value)}\n`)
+    for (const generation of [0, -1, 1.5, Infinity]) {
+      const unowned = createRuntimePublicationTraceReceiver(userData, 42, generation)
+      unowned.write(`[analytix-thread-trace] ${JSON.stringify(event)}\n`)
+      unowned.close()
+    }
+    receiver.write(`[analytix-thread-trace] {"name":"thread.provider.loop_failure",${secret}\n`)
+    await flushThreadTraceEventsForTests(userData)
+    await expect(readdir(join(userData, 'traces'))).rejects.toThrow()
+    receiver.close()
+  })
+
+  it('keeps provider failure capture opt in and recovers after oversized or incomplete lines', async () => {
+    process.env.ANALYTIX_THREAD_TRACE = '0'
+    const userData = await tempUserData()
+    const event = { name: 'thread.provider.loop_failure', threadId: `ref-${'a'.repeat(64)}`, turnId: `ref-${'b'.repeat(64)}`,
+      data: { pid: 42, stage: 'prepare', cause: 'unknown' } }
+    const line = `[analytix-thread-trace] ${JSON.stringify(event)}\n`
+    const receiver = createRuntimePublicationTraceReceiver(userData, 42, 3)
+    receiver.write(line)
+    await flushThreadTraceEventsForTests(userData)
+    await expect(readdir(join(userData, 'traces'))).rejects.toThrow()
+    process.env.ANALYTIX_THREAD_TRACE = '1'
+    receiver.write('SYNTHETIC_PRIVATE_STDERR'.repeat(500)); receiver.write('\n')
+    receiver.write(line.slice(0, 55)); receiver.close(); receiver.write(line.slice(55))
+    await flushThreadTraceEventsForTests(userData)
+    await expect(readdir(join(userData, 'traces'))).rejects.toThrow()
+    receiver.write(line)
+    await flushThreadTraceEventsForTests(userData)
+    const body = await readFile(join(userData, 'traces', `thread-${event.threadId}.jsonl`), 'utf8')
+    expect(body).not.toContain('SYNTHETIC_PRIVATE_STDERR')
+    expect(body.trim().split('\n')).toHaveLength(1)
+    expect(JSON.parse(body).data).toMatchObject(event.data)
+    receiver.close()
+  })
+
+  it('shares the existing bounded queue for provider failure records', async () => {
+    process.env.ANALYTIX_THREAD_TRACE = '1'
+    const userData = await tempUserData()
+    const ref = `ref-${'a'.repeat(64)}`
+    const receiver = createRuntimePublicationTraceReceiver(userData, 42, 3)
+    const line = `[analytix-thread-trace] ${JSON.stringify({ name: 'thread.provider.loop_failure', threadId: ref, turnId: `ref-${'b'.repeat(64)}`,
+      data: { pid: 42, stage: 'prepare', cause: 'unknown' } })}\n`
+    for (let index = 0; index < 257; index++) receiver.write(line)
+    await flushThreadTraceEventsForTests(userData)
+    const rows = (await readFile(join(userData, 'traces', `thread-${ref}.jsonl`), 'utf8')).trim().split('\n')
+    expect(rows).toHaveLength(256)
+    receiver.close()
   })
 
   it('does not write traces by default', async () => {
@@ -177,5 +295,50 @@ describe('thread trace service', () => {
     await pruneThreadTraces(userData)
 
     await expect(stat(oldTrace)).rejects.toThrow()
+  })
+})
+
+describe('owned Core generation failure diagnostics', () => {
+  const previousEnv = process.env.ANALYTIX_THREAD_TRACE
+  afterEach(() => {
+    resetThreadTraceWriterForTests()
+    if (previousEnv === undefined) delete process.env.ANALYTIX_THREAD_TRACE
+    else process.env.ANALYTIX_THREAD_TRACE = previousEnv
+  })
+
+  it('persists only valid stage/cause pairs and rejects foreign or private metadata', async () => {
+    process.env.ANALYTIX_THREAD_TRACE = '1'
+    const userData = await tempUserData(), ref = `ref-${'a'.repeat(64)}`
+    const receiver = createRuntimePublicationTraceReceiver(userData, 42, 3)
+    const pairs = [
+      ['checkpoint_settlement', 'unavailable'], ['checkpoint_settlement', 'incomplete'],
+      ['checkpoint_record', 'unavailable'],
+      ...['host_preconsume', 'host_postconsume'].flatMap(stage =>
+        ['context_canceled', 'context_deadline_exceeded', 'identity_invalid', 'snapshot_unavailable'].map(cause => [stage, cause])),
+      ...['validation_invalid', 'target_unavailable', 'codec_invalid', 'checkpoint_unavailable', 'context_canceled', 'other_unavailable'].map(cause => ['generation_output', cause])
+    ]
+    const event = { name: 'thread.tool.generation_failure', threadId: ref, turnId: `ref-${'b'.repeat(64)}`,
+      data: { pid: 42, stage: 'checkpoint_record', cause: 'unavailable' } }
+    const send = (value: unknown) => receiver.write(`[analytix-thread-trace] ${JSON.stringify(value)}\n`)
+    for (const [stage, cause] of pairs) send({ ...event, data: { pid: 42, stage, cause } })
+    const secret = 'PRIVATE_GENERATION_ERROR_PATH_BODY_SENTINEL'
+    for (const rejected of [
+      { ...event, error: secret }, { ...event, threadId: secret },
+      { ...event, data: { ...event.data, pid: 43 } },
+      { ...event, data: { ...event.data, path: secret } },
+      { ...event, data: { ...event.data, cause: 'incomplete' } },
+      { ...event, data: { ...event.data, stage: '__proto__' } },
+      { ...event, data: { ...event.data, stage: secret } },
+      { ...event, data: { ...event.data, cause: secret } }
+    ]) send(rejected)
+    await flushThreadTraceEventsForTests(userData)
+    const body = await readFile(join(userData, 'traces', `thread-${ref}.jsonl`), 'utf8')
+    expect(body).not.toContain(secret)
+    expect(body.trim().split('\n').map(row => JSON.parse(row).data)).toEqual(pairs.map(([stage, cause]) => ({
+      pid: 42, stage, cause, runtimeGeneration: 3,
+      mainReceivedMonotonicMs: expect.any(Number), mainTimeOrigin: expect.any(Number)
+    })))
+    expect(THREAD_TRACE_EVENT_NAMES).not.toContain('thread.tool.generation_failure')
+    receiver.close()
   })
 })

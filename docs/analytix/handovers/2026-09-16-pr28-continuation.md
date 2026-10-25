@@ -676,7 +676,7 @@ DuckDB 下一步针对 inline 的实际 SQL/计划做最小复现；CodeQL 需�
 - [`2026-09-10-owner-replacement.md`](2026-09-10-owner-replacement.md)：
   新 Owner 替换、R131/B1 同源链聚焦接受、无自动化 Slice 路线与当时 A0/B1
   缺口。自 2026-09-16 起它不再是最新施工入口；仍保留当时证据边界和历史恢复背景。
-- [`2026-08-05-damaged-cache-retirement.md`](2026-08-05-damaged-cache-retirement.md)：
+- [`2026-08-05-damaged-cache-retirement.md`](https://github.com/Eysn0130/analytix/blob/a7a29264586b8f8d17822d771828b4f8e8bd1865/docs/analytix/handovers/2026-08-05-damaged-cache-retirement.md)：
   当时 clean canonical 基线、损坏缓存退役、v3 保全与容量状态。仅保留该日期的
   缓存和恢复历史，不是当前 HEAD、CI、writer 或施工顺序的依据。
 - [`../document-consolidation-register.md`](../document-consolidation-register.md)：
@@ -689,10 +689,10 @@ DuckDB 下一步针对 inline 的实际 SQL/计划做最小复现；CodeQL 需�
 - [`2026-08-04-controlled-thread-checkpoint.md`](2026-08-04-controlled-thread-checkpoint.md)：
   当时的 canonical 收敛、缓存容量与 Milestone A/B gap；其中旧镜像保留和容量
   blocker 状态已由 2026-08-05 checkpoint 取代。
-- [`2026-07-25-thread-close-route-audit.md`](2026-07-25-thread-close-route-audit.md)：
+- [`2026-07-25-thread-close-route-audit.md`](https://github.com/Eysn0130/analytix/blob/a7a29264586b8f8d17822d771828b4f8e8bd1865/docs/analytix/handovers/2026-07-25-thread-close-route-audit.md)：
   当时的产品路线复核、Codex/Claude Code/OpenCode 对照、Obsidian 审核和
   上游 currentness；不替代当前知识治理或 2026-09-16 checkpoint。
-- [`2026-07-25-first-stage-pause.md`](2026-07-25-first-stage-pause.md)：
+- [`2026-07-25-first-stage-pause.md`](https://github.com/Eysn0130/analytix/blob/a7a29264586b8f8d17822d771828b4f8e8bd1865/docs/analytix/handovers/2026-07-25-first-stage-pause.md)：
   第一阶段施工暂停时的工作区、Goal、P0-P4、资金插件、上游吸收、验证和风险
   快照；仅作 Historical 背景。
 

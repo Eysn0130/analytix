@@ -3,19 +3,125 @@ package thread
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"time"
 
+	pendingworkapp "analytix.local/runtime-go/internal/app/pendingwork"
+	turnapp "analytix.local/runtime-go/internal/app/turn"
 	turnsecurityapp "analytix.local/runtime-go/internal/app/turnsecurity"
 	"analytix.local/runtime-go/internal/contracts"
 	domainidentity "analytix.local/runtime-go/internal/domain/identity"
 	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domainthread "analytix.local/runtime-go/internal/domain/thread"
 )
 
 const metadataPatchCASAttempts = 8
 
+// Promotion changes only visibility. It never recreates history or clears the
+// source lineage, and busy foreground owners retain their work unchanged.
+func (s *Service) promoteSideUnderWriter(ctx context.Context, threadID string, initial map[string]any) (map[string]any, error) {
+	if s.beginArchiveRead == nil || s.workspaceReader == nil || s.observePromotionChildren == nil {
+		return nil, ErrSidePromotionUnavailable
+	}
+	principal, err := turnsecurityapp.ResolveCurrentPrincipal(ctx, s.workspaceSecurity.Identity)
+	if err != nil {
+		return nil, ErrSidePromotionUnavailable
+	}
+	workspace, err := s.workspaceReader.WorkspaceRealPath(strings.TrimSpace(stringField(initial, "workspace")))
+	if err != nil {
+		return nil, ErrSidePromotionUnavailable
+	}
+	release, err := s.beginArchiveRead(ctx, threadID, workspace, principal.TenantID, principal.UserID)
+	if err != nil || release == nil {
+		return nil, ErrThreadMutationTransition
+	}
+	defer release()
+	for attempt := 0; attempt < metadataPatchCASAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		thread, digest, err := s.repository.ReadThreadMutationBaseline(threadID)
+		if err != nil {
+			return nil, ErrSidePromotionUnavailable
+		}
+		if _, signedLineage := thread["activeInheritedHistoryReceipt"]; signedLineage || ThreadIsCaseBound(s.caseThreads, threadID, thread) {
+			// Signed inherited history binds its original relation. This intent
+			// cannot re-sign, erase or replace that separate CASE authority.
+			return nil, ErrSidePromotionUnavailable
+		}
+		parent := strings.TrimSpace(stringField(thread, "parentThreadId"))
+		if !domainthread.IsCanonicalRecordID(threadID) || stringField(thread, "id") != threadID ||
+			stringField(thread, "status") != "idle" || stringField(thread, "relation") != "side" ||
+			!domainthread.IsCanonicalRecordID(parent) || parent == threadID || stringField(thread, "forkedFromThreadId") != parent {
+			return nil, ErrSidePromotionUnavailable
+		}
+		current, err := FreezeThreadMutationScope(thread, threadID, s.workspaceReader, principal, time.Now().UTC(), s.workspaceSecurity)
+		if err != nil || current.WorkspaceRealPath != workspace || domainsecurity.TurnSecurityContextIsCaseSensitive(current) {
+			return nil, ErrSidePromotionUnavailable
+		}
+		// A temporary metadata scope or copied parent turn is not own origin.
+		own, err := turnapp.FrozenSecurityContextForTurn(thread, current.TurnID)
+		if err != nil || own != current || own.ThreadID != threadID || own.TenantID != principal.TenantID || own.UserID != principal.UserID {
+			return nil, ErrSidePromotionUnavailable
+		}
+		turns, valid := thread["turns"].([]any)
+		if !valid {
+			return nil, ErrSidePromotionUnavailable
+		}
+		for _, raw := range turns {
+			turn, valid := raw.(map[string]any)
+			if !valid || stringField(turn, "status") == "running" {
+				return nil, ErrSidePromotionUnavailable
+			}
+		}
+		inventory, records, legacy, err := s.observePromotionChildren(ctx)
+		if err != nil || legacy {
+			return nil, ErrSidePromotionUnavailable
+		}
+		if _, err := pendingworkapp.DeriveChildIdentityFloorsV1(inventory, records, nil); err != nil {
+			return nil, ErrSidePromotionUnavailable
+		}
+		// All signed allocations count, including ended/expired children or a
+		// child whose job is now absent. Absence from running jobs is no proof.
+		for _, receipt := range inventory.Receipts {
+			if receipt.ChildProducer != nil {
+				for _, child := range receipt.ChildProducer.Children {
+					if child.ChildThreadID == threadID {
+						return nil, ErrSidePromotionUnavailable
+					}
+				}
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		promoted, err := s.repository.PatchThreadIfBaseline(threadID, map[string]any{"relation": "fork"}, digest)
+		if errors.Is(err, ErrThreadMutationBaselineConflict) {
+			continue
+		}
+		if err != nil {
+			return nil, ErrSidePromotionUnavailable
+		}
+		expected := contracts.CloneMap(thread)
+		expected["relation"] = "fork"
+		delete(expected, "updatedAt")
+		actual := contracts.CloneMap(promoted)
+		delete(actual, "updatedAt")
+		if !reflect.DeepEqual(actual, expected) {
+			return nil, ErrSidePromotionUnavailable
+		}
+		return promoted, nil
+	}
+	return nil, ErrThreadMutationBaselineConflict
+}
+
 func (s *Service) patchUnderWriter(ctx context.Context, threadID string, patch map[string]any, initial map[string]any) (map[string]any, error) {
-	if s.beginMetadataRead == nil || s.workspaceReader == nil || initial == nil {
+	beginRead := s.beginMetadataRead
+	if _, archiveIntent := patch["archived"]; archiveIntent {
+		beginRead = s.beginArchiveRead
+	}
+	if beginRead == nil || s.workspaceReader == nil || initial == nil {
 		return nil, ErrThreadMutationTransition
 	}
 	principal, err := turnsecurityapp.ResolveCurrentPrincipal(ctx, s.workspaceSecurity.Identity)
@@ -26,7 +132,7 @@ func (s *Service) patchUnderWriter(ctx context.Context, threadID string, patch m
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.beginMetadataRead(
+	release, err := beginRead(
 		ctx, strings.TrimSpace(threadID), workspaceRealPath, principal.TenantID, principal.UserID,
 	)
 	if err != nil || release == nil {

@@ -1,0 +1,74 @@
+/* Ported and adapted from DeepSeek Harness 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger. */
+.chat { display: flex; flex-direction: column; min-width: 0; width: 100%; }
+:global(.sdd-assistant-panel) .chat { gap: 16px; }
+.process { min-width: 0; }
+.processBody { min-width: 0; display: flex; flex-direction: column; }
+:global(.sdd-assistant-panel) .processBody { gap: 2px; margin-top: 8px; }
+.error { color: var(--ds-danger); }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--ds-text-faint); font-size: 12px; }
+.deliveries { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.protectedBody { min-width: 0; font-size: 13px; color: var(--ds-text-muted); }
+.processBody[hidden]:not([hidden="until-found"]) { display: none; }
+.responseSeat { min-width: 0; display: flex; flex-direction: column; }
+:global(.sdd-assistant-panel) .responseSeat { gap: 16px; }
+:global(.sdd-assistant-panel) .responseSeat:not(:empty) { margin-top: 16px; }
+.draftLabel { color: var(--ds-text-faint); font-size: 12px; margin-bottom: 8px; }
+.groupBody { display: flex; flex-direction: column; min-width: 0; }
+:global(.sdd-assistant-panel) .groupBody { gap: 2px; }
+
+/* The running divider follows rendered output, including private seats whose
+   content stays inside the process pane. A trailing input is not output. */
+.chat > [data-actions-reveal] > [data-analytix-live-progress] > [aria-hidden] {
+  display: none;
+}
+.chat > .process:where(:has(> .processBody:not([hidden]) > [data-process-group] > div:not([hidden]) > [data-disclosure-row], > .processBody:not([hidden]) > [data-process-group] > [data-step-process-body]:not([hidden]) > [data-step-process-content] > [data-chat-seat] > :not(:empty))) ~ [data-actions-reveal] > [data-analytix-live-progress] > [aria-hidden] {
+  display: block;
+}
+.chat > .process:where(:has(> .processBody:not([hidden]) > [data-process-group]:last-child > [data-step-process-body]:not([hidden]) > [data-step-process-content] > [data-chat-seat]:last-child [data-user-message-bubble])) ~ [data-actions-reveal] > [data-analytix-live-progress] > [aria-hidden] {
+  display: none;
+}
+.chat > .process:where(:has(> .responseSeat:not([hidden]) > :not(:empty))) ~ [data-actions-reveal] > [data-analytix-live-progress] > [aria-hidden],
+.chat > .process ~ :not([data-actions-reveal]):not([hidden]):not(:empty) ~ [data-actions-reveal] > [data-analytix-live-progress] > [aria-hidden] {
+  display: block;
+}
+
+/* The native turn owns nested process and response seats. Space actual
+   content, excluding the retained empty/hidden seats and live announcements. */
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .chat {
+  font-family: var(--dsw-font-family);
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .chat > :not([hidden]):not(:empty) ~ :not([hidden]):not(:empty) {
+  margin-top: 6px;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .chat > :not([hidden]):not(:empty) ~ .process:has(> .responseSeat > :not(:empty)) {
+  margin-top: 12px;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .chat > :not([hidden]):not(:empty) ~ .process:has(> .processBody:not([hidden]) :is([data-disclosure-row], [data-chat-seat] > :not(:empty), [role='status'])) {
+  margin-top: 6px;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .chat > :not([hidden]):not(:empty) ~ .process:has(> [data-analytix-turn-process]) {
+  margin-top: 16px;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .chat > :not([hidden]):not(:empty) ~ .process:not(:has(> [data-analytix-turn-process], > .responseSeat > :not(:empty), > .processBody:not([hidden]) :is([data-disclosure-row], [data-chat-seat] > :not(:empty), [role='status']))) {
+  margin-top: 0;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .processBody > :not([hidden]):not(:empty) ~ :not([hidden]):not(:empty),
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .groupBody > :not([hidden]):not(:empty) ~ :not([hidden]):not(:empty) {
+  margin-top: 6px;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .process > [data-analytix-turn-process] ~ .processBody:not([hidden]):has(:is([data-disclosure-row], [data-chat-seat] > :not(:empty), [role='status'])),
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .process > [data-analytix-turn-process] ~ .responseSeat:has(> :not(:empty)) {
+  margin-top: 16px;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .process:has(> .processBody:not([hidden]) :is([data-disclosure-row], [data-chat-seat] > :not(:empty), [role='status'])) > .responseSeat:has(> :not(:empty)) {
+  margin-top: 12px;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .responseSeat > :not([hidden]):not(:empty) ~ :not([hidden]):not(:empty),
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .chat > :not([hidden]):not(:empty) ~ .process:has(> .responseSeat > :not(:empty)) + :not([hidden]):not(:empty) {
+  margin-top: 12px;
+}
+:global(:is(.ds-chat-stage, .ds-side-chat, [data-subagent-inspector-panel])) .chat > :not([hidden]):not(:empty) ~ [data-actions-reveal]:not(:empty) {
+  margin-top: 12px;
+}

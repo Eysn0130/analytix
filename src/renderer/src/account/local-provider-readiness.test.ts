@@ -60,7 +60,7 @@ describe('local Provider startup readiness', () => {
   ] as ProviderRegistryResult[])('fails closed with redacted local recovery guidance for unusable state', (result) => {
     const readiness = resolveLocalProviderReadiness(result)
     expect(readiness.kind).toBe('recovery')
-    expect(JSON.stringify(readiness)).toContain('Settings')
+    expect(readiness).toEqual({ kind: 'recovery', reason: 'saved_connection_unavailable' })
     expect(JSON.stringify(readiness)).not.toContain('private path detail')
   })
 })
@@ -97,7 +97,14 @@ it('directs a legacy Keychain credential to Settings without exposing private de
   })
   const readiness = await checkLocalProviderReadiness(request)
   expect(readiness.kind).toBe('recovery')
-  expect(JSON.stringify(readiness)).toContain('re-entered once in Settings')
+  expect(readiness).toEqual({ kind: 'recovery', reason: 'credential_reentry_required' })
   expect(JSON.stringify(readiness)).not.toContain('private detail')
   expect(request.mock.calls.map(([r]) => r.operation)).toEqual(['list', 'credential-check'])
+})
+
+
+it('returns a closed recovery reason without presentation text or private details', () => {
+  expect(resolveLocalProviderReadiness({ schemaVersion: 1, error: { code: 'runtime_unavailable', message: 'private error body' } })).toEqual({
+    kind: 'recovery', reason: 'saved_connection_unavailable'
+  })
 })

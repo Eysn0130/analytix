@@ -1,26 +1,62 @@
 import type { ChatBlock } from '../../agent/types'
 import { sanitizePublicAssistantText } from '@shared/public-runtime-content'
+import { isNeutralProviderRequestStage } from '../../store/chat-store-runtime-helpers'
 
 export type ThreadTurn = {
   user?: Extract<ChatBlock, { kind: 'user' }>
   blocks: ChatBlock[]
 }
 
+export function blockRuntimeTurnId(block: ChatBlock | undefined): string | null {
+  const meta = (block as { meta?: Record<string, unknown> } | undefined)?.meta
+  const turnId = typeof meta?.turnId === 'string' ? meta.turnId.trim() : ''
+  return turnId || null
+}
+
+export function runtimeTurnId(turn: ThreadTurn): string | null {
+  const userTurnId = blockRuntimeTurnId(turn.user)
+  if (userTurnId) return userTurnId
+  for (const block of turn.blocks) {
+    const turnId = blockRuntimeTurnId(block)
+    if (turnId) return turnId
+  }
+  return null
+}
+
 export function groupThreadTurns(blocks: ChatBlock[]): ThreadTurn[] {
   const turns: ThreadTurn[] = []
+  const runtimeTurns = new Map<string, ThreadTurn>()
   let current: ThreadTurn | null = null
 
   for (const block of blocks) {
-    if (block.kind === 'user') {
-      if (current) turns.push(current)
-      current = { user: block, blocks: [] }
+    if (block.kind === 'system' && isNeutralProviderRequestStage(block.meta?.stage) &&
+      (block.severity === undefined || block.severity === 'info') && !block.code && !block.meta?.providerError && !block.meta?.providerRetry) continue
+    const turnId = blockRuntimeTurnId(block)
+    if (turnId) {
+      let turn = runtimeTurns.get(turnId)
+      if (!turn) {
+        // A legacy opening input may precede the first runtime-owned item.
+        turn = block.kind !== 'user' && current && !runtimeTurnId(current) ? current : { blocks: [] }
+        if (turn !== current) turns.push(turn)
+        runtimeTurns.set(turnId, turn)
+      }
+      if (block.kind === 'user' && !turn.user && turn.blocks.length === 0) turn.user = block
+      else turn.blocks.push(block)
+      current = turn
       continue
     }
-    if (!current) current = { blocks: [] }
+    if (block.kind === 'user') {
+      current = { user: block, blocks: [] }
+      turns.push(current)
+      continue
+    }
+    if (!current) {
+      current = { blocks: [] }
+      turns.push(current)
+    }
     current.blocks.push(block)
   }
 
-  if (current) turns.push(current)
   return turns
 }
 

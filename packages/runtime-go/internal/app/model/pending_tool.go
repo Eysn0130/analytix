@@ -13,18 +13,20 @@ import (
 )
 
 type PendingToolCall struct {
-	ThreadID              string
-	TurnID                string
-	ProviderConfig        domainmodel.TurnConfig
-	ProviderID            string
-	Model                 string
-	Effort                string
-	Workspace             string
-	Prompt                string
-	LogicalEffect         domainsecurity.LogicalEffect
-	OrdinaryWork          bool
-	ProviderStepExact     bool
-	CaseSourceUnavailable bool
+	ModelVisibleToolDefinition *domainmodel.ToolDefinitionSnapshotV1    `json:"-"`
+	UserInputTimedWait         *domaincontinuation.UserInputTimedWaitV1 `json:"-"`
+	ThreadID                   string
+	TurnID                     string
+	ProviderConfig             domainmodel.TurnConfig
+	ProviderID                 string
+	Model                      string
+	Effort                     string
+	Workspace                  string
+	Prompt                     string
+	LogicalEffect              domainsecurity.LogicalEffect
+	OrdinaryWork               bool
+	ProviderStepExact          bool
+	CaseSourceUnavailable      bool
 	// OrdinaryResultInputIsolated is host-owned provider-lane provenance. It is
 	// excluded from public history and provider payloads, but an exact paused
 	// gate binds the boolean in its private signed continuation receipt so a
@@ -47,35 +49,37 @@ type PendingToolCall struct {
 	// PrivateProtocolObserved is a non-secret durable fact bound by a signed
 	// gate continuation receipt. It tells pause/resume and restart to compile
 	// safe semantic history without replaying process-local protocol bytes.
-	PrivateProtocolObserved bool `json:"-"`
-	ProviderNamespace       domaincontinuation.ProviderContinuationNamespaceV1
-	TerminalRecoveryKind    domaincontinuation.TerminalRecoveryKindV1
-	PriorSettledToolRefs    []domainsecurity.SettledToolReference
-	Call                    domainmodel.ToolCall
-	ToolCallItemID          string
-	ToolScope               []string
-	SubagentDepth           int
-	SecurityContext         domainsecurity.TurnSecurityContext
-	ExecutionGrant          domainsecurity.ExecutionGrant
-	ApprovalTransition      *domainsecurity.ApprovalGrantTransitionV1 `json:"-"`
+	PrivateProtocolObserved  bool `json:"-"`
+	ProviderNamespace        domaincontinuation.ProviderContinuationNamespaceV1
+	TerminalRecoveryKind     domaincontinuation.TerminalRecoveryKindV1
+	OutputCapLogicalSequence uint64
+	PriorSettledToolRefs     []domainsecurity.SettledToolReference
+	Call                     domainmodel.ToolCall
+	ToolCallItemID           string
+	ToolScope                []string
+	SubagentDepth            int
+	SecurityContext          domainsecurity.TurnSecurityContext
+	ExecutionGrant           domainsecurity.ExecutionGrant
+	ApprovalTransition       *domainsecurity.ApprovalGrantTransitionV1 `json:"-"`
 }
 
 type PendingToolCallInput struct {
-	Event             map[string]any
-	Thread            map[string]any
-	Turn              map[string]any
-	ProviderConfig    domainmodel.TurnConfig
-	ProviderID        string
-	Model             string
-	Effort            string
-	Workspace         string
-	ApprovalPolicy    string
-	SandboxMode       string
-	Mode              string
-	Messages          []domainmodel.Message
-	ToolScope         []string
-	PrivateArguments  json.RawMessage
-	SteeringAuthority finalauthorityport.Verifier
+	Event                      map[string]any
+	Thread                     map[string]any
+	Turn                       map[string]any
+	ProviderConfig             domainmodel.TurnConfig
+	ProviderID                 string
+	Model                      string
+	Effort                     string
+	Workspace                  string
+	ApprovalPolicy             string
+	SandboxMode                string
+	Mode                       string
+	Messages                   []domainmodel.Message
+	ToolScope                  []string
+	PrivateArguments           json.RawMessage
+	ModelVisibleToolDefinition *domainmodel.ToolDefinitionSnapshotV1
+	SteeringAuthority          finalauthorityport.Verifier
 }
 
 type PendingToolThreadStore interface {
@@ -171,33 +175,34 @@ func BuildPendingToolCall(input PendingToolCallInput) (PendingToolCall, bool) {
 	providerConfig.APIKey = ""
 	providerConfig.ProxyURL = ""
 	return PendingToolCall{
-		ThreadID:               strings.TrimSpace(providerHistoryStringField(input.Event, "threadId")),
-		TurnID:                 strings.TrimSpace(providerHistoryStringField(input.Event, "turnId")),
-		ProviderConfig:         providerConfig,
-		ProviderID:             strings.TrimSpace(input.ProviderID),
-		Model:                  strings.TrimSpace(input.Model),
-		Effort:                 effort,
-		Workspace:              strings.TrimSpace(input.Workspace),
-		Prompt:                 prompt,
-		LogicalEffect:          logicalEffect,
-		OrdinaryWork:           ordinaryWork,
-		ProviderStepExact:      providerStepExact,
-		AttachmentIDs:          AttachmentIDsFromTurn(input.Turn),
-		WorkspaceCheckpointID:  firstNonEmptyAnyString(input.Event["workspaceCheckpointId"], input.Turn["workspaceCheckpointId"]),
-		Mode:                   strings.TrimSpace(input.Mode),
-		GUIPlan:                guiPlan,
-		ApprovalPolicy:         strings.TrimSpace(input.ApprovalPolicy),
-		SandboxMode:            strings.TrimSpace(input.SandboxMode),
-		DisableUserInput:       BoolFieldWithFallback(input.Event, input.Turn, "disableUserInput"),
-		MaxModelSteps:          OptionalIntField(input.Event, input.Turn, "maxModelSteps"),
-		EffectiveMaxModelSteps: OptionalIntField(input.Event, input.Turn, "effectiveMaxModelSteps"),
-		Messages:               CloneProviderMessages(input.Messages),
-		Call:                   call,
-		ToolCallItemID:         itemID,
-		ToolScope:              append([]string(nil), input.ToolScope...),
-		SubagentDepth:          subagentDepth,
-		SecurityContext:        securityContext,
-		ExecutionGrant:         executionGrant,
+		ModelVisibleToolDefinition: domainmodel.CloneToolDefinitionSnapshotV1(input.ModelVisibleToolDefinition),
+		ThreadID:                   strings.TrimSpace(providerHistoryStringField(input.Event, "threadId")),
+		TurnID:                     strings.TrimSpace(providerHistoryStringField(input.Event, "turnId")),
+		ProviderConfig:             providerConfig,
+		ProviderID:                 strings.TrimSpace(input.ProviderID),
+		Model:                      strings.TrimSpace(input.Model),
+		Effort:                     effort,
+		Workspace:                  strings.TrimSpace(input.Workspace),
+		Prompt:                     prompt,
+		LogicalEffect:              logicalEffect,
+		OrdinaryWork:               ordinaryWork,
+		ProviderStepExact:          providerStepExact,
+		AttachmentIDs:              AttachmentIDsFromTurn(input.Turn),
+		WorkspaceCheckpointID:      firstNonEmptyAnyString(input.Event["workspaceCheckpointId"], input.Turn["workspaceCheckpointId"]),
+		Mode:                       strings.TrimSpace(input.Mode),
+		GUIPlan:                    guiPlan,
+		ApprovalPolicy:             strings.TrimSpace(input.ApprovalPolicy),
+		SandboxMode:                strings.TrimSpace(input.SandboxMode),
+		DisableUserInput:           BoolFieldWithFallback(input.Event, input.Turn, "disableUserInput"),
+		MaxModelSteps:              OptionalIntField(input.Event, input.Turn, "maxModelSteps"),
+		EffectiveMaxModelSteps:     OptionalIntField(input.Event, input.Turn, "effectiveMaxModelSteps"),
+		Messages:                   CloneProviderMessages(input.Messages),
+		Call:                       call,
+		ToolCallItemID:             itemID,
+		ToolScope:                  append([]string(nil), input.ToolScope...),
+		SubagentDepth:              subagentDepth,
+		SecurityContext:            securityContext,
+		ExecutionGrant:             executionGrant,
 	}, true
 }
 

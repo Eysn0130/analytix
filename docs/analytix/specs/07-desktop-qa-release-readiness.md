@@ -59,35 +59,38 @@ independent ordinary baseline.
 
 ## 2. Final Acceptance Scope
 
-The final QA pass must cover these current analytix surfaces without deleting
-or hiding existing functionality:
+The final product-readiness pass covers the applicable current journeys in the
+[product matrix](../product-completion.md); retired modes do not require restoration.
 
 | Area | Required coverage |
 | --- | --- |
 | Electron desktop startup | A formal packaged app launches a visible analytix window, reaches a usable runtime state, and reports runtime health. `npm run dev` and a visible window alone are diagnostic evidence only. |
 | Long-thread scrolling | At least 120 turns are loaded in the real GUI; bottom-distance virtualizer preserves history position and does not jump on prepend. |
 | Streaming | Near-bottom streaming follows the active turn; away-from-bottom streaming does not pull the user out of history. |
-| Markdown/code rendering | Streaming uses lightweight rendering; finalized markdown/code blocks render after finalization without blocking composer input. |
+| Markdown/code rendering | Streaming renders Markdown incrementally, including eligible code-fence highlighting; settled parsing completes math/reference resolution. Neither phase may block composer input. |
 | Composer | Text input, model picker, reasoning effort, attachments, file references, queued messages, interrupt, `/plan`, `/review`, `/new`, and side conversation actions remain reachable. |
-| Sidebar | Thread list, search, archive/restore, workspace creation, Code/Write/Schedule/Connect Phone/plugin navigation, focus mode, and collapse/resize remain usable. |
+| Sidebar | Thread list, search, archive/restore, workspace creation, current Chat/Plugins/Schedule/Settings and Connect Phone entries, focus mode, and collapse/resize remain usable. Legacy `write` intents return to chat plus the workspace selector; the compatibility enum does not define a separate Write mode. |
 | Settings | Runtime, providers, write, updates, memory, media, speech, worktree, legacy import, and Connect Phone settings read/write the current analytix schema. |
 | Runtime | `packages/runtime` is bundled, `analytix serve` is the public CLI, HTTP/SSE replay works, approvals/user-inputs/usage remain equivalent. |
 | Terminal | Bottom terminal opens, resizes, streams output through its scheduler, and does not steal timeline scroll space. |
 | Dev Browser | Preview detection card opens the browser panel; panel resize/collapse works without affecting streaming. |
 | Provider and browser storage continuity | A fresh isolated macOS install saves a Provider through visible UI once, restores it after new Go and Main processes and a same-profile update without ordinary Keychain access, and verifies Settings replacement/deletion. A legacy Keychain-backed profile preserves old bytes and requests visible re-entry; its old-to-new fixture must retain thread, settings, and document data. If packaged cookie encryption is disabled, preserve the old Chromium cookie store under a distinct versioned browser partition and explain that websites may require sign-in again. These are separate Provider and browser-session authorities. Windows DPAPI and native installer behavior require Windows-platform evidence. |
-| Write | Workspace selection, editor/preview, file tree, assistant panel, inline completion, attachments, export, and empty state remain functional. |
+| Word / shared documents | Word creation/open/edit/save/reopen, shared file tree/preview, current-conversation assistance and attachments/references, applicable export and recovery retain their accepted scope. Plan/SDD keep shared Markdown editing and inline completion; no standalone Write mode is required. |
 | SDD | Requirement draft, assistant panel, prototype/image actions, plan upgrade, trace persistence, and history restore remain functional. |
 | Plugin marketplace | Marketplace loads, search/filter/install state renders, and current product naming is analytix. |
 | Connect Phone | User-visible copy says Connect Phone/analytix; `claw` may remain only as an internal compatibility module. |
 | Schedule | Manual and scheduled tasks can create/reuse analytix runtime threads and retain Connect Phone task context. |
 | Logs/update | Logs directory opens, update UI uses analytix release settings, and the configured feed is verified rather than merely present. |
 | Focus/dark/light | Focus mode, dark mode, light mode, and reduced-motion states keep text legible and controls reachable. |
-| Mascot/cameo | Retained mascot/cameo mode uses current source naming and does not present Kun/iKun as product identity. |
 | Window title bar | macOS/Windows title bar controls, drag regions, and collapsed sidebar safe insets remain correct. |
 | Dock/tray/app icon | App, dock, tray, installer, splash, and readme icon paths use analytix assets, not Kun or Codex. |
 | Packaging | macOS dmg/zip, Windows NSIS x64, and Linux AppImage remain configured; platform-specific execution is recorded truthfully. |
 
 ## 3. Required Desktop Long-Thread Scenario
+
+The 120-turn requirement applies to final desktop long-thread readiness, not
+every copy/style/documentation change. Ordinary maintenance follows the
+[affected-owner validation route](../development-baseline.md#bounded-maintenance-routing).
 
 The real desktop QA scenario must create or load a thread with at least 120
 turns and include all of these row types:
@@ -172,7 +175,7 @@ identity:
 | `src/renderer/src/plan/plan-prompts.ts` | Isolated legacy prompt recognition. | May recognize old internal plan prompt strings so they do not become user requests. |
 | provider/model DeepSeek files | Provider support. | DeepSeek may remain as a provider/model name, never as app identity. |
 | Connect Phone `claw` internals | First-stage internal module name. | User-visible copy must say Connect Phone/analytix. |
-| `docs/legacy/kun/` and `release/legacy/` | Historical archive. | Must remain clearly marked historical and not linked as current architecture guidance. |
+| [Kun history pointer](../../legacy/kun/README.md) and [release history pointer](../../../release/legacy/README.md) | Historical Git recovery pointers. | Must remain clearly marked historical and not linked as current architecture guidance. |
 
 Any old naming outside these boundaries is a current-product bug unless another
 spec explicitly allowlists it.
@@ -233,7 +236,7 @@ Recommended evidence:
 - long-thread near-bottom screenshot;
 - long-thread away-from-bottom screenshot;
 - settings screenshot;
-- Write screenshot;
+- current Word/shared-document journey screenshot;
 - SDD screenshot;
 - Plugin marketplace screenshot;
 - terminal/dev browser screenshot;

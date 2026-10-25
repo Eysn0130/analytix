@@ -96,7 +96,8 @@ Unless an accepted target explicitly supersedes them:
   `packages/runtime-go/internal/runtimeapp`.
 - `packages/runtime` owns public TypeScript contracts, configuration,
   telemetry, and the `analytix serve` launcher. The launcher starts the Go
-  `runtime-server`; `ANALYTIX_RUNTIME_BACKEND=typescript` is diagnostic only.
+  `runtime-server`. Electron rejects `ANALYTIX_RUNTIME_BACKEND=typescript`
+  with `retired_backend`.
 - The desktop boundary is:
 
   ```text
@@ -159,15 +160,9 @@ unsafe logs, or unverified claims.
   routes does not clear a safety refusal or transfer native acceptance evidence.
 - Before repository-grounded review, diagnosis, implementation, or mutation,
   run `git status --short --branch` and preserve existing user changes.
-- `main` tracks public `origin/main`. Follow `docs/analytix/git-workflow.md`:
-  normal feature/runtime/plugin/security/dependency/cross-layer work starts on
-  a short-lived `codex/*` branch from latest `main`; use authorized push/PR and
-  merge only after current CI and applicable acceptance. Never push directly to main,
-  bypass checks or weaken tests. Report branch, PR, HEAD, CI and merge readiness
-  separately. Keep pre-public/archive history and local-only resources private;
-  never merge unrelated archive history, force-add excluded files or use
-  `push --all`/`--mirror`. Pre-push checks outgoing history/excluded paths; it
-  does not scan secrets or establish license/release acceptance.
+- For branch selection, synchronization, PR/CI acceptance, and Git status
+  reporting, read `docs/analytix/git-workflow.md` before the relevant Git operation.
+  Preserve its private-history/excluded-path and no-bypass boundaries.
 - `/Users/sun/Projects/analytix` is the only canonical source and release
   repository. Apply product source changes to this repository and land them in
   its Git history. `/Volumes/AnalytixCache` extends build-storage capacity; it

@@ -14,6 +14,17 @@ describe('selection menu viewport coordinates', () => {
     expect((position.left + position.width) * zoom).toBeLessThan(1200)
   })
 
+  it.each([0.75, 1, 1.25])('fits a narrow right container within the viewport at zoom %s', (zoom) => {
+    vi.stubGlobal('document', { body: {} })
+    vi.stubGlobal('window', { innerWidth: 1280, getComputedStyle: () => ({ zoom: String(zoom) }) })
+    const position = inlineAgentPosition({ anchorRect: { left: 1015.4, top: 281.8, bottom: 301.8, width: 100 } }, { bounds: { left: 912, right: 1276 } })!
+    expect(position.width).toBeGreaterThan(0)
+    expect(position.left * zoom).toBeGreaterThanOrEqual(912 + 16 * zoom)
+    expect((position.left + position.width) * zoom).toBeLessThanOrEqual(1276 - 16 * zoom)
+    expect(position.anchorTop * zoom).toBeCloseTo(281.8)
+    expect(position.anchorBottom * zoom).toBeCloseTo(301.8)
+  })
+
   it('keeps a menu inside a viewport narrower than its preferred width', () => {
     vi.stubGlobal('document', { body: {} })
     vi.stubGlobal('window', { innerWidth: 240, getComputedStyle: () => ({ zoom: '1' }) })

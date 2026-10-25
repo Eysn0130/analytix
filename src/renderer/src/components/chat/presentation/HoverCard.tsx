@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom'
 import { writeClipboard } from './clipboard'
 import { usePointerGrace } from './pointer-grace'
 import { overlayTopMargin } from './overlay-top-margin'
-import { TooltipSuppression } from './Tooltip'
+import { hasChatTokenScope, TooltipSuppression } from './Tooltip'
 import css from './HoverCard.module.css'
 
 /** Preview opacity transition and retained lifetime during dismissal. */
@@ -66,6 +66,7 @@ export function HoverCard({
   const [pos, setPos] = useState<{ left: number; top: number; width?: number; maxHeight?: number } | null>(null)
   const positioned = pos !== null
   const [copied, setCopied] = useState(false)
+  const [chatScoped, setChatScoped] = useState(false)
   const [suppressed, setSuppressed] = useState(false)
 
   const clearCopied = useCallback(() => {
@@ -140,6 +141,7 @@ export function HoverCard({
       const wrapper = rootRef.current
       /* v8 ignore next -- the ref is attached before the layout effect runs and the listeners die with it. */
       if (wrapper === null) return
+      setChatScoped(hasChatTokenScope(wrapper))
       const r = wrapper.getBoundingClientRect()
       const h = cardRef.current?.offsetHeight ?? 0
       if (variant === 'preview') {
@@ -230,6 +232,7 @@ export function HoverCard({
       ref={cardRef}
       className={clsx(css.card, variant === 'preview' && css.preview, inline && css.media, copyable && css.copyable, copied && css.feedback)}
       data-closing={closing || undefined}
+      data-analytix-chat-token-scope={chatScoped || undefined}
       style={{
         ...pos, minHeight: copied && copyHeightRef.current !== null ? copyHeightRef.current : undefined,
         '--dsh-hover-preview-fade': `${PREVIEW_FADE_MS}ms`,

@@ -127,6 +127,7 @@ func TestGateContinuationInputFromPendingTool(t *testing.T) {
 
 func TestGateContinuationPayloadBindsExactProviderStepAndSameProcessPending(t *testing.T) {
 	pending, now := gateContinuationPendingFixture(t)
+	pending.ModelVisibleToolDefinition = &domainmodel.ToolDefinitionSnapshotV1{SchemaJSON: `{"name":"write_file","description":"ACTUAL_PAUSED_REQUEST","parameters":{"type":"object"}}`}
 	pending.PrivateProtocolObserved = true
 	gateID := domaincontinuation.GateID(
 		domaincontinuation.KindApproval, pending.ThreadID, pending.TurnID,
@@ -177,6 +178,18 @@ func TestGateContinuationPayloadBindsExactProviderStepAndSameProcessPending(t *t
 	changed.PrivateProtocolObserved = false
 	if err := ValidatePendingContinuationReceipt(receipt, changed); err == nil {
 		t.Fatal("changed private-protocol observation reused a continuation receipt")
+	}
+	changed = pending
+	changed.ModelVisibleToolDefinition = &domainmodel.ToolDefinitionSnapshotV1{SchemaJSON: `{"name":"write_file","description":"LATER_CATALOG","parameters":{"type":"object"}}`}
+	if err := ValidatePendingContinuationReceipt(receipt, changed); err == nil {
+		t.Fatal("changed model-visible definition reused a continuation receipt")
+	}
+	if payload.ModelVisibleToolDefinition == pending.ModelVisibleToolDefinition || receipt.Payload.ModelVisibleToolDefinition == payload.ModelVisibleToolDefinition {
+		t.Fatal("pause retained mutable producer definition pointers")
+	}
+	publicFields := GateContinuationFields(GateContinuationInputFromPendingTool(pending))
+	if _, exists := publicFields["modelVisibleToolDefinition"]; exists {
+		t.Fatal("private definition entered public gate metadata")
 	}
 
 	invalid := pending

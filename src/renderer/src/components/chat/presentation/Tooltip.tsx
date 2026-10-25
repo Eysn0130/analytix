@@ -21,6 +21,11 @@ export type TooltipSide = 'right' | 'bottom' | 'top'
  */
 export const TooltipSuppression = createContext<((suppressed: boolean) => void) | null>(null)
 
+/** Token scope follows the origin; theme and font values remain live CSS variables. */
+export function hasChatTokenScope(element: HTMLElement): boolean {
+  return element.closest('[data-analytix-message-timeline-content], [data-analytix-chat-view], [data-analytix-gate-composer], [data-analytix-chat-token-scope], [data-analytix-main-chat-table="true"]') !== null
+}
+
 /** Props Tooltip injects into its anchor child; the child's own handlers are chained ahead of the tooltip's. */
 interface AnchorProps {
   'aria-describedby'?: string | undefined
@@ -61,9 +66,10 @@ type TooltipLabel = string | (() => string)
  * anchor dismisses the bubble unless openOnClick is enabled, and focus arriving after a pointer
  * interaction (a closing menu refocusing its trigger) never raises it.
  */
-export function Tooltip({ label, shortcutKeys, side = 'right', align = 'center', delayMs = 0, focusDelayMs = 0, gap = 8, disabled = false, portal = false, maxWidth, openOnClick = false, children }: { label: TooltipLabel; shortcutKeys?: readonly string[] | undefined; side?: TooltipSide; align?: 'center' | 'end'; delayMs?: number; focusDelayMs?: number; gap?: number; disabled?: boolean; portal?: boolean; maxWidth?: number; openOnClick?: boolean; children: ReactElement<AnchorProps> }) {
+export function Tooltip({ label, shortcutKeys, side = 'right', align = 'center', delayMs = 0, focusDelayMs = 0, gap = 8, disabled = false, portal = false, maxWidth, bubbleClassName, openOnClick = false, children }: { label: TooltipLabel; shortcutKeys?: readonly string[] | undefined; side?: TooltipSide; align?: 'center' | 'end'; delayMs?: number; focusDelayMs?: number; gap?: number; disabled?: boolean; portal?: boolean; maxWidth?: number; bubbleClassName?: string; openOnClick?: boolean; children: ReactElement<AnchorProps> }) {
   const id = useId()
   const [pinned, setPinned] = useState(false)
+  const [chatScoped, setChatScoped] = useState(false)
   const anchor = useRef<HTMLElement | null>(null)
   // React 19 exposes the owner's ref in props; preserve it when cloning.
   const childRef = children.props.ref
@@ -159,6 +165,7 @@ export function Tooltip({ label, shortcutKeys, side = 'right', align = 'center',
     const el = anchor.current
     /* v8 ignore next -- the ref is attached by event time: events fire on the cloned anchor. */
     if (el === null) return
+    setChatScoped(portal && hasChatTokenScope(el))
     const r = el.getBoundingClientRect()
     setPos({
       x: side === 'right' ? r.right + 10 : align === 'end' ? r.right : r.left + r.width / 2,
@@ -208,9 +215,10 @@ export function Tooltip({ label, shortcutKeys, side = 'right', align = 'center',
     <span
       ref={bubble}
       id={openOnClick ? id : undefined}
-      className={css.bubble}
+      className={[css.bubble, bubbleClassName].filter(Boolean).join(' ')}
       data-side={side}
       data-portal={portal || undefined}
+      data-analytix-chat-token-scope={portal && chatScoped || undefined}
       data-pinned={pinned || undefined}
       data-align={align}
       data-has-shortcut={shortcutKeys?.length ? true : undefined}

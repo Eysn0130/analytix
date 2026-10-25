@@ -3,6 +3,7 @@ const { resolve } = require('node:path')
 const { beginAppInstall, recordAppInstall } = require('./app-install-state.cjs')
 const appRoot = resolve(__dirname, '..')
 const appInput = beginAppInstall(appRoot)
+require('./apply-dsh-preview-patches.cjs').applyDshPreviewPatches(appRoot)
 
 function run(command, args, options = {}) {
   return spawnSync(command, args, {

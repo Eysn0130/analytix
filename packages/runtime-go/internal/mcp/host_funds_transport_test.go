@@ -34,7 +34,7 @@ func TestExactHostFundsUsesInProcessTransportWithoutStartingPackagedJavaScript(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{},
 		HostFundsServer:  host,
 	})
@@ -491,7 +491,7 @@ func TestHostFundsInProcessTransportFingerprintMismatchNeverFallsBack(t *testing
 	if _, err := newHostFundsTransportClientV1(host, spec, strings.Repeat("f", 64)); err == nil {
 		t.Fatal("mismatched host funds fingerprint created an in-process client")
 	}
-	manager := NewProductionManagerWithOptions(nil, ProductionManagerOptions{
+	manager := newAdmissionTestManagerWithOptions(nil, ProductionManagerOptions{
 		DatasetAuthority: unavailableHostFundsDatasetAuthorityV2{}, HostFundsServer: host,
 	})
 	manager.hostFundsFingerprint = ""

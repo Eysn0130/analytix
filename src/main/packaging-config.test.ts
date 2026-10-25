@@ -105,6 +105,7 @@ const runtimePackage = require('../../packages/runtime/package.json')
 const openClawShimPackage = require('../../vendor/openclaw-shim/package.json')
 const runtimeBuildConfig = require('../../packages/runtime/tsconfig.build.json')
 const productionFundsMcpEntryClosure = require('../../plugins/analytix-fund-analysis/scripts/production-mcp-entry-closure.json')
+const fundsReferenceContract = require('../../plugins/analytix-fund-analysis/scripts/runtime-cache-contract.mjs')
 const devTestAccountLauncherSource = readFileSync(
   resolve(process.cwd(), 'scripts/dev-test-account-launcher.mjs'),
   'utf8'
@@ -525,6 +526,12 @@ function writeBundledFundsPlugin(
   cpSync(join(sourceRoot, 'agents', 'openai.yaml'), join(destinationRoot, 'agents', 'openai.yaml'))
   for (const relativePath of afterPack.ANALYTIX_FUNDS_PRODUCTION_MCP_FILES) {
     cpSync(join(sourceRoot, relativePath), join(destinationRoot, relativePath))
+  }
+  for (const directory of ['references', 'skills/analytix-fund-analysis/references']) {
+    mkdirSync(join(destinationRoot, directory), { recursive: true })
+    for (const name of fundsReferenceContract.SHIPPING_REFERENCE_FILES) {
+      cpSync(join(sourceRoot, directory, name), join(destinationRoot, directory, name))
+    }
   }
   return destinationRoot
 }
@@ -1624,6 +1631,7 @@ describe('electron-builder Analytix packaging', () => {
       'references/**/*',
       'skills/**/*',
       ...productionFundsMcpEntryClosure.files,
+      ...fundsReferenceContract.DEVELOPMENT_REFERENCE_PATHS.map((path: string) => `!${path}`),
       '!**/.DS_Store',
       '!**/._*'
     ]
@@ -1741,6 +1749,24 @@ describe('electron-builder Analytix packaging', () => {
     const root = tempRoot()
     const context = createMacPackContext(root)
     const packagedPluginRoot = writeBundledFundsPlugin(context)
+    expect(() => afterPack._internals.validateBundledFundsPlugin(context)).not.toThrow()
+
+    const referenceRoot = join(packagedPluginRoot, 'references')
+    const requiredReference = fundsReferenceContract.SHIPPING_REFERENCE_FILES[0]
+    rmSync(join(referenceRoot, requiredReference))
+    expect(() => afterPack._internals.validateBundledFundsPlugin(context))
+      .toThrow(/Reference inventory mismatch/)
+    cpSync(
+      join(process.cwd(), 'plugins', 'analytix-fund-analysis', 'references', requiredReference),
+      join(referenceRoot, requiredReference)
+    )
+    for (const relativePath of fundsReferenceContract.DEVELOPMENT_REFERENCE_PATHS) {
+      const mixedPath = join(packagedPluginRoot, relativePath)
+      cpSync(join(process.cwd(), 'plugins', 'analytix-fund-analysis', relativePath), mixedPath)
+      expect(() => afterPack._internals.validateBundledFundsPlugin(context))
+        .toThrow(/Reference inventory mismatch/)
+      rmSync(mixedPath)
+    }
     expect(() => afterPack._internals.validateBundledFundsPlugin(context)).not.toThrow()
 
     const packagedDeclaration = join(packagedPluginRoot, '.analytix-plugin', 'package.json')

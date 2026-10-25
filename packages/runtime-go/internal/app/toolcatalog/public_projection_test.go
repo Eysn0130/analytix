@@ -8,6 +8,29 @@ import (
 	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
+func TestPublicTaskJobProjectionUsesOnlyExactProducerAndSuccessfulClosedResult(t *testing.T) {
+	job := map[string]any{"schemaVersion": 1, "id": "job-synthetic", "kind": "subagent", "status": "failed", "background": false, "terminal": true,
+		"outputWithheld": true, "outputTrustStatus": "untrusted_child_output", "factAnswerAllowed": false, "evidenceAuthority": false, "canReadOutput": false, "canContinueParent": false, "active": false}
+	projection := BuildPublicToolResultProjectionV1("list_jobs", map[string]any{"jobs": []any{job}, "count": float64(1)}, false)
+	if projection.ProjectionKind != domaintoolresult.ProjectionTaskJobResult || projection.TaskJob.List.Jobs[0].Status != "failed" {
+		t.Fatal("native metadata query was discarded")
+	}
+	for _, test := range []struct {
+		name    string
+		output  any
+		isError bool
+	}{
+		{"list_jobs", map[string]any{"jobs": []any{job}, "count": 2}, false},
+		{"list_jobs", map[string]any{"jobs": []any{job}, "count": 1, "output": "PRIVATE_JOB_PAYLOAD"}, false},
+		{"list_jobs", map[string]any{"jobs": []any{job}, "count": 1}, true},
+		{"mcp__jobs__list", map[string]any{"jobs": []any{job}, "count": 1}, false},
+	} {
+		if got := BuildPublicToolResultProjectionV1(test.name, test.output, test.isError); got.TaskJob != nil {
+			t.Fatal("invalid or foreign result became job metadata")
+		}
+	}
+}
+
 func TestPublicToolResultProjectionRejectsArbitraryPayload(t *testing.T) {
 	hostile := map[string]any{
 		"content":  "ACCOUNT_SENTINEL_6222020202020202020",

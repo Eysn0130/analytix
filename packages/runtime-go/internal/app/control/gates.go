@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	domaincontinuation "analytix.local/runtime-go/internal/domain/continuation"
 )
@@ -22,6 +23,26 @@ type PendingGateState[T any] struct {
 	Record   GateRecord
 	Pending  T
 	Restored bool
+}
+
+// UserInputAdmissionV1 observes a reserved or active Question without making
+// it executable. The private binding distinguishes even byte-identical gates
+// deleted and recreated by the same producer while a response is waiting.
+type UserInputAdmissionV1[T any] struct {
+	Record  GateRecord
+	Pending T
+	binding *userInputProducerBindingV1
+}
+
+type userInputProducerBindingV1 struct {
+	owner *TurnExecutionOwnerV1
+}
+
+func (admission UserInputAdmissionV1[T]) Producer() *TurnExecutionOwnerV1 {
+	if admission.binding == nil {
+		return nil
+	}
+	return admission.binding.owner
 }
 
 type DrainedGate[T any] struct {
@@ -55,11 +76,13 @@ type GateRegistry[T any] struct {
 	inputRecords       map[string]GateRecord
 	reservedApprovals  map[string]T
 	reservedInputs     map[string]T
+	inputProducers     map[string]*userInputProducerBindingV1
 	pendingApprovals   map[string]T
 	pendingInputs      map[string]T
 	continuationClaims map[string]GateClaim[T]
 	terminalClaims     map[string]DrainedGate[T]
 	nextClaimToken     uint64
+	userInputWaits     map[string]*userInputWait
 }
 
 func NewGateRegistry[T any]() *GateRegistry[T] {
@@ -68,10 +91,12 @@ func NewGateRegistry[T any]() *GateRegistry[T] {
 		inputRecords:       map[string]GateRecord{},
 		reservedApprovals:  map[string]T{},
 		reservedInputs:     map[string]T{},
+		inputProducers:     map[string]*userInputProducerBindingV1{},
 		pendingApprovals:   map[string]T{},
 		pendingInputs:      map[string]T{},
 		continuationClaims: map[string]GateClaim[T]{},
 		terminalClaims:     map[string]DrainedGate[T]{},
+		userInputWaits:     map[string]*userInputWait{},
 	}
 }
 
@@ -80,16 +105,25 @@ func NewGateRegistry[T any]() *GateRegistry[T] {
 // authority fails closed. ClaimApproval cannot observe the reservation until
 // ActivateReservedApproval commits the complete durable public projection.
 func (r *GateRegistry[T]) ReservePendingApproval(id string, record GateRecord, pending T) bool {
-	return r.reservePending("approval", id, record, pending)
+	return r.reservePending("approval", id, record, pending, nil)
 }
 
 // ReservePendingUserInput is the user-input counterpart of
 // ReservePendingApproval.
 func (r *GateRegistry[T]) ReservePendingUserInput(id string, record GateRecord, pending T) bool {
-	return r.reservePending("user_input", id, record, pending)
+	return r.reservePending("user_input", id, record, pending, nil)
 }
 
-func (r *GateRegistry[T]) reservePending(kind, id string, record GateRecord, pending T) bool {
+// ReservePendingUserInputOwnedV1 binds the captured producer before any public
+// request projection. Exact retries retain the original binding instance.
+func (r *GateRegistry[T]) ReservePendingUserInputOwnedV1(id string, record GateRecord, pending T, owner *TurnExecutionOwnerV1) bool {
+	if !owner.MatchesTurn(record.ThreadID, record.TurnID) {
+		return false
+	}
+	return r.reservePending("user_input", id, record, pending, owner)
+}
+
+func (r *GateRegistry[T]) reservePending(kind, id string, record GateRecord, pending T, owner *TurnExecutionOwnerV1) bool {
 	if r == nil {
 		return false
 	}
@@ -125,6 +159,10 @@ func (r *GateRegistry[T]) reservePending(kind, id string, record GateRecord, pen
 			if !reflect.DeepEqual(existing, record) {
 				return false
 			}
+			binding := r.inputProducers[id]
+			if binding == nil && owner != nil || binding != nil && binding.owner != owner {
+				return false
+			}
 			if reserved, ok := r.reservedInputs[id]; ok {
 				return reflect.DeepEqual(reserved, pending)
 			}
@@ -138,6 +176,9 @@ func (r *GateRegistry[T]) reservePending(kind, id string, record GateRecord, pen
 		}
 		r.inputRecords[id] = record
 		r.reservedInputs[id] = pending
+		if owner != nil {
+			r.inputProducers[id] = &userInputProducerBindingV1{owner: owner}
+		}
 		return true
 	default:
 		return false
@@ -343,19 +384,31 @@ func (r *GateRegistry[T]) DeleteUserInput(id string) {
 	delete(r.inputRecords, id)
 	delete(r.reservedInputs, id)
 	delete(r.pendingInputs, id)
+	delete(r.inputProducers, id)
+	r.closeUserInputWaitLocked(id)
 	delete(r.continuationClaims, id)
 	delete(r.terminalClaims, id)
 }
 
 func (r *GateRegistry[T]) ClaimApproval(id string) (GateClaim[T], bool) {
-	return r.claimContinuation("approval", id)
+	return r.claimContinuation("approval", id, nil)
 }
 
 func (r *GateRegistry[T]) ClaimUserInput(id string) (GateClaim[T], bool) {
-	return r.claimContinuation("user_input", id)
+	return r.claimContinuation("user_input", id, nil)
 }
 
-func (r *GateRegistry[T]) claimContinuation(kind, id string) (GateClaim[T], bool) {
+// Compare the exact private observation before deleting pending or closing a
+// wait. A replacement cannot inherit the observer's continuation attempt.
+func (r *GateRegistry[T]) ClaimUserInputExact(id string, record GateRecord, pending T) (GateClaim[T], bool) {
+	return r.claimContinuation("user_input", id, &UserInputAdmissionV1[T]{Record: record, Pending: pending})
+}
+
+func (r *GateRegistry[T]) ClaimUserInputAdmissionV1(id string, admission UserInputAdmissionV1[T]) (GateClaim[T], bool) {
+	return r.claimContinuation("user_input", id, &admission)
+}
+
+func (r *GateRegistry[T]) claimContinuation(kind, id string, expected *UserInputAdmissionV1[T]) (GateClaim[T], bool) {
 	var zero GateClaim[T]
 	if r == nil {
 		return zero, false
@@ -385,8 +438,13 @@ func (r *GateRegistry[T]) claimContinuation(kind, id string) (GateClaim[T], bool
 			return zero, false
 		}
 		pending, exists = r.pendingInputs[id]
+		if expected != nil && (!exists || record != expected.Record || !reflect.DeepEqual(pending, expected.Pending) || r.inputProducers[id] != expected.binding) {
+			return zero, false
+		}
 		if exists {
 			delete(r.pendingInputs, id)
+			delete(r.inputProducers, id)
+			r.closeUserInputWaitLocked(id)
 		}
 	default:
 		return zero, false
@@ -524,6 +582,8 @@ func (r *GateRegistry[T]) ResolveUserInput(id string) (GateRecord, T, bool, bool
 	pending, hasPending := r.pendingInputs[id]
 	if hasPending {
 		delete(r.pendingInputs, id)
+		delete(r.inputProducers, id)
+		r.closeUserInputWaitLocked(id)
 	}
 	return record, pending, exists, hasPending
 }
@@ -539,6 +599,24 @@ func (r *GateRegistry[T]) PeekUserInput(id string) (GateRecord, T, bool, bool) {
 	record, exists := r.inputRecords[id]
 	pending, hasPending := r.pendingInputs[id]
 	return record, pending, exists, hasPending
+}
+
+// PeekUserInputAdmissionV1 includes a non-executable reservation solely so a
+// response can wait for its proven producer. It does not activate or claim it.
+func (r *GateRegistry[T]) PeekUserInputAdmissionV1(id string) (UserInputAdmissionV1[T], bool, bool) {
+	var admission UserInputAdmissionV1[T]
+	if r == nil {
+		return admission, false, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id = strings.TrimSpace(id)
+	record, exists := r.inputRecords[id]
+	pending, candidate := r.pendingInputs[id]
+	if !candidate {
+		pending, candidate = r.reservedInputs[id]
+	}
+	return UserInputAdmissionV1[T]{Record: record, Pending: pending, binding: r.inputProducers[id]}, exists, candidate
 }
 
 func (r *GateRegistry[T]) DrainForTurn(threadID, turnID string) []DrainedGate[T] {
@@ -568,9 +646,12 @@ func (r *GateRegistry[T]) DrainForTurn(threadID, turnID string) []DrainedGate[T]
 		}
 		if pending, ok := r.reservedInputs[id]; ok {
 			delete(r.reservedInputs, id)
+			delete(r.inputProducers, id)
 			r.terminalClaims[id] = r.newTerminalClaimLocked("user_input", id, record, pending)
 		} else if pending, ok := r.pendingInputs[id]; ok {
 			delete(r.pendingInputs, id)
+			delete(r.inputProducers, id)
+			r.closeUserInputWaitLocked(id)
 			r.terminalClaims[id] = r.newTerminalClaimLocked("user_input", id, record, pending)
 		}
 	}
@@ -613,9 +694,12 @@ func (r *GateRegistry[T]) DrainForThread(threadID string) []DrainedGate[T] {
 		}
 		if pending, ok := r.reservedInputs[id]; ok {
 			delete(r.reservedInputs, id)
+			delete(r.inputProducers, id)
 			r.terminalClaims[id] = r.newTerminalClaimLocked("user_input", id, record, pending)
 		} else if pending, ok := r.pendingInputs[id]; ok {
 			delete(r.pendingInputs, id)
+			delete(r.inputProducers, id)
+			r.closeUserInputWaitLocked(id)
 			r.terminalClaims[id] = r.newTerminalClaimLocked("user_input", id, record, pending)
 		}
 	}
@@ -646,6 +730,7 @@ func (r *GateRegistry[T]) DrainAll() []DrainedGate[T] {
 	for id, pending := range r.reservedInputs {
 		r.terminalClaims[id] = r.newTerminalClaimLocked("user_input", id, r.inputRecords[id], pending)
 		delete(r.reservedInputs, id)
+		delete(r.inputProducers, id)
 	}
 	for id, pending := range r.pendingApprovals {
 		r.terminalClaims[id] = r.newTerminalClaimLocked("approval", id, r.approvalRecords[id], pending)
@@ -654,6 +739,8 @@ func (r *GateRegistry[T]) DrainAll() []DrainedGate[T] {
 	for id, pending := range r.pendingInputs {
 		r.terminalClaims[id] = r.newTerminalClaimLocked("user_input", id, r.inputRecords[id], pending)
 		delete(r.pendingInputs, id)
+		delete(r.inputProducers, id)
+		r.closeUserInputWaitLocked(id)
 	}
 	for id, claim := range r.continuationClaims {
 		r.terminalClaims[id] = terminalClaimFromContinuation(claim)
@@ -892,4 +979,190 @@ func normalizeGateRecord(record GateRecord) GateRecord {
 	record.Prompt = strings.TrimSpace(record.Prompt)
 	record.ContinuationReceiptID = strings.TrimSpace(record.ContinuationReceiptID)
 	return record
+}
+
+// The deadline is fixed by the signed receipt. Claims suppress the fallback
+// timer; the owning Client must deliver an explicit continue result when its
+// local countdown expires. Component mount/focus is not a Host wait claim.
+type userInputWait struct {
+	deadline  time.Time
+	timer     *time.Timer
+	claims    int
+	finishing bool
+	ended     chan struct{}
+	finish    func()
+}
+
+func (r *GateRegistry[T]) StartUserInputWait(id string, wait *domaincontinuation.UserInputTimedWaitV1, issuedAt string, finish func()) bool {
+	if r == nil || wait == nil || !domaincontinuation.ValidUserInputTimeoutSeconds(wait.TimeoutSeconds) || finish == nil {
+		return false
+	}
+	issued, err := time.Parse(time.RFC3339Nano, issuedAt)
+	if err != nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, pending := r.pendingInputs[id]; !pending {
+		return false
+	}
+	deadline := time.Time{}
+	if wait.TimeoutSeconds != -1 {
+		deadline = issued.Add(time.Duration(wait.TimeoutSeconds) * time.Second)
+	}
+	if existing := r.userInputWaits[id]; existing != nil {
+		return existing.deadline.Equal(deadline)
+	}
+	if r.userInputWaits == nil {
+		r.userInputWaits = map[string]*userInputWait{}
+	}
+	state := &userInputWait{deadline: deadline, ended: make(chan struct{}), finish: finish}
+	r.userInputWaits[id] = state
+	r.scheduleUserInputWaitLocked(id, state, false)
+	return true
+}
+
+func (r *GateRegistry[T]) scheduleUserInputWaitLocked(id string, state *userInputWait, retry bool) {
+	if state.deadline.IsZero() || (!retry && (state.claims != 0 || state.finishing)) {
+		return
+	}
+	delay := time.Until(state.deadline)
+	if retry {
+		delay = 10 * time.Millisecond
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	state.timer = time.AfterFunc(delay, func() {
+		r.mu.Lock()
+		active := r.userInputWaits[id] == state
+		if active && !retry && (state.claims != 0 || state.finishing) {
+			active = false
+		}
+		if active {
+			state.finishing = true
+		}
+		r.mu.Unlock()
+		if active {
+			state.finish()
+		}
+	})
+}
+
+// TriggerUserInputWait is the Host completion command for a Client countdown,
+// not a skip/cancel/approval. An unlimited call has no timeout result.
+func (r *GateRegistry[T]) TriggerUserInputWait(id string) bool {
+	return r.triggerUserInputWait(id, nil)
+}
+
+func (r *GateRegistry[T]) TriggerUserInputWaitExact(id string, record GateRecord, pending T) bool {
+	return r.triggerUserInputWait(id, &PendingGateState[T]{Record: record, Pending: pending})
+}
+
+func (r *GateRegistry[T]) triggerUserInputWait(id string, expected *PendingGateState[T]) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	if expected != nil {
+		record, exists := r.inputRecords[id]
+		pending, hasPending := r.pendingInputs[id]
+		if !exists || !hasPending || record != expected.Record || !reflect.DeepEqual(pending, expected.Pending) {
+			r.mu.Unlock()
+			return false
+		}
+	}
+	state := r.userInputWaits[id]
+	if state == nil || state.deadline.IsZero() {
+		r.mu.Unlock()
+		return false
+	}
+	if state.finishing {
+		r.mu.Unlock()
+		return true
+	}
+	state.finishing = true
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	r.mu.Unlock()
+	go state.finish()
+	return true
+}
+
+// Retry only the brief original-worker registration conflict. It retains the
+// same foreground completion intent and never renews the original deadline.
+func (r *GateRegistry[T]) RetryUserInputWait(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if state := r.userInputWaits[id]; state != nil && state.finishing {
+		r.scheduleUserInputWaitLocked(id, state, true)
+	}
+}
+
+func (r *GateRegistry[T]) AttachUserInputWait(id string) (*int64, <-chan struct{}, func(), bool) {
+	if r == nil {
+		return nil, nil, nil, false
+	}
+	r.mu.Lock()
+	state := r.userInputWaits[id]
+	if state == nil || state.finishing {
+		r.mu.Unlock()
+		return nil, nil, nil, false
+	}
+	if _, pending := r.pendingInputs[id]; !pending {
+		r.mu.Unlock()
+		return nil, nil, nil, false
+	}
+	if state.claims == 0 && !state.deadline.IsZero() && !time.Now().Before(state.deadline) {
+		state.finishing = true
+		if state.timer != nil {
+			state.timer.Stop()
+		}
+		r.mu.Unlock()
+		go state.finish()
+		return nil, nil, nil, false
+	}
+	state.claims++
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	var remaining *int64
+	if !state.deadline.IsZero() {
+		millis := time.Until(state.deadline).Milliseconds()
+		if millis < 0 {
+			millis = 0
+		}
+		remaining = &millis
+	}
+	r.mu.Unlock()
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if r.userInputWaits[id] != state {
+				return
+			}
+			state.claims--
+			if state.claims == 0 {
+				r.scheduleUserInputWaitLocked(id, state, false)
+			}
+		})
+	}
+	return remaining, state.ended, release, true
+}
+
+func (r *GateRegistry[T]) closeUserInputWaitLocked(id string) {
+	if state := r.userInputWaits[id]; state != nil {
+		if state.timer != nil {
+			state.timer.Stop()
+		}
+		close(state.ended)
+		delete(r.userInputWaits, id)
+	}
+}
+
+func (m *ApprovalUserInputManager) ContinueUserInput(id string) (int, map[string]any) {
+	return m.finishUserInput(id, "continued")
 }

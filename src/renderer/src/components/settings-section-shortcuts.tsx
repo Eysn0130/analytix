@@ -42,16 +42,22 @@ export function KeyboardShortcutsSettingsSection({ ctx }: { ctx: Record<string, 
     })
   }, [effectiveBindings, query, t])
 
-  const updateBinding = useCallback((commandId: KeyboardShortcutCommandId, shortcuts: string[]): void => {
+  const updateBinding = useCallback((commandId: KeyboardShortcutCommandId, shortcuts: string[]): boolean => {
+    const bindings = { ...normalized.bindings, [commandId]: shortcuts }
+    const resolved = resolveKeyboardShortcutBindings({ bindings })
+    const conflictId = resolved[commandId].map((shortcut) =>
+      findKeyboardShortcutConflict(resolved, commandId, shortcut)).find(Boolean)
+    if (conflictId) {
+      showTopNotice({ tone: 'error', message: t('shortcutConflict', { command: commandLabel(conflictId) }) })
+      return false
+    }
     update({
       keyboardShortcuts: {
-        bindings: {
-          ...normalized.bindings,
-          [commandId]: shortcuts
-        }
+        bindings
       }
     })
-  }, [normalized.bindings, update])
+    return true
+  }, [commandLabel, normalized.bindings, showTopNotice, t, update])
 
   useEffect(() => {
     if (!capturingCommandId) return
@@ -65,21 +71,12 @@ export function KeyboardShortcutsSettingsSection({ ctx }: { ctx: Record<string, 
       }
       const shortcut = keyboardEventToShortcut(event)
       if (!shortcut) return
-      const conflictId = findKeyboardShortcutConflict(effectiveBindings, capturingCommandId, shortcut)
-      if (conflictId) {
-        showTopNotice({
-          tone: 'error',
-          message: t('shortcutConflict', { command: commandLabel(conflictId) })
-        })
-        return
-      }
-      updateBinding(capturingCommandId, [shortcut])
-      setCapturingCommandId(null)
+      if (updateBinding(capturingCommandId, [shortcut])) setCapturingCommandId(null)
     }
 
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [capturingCommandId, commandLabel, effectiveBindings, showTopNotice, t, updateBinding])
+  }, [capturingCommandId, updateBinding])
 
   return (
     <div>

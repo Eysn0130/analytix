@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useChatStore } from '../../store/chat-store'
 import type { ClawImChannelV1 } from '@shared/app-settings'
-import type { NormalizedThread, ThreadGoal } from '../../agent/types'
+import type { AuthoritativeTurnStatuses, AuthoritativeTurnTimings, NormalizedThread, ThreadGoal, ThreadUsageSnapshot, TurnUsageById } from '../../agent/types'
 import type { AppRoute } from '../../store/chat-store-types'
 
 /**
@@ -22,6 +22,10 @@ export type TimelineStores = {
   turnDurationByUserId: Record<string, number>
   activeThreadGoal: ThreadGoal | null
   activeThread: NormalizedThread | null
+  lastTurnUsage?: ThreadUsageSnapshot
+  turnUsageById?: TurnUsageById
+  authoritativeTurnTimings?: AuthoritativeTurnTimings
+  authoritativeTurnStatuses?: AuthoritativeTurnStatuses
 }
 
 export function useTimelineStores(activeThreadId: string | null): TimelineStores {
@@ -36,6 +40,10 @@ export function useTimelineStores(activeThreadId: string | null): TimelineStores
   const turnStartedAtByUserId = useChatStore((s) => s.turnStartedAtByUserId)
   const turnDurationByUserId = useChatStore((s) => s.turnDurationByUserId)
   const activeThreadGoal = useChatStore((s) => s.activeThreadGoal)
+  const usage = useChatStore((s) => s.lastTurnUsage)
+  const entries = useChatStore(s => s.turnUsageById)
+  const turnUsageById = useMemo(() => Object.fromEntries(Object.entries(entries ?? {})
+    .filter(([, entry]) => entry.threadId === activeThreadId)), [entries, activeThreadId])
   const activeThread = useChatStore((s) =>
     activeThreadId ? s.threads.find((thread) => thread.id === activeThreadId) ?? null : null
   )
@@ -56,6 +64,8 @@ export function useTimelineStores(activeThreadId: string | null): TimelineStores
     turnStartedAtByUserId,
     turnDurationByUserId,
     activeThreadGoal,
-    activeThread
+    activeThread,
+    lastTurnUsage: usage?.threadId === activeThreadId ? usage.snapshot : undefined,
+    turnUsageById
   }
 }

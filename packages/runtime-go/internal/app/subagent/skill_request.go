@@ -7,7 +7,10 @@ import (
 
 	toolcatalogapp "analytix.local/runtime-go/internal/app/toolcatalog"
 	contracts "analytix.local/runtime-go/internal/contracts"
+	domainjob "analytix.local/runtime-go/internal/domain/job"
 	domainmodel "analytix.local/runtime-go/internal/domain/model"
+	domainsecurity "analytix.local/runtime-go/internal/domain/security"
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 )
 
 type SkillTaskRequestInput struct {
@@ -108,4 +111,65 @@ func InlineSkillOutput(skill map[string]any, args map[string]any, runAs string, 
 		"instruction": instruction,
 		"arguments":   SkillArguments(args),
 	}
+}
+
+// SkillResultCaptureInputV1 contains observations from the admitted producer,
+// before the parent output projection withholds child association and output.
+type SkillResultCaptureInputV1 struct {
+	RequestedName    string
+	Skill            map[string]any
+	RunAs            string
+	Instruction      string
+	IsError          bool
+	ErrorCode        string
+	ErrorMessage     string
+	Job              *domainjob.Record
+	SecurityContext  domainsecurity.TurnSecurityContext
+	ExecutionGrantID string
+	CallID           string
+}
+
+func SkillResultCaptureV1(input SkillResultCaptureInputV1) (domaintoolresult.ProtectedCaptureV1, bool) {
+	data := &domaintoolresult.ProtectedSkillCaptureV1{RequestedName: input.RequestedName}
+	capture := domaintoolresult.ProtectedCaptureV1{Kind: "skill", Status: "completed", Skill: data}
+	if input.IsError {
+		capture.Status = "failed"
+		if input.ErrorCode != "" {
+			message, _ := domaintoolresult.BoundProtectedTextV1(input.ErrorMessage, domaintoolresult.ProtectedSnapshotBodyLimitV1)
+			data.Error = &domaintoolresult.ProtectedWebErrorV1{Code: input.ErrorCode, Message: message}
+		}
+	}
+	if input.Skill != nil {
+		data.Resolved = &domaintoolresult.ProtectedSkillIdentityV1{
+			ID: contracts.StringField(input.Skill, "id"), Name: contracts.StringField(input.Skill, "name"),
+			RunAs: input.RunAs, PackageDigest: contracts.StringField(input.Skill, "packageDigest"),
+		}
+		if input.RunAs == "inline" && !input.IsError {
+			capture.Body, capture.Truncated = domaintoolresult.BoundProtectedTextV1(input.Instruction, domaintoolresult.ProtectedSnapshotBodyLimitV1)
+		}
+	}
+	if record := input.Job; record != nil && record.ID != "" {
+		if data.Resolved == nil || data.Resolved.RunAs != "subagent" || record.Kind != "subagent" ||
+			record.SkillPackageDigest != data.Resolved.PackageDigest ||
+			!domainjob.SecurityBindingMatchesContext(record.SecurityBinding, input.SecurityContext) ||
+			record.SecurityBinding.ParentExecutionGrantID != input.ExecutionGrantID || record.SecurityBinding.ParentToolCallID != input.CallID ||
+			record.ParentThreadID != input.SecurityContext.ThreadID || record.ParentTurnID != input.SecurityContext.TurnID || record.ParentToolCallID != input.CallID {
+			return domaintoolresult.ProtectedCaptureV1{}, false
+		}
+		data.Child = &domaintoolresult.ProtectedSkillChildV1{
+			JobID: record.ID, Status: domainjob.PublicStatusV1(record.Status), Background: record.Background, OutputWithheld: true,
+		}
+		if record.ChildThreadID != "" {
+			value := record.ChildThreadID
+			data.Child.ChildThreadID = &value
+		}
+		if record.ChildTurnID != "" {
+			value := record.ChildTurnID
+			data.Child.ChildTurnID = &value
+		}
+	}
+	if domaintoolresult.ValidateProtectedCaptureV1(capture) != nil {
+		return domaintoolresult.ProtectedCaptureV1{}, false
+	}
+	return capture, true
 }

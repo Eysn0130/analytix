@@ -1,7 +1,7 @@
 import type { ReactElement, RefObject } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CheckCircle2, ChevronDown, ChevronRight, FileEdit, Hammer, ListTodo, MessageSquareQuote, RotateCcw, Search, SearchCode, TriangleAlert } from '../../design/AnalytixUiIcons'
+import { CheckCircle2, ChevronDown, ChevronRight, FileEdit, MessageSquareQuote, RotateCcw, Search, SearchCode, TriangleAlert } from '../../design/AnalytixUiIcons'
 import type { ReviewBlock, ToolBlock } from '../../agent/types'
 import { countDiffStats, sumDiffStats } from '../../lib/diff-stats'
 import { useDeferredRender } from '../../hooks/use-deferred-render'
@@ -12,63 +12,6 @@ import type {
 } from '../../write/quoted-selection'
 import { DiffView } from '../DiffView'
 import { RewindPlanApplyControls } from '../RewindPlanApplyControls'
-import { formatDuration } from './message-timeline-tools'
-
-/**
- * Inline "Review Plan" card rendered under a turn whose `create_plan`
- * call succeeded. Mirrors the Plan panel actions (open / build) so the
- * user can act on the plan without leaving the conversation.
- */
-export function ReviewPlanCard({
-  title,
-  relativePath,
-  busy,
-  onOpen,
-  onBuild
-}: {
-  title: string
-  relativePath: string
-  busy: boolean
-  onOpen?: () => void
-  onBuild?: () => void
-}): ReactElement {
-  const { t } = useTranslation('common')
-  return (
-    <div
-      title={relativePath}
-      className="flex min-h-[64px] w-full items-center gap-3 rounded-[18px] border border-ds-border-muted bg-white/[0.78] px-4 py-3 shadow-[var(--ax-shadow-floating)] backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.045]"
-    >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-accent/20 bg-accent/10 text-accent">
-        <ListTodo className="h-5 w-5" strokeWidth={1.9} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[14.5px] font-semibold text-ds-ink">{title}</div>
-        <div className="mt-0.5 truncate text-[12.5px] text-ds-muted">{t('reviewPlanCardHint')}</div>
-      </div>
-      {onOpen ? (
-        <button
-          type="button"
-          onClick={onOpen}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-ds-border bg-ds-card px-3 text-[13px] font-medium text-ds-ink transition hover:bg-ds-hover"
-        >
-          <FileEdit className="h-3.5 w-3.5" strokeWidth={1.9} />
-          {t('reviewPlanOpen')}
-        </button>
-      ) : null}
-      {onBuild ? (
-        <button
-          type="button"
-          onClick={onBuild}
-          disabled={busy}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-semibold text-[var(--ds-composer-primary-action-fg)] shadow-[var(--ax-shadow-focus)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Hammer className="h-3.5 w-3.5" strokeWidth={1.9} />
-          {t('planBuild')}
-        </button>
-      ) : null}
-    </div>
-  )
-}
 
 export function ReviewSummaryCard({ review }: { review: ReviewBlock }): ReactElement {
   const { t } = useTranslation('common')
@@ -143,7 +86,7 @@ export function ReviewSummaryCard({ review }: { review: ReviewBlock }): ReactEle
               {findings.map((finding, index) => (
                 <article
                   key={`${finding.title}-${index}`}
-                  className="rounded-[12px] border border-ds-border-muted bg-ds-card-muted/45 px-3.5 py-3"
+                  className="rounded-[12px] border border-ds-border-muted bg-ds-subtle/45 px-3.5 py-3"
                 >
                   <div className="flex min-w-0 items-start gap-2">
                     <span className="mt-0.5 shrink-0 rounded-md bg-ds-card px-1.5 py-0.5 font-mono text-[11px] text-ds-muted">
@@ -231,14 +174,14 @@ export function TurnChangeSummary({
         }`}
       >
         <span
-          className={`flex shrink-0 items-center justify-center bg-ds-card-muted text-ds-muted ${
+          className={`flex shrink-0 items-center justify-center bg-ds-subtle text-ds-muted ${
             compact ? 'h-10 w-10 rounded-[14px]' : 'h-12 w-12 rounded-[16px]'
           }`}
         >
           {rewindPlan ? (
-            <RotateCcw className={compact ? 'h-4.5 w-4.5' : 'h-5 w-5'} strokeWidth={1.85} />
+            <RotateCcw className={compact ? 'h-[18px] w-[18px]' : 'h-5 w-5'} strokeWidth={1.85} />
           ) : (
-            <FileEdit className={compact ? 'h-4.5 w-4.5' : 'h-5 w-5'} strokeWidth={1.85} />
+            <FileEdit className={compact ? 'h-[18px] w-[18px]' : 'h-5 w-5'} strokeWidth={1.85} />
           )}
         </span>
         <span className="min-w-0 flex-1">
@@ -321,7 +264,7 @@ export function TurnChangeSummary({
                 {open && plan ? (
                   <RewindPlanDetails plan={plan} compact={compact} />
                 ) : open && change.detail ? (
-                  <div className={`bg-ds-card-muted/45 ${compact ? 'px-3 pb-2.5 pt-1' : 'px-4 pb-3 pt-1'}`}>
+                  <div className={`bg-ds-subtle/45 ${compact ? 'px-3 pb-2.5 pt-1' : 'px-4 pb-3 pt-1'}`}>
                     <DiffView
                       patch={change.detail}
                       filePath={change.filePath}
@@ -352,7 +295,7 @@ function RewindPlanDetails({
   const visibleFiles = plan.files.slice(0, 8)
   const hiddenCount = Math.max(0, plan.files.length - visibleFiles.length)
   return (
-    <div className={`bg-ds-card-muted/45 ${compact ? 'px-3 pb-3 pt-1' : 'px-4 pb-4 pt-1'}`}>
+    <div className={`bg-ds-subtle/45 ${compact ? 'px-3 pb-3 pt-1' : 'px-4 pb-4 pt-1'}`}>
       <div className="grid grid-cols-3 gap-2 text-[11px]">
         <span className="rounded-md border border-ds-border-muted bg-ds-card px-2 py-1 text-ds-muted">
           {t('rewindPlanReadyCount', { count: plan.summary.readyFileCount })}
@@ -404,67 +347,6 @@ function RewindPlanDetails({
 }
 
 /** Turn-level work-process summary. Details stay collapsed until the user opens them. */
-export function WorkMetaRow({
-  processing,
-  stepCount,
-  durationMs,
-  expanded,
-  onToggle,
-  collapsible = true
-}: {
-  processing: boolean
-  stepCount: number
-  durationMs?: number
-  expanded: boolean
-  onToggle: () => void
-  collapsible?: boolean
-}): ReactElement {
-  const { t } = useTranslation('common')
-
-  const mainLabel = processing
-    ? typeof durationMs === 'number'
-      ? `${t('processing')} ${formatDuration(durationMs)}`
-      : t('processing')
-    : typeof durationMs === 'number'
-      ? `${t('processed')} ${formatDuration(durationMs)}`
-      : t('processSteps', { count: stepCount })
-
-  const content = (
-    <>
-      <span className={`tabular-nums ${processing ? 'ds-shiny-text' : ''}`}>{mainLabel}</span>
-      {collapsible ? (
-        expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-45" strokeWidth={1.8} />
-        ) : (
-          <ChevronRight
-            className="h-3.5 w-3.5 shrink-0 opacity-40 transition group-hover:opacity-65"
-            strokeWidth={1.8}
-          />
-        )
-      ) : null}
-    </>
-  )
-
-  if (!collapsible) {
-    return (
-      <div className="flex w-fit max-w-full items-center gap-1.5 rounded-md py-1 text-left text-[15px] font-medium text-ds-muted">
-        {content}
-      </div>
-    )
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={expanded}
-      className="group flex w-fit max-w-full items-center gap-1.5 rounded-md py-1 text-left text-[15px] font-medium text-ds-muted transition hover:opacity-85"
-    >
-      {content}
-    </button>
-  )
-}
-
 /**
  * Tiny mono "via <model>" tag rendered above the user message body. Subtle by
  * design — no pill, no ring, just faint monospaced text right-aligned at the

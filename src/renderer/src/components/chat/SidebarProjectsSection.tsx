@@ -1,5 +1,5 @@
-import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactElement, SetStateAction } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ComponentProps, RefObject, CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactElement, SetStateAction } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { LucideIcon } from '../../design/AnalytixUiIcons'
@@ -128,6 +128,16 @@ type DraftContextMenuState = {
 }
 
 type SidebarContextSubmenu = 'copy' | 'branch' | null
+// Match the existing SessionHeader keyboard semantics, scoped to the nearest menu.
+const useSidebarMenuLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+function sidebarMenuItems(menu: HTMLElement): HTMLButtonElement[] {
+  return [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+    .filter(item => item.closest('[role="menu"]') === menu)
+}
+type ContextMenuInteraction = Pick<ComponentProps<'div'>, 'ref' | 'onKeyDown' | 'onFocusCapture'>
+type SidebarSubmenuControls = Record<Exclude<SidebarContextSubmenu, null>, {
+  id: string; parentRef: RefObject<HTMLButtonElement | null>; menuRef: RefObject<HTMLDivElement | null>
+}>
 
 export type RenameThreadDialogState = {
   thread: NormalizedThread
@@ -249,13 +259,7 @@ export function buildSidebarWorkspaceGroups(options: {
     if ((th.archived === true) !== options.showArchived) continue
     const key = normalizeWorkspaceRoot(th.workspace)
     if (!key) continue
-    if (query) {
-      const haystack = [th.title, th.preview, key, workspaceLabelFromPath(key)]
-        .filter(Boolean)
-        .join('\n')
-        .toLowerCase()
-      if (!haystack.includes(query)) continue
-    }
+    // Runtime search includes message bodies; summary metadata cannot recheck it.
     upsertWorkspace(key, [th])
   }
 
@@ -273,13 +277,9 @@ export function buildSidebarWorkspaceGroups(options: {
     }
   }
 
-  return Array.from(map.values()).map(({ workspacePath, threads }): SidebarWorkspaceGroup => [workspacePath, threads]).sort(([a], [b]) => {
-    const aKey = workspaceRootIdentityKey(a)
-    const bKey = workspaceRootIdentityKey(b)
-    if (aKey === selectedWorkspaceKey && bKey !== selectedWorkspaceKey) return -1
-    if (bKey === selectedWorkspaceKey && aKey !== selectedWorkspaceKey) return 1
-    return a.localeCompare(b)
-  })
+  return Array.from(map.values())
+    .map(({ workspacePath, threads }): SidebarWorkspaceGroup => [workspacePath, threads])
+    .sort(([a], [b]) => compareWorkspacePathsByActive(a, b, selectedWorkspace))
 }
 
 export function buildSidebarCaseProjectGroups(options: {
@@ -585,6 +585,16 @@ export function SidebarProjectsSection({
   const [threadContextMenu, setThreadContextMenu] = useState<ThreadContextMenuState | null>(null)
   const [workspaceContextMenu, setWorkspaceContextMenu] = useState<WorkspaceContextMenuState | null>(null)
   const [draftContextMenu, setDraftContextMenu] = useState<DraftContextMenuState | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
+  const contextOriginRef = useRef<HTMLButtonElement | null>(null)
+  const entryFrameRef = useRef<number | null>(null)
+  const submenuFrameRef = useRef<number | null>(null)
+  const submenuFocusRef = useRef<SidebarContextSubmenu>(null)
+  const focusedMenuItemRef = useRef<HTMLButtonElement | null>(null)
+  const copyParentRef = useRef<HTMLButtonElement>(null), copyMenuRef = useRef<HTMLDivElement>(null)
+  const branchParentRef = useRef<HTMLButtonElement>(null), branchMenuRef = useRef<HTMLDivElement>(null)
+  const contextMenuId = useId()
+
   const [contextSubmenu, setContextSubmenu] = useState<SidebarContextSubmenu>(null)
   const [renameThreadDialog, setRenameThreadDialog] = useState<RenameThreadDialogState | null>(null)
   const [draftHistoryByWorkspace, setDraftHistoryByWorkspace] = useState<Record<string, SddDraftHistoryItem[]>>({})
@@ -765,28 +775,132 @@ export function SidebarProjectsSection({
     }
   }, [draftHistoryRefreshVersion, workspaceHistoryKey])
 
-  const closeContextMenus = useCallback((): void => {
+  const closeContextMenus = useCallback((restoreFocus = true): void => {
+    if (entryFrameRef.current !== null) window.cancelAnimationFrame(entryFrameRef.current)
+    if (submenuFrameRef.current !== null) window.cancelAnimationFrame(submenuFrameRef.current)
+    entryFrameRef.current = submenuFrameRef.current = null
+    submenuFocusRef.current = null
+    focusedMenuItemRef.current = null
+    const origin = contextOriginRef.current
+    if (restoreFocus && contextMenuRef.current?.contains(document.activeElement) && origin?.isConnected && !origin.disabled) {
+      origin.focus({ preventScroll: true })
+    }
     setThreadContextMenu(null)
     setWorkspaceContextMenu(null)
     setDraftContextMenu(null)
     setContextSubmenu(null)
   }, [])
-
+  const submenuMenu = (kind: SidebarContextSubmenu) => kind === 'copy' ? copyMenuRef.current : branchMenuRef.current
+  const submenuParent = (kind: SidebarContextSubmenu) => kind === 'copy' ? copyParentRef.current : branchParentRef.current
+  const enterContextSubmenu = (kind: Exclude<SidebarContextSubmenu, null>): void => {
+    if (entryFrameRef.current !== null) window.cancelAnimationFrame(entryFrameRef.current)
+    entryFrameRef.current = null
+    const menu = submenuMenu(kind)
+    if (contextSubmenu === kind && menu) sidebarMenuItems(menu)[0]?.focus({ preventScroll: true })
+    else { submenuFocusRef.current = kind; setContextSubmenu(kind) }
+  }
+  const pointerContextSubmenu = (kind: SidebarContextSubmenu): void => {
+    if (contextSubmenu && submenuMenu(contextSubmenu)?.contains(document.activeElement)) return
+    setContextSubmenu(kind)
+  }
+  const contextMenuInteraction: ContextMenuInteraction = {
+    ref: contextMenuRef,
+    onFocusCapture: event => { if (event.target instanceof HTMLButtonElement) focusedMenuItemRef.current = event.target },
+    onKeyDown: event => {
+      if (event.isDefaultPrevented() || event.repeat || event.nativeEvent.isComposing || event.keyCode === 229) return
+      const menu = event.target instanceof Element ? event.target.closest<HTMLElement>('[role="menu"]') : null
+      if (!menu || !contextMenuRef.current?.contains(menu)) return
+      if (event.key === 'Tab') { closeContextMenus(); return }
+      const submenu = menu === copyMenuRef.current ? 'copy' : menu === branchMenuRef.current ? 'branch' : null
+      if (event.key === 'Escape' || submenu && event.key === 'ArrowLeft') {
+        event.preventDefault(); event.stopPropagation()
+        if (submenu) {
+          setContextSubmenu(null)
+          const parent = submenuParent(submenu)
+          const fallback = sidebarMenuItems(contextMenuRef.current)[0]
+          ;(parent && !parent.disabled ? parent : fallback ?? contextOriginRef.current)?.focus({ preventScroll: true })
+        } else closeContextMenus()
+        return
+      }
+      if (event.key === 'ArrowRight' && !submenu) {
+        const kind = document.activeElement === copyParentRef.current ? 'copy'
+          : document.activeElement === branchParentRef.current && !branchParentRef.current?.disabled ? 'branch' : null
+        if (kind) { event.preventDefault(); event.stopPropagation(); enterContextSubmenu(kind) }
+        return
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+      const items = sidebarMenuItems(menu)
+      if (!items.length) return
+      event.preventDefault(); event.stopPropagation()
+      const current = items.indexOf(document.activeElement as HTMLButtonElement)
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
+      items[next]?.focus({ preventScroll: true })
+    }
+  }
+  const submenuControls: SidebarSubmenuControls = {
+    copy: { id: `${contextMenuId}-copy`, parentRef: copyParentRef, menuRef: copyMenuRef },
+    branch: { id: `${contextMenuId}-branch`, parentRef: branchParentRef, menuRef: branchMenuRef }
+  }
   useEffect(() => {
     if (!threadContextMenu && !workspaceContextMenu && !draftContextMenu) return
-    const close = (): void => closeContextMenus()
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') close()
+    entryFrameRef.current = window.requestAnimationFrame(() => {
+      entryFrameRef.current = null
+      if (document.activeElement === contextOriginRef.current || document.activeElement === document.body) {
+        const menu = contextMenuRef.current
+        if (menu) sidebarMenuItems(menu)[0]?.focus({ preventScroll: true })
+      }
+    })
+    const outside = (event: Event): void => {
+      if (event.target instanceof Node && contextMenuRef.current?.contains(event.target)) return
+      closeContextMenus(false)
     }
-    window.addEventListener('pointerdown', close)
-    window.addEventListener('scroll', close, true)
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!event.defaultPrevented && !event.repeat && !event.isComposing && event.keyCode !== 229 && event.key === 'Escape') closeContextMenus()
+    }
+    window.addEventListener('pointerdown', outside)
+    window.addEventListener('focusin', outside)
+    window.addEventListener('scroll', outside, true)
     window.addEventListener('keydown', onKeyDown)
     return () => {
-      window.removeEventListener('pointerdown', close)
-      window.removeEventListener('scroll', close, true)
+      if (entryFrameRef.current !== null) window.cancelAnimationFrame(entryFrameRef.current)
+      entryFrameRef.current = null
+      window.removeEventListener('pointerdown', outside)
+      window.removeEventListener('focusin', outside)
+      window.removeEventListener('scroll', outside, true)
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [closeContextMenus, draftContextMenu, threadContextMenu, workspaceContextMenu])
+  useEffect(() => {
+    if (!contextSubmenu || submenuFocusRef.current !== contextSubmenu) return
+    const menu = contextSubmenu === 'copy' ? copyMenuRef : branchMenuRef
+    submenuFrameRef.current = window.requestAnimationFrame(() => {
+      submenuFrameRef.current = null
+      const current = menu.current
+      if (current && contextMenuRef.current?.contains(document.activeElement)) sidebarMenuItems(current)[0]?.focus({ preventScroll: true })
+      submenuFocusRef.current = null
+    })
+    return () => {
+      if (submenuFrameRef.current !== null) window.cancelAnimationFrame(submenuFrameRef.current)
+      submenuFrameRef.current = null
+      if (submenuFocusRef.current === contextSubmenu) submenuFocusRef.current = null
+    }
+  }, [contextSubmenu])
+  useSidebarMenuLayoutEffect(() => {
+    const focused = focusedMenuItemRef.current, menu = contextMenuRef.current
+    if (!menu || !focused?.isConnected || !focused.disabled || !menu.contains(focused)) return
+    if (document.activeElement !== focused && document.activeElement !== document.body) return
+    setContextSubmenu(null)
+    focusedMenuItemRef.current = null
+    ;(sidebarMenuItems(menu)[0] ?? contextOriginRef.current)?.focus({ preventScroll: true })
+  })
+  const captureContextOrigin = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null
+    const origin = target && event.currentTarget.contains(target) && !target.disabled ? target
+      : event.currentTarget.querySelector<HTMLButtonElement>('button:not(:disabled)')
+    contextOriginRef.current = origin
+    origin?.focus({ preventScroll: true })
+  }
 
   const toggleAllGroups = (): void => {
     if (displayGroups.length === 0) return
@@ -902,10 +1016,14 @@ export function SidebarProjectsSection({
     )
     try {
       await onRenameThread(threadId, nextTitle)
-      setRenameThreadDialog(null)
+      setRenameThreadDialog((current) =>
+        current?.thread.id === threadId && current.value === nextTitle && current.submitting
+          ? null : current
+      )
     } catch {
       setRenameThreadDialog((current) =>
-        current?.thread.id === threadId ? { ...current, submitting: false } : current
+        current?.thread.id === threadId && current.value === nextTitle && current.submitting
+          ? { ...current, submitting: false } : current
       )
     } finally {
       setDeletingThreadIds((prev) => {
@@ -973,6 +1091,7 @@ export function SidebarProjectsSection({
   ): void => {
     event.preventDefault()
     event.stopPropagation()
+    captureContextOrigin(event)
     setWorkspaceContextMenu(null)
     setDraftContextMenu(null)
     setContextSubmenu(null)
@@ -988,6 +1107,7 @@ export function SidebarProjectsSection({
   ): void => {
     event.preventDefault()
     event.stopPropagation()
+    captureContextOrigin(event)
     setThreadContextMenu(null)
     setDraftContextMenu(null)
     setContextSubmenu(null)
@@ -1003,6 +1123,7 @@ export function SidebarProjectsSection({
   ): void => {
     event.preventDefault()
     event.stopPropagation()
+    captureContextOrigin(event)
     setThreadContextMenu(null)
     setWorkspaceContextMenu(null)
     setContextSubmenu(null)
@@ -1430,10 +1551,14 @@ export function SidebarProjectsSection({
 
       {contextMenuPortalTarget && threadContextMenu ? createPortal(
         <ThreadContextMenu
+          interaction={contextMenuInteraction}
           state={threadContextMenu}
           busy={deletingThreadIds[threadContextMenu.thread.id] === true}
           runtimeReady={runtimeReady}
           activePinned={pinnedThreadIds.has(threadContextMenu.thread.id)}
+          submenus={submenuControls}
+          onEnterSubmenu={enterContextSubmenu}
+          onPointerSubmenuChange={pointerContextSubmenu}
           submenu={contextSubmenu}
           onSubmenuChange={setContextSubmenu}
           onClose={closeContextMenus}
@@ -1464,6 +1589,7 @@ export function SidebarProjectsSection({
 
       {contextMenuPortalTarget && workspaceContextMenu ? createPortal(
         <WorkspaceContextMenu
+          interaction={contextMenuInteraction}
           state={workspaceContextMenu}
           onClose={closeContextMenus}
           onNewThread={() => onCreateThreadInWorkspace(workspaceContextMenu.workspacePath)}
@@ -1482,6 +1608,7 @@ export function SidebarProjectsSection({
 
       {contextMenuPortalTarget && draftContextMenu ? createPortal(
         <DraftContextMenu
+          interaction={contextMenuInteraction}
           state={draftContextMenu}
           busy={deletingDraftIds[draftContextMenu.draft.id] === true}
           onClose={closeContextMenus}
@@ -1956,11 +2083,15 @@ export function ThreadRenameDialog({
 }
 
 function ThreadContextMenu({
+  interaction,
   state,
   busy,
   runtimeReady,
   activePinned,
   submenu,
+  submenus,
+  onEnterSubmenu,
+  onPointerSubmenuChange,
   onSubmenuChange,
   onClose,
   onTogglePin,
@@ -1979,10 +2110,14 @@ function ThreadContextMenu({
   onOpenInNewWindow,
   t
 }: {
+  interaction: ContextMenuInteraction
   state: ThreadContextMenuState
   busy: boolean
   runtimeReady: boolean
   activePinned: boolean
+  submenus: SidebarSubmenuControls
+  onEnterSubmenu: (kind: Exclude<SidebarContextSubmenu, null>) => void
+  onPointerSubmenuChange: (kind: SidebarContextSubmenu) => void
   submenu: SidebarContextSubmenu
   onSubmenuChange: (submenu: SidebarContextSubmenu) => void
   onClose: () => void
@@ -2011,31 +2146,35 @@ function ThreadContextMenu({
 
   return (
     <div
+      {...interaction}
       role="menu"
       aria-label={state.thread.title}
       className="ds-session-actions-menu ds-sidebar-context-menu ds-no-drag"
       style={{ left: state.x, top: state.y }}
       onPointerDown={(event) => event.stopPropagation()}
-      onPointerLeave={() => onSubmenuChange(null)}
+      onPointerLeave={() => onPointerSubmenuChange(null)}
     >
       <ActionMenuItem
+        tabIndex={-1}
         icon={<PinActionIcon className="h-4 w-4" />}
         label={activePinned ? t('sessionActionUnpin') : t('sessionActionPin')}
         shortcut="⌥⌘P"
         active={activePinned}
         onClick={() => run(onTogglePin)}
-        onPointerEnter={() => onSubmenuChange(null)}
+        onPointerEnter={() => onPointerSubmenuChange(null)}
       />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<PencilLine className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sessionActionRename')}
         shortcut="⌥⌘R"
         disabled={busy}
         title={busy ? t('threadActionBusy') : undefined}
         onClick={() => run(onRename)}
-        onPointerEnter={() => onSubmenuChange(null)}
+        onPointerEnter={() => onPointerSubmenuChange(null)}
       />
       <ActionMenuItem
+        tabIndex={-1}
         icon={
           archived
             ? <RotateCcw className="h-4 w-4" strokeWidth={1.9} />
@@ -2046,29 +2185,34 @@ function ThreadContextMenu({
         disabled={busy}
         title={busy ? t('threadActionBusy') : undefined}
         onClick={() => run(archived ? onRestore : onArchive)}
-        onPointerEnter={() => onSubmenuChange(null)}
+        onPointerEnter={() => onPointerSubmenuChange(null)}
       />
       <ActionMenuSeparator />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<MessageCirclePlus className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sessionActionOpenSideChat')}
         shortcut="⌥⌘S"
         disabled={!runtimeReady}
         title={!runtimeReady ? t('runtimeActionNeedsConnection') : undefined}
         onClick={() => run(onOpenSideChat)}
-        onPointerEnter={() => onSubmenuChange(null)}
+        onPointerEnter={() => onPointerSubmenuChange(null)}
       />
       <div className="ds-session-actions-menu-submenu-anchor">
         <ActionMenuItem
+          tabIndex={-1}
           icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
           label={t('sessionActionCopy')}
+          ref={submenus.copy.parentRef}
+          expanded={submenu === 'copy'} controls={submenus.copy.id}
           hasSubmenu
-          onClick={() => onSubmenuChange(submenu === 'copy' ? null : 'copy')}
-          onPointerEnter={() => onSubmenuChange('copy')}
+          onClick={() => submenu === 'copy' ? onSubmenuChange(null) : onEnterSubmenu('copy')}
+          onPointerEnter={() => onPointerSubmenuChange('copy')}
         />
         {submenu === 'copy' ? (
-          <div className="ds-session-actions-submenu" role="menu" aria-label={t('sessionActionCopy')}>
+          <div ref={submenus.copy.menuRef} id={submenus.copy.id} className="ds-session-actions-submenu" role="menu" aria-label={t('sessionActionCopy')}>
             <ActionMenuItem
+              tabIndex={-1}
               icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
               label={t('sessionActionCopyMarkdown')}
               disabled={!runtimeReady}
@@ -2076,21 +2220,25 @@ function ThreadContextMenu({
               onClick={() => run(onCopyMarkdown)}
             />
             <ActionMenuItem
+              tabIndex={-1}
               icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
               label={t('sessionActionCopyThreadId')}
               onClick={() => run(onCopyThreadId)}
             />
             <ActionMenuItem
+              tabIndex={-1}
               icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
               label={t('sessionActionCopyWorkspacePath')}
               onClick={() => run(onCopyWorkspacePath)}
             />
             <ActionMenuItem
+              tabIndex={-1}
               icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
               label={t('sessionActionCopyDeeplink')}
               onClick={() => run(onCopyDeeplink)}
             />
             <ActionMenuItem
+              tabIndex={-1}
               icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
               label={t('sessionActionCopyCodexLink')}
               onClick={() => run(onCopyCodexLink)}
@@ -2100,17 +2248,21 @@ function ThreadContextMenu({
       </div>
       <div className="ds-session-actions-menu-submenu-anchor">
         <ActionMenuItem
+          tabIndex={-1}
           icon={<GitBranch className="h-4 w-4" strokeWidth={1.9} />}
           label={t('sessionActionBranch')}
+          ref={submenus.branch.parentRef}
+          expanded={submenu === 'branch'} controls={submenus.branch.id}
           hasSubmenu
           disabled={!runtimeReady || busy}
           title={busy ? t('threadActionBusy') : !runtimeReady ? t('runtimeActionNeedsConnection') : undefined}
-          onClick={() => onSubmenuChange(submenu === 'branch' ? null : 'branch')}
-          onPointerEnter={() => onSubmenuChange('branch')}
+          onClick={() => submenu === 'branch' ? onSubmenuChange(null) : onEnterSubmenu('branch')}
+          onPointerEnter={() => onPointerSubmenuChange('branch')}
         />
         {submenu === 'branch' ? (
-          <div className="ds-session-actions-submenu" role="menu" aria-label={t('sessionActionBranch')}>
+          <div ref={submenus.branch.menuRef} id={submenus.branch.id} className="ds-session-actions-submenu" role="menu" aria-label={t('sessionActionBranch')}>
             <ActionMenuItem
+              tabIndex={-1}
               icon={<GitFork className="h-4 w-4" strokeWidth={1.9} />}
               label={t('sessionActionForkCurrent')}
               disabled={!runtimeReady || busy}
@@ -2120,35 +2272,39 @@ function ThreadContextMenu({
         ) : null}
       </div>
       <ActionMenuItem
+        tabIndex={-1}
         icon={<Clock3 className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sessionActionAddAutomation')}
         onClick={() => run(onAddAutomation)}
-        onPointerEnter={() => onSubmenuChange(null)}
+        onPointerEnter={() => onPointerSubmenuChange(null)}
       />
       <ActionMenuSeparator />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<OpenWindowIcon className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sessionActionOpenInNewWindow')}
         disabled={!runtimeReady}
         title={!runtimeReady ? t('runtimeActionNeedsConnection') : undefined}
         onClick={() => run(onOpenInNewWindow)}
-        onPointerEnter={() => onSubmenuChange(null)}
+        onPointerEnter={() => onPointerSubmenuChange(null)}
       />
       <ActionMenuSeparator />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<Trash2 className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sidebarThreadDelete')}
         disabled={busy}
         danger
         title={busy ? t('threadActionBusy') : undefined}
         onClick={() => run(onDelete)}
-        onPointerEnter={() => onSubmenuChange(null)}
+        onPointerEnter={() => onPointerSubmenuChange(null)}
       />
     </div>
   )
 }
 
 function WorkspaceContextMenu({
+  interaction,
   state,
   onClose,
   onNewThread,
@@ -2158,6 +2314,7 @@ function WorkspaceContextMenu({
   onRemove,
   t
 }: {
+  interaction: ContextMenuInteraction
   state: WorkspaceContextMenuState
   onClose: () => void
   onNewThread: () => void
@@ -2174,6 +2331,7 @@ function WorkspaceContextMenu({
 
   return (
     <div
+      {...interaction}
       role="menu"
       aria-label={state.workspacePath}
       className="ds-session-actions-menu ds-sidebar-context-menu ds-no-drag"
@@ -2181,28 +2339,33 @@ function WorkspaceContextMenu({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <ActionMenuItem
+        tabIndex={-1}
         icon={<Plus className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sidebarWorkspaceNewThread')}
         onClick={() => run(onNewThread)}
       />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<FolderOpen className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sidebarContextOpenFolder')}
         onClick={() => run(onOpenFolder)}
       />
       <ActionMenuSeparator />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
         label={t('filePreviewCopyPath')}
         onClick={() => run(onCopyPath)}
       />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<FolderOpen className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sidebarContextRevealInFinder')}
         onClick={() => run(onReveal)}
       />
       <ActionMenuSeparator />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<Trash2 className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sidebarWorkspaceRemove')}
         danger
@@ -2213,6 +2376,7 @@ function WorkspaceContextMenu({
 }
 
 function DraftContextMenu({
+  interaction,
   state,
   busy,
   onClose,
@@ -2224,6 +2388,7 @@ function DraftContextMenu({
   onDelete,
   t
 }: {
+  interaction: ContextMenuInteraction
   state: DraftContextMenuState
   busy: boolean
   onClose: () => void
@@ -2242,6 +2407,7 @@ function DraftContextMenu({
 
   return (
     <div
+      {...interaction}
       role="menu"
       aria-label={state.draft.title}
       className="ds-session-actions-menu ds-sidebar-context-menu ds-no-drag"
@@ -2249,33 +2415,39 @@ function DraftContextMenu({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <ActionMenuItem
+        tabIndex={-1}
         icon={<FileText className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sidebarContextOpenDraft')}
         onClick={() => run(onOpen)}
       />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<FolderOpen className="h-4 w-4" strokeWidth={1.9} />}
         label={t('filePreviewOpenEditor')}
         onClick={() => run(onOpenEditor)}
       />
       <ActionMenuSeparator />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<Copy className="h-4 w-4" strokeWidth={1.9} />}
         label={t('filePreviewCopyPath')}
         onClick={() => run(onCopyPath)}
       />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<ClipboardList className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sidebarContextCopyFileContents')}
         onClick={() => run(onCopyContents)}
       />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<FolderOpen className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sidebarContextRevealInFinder')}
         onClick={() => run(onReveal)}
       />
       <ActionMenuSeparator />
       <ActionMenuItem
+        tabIndex={-1}
         icon={<Trash2 className="h-4 w-4" strokeWidth={1.9} />}
         label={t('sddDraftHistoryDelete')}
         disabled={busy}

@@ -23,6 +23,7 @@ type ThreadEventStore struct {
 	LoadEventsSinceContext        func(context.Context, string, int) ([]map[string]any, error)
 	LoadPublicEventsSinceContext  func(context.Context, string, int) ([]map[string]any, error)
 	SubscribeEvents               func(threadID string) (<-chan map[string]any, func())
+	InitialGoalActivation         func(threadID string) map[string]any
 	SealAcceptedFinalDelivery     func([]map[string]any) (domainevent.AcceptedFinalDeliverySealV1, error)
 	ValidateAcceptedFinalDelivery func(domainevent.AcceptedFinalDeliveryBatchV2) error
 	PreflightPublic               func(threadID string) string
@@ -34,6 +35,7 @@ type ThreadEventsHandler struct {
 	HeartbeatInterval time.Duration
 	Now               func() time.Time
 	SanitizeError     func(error) string
+	ReplayDiagnostics *FiniteReplayDiagnostics
 }
 
 const maxLiveReplayEvents = 1024
@@ -53,16 +55,54 @@ func (h ThreadEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, t
 		h.serveLive(w, r, threadID, sinceSeq)
 		return
 	}
-	events, setupErr, revocationCode := h.replay(r.Context(), threadID, sinceSeq)
+	ctx := r.Context()
+	if ctx.Err() != nil {
+		return
+	}
+	if seal := h.Store.SealAcceptedFinalDelivery; seal != nil {
+		h.Store.SealAcceptedFinalDelivery = func(events []map[string]any) (domainevent.AcceptedFinalDeliverySealV1, error) {
+			if err := ctx.Err(); err != nil {
+				return domainevent.AcceptedFinalDeliverySealV1{}, err
+			}
+			sealed, err := seal(events)
+			if cancelled := ctx.Err(); cancelled != nil {
+				return domainevent.AcceptedFinalDeliverySealV1{}, cancelled
+			}
+			return sealed, err
+		}
+	}
+	if project := h.Store.ProjectPublic; project != nil {
+		// This handler is a request-local value. Keep the existing projector and
+		// its authority checks, but stop between nested atomic-group callbacks
+		// after the finite consumer has gone away.
+		h.Store.ProjectPublic = func(id string, event map[string]any) (map[string]any, bool, string) {
+			if ctx.Err() != nil {
+				return nil, false, ""
+			}
+			public, visible, code := project(id, event)
+			if ctx.Err() != nil {
+				return nil, false, ""
+			}
+			return public, visible, code
+		}
+	}
+	events, setupErr, revocationCode := h.replay(ctx, threadID, sinceSeq)
+	if ctx.Err() != nil {
+		return
+	}
+	finishResponseWrite := h.ReplayDiagnostics.Begin(ReplayResponseWrite)
 	if revocationCode != "" {
 		h.writeProjectionRevokedResponse(w, threadID, revocationCode)
+		finishResponseWrite(1)
 		return
 	}
 	if setupErr != nil {
 		httpapi.WriteDurableSSE(w, http.StatusOK, []map[string]any{h.withSSETrace(h.setupErrorEvent(threadID, sinceSeq, setupErr.phase, setupErr.err))})
+		finishResponseWrite(1)
 		return
 	}
 	httpapi.WriteDurableSSE(w, http.StatusOK, h.withSSETraceEvents(events))
+	finishResponseWrite(len(events))
 }
 
 func SinceSeq(r *http.Request) int {
@@ -89,13 +129,33 @@ func (h ThreadEventsHandler) replay(ctx context.Context, threadID string, sinceS
 }
 
 func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID string, sinceSeq, snapshotLimit int) ([]map[string]any, *setupError, string) {
-	if code := h.preflightPublic(threadID); code != "" {
+	// Live backlog replay retains its existing behavior. Only a finite request
+	// owns this cancellation boundary and its unpublished result buffer.
+	var finiteContext context.Context
+	if snapshotLimit == 0 {
+		finiteContext = ctx
+	}
+	if finiteReplayCancelled(finiteContext) {
+		return nil, nil, ""
+	}
+	finishPreflight := h.ReplayDiagnostics.Begin(ReplayPublicPreflight)
+	code := h.preflightPublic(threadID)
+	finishPreflight(1)
+	if finiteReplayCancelled(finiteContext) {
+		return nil, nil, ""
+	}
+	if code != "" {
 		return nil, nil, code
 	}
 	if h.Store.HighestSeq == nil {
 		return nil, &setupError{phase: "highest_seq", err: errors.New("highest seq store is not configured")}, ""
 	}
+	finishHighestSeq := h.ReplayDiagnostics.Begin(ReplayHighestSeq)
 	highestSeq, err := h.Store.HighestSeq(threadID)
+	finishHighestSeq(1)
+	if finiteReplayCancelled(finiteContext) {
+		return nil, nil, ""
+	}
 	if err != nil {
 		return nil, &setupError{phase: "highest_seq", err: err}, ""
 	}
@@ -118,19 +178,34 @@ func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID strin
 	// the requested cursor lands inside it, then apply the exact cursor locally.
 	loadAfterSeq := max(0, sinceSeq-3)
 	var events []map[string]any
+	finishLoadEvents := h.ReplayDiagnostics.Begin(ReplayLoadEvents)
 	if loadEventsWithContext != nil {
 		events, err = loadEventsWithContext(ctx, threadID, loadAfterSeq)
 	} else {
 		events, err = loadEvents(threadID, loadAfterSeq)
 	}
+	finishLoadEvents(len(events))
 	if err != nil {
 		return nil, &setupError{phase: "replay", err: err}, ""
 	}
+	if finiteReplayCancelled(finiteContext) {
+		return nil, nil, ""
+	}
+	finishTerminalGroups := h.ReplayDiagnostics.Begin(ReplayTerminalGroups)
 	events, err = domainevent.AtomicTerminalReplayEventsAfter(events, sinceSeq)
+	finishTerminalGroups(len(events))
+	if finiteReplayCancelled(finiteContext) {
+		return nil, nil, ""
+	}
 	if err != nil {
 		return nil, nil, casePublicAuthorityRejectedCode
 	}
+	finishAcceptedFinalGroups := h.ReplayDiagnostics.Begin(ReplayAcceptedFinalGroups)
 	deliveryUnits, err := acceptedFinalDeliveryUnits(threadID, events, h.Store.SealAcceptedFinalDelivery)
+	finishAcceptedFinalGroups(len(deliveryUnits))
+	if finiteReplayCancelled(finiteContext) {
+		return nil, nil, ""
+	}
 	if err != nil {
 		return nil, nil, casePublicAuthorityRejectedCode
 	}
@@ -150,7 +225,9 @@ func (h ThreadEventsHandler) replayWithLimit(ctx context.Context, threadID strin
 			Timestamp: h.now().UTC().Format(time.RFC3339Nano),
 		})}, nil, ""
 	}
-	public, revocationCode := h.publicEvents(threadID, deliveryUnits)
+	finishProjectPublic := h.ReplayDiagnostics.Begin(ReplayProjectPublic)
+	public, revocationCode := h.publicEvents(finiteContext, threadID, deliveryUnits)
+	finishProjectPublic(len(public))
 	if revocationCode != "" {
 		return nil, nil, revocationCode
 	}
@@ -216,6 +293,26 @@ func (h ThreadEventsHandler) serveLive(w http.ResponseWriter, r *http.Request, t
 		}
 	}
 	flusher.Flush()
+	if h.Store.InitialGoalActivation != nil {
+		// SubscribeEvents is already live. A change before this read is in
+		// its current snapshot; a change after it remains in the live queue.
+		// This metadata has no replay cursor or durable delivery identity.
+		if event := h.Store.InitialGoalActivation(threadID); event != nil {
+			public, visible, code := h.publicEvent(threadID, event)
+			if code != "" {
+				h.writeProjectionRevokedEvent(w, threadID, code)
+				flusher.Flush()
+				return
+			}
+			if visible {
+				body, err := json.Marshal(public)
+				if err == nil {
+					_, _ = w.Write([]byte("event: goal_activation_changed\ndata: " + string(body) + "\n\n"))
+					flusher.Flush()
+				}
+			}
+		}
+	}
 
 	heartbeatInterval := h.HeartbeatInterval
 	if heartbeatInterval <= 0 {
@@ -233,6 +330,27 @@ func (h ThreadEventsHandler) serveLive(w http.ResponseWriter, r *http.Request, t
 					flusher.Flush()
 				}
 				return
+			}
+			if contracts.StringField(event, "kind") == "goal_activation_changed" {
+				// Process-local control never participates in replay cursors or
+				// interrupts a committed terminal delivery bundle.
+				if len(pendingGeneralTerminal) != 0 {
+					continue
+				}
+				public, visible, revocation := h.publicEvent(threadID, event)
+				if revocation != "" {
+					h.writeProjectionRevokedEvent(w, threadID, revocation)
+					flusher.Flush()
+					return
+				}
+				if visible {
+					body, err := json.Marshal(public)
+					if err == nil {
+						_, _ = w.Write([]byte("event: goal_activation_changed\ndata: " + string(body) + "\n\n"))
+						flusher.Flush()
+					}
+				}
+				continue
 			}
 			seq, _ := NumericSeq(event["seq"])
 			if seq <= lastSeq {
@@ -349,9 +467,16 @@ func (h ThreadEventsHandler) serveLive(w http.ResponseWriter, r *http.Request, t
 	}
 }
 
-func (h ThreadEventsHandler) publicEvents(threadID string, events []map[string]any) ([]map[string]any, string) {
+func finiteReplayCancelled(ctx context.Context) bool {
+	return ctx != nil && ctx.Err() != nil
+}
+
+func (h ThreadEventsHandler) publicEvents(ctx context.Context, threadID string, events []map[string]any) ([]map[string]any, string) {
 	out := make([]map[string]any, 0, len(events))
 	for start := 0; start < len(events); {
+		if finiteReplayCancelled(ctx) {
+			return nil, ""
+		}
 		event := events[start]
 		if domainevent.GeneralTerminalDeliveryMarkerPresentV1(event) {
 			commitID := strings.TrimSpace(contracts.StringField(event, "generalTerminalCommitId"))
@@ -360,6 +485,9 @@ func (h ThreadEventsHandler) publicEvents(threadID string, events []map[string]a
 				end++
 			}
 			batch, revocationCode := h.publicGeneralTerminalBatch(threadID, events[start:end])
+			if finiteReplayCancelled(ctx) {
+				return nil, ""
+			}
 			if revocationCode != "" {
 				return nil, revocationCode
 			}
@@ -368,6 +496,9 @@ func (h ThreadEventsHandler) publicEvents(threadID string, events []map[string]a
 			continue
 		}
 		public, visible, revocationCode := h.publicEvent(threadID, event)
+		if finiteReplayCancelled(ctx) {
+			return nil, ""
+		}
 		if revocationCode != "" {
 			return nil, revocationCode
 		}
@@ -665,6 +796,18 @@ func (h ThreadEventsHandler) withSSETrace(event map[string]any) map[string]any {
 	switch strings.TrimSpace(contracts.StringField(event, "kind")) {
 	case domainevent.AcceptedFinalDeliveryBatchKind, domainevent.GeneralTerminalDeliveryBatchKind:
 		return event
+	case "compaction_started", "compaction_completed", "compaction_failed":
+		// Every supported compaction wire version is closed and trace-free.
+		// Preserve legacy replay too; this does not upgrade its summary facts.
+		return event
+	case "pipeline_stage":
+		// Logical-step metadata is deliberately closed and trace-free in both
+		// live delivery and replay. A trace field would reject this event before
+		// downstream consumers can receive the later terminal batch.
+		switch contracts.StringField(event, "stage") {
+		case "logical_step_started", "logical_step_assembled", "logical_step_closed":
+			return event
+		}
 	}
 	out := make(map[string]any, len(event))
 	for key, value := range event {

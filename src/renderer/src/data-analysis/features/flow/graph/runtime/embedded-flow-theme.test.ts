@@ -27,6 +27,50 @@ async function flushThemeMutation(): Promise<void> {
 }
 
 describe("embedded flow display theme ownership", () => {
+  it("forwards the owning surface button foreground and observes its lifecycle", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--ax-on-primary", "#101a36");
+    root.style.setProperty("--private-unrelated-value", "not-forwarded");
+    const { surface, target } = createSurfaceFrame();
+    // Computed surface colors are literal values at the iframe boundary.
+    surface.style.setProperty("--color-accent", "#ce7919");
+    surface.style.setProperty("--color-accent-strong", "#9b4d06");
+    surface.style.setProperty("--color-on-accent", "#140b02");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-accent")).toBe("#ce7919");
+    expect(target.style.getPropertyValue("--color-accent-strong")).toBe("#9b4d06");
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("#140b02");
+    expect(target.style.getPropertyValue("--ax-on-primary")).toBe("");
+    expect(target.style.getPropertyValue("--private-unrelated-value")).toBe("");
+    root.style.setProperty("--ax-on-primary", "#ffffff");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("#140b02");
+    surface.style.setProperty("--color-on-accent", "#2b1a08");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("#2b1a08");
+    surface.style.removeProperty("--color-on-accent");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("");
+    surface.style.setProperty("--color-on-accent", "#ffffff");
+    await flushThemeMutation();
+    cleanups.splice(0).forEach((cleanup) => cleanup());
+    surface.style.setProperty("--color-on-accent", "#140b02");
+    await flushThemeMutation();
+    expect(target.style.getPropertyValue("--color-on-accent")).toBe("#ffffff");
+  });
+
+  it.each(["var(--unrelated)", "url(https://invalid.example/value)", "red", "#fff"])(
+    "does not forward a non-palette expression %s as a button foreground", async (value) => {
+      const { surface, target } = createSurfaceFrame();
+      surface.style.setProperty("--color-on-accent", "#140b02");
+      await flushThemeMutation();
+      expect(target.style.getPropertyValue("--color-on-accent")).toBe("#140b02");
+      surface.style.setProperty("--color-on-accent", value);
+      await flushThemeMutation();
+      expect(target.style.getPropertyValue("--color-on-accent")).toBe("");
+    },
+  );
+
   it("uses the independent surface theme rather than the desktop root", async () => {
     applyTheme("dark", document.documentElement);
     const { surface, target } = createSurfaceFrame();

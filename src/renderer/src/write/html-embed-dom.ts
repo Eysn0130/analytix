@@ -1,175 +1,129 @@
+import type { WorkspaceFileTarget } from '@shared/workspace-file'
+import { writePrototypeAuthorizeResultSchema } from '@shared/write-prototype'
 import i18n from '../i18n'
 import { resolveWriteMarkdownResourcePath } from '@shared/write-markdown-resource'
-
-/**
- * Inline embed for generated HTML prototypes (`![alt](../../proto/x.html)`).
- *
- * Renders a cover card and only mounts a `<webview>` after the user clicks
- * 运行原型: every DOM reattach reloads the guest page and each guest is its
- * own process, so editors that rebuild widgets (CodeMirror viewport,
- * TipTap undo) must not pay that cost passively. The webview src is set
- * only after the main process authorizes the path (write:authorize-prototype),
- * which also allow-lists it for the `will-attach-webview` guard. Plain DOM so
- * the same markup serves the TipTap node view, the CodeMirror live-preview
- * widget and the split markdown preview. Styles live in
- * styles/write-editor.css under `.write-html-embed`.
- */
 
 export type HtmlEmbedContext = {
   rawSrc: string
   alt: string
-  /** Absolute path of the markdown document embedding the prototype. */
   filePath: string | null
   workspaceRoot: string | null
+  mode?: 'write-prototype' | 'workspace-html'
+  protectedPresent?: WorkspaceFileTarget['protectedPresent']
 }
+export type HtmlEmbedHandle = { element: HTMLElement; run: () => void; dispose: () => void }
 
-type EmbedElements = {
-  body: HTMLElement
-  status: HTMLElement
-  reloadButton: HTMLButtonElement
-}
-
-function fileNameFromSrc(rawSrc: string): string {
-  const normalized = rawSrc.replaceAll('\\', '/').trim()
-  const parts = normalized.split('/').filter(Boolean)
-  return parts[parts.length - 1] || normalized
-}
-
-function setStatus(elements: EmbedElements, message: string, tone: 'idle' | 'error'): void {
-  elements.status.textContent = message
-  elements.status.dataset.tone = tone
-}
-
-function showCover(elements: EmbedElements, onRun: () => void): void {
-  elements.body.replaceChildren()
-  elements.reloadButton.hidden = true
-  const cover = document.createElement('button')
-  cover.type = 'button'
-  cover.className = 'write-html-embed-cover'
-  const icon = document.createElement('span')
-  icon.className = 'write-html-embed-cover-icon'
-  icon.textContent = '▶'
-  const label = document.createElement('span')
-  label.className = 'write-html-embed-cover-label'
-  label.textContent = i18n.t('common:writeHtmlEmbedRun')
-  cover.append(icon, label)
-  cover.addEventListener('click', (event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    onRun()
-  })
-  elements.body.replaceChildren(cover)
-}
-
-function mountWebview(elements: EmbedElements, fileUrl: string): void {
-  elements.body.replaceChildren()
-  const webview = document.createElement('webview')
-  webview.setAttribute('src', fileUrl)
-  // Non-persistent partition keeps prototype guests away from the dev
-  // browser and the default session.
-  webview.setAttribute('partition', 'analytix-proto')
-  webview.setAttribute('webpreferences', 'contextIsolation=yes,nodeIntegration=no,sandbox=yes')
-  webview.className = 'write-html-embed-webview'
-  webview.addEventListener('did-fail-load', (event) => {
-    const failure = event as unknown as { errorCode?: number }
-    // -3 (aborted) fires on reload races; everything else is a real failure.
-    if (failure.errorCode === -3) return
-    setStatus(elements, i18n.t('common:writeHtmlEmbedLoadFailed'), 'error')
-  })
-  elements.body.replaceChildren(webview)
-  elements.reloadButton.hidden = false
-  elements.reloadButton.onclick = (event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    setStatus(elements, '', 'idle')
-    ;(webview as unknown as { reload?: () => void }).reload?.()
-  }
-}
-
-export function createHtmlEmbedElement(context: HtmlEmbedContext): HTMLElement {
+/** Shared explicit-run surface for Markdown embeds and workspace HTML. A
+ * detached widget retires its exact grant, including late authorizations. */
+export function createHtmlEmbedHandle(context: HtmlEmbedContext): HtmlEmbedHandle {
   const root = document.createElement('span')
   root.className = 'write-html-embed'
   root.contentEditable = 'false'
   root.dataset.rawSrc = context.rawSrc
-
   const header = document.createElement('span')
   header.className = 'write-html-embed-header'
-
   const title = document.createElement('span')
   title.className = 'write-html-embed-title'
   title.textContent = context.alt.trim() || i18n.t('common:writePrototypeAlt')
-  const fileName = document.createElement('span')
-  fileName.className = 'write-html-embed-file'
-  fileName.textContent = fileNameFromSrc(context.rawSrc)
-
+  const file = document.createElement('span')
+  file.className = 'write-html-embed-file'
+  file.textContent = context.rawSrc.replaceAll('\\', '/').split('/').filter(Boolean).pop() ?? context.rawSrc
   const actions = document.createElement('span')
   actions.className = 'write-html-embed-actions'
-  const reloadButton = document.createElement('button')
-  reloadButton.type = 'button'
-  reloadButton.className = 'write-html-embed-action'
-  reloadButton.textContent = i18n.t('common:writeHtmlEmbedReload')
-  reloadButton.hidden = true
-  const openButton = document.createElement('button')
-  openButton.type = 'button'
-  openButton.className = 'write-html-embed-action'
-  openButton.textContent = i18n.t('common:writeHtmlEmbedOpenExternal')
-  actions.append(reloadButton, openButton)
-
-  header.append(title, fileName, actions)
-
-  const body = document.createElement('span')
-  body.className = 'write-html-embed-body'
-
-  const status = document.createElement('span')
-  status.className = 'write-html-embed-status'
-
+  const reload = document.createElement('button')
+  reload.type = 'button'; reload.className = 'write-html-embed-action'
+  reload.textContent = i18n.t('common:writeHtmlEmbedReload'); reload.hidden = true
+  const external = document.createElement('button')
+  external.type = 'button'; external.className = 'write-html-embed-action'
+  external.textContent = i18n.t('common:writeHtmlEmbedOpenExternal')
+  actions.append(reload)
+  if (context.mode !== 'workspace-html') actions.append(external)
+  header.append(title, file, actions)
+  const body = document.createElement('span'); body.className = 'write-html-embed-body'
+  const status = document.createElement('span'); status.className = 'write-html-embed-status'
+  status.setAttribute('role', 'status')
   root.append(header, body, status)
-
-  const elements: EmbedElements = { body, status, reloadButton }
-
-  const absolutePath = resolveWriteMarkdownResourcePath(context.rawSrc, context.filePath) ?? null
-  const workspaceRoot = context.workspaceRoot?.trim() || null
-
-  if (!absolutePath || !workspaceRoot) {
-    setStatus(elements, i18n.t('common:writeHtmlEmbedMissing'), 'error')
-    return root
+  const absolutePath = resolveWriteMarkdownResourcePath(context.rawSrc, context.filePath)
+  const workspaceRoot = context.workspaceRoot?.trim()
+  let disposed = false, epoch = 0
+  let release: (() => void) | undefined
+  let ancestors = new Set<Node>()
+  const setStatus = (message: string): void => { status.textContent = message }
+  const retire = (): void => {
+    observer.disconnect()
+    epoch++; const previous = release; release = undefined
+    body.replaceChildren(); reload.hidden = true
+    previous?.()
   }
-
-  const activate = (): void => {
-    if (typeof window.analytix?.write?.authorizeWritePrototype !== 'function') {
-      setStatus(elements, i18n.t('common:writeHtmlEmbedLoadFailed'), 'error')
-      return
+  const observer = new MutationObserver(records => {
+    if (records.some(record => [...record.removedNodes].some(node => ancestors.has(node)))) {
+      retire(); cover()
     }
-    setStatus(elements, '', 'idle')
-    void window.analytix
-      .write.authorizeWritePrototype({ path: absolutePath, workspaceRoot })
-      .then((result) => {
-        if (!root.isConnected) return
+  })
+  const cover = (): void => {
+    if (disposed) return
+    const button = document.createElement('button')
+    button.type = 'button'; button.className = 'write-html-embed-cover'
+    button.textContent = i18n.t('common:writeHtmlEmbedRun')
+    button.onclick = event => { event.preventDefault(); event.stopPropagation(); run() }
+    body.replaceChildren(button)
+  }
+  const run = (): void => {
+    if (disposed || !root.isConnected) return
+    observer.takeRecords()
+    retire(); setStatus('')
+    const api = window.analytix?.write
+    const revoke = api?.revokeWritePrototype
+    if ((!context.protectedPresent && (!absolutePath || !workspaceRoot)) || !api?.authorizeWritePrototype || !revoke) {
+      setStatus(i18n.t('common:writeHtmlEmbedLoadFailed')); cover(); return
+    }
+    const attempt = epoch
+    ancestors = new Set<Node>()
+    for (let node: Node | null = root; node; node = node.parentNode) ancestors.add(node)
+    observer.observe(document, { childList: true, subtree: true })
+    const revokeGrant = (grantId: string): void => { void revoke({ grantId }).catch(() => undefined) }
+    const request = context.protectedPresent
+      ? { protectedPresent: { ...context.protectedPresent }, mode: 'workspace-html' as const }
+      : { path: absolutePath!, workspaceRoot: workspaceRoot!, mode: context.mode ?? 'write-prototype' }
+    void api.authorizeWritePrototype(request)
+      .then(raw => {
+        const parsed = writePrototypeAuthorizeResultSchema.safeParse(raw)
+        const result = parsed.success ? parsed.data : { ok: false as const, message: i18n.t('common:writeHtmlEmbedLoadFailed') }
+        if (observer.takeRecords().some(record => [...record.removedNodes].some(node => ancestors.has(node)))) { retire(); cover() }
         if (!result.ok) {
-          setStatus(elements, result.message, 'error')
+          if (!disposed && attempt === epoch && root.isConnected) { setStatus(result.message); cover() }
           return
         }
-        mountWebview(elements, result.fileUrl)
-      })
-      .catch((error: unknown) => {
-        if (!root.isConnected) return
-        setStatus(elements, error instanceof Error ? error.message : String(error), 'error')
+        if (disposed || attempt !== epoch || !root.isConnected) { revokeGrant(result.grantId); return }
+        release = () => revokeGrant(result.grantId)
+        const webview = document.createElement('webview')
+        // Partition precedes src and attachment, so the guest never uses the
+        // renderer/default session. Main verifies both against this grant.
+        webview.setAttribute('partition', result.partition)
+        webview.setAttribute('webpreferences', 'contextIsolation=yes,nodeIntegration=no,sandbox=yes')
+        webview.setAttribute('src', result.fileUrl)
+        webview.className = 'write-html-embed-webview'
+        webview.addEventListener('did-fail-load', event => {
+          if ((event as unknown as { errorCode?: number }).errorCode === -3 || attempt !== epoch) return
+          retire(); setStatus(i18n.t('common:writeHtmlEmbedLoadFailed')); cover()
+        })
+        body.replaceChildren(webview); reload.hidden = false
+      }).catch(() => {
+        if (!disposed && attempt === epoch && root.isConnected) { setStatus(i18n.t('common:writeHtmlEmbedLoadFailed')); cover() }
       })
   }
+  reload.onclick = event => { event.preventDefault(); event.stopPropagation(); run() }
+  external.onclick = event => {
+    event.preventDefault(); event.stopPropagation()
+    if (!absolutePath || !workspaceRoot) return
+    void window.analytix?.write?.openWritePrototype?.({ path: absolutePath, workspaceRoot }).then(result => {
+      if (!disposed && root.isConnected && !result.ok) setStatus(result.message ?? '')
+    }).catch(() => undefined)
+  }
+  cover()
+  return { element: root, run, dispose: () => { disposed = true; observer.disconnect(); retire() } }
+}
 
-  openButton.addEventListener('click', (event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    if (typeof window.analytix?.write?.openWritePrototype !== 'function') return
-    void window.analytix
-      .write.openWritePrototype({ path: absolutePath, workspaceRoot })
-      .then((result) => {
-        if (!root.isConnected) return
-        if (!result.ok) setStatus(elements, result.message ?? '', 'error')
-      })
-      .catch(() => undefined)
-  })
-
-  showCover(elements, activate)
-  return root
+export function createHtmlEmbedElement(context: HtmlEmbedContext): HTMLElement {
+  return createHtmlEmbedHandle(context).element
 }

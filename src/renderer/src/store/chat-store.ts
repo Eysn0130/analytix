@@ -65,7 +65,8 @@ import {
   collectAssistantTextForTurn,
   findLatestUserBlockId,
   findReusableEmptyThreadId,
-  threadBelongsToWorkspace
+  threadBelongsToWorkspace,
+  updateUserInputDraftInterruption
 } from './chat-store-runtime-helpers'
 import {
   WRITE_ASSISTANT_THREAD_TITLE,
@@ -143,15 +144,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
 	  caseProjectExpandedById: {},
 	  threads: [],
   threadSearch: '',
+  threadSearchResults: null,
   showArchivedThreads: false,
   activeThreadId: null,
   activeThreadGoal: null,
+  activeGoalActivation: null,
+  goalStateEpoch: 0,
   activeThreadTodos: null,
   blocks: [],
   liveAssistant: '',
   lastSeq: 0,
   usageRefreshKey: 0,
   lastTurnUsage: null,
+  turnUsageById: {},
+  rewoundTurnIds: {},
   busy: false,
   error: null,
   topNotice: null,
@@ -163,6 +169,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   inspectorSelectedId: null,
   composerModel: initialComposerSelection?.model ?? DEFAULT_ANALYTIX_MODEL,
   pendingGateResolutionIds: {},
+  selectUserInputPanel: (requestId, view) => set(state => state.activeThreadId ? { userInputPanel: { threadId: state.activeThreadId, requestId, ...(view ? { view } : {}) } } : {}),
+  userInputDraftInterruptions: {},
+  deletedUserInputDraftThreadIds: {},
+  setUserInputDraftInterruption: (key, value) => set(state => ({
+    userInputDraftInterruptions: updateUserInputDraftInterruption(state.userInputDraftInterruptions, key, value, state.deletedUserInputDraftThreadIds)
+  })),
   composerDrafts: {},
   updateComposerDraft: (key, update) => set((state) => {
     const current = state.composerDrafts[key] ?? emptyComposerDraft
@@ -174,7 +186,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   composerModelGroups: [],
   disabledSkillIds: [],
   queuedMessages: [],
-  queuedMessagesPausedReason: null,
+  queuedMessagePauses: {},
   threadHandoffOperations: [],
   activeThreadHandoffOperationId: null,
   watchTurnCompletion: {},
@@ -226,6 +238,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set,
     get,
     getProvider,
+    threadBindingOwner: sseAbortRef,
     t: (key) => i18n.t(key),
     formatRuntimeError,
     shouldOpenSettingsForError

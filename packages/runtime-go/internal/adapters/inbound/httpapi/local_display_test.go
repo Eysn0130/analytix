@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -351,5 +353,96 @@ func TestFundsImportCapabilityUnavailableRemainsTypedAndAuthorized(t *testing.T)
 				t.Fatal("unauthorized request reached capability inspection")
 			}
 		})
+	}
+}
+
+func TestProcessLocalMuxRequiresBearerAndOneTypedHeaderEvenInsecure(t *testing.T) {
+	// Deterministic synthetic bearer fixture; never use a real credential.
+	syntheticRuntimeTokenV1 := strings.Repeat("x", 18)
+	for _, path := range []string{ProcessLocalDisplayReadPathV1, ProcessLocalDisplayTargetPathV1} {
+		for _, insecure := range []bool{false, true} {
+			for _, test := range []struct {
+				name, bearer string
+				typed        []string
+				want         int
+				dispatch     bool
+			}{
+				{"missing_bearer", "", []string{LocalDisplayHeaderValueV1}, http.StatusUnauthorized, false},
+				{"wrong_bearer", "Bearer wrong", []string{LocalDisplayHeaderValueV1}, http.StatusUnauthorized, false},
+				{"missing_typed", "Bearer " + syntheticRuntimeTokenV1, nil, http.StatusForbidden, false},
+				{"wrong_typed", "Bearer " + syntheticRuntimeTokenV1, []string{"generic"}, http.StatusForbidden, false},
+				{"duplicate_typed", "Bearer " + syntheticRuntimeTokenV1, []string{LocalDisplayHeaderValueV1, LocalDisplayHeaderValueV1}, http.StatusForbidden, false},
+				{"padded_typed", "Bearer " + syntheticRuntimeTokenV1, []string{" " + LocalDisplayHeaderValueV1}, http.StatusForbidden, false},
+				{"current_typed_bearer", "Bearer " + syntheticRuntimeTokenV1, []string{LocalDisplayHeaderValueV1}, http.StatusAccepted, true},
+			} {
+				t.Run(path+"_"+test.name+"_"+strconv.FormatBool(insecure), func(t *testing.T) {
+					calls := 0
+					mux := LocalDisplayMuxV1{RuntimeToken: syntheticRuntimeTokenV1, Insecure: insecure,
+						Processes: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							calls++
+							WriteJSON(w, http.StatusAccepted, map[string]string{"status": "owner_called"})
+						}),
+						Next:         http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("private process route fell through generic next") }),
+						LocalDisplay: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("private process route reached another local owner") })}
+					r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"privateBody":"PRIVATE_REQUEST_CANARY"}`))
+					if test.bearer != "" {
+						r.Header.Set("Authorization", test.bearer)
+					}
+					for _, value := range test.typed {
+						r.Header.Add(LocalDisplayHeaderV1, value)
+					}
+					w := httptest.NewRecorder()
+					mux.ServeHTTP(w, r)
+					wantCalls := 0
+					if test.dispatch {
+						wantCalls = 1
+					}
+					if w.Code != test.want || calls != wantCalls || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Pragma") != "no-cache" || strings.Contains(w.Body.String(), "PRIVATE_REQUEST_CANARY") {
+						t.Fatal("process mux weakened bearer/typed authorization or echoed request")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestProcessLocalMuxAbsentOwnerAndEmptyTokenStayClosed(t *testing.T) {
+	for _, path := range []string{ProcessLocalDisplayReadPathV1, ProcessLocalDisplayTargetPathV1} {
+		for _, token := range []string{"process-test-token", ""} {
+			mux := LocalDisplayMuxV1{RuntimeToken: token, Insecure: true, LocalDisplay: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("missing process owner reached generic local display")
+			})}
+			r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"action":"read","viewerToken":"private viewer canary"}`))
+			r.Header.Set("Authorization", "Bearer "+token)
+			r.Header.Set(LocalDisplayHeaderV1, LocalDisplayHeaderValueV1)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			if w.Code != http.StatusConflict || strings.Contains(w.Body.String(), "private viewer canary") || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatal("absent process owner or missing configured token acquired private capability")
+			}
+		}
+	}
+}
+
+type processLocalShutdownProbeV1 struct {
+	calls   int
+	failure error
+}
+
+func (p *processLocalShutdownProbeV1) ServeHTTP(http.ResponseWriter, *http.Request) {}
+func (p *processLocalShutdownProbeV1) Shutdown(context.Context) error               { p.calls++; return p.failure }
+
+func TestProcessLocalMuxClosesProcessBeforeNextFailureAndPropagatesErrors(t *testing.T) {
+	processFailure := errors.New("synthetic process close error")
+	nextFailure := errors.New("synthetic next close error")
+	process := &processLocalShutdownProbeV1{failure: processFailure}
+	next := &processLocalShutdownProbeV1{failure: nextFailure}
+	mux := LocalDisplayMuxV1{Processes: process, Next: next}
+	err := mux.Shutdown(context.Background())
+	if process.calls != 1 || next.calls != 1 || !errors.Is(err, processFailure) || !errors.Is(err, nextFailure) {
+		t.Fatal("process lifecycle was skipped or failure cause lost when next close failed")
+	}
+	if err := (LocalDisplayMuxV1{}).Shutdown(context.Background()); err != nil {
+		t.Fatal("empty private mux lifecycle failed")
 	}
 }

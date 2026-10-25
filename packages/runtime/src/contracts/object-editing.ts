@@ -138,7 +138,7 @@ export const objectEditingResponseSchema = z.union([
   z.object({ ok: z.literal(true), decision: objectEditingDecisionSchema }).strict(),
   z.object({ ok: z.literal(true), document: z.object({
     sessionId, objectId: revision, path: z.string().min(1), content: z.string(), revision
-  }).strict() }).strict(),
+  }).strict(), workbookEditing:z.object({editable:z.boolean(),reason:z.literal('unsupported_workbook').optional()}).strict().optional() }).strict(),
   z.object({ ok: z.literal(true), receipt: objectEditingReceiptSchema }).strict(),
   z.object({ ok: z.literal(true), closed: z.literal(true) }).strict(),
   z.object({ ok: z.literal(false), code: z.enum([

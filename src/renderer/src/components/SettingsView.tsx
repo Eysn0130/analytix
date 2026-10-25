@@ -1,9 +1,12 @@
+import { ordinarySettingsPatch } from '@shared/schedule-task-mutation'
 import type { ReactElement } from 'react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   DEFAULT_WRITE_INLINE_COMPLETION_BASE_URL,
   DEFAULT_WRITE_WORKSPACE_ROOT,
+  DEFAULT_APP_MOTION_PREFERENCE,
+  DEFAULT_APP_ACCENT_COLOR,
   type AnalytixRuntimeSettingsPatchV1,
   type AppSettingsPatch,
   getAnalytixRuntimeSettings,
@@ -29,8 +32,11 @@ import type { SkillRootListItem } from '@shared/analytix-api'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
 import { useChatStore, type SettingsRouteSection } from '../store/chat-store'
 import { AnalytixLoadingPage } from './brand/AnalytixLoadingPage'
-import { SettingsSidebar, settingsCategoryLabelKey } from './SettingsSidebar'
-import { NavigationRail } from './shell/NavigationRail'
+import { SettingsSidebar, settingsTabForCategory } from './SettingsSidebar'
+import { adoptPerformanceUsageHostReadback } from './chat/presentation/chat/TurnUsagePanel'
+import { Dialog } from '../data-analysis/components/overlay/Dialog'
+import type { ProviderSettingsActions } from './settings-section-providers'
+import './settings-modal.css'
 import { WriteDebugLogModal } from './settings-debug-log'
 import { useSettingsGuiUpdate } from './use-settings-gui-update'
 import {
@@ -52,9 +58,7 @@ import {
   GeneralSettingsSection,
   ImageGenerationSettingsSection,
   KeyboardShortcutsSettingsSection,
-  LlmDebugSettingsSection,
   WorktreeSettingsSection,
-  MediaGenerationSettingsSection,
   MemorySettingsSection,
   PermissionsSettingsSection,
   ProvidersSettingsSection,
@@ -63,9 +67,16 @@ import {
   WriteSettingsSection
 } from './settings-sections'
 
-type SettingsCategory = 'account' | 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'browser' | 'computerUse' | 'worktree' | 'memory' | 'shortcuts' | 'claw' | 'updates' | 'debug'
+type SettingsCategory = 'account' | 'general' | 'providers' | 'write' | 'imageGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'browser' | 'computerUse' | 'worktree' | 'memory' | 'shortcuts' | 'claw' | 'updates'
+function categoryForSettingsSection(section: SettingsRouteSection): SettingsCategory {
+  if (section === 'skill' || section === 'mcp') return 'agents'
+  if (section === 'debug' || section === 'mediaGeneration') return 'general'
+  return section
+}
+
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
+type MemoryProjectionOwner = { workspace: string; workspaceEpoch: number; entryEpoch: number }
 type InlineNotice = {
   tone: 'success' | 'error' | 'info'
   message: string
@@ -73,6 +84,33 @@ type InlineNotice = {
 
 const SETTINGS_SKILL_ROOTS_STALE_MS = 60_000
 const RUNTIME_CONFIG_STALE_MS = 60_000
+
+// Settings may refresh while a modal draft is open. Submit only the user's
+// changes against its starting snapshot, never stale fields echoed by a read.
+function ordinaryDraftPatch(baseline: AppSettingsV1, draft: AppSettingsV1): AppSettingsPatch {
+  const difference = (before: unknown, after: unknown): unknown => {
+    if (JSON.stringify(before) === JSON.stringify(after)) return undefined
+    if (before && after && typeof before === 'object' && typeof after === 'object' &&
+        !Array.isArray(before) && !Array.isArray(after)) {
+      const patch: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(after)) {
+        const changed = difference((before as Record<string, unknown>)[key], value)
+        if (changed !== undefined) patch[key] = changed
+      }
+      return Object.keys(patch).length ? patch : undefined
+    }
+    return after
+  }
+  const patch = (difference(ordinarySettingsPatch(baseline), ordinarySettingsPatch(draft)) ?? {}) as AppSettingsPatch
+  // Model preferences have their own explicit Provider facade operation.
+  if (patch.provider) {
+    const { modelPreferences: _preferences, ...providerPatch } = patch.provider
+    void _preferences
+    if (Object.keys(providerPatch).length) patch.provider = providerPatch
+    else delete patch.provider
+  }
+  return patch
+}
 
 const DeprecatedHubCompatibilitySection = lazy(async () => {
   const module = await import('./settings-section-account')
@@ -86,22 +124,44 @@ export function SettingsView(): ReactElement {
   const settingsReturnRoute = useChatStore((s) => s.settingsReturnRoute)
   const settingsSection = useChatStore((s) => s.settingsSection)
   const openCode = useChatStore((s) => s.openCode)
-  const openWrite = useChatStore((s) => s.openWrite)
-  const openClaw = useChatStore((s) => s.openClaw)
-  const openSchedule = useChatStore((s) => s.openSchedule)
-  const openInitialSetup = useChatStore((s) => s.openInitialSetup)
   const openPlugins = useChatStore((s) => s.openPlugins)
   const applyI18n = useChatStore((s) => s.applyI18nFromSettings)
   const reloadUiSettings = useChatStore((s) => s.reloadUiSettings)
   const showTopNotice = useChatStore((s) => s.showTopNotice)
   const probeRuntime = useChatStore((s) => s.probeRuntime)
-  const threads = useChatStore((s) => s.threads)
   const runtimeConnection = useChatStore((s) => s.runtimeConnection)
-  const refreshThreads = useChatStore((s) => s.refreshThreads)
   const selectThread = useChatStore((s) => s.selectThread)
   const archiveThread = useChatStore((s) => s.archiveThread)
   const deleteThread = useChatStore((s) => s.deleteThread)
-  const [category, setCategory] = useState<SettingsCategory>('general')
+  const [category, setCategory] = useState<SettingsCategory>(() => categoryForSettingsSection(settingsSection))
+  const previousSettingsSection = useRef<SettingsRouteSection>(settingsSection)
+  const providerDraftDirty = useRef(false)
+  const [providerDirty, setProviderDirty] = useState(false)
+  const providerActionsRef = useRef<ProviderSettingsActions | null>(null)
+  const [providerActions, setProviderActions] = useState<ProviderSettingsActions | null>(null)
+  const onProviderActionsChange = useCallback((actions: ProviderSettingsActions | null): void => {
+    providerActionsRef.current = actions
+    setProviderActions(actions)
+  }, [])
+  const onProviderDraftDirtyChange = useCallback((dirty: boolean): void => {
+    providerDraftDirty.current = dirty
+    setProviderDirty(dirty)
+  }, [])
+  const acceptSettingsSection = useCallback((section: SettingsRouteSection): boolean => {
+    const selected = categoryForSettingsSection(section)
+    if (category === 'providers' && selected !== category && providerDraftDirty.current) {
+      showTopNotice({ tone: 'info', message: t('modelProviderUnsavedChanges') })
+      useChatStore.getState().openSettings(previousSettingsSection.current)
+      return false
+    }
+    previousSettingsSection.current = section
+    setCategory(selected)
+    if (useChatStore.getState().settingsSection !== section) useChatStore.getState().openSettings(section)
+    return true
+  }, [category, showTopNotice, t])
+  const requestCategoryChange: typeof setCategory = (next) => {
+    acceptSettingsSection(typeof next === 'function' ? next(category) : next)
+  }
   const [form, setForm] = useState<AppSettingsV1 | null>(null)
   const settingsContentRef = useRef<HTMLDivElement | null>(null)
   const settingsLoaded = form !== null
@@ -114,6 +174,19 @@ export function SettingsView(): ReactElement {
   const [clawWorkspacePickerError, setClawWorkspacePickerError] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveActionPending, setSaveActionPending] = useState(false)
+  const saveActionInFlight = useRef(false)
+  const settingsWritesPending = useRef(0)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const keepEditingRef = useRef<HTMLButtonElement | null>(null)
+  const discardPromptOpener = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (confirmDiscard) keepEditingRef.current?.focus()
+    else if (discardPromptOpener.current?.isConnected) {
+      discardPromptOpener.current.focus({ preventScroll: true })
+      discardPromptOpener.current = null
+    }
+  }, [confirmDiscard])
   const [showRuntimeToken, setShowRuntimeToken] = useState(false)
   const [logPath, setLogPath] = useState('')
   const [logDirOpenError, setLogDirOpenError] = useState<string | null>(null)
@@ -138,13 +211,45 @@ export function SettingsView(): ReactElement {
   const [writeCompletionDebugSelectedId, setWriteCompletionDebugSelectedId] = useState<string | null>(null)
   const [writeDebugLoading, setWriteDebugLoading] = useState(false)
   const [writeDebugError, setWriteDebugError] = useState<string | null>(null)
-  const saveTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null)
-  const statusTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const statusTimer = useRef<ReturnType<Window['setTimeout']> | null>(null)
   const draftVersion = useRef(0)
+  const acceptedDraftVersion = useRef(0)
+  const runtimeRejectedDraftVersion = useRef<number | null>(null)
+  const settingsHostReadbackVersion = useRef(0)
+  const settingsSaveQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const settingsWriteRequest = useRef(0)
+  const settingsReadRequest = useRef(0)
+  const pendingSettingsWrite = useRef<{ request: number; version: number } | null>(null)
+  const profileDeletionIntents = useRef(new Map<string, number>())
+  const profileIntentRevision = useRef(0)
+  const settingsEntryActive = useRef(true)
+  const latestForm = useRef<AppSettingsV1 | null>(null)
+  const acceptedSettings = useRef<AppSettingsV1 | null>(null)
+  const settingsFormBaseline = useRef<AppSettingsV1 | null>(null)
+  const lastSubmittedDraft = useRef<{
+    version: number; form: AppSettingsV1; baseline: AppSettingsV1; accepted: AppSettingsV1
+  } | null>(null)
+  const hostRecoveryId = useRef(0)
+  const hostRecoveryPending = useRef(false)
+  const [recoveringHostSettings, setRecoveringHostSettings] = useState(false)
+  const memoryWorkspaceEpoch = useRef(0)
+  const memoryEntryEpoch = useRef(0)
+  const memoryListRequest = useRef(0)
+  const modelPreferencesReadback = useRef<AppSettingsV1['provider']['modelPreferences']>(undefined)
+  const applyForm = useCallback((next: AppSettingsV1): void => {
+    if (normalizeWorkspaceRoot(next.workspaceRoot) !== normalizeWorkspaceRoot(latestForm.current?.workspaceRoot)) {
+      memoryWorkspaceEpoch.current += 1
+      memoryListRequest.current += 1
+      setMemoryRecords([])
+    }
+    latestForm.current = next
+    setForm(next)
+  }, [])
   const agentsSectionRef = useRef<HTMLDivElement | null>(null)
   const skillSectionRef = useRef<HTMLDivElement | null>(null)
   const mcpSectionRef = useRef<HTMLDivElement | null>(null)
   const permissionsSectionRef = useRef<HTMLDivElement | null>(null)
+  const logsSectionRef = useRef<HTMLDivElement | null>(null)
   const setSkillNotice = useCallback((notice: InlineNotice | null): void => {
     setSkillNoticeState(notice)
     if (notice) showTopNotice({ tone: notice.tone, message: notice.message })
@@ -158,11 +263,25 @@ export function SettingsView(): ReactElement {
     if (notice) showTopNotice({ tone: notice.tone, message: notice.message })
   }, [showTopNotice])
   const formTheme = form?.theme
+  const formAccentColor = form?.accentColor
   const formUiFontScale = form?.uiFontScale
   const formMotionPreference = form?.motionPreference
   const formCursorSpotlight = form?.cursorSpotlight
   const writeTypography = form?.write?.typography
   const formWorkspaceRoot = form?.workspaceRoot
+  useLayoutEffect(() => {
+    memoryEntryEpoch.current += 1
+    return () => { memoryEntryEpoch.current += 1; memoryListRequest.current += 1 }
+  }, [category])
+  const captureMemoryOwner = useCallback((): MemoryProjectionOwner => ({
+    workspace: normalizeWorkspaceRoot(formWorkspaceRoot),
+    workspaceEpoch: memoryWorkspaceEpoch.current,
+    entryEpoch: memoryEntryEpoch.current
+  }), [formWorkspaceRoot])
+  const isCurrentMemoryOwner = useCallback((owner: MemoryProjectionOwner): boolean =>
+    settingsEntryActive.current && owner.workspaceEpoch === memoryWorkspaceEpoch.current &&
+    owner.entryEpoch === memoryEntryEpoch.current &&
+    owner.workspace === normalizeWorkspaceRoot(latestForm.current?.workspaceRoot), [])
   const formAnalytix = form ? getAnalytixRuntimeSettings(form) : null
   const formPort = formAnalytix?.port
   const formGuiUpdateChannel = form?.guiUpdate?.channel
@@ -190,32 +309,45 @@ export function SettingsView(): ReactElement {
     showTopNotice({ tone: 'error', message: saveError })
   }, [saveError, saveStatus, showTopNotice])
 
-  useEffect(() => {
-    let cancelled = false
+  const readSettingsForm = useCallback((uncached = false): void => {
+    const request = ++settingsReadRequest.current
+    const loadVersion = draftVersion.current
+    const loadWrite = settingsWriteRequest.current
+    const loadHostVersion = settingsHostReadbackVersion.current
+    const loadForm = latestForm.current
+    const isCurrent = (): boolean => settingsEntryActive.current && request === settingsReadRequest.current &&
+      loadVersion === draftVersion.current && loadWrite === settingsWriteRequest.current &&
+      loadHostVersion === settingsHostReadbackVersion.current && latestForm.current === loadForm
+    setLoadError(null)
     if (typeof window.analytix === 'undefined') {
       setLoadError('PRELOAD_BRIDGE')
       return
     }
-    void rendererRuntimeClient
-      .getSettings({ forceRefresh: true })
-      .then((s) => {
-        if (!cancelled) setForm(coerceRendererSettings(s))
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    void (uncached ? rendererRuntimeClient.readSettingsFromHost()
+      : rendererRuntimeClient.getSettings({ forceRefresh: true })).then(s => {
+      if (!isCurrent()) return
+      const next = coerceRendererSettings(s)
+      acceptedSettings.current = next
+      settingsFormBaseline.current = next
+      acceptedDraftVersion.current = loadVersion
+      modelPreferencesReadback.current = next.provider.modelPreferences
+      applyForm(next)
+      adoptPerformanceUsageHostReadback(next)
+    }).catch(() => { if (isCurrent()) setLoadError('SETTINGS_UNAVAILABLE') })
+  }, [applyForm])
+
+  useEffect(() => {
+    readSettingsForm()
+    return () => { settingsReadRequest.current += 1 }
+  }, [readSettingsForm])
 
   useEffect(() => {
     if (!formTheme || !formUiFontScale) return
-    applyTheme(formTheme)
+    applyTheme(formTheme, formAccentColor)
     applyUiFontScale(formUiFontScale)
     applyMotionPreference(formMotionPreference)
     applyCursorSpotlight(formCursorSpotlight !== false)
-  }, [formTheme, formUiFontScale, formMotionPreference, formCursorSpotlight])
+  }, [formTheme, formAccentColor, formUiFontScale, formMotionPreference, formCursorSpotlight])
 
   // Live-preview the Write editor typography as the form changes, mirroring the
   // theme/scale preview above. Keyed on the scalar fields so it only re-applies
@@ -231,13 +363,70 @@ export function SettingsView(): ReactElement {
   ])
 
   useEffect(() => {
+    const subscribe = window.analytix?.runtime?.onRuntimeStatus
+    if (typeof subscribe !== 'function') return
+    return subscribe(status => {
+      if (status.source !== 'settings-apply-rollback') return
+      if (!status.rolledBack && status.code !== 'settings_apply_failed') return
+      const version = draftVersion.current
+      const write = settingsWriteRequest.current
+      const visibleForm = latestForm.current
+      const pending = pendingSettingsWrite.current
+      if (!visibleForm || (acceptedDraftVersion.current !== version &&
+          !(pending?.request === write && pending.version === version))) return
+      runtimeRejectedDraftVersion.current = version
+      const hostVersion = ++settingsHostReadbackVersion.current
+      if (statusTimer.current) window.clearTimeout(statusTimer.current)
+      statusTimer.current = null
+      setSaveStatus('error')
+      setSaveError(t(status.rolledBack && status.code !== 'settings_rollback_failed' ? 'settingsRuntimeRolledBack' : 'settingsRuntimeRollbackFailed'))
+      const submitted = lastSubmittedDraft.current?.version === version ? lastSubmittedDraft.current : null
+      const failedForm = submitted?.form ?? visibleForm
+      if (submitted) {
+        // Keep the original field ownership: Host refreshes were never local
+        // edits, even if the committed readback briefly appeared before rollback.
+        settingsFormBaseline.current = submitted.baseline
+        applyForm(failedForm)
+      }
+      if (!status.rolledBack) return
+      if (submitted) acceptedSettings.current = submitted.accepted
+      const recovery = ++hostRecoveryId.current
+      hostRecoveryPending.current = true
+      setRecoveringHostSettings(true)
+      void rendererRuntimeClient.readSettingsFromHost().then(s => {
+        if (!settingsEntryActive.current || version !== draftVersion.current || write !== settingsWriteRequest.current ||
+            hostVersion !== settingsHostReadbackVersion.current || latestForm.current !== failedForm) return
+        const accepted = coerceRendererSettings(s)
+        rendererRuntimeClient.invalidateSettings()
+        modelPreferencesReadback.current = accepted.provider.modelPreferences
+        acceptedSettings.current = accepted
+        adoptPerformanceUsageHostReadback(accepted)
+      }).catch(() => undefined).finally(() => {
+        if (recovery !== hostRecoveryId.current) return
+        hostRecoveryPending.current = false
+        if (settingsEntryActive.current) setRecoveringHostSettings(false)
+      })
+    })
+  }, [applyForm, t])
+
+  useEffect(() => {
     const onSettingsChanged = (event: Event): void => {
       const next = (event as CustomEvent<AppSettingsV1>).detail
-      if (next) setForm(coerceRendererSettings(next))
+      if (next) {
+        settingsHostReadbackVersion.current += 1
+        const readback = coerceRendererSettings(next)
+        acceptedSettings.current = readback
+        modelPreferencesReadback.current = readback.provider.modelPreferences
+        // Host refreshes must not replace a newer local draft waiting for its own save.
+        if (acceptedDraftVersion.current === draftVersion.current && runtimeRejectedDraftVersion.current !== draftVersion.current) {
+          settingsFormBaseline.current = readback
+          applyForm(readback)
+        }
+      }
     }
     window.addEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)
     return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged)
-  }, [])
+  }, [applyForm])
 
   useEffect(() => {
     if (typeof window.analytix?.logs?.getPath !== 'function') return
@@ -270,79 +459,22 @@ export function SettingsView(): ReactElement {
   }, [category, loadWriteDebugEntries])
 
   useEffect(() => {
-    if (settingsSection === 'account') {
-      setCategory('account')
-      return
-    }
-    if (settingsSection === 'general') {
-      setCategory('general')
-      return
-    }
-    if (settingsSection === 'providers') {
-      setCategory('providers')
-      return
-    }
-    if (settingsSection === 'write') {
-      setCategory('write')
-      return
-    }
-    if (settingsSection === 'imageGeneration') {
-      setCategory('imageGeneration')
-      return
-    }
-    if (settingsSection === 'mediaGeneration') {
-      setCategory('mediaGeneration')
-      return
-    }
-    if (settingsSection === 'speechToText') {
-      setCategory('speechToText')
-      return
-    }
-    if (settingsSection === 'permissions') {
-      setCategory('permissions')
-      return
-    }
-    if (settingsSection === 'browser') {
-      setCategory('browser')
-      return
-    }
-    if (settingsSection === 'computerUse') {
-      setCategory('computerUse')
-      return
-    }
-    if (settingsSection === 'archives') {
-      setCategory('archives')
-      return
-    }
-    if (settingsSection === 'worktree') {
-      setCategory('worktree')
-      return
-    }
-    if (settingsSection === 'memory') {
-      setCategory('memory')
-      return
-    }
-    if (settingsSection === 'claw') {
-      setCategory('claw')
-      return
-    }
-    if (settingsSection === 'shortcuts') {
-      setCategory('shortcuts')
-      return
-    }
-    if (settingsSection === 'updates') {
-      setCategory('updates')
-      return
-    }
-    if (settingsSection === 'debug') {
-      setCategory('debug')
-      return
-    }
-    setCategory(settingsSection === 'agents' || settingsSection === 'skill' || settingsSection === 'mcp' ? 'agents' : 'general')
-  }, [settingsSection])
+    if (previousSettingsSection.current !== settingsSection) acceptSettingsSection(settingsSection)
+  }, [acceptSettingsSection, settingsSection])
 
   useEffect(() => {
     if (!settingsLoaded) return
+    if (settingsSection === 'debug') {
+      if (category !== 'general') return
+      const target = logsSectionRef.current
+      if (!target) return
+      const disclosure = target.closest('details')
+      if (disclosure) disclosure.open = true
+      const frame = window.requestAnimationFrame(() => {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' })
+      })
+      return () => window.cancelAnimationFrame(frame)
+    }
     if (
       settingsSection === 'account' ||
       settingsSection === 'general' ||
@@ -360,7 +492,6 @@ export function SettingsView(): ReactElement {
       settingsSection === 'claw' ||
       settingsSection === 'shortcuts' ||
       settingsSection === 'updates' ||
-      settingsSection === 'debug' ||
       category !== 'agents'
     ) {
       return
@@ -376,14 +507,16 @@ export function SettingsView(): ReactElement {
     const target = refs[settingsSection]
     if (!target) return
     const frame = window.requestAnimationFrame(() => {
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      target.scrollIntoView({ behavior: 'auto', block: 'start' })
     })
     return () => window.cancelAnimationFrame(frame)
   }, [category, settingsLoaded, settingsSection])
 
   useEffect(() => {
+    settingsEntryActive.current = true
     return () => {
-      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+      settingsEntryActive.current = false
+      draftVersion.current += 1
       if (statusTimer.current) window.clearTimeout(statusTimer.current)
     }
   }, [])
@@ -512,25 +645,29 @@ export function SettingsView(): ReactElement {
 
   const refreshAnalytixDiagnostics = useCallback(async (): Promise<void> => {
     const provider = getProvider()
+    const owner = captureMemoryOwner()
+    const request = ++memoryListRequest.current
     setRuntimeDiagnosticsBusy(true)
     setRuntimeDiagnosticsNotice(null)
     try {
       const loaded = await loadAnalytixDiagnostics(provider, {
-        workspace: normalizeWorkspaceRoot(formWorkspaceRoot)
+        workspace: owner.workspace
       })
       setRuntimeInfo(loaded.runtimeInfo)
       setToolDiagnostics(loaded.toolDiagnostics)
-      setMemoryRecords(loaded.memoryRecords)
-      if (loaded.errors.length > 0) {
+      const memoryCurrent = isCurrentMemoryOwner(owner) && request === memoryListRequest.current
+      if (memoryCurrent) setMemoryRecords(loaded.memoryRecords)
+      const errors = memoryCurrent ? loaded.errors : loaded.errors.filter((error) => !error.startsWith('Memory:'))
+      if (errors.length > 0) {
         setRuntimeDiagnosticsNotice({
           tone: 'error',
-          message: loaded.errors.join(' | ')
+          message: errors.join(' | ')
         })
       }
     } catch (error) {
       setRuntimeInfo(null)
       setToolDiagnostics(null)
-      setMemoryRecords([])
+      if (isCurrentMemoryOwner(owner) && request === memoryListRequest.current) setMemoryRecords([])
       setRuntimeDiagnosticsNotice({
         tone: 'error',
         message: error instanceof Error ? error.message : String(error)
@@ -538,7 +675,7 @@ export function SettingsView(): ReactElement {
     } finally {
       setRuntimeDiagnosticsBusy(false)
     }
-  }, [formWorkspaceRoot, setRuntimeDiagnosticsNotice])
+  }, [captureMemoryOwner, isCurrentMemoryOwner, setRuntimeDiagnosticsNotice])
 
   useEffect(() => {
     if (category !== 'agents' && category !== 'browser' && category !== 'memory') return
@@ -569,12 +706,17 @@ export function SettingsView(): ReactElement {
   }): Promise<boolean> => {
     const provider = getProvider()
     if (typeof provider.createMemory !== 'function') return false
+    const owner = captureMemoryOwner()
+    if (!isCurrentMemoryOwner(owner)) return false
     try {
-      const memory = await provider.createMemory(input)
-      setMemoryRecords((records) => [memory, ...records])
+      const memory = await provider.createMemory({ ...input, workspace: owner.workspace })
+      if (isCurrentMemoryOwner(owner)) {
+        memoryListRequest.current += 1
+        setMemoryRecords((records) => [memory, ...records])
+      }
       return true
     } catch (error) {
-      setRuntimeDiagnosticsNotice({
+      if (isCurrentMemoryOwner(owner)) setRuntimeDiagnosticsNotice({
         tone: 'error',
         message: error instanceof Error ? error.message : String(error)
       })
@@ -588,12 +730,16 @@ export function SettingsView(): ReactElement {
   ): Promise<boolean> => {
     const provider = getProvider()
     if (typeof provider.updateMemory !== 'function') return false
+    const owner = captureMemoryOwner()
     try {
       const memory = await provider.updateMemory(memoryId, patch)
-      setMemoryRecords((records) => records.map((record) => (record.id === memoryId ? memory : record)))
+      if (isCurrentMemoryOwner(owner)) {
+        memoryListRequest.current += 1
+        setMemoryRecords((records) => records.map((record) => (record.id === memoryId ? memory : record)))
+      }
       return true
     } catch (error) {
-      setRuntimeDiagnosticsNotice({
+      if (isCurrentMemoryOwner(owner)) setRuntimeDiagnosticsNotice({
         tone: 'error',
         message: error instanceof Error ? error.message : String(error)
       })
@@ -604,11 +750,15 @@ export function SettingsView(): ReactElement {
   const disableMemoryRecord = async (memoryId: string): Promise<void> => {
     const provider = getProvider()
     if (typeof provider.updateMemory !== 'function') return
+    const owner = captureMemoryOwner()
     try {
       const memory = await provider.updateMemory(memoryId, { disabled: true })
-      setMemoryRecords((records) => records.map((record) => record.id === memoryId ? memory : record))
+      if (isCurrentMemoryOwner(owner)) {
+        memoryListRequest.current += 1
+        setMemoryRecords((records) => records.map((record) => record.id === memoryId ? memory : record))
+      }
     } catch (error) {
-      setRuntimeDiagnosticsNotice({
+      if (isCurrentMemoryOwner(owner)) setRuntimeDiagnosticsNotice({
         tone: 'error',
         message: error instanceof Error ? error.message : String(error)
       })
@@ -618,11 +768,15 @@ export function SettingsView(): ReactElement {
   const deleteMemoryRecord = async (memoryId: string): Promise<void> => {
     const provider = getProvider()
     if (typeof provider.deleteMemory !== 'function') return
+    const owner = captureMemoryOwner()
     try {
       await provider.deleteMemory(memoryId)
-      setMemoryRecords((records) => records.filter((record) => record.id !== memoryId))
+      if (isCurrentMemoryOwner(owner)) {
+        memoryListRequest.current += 1
+        setMemoryRecords((records) => records.filter((record) => record.id !== memoryId))
+      }
     } catch (error) {
-      setRuntimeDiagnosticsNotice({
+      if (isCurrentMemoryOwner(owner)) setRuntimeDiagnosticsNotice({
         tone: 'error',
         message: error instanceof Error ? error.message : String(error)
       })
@@ -635,151 +789,282 @@ export function SettingsView(): ReactElement {
       skill: skillSectionRef.current,
       mcp: mcpSectionRef.current
     }
-    refs[target]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    refs[target]?.scrollIntoView({ behavior: 'auto', block: 'start' })
   }
 
-  const persistSettings = async (snapshot: AppSettingsV1, version: number): Promise<void> => {
-    if (!hasValidPort(snapshot)) return
-    setSaveStatus('saving')
-    setSaveError(null)
+  const finishSettingsWrite = (): void => {
+    settingsWritesPending.current -= 1
+    if (settingsEntryActive.current && settingsWritesPending.current === 0) {
+      setSaveStatus(current => current === 'saving' ? 'idle' : current)
+    }
+  }
 
-    try {
-      const next = coerceRendererSettings(await rendererRuntimeClient.setSettings(snapshot))
-      if (version !== draftVersion.current) return
-
-      setForm(next)
+  const persistSettings = (
+    snapshot: AppSettingsV1,
+    version: number
+  ): Promise<AppSettingsV1> => {
+    const savedVersion = version
+    settingsWritesPending.current += 1
+    let saveRequest = 0
+    let saveCompletionHostVersion: number | null = null
+    const pending = settingsSaveQueue.current.then(async () => {
+      if (!settingsEntryActive.current) throw new Error('Settings entry is no longer current.')
+      if (version !== draftVersion.current) return latestForm.current ?? snapshot
+      const current = snapshot
+      if (!hasValidPort(current)) throw new Error('Invalid runtime port.')
+      saveRequest = ++settingsWriteRequest.current
+      setSaveStatus('saving')
+      setSaveError(null)
+      pendingSettingsWrite.current = { request: saveRequest, version: savedVersion }
+      const saveHostVersion = settingsHostReadbackVersion.current
+      saveCompletionHostVersion = saveHostVersion
+      const baseline = settingsFormBaseline.current ?? current
+      const patch = ordinaryDraftPatch(baseline, current)
+      lastSubmittedDraft.current = { version: savedVersion, form: current, baseline,
+        accepted: acceptedSettings.current ?? baseline }
+      const profiles = getAnalytixRuntimeSettings(current).subagents.profiles
+      const deletionIntents = new Map(profileDeletionIntents.current)
+      const removedProfiles = Object.fromEntries([...deletionIntents.keys()]
+        .filter(name => !Object.hasOwn(profiles, name)).map(name => [name, null]))
+      if (Object.keys(removedProfiles).length) patch.runtime = { ...patch.runtime, subagents: { ...patch.runtime?.subagents,
+        profiles: { ...patch.runtime?.subagents?.profiles, ...removedProfiles } } }
+      const next = coerceRendererSettings(await rendererRuntimeClient.setSettings(patch))
+      if (!settingsEntryActive.current || saveHostVersion !== settingsHostReadbackVersion.current) return next
+      for (const [name, intent] of deletionIntents) {
+        if (!Object.hasOwn(getAnalytixRuntimeSettings(next).subagents.profiles, name) &&
+            profileDeletionIntents.current.get(name) === intent) profileDeletionIntents.current.delete(name)
+      }
+      modelPreferencesReadback.current = next.provider.modelPreferences
+      acceptedSettings.current = next
+      settingsFormBaseline.current = next
+      adoptPerformanceUsageHostReadback(next)
+      if (savedVersion !== draftVersion.current) return next
+      applyForm(next)
       emitRendererSettingsChanged(next)
+      const acceptedHostVersion = settingsHostReadbackVersion.current
+      saveCompletionHostVersion = acceptedHostVersion
       await applyI18n(next.locale)
+      if (!settingsEntryActive.current || savedVersion !== draftVersion.current ||
+          acceptedHostVersion !== settingsHostReadbackVersion.current) return next
+      acceptedDraftVersion.current = savedVersion
       void reloadUiSettings()
       void probeRuntime('background')
-      if (version !== draftVersion.current) return
-
       setSaveStatus('saved')
       if (statusTimer.current) window.clearTimeout(statusTimer.current)
       statusTimer.current = window.setTimeout(() => {
-        if (version === draftVersion.current) setSaveStatus('idle')
+        if (settingsEntryActive.current && savedVersion === draftVersion.current) setSaveStatus('idle')
         statusTimer.current = null
       }, 1500)
-    } catch (e) {
-      if (version !== draftVersion.current) return
-      const message = e instanceof Error ? e.message : String(e)
-      setSaveError(message)
-      setSaveStatus('error')
-      void window.analytix?.logs?.error?.('settings', 'Failed to apply settings', { message }).catch(() => undefined)
+      return next
+    }).catch((error: unknown) => {
+      if (settingsEntryActive.current && savedVersion === draftVersion.current &&
+          (saveCompletionHostVersion === null || saveCompletionHostVersion === settingsHostReadbackVersion.current)) {
+        setSaveError(t('settingsSaveFailed'))
+        setSaveStatus('error')
+        void window.analytix?.logs?.error?.('settings', 'Failed to apply settings', { code: 'SETTINGS_APPLY_FAILED' }).catch(() => undefined)
+        const failedForm = latestForm.current
+        const failedHostReadbackVersion = settingsHostReadbackVersion.current
+        // Read the Host directly: recovery must neither hold the save queue nor overwrite its query cache.
+        if (saveRequest !== 0) {
+          const recovery = ++hostRecoveryId.current
+          hostRecoveryPending.current = true
+          setRecoveringHostSettings(true)
+          void (async () => {
+            try {
+              const accepted = coerceRendererSettings(await rendererRuntimeClient.readSettingsFromHost())
+              if (settingsEntryActive.current && saveRequest === settingsWriteRequest.current &&
+                  savedVersion === draftVersion.current &&
+                  failedHostReadbackVersion === settingsHostReadbackVersion.current &&
+                  failedForm && latestForm.current === failedForm) {
+                // Failed IPC may follow a Host commit: retire stale cached settings only for this current recovery.
+                rendererRuntimeClient.invalidateSettings()
+                // Recover accepted preview values while retaining the failed form and its error.
+                acceptedSettings.current = accepted
+                adoptPerformanceUsageHostReadback(accepted)
+              }
+            } catch { /* Keep the last accepted preview and the failed local draft. */ }
+          })().finally(() => {
+            if (recovery !== hostRecoveryId.current) return
+            hostRecoveryPending.current = false
+            if (settingsEntryActive.current) setRecoveringHostSettings(false)
+          })
+        }
+      }
+      throw error
+    })
+    // A failed write is drained; it cannot poison the next normal save.
+    const retireWrite = (): void => {
+      finishSettingsWrite()
+      if (pendingSettingsWrite.current?.request === saveRequest) pendingSettingsWrite.current = null
     }
+    settingsSaveQueue.current = pending.then(retireWrite, retireWrite)
+    return pending
   }
 
-  const scheduleSave = (next: AppSettingsV1): void => {
-    draftVersion.current += 1
-    const version = draftVersion.current
+  // Provider model preferences are an explicit, independent facade action. Save
+  // only that patch so a Registry readback cannot commit unrelated form drafts.
+  const saveModelPreferences = (partial: SettingsPatch): Promise<AppSettingsV1> => {
+    if (!latestForm.current || !settingsEntryActive.current) {
+      return Promise.reject(new Error('Settings entry is unavailable.'))
+    }
+    settingsWritesPending.current += 1
+    setSaveStatus('saving')
+    const pending = settingsSaveQueue.current.then(async () => {
+      if (!settingsEntryActive.current) throw new Error('Settings entry is no longer current.')
+      const hostVersion = settingsHostReadbackVersion.current
+      const next = coerceRendererSettings(await rendererRuntimeClient.setSettings(ordinarySettingsPatch(partial)))
+      if (!settingsEntryActive.current || hostVersion !== settingsHostReadbackVersion.current) return next
+      acceptedSettings.current = next
+      modelPreferencesReadback.current = next.provider.modelPreferences
+      if (acceptedDraftVersion.current === draftVersion.current) {
+        settingsFormBaseline.current = next
+        applyForm(next)
+      }
+      else if (latestForm.current) applyForm(mergeSettings(latestForm.current, {
+        provider: { modelPreferences: next.provider.modelPreferences }
+      }))
+      emitRendererSettingsChanged(next)
+      setSaveStatus('idle')
+      return next
+    }).catch((error: unknown) => {
+      if (settingsEntryActive.current) {
+        setSaveStatus('error')
+        setSaveError(t('settingsSaveFailed'))
+      }
+      throw error
+    })
+    settingsSaveQueue.current = pending.then(finishSettingsWrite, finishSettingsWrite)
+    return pending
+  }
 
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
+  const markDraftChanged = (): void => {
+    draftVersion.current += 1
     if (statusTimer.current) window.clearTimeout(statusTimer.current)
     statusTimer.current = null
+    setSaveStatus('idle')
     setSaveError(null)
-
-    if (!hasValidPort(next)) {
-      setSaveStatus('idle')
-      return
-    }
-
-    setSaveStatus('saving')
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null
-      void persistSettings(next, version)
-    }, 450)
   }
 
-  const flushPendingSave = async (): Promise<void> => {
-    if (!form || !hasValidPort(form)) return
+  const restorePreview = (settings: AppSettingsV1): void => {
+    applyTheme(settings.theme, settings.accentColor)
+    applyUiFontScale(settings.uiFontScale)
+    applyMotionPreference(settings.motionPreference)
+    applyCursorSpotlight(settings.cursorSpotlight !== false)
+    applyWriteTypography(settings.write.typography)
+    adoptPerformanceUsageHostReadback(settings)
+    void applyI18n(settings.locale)
+  }
+
+  const saving = saveActionPending || recoveringHostSettings || saveStatus === 'saving' || providerActions?.busy === true
+  const ordinaryDraftDirty = acceptedDraftVersion.current !== draftVersion.current || runtimeRejectedDraftVersion.current === draftVersion.current
+  const hasUnsavedChanges = ordinaryDraftDirty || providerDirty || providerActions?.dirty === true
+
+  const discardAndClose = (): void => {
+    // A dispatched write cannot be cancelled. Keep the modal open until it
+    // settles, and fence every queued/read callback before leaving.
+    if (saveActionInFlight.current || settingsWritesPending.current > 0 || hostRecoveryPending.current || providerActionsRef.current?.busy) return
+    providerActionsRef.current?.discard()
+    settingsEntryActive.current = false
     draftVersion.current += 1
-    const version = draftVersion.current
-
-    if (saveTimer.current) {
-      window.clearTimeout(saveTimer.current)
-      saveTimer.current = null
-    }
-    if (statusTimer.current) {
-      window.clearTimeout(statusTimer.current)
-      statusTimer.current = null
-    }
-
-    await persistSettings(form, version)
+    settingsReadRequest.current += 1
+    profileDeletionIntents.current.clear()
+    if (statusTimer.current) window.clearTimeout(statusTimer.current)
+    statusTimer.current = null
+    if (acceptedSettings.current) restorePreview(acceptedSettings.current)
+    setRoute(settingsReturnRoute)
   }
 
   const goBack = (): void => {
-    void (async () => {
-      await flushPendingSave()
-      await reloadUiSettings()
-      if (settingsReturnRoute === 'write') {
-        await openWrite()
-        return
-      }
-      if (settingsReturnRoute === 'claw') {
-        openClaw()
-        return
-      }
-      if (settingsReturnRoute === 'schedule') {
-        openSchedule()
-        return
-      }
-      if (settingsReturnRoute === 'plugins') {
-        setRoute('plugins')
-        return
-      }
-      await openCode()
-    })()
+    if (saving || saveActionInFlight.current || settingsWritesPending.current > 0 || hostRecoveryPending.current || providerActionsRef.current?.busy) return
+    if (confirmDiscard) { setConfirmDiscard(false); return }
+    if (hasUnsavedChanges) {
+      discardPromptOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      setConfirmDiscard(true)
+      return
+    }
+    discardAndClose()
   }
 
-  const navigateFromSettings = (destination: 'chat' | 'plugins' | 'schedule'): void => {
-    void (async () => {
-      await flushPendingSave()
-      await reloadUiSettings()
-      if (destination === 'plugins') openPlugins()
-      else if (destination === 'schedule') openSchedule()
-      else await openCode()
-    })()
+  const savePreferences = async (): Promise<void> => {
+    if (saveActionInFlight.current || settingsWritesPending.current > 0 || hostRecoveryPending.current || providerActionsRef.current?.busy) return
+    const current = latestForm.current
+    if (!current || !hasValidPort(current)) return
+    saveActionInFlight.current = true
+    setSaveActionPending(true)
+    setSaveError(null)
+    const retryRejectedDraft = runtimeRejectedDraftVersion.current === draftVersion.current
+    runtimeRejectedDraftVersion.current = null
+    let submittedVersion: number | null = null
+    try {
+      // Registry/SecretStore remains the sole credential authority. Its facade
+      // owns key preservation and readback; ordinary settings never receive keys.
+      const actions = providerActionsRef.current
+      if (actions?.dirty && !await actions.save()) {
+        // A nested provider editor may still need Apply. The provider owns its
+        // precise error or pending message; false never means discard or close.
+        setSaveStatus('idle')
+        return
+      }
+      const snapshot = latestForm.current
+      if (snapshot && (acceptedDraftVersion.current !== draftVersion.current || retryRejectedDraft)) {
+        const version = draftVersion.current
+        submittedVersion = version
+        await persistSettings(snapshot, version)
+        if (!settingsEntryActive.current || version !== draftVersion.current ||
+            acceptedDraftVersion.current !== version || runtimeRejectedDraftVersion.current === version) return
+      }
+      if (settingsEntryActive.current) setSaveStatus('saved')
+    } catch {
+      // The owning persistence seam keeps the failed draft and error visible.
+      if (settingsEntryActive.current && submittedVersion === null) {
+        setSaveStatus('error')
+        setSaveError(t('settingsSaveFailed'))
+      }
+    } finally {
+      saveActionInFlight.current = false
+      if (settingsEntryActive.current) setSaveActionPending(false)
+    }
   }
 
-  const openOnboardingPreview = (): void => {
-    void (async () => {
-      await flushPendingSave()
-      openInitialSetup('preview')
-    })()
-  }
+  const openProviderSettings = (): void => { acceptSettingsSection('providers') }
 
   if (loadError) {
     const msg =
-      loadError === 'PRELOAD_BRIDGE' ? t('preloadBridgeError') : t('loadFailed', { message: loadError })
+      loadError === 'PRELOAD_BRIDGE' ? t('preloadBridgeError') : t('settingsReadFailed')
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 bg-ds-main p-6 text-center">
-        <p className="max-w-md text-sm text-red-700 dark:text-red-300">{msg}</p>
-        <button
-          type="button"
-          className="rounded-xl bg-ds-userbubble px-4 py-2 text-sm font-medium text-ds-userbubbleFg"
-          onClick={goBack}
-        >
-          {t('back')}
-        </button>
-      </div>
+      <Dialog open title={t('title')} width={678} className="ax-settings-modal" maskClassName="ax-settings-modal-mask"
+        closeLabel="×" closeAriaLabel={t('settingsClose')} onClose={goBack}>
+        <div className="ax-settings-content flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <p role="alert">{msg}</p>
+          <button type="button" className="ax-settings-save" onClick={() => readSettingsForm(true)}>{t('settingsReadRetry')}</button>
+          <button type="button" className="ax-settings-cancel" onClick={discardAndClose}>{t('settingsCancel')}</button>
+        </div>
+      </Dialog>
     )
   }
 
   if (!form) {
-    return <AnalytixLoadingPage fillParent label={t('loading')} />
+    return <Dialog open title={t('title')} width={678} className="ax-settings-modal" maskClassName="ax-settings-modal-mask"
+      closeLabel="×" closeAriaLabel={t('settingsClose')} onClose={goBack}>
+      <AnalytixLoadingPage fillParent label={t('loading')} />
+    </Dialog>
   }
 
   const analytix = getAnalytixRuntimeSettings(form)
   const provider = getModelProviderSettings(form)
 
   const update = (partial: SettingsPatch): void => {
-    const next = mergeSettings(form, partial)
-    setForm(next)
+    for (const [name, profile] of Object.entries(partial.runtime?.subagents?.profiles ?? {})) {
+      if (profile === null) profileDeletionIntents.current.set(name, ++profileIntentRevision.current)
+      else profileDeletionIntents.current.delete(name)
+    }
+    const next = mergeSettings(latestForm.current ?? form, partial)
+    applyForm(next)
     if (partial.locale) void applyI18n(partial.locale)
     if (partial.guiUpdate?.channel && partial.guiUpdate.channel !== form.guiUpdate.channel) {
       resetGuiUpdateState()
     }
-    scheduleSave(next)
+    markDraftChanged()
   }
 
   const sharedBaseUrl = provider.baseUrl
@@ -904,6 +1189,8 @@ export function SettingsView(): ReactElement {
     provider,
     analytix,
     update,
+    saveModelPreferences,
+    modelPreferencesReadback: modelPreferencesReadback.current,
     updateAnalytix,
     updateSharedProvider,
     sharedBaseUrl,
@@ -911,7 +1198,7 @@ export function SettingsView(): ReactElement {
     setShowRuntimeToken,
     portError,
     selectControlClass,
-    openOnboardingPreview,
+    openProviderSettings,
     pickWorkspace,
     resetWorkspaceToDefault,
     workspacePickerError,
@@ -926,6 +1213,7 @@ export function SettingsView(): ReactElement {
     downloadGuiUpdate,
     installGuiUpdate,
     logPath,
+    logsSectionRef,
     logDirOpenError,
     setLogDirOpenError,
     pickWriteWorkspace,
@@ -948,7 +1236,9 @@ export function SettingsView(): ReactElement {
     skillNotice,
     openSkillRoot,
     openPlugins,
-    openSettingsSection: setCategory,
+    openSettingsSection: requestCategoryChange,
+    onProviderDraftDirtyChange,
+    onProviderActionsChange,
     mcpConfigPath,
     mcpConfigExists,
     mcpConfigText,
@@ -975,70 +1265,76 @@ export function SettingsView(): ReactElement {
     clawWorkspacePickerError,
     splitSettingsList,
     listSettingsText,
-    threads,
     showTopNotice,
     runtimeReady: runtimeConnection === 'ready',
     locale: form.locale,
-    refreshThreads,
     openCode,
     selectThread,
     archiveThread,
     deleteThread
   }
 
+  const footer = confirmDiscard ? (
+    <div className="ax-settings-footer">
+      <div className="ax-settings-footer-actions">
+        <button ref={keepEditingRef} type="button" className="ax-settings-cancel" onClick={() => setConfirmDiscard(false)}>
+          {t('settingsKeepEditing')}
+        </button>
+        <button type="button" className="ax-settings-save" onClick={discardAndClose}>
+          {t('settingsDiscard')}
+        </button>
+      </div>
+    </div>
+  ) : (
+    <div className="ax-settings-footer">
+      {category === 'general' ? <button type="button" className="ax-settings-reset" disabled={saving}
+        title={t('settingsResetAppearanceDescription')}
+        onClick={() => update({ theme: 'light', accentColor: DEFAULT_APP_ACCENT_COLOR, uiFontScale: 'small',
+          motionPreference: DEFAULT_APP_MOTION_PREFERENCE, cursorSpotlight: true })}>
+        <span aria-hidden="true">↶</span> {t('settingsResetAppearance')}
+      </button> : <span />}
+      <span className="ax-settings-save-status" role="status" aria-live="polite" aria-atomic="true"
+        data-tone={saveStatus === 'error' || portError ? 'error' : undefined}>
+        {portError || (saveStatus === 'error' ? saveError || t('settingsSaveFailed')
+          : saving ? t('settingsSaving') : hasUnsavedChanges ? t('settingsUnsavedChanges')
+            : saveStatus === 'saved' ? t('settingsSaved') : '')}
+      </span>
+      <div className="ax-settings-footer-actions">
+        <button type="button" className="ax-settings-cancel" disabled={saving} onClick={discardAndClose}>
+          {t('settingsCancel')}
+        </button>
+        <button type="button" className="ax-settings-save" disabled={saving || !!portError || !hasUnsavedChanges}
+          onClick={() => { void savePreferences() }}>
+          {saving ? t('settingsSaving') : t('settingsSavePreferences')}
+        </button>
+      </div>
+    </div>
+  )
+
   return (
-    <div className="ds-product-body ds-settings-layout ds-drag flex h-full min-h-0 w-full min-w-0 bg-ds-main">
-      <NavigationRail active="settings"
-        onChat={() => navigateFromSettings('chat')}
-        onPlugins={() => navigateFromSettings('plugins')}
-        onSchedule={() => navigateFromSettings('schedule')}
-        onSettings={() => setCategory('general')}
-      />
-      <SettingsSidebar category={category} setCategory={setCategory} goBack={goBack} t={t} />
-
-      <div ref={settingsContentRef} className="ds-settings-content ds-page-scroll-edge ds-no-drag min-h-0 min-w-0 flex-1 overflow-y-auto px-10 py-10">
-        <div className={`mx-auto ${category === 'account' ? 'max-w-[732px]' : 'max-w-3xl'}`}>
-          {category !== 'account' && category !== 'browser' && category !== 'computerUse' ? (
-            <div className="mb-8 flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight text-ds-ink">{t(settingsCategoryLabelKey(category))}</h1>
-                <p className="mt-1 text-[14px] text-ds-muted">{t('subtitle')}</p>
-              </div>
-              <span
-                title={saveStatus === 'error' && saveError ? saveError : undefined}
-                className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-medium ${
-                  portError
-                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-200'
-                    : saveStatus === 'saved'
-                      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200'
-                      : saveStatus === 'error'
-                        ? 'bg-red-500/15 text-red-700 dark:text-red-200'
-                        : 'bg-ds-subtle text-ds-muted'
-                }`}
-              >
-                {portError
-                  ? t('autoApplyBlocked')
-                  : saveStatus === 'saving'
-                    ? t('applying')
-                    : saveStatus === 'saved'
-                      ? t('applied')
-                      : saveStatus === 'error'
-                        ? t('applyFailed')
-                        : t('autoApplyHint')}
-              </span>
-            </div>
-          ) : null}
-
+    <Dialog open title={t('title')} width={678} className="ax-settings-modal" maskClassName="ax-settings-modal-mask"
+      closeLabel="×" closeAriaLabel={t('settingsClose')} onClose={goBack} footer={footer}>
+      {confirmDiscard ? <div className="ax-settings-discard-prompt" role="alert">
+        <h2>{t('settingsDiscardTitle')}</h2>
+        <p>{t('settingsDiscardDescription')}</p>
+      </div> : null}
+      <div className="ax-settings-panel" hidden={confirmDiscard}>
+        <fieldset disabled={saving} className="ax-settings-fields">
+          <SettingsSidebar category={category} setCategory={requestCategoryChange} goBack={goBack} t={t} />
+          <div ref={settingsContentRef} id="ax-settings-tabpanel" role="tabpanel"
+            aria-labelledby={`ax-settings-tab-${settingsTabForCategory(category).id}`} className="ax-settings-content">
           {category === 'account' ? (
             <Suspense fallback={<AnalytixLoadingPage />}>
               <DeprecatedHubCompatibilitySection ctx={settingsSectionContext} />
             </Suspense>
           ) : null}
           {category === 'general' ? <GeneralSettingsSection ctx={settingsSectionContext} /> : null}
-          {category === 'providers' ? <ProvidersSettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'providers' ? <>
+            <p className="mb-4 text-[13px] text-ds-muted">{t('modelProviderManualSaveHint')}</p>
+            <ProvidersSettingsSection ctx={settingsSectionContext} />
+          </> : null}
           {category === 'write' ? <WriteSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'imageGeneration' ? <ImageGenerationSettingsSection ctx={settingsSectionContext} /> : null}
-          {category === 'mediaGeneration' ? <MediaGenerationSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'speechToText' ? <SpeechToTextSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'agents' ? <AgentsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'permissions' ? <PermissionsSettingsSection ctx={settingsSectionContext} /> : null}
@@ -1050,8 +1346,8 @@ export function SettingsView(): ReactElement {
           {category === 'shortcuts' ? <KeyboardShortcutsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'claw' ? <ClawSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'updates' ? <UpdatesSettingsSection ctx={settingsSectionContext} /> : null}
-          {category === 'debug' ? <LlmDebugSettingsSection ctx={settingsSectionContext} /> : null}
-        </div>
+          </div>
+        </fieldset>
       </div>
       {writeDebugModalOpen ? (
         <WriteDebugLogModal
@@ -1066,6 +1362,6 @@ export function SettingsView(): ReactElement {
           t={t}
         />
       ) : null}
-    </div>
+    </Dialog>
   )
 }

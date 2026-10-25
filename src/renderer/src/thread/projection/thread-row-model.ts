@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { ChatBlock, RuntimeConnectionStatus, ToolBlock } from '../../agent/types'
+import type { AuthoritativeTurnStatus, ChatBlock, RuntimeConnectionStatus, ToolBlock } from '../../agent/types'
 import type { TurnSections } from './derive-turn-sections'
 import type { ThreadTurn } from './thread-turns'
 
@@ -14,6 +14,9 @@ export type ThreadRowKind =
   | 'bottomSpacer'
 
 export type ThreadTurnTiming = {
+  status?: AuthoritativeTurnStatus
+  runningStartedAt?: number
+  /** Only terminal Go timestamps may populate this fact. */
   durationMs?: number
 }
 

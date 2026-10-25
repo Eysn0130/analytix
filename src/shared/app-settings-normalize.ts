@@ -2,6 +2,8 @@ import {
   DEFAULT_GUI_UPDATE_CHANNEL,
   DEFAULT_APP_MOTION_PREFERENCE,
   normalizeAppMotionPreference,
+  normalizeAppAccentColor,
+  normalizePerformanceUsageMode,
   normalizeGuiUpdateChannel,
   type AppBehaviorConfigV1,
   type AppSettingsV1,
@@ -88,7 +90,9 @@ export function normalizeAppSettings(settings: AppSettingsV1): AppSettingsV1 {
       maybeSettings.uiFontScale === 'large'
         ? maybeSettings.uiFontScale
         : 'small',
+    accentColor: normalizeAppAccentColor(maybeSettings.accentColor),
     motionPreference: normalizeAppMotionPreference(maybeSettings.motionPreference ?? DEFAULT_APP_MOTION_PREFERENCE),
+    performanceUsageMode: normalizePerformanceUsageMode(maybeSettings.performanceUsageMode),
     cursorSpotlight: maybeSettings.cursorSpotlight !== false,
     provider: providerSettings,
     runtime: {

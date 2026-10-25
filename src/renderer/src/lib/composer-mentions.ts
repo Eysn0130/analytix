@@ -55,7 +55,7 @@ export const COMPOSER_PLUGIN_MENTION_PREFIX = 'plugin://'
 export const COMPOSER_SKILL_MENTION_PREFIX = 'skill://'
 
 const AT_MENTION_BOUNDARY = /(^|[\s([{，。；：、])@([^\s@"'\])]*)$/u
-const QUOTED_AT_MENTION_BOUNDARY = /(^|[\s([{，。；：、])@"([^"\n\r]*)$/u
+const QUOTED_AT_MENTION_BOUNDARY = /(^|[\s([{，。；：、])@"((?:\\[^\n\r]|[^"\\\n\r])*\\?)$/u
 // Keep escape pairs disjoint from ordinary URI characters, including for
 // incomplete user input that has no closing parenthesis.
 const COMPOSER_LINK_MENTION = /([@$])\[((?:\\.|[^\]\\])*)\]\(((?:\\.|[^)\s\\])*)\)/gu
@@ -85,8 +85,9 @@ export function getComposerAtMentionAtCursor(input: string, cursor: number): Com
   const beforeCursor = input.slice(0, boundedCursor)
   const quoted = QUOTED_AT_MENTION_BOUNDARY.exec(beforeCursor)
   if (quoted) {
-    const query = quoted[2] ?? ''
-    const start = boundedCursor - query.length - 2
+    const rawQuery = quoted[2] ?? ''
+    const start = boundedCursor - rawQuery.length - 2
+    const query = rawQuery.replace(/\\(["\\])/gu, '$1')
     return { start, end: boundedCursor, query, quoted: true }
   }
 
@@ -95,6 +96,14 @@ export function getComposerAtMentionAtCursor(input: string, cursor: number): Com
   const query = plain[2] ?? ''
   const start = boundedCursor - query.length - 1
   return { start, end: boundedCursor, query, quoted: false }
+}
+
+/** An unfinished @ path for directory navigation; selecting a reference still closes the token. */
+export function formatComposerDirectoryQuery(directory: string, quoted = false): string {
+  const query = directory ? `${directory.replace(/\/+$/u, '')}/` : ''
+  return quoted || /[\s@"')\]]/u.test(query)
+    ? `@"${query.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}`
+    : `@${query}`
 }
 
 export function formatComposerPluginMentionToken(displayName: string, pluginId: string): string {
@@ -246,4 +255,68 @@ export function getComposerMentionDisplayPlan(input: string): ComposerMentionDis
     editableValue: input.slice(cursor),
     parts
   }
+}
+
+export type UserMessageDisplayPart = ComposerMentionDisplayPart
+  | { kind: 'file'; key: string; start: number; end: number; label: string; path: string; display: string; directory: boolean }
+  | { kind: 'loaded-skill'; key: string; start: number; end: number; skillId: string }
+
+/** Sent-text projection only; composer editing keeps its existing wire-token plan.
+ * Adapted from DeepSeek Harness user-text.tsx at 5badb15009ae1756c3afe0ae0cef1faafc290ccc.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md and the pinned provenance ledger.
+ * Decoration never grants file/skill navigation authority. */
+export function getUserMessageDisplayParts(input: string, loadedSkillIds: readonly string[] = []): UserMessageDisplayPart[] {
+  const wire = getComposerMentionDisplayPlan(input).parts.filter(part => part.kind !== 'text')
+  const atoms: UserMessageDisplayPart[] = [...wire]
+  const loaded = new Set(loadedSkillIds)
+  let wireCursor = 0
+  // Keep escaped quote/backslash pairs disjoint from ordinary quoted path text.
+  const tokenPattern = /(^|\s)(\/(?:skill:)?[\w.-]+(?=\s|$)|@"(?:\\[^\r\n]|[^"\\\r\n])+"|@[^\s]+)/gu
+  for (const match of input.matchAll(tokenPattern)) {
+    const raw = match[2]!
+    const start = match.index! + match[1]!.length
+    const label = raw.startsWith('@"') ? raw : raw.replace(/[.,;:!?，。；：！？]+$/u, '')
+    const end = start + label.length
+    while (wireCursor < wire.length && wire[wireCursor]!.end <= start) wireCursor += 1
+    const coveringWire = wire[wireCursor]
+    if (label.length <= 1 || coveringWire && start < coveringWire.end && end > coveringWire.start) continue
+    if (label.startsWith('/')) {
+      const skillId = label.startsWith('/skill:') ? label.slice(7) : label.slice(1)
+      if (loaded.has(skillId)) atoms.push({ kind: 'loaded-skill', key: `loaded-skill:${start}:${end}`, start, end, skillId })
+      continue
+    }
+    const quoted = label.startsWith('@"')
+    if (quoted && !label.endsWith('"')) continue
+    const path = quoted ? label.slice(2, -1).replace(/\\(["\\])/gu, '$1') : label.slice(1)
+    if (!path) continue
+    atoms.push({ kind: 'file', key: `file:${start}:${end}`, start, end, label, path,
+      display: path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path, directory: path.endsWith('/') })
+  }
+  atoms.sort((left, right) => left.start - right.start || left.end - right.end)
+  const parts: UserMessageDisplayPart[] = []
+  let cursor = 0
+  for (const atom of atoms) {
+    if (atom.start < cursor) continue
+    if (atom.start > cursor) parts.push({ kind: 'text', key: `text:${cursor}:${atom.start}`, start: cursor, end: atom.start, text: input.slice(cursor, atom.start) })
+    parts.push(atom)
+    cursor = atom.end
+  }
+  if (cursor < input.length) parts.push({ kind: 'text', key: `text:${cursor}:${input.length}`, start: cursor, end: input.length, text: input.slice(cursor) })
+  return parts
+}
+
+/** Extract only from direct user input before document/file/native context is assembled.
+ * Requests are hints; Core resolves and loads the current admitted snapshot. */
+export function extractRequestedSkillIds(input: string): string[] {
+  const wire = extractComposerSkillMentions(input)
+  const occupied = [...wire, ...extractComposerPluginMentions(input)]
+  const candidates = wire.map(mention => ({ start: mention.start, id: mention.skillId }))
+  for (const match of input.matchAll(/(^|\s)\/(?:skill:([a-z0-9][a-z0-9._-]{0,127})|([a-z0-9]+(?:-[a-z0-9]+)*))(?=\s|$)/gu)) {
+    const start = match.index! + match[1]!.length
+    if (!occupied.some(mention => start >= mention.start && start < mention.end)) {
+      candidates.push({ start, id: match[2] ?? match[3]! })
+    }
+  }
+  return [...new Set(candidates.sort((a, b) => a.start - b.start).map(candidate => candidate.id)
+    .filter(id => /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/u.test(id)))].slice(0, 16)
 }

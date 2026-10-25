@@ -36,17 +36,29 @@ export function WorkbenchResizeHandle({
       role="separator"
       tabIndex={onResizeDelta && !disabled ? 0 : undefined}
       aria-label={ariaLabel}
-      aria-valuenow={value}
-      aria-valuemin={min}
-      aria-valuemax={max}
+      aria-valuenow={typeof value === 'number' && Number.isFinite(value) ? value : undefined}
+      aria-valuemin={typeof min === 'number' && Number.isFinite(min) ? min : undefined}
+      aria-valuemax={typeof max === 'number' && Number.isFinite(max) ? max : undefined}
       onKeyDown={(event) => {
         if (disabled || !onResizeDelta || event.altKey || event.metaKey || event.ctrlKey) return
         if (event.key === 'Enter' && onReset) { event.preventDefault(); onReset(); return }
+        if (event.key === 'Home' || event.key === 'End') {
+          if (
+            typeof value !== 'number' || !Number.isFinite(value) ||
+            typeof min !== 'number' || !Number.isFinite(min) ||
+            typeof max !== 'number' || !Number.isFinite(max) || min > max
+          ) return
+          const delta = (event.key === 'Home' ? min : max) - value
+          if (!Number.isFinite(delta)) return
+          event.preventDefault()
+          onResizeDelta(delta)
+          return
+        }
         const increase = vertical ? edge === 'left' ? 'ArrowLeft' : 'ArrowRight' : edge === 'top' ? 'ArrowUp' : 'ArrowDown'
         const decrease = vertical ? edge === 'left' ? 'ArrowRight' : 'ArrowLeft' : edge === 'top' ? 'ArrowDown' : 'ArrowUp'
         if (event.key !== increase && event.key !== decrease) return
         event.preventDefault()
-        onResizeDelta((event.key === increase ? 1 : -1) * (event.shiftKey ? 64 : 24))
+        onResizeDelta((event.key === increase ? 1 : -1) * (event.shiftKey ? 50 : 10))
       }}
       aria-disabled={disabled || undefined}
       aria-orientation={vertical ? 'vertical' : 'horizontal'}

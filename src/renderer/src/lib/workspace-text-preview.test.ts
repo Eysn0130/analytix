@@ -12,3 +12,8 @@ describe('workspace text preview path helper', () => {
     expect(isWorkspaceTextPreviewPath('/tmp/project/logo.png')).toBe(false)
   })
 })
+
+it('keeps .htm and .html available as ordinary source previews', () => {
+  expect(isWorkspaceTextPreviewPath('/workspace/page.htm')).toBe(true)
+  expect(isWorkspaceTextPreviewPath('/workspace/page.HTML')).toBe(true)
+})

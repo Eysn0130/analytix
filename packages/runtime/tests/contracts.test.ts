@@ -963,7 +963,7 @@ describe('contracts', () => {
     expect(goal.objective).toBe('ship goal mode')
     expect(goal.blockedCount).toBe(1)
     expect(goal.strictCompletion).toBe(true)
-    expect(SetThreadGoalRequest.parse({ status: 'paused' }).status).toBe('paused')
+    expect(SetThreadGoalRequest.parse({ status: 'paused' })).toEqual({ status: 'paused' })
     expect(SetThreadGoalRequest.parse({
       status: 'active',
       blockedReason: 'Need API access',
@@ -1165,7 +1165,7 @@ describe('contracts', () => {
         { content: 'one', status: 'in_progress' },
         { content: 'two', status: 'in_progress' }
       ]
-    }).success).toBe(false)
+    }).success).toBe(true)
     const event = RuntimeEvent.parse({
       kind: 'todos_updated',
       seq: 2,
@@ -3485,3 +3485,54 @@ describe('cli', () => {
     expect(result.success).toBe(false)
   })
 })
+
+
+describe('optional timed Question DTO', () => {
+  it('keeps legacy answers and validates signed wait metadata and scheduling acknowledgement', async () => {
+    const contract = await import('../src/contracts/approvals.js')
+    expect(contract.UserInputResolutionRequest.safeParse({ answers: [{ id: 'q1', value: 'ordinary answer' }] }).success).toBe(true)
+    for (const seconds of [-1, 1, 120, 2147483]) {
+      expect(contract.UserInputTimedWaitSchemaV1.safeParse({ timeoutSeconds: seconds,
+        deadlineAt: seconds === -1 ? null : '2026-10-08T09:02:00Z' }).success).toBe(true)
+    }
+    for (const seconds of [-2, 0, 1.1, 2147484]) {
+      expect(contract.UserInputTimedWaitSchemaV1.safeParse({ timeoutSeconds: seconds, deadlineAt: null }).success).toBe(false)
+    }
+    expect(contract.UserInputTimedWaitSchemaV1.safeParse({ timeoutSeconds: 120, deadlineAt: null }).success).toBe(false)
+    expect(contract.UserInputWaitSnapshotSchemaV1.safeParse({ remainingMs: null }).success).toBe(true)
+    expect(contract.UserInputWaitSnapshotSchemaV1.safeParse({ remainingMs: -1 }).success).toBe(false)
+    expect(contract.UserInputWaitContinueRequestSchemaV1.safeParse({ action: 'continue', answers: [] }).success).toBe(false)
+    expect(contract.UserInputWaitScheduledResponseSchemaV1.safeParse({ inputId: 'input_' + 'a'.repeat(64), scheduled: true, status: 'continued' }).success).toBe(false)
+  })
+  it('makes late queue delivery separate from foreground settlement', async () => {
+    const contract = await import('../src/contracts/approvals.js')
+    const lateReply = { clientUserMessageId: '00000000-0000-4000-8000-000000000001', expectedTurnId: 'turn_2' }
+    expect(contract.UserInputResolutionRequest.safeParse({ answers: [{ id: 'q1', value: 'answer' }], lateReply }).success).toBe(true)
+    expect(contract.UserInputResolutionRequest.safeParse({ cancelled: true, lateReply }).success).toBe(false)
+    expect(contract.UserInputResolutionRequest.safeParse({ answers: [{ id: 'q1', kind: 'skip' }], lateReply: { ...lateReply, sourceInputId: 'input_other' } }).success).toBe(false)
+    expect(contract.UserInputLateReplyResponseSchemaV1.safeParse({ inputId: 'input_' + 'a'.repeat(64), status: 'continued',
+      lateReply: { clientUserMessageId: lateReply.clientUserMessageId, turnId: 'turn_2', state: 'queued' } }).success).toBe(true)
+  })
+})
+
+
+describe('output cap terminal contract', () => {
+  const turn = { id: 'cap-turn', threadId: 'cap-thread', status: 'completed', prompt: '', createdAt: '2026-10-10T00:00:00Z', items: [] }
+  it('preserves legacy omission and accepts only the closed completed cap reason', () => {
+    expect(TurnSchema.parse(turn)).not.toHaveProperty('endReason')
+    expect(TurnSchema.parse({ ...turn, endReason: { kind: 'max-tokens' } }).endReason).toEqual({ kind: 'max-tokens' })
+    for (const endReason of [null, 'max-tokens', { kind: 'stop' }, { kind: 'max-tokens', private: 'raw' }]) {
+      expect(TurnSchema.safeParse({ ...turn, endReason }).success).toBe(false)
+    }
+    for (const status of ['queued', 'running', 'failed', 'aborted']) {
+      expect(TurnSchema.safeParse({ ...turn, status, endReason: { kind: 'max-tokens' } }).success).toBe(false)
+    }
+  })
+})
+
+it('admits bounded initial skill requests without expanding steering input', () => {
+  expect(StartTurnRequest.safeParse({prompt:'hello',requestedSkillIds:['review']}).success).toBe(true);
+  expect(StartTurnRequest.safeParse({prompt:'hello',requestedSkillIds:['../secret']}).success).toBe(false);
+  expect(StartTurnRequest.safeParse({prompt:'hello',requestedSkillIds:Array(17).fill('review')}).success).toBe(false);
+  expect(SteerTurnRequest.safeParse({text:'hello',requestedSkillIds:['review']}).success).toBe(false);
+});

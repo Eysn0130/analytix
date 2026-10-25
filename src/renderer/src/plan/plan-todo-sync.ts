@@ -66,7 +66,13 @@ export function mergePlanTodosForRenderer(input: {
     const closedExisting = existing && (
       existing.status === 'completed' || existing.status === 'failed' || existing.status === 'canceled'
     ) ? existing : undefined
-    const status = closedExisting?.status ?? planItem.status
+    const status = closedExisting?.status ?? (
+      existing?.status === 'in_progress' &&
+      planItem.status === 'pending' &&
+      todoContentHash(existing.content) === todoContentHash(planItem.content)
+        ? existing.status
+        : planItem.status
+    )
     return {
       ...planItem,
       id: existing?.id ?? planItem.id,

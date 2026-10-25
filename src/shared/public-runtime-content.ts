@@ -8,9 +8,12 @@ import {
   AcceptedFinalDeliveryBatchV2Schema,
   GeneralTerminalDeliveryBatchV1Schema,
   GeneralTerminalErrorItemV1Schema,
+  LogicalStepClosedDetailsV1Schema,
+  LogicalStepStartedDetailsV1Schema,
   isToolNotAdvertisedDiagnosticDetailsV1
 } from '../../packages/runtime/src/contracts/events.js'
 import { PublicModelReasoningV2 } from '../../packages/runtime/src/contracts/runtime-info.js'
+import { ReportedTokenCountV1Schema } from '../../packages/runtime/src/contracts/usage.js'
 import { containsRestrictedEvidence } from './restricted-evidence-projection'
 import {
   containsInternalCaseEntityReference,
@@ -83,6 +86,318 @@ const SAFE_ERROR_DETAIL_KEYS = new Set([
   'phase'
 ])
 
+const ENDPOINT_FORMATS = new Set(['chat_completions', 'responses', 'messages', 'custom_endpoint'])
+
+const PROVIDER_FAILURE_STAGES = new Set([
+  'request_validation', 'request_build', 'pre_send_body_audit', 'telemetry_begin',
+  'transport_before_observed_send', 'transport_after_observed_send', 'local_admission_config',
+  'callback_projection', 'unclassified'
+])
+
+const PROVIDER_DISPATCH_STATES = new Set(['not_sent', 'sent', 'indeterminate'])
+
+const HOST_ERROR_CODES = new Set([
+  'turn_failed', 'turn_cancelled', 'provider_error', 'provider_authentication_failed',
+  'provider_rate_limited', 'provider_insufficient_balance', 'provider_endpoint_not_found',
+  'provider_request_rejected', 'provider_request_failed', 'provider_request_error',
+  'provider_unavailable', 'provider_network_unavailable', 'provider_timeout',
+  'provider_stream_interrupted', 'provider_model_invalid', 'provider_not_configured',
+  'provider_tool_arguments_invalid', 'provider_reasoning_markup_invalid', 'provider_empty_final',
+  'attachment_text_fallback_too_large', 'publication_receipt_required', 'validation_error',
+  'runtime_restarted', 'turn_recovery_boundary', 'approval_denied', 'input_cancelled',
+  'turn_step_limit_exceeded', 'turn_security_authority_unavailable', 'turn_security_context_invalid',
+  'turn_security_workspace_mismatch', 'turn_security_case_binding_mismatch',
+  'turn_security_dataset_snapshot_mismatch', 'turn_security_risk_policy_mismatch',
+  'tool_call_identity_invalid', 'tool_not_advertised', 'tool_schema_missing',
+  'tool_schema_invalid', 'tool_private_arguments', 'tool_source_unavailable',
+  'tool_invalid_arguments_storm', 'tool_failure_storm', 'execution_grant_rejected',
+  'source_probe_unavailable', 'tool_pending_continuation_invalid', 'provider_stream_failed',
+  'context_window_hard_limit', 'sse_setup_error'
+])
+
+const SAFE_PUBLIC_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hasOnlyKeys(record: Record<string, unknown>, allowed: Iterable<string>): boolean {
+  const keys = new Set(allowed)
+  return Object.keys(record).every((key) => keys.has(key))
+}
+
+function isSafeSequence(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isSafePublicId(value: unknown): value is string {
+  return typeof value === 'string' && SAFE_PUBLIC_ID.test(value)
+}
+
+function isCanonicalTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 64 && value.trim() === value &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    !Number.isNaN(Date.parse(value))
+}
+
+function isOptionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === 'boolean'
+}
+
+function isOptionalSafeSequence(value: unknown): boolean {
+  return value === undefined || isSafeSequence(value)
+}
+
+function isOptionalEnum(value: unknown, allowed: ReadonlySet<string>): boolean {
+  return value === undefined || (typeof value === 'string' && allowed.has(value))
+}
+
+function isOptionalSafeIdentifier(value: unknown): boolean {
+  return value === undefined || isSafePublicId(value)
+}
+
+function isClosedTrace(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!isRecord(value) || !hasOnlyKeys(value, ['sse_sent_at', 'sse_live_emitted_at'])) return false
+  return Object.keys(value).length === 2 &&
+    typeof value.sse_sent_at === 'number' && Number.isFinite(value.sse_sent_at) && value.sse_sent_at >= 0 &&
+    typeof value.sse_live_emitted_at === 'number' &&
+    Number.isFinite(value.sse_live_emitted_at) && value.sse_live_emitted_at >= 0
+}
+
+export function isPublicHostErrorCode(value: unknown): value is string {
+  return typeof value === 'string' && HOST_ERROR_CODES.has(value)
+}
+
+export function isPublicProviderEndpointFormat(value: unknown): value is string {
+  return typeof value === 'string' && ENDPOINT_FORMATS.has(value)
+}
+
+export function isPublicProviderFailureStage(value: unknown): value is string {
+  return typeof value === 'string' && PROVIDER_FAILURE_STAGES.has(value)
+}
+
+export function isPublicProviderDispatchState(value: unknown): value is string {
+  return typeof value === 'string' && PROVIDER_DISPATCH_STATES.has(value)
+}
+
+/** Closed Host retry facts, reusable at renderer sink boundaries. No wall-clock admission. */
+export function isClosedProviderRetryLifecycle(value: unknown): boolean {
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    'schemaVersion', 'source', 'phase', 'logicalSequence', 'outerAttempt', 'physicalAttempt',
+    'delayMs', 'deadlineUnixMs', 'cancelReason'
+  ]) || value.schemaVersion !== 1 ||
+      ['logicalSequence', 'outerAttempt', 'physicalAttempt', 'delayMs', 'deadlineUnixMs'].some(key =>
+        value[key] !== undefined && (!isSafeSequence(value[key]) || (value[key] as number) > 1e15)) ||
+      !isSafeSequence(value.logicalSequence) || value.logicalSequence === 0 ||
+      !isSafeSequence(value.outerAttempt) || value.outerAttempt === 0) return false
+  if (value.source === 'transport_reconnect') {
+    if (!isSafeSequence(value.physicalAttempt) || value.physicalAttempt === 0) return false
+  } else if (value.source !== 'provider_retry' || value.physicalAttempt !== undefined) return false
+  if (value.phase === 'scheduled') {
+    return isSafeSequence(value.delayMs) && isSafeSequence(value.deadlineUnixMs) &&
+      value.deadlineUnixMs > 0 && value.cancelReason === undefined
+  }
+  if (value.delayMs !== undefined || value.deadlineUnixMs !== undefined) return false
+  if (value.phase === 'started') return value.cancelReason === undefined
+  return value.phase === 'cancelled' && typeof value.cancelReason === 'string' && new Set([
+    'context_cancelled', 'deadline_exceeded', 'attempt_rejected'
+  ]).has(value.cancelReason)
+}
+
+export function isClosedProviderOutputCapObservation(value: unknown): boolean {
+  return isRecord(value) && hasOnlyKeys(value, ['stopReason', 'streamCompleted', 'logicalSequence', 'toolCallCount']) &&
+    value.stopReason === 'length' && typeof value.streamCompleted === 'boolean' &&
+    isSafeSequence(value.logicalSequence) && value.logicalSequence > 0 && value.logicalSequence <= 1e15 &&
+    (value.toolCallCount === undefined || (isSafeSequence(value.toolCallCount) && value.toolCallCount <= 1e15))
+}
+
+export function isClosedPipelineDetails(value: unknown, stage: unknown): boolean {
+  if (!isRecord(value)) return false
+  if (stage === 'logical_step_started' || stage === 'logical_step_assembled') return LogicalStepStartedDetailsV1Schema.safeParse(value).success
+  if (stage === 'logical_step_closed') return LogicalStepClosedDetailsV1Schema.safeParse(value).success
+  const allowed = [
+    'visibleRecovery', 'recoveryKind', 'recoveryAttempt', 'maxRecoveryAttempt',
+    'maxRecoveryAttempts', 'recoveryExhausted', 'partialToolStarted', 'maxModelSteps', 'toolName',
+    'guardKind', 'stormCount', 'providerError', 'reasonCode', 'firstReasoningLatencyMs',
+    'retry', 'stopReason', 'streamCompleted', 'logicalSequence', 'toolCallCount', 'logicalStepMetricsVersion'
+  ]
+  if (!hasOnlyKeys(value, allowed) || !isOptionalBoolean(value.visibleRecovery) ||
+      !isOptionalEnum(value.recoveryKind, new Set([
+        'interrupted_stream', 'step_limit_final_answer', 'empty_final'
+      ])) || !isOptionalSafeSequence(value.recoveryAttempt) ||
+      !isOptionalSafeSequence(value.maxRecoveryAttempt) ||
+      !isOptionalSafeSequence(value.maxRecoveryAttempts) || !isOptionalBoolean(value.recoveryExhausted) ||
+      !isOptionalBoolean(value.partialToolStarted) || !isOptionalSafeSequence(value.maxModelSteps) ||
+      !isOptionalSafeSequence(value.stormCount) || !isOptionalSafeSequence(value.firstReasoningLatencyMs) ||
+      !isOptionalSafeIdentifier(value.toolName) ||
+      !isOptionalEnum(value.guardKind, new Set([
+        'tool_failure', 'invalid_tool_arguments'
+      ])) ||
+      (value.reasonCode !== undefined &&
+        (typeof value.reasonCode !== 'string' || !HOST_ERROR_CODES.has(value.reasonCode)))) return false
+  if (value.logicalStepMetricsVersion !== undefined &&
+      (stage !== 'post_start' || value.logicalStepMetricsVersion !== 1)) return false
+  if (value.retry !== undefined && (stage !== 'provider_retrying' || value.visibleRecovery === true ||
+      !isClosedProviderRetryLifecycle(value.retry))) return false
+  if (['stopReason', 'streamCompleted', 'logicalSequence', 'toolCallCount'].some(key => value[key] !== undefined) &&
+      (stage !== 'response_received' || !isClosedProviderOutputCapObservation({
+        stopReason: value.stopReason, streamCompleted: value.streamCompleted, logicalSequence: value.logicalSequence,
+        ...(value.toolCallCount !== undefined ? { toolCallCount: value.toolCallCount } : {})
+      }))) return false
+  if (value.providerError === undefined) return true
+  if (!isRecord(value.providerError) || !hasOnlyKeys(value.providerError, [
+    'kind', 'code', 'providerId', 'family', 'endpointFormat', 'model', 'authStatus', 'hasApiKey',
+    'retryable', 'status', 'retryAfterMs', 'attempt', 'failureStage', 'dispatchState'
+  ])) return false
+  const diagnostic = value.providerError
+  const kindAttributed = typeof diagnostic.kind === 'string' && new Set([
+    'auth', 'rate_limit', 'insufficient_balance', 'request', 'server', 'network', 'http',
+    'invalid_model', 'unknown'
+  ]).has(diagnostic.kind)
+  const stageAttributed = typeof diagnostic.failureStage === 'string' &&
+    PROVIDER_FAILURE_STAGES.has(diagnostic.failureStage) &&
+    typeof diagnostic.dispatchState === 'string' && PROVIDER_DISPATCH_STATES.has(diagnostic.dispatchState)
+  return (kindAttributed || stageAttributed) &&
+    (diagnostic.code === undefined ||
+      (typeof diagnostic.code === 'string' && HOST_ERROR_CODES.has(diagnostic.code))) &&
+    isOptionalSafeIdentifier(diagnostic.providerId) && isOptionalSafeIdentifier(diagnostic.family) &&
+    isOptionalSafeIdentifier(diagnostic.model) && isOptionalEnum(diagnostic.endpointFormat, ENDPOINT_FORMATS) &&
+    isOptionalEnum(diagnostic.authStatus, new Set(['none', 'possible', 'required', 'unknown'])) &&
+    isOptionalBoolean(diagnostic.hasApiKey) && isOptionalBoolean(diagnostic.retryable) &&
+    (diagnostic.attempt === undefined ||
+      (isSafeSequence(diagnostic.attempt) && diagnostic.attempt <= 1_000_000)) &&
+    isOptionalEnum(diagnostic.failureStage, PROVIDER_FAILURE_STAGES) &&
+    isOptionalEnum(diagnostic.dispatchState, PROVIDER_DISPATCH_STATES) &&
+    (diagnostic.status === undefined ||
+      (isSafeSequence(diagnostic.status) && diagnostic.status <= 599)) &&
+    (diagnostic.retryAfterMs === undefined ||
+      (isSafeSequence(diagnostic.retryAfterMs) && diagnostic.retryAfterMs <= 900_000))
+}
+
+// Qualify the original complete event before treating closed Host retry
+// numbers as metadata. This guard is structural and never calls a privacy
+// gate, so the SSE and IPC gates can reuse it without recursion.
+function isClosedProviderRetryEvent(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    'kind', 'seq', 'timestamp', 'threadId', 'turnId', 'itemId', 'trace',
+    'stage', 'label', 'message', 'attempt', 'maxAttempt', 'child', 'details'
+  ]) || value.kind !== 'pipeline_stage' || value.stage !== 'provider_retrying' ||
+      value.label !== 'Retrying provider stream' || value.message !== undefined ||
+      value.child !== undefined || value.itemId !== undefined ||
+      !isSafeSequence(value.seq) || !isCanonicalTimestamp(value.timestamp) ||
+      !isSafePublicId(value.threadId) || !isSafePublicId(value.turnId) ||
+      !isClosedTrace(value.trace) || !isClosedPipelineDetails(value.details, value.stage) ||
+      !isRecord(value.details) || !isRecord(value.details.retry) ||
+      !hasOnlyKeys(value.details, ['retry', 'visibleRecovery', 'providerError']) ||
+      !isSafeSequence(value.attempt) || value.attempt === 0 || value.attempt > 1e15 ||
+      !isSafeSequence(value.maxAttempt) || value.maxAttempt < value.attempt || value.maxAttempt > 1e15) {
+    return false
+  }
+  return value.attempt === (value.details.retry.source === 'transport_reconnect'
+    ? value.details.retry.physicalAttempt : value.details.retry.outerAttempt)
+}
+
+function providerRetryPiiInspectionView(value: unknown, original: unknown = value): unknown {
+  if (!isClosedProviderRetryEvent(original) || !isClosedProviderRetryEvent(value)) return value
+  const details = value.details as Record<string, unknown>
+  const retry = { ...(details.retry as Record<string, unknown>) }
+  // Only the classifier sees zeros. Keep optional absence and original wire
+  // values; arbitrary detail text and numeric fields still undergo PII checks.
+  for (const key of ['logicalSequence', 'outerAttempt', 'physicalAttempt', 'delayMs', 'deadlineUnixMs']) {
+    if (Object.prototype.hasOwnProperty.call(retry, key)) retry[key] = 0
+  }
+  return { ...value, details: { ...details, retry } }
+}
+
+/** Closed, trace-free logical metadata; this structural guard never invokes a privacy gate. */
+export function isClosedLogicalStepEvent(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    'kind', 'seq', 'timestamp', 'threadId', 'turnId', 'stage', 'label', 'details'
+  ]) || value.kind !== 'pipeline_stage' || !isSafeSequence(value.seq) ||
+      !isCanonicalTimestamp(value.timestamp) || !isSafePublicId(value.threadId) ||
+      !isSafePublicId(value.turnId)) return false
+  return ((value.stage === 'logical_step_started' && value.label === 'Logical step started') ||
+          (value.stage === 'logical_step_assembled' && value.label === 'Logical step assembled') ||
+          (value.stage === 'logical_step_closed' && value.label === 'Logical step closed')) &&
+    isClosedPipelineDetails(value.details, value.stage)
+}
+
+function logicalStepPiiInspectionView(value: unknown, original: unknown = value): unknown {
+  if (!isClosedLogicalStepEvent(original) || !isClosedLogicalStepEvent(value)) return value
+  const details: Record<string, unknown> = { ...(value.details as Record<string, unknown>),
+    logicalStepId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
+  for (const key of ['llmMs', 'ttftMs', 'decodeMs', 'decodeTokens']) {
+    if (Object.prototype.hasOwnProperty.call(details, key)) details[key] = 0
+  }
+  return { ...value, details }
+}
+
+function closedPipelinePiiInspectionView(value: unknown, original: unknown = value): unknown {
+  const retry = providerRetryPiiInspectionView(value, original)
+  return retry !== value ? retry : logicalStepPiiInspectionView(value, original)
+}
+
+function isClosedSseEnvelope(value: unknown): value is {
+  streamId: string
+  events: Array<Record<string, unknown>>
+} {
+  return isRecord(value) && hasOnlyKeys(value, ['streamId', 'events']) &&
+    typeof value.streamId === 'string' && value.streamId.trim() === value.streamId &&
+    value.streamId.length > 0 && value.streamId.length <= 256 &&
+    Array.isArray(value.events) && value.events.every(isRecord)
+}
+
+function hasUnadmittedClosedPipelineEvent(value: unknown): boolean {
+  const admitted = new Set<unknown>()
+  if (isClosedProviderRetryEvent(value) || isClosedLogicalStepEvent(value)) admitted.add(value)
+  else if (isClosedSseEnvelope(value)) {
+    for (const event of value.events) {
+      if (isClosedProviderRetryEvent(event) || isClosedLogicalStepEvent(event)) admitted.add(event)
+    }
+  }
+  const active = new WeakSet<object>()
+  let remaining = 100_000
+  const visit = (entry: unknown, depth: number, carrierAllowed = false, directEvents = false): boolean => {
+    if (depth > 32 || remaining-- <= 0) return true
+    if (!entry || typeof entry !== 'object') return false
+    if (active.has(entry)) return true
+    if (isRecord(entry) && entry.kind === 'pipeline_stage') {
+      const logical = entry.stage === 'logical_step_started' || entry.stage === 'logical_step_assembled' ||
+        entry.stage === 'logical_step_closed'
+      const retry = isRecord(entry.details) && Object.prototype.hasOwnProperty.call(entry.details, 'retry') &&
+        entry.details.retry !== undefined
+      if (logical || retry) return !carrierAllowed || !admitted.has(entry)
+    }
+    active.add(entry)
+    try {
+      if (directEvents && Array.isArray(entry)) {
+        return entry.some(child => visit(child, depth + 1, true))
+      }
+      return Object.entries(entry).some(([key, child]) => visit(child, depth + 1, false,
+        depth === 0 && key === 'events' && isClosedSseEnvelope(value)))
+    } finally { active.delete(entry) }
+  }
+  // Only original direct events or direct events of the closed IPC envelope
+  // may carry retry or logical-step facts. Validate the complete original
+  // carrier before sanitization; removing fields cannot grant admission.
+  // Admission is positional too: aliasing a direct event inside a wrapper
+  // must not authorize its nested occurrence. Ordinary data stays unchanged.
+  return visit(value, 0, true)
+}
+
+function publicRuntimePiiInspectionView(value: unknown, original: unknown = value): unknown {
+  const eventView = closedPipelinePiiInspectionView(value, original)
+  if (eventView !== value) return eventView
+  // Only direct events in the actual IPC envelope get this treatment, never
+  // arbitrary arrays, wrappers or objects discovered by recursive traversal.
+  if (!isClosedSseEnvelope(original) || !isClosedSseEnvelope(value) ||
+      value.events.length !== original.events.length) return value
+  return { ...value, events: value.events.map((event, index) =>
+    closedPipelinePiiInspectionView(event, original.events[index])) }
+}
+
+
 function normalizedKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
@@ -100,6 +415,8 @@ function publicReasoningMetadataState(
     case 'reasoning':
       return PublicModelReasoningV2.safeParse(value).success ? 'valid' : 'invalid'
     case 'reasoningtokens':
+      return (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) ||
+        ReportedTokenCountV1Schema.safeParse(value).success ? 'valid' : 'invalid'
     case 'firstreasoninglatencyms':
       return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? 'valid' : 'invalid'
     case 'reasoningeffort':
@@ -412,6 +729,7 @@ function sanitizePublicRuntimeValueInternal(
 }
 
 export function sanitizePublicRuntimeValue(value: unknown): unknown {
+  if (hasUnadmittedClosedPipelineEvent(value)) return undefined
   if (value && typeof value === 'object' && !Array.isArray(value) &&
       looksLikeRuntimeError(value as Record<string, unknown>)) {
     return sanitizePublicRuntimeErrorEnvelope(value)
@@ -421,7 +739,7 @@ export function sanitizePublicRuntimeValue(value: unknown): unknown {
       hasInvalidPublicReasoningMetadata(value) ||
       containsPrivateRuntimeDiagnosticContent(value)) return undefined
   const sanitized = sanitizePublicRuntimeValueInternal(value, true)
-  if (containsSecretMaterial(sanitized) || containsOrdinaryPublicPII(sanitized) ||
+  if (containsSecretMaterial(sanitized) || containsOrdinaryPublicPII(publicRuntimePiiInspectionView(sanitized, value)) ||
       containsInternalCaseEntityReference(sanitized)) return undefined
   return sanitized
 }
@@ -518,9 +836,9 @@ export function isPublicSseIpcPayload(value: unknown): value is {
   streamId: string
   events: Array<Record<string, unknown>>
 } {
-  if (containsPrivateAcceptedFinalAuthority(value) ||
+  if (hasUnadmittedClosedPipelineEvent(value) || containsPrivateAcceptedFinalAuthority(value) ||
       containsRestrictedEvidence(value) || containsPrivateReasoningContent(value) ||
-      containsSecretMaterial(value) || containsOrdinaryPublicPII(value) ||
+      containsSecretMaterial(value) || containsOrdinaryPublicPII(publicRuntimePiiInspectionView(value)) ||
       containsInternalCaseEntityReference(value)) return false
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>

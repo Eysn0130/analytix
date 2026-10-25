@@ -14,7 +14,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	domaintoolresult "analytix.local/runtime-go/internal/domain/toolresult"
 	netclient "analytix.local/runtime-go/internal/netclient"
 )
 
@@ -56,7 +58,7 @@ func ProxySpecForURL(proxyURL string) netclient.ProxySpec {
 func ParseRequest(args map[string]any, maxCap int, defaultMaxBytes int, minBytes int, defaultTimeout time.Duration) (Request, map[string]any, bool) {
 	rawURL := strings.TrimSpace(firstNonEmptyString(args["url"]))
 	if rawURL == "" {
-		return Request{}, map[string]any{"code": "invalid_url", "error": "url is required"}, true
+		return Request{}, map[string]any{"code": "invalid_url", "outcome": "invalid_url", "error": "url is required"}, true
 	}
 	maxBytes := positiveLimit(args["max_bytes"], maxCap, maxCap)
 	if maxBytes < minBytes {
@@ -74,12 +76,48 @@ func ParseRequest(args map[string]any, maxCap int, defaultMaxBytes int, minBytes
 	}, nil, false
 }
 
-func (c Client) Fetch(ctx context.Context, request Request) (map[string]any, bool) {
+func (c Client) Fetch(ctx context.Context, request Request) (result map[string]any, isError bool) {
 	startedAt := c.now()
+	observation := domaintoolresult.ProtectedWebCaptureV1{StartedAt: startedAt.UTC().Format(time.RFC3339Nano)}
+	setWebCaptureURLV1(&observation.RequestURL, &observation.RequestURLTruncated, request.URL)
+	var targets *domaintoolresult.ProtectedWebTargetsV1
+	var displayBody string
+	captureTruncated := request.URL != "" && observation.RequestURL == "" && !observation.RequestURLTruncated
+	defer func() {
+		observation.ToolIsError = isError
+		if isError {
+			message, clipped := domaintoolresult.BoundProtectedTextV1(firstNonEmptyString(result["error"]), domaintoolresult.ProtectedWebSnapshotErrorLimitV1)
+			captureTruncated = captureTruncated || clipped
+			observation.Error = &domaintoolresult.ProtectedWebErrorV1{Code: firstNonEmptyString(result["code"]), Message: message}
+			if !observation.ResponseComplete {
+				displayBody = firstNonEmptyString(result["error"])
+			}
+		}
+		body, clipped := domaintoolresult.BoundProtectedTextV1(displayBody, domaintoolresult.ProtectedWebSnapshotBodyLimitV1)
+		status := "completed"
+		if !observation.ResponseComplete {
+			status = "failed"
+			switch firstNonEmptyString(result["outcome"]) {
+			case "timeout":
+				status = "timeout"
+			case "cancelled":
+				status = "canceled"
+			}
+		}
+		duration := c.now().Sub(startedAt).Milliseconds()
+		if duration < 0 {
+			duration = 0
+		}
+		domaintoolresult.CaptureProtectedToolResultV1(ctx, domaintoolresult.ProtectedCaptureV1{Kind: "web_fetch", Status: status, Body: body, Label: "Fetch", DurationMs: duration, Truncated: captureTruncated || clipped, Web: &observation, WebTargets: targets})
+	}()
 	policyURL, failure, failed := ValidateURL(request.URL, c.Policy)
 	if failed {
+		failure["outcome"] = firstNonEmptyString(failure["code"])
 		failure["telemetry"] = Telemetry(startedAt, "blocked", c.ProviderID, request.URL, 0)
 		return failure, true
+	}
+	if observation.RequestURL != "" && domaintoolresult.ValidProtectedWebTargetV1(request.URL) {
+		targets = &domaintoolresult.ProtectedWebTargetsV1{RequestURL: request.URL}
 	}
 	timeout := request.Timeout
 	if timeout <= 0 {
@@ -89,10 +127,11 @@ func (c Client) Fetch(ctx context.Context, request Request) (map[string]any, boo
 	defer cancel()
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, policyURL.String(), nil)
 	if err != nil {
-		return map[string]any{"code": "fetch_failed", "error": err.Error()}, true
+		return map[string]any{"code": "fetch_failed", "outcome": "invalid_url", "error": err.Error()}, true
 	}
 	httpRequest.Header.Set("User-Agent", c.userAgent())
 	httpRequest.Header.Set("Accept", "text/html,text/plain,application/json,application/xml,text/markdown,*/*;q=0.8")
+	redirectOutcome := ""
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: RoundTripper{
@@ -101,9 +140,11 @@ func (c Client) Fetch(ctx context.Context, request Request) (map[string]any, boo
 		},
 		CheckRedirect: func(redirect *http.Request, via []*http.Request) error {
 			if redirect == nil || redirect.URL == nil {
+				redirectOutcome = "invalid_url"
 				return errors.New("redirect URL is missing")
 			}
 			if _, failure, failed := ValidateURL(redirect.URL.String(), c.Policy); failed {
+				redirectOutcome = firstNonEmptyString(failure["code"])
 				return fmt.Errorf("redirect blocked: %s", firstNonEmptyString(failure["error"], failure["code"]))
 			}
 			return nil
@@ -114,21 +155,59 @@ func (c Client) Fetch(ctx context.Context, request Request) (map[string]any, boo
 	}
 	response, err := client.Do(httpRequest)
 	if err != nil {
-		return map[string]any{
+		outcome := fetchErrorOutcome(err, "transport_error")
+		if redirectOutcome != "" {
+			outcome = redirectOutcome
+		}
+		failure := map[string]any{
 			"code":      "fetch_failed",
+			"outcome":   outcome,
 			"error":     err.Error(),
 			"url":       SanitizeURL(policyURL.String()),
 			"telemetry": Telemetry(startedAt, "allowed", c.ProviderID, policyURL.String(), 0),
-		}, true
+		}
+		// A rejected redirect can return an actual response with a closed body.
+		// Its HTTP status is known; no body measurement has been performed.
+		if response != nil {
+			failure["statusCode"] = float64(response.StatusCode)
+			statusCode := response.StatusCode
+			observation.StatusCode = &statusCode
+			observedFinalURL := FinalResponseURL(response, policyURL.String())
+			setWebCaptureURLV1(&observation.FinalURL, &observation.FinalURLTruncated, observedFinalURL)
+			if observedFinalURL != "" && observation.FinalURL == "" && !observation.FinalURLTruncated {
+				captureTruncated = true
+			}
+			if observation.FinalURL != "" && domaintoolresult.ValidProtectedWebTargetV1(observation.FinalURL) {
+				if targets == nil {
+					targets = &domaintoolresult.ProtectedWebTargetsV1{}
+				}
+				targets.ResultURL = observation.FinalURL
+			}
+		}
+		return failure, true
 	}
 	defer response.Body.Close()
+	statusCode := response.StatusCode
+	observation.StatusCode = &statusCode
+	setWebCaptureURLV1(&observation.FinalURL, &observation.FinalURLTruncated, FinalResponseURL(response, policyURL.String()))
+	if FinalResponseURL(response, policyURL.String()) != "" && observation.FinalURL == "" && !observation.FinalURLTruncated {
+		captureTruncated = true
+	}
+	if observation.FinalURL != "" && domaintoolresult.ValidProtectedWebTargetV1(observation.FinalURL) {
+		if targets == nil {
+			targets = &domaintoolresult.ProtectedWebTargetsV1{}
+		}
+		targets.ResultURL = observation.FinalURL
+	}
 	body, truncated, readErr := ReadLimitedResponse(response.Body, request.MaxBytes, c.DefaultMaxBytes)
 	if readErr != nil {
 		return map[string]any{
 			"code":       "fetch_failed",
+			"outcome":    fetchErrorOutcome(readErr, "read_error"),
 			"error":      readErr.Error(),
 			"status":     response.Status,
 			"statusCode": float64(response.StatusCode),
+			"byteCount":  float64(len(body)),
 			"url":        SanitizeURL(policyURL.String()),
 			"finalUrl":   SanitizeURL(FinalResponseURL(response, policyURL.String())),
 			"telemetry":  Telemetry(startedAt, "allowed", c.ProviderID, policyURL.String(), len(body)),
@@ -137,6 +216,16 @@ func (c Client) Fetch(ctx context.Context, request Request) (map[string]any, boo
 	finalURL := FinalResponseURL(response, policyURL.String())
 	contentType := response.Header.Get("Content-Type")
 	extractedTitle, extractedText := ExtractReadableText(string(body), contentType)
+	displayBody = extractedText
+	title, titleTruncated := domaintoolresult.BoundProtectedTextV1(extractedTitle, domaintoolresult.ProtectedWebSnapshotTitleLimitV1)
+	if strings.ContainsRune(title, 0) {
+		title = ""
+		titleTruncated = true
+	}
+	observation.Title = title
+	captureTruncated = captureTruncated || titleTruncated
+	observation.ResponseComplete = true
+	observation.FetchTruncated = &truncated
 	retrievedAt := c.now().UTC().Format(time.RFC3339Nano)
 	source := map[string]any{
 		"sourceId":    SourceID(finalURL),
@@ -147,6 +236,8 @@ func (c Client) Fetch(ctx context.Context, request Request) (map[string]any, boo
 		source["title"] = extractedTitle
 	}
 	output := map[string]any{
+		"outcome":     "success",
+		"statusCode":  float64(response.StatusCode),
 		"sourceId":    source["sourceId"],
 		"url":         SanitizeURL(policyURL.String()),
 		"finalUrl":    SanitizeURL(finalURL),
@@ -163,13 +254,44 @@ func (c Client) Fetch(ctx context.Context, request Request) (map[string]any, boo
 		output["title"] = extractedTitle
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		output["outcome"] = "http_error"
 		output["code"] = "fetch_failed"
 		output["error"] = fmt.Sprintf("HTTP %d", response.StatusCode)
 		output["status"] = response.Status
-		output["statusCode"] = float64(response.StatusCode)
 		return output, true
 	}
 	return output, false
+}
+
+func setWebCaptureURLV1(value *string, truncated *bool, observed string) {
+	// A clipped URL is neither a source URL nor a valid navigation target.
+	if !utf8.ValidString(observed) || strings.ContainsRune(observed, 0) {
+		*value = ""
+		*truncated = false
+		return
+	}
+	if len(observed) > domaintoolresult.ProtectedWebSnapshotURLLimitV1 {
+		*value = ""
+		*truncated = true
+		return
+	}
+	*value = observed
+}
+
+// Classify failures from typed errors only. Error prose can contain a URL or
+// remote response text and is not status authority for the public projection.
+func fetchErrorOutcome(err error, fallback string) string {
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return "timeout"
+	}
+	return fallback
 }
 
 func ValidateURL(rawURL string, policy Policy) (*url.URL, map[string]any, bool) {

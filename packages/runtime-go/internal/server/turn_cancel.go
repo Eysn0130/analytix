@@ -14,7 +14,17 @@ func (h *runtimeServerHandler) Shutdown(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	controller := h.runtimeControl()
+	// Close private viewer/producer admission before the controller can cancel
+	// executions. Existing captures remain owned until terminal/gate drains have
+	// persisted their real witnesses, including host-coded cancellation.
+	if h.processDisplay != nil {
+		h.processDisplay.BeginShutdownDrainV1()
+	}
 	controller.BeginShutdown()
+	var goalErr error
+	if h.goalDriver != nil {
+		goalErr = h.goalDriver.Close(ctx)
+	}
 	controller.CancelAllRegisteredTurns()
 	backgroundWait := 2 * time.Second
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < backgroundWait {
@@ -36,6 +46,14 @@ func (h *runtimeServerHandler) Shutdown(ctx context.Context) error {
 			}
 		}
 	}
+	// Only a successful drain retires captures. A failed gate/operation drain
+	// retains its bounded private owner for an ordinary shutdown retry; neither
+	// failure nor timeout invents a terminal witness for unfinished drafts.
+	drained := waitErr == nil && backgroundErr == nil && gateErr == nil
+	var processErr error
+	if drained && h.processDisplay != nil {
+		processErr = h.processDisplay.Close()
+	}
 	var disconnectErr error
 	var nativeErr error
 	// Native containment is an independent safety obligation. Persistence or
@@ -55,7 +73,13 @@ func (h *runtimeServerHandler) Shutdown(ctx context.Context) error {
 			disconnectErr = ctx.Err()
 		}
 	}
-	return errors.Join(backgroundErr, waitErr, gateErr, nativeErr, disconnectErr)
+	var historyErr error
+	if drained {
+		if closer, ok := h.processHistory.(interface{ Close() error }); ok {
+			historyErr = closer.Close()
+		}
+	}
+	return errors.Join(goalErr, processErr, historyErr, backgroundErr, waitErr, gateErr, nativeErr, disconnectErr)
 }
 
 func (h *runtimeServerHandler) settlePendingRuntimeGatesForTurn(

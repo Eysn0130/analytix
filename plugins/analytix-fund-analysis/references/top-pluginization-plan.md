@@ -30,8 +30,7 @@ P0 级上下文断链。
 平台品牌、唯一 Go Harness、Privacy Layer 与 Core/Plugin 边界以
 `docs/analytix/specs/11-agent-platform-brand-and-architecture.md` 和 accepted
 `openspec/specs/agent-platform-foundation/spec.md` 为准；Funds 域细节再以本蓝本与
-当前插件代码/门禁为准。`/Users/sun/Projects/analytix/重构升级方案.md` 仅是
-历史决策账本，不再是当前控制权威。
+当前插件代码/门禁为准。历史决策账本可从 Git 历史查询，不作为当前控制权威。
 
 本文档定义 `Analytix 涉案资金研判` 插件的完整系统蓝本：产品目标、插件身份、能力体系、工程架构、运行链路、证据协议、资金链路穿透模型、报告交付、质量治理、边界隔离、施工控制、Reference 映射、外部借鉴内化和商业成熟完成定义。
 

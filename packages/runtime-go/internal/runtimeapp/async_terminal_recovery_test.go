@@ -5,7 +5,9 @@ package runtimeapp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,11 +19,280 @@ import (
 	"testing"
 	"time"
 
+	persistencefs "analytix.local/runtime-go/internal/adapters/outbound/persistencefs"
 	appturn "analytix.local/runtime-go/internal/app/turn"
 	"analytix.local/runtime-go/internal/contracts"
 	"analytix.local/runtime-go/internal/server"
 	"analytix.local/runtime-go/internal/testsupport/workspacetest"
 )
+
+// Keep the ordinary task's real 512-token input while observing both its
+// terminal outcome and a same-root production Prepare after normal shutdown.
+// Ordinary cumulative-budget semantics remain unresolved; this test does not
+// assert a new cost limit or reinterpret the foreground output-budget contract.
+func TestRuntimeBackgroundChildBudget512ThenShutdownPrepareV1(t *testing.T) {
+	errorType := func(err error) string {
+		var integrity persistencefs.IntegrityError
+		var preparation *startupPreparationErrorV1
+		switch {
+		case err == nil:
+			return "none"
+		case errors.Is(err, context.Canceled):
+			return "cancelled"
+		case errors.Is(err, context.DeadlineExceeded):
+			return "deadline"
+		case errors.Is(err, errRuntimeReportRestartReconciliationRequired):
+			return "report_reconciliation_required"
+		case errors.As(err, &integrity):
+			return "persistence_integrity"
+		case errors.As(err, &preparation):
+			return "startup_preparation"
+		default:
+			return "unclassified"
+		}
+	}
+	closedStatus := func(value string) string {
+		switch value {
+		case "queued", "running", "waiting", "completed", "failed", "killed", "aborted", "cancelled", "interrupted":
+			return value
+		default:
+			return "unobserved"
+		}
+	}
+	// Only fresh synthetic errors reach this observer. Fingerprints let the
+	// task match fixed source literals without printing paths or error bodies.
+	observePrepareCause := func(t *testing.T, err error, roots ...string) {
+		var replacements []string
+		for _, root := range roots {
+			if root != "" {
+				replacements = append(replacements, root, "<synthetic-root>")
+			}
+		}
+		normalize := strings.NewReplacer(replacements...)
+		var visit func(error, int)
+		nodes := 0
+		visit = func(current error, depth int) {
+			if current == nil || depth > 16 || nodes >= 32 {
+				return
+			}
+			nodes++
+			kind := strings.NewReplacer("*", "pointer_", ".", "_", "/", "_").Replace(reflect.TypeOf(current).String())
+			digest := sha256.Sum256([]byte(normalize.Replace(current.Error())))
+			t.Logf("phase=restart_cause node=%d depth=%d type=%s class=%s normalized_sha=%x", nodes, depth, kind, errorType(current), digest)
+			switch wrapped := current.(type) {
+			case interface{ Unwrap() []error }:
+				for _, cause := range wrapped.Unwrap() {
+					visit(cause, depth+1)
+				}
+			case interface{ Unwrap() error }:
+				visit(wrapped.Unwrap(), depth+1)
+			}
+		}
+		visit(err, 0)
+	}
+	for _, cell := range []string{"parent_only", "background_512"} {
+		t.Run(cell, func(t *testing.T) {
+			const childPrompt = "BACKGROUND_BUDGET_512_CHILD_V1: return only a short synthetic reply; call no tools."
+			var parentCalls, childCalls, taskResults, unexpected atomic.Int32
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					Messages []struct {
+						Role    string `json:"role"`
+						Content any    `json:"content"`
+					} `json:"messages"`
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" ||
+					json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&request) != nil {
+					unexpected.Add(1)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				lastUser, results := "", 0
+				for _, message := range request.Messages {
+					if message.Role == "user" {
+						body, _ := json.Marshal(message.Content)
+						lastUser = string(body)
+					}
+					if message.Role == "tool" {
+						results++
+					}
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				if strings.Contains(lastUser, "BACKGROUND_BUDGET_512_CHILD_V1") {
+					childCalls.Add(1)
+					runtimeOptionalLifecycleModelResponseV1(w, "", nil, "Synthetic child complete.")
+					return
+				}
+				call := parentCalls.Add(1)
+				if cell == "background_512" && call == 1 {
+					runtimeOptionalLifecycleModelResponseV1(w, "task", map[string]any{
+						"name": "Synthetic continuable child", "prompt": childPrompt,
+						"toolPolicy": "readOnly", "run_in_background": true,
+						"max_steps": 2, "token_budget": 512, "time_budget_ms": 15000,
+						"auto_continue_parent": false,
+					}, "")
+					return
+				}
+				if cell == "background_512" {
+					taskResults.Add(int32(results))
+				}
+				runtimeOptionalLifecycleModelResponseV1(w, "", nil, "Synthetic parent complete.")
+			}))
+			defer provider.Close()
+			_, config := runtimeWitnessedRegistryConfigV2(t)
+			config.ProductionDurableRoot = runtimeWitnessedRegistryHostTempV2(t, "background-budget-durable")
+			config.UserDataDir = runtimeWitnessedRegistryHostTempV2(t, "background-budget-ui")
+			config.BaseURL = provider.URL + "/v1"
+			config.MCPConfigJSON = `{"subagents":{"enabled":true,"default_tool_policy":"readOnly"}}`
+			seedProviderRegistryExecutionAuthorityV1(t, config.DataDir, config.ProviderID, config.BaseURL, []string{config.Model}, config.Model, "test-only")
+			observations := make(chan server.AsyncTurnObservationV1, 16)
+			var overflow atomic.Bool
+			ctx := context.WithValue(context.Background(), asyncTurnObservationContextKeyV1{}, func(o server.AsyncTurnObservationV1) {
+				select {
+				case observations <- o:
+				default:
+					overflow.Store(true)
+				}
+			})
+			lease, err := AcquireRuntimePersistenceLease(config)
+			if err != nil {
+				t.Fatalf("phase=initial_lease type=%s", errorType(err))
+			}
+			inner, err := newRuntimeServerHandlerWithPersistenceLeaseContextE(ctx, config, lease)
+			if err != nil {
+				_ = lease.Close()
+				t.Fatalf("phase=initial_start code=%s type=%s", RuntimeStartupPreparationFailureCodeV1(err), errorType(err))
+			}
+			owned := &ownedPersistenceLeaseHandler{Handler: inner, lease: lease}
+			active := true
+			defer func() {
+				if active {
+					stop, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					if err := owned.Shutdown(stop); err != nil {
+						t.Errorf("phase=cleanup_shutdown type=%s", errorType(err))
+					}
+				}
+			}()
+			// Match the existing direct-mux HTTP seam, but never dump an error body.
+			request := func(method, path string, body map[string]any) (int, map[string]any) {
+				encoded, encodeErr := json.Marshal(body)
+				if encodeErr != nil {
+					t.Errorf("phase=request_encode type=unclassified")
+					return 0, nil
+				}
+				req := httptest.NewRequest(method, path, bytes.NewReader(encoded))
+				req.Header.Set("Authorization", "Bearer "+DefaultRuntimeToken)
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				owned.ServeHTTP(rec, req)
+				var result map[string]any
+				if json.Unmarshal(rec.Body.Bytes(), &result) != nil {
+					t.Errorf("phase=response_decode http=%d type=unclassified", rec.Code)
+				}
+				return rec.Code, result
+			}
+			status, thread := request(http.MethodPost, "/v1/threads", map[string]any{
+				"workspace": workspacetest.New(t), "providerId": config.ProviderID, "model": config.Model,
+			})
+			threadID := contracts.StringField(thread, "id")
+			if status != http.StatusCreated || threadID == "" {
+				t.Fatalf("phase=parent_create http=%d", status)
+			}
+			prompt := "Complete one ordinary synthetic parent task."
+			if cell == "background_512" {
+				prompt = "Use the task tool to start one background subagent for a concise synthetic reply."
+			}
+			status, started := request(http.MethodPost, "/v1/threads/"+threadID+"/turns", map[string]any{
+				"prompt": prompt, "mode": "agent", "async": true,
+				"approvalPolicy": "auto", "sandboxMode": "read-only",
+			})
+			turnID := contracts.StringField(started, "turnId")
+			if status != http.StatusAccepted || turnID == "" {
+				t.Fatalf("phase=parent_start http=%d", status)
+			}
+			parentStatus, jobStatus, childStatus := "unobserved", "unobserved", "unobserved"
+			parentFinished, jobTerminal := false, cell == "parent_only"
+			deadline := time.Now().Add(20 * time.Second)
+			for time.Now().Before(deadline) && (!parentFinished || !jobTerminal) {
+				select {
+				case o := <-observations:
+					if o.ThreadID == threadID && o.TurnID == turnID && o.Stage == "finished" {
+						parentFinished = true
+						parentStatus = closedStatus(o.TerminalStatus)
+						t.Logf("phase=parent_terminal status=%s completion_phase=%s completion_type=%s record_type=%s", parentStatus, o.CompletionPhase, o.CompletionErrorClass, o.FailureRecordErrorClass)
+					}
+				case <-time.After(10 * time.Millisecond):
+				}
+				if parentFinished && !jobTerminal {
+					status, waited := request(http.MethodPost, "/v1/runtime/task-jobs/wait", map[string]any{"threadId": threadID, "timeoutMs": 100})
+					jobs, _ := waited["jobs"].([]any)
+					if status == http.StatusOK && len(jobs) == 1 {
+						job, _ := jobs[0].(map[string]any)
+						jobStatus = closedStatus(contracts.StringField(job, "status"))
+						switch jobStatus {
+						case "completed", "failed", "killed", "aborted", "cancelled", "interrupted":
+							jobTerminal = true
+						}
+					}
+				}
+			}
+			if cell == "background_512" {
+				status, summary := request(http.MethodGet, "/v1/threads/"+threadID+"/summary", nil)
+				subagents, _ := summary["subagents"].([]any)
+				if status == http.StatusOK && len(subagents) == 1 {
+					child, _ := subagents[0].(map[string]any)
+					childID, childTurnID := contracts.StringField(child, "childThreadId"), contracts.StringField(child, "childTurnId")
+					if childID != "" && childTurnID != "" {
+						status, detail := request(http.MethodGet, "/v1/threads/"+childID, nil)
+						if status == http.StatusOK {
+							turn := packagedSourceUnavailableHydrationTurnV1(detail, childTurnID)
+							childStatus = closedStatus(contracts.StringField(turn, "status"))
+						}
+					}
+				}
+			}
+			t.Logf("phase=live_complete parent=%s child=%s job=%s parent_drained=%t job_terminal=%t parent_calls=%d child_calls=%d task_results=%d fixture_rejected=%d budget_semantics=unresolved", parentStatus, childStatus, jobStatus, parentFinished, jobTerminal, parentCalls.Load(), childCalls.Load(), taskResults.Load(), unexpected.Load())
+			stop, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			shutdownErr := owned.Shutdown(stop)
+			cancel()
+			t.Logf("phase=shutdown type=%s", errorType(shutdownErr))
+			if shutdownErr != nil {
+				t.Errorf("normal shutdown failed; same-root Prepare remains blocked")
+				return
+			}
+			active = false
+			restartLease, leaseErr := AcquireRuntimePersistenceLease(config)
+			if leaseErr != nil {
+				t.Errorf("phase=restart_lease type=%s", errorType(leaseErr))
+				return
+			}
+			beforePrepareCalls := parentCalls.Load() + childCalls.Load()
+			prepareCtx, cancelPrepare := context.WithTimeout(context.Background(), 20*time.Second)
+			prepared, prepareErr := PrepareRuntimeServerStartupWithPersistenceLeaseContextE(prepareCtx, config, restartLease)
+			cancelPrepare()
+			prepareCode := "none"
+			if prepareErr != nil {
+				prepareCode = RuntimeStartupPreparationFailureCodeV1(prepareErr)
+			}
+			t.Logf("phase=restart_prepare prepared=%t code=%s type=%s provider_calls_unchanged=%t", prepared != nil, prepareCode, errorType(prepareErr), beforePrepareCalls == parentCalls.Load()+childCalls.Load())
+			observePrepareCause(t, prepareErr, config.ProductionDurableRoot, config.UserDataDir, config.DataDir)
+			if closeErr := restartLease.Close(); closeErr != nil {
+				t.Errorf("phase=restart_lease_close type=%s", errorType(closeErr))
+			}
+			// Record both outcomes before reporting any child regression failure.
+			if !parentFinished || parentStatus != "completed" || overflow.Load() || unexpected.Load() != 0 {
+				t.Errorf("ordinary parent or fixture did not complete cleanly")
+			}
+			if cell == "background_512" && (!jobTerminal || jobStatus != "completed" || childStatus != "completed" || childCalls.Load() != 1 || taskResults.Load() != 1) {
+				t.Errorf("ordinary background child with unchanged 512 input did not complete")
+			}
+			if prepareErr != nil || prepared == nil || beforePrepareCalls != parentCalls.Load()+childCalls.Load() {
+				t.Errorf("same-root Prepare after normal shutdown did not complete without provider work")
+			}
+		})
+	}
+}
 
 // Authentic terminal records are produced through production HTTP and a
 // loopback provider. After all runtime owners stop, model the CAS/event cuts

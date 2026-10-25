@@ -2,6 +2,7 @@ package filestore
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,7 +60,7 @@ func TestListDirFailureSuggestsCurrentDesktopForOtherMacUser(t *testing.T) {
 	}
 }
 
-func TestFindFilesSkipsProtectedDirectoriesAndStopsAtLimit(t *testing.T) {
+func TestFindFilesStopsAtLimitBeforeProtectedDirectory(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o600); err != nil {
 		t.Fatalf("write a: %v", err)
@@ -74,6 +75,7 @@ func TestFindFilesSkipsProtectedDirectoriesAndStopsAtLimit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(protectedDir, "secret.txt"), []byte("secret"), 0o600); err != nil {
 		t.Fatalf("write secret: %v", err)
 	}
+	protectedVisited := false
 	result, err := FindFiles(FindFilesRequest{
 		Root:  root,
 		Limit: 1,
@@ -83,6 +85,7 @@ func TestFindFilesSkipsProtectedDirectoriesAndStopsAtLimit(t *testing.T) {
 		},
 		ProtectedDir: func(path string) (string, bool) {
 			if path == protectedDir {
+				protectedVisited = true
 				return "protected", true
 			}
 			return "", false
@@ -99,6 +102,122 @@ func TestFindFilesSkipsProtectedDirectoriesAndStopsAtLimit(t *testing.T) {
 	}
 	if !result.LimitReached {
 		t.Fatalf("expected limit reached")
+	}
+	if result.Matches[0].RelativePath != "a.txt" || protectedVisited || len(result.SkippedProtected) != 0 {
+		t.Fatalf("limit did not stop before later traversal: result=%#v protectedVisited=%v", result, protectedVisited)
+	}
+}
+
+func TestFindFilesMissingRootReturnsTraversalError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-root")
+	callbacks := 0
+	result, err := FindFiles(FindFilesRequest{
+		Root:         missing,
+		Limit:        10,
+		ProtectedDir: func(string) (string, bool) { callbacks++; return "", false },
+		Match:        func(string, string) bool { callbacks++; return true },
+	})
+	var pathError *os.PathError
+	if !errors.Is(err, os.ErrNotExist) || !errors.As(err, &pathError) || pathError.Path != missing {
+		t.Fatalf("missing root error was swallowed or replaced: %v", err)
+	}
+	if callbacks != 0 || len(result.Matches) != 0 || len(result.SkippedProtected) != 0 || result.LimitReached {
+		t.Fatalf("missing root produced successful traversal facts: result=%#v callbacks=%d", result, callbacks)
+	}
+}
+
+func TestFindFilesChildReadDirFailureReturnsErrorWithPartialMatches(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"00-before.txt", "02-after.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("synthetic"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	child := filepath.Join(root, "01-disappears")
+	if err := os.Mkdir(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	removals := 0
+	result, err := FindFiles(FindFilesRequest{
+		Root:  root,
+		Limit: 10,
+		RelativePath: func(path string) string {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return filepath.ToSlash(rel)
+		},
+		ProtectedDir: func(path string) (string, bool) {
+			if path == child {
+				removals++
+				if removals != 1 {
+					t.Fatal("directory admission callback repeated after ReadDir failure")
+				}
+				// WalkDir has already observed the directory entry but has not
+				// opened it yet. Removing this empty, test-owned directory makes
+				// the subsequent real ReadDir fail without permission assumptions.
+				if err := os.Remove(child); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return "", false
+		},
+		Match: func(_ string, name string) bool { return strings.HasSuffix(name, ".txt") },
+	})
+	var pathError *os.PathError
+	if !errors.Is(err, os.ErrNotExist) || !errors.As(err, &pathError) || pathError.Path != child {
+		t.Fatalf("child ReadDir error was swallowed or replaced: %v", err)
+	}
+	if removals != 1 || len(result.Matches) != 1 || result.Matches[0].RelativePath != "00-before.txt" || result.LimitReached || len(result.SkippedProtected) != 0 {
+		t.Fatalf("partial traversal was treated as a complete success: result=%#v removals=%d", result, removals)
+	}
+}
+
+func TestFindFilesProtectedSkipDirReturnsNoErrorAndContinues(t *testing.T) {
+	root := t.TempDir()
+	protected := filepath.Join(root, "01-protected")
+	if err := os.Mkdir(protected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(root, "00-before.txt"), filepath.Join(protected, "secret.txt"), filepath.Join(root, "02-after.txt")} {
+		if err := os.WriteFile(path, []byte("synthetic"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	protectedVisits, descendantVisits := 0, 0
+	result, err := FindFiles(FindFilesRequest{
+		Root:  root,
+		Limit: 10,
+		RelativePath: func(path string) string {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return filepath.ToSlash(rel)
+		},
+		ProtectedDir: func(path string) (string, bool) {
+			if path == protected {
+				protectedVisits++
+				return "01-protected", true
+			}
+			return "", false
+		},
+		Match: func(relativePath string, name string) bool {
+			if strings.HasPrefix(relativePath, "01-protected/") {
+				descendantVisits++
+			}
+			return strings.HasSuffix(name, ".txt")
+		},
+	})
+	if err != nil {
+		t.Fatalf("intentional SkipDir became a traversal error: %v", err)
+	}
+	if protectedVisits != 1 || descendantVisits != 0 || len(result.SkippedProtected) != 1 || result.SkippedProtected[0] != "01-protected" || result.LimitReached {
+		t.Fatalf("protected directory was not actively skipped: result=%#v protectedVisits=%d descendantVisits=%d", result, protectedVisits, descendantVisits)
+	}
+	if len(result.Matches) != 2 || result.Matches[0].RelativePath != "00-before.txt" || result.Matches[1].RelativePath != "02-after.txt" {
+		t.Fatalf("SkipDir did not preserve ordinary traversal on both sides: %#v", result.Matches)
 	}
 }
 

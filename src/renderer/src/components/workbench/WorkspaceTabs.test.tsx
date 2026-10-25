@@ -6,6 +6,11 @@ import i18n from '../../i18n'
 import { WorkspaceTabs, WorkspaceToolSelector } from './WorkspaceTabs'
 import { useWorkspaceTabsStore, type WorkspaceTab } from '../../store/workspace-tabs-store'
 
+const readyDocuments = () => ({packageId:'analytix-documents' as const,packageVersion:'1.0.0',displayName:'Documents',
+  origin:'development-source' as const,publishable:false as const,materialized:true,generationId:'a'.repeat(64),
+  activationState:'recorded' as const,desiredState:'enabled' as const,activationRevision:1,activationId:'b'.repeat(64),available:true,
+  operations:['create-object','open-object','close-object']})
+const packageList=vi.fn()
 let root: Root
 let container: HTMLDivElement
 const onSelect = vi.fn((id: string) => useWorkspaceTabsStore.getState().activateTab(id))
@@ -24,13 +29,15 @@ async function key(target: HTMLElement, key: string, options: KeyboardEventInit 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   await i18n.changeLanguage('zh')
+  packageList.mockReset().mockResolvedValue({ok:true,packages:[readyDocuments()]})
+  Object.defineProperty(window,'analytix',{configurable:true,value:{packageHost:{request:packageList}}})
   onSelect.mockClear(); onClose.mockClear()
   useWorkspaceTabsStore.setState({ tabs: [a, b], activeTabId: a.id, selectorOpen: false, open: true, focused: false })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   await act(async () => root.render(createElement(Harness)))
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  await act(async () => root.unmount()); container.remove(); Reflect.deleteProperty(window,'analytix'); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 const c: WorkspaceTab = { id: 'doc-c', kind: 'document', mode: 'documents', title: '隔离的长标题_恢复后仍应显示关闭按钮.xlsx' }
 function tabStripLayout(viewportWidth = 240, scale = 1) {
@@ -76,6 +83,27 @@ function tabStripLayout(viewportWidth = 240, scale = 1) {
 }
 
 describe('manual workspace tabs', () => {
+  it('delegates fullscreen and collapse visuals to an integrated viewer while retaining add and tab close', async () => {
+    const state = useWorkspaceTabsStore.getState(), collapse = vi.fn(), focus = vi.fn()
+    await act(async () => root.render(createElement(WorkspaceTabs, { tabs: state.tabs, activeTabId: state.activeTabId,
+      selectorOpen: false, focused: false, viewerControlsInHeader: true, onSelect, onClose, onReorder: state.reorderTab,
+      onAdd: state.showSelector, onCollapse: collapse, onToggleFocus: focus })))
+    expect(container.querySelector('.workspace-tabs-actions')?.querySelectorAll('button')).toHaveLength(1)
+    expect(container.querySelector('#workbench-workspace-collapse')).toBeNull()
+    await act(async () => container.querySelector<HTMLButtonElement>('.workspace-tab-close')!.click())
+    expect(onClose).toHaveBeenCalledWith(a.id)
+    expect(collapse).not.toHaveBeenCalled(); expect(focus).not.toHaveBeenCalled()
+  })
+  it('shows task identity in the existing strip and omits the unavailable terminal from Schedule tools', async () => {
+    const taskTab: WorkspaceTab = { id: 'schedule-task:"task"', kind: 'tool', mode: 'schedule-task', title: 'Current task', scheduleTaskId: 'task' }
+    await act(async () => useWorkspaceTabsStore.getState().openTab(taskTab))
+    expect(tabButtons().find(tab => tab.getAttribute('aria-selected') === 'true')?.textContent).toContain('Current task')
+    await act(async () => root.render(createElement(WorkspaceToolSelector, {
+      onOpen: vi.fn(), filesEnabled: true, sideChatEnabled: false, planEnabled: false,
+      terminalAvailable: false
+    })))
+    expect(container.textContent).not.toContain(i18n.t('common:rightPanelTerminal'))
+  })
   it('moves focus with arrows without opening a native object until Enter', async () => {
     await act(async () => tabButtons()[0].focus())
     await key(tabButtons()[0], 'ArrowRight')
@@ -209,12 +237,13 @@ describe('manual workspace tabs', () => {
         await act(async () => root.render(createElement(WorkspaceTabs, {tabs:[a,b],activeTabId:a.id,selectorOpen:false,focused,onSelect,onClose,onReorder:vi.fn(),onAdd:vi.fn(),onToggleFocus,onCollapse})))
         const label = i18n.t(focused ? 'common:workbenchDock' : 'common:workbenchFocus')
         const focusButtons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === label)
-        expect(focusButtons).toHaveLength(focused ? 1 : 0)
-        if (!focused) continue
+        expect(focusButtons).toHaveLength(1)
         expect(focusButtons[0].getAttribute('aria-pressed')).toBe(String(focused))
+        expect(focusButtons[0].disabled).toBe(false)
+        expect(focusButtons[0].querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 16 16')
         await act(async () => focusButtons[0].click())
       }
-      expect(onToggleFocus).toHaveBeenCalledTimes(1)
+      expect(onToggleFocus).toHaveBeenCalledTimes(2)
       const collapseButtons = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === i18n.t('common:workbenchCollapse'))
       expect(collapseButtons).toHaveLength(1)
       await act(async () => collapseButtons[0].click())
@@ -223,26 +252,141 @@ describe('manual workspace tabs', () => {
       expect(stealFocus).not.toHaveBeenCalled()
     } finally { globalToggle.remove() }
   })
-  it('keeps the secondary focus command in the existing tool chooser', async () => {
-    const onToggleFocus = vi.fn()
-    for (const focused of [false, true]) {
-      await act(async () => root.render(createElement(WorkspaceToolSelector, {
-        onOpen: vi.fn(), filesEnabled: true, sideChatEnabled: false, planEnabled: false,
-        focused, onToggleFocus
-      })))
-      const button = container.querySelector<HTMLButtonElement>('.workspace-selector-layout')!
-      expect(button.textContent).toBe(i18n.t(focused ? 'common:workbenchDock' : 'common:workbenchFocus'))
-      expect(button.getAttribute('aria-pressed')).toBe(String(focused))
-      await act(async () => button.click())
+  it('keeps layout controls out of the guide and drops every description for the real entry list', async () => {
+    const onOpen = vi.fn()
+    await act(async () => root.render(createElement(WorkspaceToolSelector, {
+      onOpen, filesEnabled: true, sideChatEnabled: false, planEnabled: true
+    })))
+    expect(container.querySelector('h2')).toBeNull()
+    expect(container.querySelector('.workspace-selector-layout')).toBeNull()
+    expect(container.querySelectorAll('[data-sidebar-right-guide-entry]').length).toBeGreaterThan(4)
+    expect(container.querySelector('.workspace-guide-entry-description')).toBeNull()
+    expect(container.querySelectorAll('kbd')).toHaveLength(1)
+    for (const [id, palette] of [
+      ['files', '[fill="#FFBC4D"]'],
+      ['browser', '[stroke="#539CFA"]'],
+      ['terminal', '[stroke="#679EFE"]']
+    ]) {
+      const artwork = container.querySelector(`[data-sidebar-right-guide-entry="${id}"] svg`)
+      expect(artwork?.getAttribute('viewBox')).toBe('0 0 36 36')
+      expect(artwork?.getAttribute('width')).toBe('22')
+      expect(artwork?.querySelector(palette)).not.toBeNull()
     }
-    expect(onToggleFocus).toHaveBeenCalledTimes(2)
+    const terminal = container.querySelector('[data-sidebar-right-guide-entry="terminal"]')!
+    expect(terminal.getAttribute('aria-keyshortcuts')).toBe('Control+` Meta+`')
+    expect(container.querySelector('[data-sidebar-right-guide-entry="files"]')?.getAttribute('aria-keyshortcuts')).toBeNull()
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="sidechat"]')!.click())
+    expect(onOpen).not.toHaveBeenCalled()
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="files"]')!.click())
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith('files')
   })
-  it('terminal selector dispatches one action and creates no right-side terminal tab', async () => {
+  it('keeps all tabs and dirty state when the panel folds and returns', async () => {
+    const state = useWorkspaceTabsStore.getState()
+    await act(async () => root.render(createElement(WorkspaceTabs, {tabs:[a,b],activeTabId:b.id,selectorOpen:false,focused:false,
+      onSelect,onClose,onReorder:state.reorderTab,onAdd:state.showSelector,onToggleFocus:() => state.setFocused(true),onCollapse:() => state.setOpen(false)})))
+    await act(async () => container.querySelector<HTMLButtonElement>('#workbench-workspace-collapse')!.click())
+    expect(useWorkspaceTabsStore.getState()).toMatchObject({open:false,tabs:[a,b]})
+    expect(onClose).not.toHaveBeenCalled()
+    await act(async () => useWorkspaceTabsStore.getState().setOpen(true))
+    expect(useWorkspaceTabsStore.getState().tabs).toEqual([a,b])
+    expect(useWorkspaceTabsStore.getState().tabs[1].dirty).toBe(true)
+  })
+  it('terminal selector dispatches one action to the workspace owner', async () => {
     const onOpen = vi.fn()
     await act(async () => root.render(createElement(WorkspaceToolSelector, { onOpen, filesEnabled: true, sideChatEnabled: false, planEnabled: false })))
-    const button = [...container.querySelectorAll('button')].find((item) => item.textContent === i18n.t('common:rightPanelTerminal'))!
+    const button = container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="terminal"]')!
     await act(async () => button.click())
     expect(onOpen).toHaveBeenCalledExactlyOnceWith('terminal')
     expect(useWorkspaceTabsStore.getState().tabs).toEqual([a, b])
   })
+})
+
+describe('Word user creation entry',()=>{
+  it('opens the existing guide Word form and submits one valid basename without routing the old document entry',async()=>{
+    const onOpen=vi.fn(),onCreateWord=vi.fn()
+    await act(async()=>root.render(createElement(WorkspaceToolSelector,{onOpen,onCreateWord,wordEnabled:true,filesEnabled:true,sideChatEnabled:false,planEnabled:false})))
+    expect(container.querySelector('[data-sidebar-right-guide-entry="documents"]')).toBeNull()
+    await act(async()=>container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="word"]')!.click())
+    const input=container.querySelector<HTMLInputElement>('[aria-label="'+i18n.t('common:workspaceWordFileName')+'"]')!
+    expect(document.activeElement).toBe(input);expect(input.value).toBe(i18n.t('common:workspaceNewWordFileName'))
+    await act(async()=>container.querySelector<HTMLButtonElement>('form button[type="submit"]')!.click())
+    expect(onCreateWord).toHaveBeenCalledExactlyOnceWith(input.value);expect(onOpen).not.toHaveBeenCalled()
+    expect(useWorkspaceTabsStore.getState().tabs).toEqual([a,b])
+  })
+  it('keeps the Word entry disabled when its current thread/runtime gate is unavailable',async()=>{
+    const onCreateWord=vi.fn()
+    await act(async()=>root.render(createElement(WorkspaceToolSelector,{onOpen:vi.fn(),onCreateWord,wordEnabled:false,filesEnabled:true,sideChatEnabled:false,planEnabled:false})))
+    const word=container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="word"]')!
+    expect(word.disabled).toBe(true);await act(async()=>word.click())
+    expect(container.querySelector('form')).toBeNull();expect(onCreateWord).not.toHaveBeenCalled()
+  })
+  it('freezes an unresolved filename and retries the same requested name',async()=>{
+    const onCreateWord=vi.fn()
+    await act(async()=>root.render(createElement(WorkspaceToolSelector,{onOpen:vi.fn(),onCreateWord,wordEnabled:true,filesEnabled:true,sideChatEnabled:false,planEnabled:false,
+      wordCreation:{phase:'unknown',fileName:'original.docx',message:'Unconfirmed'}})))
+    await act(async()=>container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="word"]')!.click())
+    const input=container.querySelector<HTMLInputElement>('form input')!
+    expect(input.value).toBe('original.docx');expect(input.disabled).toBe(true)
+    await act(async()=>container.querySelector<HTMLButtonElement>('form button[type="submit"]')!.click())
+    expect(onCreateWord).toHaveBeenCalledExactlyOnceWith('original.docx')
+  })
+  it('keeps invalid basenames out of the create callback even on direct form submission',async()=>{
+    const onCreateWord=vi.fn()
+    await act(async()=>root.render(createElement(WorkspaceToolSelector,{onOpen:vi.fn(),onCreateWord,wordEnabled:true,filesEnabled:true,sideChatEnabled:false,planEnabled:false})))
+    await act(async()=>container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="word"]')!.click())
+    const input=container.querySelector<HTMLInputElement>('form input')!
+    await act(async()=>{
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'unsafe/path.docx')
+      input.dispatchEvent(new Event('input',{bubbles:true}))
+    })
+    expect(container.querySelector<HTMLButtonElement>('form button[type="submit"]')!.disabled).toBe(true)
+    await act(async()=>container.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})))
+    expect(onCreateWord).not.toHaveBeenCalled()
+  })
+  it('does not submit a pending operation',async()=>{
+    const onCreateWord=vi.fn()
+    await act(async()=>root.render(createElement(WorkspaceToolSelector,{onOpen:vi.fn(),onCreateWord,wordEnabled:true,filesEnabled:true,sideChatEnabled:false,planEnabled:false,
+      wordCreation:{phase:'pending',fileName:'pending.docx',message:'Pending'}})))
+    await act(async()=>container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="word"]')!.click())
+    const submit=container.querySelector<HTMLButtonElement>('form button[type="submit"]')!
+    expect(submit.disabled).toBe(true);await act(async()=>submit.click());expect(onCreateWord).not.toHaveBeenCalled()
+  })
+})
+
+it('opens a retained creation through its explicit callback without issuing another create',async()=>{
+  const onCreateWord=vi.fn(),onOpenCreatedWord=vi.fn()
+  await act(async()=>root.render(createElement(WorkspaceToolSelector,{onOpen:vi.fn(),onCreateWord,onOpenCreatedWord,wordEnabled:false,filesEnabled:true,sideChatEnabled:false,planEnabled:false})))
+  await act(async()=>container.querySelector<HTMLButtonElement>('[data-word-open-created]')!.click())
+  expect(onOpenCreatedWord).toHaveBeenCalledOnce();expect(onCreateWord).not.toHaveBeenCalled()
+})
+
+it('keeps the Word form discoverable while real readiness loads, then offers existing plugin guidance',async()=>{
+  let finish!:(value:unknown)=>void
+  packageList.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+  const onCreateWord=vi.fn(),onOpenWordPlugins=vi.fn()
+  await act(async()=>root.render(createElement(WorkspaceToolSelector,{onOpen:vi.fn(),onCreateWord,onOpenWordPlugins,wordEnabled:true,filesEnabled:true,sideChatEnabled:false,planEnabled:false})))
+  await act(async()=>container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="word"]')!.click())
+  expect(container.querySelector<HTMLInputElement>('form input')).not.toBeNull()
+  expect(container.querySelector<HTMLButtonElement>('form button[type="submit"]')!.disabled).toBe(true)
+  expect(container.querySelector('[data-word-readiness]')?.textContent).toBe(i18n.t('common:workspaceWordDocumentsChecking'))
+  const pkg=readyDocuments(),unset={...pkg,activationState:'unset',activationRevision:0,available:false}
+  Reflect.deleteProperty(unset,'desiredState');Reflect.deleteProperty(unset,'activationId')
+  await act(async()=>finish({ok:true,packages:[unset]}))
+  expect(container.querySelector('[data-word-readiness]')?.textContent).toBe(i18n.t('common:workspaceWordDocumentsNotEnabled'))
+  await act(async()=>container.querySelector<HTMLButtonElement>('[data-word-open-plugins]')!.click())
+  expect(onOpenWordPlugins).toHaveBeenCalledOnce();expect(onCreateWord).not.toHaveBeenCalled()
+  expect(packageList).toHaveBeenCalledExactlyOnceWith({action:'list'})
+  await act(async()=>container.querySelector<HTMLButtonElement>('[data-word-readiness-refresh]')!.click())
+  expect(container.querySelector<HTMLButtonElement>('form button[type="submit"]')!.disabled).toBe(false)
+})
+it('allows the same unknown recovery while the new-create readiness query is unresolved',async()=>{
+  packageList.mockImplementationOnce(()=>new Promise(()=>{}))
+  const onCreateWord=vi.fn()
+  await act(async()=>root.render(createElement(WorkspaceToolSelector,{onOpen:vi.fn(),onCreateWord,wordEnabled:true,filesEnabled:true,sideChatEnabled:false,planEnabled:false,
+    wordCreation:{phase:'unknown',fileName:'original.docx',message:'Unconfirmed'}})))
+  await act(async()=>container.querySelector<HTMLButtonElement>('[data-sidebar-right-guide-entry="word"]')!.click())
+  expect(container.querySelector<HTMLInputElement>('form input')!.disabled).toBe(true)
+  const submit=container.querySelector<HTMLButtonElement>('form button[type="submit"]')!
+  expect(submit.disabled).toBe(false);await act(async()=>submit.click())
+  expect(onCreateWord).toHaveBeenCalledExactlyOnceWith('original.docx')
 })

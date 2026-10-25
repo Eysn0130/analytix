@@ -106,7 +106,7 @@ func validRestartResolutionRecord(kind string, record GateRecord, event map[stri
 	case "approval":
 		return status == "allowed" || status == "denied" || status == "expired"
 	case "user_input":
-		return status == "submitted" || status == "cancelled"
+		return status == "submitted" || status == "cancelled" || status == "continued"
 	default:
 		return false
 	}

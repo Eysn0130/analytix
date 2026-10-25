@@ -2,6 +2,7 @@ package privacyprojection
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -70,6 +71,49 @@ func TestProjectTextLabeledPIIPreservesOriginalUnicodeByteOffsets(t *testing.T) 
 	}
 }
 
+func TestProjectTextExplicitAccountLabelsBeyondCueWindow(t *testing.T) {
+	raw, err := os.ReadFile("../../../../runtime/src/conformance/fixtures/ordinary-pii-projection-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Cases []struct {
+			ID                 string `json:"id"`
+			Input              string `json:"input"`
+			Expected           string `json:"expected"`
+			SensitiveCanonical string `json:"sensitiveCanonical"`
+		} `json:"untrustedTextCases"`
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	selected := 0
+	for _, test := range fixture.Cases {
+		if !strings.HasPrefix(test.ID, "explicit-account-label-") {
+			continue
+		}
+		selected++
+		t.Run(test.ID, func(t *testing.T) {
+			projection := ProjectText(test.Input)
+			if test.Expected == "preserve" {
+				if projection.Text != test.Input || len(projection.Findings) != 0 {
+					t.Fatalf("safe label boundary changed: %#v", projection)
+				}
+			} else if len(projection.Findings) != 1 || projection.Findings[0].Kind != KindAccount ||
+				strings.Contains(projection.Text, test.SensitiveCanonical) ||
+				projection.Findings[0].StartByte != strings.Index(test.Input, test.SensitiveCanonical) {
+				t.Fatalf("explicit account label or original byte offset lost: %#v", projection)
+			}
+			if strings.HasSuffix(test.ID, "closest-measure") && !strings.Contains(projection.Text, "；金额 123456789012") {
+				t.Fatalf("later measure was changed: %#v", projection)
+			}
+		})
+	}
+	if selected == 0 {
+		t.Fatal("missing explicit account label corpus")
+	}
+}
+
 func TestProjectTextMasksShortAccountsOnlyWithAccountSemantics(t *testing.T) {
 	for _, input := range []string{
 		"账号 00123456",
@@ -134,6 +178,54 @@ func TestProjectTextPreservesMeasuresAndCalendarValues(t *testing.T) {
 	input := "金额 123456789012345678；格式化金额 12,345,678,901.23；日期 20260716153045；时间戳 1784174496000；记录数 2645472"
 	if projection := ProjectText(input); projection.Text != input || len(projection.Findings) != 0 {
 		t.Fatalf("ordinary measures were modified: %#v", projection)
+	}
+}
+
+func TestProjectTextNumericBoundarySemantics(t *testing.T) {
+	for _, test := range []struct {
+		input string
+		kind  Kind
+	}{
+		{input: "00000.  0000000000"},
+		{input: "账号 00000.  0000000000", kind: KindAccount},
+		{input: "金额 12345678901"},
+		{input: "金额 13800138000", kind: KindPhone},
+		{input: "金额 110105194912310020"},
+		{input: "金额 11010519491231002X", kind: KindID},
+		{input: "123456\r\n789012"},
+		{input: "账户\n00123456", kind: KindAccount},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			projection := ProjectText(test.input)
+			if test.kind == "" {
+				if projection.Text != test.input || len(projection.Findings) != 0 {
+					t.Fatalf("safe numeric source changed: %#v", projection)
+				}
+			} else if projection.Text == test.input || len(projection.Findings) != 1 || projection.Findings[0].Kind != test.kind {
+				t.Fatalf("numeric authority changed: %#v", projection)
+			}
+			if second := ProjectText(projection.Text); second.Text != projection.Text || len(second.Findings) != 0 {
+				t.Fatalf("numeric projection is not a fixed point: %#v", second)
+			}
+		})
+	}
+}
+
+func TestProjectTextNumericCueWindowUsesOriginalRunes(t *testing.T) {
+	for _, padding := range []string{"😀", "\u200b"} {
+		for _, count := range []int{30, 31} {
+			prefix := "账户" + strings.Repeat(padding, count)
+			input := prefix + "00123456"
+			projection := ProjectText(input)
+			if count == 31 {
+				if projection.Text != input || len(projection.Findings) != 0 {
+					t.Fatalf("cue outside original 32-rune window was used: %#v", projection)
+				}
+			} else if len(projection.Findings) != 1 || projection.Findings[0].Kind != KindAccount ||
+				projection.Findings[0].StartByte != len(prefix) || projection.Findings[0].EndByte != len(input) {
+				t.Fatalf("original rune window or source byte offsets changed: %#v", projection)
+			}
+		}
 	}
 }
 
@@ -381,5 +473,38 @@ func TestValidatePublicValueMatchesProjectionChangedSemantics(t *testing.T) {
 		if rejected != changed {
 			t.Fatalf("input %d validation=%v projectionChanged=%v value=%#v", index, rejected, changed, input)
 		}
+	}
+}
+
+func TestProjectHostQuestionOptionsPreservesOnlyBoundOptionIdentity(t *testing.T) {
+	const inputID = "input_123456789012"
+	questionID := inputID + "_1"
+	for _, options := range []any{
+		[]map[string]string{{"id": questionID + "_option_1", "label": "账号 6222020000000000000", "description": "电话 13800138000"}},
+		[]map[string]any{{"id": questionID + "_option_1", "label": "账号 6222020000000000000", "description": "电话 13800138000"}},
+		[]any{map[string]any{"id": questionID + "_option_1", "label": "账号 6222020000000000000", "description": "电话 13800138000"}},
+	} {
+		input := map[string]any{"kind": "user_input", "inputId": inputID, "questions": []any{map[string]any{"id": questionID, "question": "Choose", "multiSelect": false, "options": options}}}
+		projected, changed := ProjectPublicValue(input)
+		if !changed {
+			t.Fatal("option content was not projected")
+		}
+		encoded, err := json.Marshal(projected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(encoded)
+		if !strings.Contains(text, questionID+"_option_1") || strings.Contains(text, "6222020000000000000") || strings.Contains(text, "13800138000") {
+			t.Fatalf("option identity/content projection = %s", text)
+		}
+		again, changed := ProjectPublicValue(projected)
+		if changed || !reflect.DeepEqual(again, projected) {
+			t.Fatal("option projection is not idempotent")
+		}
+	}
+	unbound, _ := ProjectPublicValue(map[string]any{"kind": "user_input", "inputId": inputID, "questions": []any{map[string]any{"id": questionID, "question": "Choose", "options": []any{map[string]any{"id": "6222020000000000000", "label": "safe"}}}}})
+	encoded, _ := json.Marshal(unbound)
+	if strings.Contains(string(encoded), "6222020000000000000") {
+		t.Fatal("unbound option identity escaped projection")
 	}
 }

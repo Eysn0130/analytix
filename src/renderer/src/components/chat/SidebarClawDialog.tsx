@@ -128,8 +128,8 @@ export function ClawAddImDialog({
     error: ''
   })
   const [platformAccount, setPlatformAccount] = useState<ClawImPlatformAccountV1 | undefined>()
-  const installPollTimerRef = useRef<ReturnType<typeof window.setInterval> | null>(null)
-  const installCountdownTimerRef = useRef<ReturnType<typeof window.setInterval> | null>(null)
+  const installPollTimerRef = useRef<ReturnType<Window['setInterval']> | null>(null)
+  const installCountdownTimerRef = useRef<ReturnType<Window['setInterval']> | null>(null)
   const installAttemptRef = useRef(0)
   const [activeStep, setActiveStep] = useState<ClawDialogStep>('defaults')
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false)

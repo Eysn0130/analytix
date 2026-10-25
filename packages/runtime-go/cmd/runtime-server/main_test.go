@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -441,6 +442,210 @@ func TestRuntimeConfigRejectsAmbientProviderCredentialAuthority(t *testing.T) {
 		"--model-providers-json", `{"providers":[{"id":"explicit","apiKey":"synthetic-cli-provider-secret","baseUrl":"https://provider.invalid/v1"}]}`,
 	}); err == nil {
 		t.Fatal("runtime accepted credential-bearing Provider metadata in argv")
+	}
+}
+
+func TestRuntimeCLIProjectsClosedModelPreferencesIntoConfig(t *testing.T) {
+	t.Setenv("ANALYTIX_API_KEY", "synthetic-ambient-provider-secret")
+	t.Setenv("ANALYTIX_MODEL_PROVIDERS", `{"providers":[{"id":"ambient","apiKey":"synthetic-ambient-provider-secret"}]}`)
+	for _, reasoning := range []string{
+		`{"supportedEfforts":["off","high"],"defaultEffort":"high","requestProtocol":"deepseek-chat-completions"}`,
+		`{"supportedEfforts":["off"],"defaultEffort":"off","requestProtocol":"none"}`,
+	} {
+		raw := `{"providers":[{"id":"selected","baseUrl":"https://selected.invalid/v1","endpointFormat":"chat_completions","modelProfiles":{"canonical":{"aliases":["display-alias"],"reasoning":` + reasoning + `},"empty":{}}}]}`
+		cli, err := parseRuntimeServerCLI([]string{
+			"--model-providers-json", raw,
+			"--provider-id", "ignored-provider", "--base-url", "https://ignored.invalid/v1",
+			"--model", "ignored-model", "--endpoint-format", "messages",
+			"--model-proxy-url", "http://ignored-proxy.invalid",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := runtimeConfigFromCLI(cli, "", 0)
+		if config.ProviderID != "" || config.BaseURL != "" || config.APIKey != "" || config.Model != "" ||
+			config.EndpointFormat != "" || config.ModelProxyURL != "" || config.ModelProvidersJSON == "" {
+			t.Fatal("closed preferences were lost or legacy execution authority was retained")
+		}
+		var got, want map[string]any
+		if err := json.Unmarshal([]byte(config.ModelProvidersJSON), &got); err != nil {
+			t.Fatal(err)
+		}
+		wantRaw := `{"providers":[{"id":"selected","baseUrl":"https://selected.invalid/v1","endpointFormat":"chat_completions","modelProfiles":{"canonical":{"aliases":["display-alias"],"reasoning":` + reasoning + `}}}]}`
+		if err := json.Unmarshal([]byte(wantRaw), &want); err != nil {
+			t.Fatal(err)
+		}
+		gotCanonical, _ := json.Marshal(got)
+		wantCanonical, _ := json.Marshal(want)
+		if !bytes.Equal(gotCanonical, wantCanonical) {
+			t.Fatal("parse-to-config preferences did not preserve the closed identity-bound payload")
+		}
+	}
+}
+
+func TestRuntimeCLIModelPreferencesRejectInvalidAndExpandedPayloads(t *testing.T) {
+	fixture := func() map[string]any {
+		return map[string]any{"providers": []any{map[string]any{
+			"id": "selected", "baseUrl": "https://selected.invalid/v1", "endpointFormat": "chat_completions",
+			"modelProfiles": map[string]any{"canonical": map[string]any{
+				"aliases": []any{"display-alias"},
+				"reasoning": map[string]any{
+					"supportedEfforts": []any{"off", "high"}, "defaultEffort": "high",
+					"requestProtocol": "deepseek-chat-completions",
+				},
+			}},
+		}}}
+	}
+	provider := func(document map[string]any) map[string]any {
+		return document["providers"].([]any)[0].(map[string]any)
+	}
+	profile := func(document map[string]any) map[string]any {
+		return provider(document)["modelProfiles"].(map[string]any)["canonical"].(map[string]any)
+	}
+	tests := []struct {
+		name   string
+		raw    string
+		change func(map[string]any)
+	}{
+		{name: "malformed JSON", raw: `{"providers":[`},
+		{name: "trailing JSON", raw: `{"providers":[]} {}`},
+		{name: "duplicate JSON key", raw: `{"providers":[],"providers":[]}`},
+		{name: "document bytes", raw: strings.Repeat(" ", (1<<20)+1)},
+		{name: "wrong providers type", raw: `{"providers":{}}`},
+		{name: "unknown root field", change: func(d map[string]any) { d["defaultProviderId"] = "selected" }},
+		{name: "unknown provider field", change: func(d map[string]any) { provider(d)["models"] = []any{"external"} }},
+		{name: "credential member", change: func(d map[string]any) { provider(d)["apiKey"] = nil }},
+		{name: "unknown profile field", change: func(d map[string]any) { profile(d)["supportsToolCalling"] = true }},
+		{name: "invalid provider ID", change: func(d map[string]any) { provider(d)["id"] = "Selected" }},
+		{name: "duplicate provider ID", change: func(d map[string]any) {
+			d["providers"] = append(d["providers"].([]any), provider(d))
+		}},
+		{name: "provider count", change: func(d map[string]any) {
+			entries := make([]any, 129)
+			for index := range entries {
+				entries[index] = map[string]any{"id": fmt.Sprintf("p-%d", index)}
+			}
+			d["providers"] = entries
+		}},
+		{name: "unknown endpoint format", change: func(d map[string]any) { provider(d)["endpointFormat"] = "anthropic_messages" }},
+		{name: "endpoint credential", change: func(d map[string]any) { provider(d)["baseUrl"] = "https://user:synthetic@selected.invalid/v1" }},
+		{name: "endpoint query", change: func(d map[string]any) { provider(d)["baseUrl"] = "https://selected.invalid/v1?key=synthetic" }},
+		{name: "endpoint fragment", change: func(d map[string]any) { provider(d)["baseUrl"] = "https://selected.invalid/v1#" }},
+		{name: "endpoint whitespace", change: func(d map[string]any) { provider(d)["baseUrl"] = "https://selected.invalid/a b" }},
+		{name: "endpoint length", change: func(d map[string]any) {
+			provider(d)["baseUrl"] = "https://selected.invalid/" + strings.Repeat("a", 2048)
+		}},
+		{name: "null profiles", change: func(d map[string]any) { provider(d)["modelProfiles"] = nil }},
+		{name: "profile count", change: func(d map[string]any) {
+			entries := make(map[string]any, 201)
+			for index := 0; index < 201; index++ {
+				entries[fmt.Sprintf("m-%d", index)] = map[string]any{}
+			}
+			provider(d)["modelProfiles"] = entries
+		}},
+		{name: "model length", change: func(d map[string]any) {
+			provider(d)["modelProfiles"] = map[string]any{strings.Repeat("a", 129): profile(d)}
+		}},
+		{name: "casefold duplicate model", change: func(d map[string]any) {
+			provider(d)["modelProfiles"] = map[string]any{"Model": profile(d), "model": profile(d)}
+		}},
+		{name: "model control", change: func(d map[string]any) {
+			provider(d)["modelProfiles"] = map[string]any{"model\ncontrol": profile(d)}
+		}},
+		{name: "duplicate aliases", change: func(d map[string]any) { profile(d)["aliases"] = []any{"alias", "alias"} }},
+		{name: "alias whitespace", change: func(d map[string]any) { profile(d)["aliases"] = []any{" padded "} }},
+		{name: "alias UTF-16 length", change: func(d map[string]any) { profile(d)["aliases"] = []any{strings.Repeat("😀", 65)} }},
+		{name: "alias count", change: func(d map[string]any) {
+			aliases := make([]any, 51)
+			for index := range aliases {
+				aliases[index] = fmt.Sprintf("alias-%d", index)
+			}
+			profile(d)["aliases"] = aliases
+		}},
+		{name: "null runtime reasoning", change: func(d map[string]any) { profile(d)["reasoning"] = nil }},
+		{name: "unknown reasoning field", change: func(d map[string]any) {
+			profile(d)["reasoning"].(map[string]any)["enabled"] = true
+		}},
+		{name: "empty efforts", change: func(d map[string]any) {
+			profile(d)["reasoning"].(map[string]any)["supportedEfforts"] = []any{}
+		}},
+		{name: "duplicate effort", change: func(d map[string]any) {
+			profile(d)["reasoning"].(map[string]any)["supportedEfforts"] = []any{"high", "high"}
+		}},
+		{name: "padded effort", change: func(d map[string]any) {
+			profile(d)["reasoning"].(map[string]any)["supportedEfforts"] = []any{" high "}
+		}},
+		{name: "unsupported default", change: func(d map[string]any) {
+			profile(d)["reasoning"].(map[string]any)["defaultEffort"] = "low"
+		}},
+		{name: "unknown protocol", change: func(d map[string]any) {
+			profile(d)["reasoning"].(map[string]any)["requestProtocol"] = "deepseek-by-name"
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw := test.raw
+			if test.change != nil {
+				document := fixture()
+				test.change(document)
+				encoded, err := json.Marshal(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw = string(encoded)
+			}
+			if _, err := parseRuntimeServerCLI([]string{"--model-providers-json", raw}); err == nil {
+				t.Fatal("invalid or authority-expanding model preferences reached runtime configuration")
+			}
+		})
+	}
+}
+
+func TestRuntimeCLIModelPreferencesDropEmptyProfilesAndKeepExactStringBoundary(t *testing.T) {
+	for _, raw := range []string{
+		`{"providers":[{"id":"selected","baseUrl":"https://selected.invalid/v1","endpointFormat":"chat_completions","modelProfiles":{}}]}`,
+		`{"providers":[{"id":"selected","baseUrl":"https://selected.invalid/v1","endpointFormat":"chat_completions","modelProfiles":{"model":{}}}]}`,
+	} {
+		cli, err := parseRuntimeServerCLI([]string{"--model-providers-json", raw})
+		if err != nil || runtimeConfigFromCLI(cli, "", 0).ModelProvidersJSON != "" {
+			t.Fatal("empty explicit profile changed legacy/default reasoning behavior")
+		}
+	}
+	raw := `{"providers":[{"id":"selected","baseUrl":"https://selected.invalid/v1","endpointFormat":"chat_completions","modelProfiles":{"model":{"aliases":["` + strings.Repeat("😀", 64) + `"]}}}]}`
+	cli, err := parseRuntimeServerCLI([]string{"--model-providers-json", raw})
+	if err != nil || runtimeConfigFromCLI(cli, "", 0).ModelProvidersJSON == "" {
+		t.Fatal("exact JavaScript string boundary was not retained in runtime metadata")
+	}
+}
+
+func TestRuntimeCLIModelPreferencesPreserveReasoningAbsenceAndPrototypeKeys(t *testing.T) {
+	for _, model := range []string{"canonical", "__proto__", "constructor"} {
+		t.Run(model, func(t *testing.T) {
+			raw := `{"providers":[{"id":"selected","baseUrl":"https://selected.invalid/v1","endpointFormat":"chat_completions","modelProfiles":{"` + model + `":{"aliases":["display-alias"]}}}]}`
+			cli, err := parseRuntimeServerCLI([]string{"--model-providers-json", raw})
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := runtimeConfigFromCLI(cli, "", 0)
+			if config.ModelProvidersJSON == "" {
+				t.Fatal("aliases-only metadata was discarded")
+			}
+			var document struct {
+				Providers []struct {
+					ModelProfiles map[string]map[string]json.RawMessage `json:"modelProfiles"`
+				} `json:"providers"`
+			}
+			if err := json.Unmarshal([]byte(config.ModelProvidersJSON), &document); err != nil {
+				t.Fatal(err)
+			}
+			if len(document.Providers) != 1 {
+				t.Fatal("aliases-only metadata changed provider count")
+			}
+			profile, present := document.Providers[0].ModelProfiles[model]
+			if !present || len(profile) != 1 || string(profile["aliases"]) != `["display-alias"]` {
+				t.Fatal("projection lost the exact model key or added a reasoning override")
+			}
+		})
 	}
 }
 
@@ -913,6 +1118,7 @@ func TestFailedConstructorReleasesPersistenceLease(t *testing.T) {
 }
 
 func TestSemanticStartupFailurePrecedesEnvironmentAndListenerActivation(t *testing.T) {
+	t.Setenv("ANALYTIX_STARTUP_TRACE", "1")
 	t.Setenv("ANALYTIX_RUNTIME_TOKEN", "pre-activation-token")
 	dataDir := t.TempDir()
 	durableRoot := t.TempDir()
@@ -933,9 +1139,15 @@ func TestSemanticStartupFailurePrecedesEnvironmentAndListenerActivation(t *testi
 		unsetCalls++
 		return nil
 	}
+	finishCapture := beginRuntimeServerStderrCapture(t)
 	err := runRuntimeServerWithDependencies([]string{
 		"--host", "127.0.0.1", "--port", "0", "--data-dir", dataDir, "--runtime-durable-root", durableRoot,
 	}, dependencies)
+	stderr := finishCapture()
+	if !regexp.MustCompile(`(?m)^ANALYTIX_STARTUP_OWNER_PHASE_V1 go_prepare_failed_persistence_integrity [0-9]+$`).MatchString(stderr) ||
+		strings.Count(stderr, "go_prepare_failed_") != 1 || strings.Contains(stderr, threadDir) {
+		t.Fatal("real Prepare failure did not emit exactly one closed code")
+	}
 	if err == nil || !strings.Contains(err.Error(), "invalid_json") {
 		t.Fatalf("corrupt semantic startup returned the wrong failure: %v", err)
 	}
@@ -944,6 +1156,17 @@ func TestSemanticStartupFailurePrecedesEnvironmentAndListenerActivation(t *testi
 	}
 	if os.Getenv("ANALYTIX_RUNTIME_TOKEN") != "pre-activation-token" {
 		t.Fatal("semantic failure changed the process environment before activation")
+	}
+	cli, parseErr := parseRuntimeServerCLI([]string{"--data-dir", dataDir, "--runtime-durable-root", durableRoot})
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	lease, acquireErr := runtimeapp.AcquireRuntimePersistenceLease(runtimeConfigFromCLI(cli, "pre-activation-token", 0))
+	if acquireErr != nil {
+		t.Fatal("Prepare failure retained its lease")
+	}
+	if closeErr := lease.Close(); closeErr != nil {
+		t.Fatal("reacquired lease did not close")
 	}
 }
 
@@ -1061,6 +1284,7 @@ func TestRuntimeServerShutdownRetryRetainsOwnershipUntilDrainSucceeds(t *testing
 }
 
 func TestSignalDuringStartupDoesNotActivateListener(t *testing.T) {
+	t.Setenv("ANALYTIX_STARTUP_TRACE", "1")
 	t.Setenv("ANALYTIX_RUNTIME_TOKEN", "startup-cancel-token")
 	args := []string{
 		"--host", "127.0.0.1", "--port", "0", "--data-dir", t.TempDir(), "--runtime-durable-root", t.TempDir(),
@@ -1082,6 +1306,7 @@ func TestSignalDuringStartupDoesNotActivateListener(t *testing.T) {
 		listenCalled = true
 		return nil, errors.New("listener must remain inactive")
 	}
+	finishCapture := beginRuntimeServerStderrCapture(t)
 	done := make(chan error, 1)
 	go func() { done <- runRuntimeServerWithDependencies(args, dependencies) }()
 	select {
@@ -1100,6 +1325,9 @@ func TestSignalDuringStartupDoesNotActivateListener(t *testing.T) {
 	}
 	if listenCalled {
 		t.Fatal("startup cancellation activated a listener")
+	}
+	if strings.Contains(finishCapture(), "go_prepare_failed_") {
+		t.Fatal("graceful startup cancellation emitted a failure code")
 	}
 }
 

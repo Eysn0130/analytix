@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement, Ref } from 'react'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next'
 import type { FundsCSVSnapshotStageResult } from '@shared/analytix-api'
 import { useChatStore } from '../store/chat-store'
 import { ActionMenuItem, ActionMenuSeparator } from './common/ActionMenu'
+import { useWorkDetailsPreference, writeWorkDetailsPreference, WORK_DETAILS_MODES } from '../lib/chat-presentation-preferences'
 import { formatRelativeTime } from '../lib/format-relative-time'
 import { readPinnedThreadIds, subscribePinnedThreadIds, togglePinnedThreadId } from '../lib/pinned-threads'
 import { buildThreadMarkdown } from '../lib/thread-markdown'
@@ -50,7 +51,7 @@ type Props = {
   onOpenSideChat?: () => void
 }
 
-type ThreadActionsSubmenu = 'copy' | 'branch' | null
+type ThreadActionsSubmenu = 'copy' | 'branch' | 'work-details' | null
 type ActionsMenuPlacement = {
   left: number
   top: number
@@ -78,8 +79,14 @@ const ACTIONS_MENU_VIEWPORT_MARGIN = 8
 const ACTIONS_MENU_TRIGGER_GAP = 6
 const useSessionHeaderLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
 
+/** Resident header chrome. The mounted timeline retains view and request ownership. */
+export function SessionHeaderTabsSeat({ seatRef }: { seatRef: Ref<HTMLDivElement> }): ReactElement {
+  return <div ref={seatRef} data-analytix-session-header-tabs
+    className="ds-no-drag min-w-0 shrink-0 border-b border-ds-border-muted px-5 empty:hidden" />
+}
+
 function menuItems(menu: HTMLElement): HTMLButtonElement[] {
-  return [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+  return [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled),[role="menuitemradio"]:not(:disabled)')]
     .filter(item => item.closest('[role="menu"]') === menu)
 }
 
@@ -106,8 +113,16 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
     workspaceLabel || storeSnapshot.workspaceLabel || (active?.workspace ? workspaceLabelFromPath(active.workspace) : '')
   const [editing, setEditing] = useState(false)
   const [draftTitle, setDraftTitle] = useState('')
+  const renameEditorRef = useRef({
+    threadId: null as string | null,
+    generation: 0,
+    revision: 0,
+    open: false,
+    pending: false
+  })
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false)
   const [actionsMenuPlacement, setActionsMenuPlacement] = useState<ActionsMenuPlacement | null>(null)
+  const workDetails = useWorkDetailsPreference()
   const [actionsSubmenu, setActionsSubmenu] = useState<ThreadActionsSubmenu>(null)
   const [sourcePreviewOpen, setSourcePreviewOpen] = useState(false)
   const [fundsCSVStageState, setFundsCSVStageState] = useState<'idle' | 'running' | 'staged' | 'confirming' | 'success' | 'failed' | 'capability_unavailable'>('idle')
@@ -122,6 +137,10 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   const branchParentRef = useRef<HTMLButtonElement>(null)
   const copyMenuRef = useRef<HTMLDivElement>(null)
   const branchMenuRef = useRef<HTMLDivElement>(null)
+  const workDetailsParentRef = useRef<HTMLButtonElement>(null)
+  const workDetailsMenuRef = useRef<HTMLDivElement>(null)
+  const submenuMenu = (kind: ThreadActionsSubmenu) => kind === 'copy' ? copyMenuRef.current : kind === 'branch' ? branchMenuRef.current : workDetailsMenuRef.current
+  const submenuParent = (kind: ThreadActionsSubmenu) => kind === 'copy' ? copyParentRef.current : kind === 'branch' ? branchParentRef.current : workDetailsParentRef.current
   const actionsMenuId = useId()
   const entryFocusRef = useRef<'first' | 'last'>('first')
   const entryFrameRef = useRef<number | null>(null)
@@ -161,12 +180,19 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
       : ''
 
   useEffect(() => {
-    if (active) {
-      setDraftTitle(active.title)
-    } else {
-      setDraftTitle('')
+    const editor = renameEditorRef.current
+    const threadId = active?.id ?? null
+    if (editor.threadId !== threadId) {
+      editor.threadId = threadId
+      editor.generation += 1
+      editor.revision = 0
+      editor.open = false
+      editor.pending = false
     }
-    setEditing(false)
+    if (!editor.open) {
+      setDraftTitle(active?.title ?? '')
+      setEditing(false)
+    }
     closeActionsMenu()
   }, [active, closeActionsMenu])
 
@@ -232,7 +258,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
     if (!actionsSubmenu || submenuFocusRef.current !== actionsSubmenu) return
     submenuFrameRef.current = window.requestAnimationFrame(() => {
       submenuFrameRef.current = null
-      const menu = actionsSubmenu === 'copy' ? copyMenuRef.current : branchMenuRef.current
+      const menu = submenuMenu(actionsSubmenu)
       if (menu) menuItems(menu)[0]?.focus({ preventScroll: true })
       submenuFocusRef.current = null
     })
@@ -292,18 +318,47 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
     }
   }, [actionsMenuOpen, positionActionsMenu])
 
+  const cancelRename = (): void => {
+    const editor = renameEditorRef.current
+    editor.generation += 1
+    editor.open = false
+    editor.pending = false
+    setDraftTitle(active?.title ?? '')
+    setEditing(false)
+  }
+
+  const changeDraftTitle = (title: string): void => {
+    renameEditorRef.current.revision += 1
+    setDraftTitle(title)
+  }
+
   const commitTitle = (): void => {
-    if (!active) {
-      setEditing(false)
-      return
-    }
+    const editor = renameEditorRef.current
+    if (!editor.open || editor.pending || !active || editor.threadId !== active.id) return
+    if (useChatStore.getState().activeThreadId !== active.id) return
     const next = draftTitle.trim()
     if (!next || next === active.title) {
-      setDraftTitle(active.title)
-      setEditing(false)
+      cancelRename()
       return
     }
-    void renameActiveThread(next).finally(() => setEditing(false))
+    const { threadId, generation, revision } = editor
+    editor.pending = true
+    void renameActiveThread(next).then(
+      () => {
+        const current = renameEditorRef.current
+        if (current.generation !== generation) return
+        current.pending = false
+        if (!current.open || current.threadId !== threadId || current.revision !== revision) return
+        if (useChatStore.getState().activeThreadId !== threadId) return
+        current.open = false
+        current.generation += 1
+        setEditing(false)
+      },
+      () => {
+        const current = renameEditorRef.current
+        if (current.generation === generation) current.pending = false
+      }
+    )
   }
 
   const openActionsMenu = (entry: 'first' | 'last' = 'first'): void => {
@@ -319,21 +374,21 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   const enterSubmenu = (kind: Exclude<ThreadActionsSubmenu, null>): void => {
     if (entryFrameRef.current !== null) window.cancelAnimationFrame(entryFrameRef.current)
     entryFrameRef.current = null
-    const menu = kind === 'copy' ? copyMenuRef.current : branchMenuRef.current
+    const menu = submenuMenu(kind)
     if (actionsSubmenu === kind && menu) menuItems(menu)[0]?.focus({ preventScroll: true })
     else { submenuFocusRef.current = kind; setActionsSubmenu(kind) }
   }
   const handleActionsMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (event.isDefaultPrevented() || event.nativeEvent.isComposing) return
+    if (event.isDefaultPrevented() || event.repeat || event.nativeEvent.isComposing || event.keyCode === 229) return
     const menu = event.target instanceof Element ? event.target.closest<HTMLElement>('[role="menu"]') : null
     if (!menu) return
     if (event.key === 'Tab') { closeActionsMenu(); return }
-    const submenu = menu === copyMenuRef.current ? 'copy' : menu === branchMenuRef.current ? 'branch' : null
+    const submenu = menu === copyMenuRef.current ? 'copy' : menu === branchMenuRef.current ? 'branch' : menu === workDetailsMenuRef.current ? 'work-details' : null
     if (event.key === 'Escape' || (submenu && event.key === 'ArrowLeft')) {
       event.preventDefault(); event.stopPropagation()
       if (submenu) {
         setActionsSubmenu(null)
-        const parent = submenu === 'copy' ? copyParentRef.current : branchParentRef.current
+        const parent = submenuParent(submenu)
         // Runtime/busy gates may disable the parent while its child has focus.
         const rootMenu = actionsMenuPortalRef.current
         const fallback = rootMenu ? menuItems(rootMenu)[0] : null
@@ -343,7 +398,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
     }
     if (event.key === 'ArrowRight' && !submenu) {
       const kind = document.activeElement === copyParentRef.current ? 'copy'
-        : branchParentRef.current && document.activeElement === branchParentRef.current && !branchParentRef.current.disabled ? 'branch' : null
+        : branchParentRef.current && document.activeElement === branchParentRef.current && !branchParentRef.current.disabled ? 'branch' : document.activeElement === workDetailsParentRef.current ? 'work-details' : null
       if (kind) { event.preventDefault(); event.stopPropagation(); enterSubmenu(kind) }
       return
     }
@@ -372,6 +427,12 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
 
   const beginRename = (): void => {
     if (!active) return
+    const editor = renameEditorRef.current
+    editor.threadId = active.id
+    editor.generation += 1
+    editor.revision = 0
+    editor.open = true
+    editor.pending = false
     setDraftTitle(active.title)
     setEditing(true)
     closeActionsMenu()
@@ -570,7 +631,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
   const threadActionsDisabled = !active || runtimeConnection !== 'ready'
   const sourcePreviewDisabled = !workspaceRoot.trim()
   const hoverSubmenu = (next: ThreadActionsSubmenu): void => {
-    if (copyMenuRef.current?.contains(document.activeElement) || branchMenuRef.current?.contains(document.activeElement)) return
+    if (copyMenuRef.current?.contains(document.activeElement) || branchMenuRef.current?.contains(document.activeElement) || workDetailsMenuRef.current?.contains(document.activeElement)) return
     setActionsSubmenu(next)
   }
 
@@ -597,7 +658,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           if (event.target instanceof HTMLButtonElement) lastFocusedActionRef.current = event.target
         }}
         onPointerLeave={() => {
-          if (!copyMenuRef.current?.contains(document.activeElement) && !branchMenuRef.current?.contains(document.activeElement)) setActionsSubmenu(null)
+          if (!copyMenuRef.current?.contains(document.activeElement) && !branchMenuRef.current?.contains(document.activeElement) && !workDetailsMenuRef.current?.contains(document.activeElement)) setActionsSubmenu(null)
         }}
       >
         {compact ? (
@@ -647,6 +708,18 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
           onClick={openSideChat}
           onPointerEnter={() => hoverSubmenu(null)}
         />
+        <div className="ds-session-actions-menu-submenu-anchor">
+          <ActionMenuItem icon={<MoreHorizontal className="h-5 w-5" />} label={t('workDetailsTitle')} hasSubmenu
+            ref={workDetailsParentRef} expanded={actionsSubmenu === 'work-details'} controls={`${actionsMenuId}-work-details`}
+            onClick={() => actionsSubmenu === 'work-details' ? setActionsSubmenu(null) : enterSubmenu('work-details')}
+            onPointerEnter={() => hoverSubmenu('work-details')} />
+          {actionsSubmenu === 'work-details' ? <div ref={workDetailsMenuRef} id={`${actionsMenuId}-work-details`}
+            className="ds-session-actions-submenu" role="menu" aria-label={t('workDetailsTitle')}>
+            {WORK_DETAILS_MODES.map(mode => <ActionMenuItem key={mode} icon={<MoreHorizontal className="h-5 w-5" />}
+              role="menuitemradio" checked={workDetails === mode} active={workDetails === mode} label={t(`workDetailsMode.${mode}`)}
+              onClick={() => { writeWorkDetailsPreference(mode); closeActionsMenu() }} />)}
+          </div> : null}
+        </div>
         <ActionMenuItem
           icon={<TableProperties className="h-5 w-5" strokeWidth={1.9} />}
           label={t('sessionActionDataImport')}
@@ -849,7 +922,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                     <input
                       className="ds-session-title-compact min-w-0 flex-1 rounded-lg border border-ds-border bg-ds-elevated px-2 py-1 text-[13px] font-semibold leading-[18px] tracking-[-0.01em] text-ds-ink focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/20"
                       value={draftTitle}
-                      onChange={(e) => setDraftTitle(e.target.value)}
+                      onChange={(e) => changeDraftTitle(e.target.value)}
                       onBlur={() => commitTitle()}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
@@ -857,8 +930,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                           commitTitle()
                         }
                         if (e.key === 'Escape') {
-                          setDraftTitle(active.title)
-                          setEditing(false)
+                          cancelRename()
                         }
                       }}
                       aria-label={t('renameThreadHint')}
@@ -936,7 +1008,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                   <input
                     className="min-w-0 flex-1 rounded-2xl border border-ds-border bg-ds-elevated px-3.5 py-2 text-[21px] font-semibold tracking-[-0.02em] text-ds-ink focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/20"
                     value={draftTitle}
-                    onChange={(e) => setDraftTitle(e.target.value)}
+                    onChange={(e) => changeDraftTitle(e.target.value)}
                     onBlur={() => commitTitle()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -944,8 +1016,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                         commitTitle()
                       }
                       if (e.key === 'Escape') {
-                        setDraftTitle(active.title)
-                        setEditing(false)
+                        cancelRename()
                       }
                     }}
                     aria-label={t('renameThreadHint')}
@@ -956,7 +1027,7 @@ export function SessionHeader({ compact = false, className = '', onOpenSideChat 
                     type="button"
                     className="min-w-0 truncate text-left text-[22px] font-semibold tracking-[-0.03em] text-ds-ink transition hover:text-accent"
                     title={t('renameThreadHint')}
-                    onClick={() => setEditing(true)}
+                    onClick={beginRename}
                   >
                     {activeTitle}
                   </button>

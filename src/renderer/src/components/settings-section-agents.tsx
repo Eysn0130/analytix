@@ -3,18 +3,16 @@ import type {
   AnalytixSubagentProfileV1,
   AnalytixSubagentReasoningEffort,
   AnalytixSubagentToolPolicy,
-  AppSettingsV1,
-  ModelProviderProfileV1
+  AnalytixRuntimeSettingsPatchV1,
+  AppSettingsV1
 } from '@shared/app-settings'
 import {
-  DEFAULT_MODEL_PROVIDER_ID,
   DEFAULT_WRITE_INLINE_COMPLETION_BASE_URL,
   DEFAULT_WRITE_INLINE_COMPLETION_MAX_TOKENS,
   DEFAULT_WRITE_INLINE_COMPLETION_MODEL,
   DEFAULT_WRITE_INLINE_LONG_COMPLETION_MAX_TOKENS,
   DEFAULT_ANALYTIX_DATA_DIR,
   WRITE_INLINE_COMPLETION_MODEL_IDS,
-  defaultModelProviderSettings,
   isAnalytixRuntimeInsecure
 } from '@shared/app-settings'
 import type { GuiUpdateChannel } from '@shared/gui-update'
@@ -26,7 +24,6 @@ import { GuiUpdateControl } from './settings-gui-update'
 import {
   AdvancedSettingsDisclosure,
   InlineNoticeView,
-  ModelSelect,
   SecretInput,
   SectionJumpButton,
   SettingsCard,
@@ -37,8 +34,6 @@ import { rendererRuntimeClient } from '../agent/runtime-client'
 import type { CoreRuntimeCommandDiagnosticJson } from '../agent/analytix-contract'
 import { formatCompactNumber } from '../hooks/use-thread-usage'
 import { parseUsageResponse } from '../hooks/usage-response'
-
-export { modelProvidersSettingsPatch } from './settings-section-providers'
 
 // These fields remain parseable for settings-file compatibility, but the
 // production Go runtime does not consume them. Keep them out of the UI until
@@ -248,7 +243,7 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
   }
   const subagentConfigProfileNames = Object.keys(subagents.profiles ?? {}).sort()
   const [newSubagentProfileName, setNewSubagentProfileName] = useState('')
-  const updateSubagents = (patch: Partial<typeof subagents>) => {
+  const updateSubagents = (patch: NonNullable<AnalytixRuntimeSettingsPatchV1['subagents']>) => {
     updateAnalytix({
       subagents: {
         ...subagents,
@@ -283,10 +278,8 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
     setNewSubagentProfileName('')
   }
   const removeSubagentProfile = (name: string) => {
-    const nextProfiles = { ...subagents.profiles }
-    delete nextProfiles[name]
     updateSubagents({
-      profiles: nextProfiles,
+      profiles: { [name]: null },
       defaultProfile: subagents.defaultProfile === name ? '' : subagents.defaultProfile
     })
   }
@@ -446,27 +439,12 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
       }
     })
   }
-  const provider = form.provider ?? ctx.provider ?? defaultModelProviderSettings()
-  const modelProviders = provider.providers as ModelProviderProfileV1[]
-  const activeProviderId = analytix.providerId?.trim() || provider.activeProviderId?.trim() || DEFAULT_MODEL_PROVIDER_ID
-  const activeProvider = modelProviders.find((item) => item.id === activeProviderId) ?? modelProviders[0]
-  const activeProviderModels = activeProvider?.models ?? []
   const quality = analytix.quality ?? {
     enabled: true,
     strictness: 'standard' as const,
     ignoreRules: [],
     ignoreFiles: [],
     maxFindings: 12
-  }
-  const selectAnalytixProvider = (providerId: string): void => {
-    const nextProvider = modelProviders.find((item) => item.id === providerId) ?? activeProvider
-    const nextModel = nextProvider?.models.includes(analytix.model)
-      ? analytix.model
-      : nextProvider?.models[0] ?? analytix.model
-    update({
-      provider: { activeProviderId: providerId },
-      runtime: { providerId, model: nextModel, baseUrl: '' }
-    })
   }
   const updateQuality = (patch: Record<string, unknown>): void => {
     updateAnalytix({
@@ -499,39 +477,15 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                   />
                   <SettingRow
                     title={t('analytixProvider')}
-                    description={t('analytixProviderSelectDesc')}
+                    description={t('providersDesc')}
                     control={
-                      <select
-                        className={selectControlClass}
-                        value={activeProvider?.id ?? DEFAULT_MODEL_PROVIDER_ID}
-                        onChange={(e) => selectAnalytixProvider(e.target.value)}
+                      <button
+                        type="button"
+                        onClick={() => ctx.openSettingsSection('providers')}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-ds-userbubble px-3 py-2 text-[13px] font-medium text-ds-userbubbleFg shadow-sm transition hover:opacity-90"
                       >
-                        {modelProviders.map((item) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
-                      </select>
-                    }
-                  />
-                  <SettingRow
-                    title={t('analytixModel')}
-                    description={t('analytixModelDesc')}
-                    control={
-                      <ModelSelect
-                        value={analytix.model}
-                        options={activeProviderModels}
-                        optionLabel={(model) =>
-                          model === activeProviderModels[0]
-                            ? t('modelSelectDefaultSuffix', { model })
-                            : model}
-                        allowCustom
-                        customLabel={t('modelSelectCustomOption')}
-                        customPlaceholder={t('modelSelectCustomPlaceholder')}
-                        selectClassName={selectControlClass}
-                        onChange={(model) => {
-                          const next = model.trim()
-                          updateAnalytix({ model: next || (activeProviderModels[0] ?? analytix.model) })
-                        }}
-                      />
+                        {t('providers')}
+                      </button>
                     }
                   />
                   <SettingRow
@@ -608,12 +562,11 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                     description={
                       analytix.runtimeToken.trim()
                         ? t('analytixInsecureDesc')
-                        : t('analytixInsecureForcedDesc')
+                        : t('analytixManagedTokenDesc')
                     }
                     control={
                       <Toggle
                         checked={isAnalytixRuntimeInsecure(analytix)}
-                        disabled={!analytix.runtimeToken.trim()}
                         onChange={(v) => updateAnalytix({ insecure: v })}
                       />
                     }
@@ -856,30 +809,6 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                             value={mcpSearch.topKDefault}
                             disabled={!mcpSearch.enabled}
                             onChange={(e) => updateMcpSearch({ topKDefault: Number(e.target.value) })}
-                          />
-                        </label>
-                        <label className="flex min-w-0 flex-col gap-1.5 text-[12px] font-medium text-ds-muted">
-                          {t('mcpSearchTopKMax')}
-                          <input
-                            type="number"
-                            min={1}
-                            className="rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
-                            value={mcpSearch.topKMax}
-                            disabled={!mcpSearch.enabled}
-                            onChange={(e) => updateMcpSearch({ topKMax: Number(e.target.value) })}
-                          />
-                        </label>
-                        <label className="flex min-w-0 flex-col gap-1.5 text-[12px] font-medium text-ds-muted">
-                          {t('mcpSearchMinScore')}
-                          <input
-                            type="number"
-                            min={0}
-                            max={1}
-                            step={0.01}
-                            className="rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
-                            value={mcpSearch.minScore}
-                            disabled={!mcpSearch.enabled}
-                            onChange={(e) => updateMcpSearch({ minScore: Number(e.target.value) })}
                           />
                         </label>
                       </div>
@@ -1265,6 +1194,15 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                     }
                   />
                   </> : null}
+                  <SettingRow title={t('analytixUserInputPolicy')} description={t('analytixUserInputPolicyDesc')}
+                    control={<select className={selectControlClass} value={analytix.userInput?.policy ?? 'legacy'}
+                      onChange={event => updateAnalytix({ userInput: { policy: event.target.value as 'legacy' | 'timed', ...(analytix.userInput?.defaultTimeoutSeconds === undefined ? {} : { defaultTimeoutSeconds: analytix.userInput.defaultTimeoutSeconds }) } })}>
+                      <option value="legacy">{t('analytixUserInputLegacy')}</option><option value="timed">{t('analytixUserInputTimed')}</option>
+                    </select>} />
+                  {analytix.userInput?.policy === 'timed' ? <SettingRow title={t('analytixUserInputTimeout')} description={t('analytixUserInputTimeoutDesc')}
+                    control={<input type="number" min={-1} max={2147483} step={1} className="w-40 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] text-ds-ink"
+                      value={analytix.userInput.defaultTimeoutSeconds ?? ''} placeholder="120"
+                      onChange={event => { const value = event.target.value === '' ? null : Number(event.target.value); if (value === null || Number.isInteger(value) && (value === -1 || value >= 1 && value <= 2147483)) updateAnalytix({ userInput: { policy: 'timed', defaultTimeoutSeconds: value } }) }} />} /> : null}
                   <SettingRow
                     title={t('analytixStreamIdleTimeout')}
                     description={t('analytixStreamIdleTimeoutDesc')}

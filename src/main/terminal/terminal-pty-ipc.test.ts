@@ -266,22 +266,31 @@ describe('terminal PTY IPC authority', () => {
       'const applySettingsPatch = async (partial: AppSettingsPatch)'
     )
     const applyEnd = source.indexOf(
-      'const hubAccountService = createHubAccountService',
+      "type HubAccountService = import('./services/hub-account-service').HubAccountService",
       applyStart
     )
+    expect(applyStart).toBeGreaterThanOrEqual(0)
+    expect(applyEnd).toBeGreaterThan(applyStart)
     const applySource = source.slice(applyStart, applyEnd)
     const revoke = applySource.indexOf(
       'terminalPtyController?.suspendCreates()'
     )
-    const persist = applySource.indexOf('saved = await store.patch(partial)')
+    const persist = applySource.indexOf(
+      'saved = await store.patch(partial, async (current, proposed) => {'
+    )
     const handover = applySource.indexOf(
       'const runtimeApply = queueRuntimeSettingsApply(prev, saved)'
     )
 
-    expect(applyStart).toBeGreaterThanOrEqual(0)
     expect(revoke).toBeGreaterThanOrEqual(0)
     expect(persist).toBeGreaterThan(revoke)
     expect(handover).toBeGreaterThan(persist)
+    expect(applySource.slice(persist, handover)).toContain(
+      'const release = await syncGuiRuntimeSettingsBeforeCommit(current, proposed)\n' +
+      '        prev = current\n' +
+      '        return release\n' +
+      '      }, noteRuntimeSettingsCommit)'
+    )
     expect(applySource).toContain('void runtimeApply.then(release, release)')
     expect(applySource.slice(0, revoke)).toContain(
       'retainTerminalRuntimeProtectedRoots(prev)'

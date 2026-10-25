@@ -131,7 +131,7 @@ foreground event loops and reviewed filesystem merge.
 The current evidence-backed core is preserved:
 
 - `todo_write` remains complete-list replacement.
-- Todos remain capped at 200 items with at most one `in_progress`.
+- Todos remain capped at 200 items; one list may contain multiple `in_progress` entries when work is running in parallel.
 - `complete_step` requires evidence.
 - `update_goal status=complete` requires evidence ledger and completed todos.
 - `update_goal status=blocked` requires the same reason across three goal turns.
@@ -204,7 +204,7 @@ panel, and plan/todo sync components rather than redesigning the workbench.
 | 4. Evidence bundle | Implemented for return material | Child final answers can surface structured evidence bundles in tool results. Timeline events expose only `evidenceBundleStatus` and `evidenceCount`, not full evidence. Parent goal/todo completion is not automatic and still requires host-verified evidence receipts. |
 | 5. Todo operations and plan sync | Partially implemented | `todo_write`, goal completion, blocked gating, and existing plan/todo behavior are preserved. `todo_ops` and `todo_patch` apply ordered append/start/done/drop/note operations through the same todo store and `todos_updated` event. Phase 11A/12A add scoped child projections and explicit mapped-completion acceptance; richer plan markdown merge, automatic parent todo creation, and automatic evidence/goal merge remain deferred. |
 | 6. Renderer UX | Implemented first-stage closure | Existing child cards, process rows, runtime chips, and parallel groups now show job id, profile/mode, tool policy, return format, budgets, evidence parse status, heartbeat/stale diagnostics, and child-thread navigation when `childThreadId` is present. |
-| 7. Subagent steer queue | Implemented Phase 3 slice | `/v1/runtime/task-jobs/steer` lets the parent thread send a bounded message to its own running background child job. Messages are stored on the durable job record, injected into the child turn steering queue only when child lineage exists, promoted at provider/model boundaries, and surfaced through child steer events and the existing child card UI. No model tool is exposed. |
+| 7. Subagent steer queue | Implemented Phase 3 slice | The legacy steer mode of `/v1/runtime/task-jobs/steer` lets the parent thread send a bounded message to its own running background child job. Messages are stored on the durable job record, injected into the child turn steering queue only when child lineage exists, promoted at provider/model boundaries, and surfaced through child steer events and the existing child card UI. No model tool is exposed. |
 | 8. Cooperative pause/resume | Implemented Phase 4 slice | `/v1/runtime/task-jobs/pause` and `/v1/runtime/task-jobs/resume` let the parent request a background child pause, admit the pause only at child loop safe boundaries, persist `pause_requested`/`paused`/`resume_requested`/`resuming`, and resume the active child runner without changing tool policy, tool scope, approval, or sandbox state. No model tool is exposed. |
 | 9. Worktree isolation metadata | Implemented Phase 5 slice | Background child jobs may request `isolationMode=worktree` only with explicit/profile `toolPolicy=inherit`. The runtime rejects dirty parents, creates an analytix-owned Git worktree, runs the child in that workspace, and persists branch/path/base/current commit, changed files, diff summary, and `mergeStatus=not_requested`. No merge is applied. |
 | 10. Isolation review and cleanup | Implemented Phase 6/7 slice | Parent-owned reviewed isolated child jobs can be inspected, rejected, and cleaned up through explicit runtime endpoints. Review and cleanup validate durable ownership and analytix-owned worktree/branch metadata; renderer shows inspect/reject/cleanup but no accept merge control. |
@@ -223,7 +223,7 @@ panel, and plan/todo sync components rather than redesigning the workbench.
 | Evidence and goal safety | Child evidence is returned as material only; child events carry parse status/count; parent `complete_step` and `update_goal complete/blocked` gates remain evidence-backed. | `output_test.go`, existing goal/todo tests |
 | Renderer contract | Child runtime metadata and job diagnostics preserve new fields through contract, mapper, chips, process rows, and locales. | `src/renderer/src/agent/*test.ts`, `src/renderer/src/components/chat/MessageTimeline.tool-summary.test.ts` |
 | Desktop bridge | `window.analytix` remains the only renderer bridge. Runtime task job list/wait/output/kill paths are canonical `/v1/runtime/task-jobs/*` paths in shared endpoint constants and main IPC allow-list. | `src/shared/analytix-endpoints.test.ts`, `src/main/ipc/app-ipc-schemas.test.ts`, `runtime-client.test.ts` |
-| Phase 3 steer | Parent-owned background child jobs can accept bounded steer messages. Completed/failed/killed/aborted/interrupted jobs reject steer; cross-parent requests reject; terminal state expires queued steer messages; renderer shows the affordance only for running/queued steer-capable child jobs. | `steer_test.go`, `lineage_test.go`, `steering_service_test.go`, `task_jobs_test.go`, mapper/runtime-client/card tests |
+| Phase 3 steer | Legacy steer mode lets parent-owned background child jobs accept bounded steer messages. Completed/failed/killed/aborted/interrupted jobs reject steer; cross-parent requests reject; terminal state expires queued steer messages; renderer shows the affordance only for running/queued steer-capable child jobs. | `steer_test.go`, `lineage_test.go`, `steering_service_test.go`, `task_jobs_test.go`, mapper/runtime-client/card tests |
 | Phase 4 pause/resume | Parent-owned running/queued background child jobs can request pause; the child enters `paused` only at provider/tool/queued safe boundaries; paused jobs are not marked stalled; kill still works; pending steer remains queued while paused and is admitted after resume. Renderer shows pause/resume controls only for eligible child jobs. | `pause_test.go`, `lineage_test.go`, `runtime_state_test.go`, task-job HTTP tests, mapper/runtime-client/card tests |
 | Phase 5 worktree isolation | Explicit writable background child jobs can run inside analytix-owned Git worktrees. Read-only/default-policy/foreground requests are rejected; dirty parent workspaces are rejected; child changes are summarized and shown without auto-merge. | `worktree_test.go`, `requests_test.go`, `lineage_test.go`, `job_view_test.go`, mapper/card tests |
 | Phase 6/7 isolation decision | Parent-owned isolated child worktrees can be reviewed, rejected, and cleaned after review/rejection. Cross-parent/non-isolated/active cleanup requests reject; cleanup removes only durable analytix-owned worktree paths and `codex/subagent/*` branches. No accept merge control is exposed. | `worktree_review.go` service tests, process worktree tests, task-job HTTP tests, mapper/runtime-client/card tests |
@@ -267,7 +267,14 @@ and tests are present in the same slice.
 Goal: allow a parent run to send a bounded steering message to a running child
 run without racing the child's current model/tool turn.
 
-Implemented Phase 3 runtime contract:
+The same endpoint also accepts authenticated private Host `mode=inspect` and
+`mode=start_or_steer`. Inspection is read-only. Host input reuses an active
+child's steering, or starts a fresh Job/ChildTurn in the same idle/cold child
+thread while preserving the prior result. These modes do not expose model
+start authority; the legacy terminal-job rejection below does not prohibit a
+fresh Host continuation.
+
+Implemented Phase 3 runtime contract for legacy `mode=steer` or omitted mode:
 
 - Parent messages are appended to the durable task-job record as
   `SteerMessage` with `parentThreadId`, `childRunId`, `jobId`, source turn/call
@@ -631,7 +638,7 @@ Required runtime contract:
   executor and tests.
 - Operations run on the parent thread todo store and emit the existing
   `todos_updated` event.
-- Todos remain capped at 200 items with at most one `in_progress`.
+- Todos remain capped at 200 items; one list may contain multiple `in_progress` entries when work is running in parallel.
 - Sources are explicit: `manual`, `plan`, or `child`. Child runs still do not
   receive parent todo tools; child-sourced todos can be applied only by the
   parent after reviewing returned material.
@@ -642,7 +649,7 @@ Required runtime contract:
 
 Required tests:
 
-- append/start/done/drop/note operations preserve a single active todo;
+- append/start/done/drop/note operations allow multiple active todos, validate each item's status, and preserve the complete list;
 - over-200 todo state is rejected;
 - `todo_patch` alias uses the same executor when enabled;
 - child-depth preflight blocks `todo_ops` and `todo_patch`;
@@ -661,7 +668,7 @@ Previous second-stage slice: `todo_ops` / `todo_patch`.
 - `done` does not write goal evidence and cannot complete a goal.
 - Child-depth materialization and preflight block both new tools.
 
-Current Phase 3 slice: background child `steer` / `send_message`.
+Current Phase 3 slice: legacy background child `steer` / `send_message`.
 
 - Implemented as `/v1/runtime/task-jobs/steer`, renderer runtime client helper,
   IPC allow-list, SSE event mapping, and `SubagentCallCard` affordance.

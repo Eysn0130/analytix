@@ -5,6 +5,35 @@ import {
 } from './InitialSetupDialog'
 
 describe('InitialSetupDialog completion flow', () => {
+  it.each(['reload', 'probe', 'openCode'] as const)('retires completion after newer edits while %s is pending', async (phase) => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let current = true
+    const step = (name: typeof phase) => vi.fn(async () => { if (phase === name) await gate })
+    const reloadUiSettings = step('reload')
+    const probeRuntime = step('probe')
+    const openCode = step('openCode')
+    const selectSavedModel = vi.fn()
+    const closeInitialSetup = vi.fn()
+    const setDialogError = vi.fn()
+    const completion = completeInitialSetupAfterSave({
+      mode: 'required', reloadUiSettings, probeRuntime, openCode,
+      selectSavedModel, closeInitialSetup, setDialogError,
+      getState: () => ({ runtimeConnection: 'ready', error: null }),
+      fallbackRuntimeError: 'Synthetic runtime failure', restartRuntimeError: 'Synthetic startup failure',
+      isCurrent: () => current
+    })
+    const pending = phase === 'reload' ? reloadUiSettings : phase === 'probe' ? probeRuntime : openCode
+    await vi.waitFor(() => expect(pending).toHaveBeenCalledTimes(1))
+    current = false; release()
+    await expect(completion).resolves.toBe(false)
+    expect(selectSavedModel).not.toHaveBeenCalled()
+    expect(closeInitialSetup).not.toHaveBeenCalled()
+    expect(setDialogError).not.toHaveBeenCalled()
+    if (phase === 'reload') expect(probeRuntime).not.toHaveBeenCalled()
+    if (phase !== 'openCode') expect(openCode).not.toHaveBeenCalled()
+  })
+
   it('checks the committed Provider without a second restart, then opens Code', async () => {
     const reloadUiSettings = vi.fn(async () => undefined)
     const probeRuntime = vi.fn(async () => undefined)

@@ -3,9 +3,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { AppSettingsV1 } from '@shared/app-settings'
 import {
-  FloatingComposer,
-  buildComposerThreadUsageDisplay,
-  buildComposerTurnChipText,
+  InputBar,
   buildResearchPrompt,
   formatGoalElapsedSeconds,
   handleComposerImagePaste,
@@ -17,13 +15,12 @@ import {
   parseResearchCommand,
   parseReviewCommand,
   shouldShowGoalFloater
-} from './FloatingComposer'
+} from './InputBar'
 import {
   FloatingComposerModelPicker,
   buildComposerModelMenuGroups,
   composerModelDisplayLabel,
   calculateFloatingMenuPlacement,
-  calculateFloatingSubmenuPlacement,
   composerModelCapabilityKind,
   composerModelIdLooksMultimodal,
   composerModelMenuItemSelected,
@@ -36,7 +33,7 @@ import {
 } from './FloatingComposerModelPicker'
 import { FloatingComposerExecutionPicker } from './FloatingComposerExecutionPicker'
 import { speechToTextPreferenceEnabled } from './use-voice-dictation'
-import floatingComposerSource from './FloatingComposer.tsx?raw'
+import floatingComposerSource from './InputBar.tsx?raw'
 import { getGoalPanelDraftObjective } from './floating-composer-commands'
 import { useChatStore } from '../../store/chat-store'
 import {
@@ -69,7 +66,16 @@ function composerEditorHostHtml(html: string): string {
   return html.match(/<div[^>]*data-composer-prompt-editor="true"[^>]*>/)?.[0] ?? ''
 }
 
-describe('FloatingComposer slash commands', () => {
+function composerCommandButtonHtml(html: string, commandId: string): string {
+  return html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button =>
+    button.slice(0, button.indexOf('>') + 1).includes(`data-command-id="${commandId}"`)) ?? ''
+}
+
+function composerPrimaryActionButtonHtml(html: string): string {
+  return html.match(/<button\b[^>]*ds-composer-primary-action-button[^>]*>[\s\S]*?<\/button>/)?.[0] ?? ''
+}
+
+describe('InputBar slash commands', () => {
   it('parses compact command aliases', () => {
     expect(parseCompactCommand('/compact')).toEqual({})
     expect(parseCompactCommand('/compress')).toEqual({})
@@ -145,7 +151,7 @@ describe('FloatingComposer slash commands', () => {
   })
 })
 
-describe('FloatingComposer goal helpers', () => {
+describe('InputBar goal helpers', () => {
   it('formats elapsed goal time compactly', () => {
     expect(formatGoalElapsedSeconds(3)).toBe('3s')
     expect(formatGoalElapsedSeconds(60)).toBe('1m')
@@ -196,97 +202,7 @@ describe('FloatingComposer goal helpers', () => {
   })
 })
 
-describe('FloatingComposer usage footer helpers', () => {
-  it('keeps nonzero unpriced Go runtime usage visible without presenting zero cost', () => {
-    const display = buildComposerThreadUsageDisplay({
-      inputTokens: 100,
-      outputTokens: 20,
-      reasoningTokens: 0,
-      totalTokens: 120,
-      cachedTokens: 80,
-      cacheMissTokens: 20,
-      cacheHitRate: 0.4,
-      lastTurnCacheHitRate: 0.986,
-      costUsd: 0,
-      costCny: 0,
-      priceConfigured: false,
-      costEstimateStatus: 'unknown',
-      costKnownCurrencies: [],
-      turns: 2,
-      tokenEconomySavingsTokens: 4096
-    }, 'en')
-
-    expect(display.tokens).toBe('120')
-    expect(display.cost).toBe('Cost unavailable')
-    expect(display.cost).not.toBe('$0.0000')
-    expect(display.saved).toBe('4.1k')
-    expect(display.cache).toBe('40%')
-    expect(display.primaryCache).toBe('99%')
-    expect(display.latestCache).toBe('99%')
-    expect(display.cached).toBe('80')
-    expect(display.miss).toBe('20')
-    expect(display.turns).toBe(2)
-    expect(display.showContextSavings).toBe(true)
-    expect(display.showCache).toBe(true)
-    expect(display.showLatestCache).toBe(true)
-    expect(buildComposerTurnChipText(display)).toBe('2')
-  })
-
-  it('keeps configured zero price distinct from missing price configuration', () => {
-    const display = buildComposerThreadUsageDisplay({
-      inputTokens: 8,
-      outputTokens: 2,
-      reasoningTokens: 0,
-      totalTokens: 10,
-      cachedTokens: 0,
-      cacheMissTokens: 10,
-      cacheHitRate: 0,
-      lastTurnCacheHitRate: null,
-      costUsd: 0,
-      costCny: null,
-      priceConfigured: true,
-      costEstimateStatus: 'complete',
-      costKnownCurrencies: ['USD'],
-      turns: 1,
-      tokenEconomySavingsTokens: 0
-    }, 'en')
-
-    expect(display.tokens).toBe('10')
-    expect(display.cost).toBe('$0.0000')
-    expect(display.showContextSavings).toBe(false)
-    expect(display.showCache).toBe(false)
-    expect(display.showLatestCache).toBe(false)
-  })
-
-  it('uses the same turn count for the compact circular turn chip', () => {
-    const display = buildComposerThreadUsageDisplay({
-      inputTokens: 100,
-      outputTokens: 20,
-      reasoningTokens: 0,
-      totalTokens: 120,
-      cachedTokens: 46,
-      cacheMissTokens: 54,
-      cacheHitRate: 0.46,
-      lastTurnCacheHitRate: null,
-      costUsd: 0,
-      costCny: 0,
-      priceConfigured: false,
-      costEstimateStatus: 'unknown',
-      costKnownCurrencies: [],
-      turns: 3,
-      tokenEconomySavingsTokens: 0
-    }, 'zh')
-
-    expect(display.turns).toBe(3)
-    expect(buildComposerTurnChipText(display)).toBe('3')
-  })
-
-  it('keeps the circular turn chip empty until usage has loaded', () => {
-    expect(buildComposerTurnChipText(null)).toBe('-')
-  })
-})
-
-describe('FloatingComposer file references', () => {
+describe('InputBar file references', () => {
   it('parses @ file mention queries at the current cursor', () => {
     expect(getFileMentionAtCursor('please inspect @src/ren', 'please inspect @src/ren'.length)).toEqual({
       start: 15,
@@ -397,7 +313,7 @@ describe('FloatingComposer file references', () => {
   })
 })
 
-describe('FloatingComposer model controls', () => {
+describe('InputBar model controls', () => {
   it('passes explicit reasoning choices through to the runtime', () => {
     expect(composerReasoningEffortRequestValue('off')).toBe('off')
     expect(composerReasoningEffortRequestValue('low')).toBe('low')
@@ -442,7 +358,7 @@ describe('FloatingComposer model controls', () => {
       viewportWidth: 1000
     })
 
-    expect(placement.left).toBe(712)
+    expect(placement.left).toBe(680)
     expect(placement.top).toBe(633)
   })
 
@@ -455,32 +371,8 @@ describe('FloatingComposer model controls', () => {
       coordinateScale: 0.8
     })
 
-    expect(placement.left).toBe(712)
+    expect(placement.left).toBe(680)
     expect(placement.top).toBe(633)
-  })
-
-  it('places the model submenu beside the active provider row', () => {
-    const placement = calculateFloatingSubmenuPlacement({
-      anchorRect: { top: 650, right: 700, bottom: 686, left: 492 },
-      submenuHeight: 140,
-      viewportHeight: 900,
-      viewportWidth: 1000
-    })
-
-    expect(placement.left).toBe(706)
-    expect(placement.top).toBe(642)
-  })
-
-  it('flips the model submenu left when there is not enough room on the right', () => {
-    const placement = calculateFloatingSubmenuPlacement({
-      anchorRect: { top: 650, right: 920, bottom: 686, left: 712 },
-      submenuHeight: 140,
-      viewportHeight: 900,
-      viewportWidth: 1000
-    })
-
-    expect(placement.left).toBe(474)
-    expect(placement.top).toBe(642)
   })
 
   it('keeps non-text models out of the composer model menu', () => {
@@ -830,7 +722,7 @@ describe('FloatingComposer model controls', () => {
   })
 })
 
-describe('FloatingComposer image transfer helpers', () => {
+describe('InputBar image transfer helpers', () => {
   it('extracts image files from clipboard or drop payloads', () => {
     const screenshot = new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' })
     const pastedWebp = new File([new Uint8Array([4])], '', { type: 'image/webp' })
@@ -1000,8 +892,8 @@ describe('FloatingComposer image transfer helpers', () => {
   })
 })
 
-describe('FloatingComposer capability controls', () => {
-  it('uses only the explicit speech UI preference, not copied Provider fields, to expose the Go-resolved attempt', () => {
+describe('InputBar capability controls', () => {
+  it('uses the explicit speech UI preference and secondary-owner gate, not copied Provider fields, to expose the Go-resolved attempt', () => {
     const settingsWith = (enabled: boolean, baseUrl: string, model: string): Pick<AppSettingsV1, 'runtime'> => ({
       runtime: {
         speechToText: { enabled, baseUrl, model }
@@ -1011,14 +903,15 @@ describe('FloatingComposer capability controls', () => {
     expect(speechToTextPreferenceEnabled(settingsWith(true, '', ''))).toBe(true)
     expect(speechToTextPreferenceEnabled(settingsWith(true, 'https://stale.invalid/v1', 'stale-model'))).toBe(true)
     expect(speechToTextPreferenceEnabled(settingsWith(false, 'https://stale.invalid/v1', 'stale-model'))).toBe(false)
-    expect(floatingComposerSource).toContain('const showVoiceDictation = speechToTextEnabled')
+    expect(floatingComposerSource).toContain('const secondaryOwner = ownerThreadId !== undefined')
+    expect(floatingComposerSource).toContain('const showVoiceDictation = (voiceDictationEnabled ?? !secondaryOwner) && speechToTextEnabled')
     expect(floatingComposerSource).not.toMatch(/speechToTextSettings\.(?:baseUrl|model)/u)
     expect(floatingComposerSource).not.toContain('speechToText: speechToTextSettings')
   })
 
   it('enables quote-only sending while preserving the runtime readiness gate', () => {
     useChatStore.setState({ activeThreadId: 'thr_quote', activeThreadGoal: null, route: 'chat', workspaceRoot: '/workspace/analytix' })
-    const render = (count: number, ready = true): string => renderToStaticMarkup(createElement(FloatingComposer, {
+    const render = (count: number, ready = true): string => renderToStaticMarkup(createElement(InputBar, {
       input: '', setInput: () => undefined, mode: 'agent', setMode: () => undefined,
       busy: false, runtimeReady: ready, hasActiveThread: true,
       composerModel: '', composerPickList: [], onComposerModelChange: () => undefined,
@@ -1040,7 +933,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '使用 @[Computer Use](plugin://computer-use) 插件',
         setInput: () => undefined,
         mode: 'agent',
@@ -1066,57 +959,7 @@ describe('FloatingComposer capability controls', () => {
     expect(html).not.toContain('<textarea')
   })
 
-  it('renders queued messages in the above-composer stack', () => {
-    useChatStore.setState({
-      activeThreadId: 'thr_1',
-      activeThreadGoal: {
-        threadId: 'thr_1',
-        objective: 'Ship the top tray',
-        status: 'active',
-        tokensUsed: 12,
-        timeUsedSeconds: 61,
-        createdAt: '2026-06-29T00:00:00.000Z',
-        updatedAt: '2026-06-29T00:01:00.000Z'
-      },
-      activeThreadHandoffOperationId: null,
-      queuedMessagesPausedReason: null,
-      route: 'chat',
-      workspaceRoot: '/workspace/analytix',
-      threadHandoffOperations: []
-    })
 
-    const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
-        input: '',
-        setInput: () => undefined,
-        mode: 'agent',
-        setMode: () => undefined,
-        busy: false,
-        runtimeReady: true,
-        hasActiveThread: true,
-        workspaceRootOverride: '/workspace/analytix',
-        composerModel: '',
-        composerPickList: [],
-        onComposerModelChange: () => undefined,
-        queuedMessages: [{
-          id: 'queued-1',
-          text: 'queued follow-up',
-          mode: 'agent',
-          model: 'deepseek-v4-pro',
-          providerId: 'deepseek',
-          reasoningEffort: 'high'
-        }],
-        onRemoveQueuedMessage: () => undefined,
-        onSend: () => undefined,
-        onInterrupt: () => undefined,
-        attachmentUploadEnabled: false,
-        webAccessAvailable: false
-      })
-    )
-
-    expect(html).toContain('data-above-composer-portal="true"')
-    expect(html.indexOf('queued follow-up')).toBeGreaterThanOrEqual(0)
-  })
 
   it('enables goal setup before a thread exists when a workspace is available', () => {
     useChatStore.setState({
@@ -1127,7 +970,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '/goal',
         setInput: () => undefined,
         mode: 'agent',
@@ -1148,8 +991,9 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    const goalButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/goal')) ?? ''
-    expect(goalButton).toContain('/goal')
+    const goalButton = composerCommandButtonHtml(html, 'goal')
+    expect(goalButton).toContain('role="option"')
+    expect(goalButton).toContain('>Goal</span>')
     expect(goalButton).not.toContain('disabled=""')
   })
 
@@ -1162,7 +1006,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '/new',
         setInput: () => undefined,
         mode: 'agent',
@@ -1184,8 +1028,9 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    const newButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/new')) ?? ''
-    expect(newButton).toContain('/new')
+    const newButton = composerCommandButtonHtml(html, 'new')
+    expect(newButton).toContain('role="option"')
+    expect(newButton).toContain('>New session</span>')
     expect(newButton).not.toContain('disabled=""')
   })
 
@@ -1198,7 +1043,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '/plan',
         setInput: () => undefined,
         mode: 'agent',
@@ -1220,8 +1065,9 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    const planButton = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes('/plan')) ?? ''
-    expect(planButton).toContain('/plan')
+    const planButton = composerCommandButtonHtml(html, 'plan')
+    expect(planButton).toContain('role="option"')
+    expect(planButton).toContain('>Plan</span>')
     expect(planButton).not.toContain('disabled=""')
   })
 
@@ -1235,7 +1081,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '/openspec',
         setInput: () => undefined,
         workspaceRootOverride: '/workspace/analytix',
@@ -1262,10 +1108,12 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    expect(html).toContain('Openspec Apply Change')
-    expect(html).toContain('Implement tasks from an OpenSpec change')
-    expect(html).toContain('Project')
-    expect(html).toContain('/skill:openspec-apply-change')
+    const skillButton = composerCommandButtonHtml(html, 'skill:openspec-apply-change')
+    expect(skillButton).toContain('Openspec Apply Change')
+    expect(skillButton).toContain('Implement tasks from an OpenSpec change')
+    expect(skillButton).toContain('class="dsh-composer-command-alias">skill:openspec-apply-change</span>')
+    expect(skillButton).not.toContain('disabled=""')
+    expect(html).not.toContain('data-command-section=')
   })
 
   it('hides disabled Skills from the slash command menu', () => {
@@ -1278,7 +1126,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '/skill',
         setInput: () => undefined,
         workspaceRootOverride: '/workspace/analytix',
@@ -1314,10 +1162,13 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
+    expect(composerCommandButtonHtml(html, 'skill:test-skill-08')).toBe('')
     expect(html).not.toContain('Test Skill 08')
-    expect(html).not.toContain('/skill:test-skill-08')
-    expect(html).toContain('Test Skill 09')
-    expect(html).toContain('/skill:test-skill-09')
+    const enabledSkillButton = composerCommandButtonHtml(html, 'skill:test-skill-09')
+    expect(enabledSkillButton).toContain('Test Skill 09')
+    expect(enabledSkillButton).toContain('class="dsh-composer-command-alias">skill:test-skill-09</span>')
+    expect(enabledSkillButton).not.toContain('disabled=""')
+    expect(html).not.toContain('data-command-section=')
   })
 
   it('enables local Claw input when a WeChat channel is already mapped to a local thread', () => {
@@ -1355,7 +1206,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '',
         setInput: () => undefined,
         mode: 'agent',
@@ -1382,7 +1233,7 @@ describe('FloatingComposer capability controls', () => {
 
   it('hides image upload when attachment upload is unavailable', () => {
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: 'hello',
         setInput: () => undefined,
         mode: 'agent',
@@ -1407,7 +1258,7 @@ describe('FloatingComposer capability controls', () => {
 
   it('renders the plus trigger alongside uploaded attachments', () => {
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: 'describe this',
         setInput: () => undefined,
         mode: 'agent',
@@ -1436,7 +1287,7 @@ describe('FloatingComposer capability controls', () => {
 
   it('uses the primary action to send a follow-up while busy when text is present', () => {
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: 'hello',
         setInput: () => undefined,
         mode: 'agent',
@@ -1458,9 +1309,11 @@ describe('FloatingComposer capability controls', () => {
     )
 
     expect(html).toContain('deepseek-v4-pro')
-    expect(html).toContain('Send follow-up without stopping')
-    expect(html).toContain('aria-label="Stop"')
-    expect(html).toContain('ds-composer-secondary-stop')
+    const primaryAction = composerPrimaryActionButtonHtml(html)
+    expect(primaryAction).toContain('aria-label="Send follow-up without stopping"')
+    expect(primaryAction).not.toContain('disabled=""')
+    expect(html).not.toContain('aria-label="Stop"')
+    expect(html).not.toContain('ds-composer-secondary-stop')
     expect(composerEditorHostHtml(html)).not.toContain('aria-disabled="true"')
     expect(html).not.toContain('Queue message')
     expect(html.match(/ds-composer-primary-action-button/g)?.length).toBe(1)
@@ -1472,7 +1325,7 @@ describe('FloatingComposer capability controls', () => {
 
   it('keeps the busy primary action as stop when the draft is empty', () => {
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '',
         setInput: () => undefined,
         mode: 'agent',
@@ -1498,9 +1351,9 @@ describe('FloatingComposer capability controls', () => {
     expect(composerEditorHostHtml(html)).not.toContain('aria-disabled="true"')
   })
 
-  it('keeps the busy primary action as stop when only attachments are present', () => {
+  it('offers only the primary follow-up when attachments form the busy draft', () => {
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '',
         setInput: () => undefined,
         mode: 'agent',
@@ -1523,9 +1376,13 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    expect(html).toContain('Stop')
     expect(html).toContain('shot.png')
-    expect(html).not.toContain('Send follow-up without stopping')
+    const primaryAction = composerPrimaryActionButtonHtml(html)
+    expect(primaryAction).toContain('aria-label="Send follow-up without stopping"')
+    expect(primaryAction).not.toContain('disabled=""')
+    expect(html.match(/ds-composer-primary-action-button/g)).toHaveLength(1)
+    expect(html).not.toContain('aria-label="Stop"')
+    expect(html).not.toContain('ds-composer-secondary-stop')
   })
 
   it('renders the model control chip without an empty default option', () => {
@@ -1574,7 +1431,7 @@ describe('FloatingComposer capability controls', () => {
 
   it('shows a plan badge in the input toolbar when plan mode is enabled', () => {
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: 'plan this',
         setInput: () => undefined,
         mode: 'plan',
@@ -1600,7 +1457,7 @@ describe('FloatingComposer capability controls', () => {
 
   it('renders image attachment thumbnails when a local preview is available', () => {
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '',
         setInput: () => undefined,
         mode: 'agent',
@@ -1633,7 +1490,7 @@ describe('FloatingComposer capability controls', () => {
 
   it('renders @ file reference chips as sendable context', () => {
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '',
         setInput: () => undefined,
         mode: 'agent',
@@ -1675,7 +1532,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: 'hello',
         setInput: () => undefined,
         mode: 'agent',
@@ -1703,7 +1560,7 @@ describe('FloatingComposer capability controls', () => {
     expect(html).toContain('aria-label="Permissions"')
     expect(html).toContain('Permissions: Full access')
     expect(html).toContain('>Full access<')
-    expect(html).toContain('data-analytix-icon="SettingsCog"')
+    expect(html).toContain('ds-execution-trigger-icon')
   })
 
   it('renders the standalone permission picker with the current mode label', () => {
@@ -1724,8 +1581,9 @@ describe('FloatingComposer capability controls', () => {
   })
 
   it.each([
-    ['request approval', { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' }, 'Request approval'],
-    ['full access, ask first', { approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access' }, 'Full access, ask first'],
+    ['read only', { approvalPolicy: 'never', sandboxMode: 'read-only' }, 'Read only'],
+    ['workspace write', { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' }, 'Workspace write'],
+    ['legacy ask first', { approvalPolicy: 'untrusted', sandboxMode: 'danger-full-access' }, 'Custom'],
     ['full access', { approvalPolicy: 'auto', sandboxMode: 'danger-full-access' }, 'Full access'],
     ['custom', { approvalPolicy: 'on-request', sandboxMode: 'read-only' }, 'Custom']
   ] as const)('renders %s as the visible permission label', (_name, value, label) => {
@@ -1748,7 +1606,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: 'review this',
         setInput: () => undefined,
         mode: 'agent',
@@ -1793,7 +1651,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: '',
         setInput: () => undefined,
         workspaceRootOverride: '/workspace/analytix',
@@ -1814,8 +1672,8 @@ describe('FloatingComposer capability controls', () => {
       })
     )
 
-    expect(html).toContain('ds-floating-composer ds-no-drag')
-    expect(html).toContain('ds-composer-shell ds-chat-composer ds-frosted ds-no-drag')
+    expect(html).toContain('dsh-input-bar ds-no-drag')
+    expect(html).toContain('dsh-input-card ds-no-drag')
     const editor = composerEditorHostHtml(html)
     expect(editor).toContain('w-full')
     expect(editor).not.toContain('aria-disabled="true"')
@@ -1831,7 +1689,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: 'draft while creating',
         setInput: () => undefined,
         mode: 'agent',
@@ -1867,7 +1725,7 @@ describe('FloatingComposer capability controls', () => {
     })
 
     const html = renderToStaticMarkup(
-      createElement(FloatingComposer, {
+      createElement(InputBar, {
         input: 'draft during startup',
         setInput: () => undefined,
         workspaceRootOverride: '/workspace/analytix',

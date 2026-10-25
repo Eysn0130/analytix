@@ -1,3 +1,6 @@
+/* Selected recording-strip geometry adapted from DeepSeek Harness
+ * 687f282e8625c6b8d11ff58211a90524be2e4317, VoiceInput.module.css.
+ * Copyright (c) 2026 DeepSeek. MIT; see THIRD_PARTY_NOTICES.md. */
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 
 const BAR_WIDTH = 2
@@ -74,13 +77,13 @@ export function VoiceRecordingStrip({
   const seconds = `${totalSeconds % 60}`.padStart(2, '0')
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div className="flex min-h-[34px] min-w-0 flex-1 items-center gap-3">
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="h-8 min-w-0 flex-1 text-ds-muted"
+        className="h-6 w-0 min-w-6 flex-1 text-[var(--dsw-alias-label-secondary)]"
       />
-      <span className="shrink-0 text-[12.5px] font-medium tabular-nums text-ds-muted">
+      <span className="shrink-0 text-[12px] tabular-nums text-[var(--dsw-alias-label-secondary)]">
         {minutes}:{seconds}
       </span>
     </div>

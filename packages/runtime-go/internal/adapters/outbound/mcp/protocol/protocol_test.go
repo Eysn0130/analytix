@@ -696,3 +696,43 @@ func TestMCPMetaPreservedForHostButNeverProviderVisible(t *testing.T) {
 		}
 	}
 }
+
+func TestToolCallParamsWithScheduleOriginIsBoundedV1(t *testing.T) {
+	now := time.Now().UTC()
+	c, e := securitycontexttest.CaseExecutionContextV2(domainsecurity.TurnSecurityContextInput{ThreadID: "thread-schedule", TurnID: "turn-schedule", WorkspaceRealPath: "/workspace", CaseID: "case-schedule", CaseBindingHash: domainsecurity.SHA256Hex([]byte("binding")), DatasetSnapshotID: securitycontexttest.DatasetSnapshotID("schedule"), SourceManifestHash: domainsecurity.SHA256Hex([]byte("manifest")), ContextEpoch: 2, IssuedAt: now})
+	if e != nil {
+		t.Fatal(e)
+	}
+	identity, e := domainsecurity.NewVerifiedMCPServerIdentity("gui_schedule", "analytix-schedule", "0.1.0", domainsecurity.SHA256Hex([]byte("instance")), 1)
+	if e != nil {
+		t.Fatal(e)
+	}
+	g := domainsecurity.NewExecutionGrant(domainsecurity.ExecutionGrantInput{Context: c, Provider: "test", ServerIdentity: identity, ToolName: "mcp__gui_schedule__gui_schedule_create", ToolCallID: toolidentity.MustHostToolCallIDV1("schedule-protocol"), ConnectionEpoch: 1, ArgsHash: domainsecurity.SHA256Hex([]byte("args")), SchemaHash: domainsecurity.SHA256Hex([]byte("schema")), ScopeHash: domainsecurity.SHA256Hex([]byte("scope")), ApprovalState: "not_required", IssuedAt: now})
+	envelope, e := domainmcp.NewHostContextEnvelope(c, g)
+	if e != nil {
+		t.Fatal(e)
+	}
+	params, e := ToolCallParamsWithScheduleOriginV1("gui_schedule_create", map[string]any{"title": "task", "_analytix": map[string]any{"threadId": "forged"}}, envelope)
+	if e != nil {
+		t.Fatal(e)
+	}
+	meta := params["_meta"].(map[string]any)
+	origin := meta["analytixScheduleOriginV1"].(map[string]any)
+	if len(meta) != 1 || len(origin) != 5 || origin["threadId"] != c.ThreadID || origin["toolCallId"] != g.ToolCallID || params["arguments"].(map[string]any)["_analytix"] != nil {
+		t.Fatal("origin escaped typed subset")
+	}
+	encoded, _ := json.Marshal(meta)
+	if bytes.Contains(encoded, []byte("workspace")) || bytes.Contains(encoded, []byte("caseId")) || bytes.Contains(encoded, []byte("analytixRuntimeContext")) {
+		t.Fatal("full Host context reached Schedule")
+	}
+	if _, e := ToolCallParamsWithScheduleOriginV1("gui_schedule_delete", nil, envelope); e == nil {
+		t.Fatal("origin expanded beyond create")
+	}
+	if _, e := ToolCallParamsWithScheduleOriginV1("gui_schedule_create", nil, domainmcp.HostContextEnvelope{}); e == nil {
+		t.Fatal("zero envelope emitted origin")
+	}
+	ordinary := ToolCallParams("gui_schedule_create", map[string]any{"_analytix": origin})
+	if ordinary["_meta"] != nil {
+		t.Fatal("provider origin became outer metadata")
+	}
+}

@@ -9,6 +9,7 @@ import (
 	domaincaseentity "analytix.local/runtime-go/internal/domain/caseentity"
 	domaincontrolledaccount "analytix.local/runtime-go/internal/domain/controlledaccount"
 	domainreasoningmarkup "analytix.local/runtime-go/internal/domain/reasoningmarkup"
+	domainsecret "analytix.local/runtime-go/internal/domain/secretprojection"
 )
 
 func TestPublicRecordRejectsInternalCaseEntityReferenceAtEveryPublicProjection(t *testing.T) {
@@ -515,5 +516,134 @@ func TestSanitizePublicValueDropsNeutralWrappedPrivateTerminalContract(t *testin
 	}
 	if !ContainsPrivateTerminalAuthority(value) {
 		t.Fatal("sidecar/import semantic detector missed a neutral-wrapped private terminal contract")
+	}
+}
+
+func questionReplyEventFixtureV1(t *testing.T, size int, insert string) map[string]any {
+	t.Helper()
+	questions, answers := []any{}, []any{}
+	for i := 0; i < 3; i++ {
+		questions = append(questions, map[string]any{"question": "Synthetic detail?", "header": "", "options": []any{}, "multiSelect": false})
+		text := strings.Repeat(string(rune('a'+i)), size)
+		if i == 0 {
+			if strings.HasPrefix(strings.TrimSpace(insert), "{") {
+				text = strings.TrimSpace(insert)
+			} else {
+				text = text[:size/2] + insert + text[size/2:]
+			}
+		}
+		answers = append(answers, map[string]any{"selected": []any{}, "custom": text})
+	}
+	encoded, err := json.Marshal(map[string]any{"kind": "question_reply_content", "questions": questions, "answers": answers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{"kind": "turn_steered", "threadId": "thread-capacity", "turnId": "turn-capacity", "clientUserMessageId": "00000000-0000-4000-8000-0000000000a1", "text": string(encoded), "displayText": ""}
+}
+
+func TestQuestionReplyContainerKeepsFieldAndRecordLimitsV1(t *testing.T) {
+	event := questionReplyEventFixtureV1(t, 900000, "")
+	if err := ValidatePublicRecord(event); err != nil {
+		t.Fatalf("closed legal record error=%v", err)
+	}
+	for _, sanitize := range []func(any, bool) (any, bool){SanitizePublicValue, SanitizeDurableValue} {
+		public, ok := sanitize(event, false)
+		if !ok || public.(map[string]any)["text"] != event["text"] {
+			t.Fatal("sanitation lost original serialized body")
+		}
+	}
+	if err := ValidateQuestionReplyResourceLimitsV1([]any{event, event, event, event}); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+		t.Fatal("encoded duplicate occupancy not charged")
+	}
+	tooWide := questionReplyEventFixtureV1(t, 1<<20+1, "")
+	if err := ValidatePublicRecord(tooWide); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+		t.Fatal("real leaf limit weakened")
+	}
+	ordinary := map[string]any{"kind": "turn_steered", "threadId": "thread-capacity", "turnId": "turn-capacity", "clientUserMessageId": "00000000-0000-4000-8000-0000000000a1", "text": strings.Repeat("a", 1<<20+1)}
+	if err := ValidatePublicRecord(ordinary); !errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+		t.Fatal("ordinary scalar limit weakened")
+	}
+}
+
+func TestQuestionReplyContentViewKeepsWholeLeafScannersV1(t *testing.T) {
+	// Deterministic synthetic redaction fixture; never use a real credential.
+	syntheticRedactionTokenV1 := "sk-" + strings.Repeat("x", 20)
+	reference, err := domaincaseentity.NewReferenceV1FromKeyedDigest(strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range []struct {
+		name, insert string
+		want         error
+	}{
+		{"credential", " api_key=" + syntheticRedactionTokenV1 + " ", ErrCredentialProjection},
+		{"restricted_nested_json", ` {"purpose":"analytix.source-row-lineage/v1"} `, ErrRestrictedEvidenceProjection},
+		{"case_reference", " " + string(reference) + " ", ErrInternalEntityReferenceProjection},
+		{"pii", " account number: 6222020202020202020 ", ErrPrivacyProjection},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			value := questionReplyEventFixtureV1(t, 900000, fixture.insert)
+			err := ValidatePublicRecord(value)
+			if !errors.Is(err, fixture.want) {
+				t.Fatalf("wrong rejection type=%T expected=%v", err, fixture.want)
+			}
+			if errors.Is(err, domainsecret.ErrProjectionLimitV1) {
+				t.Fatal("privacy rejection misclassified as capacity")
+			}
+		})
+	}
+}
+
+func TestQuestionReplyClosedCodecAndRestoreV1(t *testing.T) {
+	value := questionReplyEventFixtureV1(t, 10, "")
+	text := value["text"].(string)
+	for _, invalid := range []string{
+		strings.Replace(text, `"custom":`, `"Custom":`, 1),
+		strings.Replace(text, `"custom":`, `"custom":"discarded","custom":`, 1),
+		strings.Replace(text, `"selected":[]`, `"selected":null`, 1),
+		text + ` {}`, strings.Replace(text, `"header":""`, `"header":null`, 1),
+	} {
+		if err := ValidateQuestionReplyContentV1(invalid); err == nil {
+			t.Fatal("ambiguous closed body accepted")
+		}
+	}
+	staged, restore, err := StageQuestionReplyContentV1(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := staged.(map[string]any)["text"].(map[string]any)
+	body["answers"].([]any)[0].(map[string]any)["custom"] = "different"
+	if _, ok := restore(staged); ok {
+		t.Fatal("mutating staged AST changed expected snapshot")
+	}
+	user := map[string]any{"kind": "user_message", "delivery": "steer", "steeringProjectionVersion": float64(1), "steeringContentDigest": strings.Repeat("c", 64), "text": questionReplyEventFixtureV1(t, 10, "<think>literal user example</think>")["text"]}
+	if err := ValidatePublicRecord(user); err != nil {
+		t.Fatal("user syntax acquired provider reasoning semantics", err)
+	}
+	if sanitized, ok := SanitizeDurableValue(user, false); !ok || sanitized.(map[string]any)["text"] != user["text"] {
+		t.Fatal("user literal syntax changed")
+	}
+}
+
+func TestPublicCompactionStrictJSONSchemaVersion(t *testing.T) {
+	for _, value := range []json.Number{"3", "5", "1.5", "1.0", "-1", "9223372036854775808", "NaN", "garbage"} {
+		item := map[string]any{"kind": "compaction", "schemaVersion": value, "reasoningExcluded": true}
+		item["reasoningExclusionProof"] = ReasoningExclusionProof(item)
+		err := ValidatePublicRecord(item)
+		valid := value == "3" || value == "5"
+		if (err == nil) != valid {
+			t.Errorf("schema %s: valid=%t err=%v", value, valid, err)
+		}
+	}
+}
+
+func TestPublicCompactionTypedSchemaCompatibility(t *testing.T) {
+	for _, value := range []any{int32(3), float32(5), float32(2.5)} {
+		item := map[string]any{"kind": "compaction", "schemaVersion": value, "reasoningExcluded": true}
+		item["reasoningExclusionProof"] = ReasoningExclusionProof(item)
+		err := ValidatePublicRecord(item)
+		if (err == nil) != (value != float32(2.5)) {
+			t.Fatalf("typed version %v: err=%v", value, err)
+		}
 	}
 }

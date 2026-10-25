@@ -1,8 +1,14 @@
 # Unified workbench and productivity plugins
 
-Status: Reference / accepted implementation direction, 2026-09-14. This is an
-incremental design, not an assertion that the native Office editors ship.
+Status: Historical design snapshot, 2026-09-14.
 Research baseline: `60839b721b273119ab30158c65109dde4db52441`.
+Current product routing has one entry: [the product matrix](product-completion.md).
+The body below retains historical targets and research, not a current work plan
+or evidence of implementation or acceptance.
+
+The `write` route value still has compatibility consumers. A no-path legacy
+Write entry returns to chat and opens the workspace selector; it does not restore
+a standalone Write mode. Shared Plan/SDD Markdown editors remain in scope.
 
 ## Target and compatibility
 

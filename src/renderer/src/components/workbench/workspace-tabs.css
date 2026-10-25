@@ -9,23 +9,37 @@
 .workspace-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @container (max-width: 210px) { .workspace-tab > [role=tab] { gap: 4px; padding-inline: 6px; } }
 .workspace-tab svg { flex-shrink: 0; }
-.workspace-tab-close { display: grid; place-items: center; width: 28px; height: 28px; margin-right: 2px; flex-shrink: 0; border-radius: 4px; }
-.workspace-tabs-actions { display: flex; align-items: center; gap: 1px; padding: 0 4px; margin-left: auto; }
-.workspace-tabs-actions button { display: grid; place-items: center; width: 28px; height: 30px; border-radius: 4px; }
-.workspace-tab button:hover, .workspace-tabs-actions button:hover, .workspace-tool-selector button:hover { background: var(--ds-surface-hover); }
+.workspace-tab-close { display: grid; place-items: center; width: 32px; height: 32px; margin-right: 2px; flex-shrink: 0; border-radius: 4px; }
+.workspace-tabs-actions { display: flex; align-items: center; gap: 6px; padding: 0 6px; margin-left: auto; }
+.workspace-tabs-actions button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; }
+.workspace-tab button:hover, .workspace-tabs-actions button:hover { background: var(--ds-surface-hover); }
 .workspace-tabs-header button:focus-visible, .workspace-tool-selector button:focus-visible { outline: 2px solid var(--ax-border-focus); outline-offset: -3px; }
 .workspace-tab-status { font-size: 13px; }
 .workspace-tab-status[data-error=true] { color: var(--ds-danger, #b64040); }
-.workspace-tool-selector { padding: 22px 14px; overflow: auto; background: var(--surface-3); }
-.workspace-tool-selector h2 { margin: 0 8px 14px; font-size: 12px; font-weight: 500; color: var(--ds-text-muted); }
-.workspace-tool-selector > div { display: grid; gap: 3px; }
-.workspace-tool-selector button { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; background: var(--ds-surface-card); text-align: left; font-size: 14px; transition: background-color var(--ax-motion-hover); }
-.workspace-tool-selector button:disabled { opacity: .4; cursor: not-allowed; }
-.workspace-tool-selector button:active:not(:disabled) { background: var(--ax-toolbar-active-bg); transform: translateY(1px); }
-@media (prefers-reduced-motion: reduce) { .workspace-tool-selector button { transition: none; transform: none; } }
+/* GuideBody.module.css at pinned DSH 5badb150; scoped to the existing right workspace. */
+.workspace-tool-selector { height: 100%; min-height: 0; overflow: auto; font-family: var(--dsw-font-family); }
+.workspace-guide { --dsw-static-neutral-200: rgb(229, 229, 229); --dsw-static-neutral-700: rgb(60, 60, 61); --dsl-guide-entry-radius: var(--dsw-radius-xl); display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center; box-sizing: border-box; min-height: 100%; padding: 0 24px; }
+.workspace-guide::after { content: ''; flex: 0 1 10%; }
+.workspace-guide-hero { display: flex; flex: none; margin-bottom: 16px; color: var(--dsw-static-neutral-200); }
+[data-theme='dark'] .workspace-guide-hero { color: var(--dsw-static-neutral-700); }
+.workspace-guide-entry-cell { width: 380px; max-width: 100%; flex: none; }
+.workspace-guide-entry, .workspace-guide-canvas > button { display: flex; gap: 14px; align-items: center; box-sizing: border-box; width: 380px; max-width: 100%; min-height: 56px; padding: 14px 20px; color: var(--dsw-alias-label-primary); font: inherit; text-align: left; background: var(--dsw-alias-bg-layer-1); border: .5px solid var(--dsw-alias-border-l3); border-radius: var(--dsl-guide-entry-radius); cursor: pointer; }
+.workspace-guide-entry:hover:not(:disabled), .workspace-guide-canvas > button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.workspace-guide-entry:disabled, .workspace-guide-canvas > button:disabled { opacity: .4; cursor: not-allowed; }
+.workspace-guide-entry-icon { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; color: var(--dsw-alias-label-secondary); }
+.workspace-guide-canvas > button > svg { flex: none; width: 22px; height: 22px; margin: 2px; color: var(--dsw-alias-label-secondary); }
+.workspace-guide-entry-text { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.workspace-guide-entry-title, .workspace-guide-canvas > button > span { overflow: hidden; font-size: 14px; line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
+.workspace-guide-entry-description { overflow: hidden; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
+.workspace-guide-shortcut { flex: none; color: var(--dsw-alias-label-tertiary); font: 11px/1.4 var(--dsw-font-family); }
 
 :where(:root) .workspace-tab[data-active=true] { background: var(--workspace-tab-selected-bg); }
 :where(:root[data-theme='dark']) .workspace-tabs-header { --workspace-tab-selected-bg: #444445; }
 
 /* Selected dark tabs keep a 3:1 focus edge even over their hover fill. */
 :where(:root[data-theme='dark']) .workspace-tab[data-active=true] button:focus-visible { outline-color: #6eaaff; }
+
+/* Preserve the shared tab controller and its focus/drag/close behavior. */
+.workspace-tab[data-kind=file] { margin-block: 3px; border-radius: 10px; overflow: hidden; }
+.workspace-tab[data-kind=file] > [role=tab] { height: 34px; }
+.workspace-tab[data-kind=file][data-active=true] { box-shadow: 0 0 0 1px rgb(0 0 0 / .05); }

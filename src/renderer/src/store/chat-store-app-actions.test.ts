@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type i18next from 'i18next'
-import { DEFAULT_ANALYTIX_MODEL } from '@shared/app-settings'
+import { DEFAULT_ANALYTIX_MODEL, normalizeAppSettings, type AppSettingsV1 } from '@shared/app-settings'
 import type { AppRoute, ChatState, ChatStoreGet, ChatStoreSet } from './chat-store-types'
 import {
   fallbackComposerModel,
@@ -10,6 +10,7 @@ import {
 } from './chat-store-helpers'
 import { useWriteWorkspaceStore } from '../write/write-workspace-store'
 import { createAppActions } from './chat-store-app-actions'
+import { rendererRuntimeClient } from '../agent/runtime-client'
 
 const COMPOSER_MODEL_STORAGE_KEY = 'analytix.composerModel'
 const COMPOSER_PROVIDER_STORAGE_KEY = 'analytix.composerProviderId'
@@ -62,7 +63,9 @@ function buildHarness(fetchModelsResult: FetchModelsResult): {
   actions: ReturnType<typeof createAppActions>
   state: ChatState
   refreshClawChannels: ReturnType<typeof vi.fn>
+  applyTheme: ReturnType<typeof vi.fn>
 } {
+  const applyTheme = vi.fn()
   const refreshClawChannels = vi.fn(async () => undefined)
   let state = {
     activeThreadId: null,
@@ -96,6 +99,7 @@ function buildHarness(fetchModelsResult: FetchModelsResult): {
   return {
     state,
     refreshClawChannels,
+    applyTheme,
     actions: createAppActions({
       set,
       get,
@@ -108,7 +112,7 @@ function buildHarness(fetchModelsResult: FetchModelsResult): {
       setComposerModelLoadPromise: (promise) => {
         loadPromise = promise
       },
-      applyTheme: () => undefined,
+      applyTheme,
       applyUiFontScale: () => undefined,
       applyMotionPreference: () => undefined,
       applyCursorSpotlight: () => undefined,
@@ -609,4 +613,21 @@ it('does not clear the active thread or refresh Claw while an image note is comp
     expect(refreshClawChannels).not.toHaveBeenCalled()
     expect(useWriteWorkspaceStore.getState().imageRegionEditor?.note).toBe('组合文本')
   } finally { useWriteWorkspaceStore.setState({ imageRegionEditor: null }); vi.unstubAllGlobals() }
+})
+
+
+describe('reloadUiSettings appearance', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+  it('applies the saved theme and accent together after a Host reload', async () => {
+    vi.stubGlobal('localStorage', createMemoryStorage())
+    const harness = buildHarness({ ok: false, message: 'Synthetic fixture' })
+    harness.state.applyI18nFromSettings = vi.fn(async () => undefined)
+    harness.state.loadComposerModels = vi.fn(async () => undefined)
+    harness.state.runtimeConnection = 'idle'
+    vi.spyOn(rendererRuntimeClient, 'getSettings').mockResolvedValue(normalizeAppSettings({
+      locale: 'en', theme: 'dark', accentColor: 'orange', workspaceRoot: '/synthetic/accent'
+    } as AppSettingsV1))
+    await harness.actions.reloadUiSettings()
+    expect(harness.applyTheme).toHaveBeenCalledExactlyOnceWith('dark', 'orange')
+  })
 })
