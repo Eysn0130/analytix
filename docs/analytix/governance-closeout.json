@@ -1378,22 +1378,17 @@
     "acceptance": "PR85已合并；完整本地main gate exit0。当前身份/次数/guard和操作合同只引用下列owner，不复制动态值。"
   },
   "sources_of_truth": {
-    "this_ledger": "阶段0库存与历史unused诊断",
+    "this_ledger": "Historicalsnapshots retain own UTC/SHA;current governance operations andRound13 evidence:delivery_cycle_2026_10_25_round13. Source baselines/guards remain under their machine owners;do not copy dynamic current datasets into history.",
     "current_unused_baseline": "../../scripts/unused-findings-baseline.json",
     "current_unused_contract": "development-baseline.md#unused-finding-ratchet",
     "historical_scan_paths": "qa/unused-scan-2c549464.json"
   },
   "standing_execution_rules": {
     "status": "Operational; read before every continuation and delegation",
-    "approved_at_utc": "2026-10-24T05:30:00Z",
-    "authority": "User-approved governance closeout package; does not authorize unrelated work",
+    "approved_at_utc": "2026-10-25T12:28:00Z",
+    "authority": "User-approvedRound13A1/A2;Bplansonly. Latestdelta at delivery_cycle_2026_10_25_round13; historical scope.delivery/merge_policy are not current authority.",
     "frozen": ["product code", "feature development", "Privacy changes, merges and acceptance execution", "real cases, credentials and live Providers"],
-    "prohibited": [
-      "process enumeration or equivalent discovery",
-      "environment reconnaissance outside the declared task scope",
-      "permission repairs or deletion of preserved evidence",
-      "bypass, force-push, settings changes, release, tag or deploy"
-    ],
+    "prohibited": ["process enumeration or equivalent discovery", "environment reconnaissance outside the declared task scope", "permission repairs or deletion of preserved evidence", "bypass, force-push, settings changes, release, tag or deploy"],
     "isolation": {
       "before_use": ["verify task-owned canonical cache destinations", "directories 0700", "no extra ACL", "new backend cache; do not execute from old backend isolation"],
       "old_backend": "Retain unused, including the 0666 empty lock; do not delete or repair permissions. Only explicitly approved public metadata/wheel evidence may be copied read-only after verification.",
@@ -1404,9 +1399,9 @@
       "scope": "Only metadata and exact-version packages of already approved items; verify against approved artifact hashes or fingerprints before offline generation or validation.",
       "preparation": "No installation, build or project execution during acquisition. This does not cancel separately approved synthetic tests or the real patch-package CLI contract."
     },
-    "git": "One writer per branch; fresh main/head; mechanical synchronization only; final-head required CI; ready then normal merge commit; no auto-merge or branch deletion.",
+    "git": "One writer per branch;fresh main/head;mechanical sync only;normal finalHEAD full expected matrix+required gate before ready/mergecommit. No force/admin/bypass/auto-merge. Only exact pre-recorded32 refs admitted for individual reversible deletion this round, now all executed; no batchpush/automatic release loop/list expansion/newbranch deletion.",
     "public_pr_text": "Public PR/SHA/CI links and coverage mapping only; no local machine paths or unsafe machine evidence.",
-    "verification": "Reuse completed evidence with unchanged relevant inputs. Never relabel failed, skipped, unexecuted or partial checks as passed; no automatic unused-baseline rebuild.",
+    "verification": "Reuse unchanged passing inputs;honest pass/partial/skipped/blocked. Unused strict equality preserved:source repair first;explicit --prune only previously recorded fixed keys/counts,never add or increase. Historical1927/1933 preserved by immutable retained-main ancestor+hash;current baseline is operational SSOT. No automatic regeneration or restoration of fixed findings.",
     "refusals": {
       "old_logs_and_annotations": ["119912129517 logs and annotations", "119329587298 logs"],
       "other": "Do not retry refused security/alerts/protection routes or PR70 diff. C quinn remains evidence-only; no retry, alternate route or manual bypass sequence.",
@@ -1417,26 +1412,22 @@
         "result": "400URLnotallowed;do not retryor use steps/logs/gh/anotherroute toretrievethesamejobdetails",
         "allowed_limit": "Existingcheck/runstatuscachemay be cited;failurecauseunknown. No blanketbanon unrelatednewtargetmetadata."
       },
-      "individual_job_route": "Genericgithub_fetch/actions/jobs/<id>isnotanallowedendpointfamily;do not probeothervariants. The3explicitlyrefusedjobsremainunreadthroughalternativeroutes."
+      "individual_job_route": "Genericgithub_fetch/actions/jobs/<id>isnotanallowedendpointfamily;do not probeothervariants. The3explicitlyrefusedjobsremainunreadthroughalternativeroutes.",
+      "other_public_actions": "PR109 old body update failed with unknown cause/raw error unavailable;do not retry that action or alternate comments. R12 bulk70ref deletion denied/unexecuted;not restored by newexact32single-ref authority.",
+      "large_baseline_independent_read": "ParentfixedHEADlargebaseline read400too-large/unsupported;no alternate retrieval for that refusal. Existing authorizedlocal baseline may be used with accurate attribution.",
+      "rustsec_0185": "RUSTSEC-2026-0185 official page unavailable in boundedB review;no retry or alternate lookup for refused target;gap retained."
     },
-    "hard_stops": [
-      "product code or Privacy required",
-      "certifi fingerprint differs from the accepted comparison",
-      "lock drift outside the declared write set",
-      "behavior change beyond approved exact-version contract alignment",
-      "unofficial source or hash mismatch",
-      "CI failure with unlocated cause",
-      "reserved E/H, Electron/rustls, Pillow or Python 3.10 decision"
-    ],
+    "hard_stops": ["product code or Privacy required", "certifi fingerprint differs from the accepted comparison", "lock drift outside the declared write set", "behavior change beyond approved exact-version contract alignment", "unofficial source or hash mismatch", "CI failure with unlocated cause", "reserved E/H, Electron/rustls, Pillow or Python 3.10 decision"],
     "item_holds": "Unexpected external candidate-head changes or an unlocated failure hold that item only. A target-behavior probe failure is retained as failed evidence and holds its merge; other approved items continue.",
-    "reporting": "No queue/running patrol receipts; hard stops immediately, otherwise one final package delivery report.",
-    "supersession": "Current user approval at2026-10-24T05:30Z supersedes historical scope.delivery/merge_policy and the earlier backend/#106 preparation holds and narrower download fences. Inventory and earlier diagnostics remain historical; old backend isolation remains abandoned.",
+    "reporting": "Hard stops immediately; otherwise one final same-main/same-window package receipt. Queue/running is work, not delivery. CI observer finite declared targets only, stop at terminal. No globalcloseout/unfreeze untiluser accepts.",
+    "supersession": "CurrentRound13 delta supersedes historical narrower no-deletion/baseline-not-moving wording ONLY for exact32 and verified trim-only. Product/features/Privacy frozen. B21 plans/disposition only, no B upgrades/closures/candidate execution. Node/Electron changes and Macgo/nodeversion sampling remain unapproved. All safety/API refusals remain.",
     "explicit_resumption": {
       "backend_metadata": ["pypdf6.21.2", "urllib3 2.8.0", "certifi2026.10.19"],
       "patch_package": "Previously verified official8.0.1 artifact and its real-CLI evidence admitted; do not redownload or rerun unchanged verification."
     },
-    "frozen_pr_policy": "Currentcloseouttarget:freezePRmeansclosed+registeredretainedbranch. HistoricalbranchF recommendationnot-to-closeisarchivedcontext.51/70stillopenareuncompleteddisposition;thisdependencypackagedoesnotclose themorunfreezefeatures/Privacy.",
-    "observation_control": "Onlydeclaredexactheads/runs;one60smetadataobserver. Eachcompletedexeccommitsactualjob/stepdata. Withinthiscontinuouspackage,finite4hwindowsmaycheckpointandresumesamedeclaredtargetswithoutnewuserapproval;neverextendarefusedactionoroldPR80budget,neveraddendpoints/logs. Stopwhenalltargetsdone."
+    "frozen_pr_policy": "51/70 closed and registered as feature-freeze decisions inRound12;their branches remain retained. Historical still-open recommendations are superseded, never authorization to reopen or implement.",
+    "observation_control": "Onlydeclaredexactheads/runs;one60smetadataobserver. Eachcompletedexeccommitsactualjob/stepdata. Withinthiscontinuouspackage,finite4hwindowsmaycheckpointandresumesamedeclaredtargetswithoutnewuserapproval;neverextendarefusedactionoroldPR80budget,neveraddendpoints/logs. Stopwhenalltargetsdone.",
+    "current_delta_pointer": "delivery_cycle_2026_10_25_round13"
   },
   "delivery_cycle_2026_10_24": {
     "source_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
@@ -3279,7 +3270,7 @@
       }
     },
     "trim": {
-      "status": "explicitprune completed;exact6reductionsverified;strictpostcommitgatepending",
+      "status": "pass;source repair and explicit six-item prune verified;postcommit strict gate and seven contract tests passed;final candidate/main CI pending",
       "historical_source": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9:scripts/unused-findings-baseline.json",
       "historical_sha256": "0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae",
       "historical_identities": 1927,
@@ -3556,8 +3547,33 @@
         "node_test": "node --test --test-timeout=120000 scripts/runtime-go-release-finalization.test.mjs",
         "node_test_result": "36passed/0failed/0skipped;21.978948833s;exit0",
         "other_affected_TS_tests": "Notrunlocally: toolonly132treeisnotwholeproject/currentReactruntime. FinalHEADCIactualnpmci mustexecute existing3testfiles/typechecks pluscompletegate. NooldReactsubstitution orfull-localinstall.",
-        "baseline_mutated": false,
-        "tool_preparation": "Standardhelperpass;new0700/noACLtaskcache;132policyclosure rawmetadata+lockresolution;130admittedinstalledcopies+2officialcachedSRI-verifiedtarballs;noinstallation/download/scripts duringacquisition;notwholeproject ortarbyte reattestationfor130."
+        "baseline_mutated": "Onlysixexplicitverifiedcuts bystandard --prune;priorfalse field recorded pre-prune phase, not current state.",
+        "tool_preparation": "Standardhelperpass;new0700/noACLtaskcache;132policyclosure rawmetadata+lockresolution;130admittedinstalledcopies+2officialcachedSRI-verifiedtarballs;noinstallation/download/scripts duringacquisition;notwholeproject ortarbyte reattestationfor130.",
+        "postcommit_strict_gate": {
+          "head": "2f98af636cc8e2da55f5565930772c1a0f265d97",
+          "base": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+          "event": "pull_request",
+          "command": ["node", "scripts/unused-findings-gate.mjs"],
+          "exit": 0,
+          "seconds": 117.04397587501444,
+          "actual_result": {
+            "status": "pass",
+            "files": 2342,
+            "identities": 1921,
+            "occurrences": 1927,
+            "ambiguity_groups": 8
+          }
+        },
+        "gate_contract_tests": {
+          "command": ["node", "--test", "--test-timeout=120000", "scripts/unused-findings-gate.test.mjs"],
+          "exit": 0,
+          "seconds": 18.818111541913822,
+          "tests": 7,
+          "passed": 7,
+          "failed": 0,
+          "skipped": 0,
+          "note": "Expected malformed-tree negative emits fatal:notatreeobject inside passing test7;not a failure of gate. No fixtures/expectations/time budgets changed."
+        }
       },
       "prune_command": "UNUSED_EVENT=pull_request UNUSED_BASE=6243bcf17b0a4ae87fe1dfe44661192ad45261a9 UNUSED_HEAD=e58bc6fbd41e58a7954e20dacc902718bd2aebba node scripts/unused-findings-gate.mjs --prune",
       "prune_exit": 0,
@@ -3583,16 +3599,16 @@
       "source_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
       "index_columns": ["PR", "head", "packet_pointer", "readiness_limit"],
       "index": [
-        [1, "027ab53ab470b6c0a545939eecd7000110c40eeb", "rust_go/rust_security_bundle57_1_29", "boundedplan;candidatechecksnotrun"],
+        [1, "027ab53ab470b6c0a545939eecd7000110c40eeb", "rust_go/rust_security_bundle57_1_29", "upgrade notready;exact official tar probe planready;TLSnegativecontrol gaps retained;recommend evidence-only decision,not upgrade/merge"],
         [2, "946bb377ae3392408bec05474c4f0c67c45550f1", "rust_go/quinn_exceptions/0", "platformblocked;no executablepath"],
         [4, "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "python_actions/items/0", "boundedplan;formalartifact/prerequisites unverified"],
         [7, "cf368d0e088e49afb8f0ea9b314f95015047aeda", "python_actions/items/1", "boundedplan;formalartifact/prerequisites unverified"],
         [12, "1cf3583b40fe4362ad786888ad500c17d24b94c3", "rust_go/icu12", "boundedplan;candidatechecksnotrun"],
         [15, "f11600dd5b425c1292e16f635dfdf130d18f4fae", "python_actions/items/3", "boundedplan;formalartifact/prerequisites unverified"],
-        [29, "b35306029b571f090244bb0f26b0f50525a6222f", "rust_go/rust_security_bundle57_1_29", "boundedplan;candidatechecksnotrun"],
+        [29, "b35306029b571f090244bb0f26b0f50525a6222f", "rust_go/rust_security_bundle57_1_29", "upgrade notready;exact official tar probe planready;TLSnegativecontrol gaps retained;recommend evidence-only decision,not upgrade/merge"],
         [31, "0ac9267c634927e172be535370ab15843007e715", "rust_go/quinn_exceptions/1", "platformblocked;no executablepath"],
         [34, "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", "rust_go/electron34", "readytodispose/defer;no verifiedsafeElectrontarget"],
-        [57, "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "rust_go/rust_security_bundle57_1_29", "boundedplan;candidatechecksnotrun"],
+        [57, "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "rust_go/rust_security_bundle57_1_29", "upgrade notready;exact official tar probe planready;TLSnegativecontrol gaps retained;recommend evidence-only decision,not upgrade/merge"],
         [77, "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", "python_actions/items/5", "boundedplan;formalartifact/prerequisites unverified"],
         [89, "da5871807db650e413bd6ca136175aa4e129ff3f", "rust_go/go89", "boundedplan;candidatechecksnotrun"],
         [90, "1a224b640d5750a99932feaa4be656bd7c1dd433", "python_actions/items/2", "boundedplan;formalartifact/prerequisites unverified"],
@@ -4404,7 +4420,7 @@
           },
           "rust_security_bundle57_1_29": {
             "prs": [57, 1, 29],
-            "recommendation": "三锁TLS+tar目标和写集可以讨论；本轮无法给出已固定且完整的专项probe闭包，不能称一yes即可完成安全验收。仅保留真实现有metadata/features/unit/CI路径，专项探针缺口须先补齐；不以全量CI替代。",
+            "recommendation": "本次补到官方tar回归和19节点固定输入、WebPKI既存精确unit及其完整上游锁。Tar可按已列有限步骤取证；TLS旧版负控/根锚专项测试/目标registry输入仍有真实hardgap。推荐只批准证据补口，不批准升级或安全合并；不继续无限研究。",
             "write_set": ["tools/analysis_compute/Cargo.lock", "tools/cleaning_ops/Cargo.lock", "tools/data_engine/Cargo.lock"],
             "current_per_root": {
               "analysis_compute": {
@@ -4490,9 +4506,9 @@
               "1": "carriermerge→cleaning_opstar0.4.46→PAXprobe/ownRusttests;quinnnotclosed",
               "29": "carriermerge→analysis_computetar0.4.46→sameprobe/ownRusttests;data_enginetaralready.46notclaimednewfix"
             },
-            "question": "是否采纳三锁最小TLS＋tar安全目标？当前专项探针状态not_ready；精确闭包/fixture补齐前，不把该目标确认当作专项验收通过或合并批准。",
+            "question": "是否只批准本精确官方输入/固定闭包的证据补口包，暂不批准TLS升级及合并；剩余registry元数据和旧版TLS负控缺口保持明示，不换途径绕过？",
             "platform_evidence_limit": "ExistingRustrequiredjobsrunLinux1.94.1unitcontracts; theydonotproveWindows/Darwinpackagedbinaries. Exactnewnativepublication/buildcontextreceipts andsyntheticartifactconsumers mustbeconsolidatedforclaimedtargetsupport; noinstaller/releaseclaimfrom52/52. IfaC-relatedplatformrestrictionalsoblocksindependentTLS/tarvalidationoncleaning_ops,holdthatrootandreportpartialcoverage; neverroutearoundorclaim3rootsdone.",
-            "status": "not_ready_for_specialized_security_acceptance_or_merge",
+            "status": "not_ready_for_full_security_upgrade; bounded_evidence_preparation_packet_specified",
             "probe_readiness": {
               "status": "not_ready",
               "manifest_path_status": "$TASK/probes/dependency-contracts/Cargo.toml was a proposed NEW task-only probe, never an existing repository fixture. No file or executable probe was materialized. The previous command has been removed.",
@@ -4527,6 +4543,815 @@
                 "readiness_gap": "Actual feature graph, complete public distrust-chain fixture with integrity/provenance, positive controls, and a fixed offline test closure are missing. No arbitrary new key or forged incomplete chain will substitute for these."
               },
               "acceptance_effect": "Existingrootunit/metadata/lock/version/fullCI evidence may establish source integration and target resolution. It does NOT satisfy the missing dedicated security probes or authorize a security-complete merge under the original acceptance requirements."
+            },
+            "bounded_official_test_followup": {
+              "status": "ready_proposal_for_evidence_preparation_only; upgrade_and_security_merge_still_not_ready",
+              "performed": "One bounded official-text/metadata followup, no binaryfixture/crate/archive download, no candidate/probe materialization, compilation or tests.",
+              "one_yes_recommendation": "Approve only the fixed evidence-preparation packet below, not the3lockupgrade or securitycomplete merge. It has exact source/fixture/catalog inputs and finite pass/hold receipts; no plan to retrieve refusedmetadata through another route.",
+              "tar": {
+                "official_target_commit": "fc459c149f83bf4daceaa52e17d351989002e1a9",
+                "official_baseline_commit": "096e3d16d14fefac51bc4d94d616b21546ea8bcc",
+                "test_source": "tests/all.rs:2105 pax_size_does_not_apply_to_extension_headers",
+                "test_source_url": "https://github.com/composefs/tar-rs/blob/fc459c149f83bf4daceaa52e17d351989002e1a9/tests/all.rs#L2105",
+                "license": "MIT OR Apache-2.0; preserve the selected full upstreamLICENSE and attribution with task-onlyadaptation. No productcode/admission claim.",
+                "fixture": {
+                  "path": "tests/archives/pax-overrides-extension-header.tar",
+                  "commit": "fc459c149f83bf4daceaa52e17d351989002e1a9",
+                  "git_blob_sha1": "13a662d6fc7815d7a859f1dd64aa1cc43cdd5e1f",
+                  "bytes": 6144,
+                  "url": "https://raw.githubusercontent.com/composefs/tar-rs/fc459c149f83bf4daceaa52e17d351989002e1a9/tests/archives/pax-overrides-extension-header.tar",
+                  "acquisition_now": false,
+                  "future_integrity": "Verify exact6144bytes and GitSHA1(blob-header+bytes)=13a662... beforeuse; then recordSHA256. Publishedtarcrate excludes tests/archives/*, so officialcrate alone doesNOT supplythisfixture."
+                },
+                "planned_new_task_only_manifest_target": "[package]\nname = \"analytix-governance-tar-probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[dependencies]\ntar = { version = \"=0.4.46\", default-features = true }\n",
+                "planned_new_task_only_manifest_baseline": "Same manifest except exacttar=0.4.45; distinctprivatefolders. No newdevdependencies, async runtimes or testframework.",
+                "test_body_adaptation": "Copy only the upstream named test into tests/pax.rs; replace its tar!(...)helper with include_bytes!(../fixtures/pax-overrides-extension-header.tar) and import std::io::Cursor/tar::Archive. Keep the upstreamexact2-nameoracle [longname.txt,file_b]. Samebodyandfixtureforold/new. Do notclaimfullpayloadbyteverificationfromthisnames-onlyupstreamtest.",
+                "fixed_closure_source": "Actual6243 data_engine Cargo.lock complete transitive19-nodeclosure rootedattar0.4.46 below; retain everyedge/checksum/cross-targetnode. Newprobe rootpackageentryhasdependencytar; no registrychecksum for localroot. Baselinechangesonlytarversion/checksum usingexistinganalysis_computeoldnode, whosemanifestnormaldependencies/targetdeps/features were read and proved equal.",
+                "target_catalog": [
+                  {
+                    "name": "bitflags",
+                    "version": "2.13.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
+                  },
+                  {
+                    "name": "cfg-if",
+                    "version": "1.0.4",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+                  },
+                  {
+                    "name": "errno",
+                    "version": "0.3.14",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb",
+                    "dependencies": ["libc", "windows-sys 0.59.0"]
+                  },
+                  {
+                    "name": "filetime",
+                    "version": "0.2.29",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759",
+                    "dependencies": ["cfg-if", "libc"]
+                  },
+                  {
+                    "name": "libc",
+                    "version": "0.2.186",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+                  },
+                  {
+                    "name": "linux-raw-sys",
+                    "version": "0.12.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+                  },
+                  {
+                    "name": "rustix",
+                    "version": "1.1.4",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190",
+                    "dependencies": ["bitflags", "errno", "libc", "linux-raw-sys 0.12.1", "windows-sys 0.59.0"]
+                  },
+                  {
+                    "name": "tar",
+                    "version": "0.4.46",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840",
+                    "dependencies": ["filetime", "libc", "xattr"]
+                  },
+                  {
+                    "name": "windows-sys",
+                    "version": "0.59.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b",
+                    "dependencies": ["windows-targets"]
+                  },
+                  {
+                    "name": "windows-targets",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973",
+                    "dependencies": ["windows_aarch64_gnullvm", "windows_aarch64_msvc", "windows_i686_gnu", "windows_i686_gnullvm", "windows_i686_msvc", "windows_x86_64_gnu", "windows_x86_64_gnullvm", "windows_x86_64_msvc"]
+                  },
+                  {
+                    "name": "windows_aarch64_gnullvm",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
+                  },
+                  {
+                    "name": "windows_aarch64_msvc",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
+                  },
+                  {
+                    "name": "windows_i686_gnu",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
+                  },
+                  {
+                    "name": "windows_i686_gnullvm",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
+                  },
+                  {
+                    "name": "windows_i686_msvc",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
+                  },
+                  {
+                    "name": "windows_x86_64_gnu",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
+                  },
+                  {
+                    "name": "windows_x86_64_gnullvm",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
+                  },
+                  {
+                    "name": "windows_x86_64_msvc",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+                  },
+                  {
+                    "name": "xattr",
+                    "version": "1.6.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156",
+                    "dependencies": ["libc", "rustix 1.1.4"]
+                  }
+                ],
+                "baseline_tar_node": {
+                  "name": "tar",
+                  "version": "0.4.45",
+                  "source": "registry+https://github.com/rust-lang/crates.io-index",
+                  "checksum": "22692a6476a21fa75fdfc11d452fda482af402c008cdbaf3476414e122040973",
+                  "dependencies": ["filetime", "libc", "xattr"]
+                },
+                "lock_derivation": "Deterministically writeversion4Cargo.lock using newlocalprobe package plus exactly the19 complete recordedregistry entries; oldarm replacesonlytarentry withbaseline node. cargo metadata --locked --offline must accept withoutanylock rewrite. Failure meanshold, notnetwork resolver/allowlistexpansion.",
+                "commands_future_only": ["cargo metadata --locked --offline --format-version 1 --manifest-path \"$TASK/tar-probe-old/Cargo.toml\"", "cargo metadata --locked --offline --format-version 1 --manifest-path \"$TASK/tar-probe-new/Cargo.toml\"", "cargo test --locked --offline --manifest-path \"$TASK/tar-probe-old/Cargo.toml\" --test pax pax_size_does_not_apply_to_extension_headers -- --exact --test-threads=1", "cargo test --locked --offline --manifest-path \"$TASK/tar-probe-new/Cargo.toml\" --test pax pax_size_does_not_apply_to_extension_headers -- --exact --test-threads=1"],
+                "expected": "Actualoldtest executes1case andfails upstreamoracle; new executes1andpasses. Compiler/linker failure, zero tests, metadata failure or timeout isNOT a validnegativecontrol. CaptureexactRusttestsummary and exit. ReadCursoronly,no extraction oroutsidefilesystemeffects.",
+                "limits": "Preparation officialfixedsources only; compilation outer15min/2jobs, runtime15s/RSS128MiB/output64KiB; ordinarytaskcachehelper andisolation checks. No execution performedthisround."
+              },
+              "webpki": {
+                "official_target_commit": "8ecdcc76f56b68fda67a6adf7976f5eed5006a4c",
+                "version": "0.103.16",
+                "existing_test": "src/verify_cert.rs:1234 verify_cert::tests::distrusted_spki",
+                "source_url": "https://github.com/rustls/webpki/blob/8ecdcc76f56b68fda67a6adf7976f5eed5006a4c/src/verify_cert.rs#L1234",
+                "source_sha256": "73e60395e81a8c2ac7c276ee49bd501208876855fd820d83c386ce29f376c4d8",
+                "manifest_input": "ExactupstreamCargo.toml atthiscommit; do notreplaceitwithahypotheticalnewconsumerprobe.",
+                "manifest_sha256": "d2264fd4cf50e851dfd8a5d1a9f24cc4518f8205520c92707d2a8613ef4cdd88",
+                "lock_input": "ExactupstreamCargo.lock atthiscommit (Gitblobcb0917fc7966a08e2ca54fcdfa2e3b4a153ade60); do notregenerate.",
+                "lock_sha256": "9fef3d6a24035b2f8f7ee2b3f8f86f85453d1cfe7f75e1a61e608b94f4d52ed6",
+                "locked_registry_catalog": [
+                  {
+                    "name": "aho-corasick",
+                    "version": "1.1.4",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301",
+                    "dependencies": ["memchr"]
+                  },
+                  {
+                    "name": "asn1-rs",
+                    "version": "0.7.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "56624a96882bb8c26d61312ae18cb45868e5a9992ea73c58e45c3101e56a1e60",
+                    "dependencies": ["asn1-rs-derive", "asn1-rs-impl", "displaydoc", "nom", "num-traits", "rusticata-macros", "thiserror", "time"]
+                  },
+                  {
+                    "name": "asn1-rs-derive",
+                    "version": "0.6.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "3109e49b1e4909e9db6515a30c633684d68cdeaa252f215214cb4fa1a5bfee2c",
+                    "dependencies": ["proc-macro2", "quote", "syn", "synstructure"]
+                  },
+                  {
+                    "name": "asn1-rs-impl",
+                    "version": "0.2.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7",
+                    "dependencies": ["proc-macro2", "quote", "syn"]
+                  },
+                  {
+                    "name": "autocfg",
+                    "version": "1.5.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+                  },
+                  {
+                    "name": "aws-lc-fips-sys",
+                    "version": "0.14.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "118303cd75f63d1933a90c2ceb7e697281ac6acbdbcc490b46419f25a527ab90",
+                    "dependencies": ["bindgen", "cc", "cmake", "dunce", "fs_extra", "pkg-config", "regex"]
+                  },
+                  {
+                    "name": "aws-lc-rs",
+                    "version": "1.18.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "ce2b2dcc879c3bae0d371e77c99f2238400ef24ec001394befa67b6e543add9e",
+                    "dependencies": ["aws-lc-fips-sys", "aws-lc-sys", "untrusted 0.7.1", "zeroize"]
+                  },
+                  {
+                    "name": "aws-lc-sys",
+                    "version": "0.44.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "f09fae7be8bb3174e05c6afdb34199e6dc0c7c04ba9fa237b1967adfbde27483",
+                    "dependencies": ["cc", "cmake", "dunce", "fs_extra", "pkg-config"]
+                  },
+                  {
+                    "name": "base64",
+                    "version": "0.23.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+                  },
+                  {
+                    "name": "bencher",
+                    "version": "0.1.5",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "7dfdb4953a096c551ce9ace855a604d702e6e62d77fac690575ae347571717f5"
+                  },
+                  {
+                    "name": "bindgen",
+                    "version": "0.72.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895",
+                    "dependencies": ["bitflags", "cexpr", "clang-sys", "itertools", "log", "prettyplease", "proc-macro2", "quote", "regex", "rustc-hash", "shlex", "syn"]
+                  },
+                  {
+                    "name": "bitflags",
+                    "version": "2.11.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
+                  },
+                  {
+                    "name": "bzip2",
+                    "version": "0.6.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "f3a53fac24f34a81bc9954b5d6cfce0c21e18ec6959f44f56e8e90e4bb7c346c",
+                    "dependencies": ["libbz2-rs-sys"]
+                  },
+                  {
+                    "name": "cc",
+                    "version": "1.2.57",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "7a0dd1ca384932ff3641c8718a02769f1698e7563dc6974ffd03346116310423",
+                    "dependencies": ["find-msvc-tools", "jobserver", "libc", "shlex"]
+                  },
+                  {
+                    "name": "cexpr",
+                    "version": "0.6.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766",
+                    "dependencies": ["nom"]
+                  },
+                  {
+                    "name": "cfg-if",
+                    "version": "1.0.4",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+                  },
+                  {
+                    "name": "clang-sys",
+                    "version": "1.8.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4",
+                    "dependencies": ["glob", "libc", "libloading"]
+                  },
+                  {
+                    "name": "cmake",
+                    "version": "0.1.57",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d",
+                    "dependencies": ["cc"]
+                  },
+                  {
+                    "name": "data-encoding",
+                    "version": "2.10.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
+                  },
+                  {
+                    "name": "der-parser",
+                    "version": "10.0.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "07da5016415d5a3c4dd39b11ed26f915f52fc4e0dc197d87908bc916e51bc1a6",
+                    "dependencies": ["asn1-rs", "displaydoc", "nom", "num-bigint", "num-traits", "rusticata-macros"]
+                  },
+                  {
+                    "name": "deranged",
+                    "version": "0.5.8",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c",
+                    "dependencies": ["powerfmt"]
+                  },
+                  {
+                    "name": "displaydoc",
+                    "version": "0.2.5",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0",
+                    "dependencies": ["proc-macro2", "quote", "syn"]
+                  },
+                  {
+                    "name": "dunce",
+                    "version": "1.0.5",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+                  },
+                  {
+                    "name": "either",
+                    "version": "1.15.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+                  },
+                  {
+                    "name": "find-msvc-tools",
+                    "version": "0.1.9",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+                  },
+                  {
+                    "name": "fs_extra",
+                    "version": "1.3.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
+                  },
+                  {
+                    "name": "getrandom",
+                    "version": "0.2.17",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0",
+                    "dependencies": ["cfg-if", "libc", "wasi"]
+                  },
+                  {
+                    "name": "getrandom",
+                    "version": "0.3.4",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd",
+                    "dependencies": ["cfg-if", "libc", "r-efi", "wasip2"]
+                  },
+                  {
+                    "name": "glob",
+                    "version": "0.3.3",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+                  },
+                  {
+                    "name": "itertools",
+                    "version": "0.13.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186",
+                    "dependencies": ["either"]
+                  },
+                  {
+                    "name": "itoa",
+                    "version": "1.0.18",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+                  },
+                  {
+                    "name": "jobserver",
+                    "version": "0.1.34",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33",
+                    "dependencies": ["getrandom 0.3.4", "libc"]
+                  },
+                  {
+                    "name": "lazy_static",
+                    "version": "1.5.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+                  },
+                  {
+                    "name": "libbz2-rs-sys",
+                    "version": "0.2.2",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "2c4a545a15244c7d945065b5d392b2d2d7f21526fba56ce51467b06ed445e8f7"
+                  },
+                  {
+                    "name": "libc",
+                    "version": "0.2.183",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
+                  },
+                  {
+                    "name": "libloading",
+                    "version": "0.8.9",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55",
+                    "dependencies": ["cfg-if", "windows-link"]
+                  },
+                  {
+                    "name": "log",
+                    "version": "0.4.29",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+                  },
+                  {
+                    "name": "memchr",
+                    "version": "2.8.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+                  },
+                  {
+                    "name": "minimal-lexical",
+                    "version": "0.2.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+                  },
+                  {
+                    "name": "nom",
+                    "version": "7.1.3",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a",
+                    "dependencies": ["memchr", "minimal-lexical"]
+                  },
+                  {
+                    "name": "num-bigint",
+                    "version": "0.4.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9",
+                    "dependencies": ["num-integer", "num-traits"]
+                  },
+                  {
+                    "name": "num-conv",
+                    "version": "0.2.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050"
+                  },
+                  {
+                    "name": "num-integer",
+                    "version": "0.1.46",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f",
+                    "dependencies": ["num-traits"]
+                  },
+                  {
+                    "name": "num-traits",
+                    "version": "0.2.19",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841",
+                    "dependencies": ["autocfg"]
+                  },
+                  {
+                    "name": "oid-registry",
+                    "version": "0.8.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "12f40cff3dde1b6087cc5d5f5d4d65712f34016a03ed60e9c08dcc392736b5b7",
+                    "dependencies": ["asn1-rs"]
+                  },
+                  {
+                    "name": "once_cell",
+                    "version": "1.21.4",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+                  },
+                  {
+                    "name": "pkg-config",
+                    "version": "0.3.33",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+                  },
+                  {
+                    "name": "powerfmt",
+                    "version": "0.2.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
+                  },
+                  {
+                    "name": "prettyplease",
+                    "version": "0.2.37",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b",
+                    "dependencies": ["proc-macro2", "syn"]
+                  },
+                  {
+                    "name": "proc-macro2",
+                    "version": "1.0.106",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
+                    "dependencies": ["unicode-ident"]
+                  },
+                  {
+                    "name": "quote",
+                    "version": "1.0.45",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924",
+                    "dependencies": ["proc-macro2"]
+                  },
+                  {
+                    "name": "r-efi",
+                    "version": "5.3.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+                  },
+                  {
+                    "name": "rcgen",
+                    "version": "0.14.7",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "10b99e0098aa4082912d4c649628623db6aba77335e4f4569ff5083a6448b32e",
+                    "dependencies": ["aws-lc-rs", "rustls-pki-types", "time", "x509-parser", "yasna"]
+                  },
+                  {
+                    "name": "regex",
+                    "version": "1.12.3",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276",
+                    "dependencies": ["aho-corasick", "memchr", "regex-automata", "regex-syntax"]
+                  },
+                  {
+                    "name": "regex-automata",
+                    "version": "0.4.14",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "6e1dd4122fc1595e8162618945476892eefca7b88c52820e74af6262213cae8f",
+                    "dependencies": ["aho-corasick", "memchr", "regex-syntax"]
+                  },
+                  {
+                    "name": "regex-syntax",
+                    "version": "0.8.10",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+                  },
+                  {
+                    "name": "ring",
+                    "version": "0.17.14",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7",
+                    "dependencies": ["cc", "cfg-if", "getrandom 0.2.17", "libc", "untrusted 0.9.0", "windows-sys"]
+                  },
+                  {
+                    "name": "rustc-hash",
+                    "version": "2.1.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
+                  },
+                  {
+                    "name": "rusticata-macros",
+                    "version": "4.1.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "faf0c4a6ece9950b9abdb62b1cfcf2a68b3b67a10ba445b3bb85be2a293d0632",
+                    "dependencies": ["nom"]
+                  },
+                  {
+                    "name": "rustls-pki-types",
+                    "version": "1.14.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "be040f8b0a225e40375822a563fa9524378b9d63112f53e19ffff34df5d33fdd",
+                    "dependencies": ["zeroize"]
+                  },
+                  {
+                    "name": "serde",
+                    "version": "1.0.228",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e",
+                    "dependencies": ["serde_core", "serde_derive"]
+                  },
+                  {
+                    "name": "serde_core",
+                    "version": "1.0.228",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad",
+                    "dependencies": ["serde_derive"]
+                  },
+                  {
+                    "name": "serde_derive",
+                    "version": "1.0.228",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79",
+                    "dependencies": ["proc-macro2", "quote", "syn"]
+                  },
+                  {
+                    "name": "serde_json",
+                    "version": "1.0.149",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86",
+                    "dependencies": ["itoa", "memchr", "serde", "serde_core", "zmij"]
+                  },
+                  {
+                    "name": "shlex",
+                    "version": "1.3.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+                  },
+                  {
+                    "name": "syn",
+                    "version": "2.0.117",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99",
+                    "dependencies": ["proc-macro2", "quote", "unicode-ident"]
+                  },
+                  {
+                    "name": "synstructure",
+                    "version": "0.13.2",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2",
+                    "dependencies": ["proc-macro2", "quote", "syn"]
+                  },
+                  {
+                    "name": "thiserror",
+                    "version": "2.0.18",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4",
+                    "dependencies": ["thiserror-impl"]
+                  },
+                  {
+                    "name": "thiserror-impl",
+                    "version": "2.0.18",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5",
+                    "dependencies": ["proc-macro2", "quote", "syn"]
+                  },
+                  {
+                    "name": "time",
+                    "version": "0.3.47",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c",
+                    "dependencies": ["deranged", "itoa", "num-conv", "powerfmt", "serde_core", "time-core", "time-macros"]
+                  },
+                  {
+                    "name": "time-core",
+                    "version": "0.1.8",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
+                  },
+                  {
+                    "name": "time-macros",
+                    "version": "0.2.27",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215",
+                    "dependencies": ["num-conv", "time-core"]
+                  },
+                  {
+                    "name": "unicode-ident",
+                    "version": "1.0.24",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+                  },
+                  {
+                    "name": "untrusted",
+                    "version": "0.7.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
+                  },
+                  {
+                    "name": "untrusted",
+                    "version": "0.9.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+                  },
+                  {
+                    "name": "wasi",
+                    "version": "0.11.1+wasi-snapshot-preview1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
+                  },
+                  {
+                    "name": "wasip2",
+                    "version": "1.0.2+wasi-0.2.9",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5",
+                    "dependencies": ["wit-bindgen"]
+                  },
+                  {
+                    "name": "windows-link",
+                    "version": "0.2.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+                  },
+                  {
+                    "name": "windows-sys",
+                    "version": "0.52.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d",
+                    "dependencies": ["windows-targets"]
+                  },
+                  {
+                    "name": "windows-targets",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973",
+                    "dependencies": ["windows_aarch64_gnullvm", "windows_aarch64_msvc", "windows_i686_gnu", "windows_i686_gnullvm", "windows_i686_msvc", "windows_x86_64_gnu", "windows_x86_64_gnullvm", "windows_x86_64_msvc"]
+                  },
+                  {
+                    "name": "windows_aarch64_gnullvm",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
+                  },
+                  {
+                    "name": "windows_aarch64_msvc",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
+                  },
+                  {
+                    "name": "windows_i686_gnu",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
+                  },
+                  {
+                    "name": "windows_i686_gnullvm",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
+                  },
+                  {
+                    "name": "windows_i686_msvc",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
+                  },
+                  {
+                    "name": "windows_x86_64_gnu",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
+                  },
+                  {
+                    "name": "windows_x86_64_gnullvm",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
+                  },
+                  {
+                    "name": "windows_x86_64_msvc",
+                    "version": "0.52.6",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+                  },
+                  {
+                    "name": "wit-bindgen",
+                    "version": "0.51.0",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
+                  },
+                  {
+                    "name": "x509-parser",
+                    "version": "0.18.1",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "d43b0f71ce057da06bc0851b23ee24f3f86190b07203dd8f567d0b706a185202",
+                    "dependencies": ["asn1-rs", "aws-lc-rs", "data-encoding", "der-parser", "lazy_static", "nom", "oid-registry", "rusticata-macros", "thiserror", "time"]
+                  },
+                  {
+                    "name": "yasna",
+                    "version": "0.5.2",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd",
+                    "dependencies": ["time"]
+                  },
+                  {
+                    "name": "zeroize",
+                    "version": "1.8.2",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
+                  },
+                  {
+                    "name": "zmij",
+                    "version": "1.0.21",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "checksum": "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+                  }
+                ],
+                "catalog_count": 93,
+                "license": "ISC; preserve upstreamLICENSE. Copyonlyexactofficialsource tree/testinputs; third-party/chromium retains its ownLICENSE if included. No realcredentials; published/generatedsyntheticcertificates only.",
+                "crypto_features": "Runupstreamdefaultstd(=>alloc) plusring exactly; upstreamdevrcgen0.14.2declaresaws_lc_rs, soitslockedAWSLCbuildclosureisnotignored. This is amodel/mechanism test, notproof theproductconsumer selectedthese samefeatures.",
+                "positive_command_future_only": "cargo test --locked --offline --manifest-path \"$TASK/upstream-webpki/Cargo.toml\" --features ring --lib verify_cert::tests::distrusted_spki -- --exact --test-threads=1",
+                "existing_fixture_logic": "OfficialtestgeneratesRoot/intermediates/leafandcross-signs atfixedverificationtime0x1fed_f00d: validchainOk2; block root/issuer/intermediate/leaf=>CertDistrusted; unrelatedSPKIOk2; alternatecrosssignOk1; sharedSPKIandblockedissuer-beforelookup=>CertDistrusted. Thisdirectlyaddresseswrong-reasonnegativecontrol andtime issues, withoutusinga realcompromisedprivatekey.",
+                "binary_inputs": "Exact8publicSPKIderfiles listedinPR546 retainedbytargetsource; verify each recordedGitblob. Notdownloadednow. The generatedsyntheticblacklistmechanismtestdoesnotaloneproveall8realSPKIvaluescorrect.",
+                "baseline_negative_control_gap": "Old0.103.15 lacksChainOptions.distrusted_spkis andError::CertDistrusted; copyingthetargetunitcode intooldsourcewouldnotcompileandisNOT a validRED. A public-APIcompatibleold/new reason-specificnegativecontrol has notbeenbound. Do notinventone orlabela compileerrorasprooffixed. Thisremainsahardgapforupgradeacceptance.",
+                "limits": "Offlinefixedupstreamlock; outercompile20min/2jobs, test60s/RSS512MiB/output64KiB. Onlysyntheticcertificateunitselected; noothernetwork/generationtestorproductexecution."
+              },
+              "roots": {
+                "official_commit": "70760478b9d3ea729b22faa0b5324da38a297c1c",
+                "version": "1.0.10",
+                "change_source": "webpki-roots/src/lib.rs andwebpki-root-certs/src/lib.rs; publicPR133removedemSignECCG3 and addeditsDERfingerprinttoccadbexclude list.",
+                "license": "webpki-rootscrate CDLA-Permissive-2.0; preserveapplicableLICENSE-CCADB andcrateLICENSEpointer plusrootMIT/Apache noticeswhereused. Do notmislabelroots dataasISC.",
+                "existing_tests": "webpki-roots/tests/verify.rs hasname_constraints andtubitak_name_constraint_works. They areNOT anemSigndistrust-specificregression; tests/codegen.rs mayregeneratedata/externalinputs andisnotselected.",
+                "safe_future_root_fixture": "PR133removedblockcontainscompletepublicPEM withknownDERhash86a1... andtheformerTrustAnchor subject/SPKI bytes. After approvedinputcopy, decodepublicPEM, verifyDERhash, andcompareDER-derivedsubject/SPKI againstcompiledanchors; nevercompareananchorserializationhashdirectlytoDERhash.",
+                "specialized_negative_control_gap": "NoexistingupstreamemSign-specificexecutabletest identifiedinthisboundedreview. Actualold1.0.8/target1.0.10compiled-rootcomparison stillrequiresa smallfixedtestandverifiedtargetregistryclosure.",
+                "artifact_metadata_gap": "Theofficialcrates.io APIreads forwebpki-roots1.0.10 andrustls-webpki0.103.16 returnedtool-not-accessible. Noretry/otherroutewasused. Exactproductregistryartifactchecksumsarenotassertedavailable. Thisdoesnotblockindependentpinnedupstreamtexttestresearch,butitdoesblockclaimingtheregistrycandidate/upgrade ready."
+              },
+              "rustls": {
+                "target_commit": "f04804fa13341a9b1dc02b5d1dd8a746f2c4b7fb",
+                "version": "0.23.46",
+                "root_lock_input": "OfficialcommitrootCargo.lock exists93572bytes/Gitblobe9b3202c700b083b3018940db9735c93253a80c9. No archiveorartifactdownload/readiness claim.",
+                "official_main_fix_reference": "PR3299 introducesclient::tests::debug_of_session_types andconn::receive::tests::debug_of_input_types onitsmainbranch, buttheseexacttestsnotconfirmedinv0.23.46target; doNOT blindlyusemainPRtestnamesastarget-versioncommands.",
+                "remaining_gap": "Precisetarget-versionsecurityregression/old-vs-newharnessforconditional0346-0349featuresnotfullybound. Version/advisoryresolutionevidenceisnotclaimofexecutedallfourreproducers.",
+                "license": "RustlsApache-2.0/ISC/MIT, preserveselectedcompleteupstreamlicense."
+              },
+              "explicit_future_preparation_scope": "A YES tothisevidence-onlypacket permits onlyfixedGitHubsource/fixture inputs namedaboveandexactofficialCargoarchives alreadylistedintheclosed19tar/upstreamWebPKIlockcatalog, hashbeforeuse, new0700/noACLcache/0600records. It doesnotinheritnpm/PyPIpermission, allowunknownpackages/onlinelockgeneration, or authorizequeryingthe2refusedregistrymetadataURLsbyanothertool. No repository/product/Privacy/Cquinnwriteorupgrade.",
+              "finite_finish": "ReturntaroldRED/newGREEN actualreceipts, upstreamWebPKIpositiveunitreceipt withpreciselimits, andanyremainingTLSnegativecontrol/registryinputhardgap. Eveniftheseevidencechecks pass, source-packageupgrade/mergeisNOT approvedbythisevidence-onlyselection.",
+              "decision_question": "是否只批准本精确官方输入/固定闭包的证据补口包，暂不批准TLS升级及合并；剩余registry元数据和旧版TLS负控缺口保持明示，不换途径绕过？"
             }
           },
           "icu12": {
@@ -4645,16 +5470,35 @@
             "removed_hypothetical_commands": 1,
             "repository_write_set_expanded": false,
             "artifacts_materialized": false,
-            "downloads_or_tests": 0
+            "downloads_or_tests": 0,
+            "bounded_followup_utc": "2026-10-25T13:31:21.675499+00:00",
+            "new_artifact_downloads": 0
           }
         }
       },
       "readiness_meaning": "Ayesselectsastatedboundedplan/disposition,notfakeprevalidatedcandidate. Missingformalartifact/safeofficialElectronstable/unknownprerequisites remain explicitstops;C2/31areplatformblockedexceptions,noapprovalunblocksforbiddenexecution. NoBcandidateexecuted/closed/merged inthisround.",
       "active_baseline_rule": "Allfuturetoolingmigrations must preserve the thenfreshtrustedbase active trimmedentries/counts/guards; historical1927/1933/0b5e77 are never a target torestore. ActualA2state now1921/1927/8,hashcbbcea1c...; subsequent legitimatelytrimmedbase maydiffer.",
-      "review_fixes": ["Actionslocalactionlintonlyexistingverifiedcache withGOTOOLCHAINlocal/GOPROXYoff/GOSUMDBoff;primarynormalCIstepotherwise.No implicitGo-sourcepermissionvia npm/PyPI.", "Rustnewprobe notyetcomplete: no commandpoints to nonexistentCargo.toml. Furtherboundedofficialfixtureplanreviewinprogress;no B candidatevalidation.", "No sourceB execution/upgrade/close; C2/31 remainexceptions withzero executablepath."]
+      "review_fixes": ["Actionslocalactionlintonlyexistingverifiedcache withGOTOOLCHAINlocal/GOPROXYoff/GOSUMDBoff;primarynormalCIstepotherwise.No implicitGo-sourcepermissionvia npm/PyPI.", "Rustnonexistentprobe command removed;exactofficial tar fixtures/oldRED-fixedGREEN plan andWebPKI unit pinned. WebPKIoldarmcompileerror isnotRED;rootsSPKInegativecontrol/2metadata availability remain gaps. No fakeupgrade-readiness;approveevidence-only recommendation.", "No sourceB execution/upgrade/close; C2/31 remainexceptions withzero executablepath."],
+      "final_packet_sha256": {
+        "js_sql": "0fb0576b9bfe76e60e351bad6ed8ff992792a34ed1e9dacd63da36ceb2ff3717",
+        "python_actions": "e828061a533108372f464fbae8459f3b39d2fa7144b25fabc048f7b46e7c87b6",
+        "rust_go": "592ea771e9d0e45b275bb31a6d3833412e3a89d6ed69c1266e5eb3baf1731dc8"
+      }
     },
     "security_evidence": "Incomplete; userprovidedsettings/alert screenshots stillneeded. Existingdeniedroutes not retried.",
-    "decisions": ["Exactstartmain6243,21open,61refs matchespreviousendpoint.", "32allowlist fixedbeforeanydelete; staticsha256 prevents reachability-basedexpansion.", "32actions completed independently,eachwith own SHA/containment/recovery and postabsence proof; no batchedpush/looprelease/newref expansion. Firstprivate runner syntaxerror parsedbeforebody,allplanned; correctedbefore anyrefaction,not a permissionrefusal.", "A1all32singleactions exited0;freshpostlist29refs exactly61minus32,unknown disappearances0;no otherref/tipchanged.", "A2bounded6pureimportbindings repaired:5non-productiontest/supportfiles4+/6-.Moduleedgesretained,noinitializer/function/SQL/parameter/error/assertion changes.", "Historicalfullbaseline retainedbyimmutablefca67b41blobee7805c7/hash0b5e77... andmainancestor;no duplicatebigbaselinefile.", "Onlymatching132toolclosure materialized; localfullVitest/typecheck unavailable withoutwholecurrentprojectdeps,so currentHEADrequiredCIis designatedremainingactualtest evidence; no misleadinglocalpass.", "Bpriorroundsummary storedas recoverablehistory at6243 whilecurrent21executionplans liveoncehere; sourceoldreasons notsilentlyrewritten."],
-    "verification": "pending; thisispre-actionrecordnotcloseout"
+    "decisions": ["Exactstartmain6243,21open,61refs matchespreviousendpoint.", "32allowlist fixedbeforeanydelete; staticsha256 prevents reachability-basedexpansion.", "32actions completed independently,eachwith own SHA/containment/recovery and postabsence proof; no batchedpush/looprelease/newref expansion. Firstprivate runner syntaxerror parsedbeforebody,allplanned; correctedbefore anyrefaction,not a permissionrefusal.", "A1all32singleactions exited0;freshpostlist29refs exactly61minus32,unknown disappearances0;no otherref/tipchanged.", "A2bounded6pureimportbindings repaired:5non-productiontest/supportfiles4+/6-.Moduleedgesretained,noinitializer/function/SQL/parameter/error/assertion changes.", "Historicalfullbaseline retainedbyimmutablefca67b41blobee7805c7/hash0b5e77... andmainancestor;no duplicatebigbaselinefile.", "Onlymatching132toolclosure materialized; localfullVitest/typecheck unavailable withoutwholecurrentprojectdeps,so currentHEADrequiredCIis designatedremainingactualtest evidence; no misleadinglocalpass.", "Bpriorroundsummary storedas recoverablehistory at6243 whilecurrent21executionplans liveoncehere; sourceoldreasons notsilentlyrewritten.", "Postcommitstrictgate actualexit0 117.043975875s;2342/1921/1927/8. Existingseven ratchetcontracttests exit0 18.818111542s;no helper/scan repetition for unchangedinputs.", "Independentreadonly source/baseline/recovery review foundno blockingdelta. B21packetreview corrected3readinessissues:activebaselinejoin,offlineactionlintprerequisites,Rustfictionalprobe. RustTLSremains notready andElectronnosafe44/45targetverified;terminaldecisionquestions explicitlyexcludeupgradeacceptance. NoBcandidatebuilt,tested,closed ormerged."],
+    "verification": {
+      "local": "pass within declared scope; final exactHEAD CI and newmain actualgate still pending",
+      "source_unchanged_since_strict_head": "Final ledger-only updates may reuse source/baseline/checker/config/lock/tool blobs; record Git object comparison, not oldHEAD CI as newHEAD CI.",
+      "remaining": "Three affected TS/Vitest files, full typechecks and complete normal CI execute at final candidate. No desktop/native/Provider/Privacy claim.",
+      "independent_source_delta_review": {
+        "status": "pass boundedreadonly review; no independent test rerun",
+        "checked_head": "2f98af636cc8e2da55f5565930772c1a0f265d97",
+        "checks": ["5filesexactimportonly4+/6- modesunchanged", "6specifiedbaselinekeys count1each removed;everyotherentry/policy/provenance/audit/8guards equal", "e58sourcefixbefore2f98prune;fca67historicalbaseline reachablematchinghash", "32exactallowlist equals31held+R12branch;all32tipsinmain6243;d138pre-actionplannedrecord;frozenexcluded"],
+        "later_document_only_delta": "Root checkedpacket indices/boundaries;not represented as independent test execution."
+      },
+      "publication_record": "This is prepublicationlocalreceipt. Exactcandidateandmergedmain CI plus same-windowterminalsnapshot will be attached to its publicPR;do not keep committing a self-referential report solely to change itsownSHA/CI. Branch/rawsource/baseline proof stays in thisledger."
+    },
+    "prepublication_utc": "2026-10-25T13:32:05.708514+00:00"
   }
 }
