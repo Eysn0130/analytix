@@ -66,8 +66,10 @@ def test_pdfium_native_renders_a_bounded_generated_pdf() -> None:
     writer.write(stream)
     with pdfium.PdfDocument(stream.getvalue()) as document:
         assert len(document) == 1
-        with document[0] as page:
-            with page.render(scale=1) as bitmap:
+        page = document[0]
+        try:
+            bitmap = page.render(scale=1)
+            try:
                 image = bitmap.to_pil()
                 try:
                     assert image.size == (32, 24)
@@ -75,6 +77,10 @@ def test_pdfium_native_renders_a_bounded_generated_pdf() -> None:
                     assert 0 < len(image.tobytes()) <= 32 * 24 * 4
                 finally:
                     image.close()
+            finally:
+                bitmap.close()
+        finally:
+            page.close()
 
 
 @pytest.mark.parametrize("content", [b"%PDF-1.7\ninvalid", b"%PDF-1.7\n1 0 obj\n"])
