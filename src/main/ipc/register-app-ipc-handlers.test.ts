@@ -9,14 +9,12 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog } from 'electron'
 import {
-  mergeScheduleSettings,
   defaultClawSettings,
   defaultKeyboardShortcuts,
   defaultAnalytixRuntimeSettings,
   defaultModelProviderSettings,
   defaultScheduleSettings,
   defaultWriteSettings,
-  type AppSettingsPatch,
   type AppSettingsV1
 } from '../../shared/app-settings'
 import {

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { lstat, readFile, readdir, readlink, realpath, stat } from 'node:fs/promises'
+import { lstat, readdir, readlink, realpath, stat } from 'node:fs/promises'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'

@@ -1,4 +1,4 @@
-import type { ThreadRecord, ThreadStatus } from '../contracts/threads.js'
+import type { ThreadRecord } from '../contracts/threads.js'
 import type {
   CompactRequest,
   CompactResponse,
