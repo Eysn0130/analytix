@@ -3279,7 +3279,7 @@
       }
     },
     "trim": {
-      "status": "6sourceimports fixed;baseline unchanged pending targetedvalidation and explicitprune",
+      "status": "explicitprune completed;exact6reductionsverified;strictpostcommitgatepending",
       "historical_source": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9:scripts/unused-findings-baseline.json",
       "historical_sha256": "0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae",
       "historical_identities": 1927,
@@ -3314,7 +3314,7 @@
           "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
           "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
           "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
-          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+          "repair_status": "sourcefixedin e58bc6fbd;localrootlint0/0,Node36pass;TSaffectedtests/typechecks requirefinalheadCI;explicitprune removedonlythiscount1"
         },
         {
           "identity": {
@@ -3345,7 +3345,7 @@
           "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
           "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
           "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
-          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+          "repair_status": "sourcefixedin e58bc6fbd;localrootlint0/0,Node36pass;TSaffectedtests/typechecks requirefinalheadCI;explicitprune removedonlythiscount1"
         },
         {
           "identity": {
@@ -3376,7 +3376,7 @@
           "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
           "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
           "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
-          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+          "repair_status": "sourcefixedin e58bc6fbd;localrootlint0/0,Node36pass;TSaffectedtests/typechecks requirefinalheadCI;explicitprune removedonlythiscount1"
         },
         {
           "identity": {
@@ -3407,7 +3407,7 @@
           "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
           "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
           "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
-          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+          "repair_status": "sourcefixedin e58bc6fbd;localrootlint0/0,Node36pass;TSaffectedtests/typechecks requirefinalheadCI;explicitprune removedonlythiscount1"
         },
         {
           "identity": {
@@ -3438,7 +3438,7 @@
           "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
           "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
           "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
-          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+          "repair_status": "sourcefixedin e58bc6fbd;localrootlint0/0,Node36pass;TSaffectedtests/typechecks requirefinalheadCI;explicitprune removedonlythiscount1"
         },
         {
           "identity": {
@@ -3469,7 +3469,7 @@
           "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
           "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
           "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
-          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+          "repair_status": "sourcefixedin e58bc6fbd;localrootlint0/0,Node36pass;TSaffectedtests/typechecks requirefinalheadCI;explicitprune removedonlythiscount1"
         }
       ],
       "proof_source_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
@@ -3558,7 +3558,25 @@
         "other_affected_TS_tests": "Notrunlocally: toolonly132treeisnotwholeproject/currentReactruntime. FinalHEADCIactualnpmci mustexecute existing3testfiles/typechecks pluscompletegate. NooldReactsubstitution orfull-localinstall.",
         "baseline_mutated": false,
         "tool_preparation": "Standardhelperpass;new0700/noACLtaskcache;132policyclosure rawmetadata+lockresolution;130admittedinstalledcopies+2officialcachedSRI-verifiedtarballs;noinstallation/download/scripts duringacquisition;notwholeproject ortarbyte reattestationfor130."
-      }
+      },
+      "prune_command": "UNUSED_EVENT=pull_request UNUSED_BASE=6243bcf17b0a4ae87fe1dfe44661192ad45261a9 UNUSED_HEAD=e58bc6fbd41e58a7954e20dacc902718bd2aebba node scripts/unused-findings-gate.mjs --prune",
+      "prune_exit": 0,
+      "prune_elapsed": "notseparatelytimed;helper+scan inonecommand; no durationestimate",
+      "identities_before": 1927,
+      "occurrences_before": 1933,
+      "identities_after": 1921,
+      "occurrences_after": 1927,
+      "guards_before_after": [8, 8],
+      "actual_scan_files": 2342,
+      "current_baseline_sha256": "cbbcea1c35c4ed9f17dd69ba81a2c6b171a39ca05b839d89011b6292013caaca",
+      "actual_category_counts": {
+        "parameter": 1297,
+        "variable": 598,
+        "caught_error": 32
+      },
+      "source_fix_commit": "e58bc6fbd41e58a7954e20dacc902718bd2aebba",
+      "comparison": "Onlysixplannedkeys removed,count1each;everyremainingentry/policy/provenance/audit/guard exactlyequal;historical1933audit retained ashistory,notactualcurrentfindings.",
+      "deferment_join": "R12classificationranges refer ONLY historicalbaseline0b5e77 recoveredat6243;expandtofullkeythenjoincurrent1921subset,minussixfixed. Never apply oldindices directly toprunedarray orcallremainingclassificationformalexemption."
     },
     "B_plans": {
       "status": "Reference;onlyproposalnotconstructionoracceptance",
@@ -3732,12 +3750,12 @@
               "fresh_files": 4,
               "fresh_additions": 15,
               "fresh_deletions": 27,
-              "current": "root+runtimeZod4.4.3; rootZod belongs to132-package ratchet tool closure;1927identities/1933occurrences/8guards",
+              "current": "Historical review snapshot at6243:root+runtimeZod4.4.3,132-package tool closure,1927identities/1933occurrences/8guards. These counts are historical only; future migration must preserve its own fresh trusted-base reduced findings, never restore this snapshot.",
               "proposal": "bothZod4.6.7; oldproposal includes12runtimeextraneous deletion and5rootUnicode-escape-only funding rewrites, all excluded from new carrier",
               "existing_barrier": "ci.yml reads checker from trusted eventbase. gate294 rejects policy drift;269 rejects oldZodlockfingerprint. Modifying only candidate checker/baseline policy cannot make original98 acceptable.",
               "write_set_phase1": ["scripts/unused-findings-gate.mjs", "scripts/unused-findings-gate.test.mjs", "docs/analytix/development-baseline.md"],
               "write_set_phase2": ["package.json", "package-lock.json", "packages/runtime/package.json", "packages/runtime/package-lock.json", "scripts/unused-findings-baseline.json (only exact policy.closure Zod version/metadata/lock fingerprints; entries/guards/audit/provenance unchanged)"],
-              "sequence": ["Under explicit yes, safely acquire only official exact4.6.7 artifact+metadata, hashverify; materialize into new isolated matched existing tool tree, preserving old. Derive exact old/new policy and installed metadata fingerprints, do not run discovery to rewrite baseline.", "Phase1 independent tooling-contract PR on old dependencies: implement one exact reviewed old-policy->new-policy fingerprint transition, limited to existingZod node4.4.3->4.6.7 and unchanged131otherclosure nodes. Bind config/rule/identity/rawprovenance. No generic reset/accept-current/autoexpand or free environment approval. Add small negative tests for wrong fingerprint, extra toolnode, and new finding hidden by policy change. Existing strictcompare/prune unchanged. Normal finalCI then merge.", "Phase2 new dependency PR on that trusted base: preserve all otherlocknodes and12extraneousnode/funding text; pin4.6.7 both trees; change baselinepolicy only exact reviewed Zod fingerprints. Trusted checker verifies newtools and exact same findings entries/counts/guards. If any identity/count/guard changes, pause; no automatic relabel/expansion/cleanup.", "Run existing seven checker tests including sixrequired cases and committedsource selection, actual full gate exacteventbase/head, focused Zod production-schema/IPC tests/typecheck; then final exact-head fullCI. Compare source selection dynamically, not historical2339 whitelist.", "Only after accepted coordinatedmerge close superseded98/108 with exactmapping; no automaticclose in this readonly plan."],
+              "sequence": ["Under explicit yes, safely acquire only official exact4.6.7 artifact+metadata, hashverify; materialize into new isolated matched existing tool tree, preserving old. Derive exact old/new policy and installed metadata fingerprints, do not run discovery to rewrite baseline. Before any migration, record the actual fresh trusted main SHA and baseline full-blob SHA256, entries/counts/guards and their payload hashes after all accepted trim-only reductions; never use historical6243 baseline/counts as current allowance.", "Phase1 independent tooling-contract PR on old dependencies: implement one exact reviewed old-policy->new-policy fingerprint transition, limited to existingZod node4.4.3->4.6.7 and unchanged131otherclosure nodes. Bind config/rule/identity/rawprovenance. No generic reset/accept-current/autoexpand or free environment approval. Add small negative tests for wrong fingerprint, extra toolnode, and new finding hidden by policy change. Existing strictcompare/prune unchanged. Normal finalCI then merge.", "Phase2 new dependency PR on the fresh trusted phase1 base: preserve all otherlocknodes and12extraneousnode/funding text; pin4.6.7 both trees; change baselinepolicy only exact reviewed Zod fingerprints. Bind the pre-migration baseline SHA256 to that fresh trusted commit; preserve its already-reduced entries/counts/guards/audit/provenance exactly. Derive the candidate full baseline SHA256 from that fresh blob with only reviewed policy substitution; do not require or restore the historical full baseline hash. Any identity/count/guard change relative to this fresh base pauses; no automatic relabel/expansion/cleanup.", "Run existing seven checker tests including sixrequired cases and committedsource selection, actual full gate exacteventbase/head, focused Zod production-schema/IPC tests/typecheck; then final exact-head fullCI. Compare source selection dynamically, not historical2339 whitelist.", "Only after accepted coordinatedmerge close superseded98/108 with exactmapping; no automaticclose in this readonly plan."],
               "validation_commands": [
                 {
                   "command": "source ./scripts/use-analytix-cache.sh && node --test scripts/unused-findings-gate.test.mjs",
@@ -3747,7 +3765,7 @@
                 {
                   "command": "UNUSED_EVENT=pull_request UNUSED_BASE=<trusted-phase1-main> UNUSED_HEAD=<phase2-head> node <checker-extracted-from-trusted-base>",
                   "status": "future exactevent invocation in CI or verifiedisolatedworktree; ordinarycurrent node scripts/unused-findings-gate.mjs remains usable after trusted integration",
-                  "assertion": "132closure with onlyreviewedZodfingerprints; exact1927/1933/8guards onunchangedsource and unchangedRAW_SHA; no baselineexpansion"
+                  "assertion": "132closure with onlyreviewedZodfingerprints; trusted eventbase and its baseline full-blob SHA256 are the actual migration-time fresh pair; preserve that already-reduced entries/counts/guards payload exactly and unchangedRAW_SHA; no restoration of historical1927/1933 allowances or oldfullhash and no baselineexpansion. Candidate fullblob hash may differ solely by the explicitly reviewed policy fields and must equal the deterministic substitution result."
                 },
                 {
                   "command": "source ./scripts/use-analytix-cache.sh && npm --prefix packages/runtime test -- src/config/analytix-config.test.ts src/contracts/model-endpoint-format.test.ts",
@@ -3772,16 +3790,24 @@
               ],
               "provenance": {
                 "raw_sha256": "dff6e88701aabb1d26794c84cb8661d04084b89181f5513ca1cbcdda1bc4458c",
-                "current_baseline_sha256": "0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae",
                 "old_policy_sha256": "4bbce2786556231865a666b9a42be2e54f9176141b219b968d7a89014a6bb21a",
                 "zod_old_metadata_sha256": "c630bd10b52dcf71c112a2bf78dbf2734b9db58d62de663b8d86c2ec2c8cda2e",
                 "zod_old_lock_sha256": "11ab6e9e2b4241b299f5098bf0dad6cd05adbc22dd0e8acb736eadf0e2d1acaa",
-                "new_fingerprints": "notacquired/notmeasuredinreadonlyreview; mustderivefromexactapprovedartifactbeforephase1review"
+                "new_fingerprints": "notacquired/notmeasuredinreadonlyreview; mustderivefromexactapprovedartifactbeforephase1review",
+                "historical_baseline_sha256_at_6243": "0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae",
+                "historical_baseline_limit": "Permanently recoverable history only; not the migration target or current allowance after accepted explicit trims."
               },
-              "stop": "Any identity/count/guard change, extra closure or config/rule/anchor drift, non-Zod lock drift, invalidmetadata/hash, productsource requirement or unknownCIcause. Do not weaken policy equality or grant broad future migration.",
+              "stop": "Any identity/count/guard change relative to the migration-time fresh already-reduced trusted base, substitution of an obsolete pre-trim baseline/hash, extra closure or config/rule/anchor drift, non-Zod lock drift, invalidmetadata/hash, productsource requirement or unknownCIcause. Do not restore fixed allowances, weaken policy equality or grant broad future migration.",
               "rollback": "Normal reverse migration PR using separately reviewed exact inverse policy tuple and target locknode, preserving all intervening security nodes; never reset baseline or autoaccept currentfindings. Ordinary source revert alone cannot bypass trustedpolicy migration checks.",
-              "recommendation": "Approve explicit two-phase independent tool migration, not direct98merge. Retain original1933 provenance permanently; no cleanup included.",
-              "question": "是否批准两阶段Zod4.6.7工具合同迁移：先可信base精确迁移凭据，再双树依赖及唯一Zod指纹更新，1927/1933/8guards与原始来源不变，任何身份变化即停？"
+              "recommendation": "Approve explicit two-phase independent tool migration, not direct98merge. Retain original1933 report and historical1927/1933 baseline permanently as recoverable history; preserve all later accepted trims by binding the migration to its fresh trusted base. No cleanup included in tooling migration.",
+              "question": "是否批准两阶段Zod4.6.7工具合同迁移：先可信base精确迁移凭据，再双树依赖及唯一Zod指纹更新；锁定迁移时fresh可信base的已裁减entries/counts/guards与其baselinehash，不恢复历史已修额度，历史1927/1933及原始来源永久保留，任何相对fresh base的身份变化即停？",
+              "migration_anchor": {
+                "trusted_base_sha": "Must be freshly measured at actual migration; not frozen to6243 or a pre-trim commit.",
+                "trusted_baseline_sha256": "Must be hash of that exact trusted commit baseline; historical0b5e77... is never substituted.",
+                "findings": "Entries, multiplicities/counts and ambiguity guards of that fresh trusted baseline remain exactly unchanged during tooling migration.",
+                "candidate_baseline_sha256": "Deterministically derive from the fresh baseline blob by the approved policy-only edit; never copy a historical baseline or enlarge findings.",
+                "A2_status_at_amendment": "Parent reports six-source fix plus explicit trim candidate1927/1933->1921/1927; actual gate not yet complete. These prospective counts are not new measured acceptance and are not hardcoded as the future migration target."
+              }
             },
             {
               "pr": 108,
@@ -3848,7 +3874,12 @@
               "state": "proposed new small workflow; not present/not executed",
               "contract": ["pull_request with exact changed-workflow paths, plus explicit workflow_dispatch; contents:read/actions:read only; no secrets, release, deployment, installer, Provider, protected user state or product build.", "Matrix ubuntu-24.04/windows-2022/macos-14, fixed action SHAs matching the approved target; timeout10min per job.", "checkout exact head with persist-credentials:false; assert local HEAD equals expected SHA and working tree clean; capture git config privately only to assert no persisted extraheader, never print token values.", "setup Python3.11; assert interpreter series and sys.executable source; exercise pip cache input using checked-in backend/uv.lock and no pip package install. Cache miss is legitimate, not a failing forced-hit requirement.", "Write a fixed tiny public probe payload, SHA256 it; upload once with if-no-files-found:error/retention-days:1, retrieve that run own artifact with existing runner gh API and actions:read, assert ZIP member path and byte hash exactly equal. No installer/source archive upload.", "The supplied commands require this newly implemented fixture. Until its exact contents are reviewed and actually run, these items remain unverified."],
               "ci_command": ["gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>", "gh run view <actual-probe-run-id> --json headSha,event,status,conclusion,jobs"],
-              "expected": "One exact final-head probe run, all three matrix jobs pass; separate complete Development/CodeQL gate. No release.yml/package.yml/pr28 archival workflow dispatch."
+              "expected": "One exact final-head probe run, all three matrix jobs pass; separate complete Development/CodeQL gate. No release.yml/package.yml/pr28 archival workflow dispatch.",
+              "actionlint_acceptance": {
+                "primary": "Existing Source baseline workflow actionlint@v1.7.12 step succeeds on exact final head in its normal CI validation chain.",
+                "optional_local": "Only verified exact cache with GOTOOLCHAIN=local/GOPROXY=off/GOSUMDB=off; cache unavailable => local not_ready, no implicit source/module/toolchain acquisition.",
+                "additional_preparation": "Any separate Go preparation requires explicit official source and checksum conditions in future B approval; npm/PyPI standing grant does not cover it."
+              }
             },
             "shared_windows_generation": {
               "status": "specified recipe, not executed; finite task-only wrapper is not yet implemented",
@@ -3875,10 +3906,10 @@
               "original_pr_files": [".github/workflows/ci.yml", ".github/workflows/release.yml"],
               "planned_full_write_set": [".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/dependency-actions-contract-probe.yml"],
               "sequence": ["Fresh-base on6243or later; replace all4 current setup-python uses (CI2 including addedWindows lxml +release2), not only oldPR3.", "Preserve Python inputs, architecture, cache keys and existing permissions. Add/reuse only approved shared synthetic probe; no release dispatch."],
-              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\ngo run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\nGOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
               "expected_assertions": ["All4 occurrences exacttargetSHA, none old; no unsupported pip-install input.", "Three synthetic Python setup/cache jobs and current Development Windowsnative/Backend jobs pass; release file static-validated, not claimed executed."],
-              "failure_stop_points": ["Unexpected Python/runtime change or action-input removal used by repository.", "Cache/setup/probe or required job failure not localized; runner unsupported."],
-              "execution_prerequisites": [],
+              "failure_stop_points": ["Unexpected Python/runtime change or action-input removal used by repository.", "Cache/setup/probe or required job failure not localized; runner unsupported.", "本地离线actionlint因缺精确cache或工具链退出时，记本地未就绪，不改GOPROXY联网重试；可依既有CI同版步骤取得主要验收证据。"],
+              "execution_prerequisites": ["本地actionlint仅可复用已核精确v1.7.12源码/模块闭包缓存，GOTOOLCHAIN=local/GOPROXY=off/GOSUMDB=off禁止工具链与模块隐式下载；本轮未核该缓存，故本地actionlint当前未就绪。", "主要验收使用既有Source baseline正常CI中同版actionlint@v1.7.12实际成功步骤，加完整final-head required矩阵；不为补本地证据额外联网。若另需准备Go模块，须单独在本项yes中写明官方Go来源、精确版本和go.sum/checksum校验条件，不能套用npm/PyPI授权。"],
               "recommendation": "Approve controlled action migration with actual consumer probe; no need full packaging.",
               "decision_question": "是否批准#4按四处固定SHA替换并执行共享合成Python设置/缓存探针，保留现有Python与权限合同？",
               "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
@@ -3894,7 +3925,7 @@
                 }
               ],
               "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
-              "notes": []
+              "notes": ["actionlint命令为未来可选离线检查，非本轮运行回执；新probe仍拟新增，原版本替换处数不变。"]
             },
             {
               "pr": 7,
@@ -3911,10 +3942,10 @@
               "original_pr_files": [".github/workflows/ci.yml", ".github/workflows/package.yml", ".github/workflows/pr28-independent-environment.yml", ".github/workflows/release.yml"],
               "planned_full_write_set": [".github/workflows/ci.yml", ".github/workflows/package.yml", ".github/workflows/pr28-independent-environment.yml", ".github/workflows/release.yml", ".github/workflows/dependency-actions-contract-probe.yml"],
               "sequence": ["Mechanical fresh-base and all16 current uses (CI12/release2/package1/PR28one); preserve each exact ref/fetch-depth/submodule/LFS/credential flag.", "Verify official v7 fork protection behavior; never add allow-unsafe-pr-checkout. Execute only shared probe and normalPR CI."],
-              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\ngo run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\nGOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
               "expected_assertions": ["All16 SHAs exact; events/refs/permissions unchanged; sourcebaseline still exact event head and full history.", "Three runner checkout probes assert exact expected head and no credential persistence; complete required matrix from finalhead."],
-              "failure_stop_points": ["A consumer needs unsafe fork opt-in, persisted credential relaxation or different source-ref semantics.", "Unsupported runner or required failure; stop rather than change fork/security contract."],
-              "execution_prerequisites": [],
+              "failure_stop_points": ["A consumer needs unsafe fork opt-in, persisted credential relaxation or different source-ref semantics.", "Unsupported runner or required failure; stop rather than change fork/security contract.", "本地离线actionlint因缺精确cache或工具链退出时，记本地未就绪，不改GOPROXY联网重试；可依既有CI同版步骤取得主要验收证据。"],
+              "execution_prerequisites": ["本地actionlint仅可复用已核精确v1.7.12源码/模块闭包缓存，GOTOOLCHAIN=local/GOPROXY=off/GOSUMDB=off禁止工具链与模块隐式下载；本轮未核该缓存，故本地actionlint当前未就绪。", "主要验收使用既有Source baseline正常CI中同版actionlint@v1.7.12实际成功步骤，加完整final-head required矩阵；不为补本地证据额外联网。若另需准备Go模块，须单独在本项yes中写明官方Go来源、精确版本和go.sum/checksum校验条件，不能套用npm/PyPI授权。"],
               "recommendation": "Approve v7 upgrade with same-source and credential boundary, no unsafe opt-in.",
               "decision_question": "是否批准#7全16处固定SHA迁移，保留可信事件/准确HEAD/凭据隔离，并补共享三平台合成探针？",
               "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
@@ -3938,7 +3969,7 @@
                 }
               ],
               "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
-              "notes": ["No pull_request_target/workflow_run event exists in these4 source workflows; behavior for such events is official-reference only, not claimed repository runtime coverage.", "package workflow requires main and qualified self-hosted packaging runner; do not dispatch it just to test checkout."]
+              "notes": ["No pull_request_target/workflow_run event exists in these4 source workflows; behavior for such events is official-reference only, not claimed repository runtime coverage.", "package workflow requires main and qualified self-hosted packaging runner; do not dispatch it just to test checkout.", "actionlint命令为未来可选离线检查，非本轮运行回执；新probe仍拟新增，原版本替换处数不变。"]
             },
             {
               "pr": 90,
@@ -3955,10 +3986,10 @@
               "original_pr_files": [".github/workflows/package.yml", ".github/workflows/pr28-independent-environment.yml"],
               "planned_full_write_set": [".github/workflows/package.yml", ".github/workflows/pr28-independent-environment.yml", ".github/workflows/dependency-actions-contract-probe.yml"],
               "sequence": ["Fresh-base; replace exactly5 current uses; retain names, compression, retention and missing-file error flags.", "Shared probe uses same fixed action target and tiny public bytes; no installer, private evidence or source ancestry archive transfer."],
-              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\ngo run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\nGOTOOLCHAIN=local GOPROXY=off GOSUMDB=off go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
               "expected_assertions": ["Artifact upload output provides actualartifactID; download exactlysame run artifact and verify exactZIP member SHA256/bytes.", "5 production uses exactSHA, all artifact metadata inputs unchanged; complete finalhead CI."],
-              "failure_stop_points": ["ZIP/path/content mismatch, artifact/API contract incompatible, permissions need expansion beyond own-run actions:read.", "No qualified isolated probe runner; do not run old PR28 provisioning or package workflow as workaround."],
-              "execution_prerequisites": [],
+              "failure_stop_points": ["ZIP/path/content mismatch, artifact/API contract incompatible, permissions need expansion beyond own-run actions:read.", "No qualified isolated probe runner; do not run old PR28 provisioning or package workflow as workaround.", "本地离线actionlint因缺精确cache或工具链退出时，记本地未就绪，不改GOPROXY联网重试；可依既有CI同版步骤取得主要验收证据。"],
+              "execution_prerequisites": ["本地actionlint仅可复用已核精确v1.7.12源码/模块闭包缓存，GOTOOLCHAIN=local/GOPROXY=off/GOSUMDB=off禁止工具链与模块隐式下载；本轮未核该缓存，故本地actionlint当前未就绪。", "主要验收使用既有Source baseline正常CI中同版actionlint@v1.7.12实际成功步骤，加完整final-head required矩阵；不为补本地证据额外联网。若另需准备Go模块，须单独在本项yes中写明官方Go来源、精确版本和go.sum/checksum校验条件，不能套用npm/PyPI授权。"],
               "recommendation": "Approve bounded actual artifact roundtrip before applying five uses.",
               "decision_question": "是否批准#90五处固定SHA升级并上传/取回一个非敏感合成小文件验证内容，保留产物合同且不执行打包/发布？",
               "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
@@ -3974,7 +4005,7 @@
                 }
               ],
               "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
-              "notes": []
+              "notes": ["actionlint命令为未来可选离线检查，非本轮运行回执；新probe仍拟新增，原版本替换处数不变。"]
             },
             {
               "pr": 15,
@@ -4199,20 +4230,21 @@
             "helper_runs": 0,
             "repository_edits": 0,
             "new_package_acquisitions": 0,
-            "readiness": "Not all8areimmediatelymerge-ready. Plans identifyfinitewrite sets,commandsandassertions; Windowsformalruntime/artifacts and proposedfixtures remainexplicitpreconditions."
+            "readiness": "Not all8areimmediatelymerge-ready. Plans identifyfinitewrite sets,commandsandassertions; Windowsformalruntime/artifacts and proposedfixtures remainexplicitpreconditions.",
+            "actionlint_readiness_correction": "Static packet-only correction; no query, verification, helper, download or Go execution.4/7/90 replacement counts4/16/5 and source write sets unchanged."
           }
         },
         "rust_go": {
           "schema": "governance-r13-rust-go-decision-proposals-v1",
           "common": {
-            "status": "Reference / decision-ready proposal only; nothing authorized by this file",
+            "status": "Reference / decision proposals; Rustspecializedsecurityacceptanceplan explicitlynot_ready",
             "source_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
             "created_at_utc": "2026-10-25T12:48:34.233303+00:00",
             "performed": ["FreshGitHubmain and8PRmetadata", "ReadfixedGitmanifests/locks/consumers/scripts", "Officialprimaryread-onlyresearch; pinnedduckdb/ICUtagresolvedtocommit"],
             "not_performed": ["No repository edit/commit/push/merge/close", "Nohelper/tests/build/download/packageinstall/newcandidateacceptance", "NoMacnode--version/goversion sampling", "No processenumeration, task-externalreconnaissance, realcase/credentials/Provider/Privacy"],
             "freeze": "Productsource/features/Privacy remainfrozen; approval of dependency plan doesnot authorize repairing productcode to fit it.",
             "refusals": "All inherited logs/annotations/security/alerts/protection/PR70diff/Cquinn/KaTeXcollection/largebaselineAPI/3botjobs/genericindividualjob/PR109body restrictions remain; no route substitution.",
-            "approval_semantics": "A futureYES refers to the exact recommended decision/write set/preparation/test/stop/rollback below; it is not current implementation authority. Unselected alternative remains unapproved.",
+            "approval_semantics": "Futureapproval must be tied to a ready item and its exact selected scope. This revision marks Rustsecurityprobe not_ready, so it cannot be presented as an already executable one-YES acceptance package. No currentimplementation authority.",
             "preparation_if_future_approved": "Newtask-owned0700root/noextraACL, files0600, actualcache destinations first. Existing standardhelper in same shell for commands using build storage. Proposed Go/Rust preparation additionally needs explicit officialproxy.golang.org/sum.golang.org andcrates.io exactapprovedversions/checksums, not merely npm/PyPI standing grant. No fullnpmci, no canonical dependency/permission changes; no blindresolver/fulltreecleanup.",
             "git_if_future_approved": "Normalshortbranchfromfreshmain; preserve canonical6dirty/22untracked; one writer; show exactdelta; finalheadfullsamechainjobs+requiredgate+CodeQL; noadmin/force/auto-merge; finalmergemethodnormalmergecommit onlyif granted.",
             "shared_rollback": "NormalrevertPR of the specific carrier commit (mergecommit uses mainline1 after verifying parents), preserve laterunrelated changes; redo affectedchecks. Securityrollback reintroduces oldrisk and must be explicit, not silently claimedsafe. Noreset/force/history rewrite.",
@@ -4372,7 +4404,7 @@
           },
           "rust_security_bundle57_1_29": {
             "prs": [57, 1, 29],
-            "recommendation": "One minimal3lockTLS+tar carrier canavoidrepeatedsame-lockCI; eachrootversion/feature/probe independentlyverified. Noquinnupgrade orCresumption. Original57/1/29 remainopenuntilcarrieracceptedandmappingexplicit.",
+            "recommendation": "三锁TLS+tar目标和写集可以讨论；本轮无法给出已固定且完整的专项probe闭包，不能称一yes即可完成安全验收。仅保留真实现有metadata/features/unit/CI路径，专项探针缺口须先补齐；不以全量CI替代。",
             "write_set": ["tools/analysis_compute/Cargo.lock", "tools/cleaning_ops/Cargo.lock", "tools/data_engine/Cargo.lock"],
             "current_per_root": {
               "analysis_compute": {
@@ -4420,7 +4452,7 @@
             },
             "consumer_boundary": "All3locks:reqwest/tar soleparentlibduckdb-sys1.10504.0. Upstreamclassifiesthembuild-dependencies; reqwestdefault-features=false,blocking+rustls-tls. Repo3rootsenableDuckDBbundled. bundled_cc usesRusttar::Archive oncrate-ownedduckdb.tar.gz duringbuild; reqwestdownloadpathisinnot(bundled) module gatedDUCKDB_DOWNLOAD_LIB=true. NoRustappdirectreqwest/tarcall foundinthe3src trees. This narrowscurrentRustchain tobuild-time; DuckDBC++runtimeHTTPS/extensions area separateTLSimplementation andarenotprovedsafe/unreachablebythisRustlockanalysis.",
             "native_consumers": ["data_engine→backenddata_engine_client/db_engine andGo nativecomponentregistry/runner", "analysis_compute→backendanalysis_compute_runner andGo registry", "cleaning_ops→data_engine pathcrate andnativecomponentregistry"],
-            "order": ["Freshmainandhead/filediff; source3lockbaseline fullnodecatalog", "ReadexactofficialCargoartifactchecksums; materializetaskcacheonlyiffutureapprovalexplicitlycoversCargo; offlinegenerationinprivatecandidate,nevercanonical", "Buildcandidatewithonlyclosed4nametargetdeltas; enumeratenodesandassertallothercompletenodes unchanged", "Runperrootmetadata/features thenboundedtar/TLSprobes andexistingRusttests; C-refusedpurposeunchanged/neverexecuted", "OnecompletefinalheadCIchain; thennormalmergemap57+1+29totree-specificcoverage; keepquinnresidualopen", "Consolidatenativebuild/artifactacceptanceonceonstableintegratedcandidate; oldreceiptsinvalidatedbychangedCargo.lock,notmanuallyrefreshed"],
+            "order": ["Freshmain/head and exact3lock source catalog", "Complete a reviewed closed target/feature/checksum and fixture plan; currentstate NOT_READY", "Only if futurepreparation is specifically approved, materialize exactofficial inputs in a fresh verified taskcache", "Use existingrealmetadata/features/unit/CI commands, recording their limited claims", "Do not merge or close57/1/29 as security-complete until the specialized probe gap is actually filled; C remains evidence-only"],
             "commands_proposed_nonC": [
               {
                 "cwd": "repo",
@@ -4435,11 +4467,6 @@
                 "expect": "recordbuildedgeandactualrustlsfeaturesfromeachroot;donotinferfromlockoptionalnodes;brotil/ECHclaimsconditional"
               },
               {
-                "cwd": "taskprivateprobe",
-                "command": "cargo test --locked --offline --manifest-path \"$TASK/probes/dependency-contracts/Cargo.toml\" -- --test-threads=1",
-                "expect": "declaredsmallsyntheticprobesbelow run;notactualproduct/Provider/case;outertimeout60s/RSS256MiB/output64KiB"
-              },
-              {
                 "cwd": "repo",
                 "command": "cargo test --locked --offline --manifest-path tools/<root>/Cargo.toml --all-targets",
                 "roots": ["analysis_compute", "cleaning_ops", "data_engine"],
@@ -4452,18 +4479,55 @@
               }
             ],
             "synthetic_probe_spec": {
-              "tar": "Handwrittenfixed512-byteheaders/checksums, <=16KiBarchive: PAXsize→GNUlongname→fileA+fileB. Assert2entries/names/exactbytes/sizes, nohiddenextra member; ordinaryustarandPAX-onlycontrols pass. Baseline.45mustfaildeclaredoracleandcandidate.46pass. Extractionifneededonlynew0700taskroot; noambientpath/symlinktarget/userfile. DonotuseBuildernormalizationthatremovesbug.",
-              "TLS": "Useonlytask-generatedsyntheticcert/keyorlicensedpublicupstreamcertfixtures. ExacttargetRustls/WebPKI loopbackpair: trustedmatchingnameconnects,wrongname/untrustedCAreject,close/cancelends. EnumeraterootanchorsproveemSignECCG3absent(knownDERSHA25686a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b); exerciseofficialdistrustedSPKIpubliccertificateverificationfixturewithoutreadingprivatekeys. Version/advisorycheckscovernonactivefeatures; do notmanufacture1GiBdecompressionorclaimall6TLSexploitpathsreproduced."
+              "status": "unimplemented requirements only; not executable evidence",
+              "tar": "Seeprobe_readiness.tar_probe_missing",
+              "TLS": "Seeprobe_readiness.tls_probe_missing"
             },
-            "stop": ["Anyquinn/C-refusedpurpose requiresexecution; do notprovidealternativeroute", "Anylockchangeoutsideclosedtargetnodes/3files", "Publicartifactchecksum/registryidentitymismatch", "Target-behaviornegativetestactuallyfailsorbaselinecontrolcannotdetectcase; retainfailure,noassertionweakening", "Anyproductcode/Privacychange needed", "UnknownCIfailure", "Noactualnativeidentity/prerequisites: holdartifactclaim,notfakesourcefailure"],
+            "stop": ["Anyquinn/C-refusedpurpose requiresexecution; do notprovidealternativeroute", "Anylockchangeoutsideclosedtargetnodes/3files", "Publicartifactchecksum/registryidentitymismatch", "Target-behaviornegativetestactuallyfailsorbaselinecontrolcannotdetectcase; retainfailure,noassertionweakening", "Anyproductcode/Privacychange needed", "UnknownCIfailure", "Noactualnativeidentity/prerequisites: holdartifactclaim,notfakesourcefailure", "Specialized probe closure or fixed fixture not ready: holdsecurityacceptance/merge; do not substitute oldgreenCI or claim the proposedmanifestalreadyexists"],
             "rollback": "NormalcarrierrevertPR restoringreviewedparent3locks;recheck3rootnodesandunitmatrix;explicitlyregisterreturnedTLS/PAXrisk.Nocachedreceiptcopy,Go/nativeauthorityweaken,resetorforce.",
             "mapping_if_accepted": {
               "57": "carriermerge→TLS3ownroots→targetenumeration/features/probe/CI",
               "1": "carriermerge→cleaning_opstar0.4.46→PAXprobe/ownRusttests;quinnnotclosed",
               "29": "carriermerge→analysis_computetar0.4.46→sameprobe/ownRusttests;data_enginetaralready.46notclaimednewfix"
             },
-            "question": "是否批准将#57/#1/#29重建为上述三锁最小TLS＋tar安全载体（含官方Cargo精确包准备和逐根合成验证），quinn/C操作不变，超出封闭目标即停该项？",
-            "platform_evidence_limit": "ExistingRustrequiredjobsrunLinux1.94.1unitcontracts; theydonotproveWindows/Darwinpackagedbinaries. Exactnewnativepublication/buildcontextreceipts andsyntheticartifactconsumers mustbeconsolidatedforclaimedtargetsupport; noinstaller/releaseclaimfrom52/52. IfaC-relatedplatformrestrictionalsoblocksindependentTLS/tarvalidationoncleaning_ops,holdthatrootandreportpartialcoverage; neverroutearoundorclaim3rootsdone."
+            "question": "是否采纳三锁最小TLS＋tar安全目标？当前专项探针状态not_ready；精确闭包/fixture补齐前，不把该目标确认当作专项验收通过或合并批准。",
+            "platform_evidence_limit": "ExistingRustrequiredjobsrunLinux1.94.1unitcontracts; theydonotproveWindows/Darwinpackagedbinaries. Exactnewnativepublication/buildcontextreceipts andsyntheticartifactconsumers mustbeconsolidatedforclaimedtargetsupport; noinstaller/releaseclaimfrom52/52. IfaC-relatedplatformrestrictionalsoblocksindependentTLS/tarvalidationoncleaning_ops,holdthatrootandreportpartialcoverage; neverroutearoundorclaim3rootsdone.",
+            "status": "not_ready_for_specialized_security_acceptance_or_merge",
+            "probe_readiness": {
+              "status": "not_ready",
+              "manifest_path_status": "$TASK/probes/dependency-contracts/Cargo.toml was a proposed NEW task-only probe, never an existing repository fixture. No file or executable probe was materialized. The previous command has been removed.",
+              "existing_owner_tests": "Eachtools/<root>/Cargo.toml and existing unit tests are real. cargo test --all-targets on the root does not run transitive dependency upstream tests and does not itself exercise tar PAX desync or Rustls/WebPKI distrust behavior.",
+              "exact_direct_targets_known": {
+                "tar": "=0.4.46",
+                "rustls": "=0.23.46",
+                "rustls-webpki": "=0.103.16",
+                "webpki-roots": "=1.0.10"
+              },
+              "cargo_manifest_exact_text": null,
+              "why_no_exact_manifest_claim": "Actual root-selected crypto provider/features are not yet backed by a fixed candidate feature graph. Adding an arbitrary ring/aws-lc/rcgen/reqwest default would change the test closure and could fail to represent the consumer. Existing PR57 locks webpki0.103.15 and oldroots, not the target0.103.16/1.0.10; hence a full target probe closure cannot be copied from that lock unchanged.",
+              "candidate_input_gaps": ["No actual3-lock candidate targeting all4 exact versions has been generated or validated in this read-only task.", "Complete package/dependency/checksum closure for a new test crate is not retained; targetwebpki0.103.16/roots1.0.10 checksums and bytes are not materialized/validated here.", "Actual consumer crypto-provider/features and any temporary probe test-only dependency set remain unproven; no additional package/version is implicitly authorized.", "No baseline0.4.45/candidate0.4.46 fixed fixture pair has run the same independent PAX oracle.", "No complete public distrust certificate chain with reason-specific verification controls is bound to this probe."],
+              "closure_derivation_required_before_probe_ready": ["From the final approved candidate lock, retain each package tuple(name,version,registry source,checksum) and exact dependency edges; use only the consumer-selected feature graph. The probe package itself may be task-only; repository write set remains3locks.", "A task-only manifest would have to pin the4 direct versions, disable unwanted defaults and name the exact consumer features. Every transitive version/checksum must already be present in that final candidate graph; if not, the extra exact package/version requires explicit review instead of an online unconstrained solve.", "A proposed task-only Cargo.lock must be derived from that closed catalog, with metadata/locked/offline checks proving it is accepted. Merely copying a root lock with a different root package is not sufficient. No cargo update/generate-lockfile network fallback or broad resolver is allowed.", "Only after exact closure/fixture input digests are recorded can an executable probe command be presented as ready. At present this is a missing preparation artifact, not a passed or executable check."],
+              "official_cargo_preparation_approval_scope": {
+                "authorization_now": false,
+                "requested_sources": ["Officialcrates.io index metadata andstatic.crates.io exact-version artifacts; no third-party mirror"],
+                "exact_targets": ["rustls0.23.46", "rustls-webpki0.103.16", "webpki-roots1.0.10", "tar0.4.46"],
+                "baseline_control": "tar0.4.45 only if the current locked artifact is not already available and the precise baseline-control preparation is explicitly admitted",
+                "integrity": "Record official registry SHA256 before artifact use, verify archive bytes match; retainedcurrentpackage catalog and toolchain identities must also match. No checksum is invented or called already verified.",
+                "transitives": "Only exact versions/checksums already in the selected candidate lock may be reused/fetched under that scope. New test-only or other transitive packages are NOT covered by a blanket permission; absence is a hold.",
+                "boundaries": "Separate futureB-plan approval required; never inferCargo permission from earliernpm/PyPI grant. New0700/noextraACL taskcache,0600files; no install/build during acquisition; no canonical/oldbackend/permissions/Privacy/Cquinn operations."
+              },
+              "tar_probe_missing": {
+                "desired_logic": "A manually encoded <=16KiB tar hasPAXx(size)→GNUlongnameL→fileA→fileB. Check exactly2 final member names, lengths and bytes against an independent handwritten oracle; plainUSTAR/PAX-only controls must pass. Do not construct the bug through a Builder that normalizes it away.",
+                "negative_control": "Same fixed bytes and oracle must detect the old0.4.45 behavior and pass0.4.46, with resource caps and extraction only into a fresh private task directory. This has not been implemented or executed.",
+                "readiness_gap": "No fixed fixture bytes/hash or existing executable runner currently retained for this exact test."
+              },
+              "tls_probe_missing": {
+                "desired_logic": "Use the consumer-selected Rustls provider/features. Genuine synthetic trusted/name-matched loopback succeeds; wrongDNS/untrustedCA fails; close/cancel ends. Distrust test must use a fully bound public certificate chain and controls that distinguish blocklist refusal from invalid signature/untrusted root/future-time errors.",
+                "root_fingerprint_correction": "webpki-roots exposes TrustAnchor subject/SPKI/nameConstraints, not necessarily original certificateDER. The emSignECCG3 DERhash86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b cannot be directly compared to an arbitrary serializedTrustAnchorhash. Need the licensed/publicDER fixture and definedDER→TrustAnchor/SPKI comparison, or a source certificate bundle with exact normalization.",
+                "readiness_gap": "Actual feature graph, complete public distrust-chain fixture with integrity/provenance, positive controls, and a fixed offline test closure are missing. No arbitrary new key or forged incomplete chain will substitute for these."
+              },
+              "acceptance_effect": "Existingrootunit/metadata/lock/version/fullCI evidence may establish source integration and target resolution. It does NOT satisfy the missing dedicated security probes or authorize a security-complete merge under the original acceptance requirements."
+            }
           },
           "icu12": {
             "prs": [12],
@@ -4574,10 +4638,20 @@
             "package_downloads": 0,
             "private_root_mode": "0700/noextraACL",
             "file_mode": "0600"
+          },
+          "readiness_revision": {
+            "at_utc": "2026-10-25T13:17:31.112827+00:00",
+            "reason": "Independentreview found hypotheticalRustprobe command lackedexisting/newstatus,exactfeatures/closedchecksums/cachefixtureinputs. Corrected ratherthan fabricatingreadiness.",
+            "removed_hypothetical_commands": 1,
+            "repository_write_set_expanded": false,
+            "artifacts_materialized": false,
+            "downloads_or_tests": 0
           }
         }
       },
-      "readiness_meaning": "Ayesselectsastatedboundedplan/disposition,notfakeprevalidatedcandidate. Missingformalartifact/safeofficialElectronstable/unknownprerequisites remain explicitstops;C2/31areplatformblockedexceptions,noapprovalunblocksforbiddenexecution. NoBcandidateexecuted/closed/merged inthisround."
+      "readiness_meaning": "Ayesselectsastatedboundedplan/disposition,notfakeprevalidatedcandidate. Missingformalartifact/safeofficialElectronstable/unknownprerequisites remain explicitstops;C2/31areplatformblockedexceptions,noapprovalunblocksforbiddenexecution. NoBcandidateexecuted/closed/merged inthisround.",
+      "active_baseline_rule": "Allfuturetoolingmigrations must preserve the thenfreshtrustedbase active trimmedentries/counts/guards; historical1927/1933/0b5e77 are never a target torestore. ActualA2state now1921/1927/8,hashcbbcea1c...; subsequent legitimatelytrimmedbase maydiffer.",
+      "review_fixes": ["Actionslocalactionlintonlyexistingverifiedcache withGOTOOLCHAINlocal/GOPROXYoff/GOSUMDBoff;primarynormalCIstepotherwise.No implicitGo-sourcepermissionvia npm/PyPI.", "Rustnewprobe notyetcomplete: no commandpoints to nonexistentCargo.toml. Furtherboundedofficialfixtureplanreviewinprogress;no B candidatevalidation.", "No sourceB execution/upgrade/close; C2/31 remainexceptions withzero executablepath."]
     },
     "security_evidence": "Incomplete; userprovidedsettings/alert screenshots stillneeded. Existingdeniedroutes not retried.",
     "decisions": ["Exactstartmain6243,21open,61refs matchespreviousendpoint.", "32allowlist fixedbeforeanydelete; staticsha256 prevents reachability-basedexpansion.", "32actions completed independently,eachwith own SHA/containment/recovery and postabsence proof; no batchedpush/looprelease/newref expansion. Firstprivate runner syntaxerror parsedbeforebody,allplanned; correctedbefore anyrefaction,not a permissionrefusal.", "A1all32singleactions exited0;freshpostlist29refs exactly61minus32,unknown disappearances0;no otherref/tipchanged.", "A2bounded6pureimportbindings repaired:5non-productiontest/supportfiles4+/6-.Moduleedgesretained,noinitializer/function/SQL/parameter/error/assertion changes.", "Historicalfullbaseline retainedbyimmutablefca67b41blobee7805c7/hash0b5e77... andmainancestor;no duplicatebigbaselinefile.", "Onlymatching132toolclosure materialized; localfullVitest/typecheck unavailable withoutwholecurrentprojectdeps,so currentHEADrequiredCIis designatedremainingactualtest evidence; no misleadinglocalpass.", "Bpriorroundsummary storedas recoverablehistory at6243 whilecurrent21executionplans liveoncehere; sourceoldreasons notsilentlyrewritten."],
