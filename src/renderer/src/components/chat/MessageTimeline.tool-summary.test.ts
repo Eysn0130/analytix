@@ -16,7 +16,7 @@ import { GeneratedFilesPanel, MessageBubble } from './message-timeline-bubbles'
 import { groupProcessSections, getProcessDetail, describeProcessBlock, type ProcessSection } from './presentation/chat/chat-view-model'
 import { PublicToolBody } from './presentation/chat/ToolViews'
 import { ToolCallTree } from './presentation/chat/ToolCallTree'
-import { projectSubagentActionResponse, SubagentDetailBody, isSubagentProcessBlock } from './SubagentCallCard'
+import { projectSubagentActionResponse, SubagentDetailBody } from './SubagentCallCard'
 import { resolveInjectedMemoryTooltipLines } from './injected-memory-lookup'
 
 const labels: Record<string, string> = {

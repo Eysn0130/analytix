@@ -2978,625 +2978,11 @@
       "embedded_caveat": "Embedded94files/66537LF are separated as a current embedded snapshot; this review does not prove their generation provenance or authorize editing/deletion. Explicit vendor/build paths separate; no claim every other source handwritten."
     },
     "reserved_decisions_current": {
-      "schema": "governance-b-decision-fragment-v1",
-      "status": "Reference; decision material only, no implementation or merge authority",
-      "source_sha": "17e2dd28f8bffe749ea04b80ab22409abff3129c",
-      "evidence_cutoff_utc": "2026-10-25T08:40:35Z",
-      "created_at_utc": "2026-10-25T08:47:37.265530+00:00",
-      "method": ["Read current PR metadata and complete files lists; reused unchanged verified input evidence.", "PR102 API omitted large lock patch; compared complete TOML nodes from existing Git objects.", "Read immutable main manifests, lock nodes, ratchet verification logic and consumer paths.", "Official primary web research for contract/security updates; no helper, test, install, package download, product execution or version sampling."],
-      "rows": [
-        {
-          "pr": 89,
-          "head": "da5871807db650e413bd6ca136175aa4e129ff3f",
-          "category": "E-toolchain",
-          "judgment": "两文件17+/11−；go1.25.0→1.26.0，x/sys.46→.49、x/text.38→.43；当前CI使用1.26.4不等于最低版本决定。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/89",
-            "source_paths": [
-              {
-                "path": "packages/runtime-go/go.mod",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime-go/go.mod"
-              },
-              {
-                "path": "packages/runtime-go/go.sum",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime-go/go.sum"
-              },
-              {
-                "path": ".github/workflows/ci.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/ci.yml"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "明确退役1.25后采用最小工具链载体，正式构建与打包消费需验证。",
-          "decision_question": "是否批准生产Go模块最低版本升至1.26，并验证正式构建与打包消费链？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 4,
-          "head": "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f",
-          "category": "H-major",
-          "judgment": "setup-python5.6→7，涉及CI及release；官方v7迁移ESM并移除pip-install输入，本PR没有添加新输入。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/4",
-            "source_paths": [
-              {
-                "path": ".github/workflows/ci.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/ci.yml"
-              },
-              {
-                "path": ".github/workflows/release.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/release.yml"
-              }
-            ],
-            "primary_urls": ["https://github.com/actions/setup-python/releases/tag/v7.0.0"]
-          },
-          "recommendation": "可批准固定SHA升级方向，检查全部Python设置与缓存消费者，不仅Development摘要。",
-          "decision_question": "是否批准setup-python7独立工具合同迁移及相关工作流验证？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 7,
-          "head": "cf368d0e088e49afb8f0ea9b314f95015047aeda",
-          "category": "H-major",
-          "judgment": "checkout4→7.0.1，四工作流16处替换；v7增加fork PR安全默认值，v6改变凭据保存位置，不是无行为变化。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/7",
-            "source_paths": [
-              {
-                "path": ".github/workflows/ci.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/ci.yml"
-              },
-              {
-                "path": ".github/workflows/package.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/package.yml"
-              },
-              {
-                "path": ".github/workflows/pr28-independent-environment.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/pr28-independent-environment.yml"
-              },
-              {
-                "path": ".github/workflows/release.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/release.yml"
-              }
-            ],
-            "primary_urls": ["https://github.com/actions/checkout", "https://github.com/actions/checkout/releases/tag/v7.0.1"]
-          },
-          "recommendation": "保留persist-credentials:false；验证PR、workflow_run与打包路径，不启用unsafe选项。",
-          "decision_question": "是否批准checkout7迁移并保留现有凭据与可信事件边界？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 90,
-          "head": "1a224b640d5750a99932feaa4be656bd7c1dd433",
-          "category": "H-major",
-          "judgment": "upload-artifact4→7.0.2仅改两个产物工作流；Development不执行全部上传下载消费链。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/90",
-            "source_paths": [
-              {
-                "path": ".github/workflows/package.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/package.yml"
-              },
-              {
-                "path": ".github/workflows/pr28-independent-environment.yml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/.github/workflows/pr28-independent-environment.yml"
-              }
-            ],
-            "primary_urls": ["https://github.com/actions/upload-artifact/releases/tag/v7.0.2"]
-          },
-          "recommendation": "用合成小产物验证名称、内容及读取端兼容，不为此发布安装包。",
-          "decision_question": "是否批准artifact7迁移并以合成上传下载闭环验收？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 15,
-          "head": "f11600dd5b425c1292e16f635dfdf130d18f4fae",
-          "category": "H-major",
-          "judgment": "pytest8.4.2→9.1.1且放宽manifest上限、更新锁marker；官方9含破坏变化，最低Python3.10仍满足。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/15",
-            "source_paths": [
-              {
-                "path": "backend/pyproject.toml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/pyproject.toml"
-              },
-              {
-                "path": "backend/uv.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/uv.lock"
-              }
-            ],
-            "primary_urls": ["https://docs.pytest.org/en/stable/announce/release-9.0.0.html", "https://docs.pytest.org/en/stable/backwards-compatibility.html"]
-          },
-          "recommendation": "验证现有fixture/plugin合同后采用，marker重排需确认等价。",
-          "decision_question": "是否批准pytest9迁移，保留测试发现、fixture与失败语义？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 95,
-          "head": "f64678911e7da5a09ef6e849c83c43036f9d99d2",
-          "category": "H-major",
-          "judgment": "Windows websockets16→17.3仅requirements一行，缺冻结聚合JSON与实际协议兼容证据。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/95",
-            "source_paths": [
-              {
-                "path": "scripts/windows-backend-requirements.lock.txt",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-backend-requirements.lock.txt"
-              },
-              {
-                "path": "scripts/windows-python-runtime-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-python-runtime-lock.json"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "重建完整Windows候选，不能把一行改动直接作为冻结载体。",
-          "decision_question": "是否批准完整Windows websockets17候选与实际WebSocket消费链验证？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 34,
-          "head": "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb",
-          "category": "platform-security",
-          "judgment": "目标42.11.16内嵌Node24.19.0；Electron41于2026-08-24、42于2026-10-20 EOL。10月21日Node修复为22.23.4/24.22.1/26.12.1；官方44.9.3与45.0.0页仍列24.22.0，不可称升级44/45已含修复。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/34",
-            "source_paths": [
-              {
-                "path": "package.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package.json"
-              },
-              {
-                "path": "package-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package-lock.json"
-              }
-            ],
-            "primary_urls": ["https://releases.electronjs.org/schedule", "https://releases.electronjs.org/release/v42.11.16", "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases", "https://releases.electronjs.org/"]
-          },
-          "recommendation": "不采纳42.11.16为长期安全目标；优先评估受支持44线实际修补候选，45备选；确认Electron补丁及嵌入Node，补native ABI、启动、renderer、安装证据。",
-          "decision_question": "是否批准独立Node22.23.4工具迁移及受支持Electron44/45兼容候选评估，暂不直接采纳#34？",
-          "limits": ["本轮未修改Node或Electron，未采样本机版本。", "官方版本状态为2026-10-25只读快照，后续候选须重新核实。"],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 57,
-          "head": "db19f2652cb618b8d45db48e76c2f57a6cba2d6a",
-          "category": "TLS-security",
-          "judgment": "data_engine锁rustls.23.41→.23.46、webpki.103.13→.103.15。rustls目标修RUSTSEC-2026-0346–0349，但0382要求webpki≥.103.16，roots当前1.0.8也低于0381要求1.0.10；另两Rust锁为rustls.23.39/webpki.103.13/roots1.0.7。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/57",
-            "source_paths": [
-              {
-                "path": "tools/data_engine/Cargo.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/data_engine/Cargo.lock"
-              },
-              {
-                "path": "tools/data_engine/Cargo.toml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/data_engine/Cargo.toml"
-              },
-              {
-                "path": "tools/data_engine/src/main.rs",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/data_engine/src/main.rs"
-              },
-              {
-                "path": "tools/analysis_compute/Cargo.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/analysis_compute/Cargo.lock"
-              },
-              {
-                "path": "tools/cleaning_ops/Cargo.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/cleaning_ops/Cargo.lock"
-              },
-              {
-                "path": "scripts/native-components.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/native-components.json"
-              },
-              {
-                "path": "scripts/native-component-contract.cjs",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/native-component-contract.cjs"
-              }
-            ],
-            "primary_urls": ["https://rustsec.org/advisories/RUSTSEC-2026-0346.html", "https://rustsec.org/advisories/RUSTSEC-2026-0347.html", "https://rustsec.org/advisories/RUSTSEC-2026-0348.html", "https://rustsec.org/advisories/RUSTSEC-2026-0349.html", "https://rustsec.org/advisories/RUSTSEC-2026-0382.html", "https://rustsec.org/advisories/RUSTSEC-2026-0381.html"]
-          },
-          "recommendation": "重新界定三锁最小安全目标，至少核rustls.23.46/webpki.103.16/roots1.0.10；不照合原57，不执行C树被拒操作。",
-          "decision_question": "是否批准先核三锁TLS补丁与实际feature/构建消费证据，再形成最小安全载体，C拒绝边界保持不变？",
-          "limits": ["锁反向链rustls/webpki←reqwest0.12.28←libduckdb-sys1.10504.0←duckdb←data-engine；native组件合同及实际DuckDB连接可达。", "锁图不能区分构建时或运行时TLS，也不证明已利用或不可达。", "精确libduckdb-sys Cargo.toml/build.rs官方页本次未能读取；未换途径补取，feature边界仍缺。"],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 77,
-          "head": "57589814d34f4babaf1a7878fc13bcd3b0c33bb1",
-          "category": "Pillow-Python-contract",
-          "judgment": "Windows仅Pillow12.3→13一行；backend锁仍12.3且manifest Python≥3.10；Windows正式runtime3.11.15。Pillow13官方停止3.10并含API移除；100仅候选生成工具。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/77",
-            "source_paths": [
-              {
-                "path": "backend/pyproject.toml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/pyproject.toml"
-              },
-              {
-                "path": "backend/uv.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/uv.lock"
-              },
-              {
-                "path": "scripts/windows-backend-requirements.lock.txt",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-backend-requirements.lock.txt"
-              },
-              {
-                "path": "scripts/windows-python-runtime-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-python-runtime-lock.json"
-              },
-              {
-                "path": "scripts/build-windows-backend-runtime-assets.cjs",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/build-windows-backend-runtime-assets.cjs"
-              },
-              {
-                "path": "src/main/windows-backend-candidate.test.ts",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/src/main/windows-backend-candidate.test.ts"
-              }
-            ],
-            "primary_urls": ["https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html", "https://pillow.readthedocs.io/en/stable/installation/python-support.html"]
-          },
-          "recommendation": "三选：保留12.3并限期接受残余；正式退役3.10后两树升13（推荐先补正式支持证据）；按解释器拆版本但3.10残余仍需接受。",
-          "decision_question": "是否选择退役Python3.10并验证两树Pillow13，或明确选择另两项及残余期限？",
-          "limits": ["CI3.11.9不是正式打包3.11.15验收；本机采样不作为正式3.10支持证据。"],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 92,
-          "head": "a6682fcb98e266e0ca43130eeba447b62b0f1327",
-          "category": "G-major",
-          "judgment": "目标现为SQLGlot30.24.0；旧30.23材料须修正。manifest<27→<31，uv revision3→5和marker变化；真实SQL/AST检查消费。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/92",
-            "source_paths": [
-              {
-                "path": "backend/pyproject.toml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/pyproject.toml"
-              },
-              {
-                "path": "backend/uv.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/uv.lock"
-              },
-              {
-                "path": "backend/app/repositories/analysis_repository.py",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/app/repositories/analysis_repository.py"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "不照合；先冻结允许与拒绝SQL语料作升级对照，保拒绝优先级。",
-          "decision_question": "是否批准SQLGlot30的SQL/AST兼容迁移并保留现有拒绝优先级？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 93,
-          "head": "f699f8f660ef2429d2a106d970de3710985cb93b",
-          "category": "G-runtime-contract",
-          "judgment": "Weixin2.4.3→2.4.10虽patch，但Node最低≥22→≥22.13.0，OpenClaw peer≥2026.3.22→≥2026.5.12；真实动态深导入send-media.js。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/93",
-            "source_paths": [
-              {
-                "path": "package.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package.json"
-              },
-              {
-                "path": "package-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package-lock.json"
-              },
-              {
-                "path": "src/main/weixin-bridge-runtime.ts",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/src/main/weixin-bridge-runtime.ts"
-              },
-              {
-                "path": "src/main/openclaw-weixin-media.d.ts",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/src/main/openclaw-weixin-media.d.ts"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "作为运行环境与媒体深导入合同迁移，不按F普通patch合并。",
-          "decision_question": "是否接受新的Node/OpenClaw最低合同并验证登录、媒体深导入与打包可达性？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 97,
-          "head": "699c4c8f02adc5ed1840cb4d899ff13caf6485b3",
-          "category": "G-major",
-          "judgment": "KaTeX.19与Commander15，并引入嵌套KaTeX.16.47；main已有107的.18.2及$katex约束完成较小安全目标，原PR基于旧main。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/97",
-            "source_paths": [
-              {
-                "path": "package.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package.json"
-              },
-              {
-                "path": "package-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package-lock.json"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "不直接采纳原PR；若需.19，重建保留现有安全约束的最小候选。",
-          "decision_question": "是否关闭旧97并登记安全目标由107承接，KaTeX.19另作兼容决策？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 102,
-          "head": "ad609e6a9a06de9c215c39d7747b88531a1bd262",
-          "category": "G-group-contract",
-          "judgment": "2文件294+/236−；62→63锁节点，新增OTel API，升级FastAPI/Pydantic/core/DuckDB/crypto/pdfium；附模式100755→100644和marker变化。候选仍certifi7.22/urllib3 2.7，不可整锁替换当前10.19/2.8。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/102",
-            "source_paths": [
-              {
-                "path": "backend/pyproject.toml",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/pyproject.toml"
-              },
-              {
-                "path": "backend/uv.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/backend/uv.lock"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "重建保完整安全节点的组；剥离附带模式变化，补原生pdfium与crypto证据。",
-          "decision_question": "是否批准重建保持现有安全节点的backend minor/patch组，并按真实原生消费者验收？",
-          "limits": ["旧完整BackendCI不能替代新原生pdfium5.14/crypto50.0.2证据。"],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 110,
-          "head": "4882a9cc33392e295aefd17284c0645c1f4e5cf1",
-          "category": "G-frozen-carrier-contract",
-          "judgment": "单requirements文件22+/22−、45LF，无聚合JSON；四安全pin/Pillow12.3保留，多平台hash扩张。含DuckDB1.5.6、NumPy2.5.4、Pandas3.0.6、FastAPI.156.4、Pydantic/core等22更新。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/110",
-            "source_paths": [
-              {
-                "path": "scripts/windows-backend-requirements.lock.txt",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-backend-requirements.lock.txt"
-              },
-              {
-                "path": "scripts/windows-python-runtime-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/windows-python-runtime-lock.json"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "不能直接作为冻结载体；需完整候选、实际聚合和原生/HTTP/PDF合同。",
-          "decision_question": "是否批准把22项重建为完整Windows冻结候选并重新计算聚合、验证原生/HTTP/PDF合同？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 98,
-          "head": "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53",
-          "category": "Zod-tool-migration",
-          "judgment": "两树Zod4.6.7，夹12行extraneous删除；根4.4.3属132包ratchet闭包，既有实际失败为Tool lock drift:node_modules/zod。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/98",
-            "source_paths": [
-              {
-                "path": "package.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package.json"
-              },
-              {
-                "path": "package-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/package-lock.json"
-              },
-              {
-                "path": "packages/runtime/package.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime/package.json"
-              },
-              {
-                "path": "packages/runtime/package-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime/package-lock.json"
-              },
-              {
-                "path": "scripts/unused-findings-gate.mjs",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/unused-findings-gate.mjs"
-              },
-              {
-                "path": "scripts/unused-findings-baseline.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/unused-findings-baseline.json"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "单独批准工具迁移，保原1933来源并比较新旧身份，不改policy或自动重建吞入。",
-          "decision_question": "是否批准独立Zod工具闭包迁移后协调双树升级，禁止扩大历史finding额度？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 108,
-          "head": "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3",
-          "category": "Zod-runtime-only",
-          "judgment": "runtime-only4.6.6夹同12行删除，不直接改根闭包；98失败不等于108已证实同类失败，也不算双树完成。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/108",
-            "source_paths": [
-              {
-                "path": "packages/runtime/package.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime/package.json"
-              },
-              {
-                "path": "packages/runtime/package-lock.json",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/packages/runtime/package-lock.json"
-              },
-              {
-                "path": "scripts/unused-findings-gate.mjs",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/scripts/unused-findings-gate.mjs"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "若急需仅runtime，先剥无关删除；长期推荐显式工具迁移后的协调方案。",
-          "decision_question": "是否采用runtime-only过渡方案，还是等待显式工具迁移后统一处理？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 12,
-          "head": "1cf3583b40fe4362ad786888ad500c17d24b94c3",
-          "category": "F-to-B-transitive-major",
-          "judgment": "独立F reviewer确证ICU2.2→2.3同时引入syn3.0.5 major（zerovec-derive依赖syn2→3），另换windows-sys依赖边；不满足全闭包minor/patch。真实中文排序消费者存在。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/12",
-            "source_paths": ["tools/analysis_compute/Cargo.lock"],
-            "primary_urls": [],
-            "source_path_status": "已由既有Git对象独立核实完整路径tools/analysis_compute/Cargo.lock；该PR仅此文件，26+/15−。未核实的是当前完整兼容性及历史CI失败原因，不是文件路径。",
-            "verified_path_method": "git show --format= --name-only1cf3583b; onlythispath;26+/15- vs58b365b"
-          },
-          "recommendation": "转B；原CI有cargo步骤失败且原因未取，不称全绿。可约束更小兼容闭包或明确接受proc-macro major。",
-          "decision_question": "是否接受含proc-macro major的ICU闭包迁移，或先约束更小兼容闭包？",
-          "limits": ["独立只读F审阅已核完整锁差异和真实消费者；未重跑测试，历史失败原因未取。"],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 1,
-          "head": "027ab53ab470b6c0a545939eecd7000110c40eeb",
-          "category": "tar-evidence-only",
-          "judgment": "cleaning_ops当前tar.4.45，候选.4.46；6+/15−且重选windows-sys.59→.52删除旧节点。两树不互相替代，缺完整兼容与准确安全公告绑定。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/1",
-            "source_paths": [
-              {
-                "path": "tools/cleaning_ops/Cargo.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/cleaning_ops/Cargo.lock"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "只复核已有允许证据，不执行或称安全销项；先核公告绑定及无关Windows重选。",
-          "decision_question": "是否先核公告绑定并重建不夹带无关Windows重选的两树载体，再决定采纳？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 29,
-          "head": "b35306029b571f090244bb0f26b0f50525a6222f",
-          "category": "tar-evidence-only",
-          "judgment": "analysis_compute当前tar.4.45，候选.4.46；6+/15−且重选windows-sys.59→.52删除旧节点。两树不互相替代，缺完整兼容与准确安全公告绑定。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/29",
-            "source_paths": [
-              {
-                "path": "tools/analysis_compute/Cargo.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/analysis_compute/Cargo.lock"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "只复核已有允许证据，不执行或称安全销项；先核公告绑定及无关Windows重选。",
-          "decision_question": "是否先核公告绑定并重建不夹带无关Windows重选的两树载体，再决定采纳？",
-          "limits": [],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 2,
-          "head": "946bb377ae3392408bec05474c4f0c67c45550f1",
-          "category": "C-refused-evidence-only",
-          "judgment": "cleaning_ops当前quinn-proto.11.14，候选.11.17且改rand/getrandom闭包；历史≥.11.19不是本轮安全证明，准确公告绑定缺口保留。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/2",
-            "source_paths": [
-              {
-                "path": "tools/cleaning_ops/Cargo.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/cleaning_ops/Cargo.lock"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "不可执行、重试或提供替代手动runbook；维持证据与限期残余登记，平台合规恢复并重新绑定公告后再决策。",
-          "decision_question": "是否维持证据包与限期残余登记，待平台合规恢复且公告重新绑定后再决定修复？",
-          "limits": ["C拒绝不能由本次重复批准解除；禁止换工具、渠道或手动代跑绕过。"],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        },
-        {
-          "pr": 31,
-          "head": "0ac9267c634927e172be535370ab15843007e715",
-          "category": "quinn-evidence-only",
-          "judgment": "analysis_compute当前quinn-proto.11.14，候选.11.18且改rand/getrandom闭包；历史≥.11.19不是本轮安全证明，准确公告绑定缺口保留。",
-          "evidence": {
-            "pr_url": "https://github.com/Eysn0130/analytix/pull/31",
-            "source_paths": [
-              {
-                "path": "tools/analysis_compute/Cargo.lock",
-                "url": "https://github.com/Eysn0130/analytix/blob/17e2dd28f8bffe749ea04b80ab22409abff3129c/tools/analysis_compute/Cargo.lock"
-              }
-            ],
-            "primary_urls": []
-          },
-          "recommendation": "不可执行、重试或提供替代手动runbook；维持证据与限期残余登记，平台合规恢复并重新绑定公告后再决策。",
-          "decision_question": "是否维持证据包与限期残余登记，待平台合规恢复且公告重新绑定后再决定修复？",
-          "limits": ["C拒绝不能由本次重复批准解除；禁止换工具、渠道或手动代跑绕过。"],
-          "owner": "Eysn / governance coordinator",
-          "review_by_utc": "2026-11-01T00:00:00Z",
-          "deadline_meaning": "Decision-review deadline only; does not imply acceptedsecurityresidual or implementation authority."
-        }
-      ],
-      "execution_restrictions": ["Product/features/Privacy remain frozen.", "No process enumeration or task-external environment reconnaissance.", "No permission repair or old backend isolation reuse.", "No real cases, credentials or live Providers.", "No refused endpoint retries or route changes; C remains evidence-only.", "Only root integrates canonical ledger; this fragment does not change repository files."],
-      "unverified": ["Formal Python3.10 support evidence and packaged3.11.15 acceptance.", "Exact libduckdb-sys feature/build-time/runtime TLS boundary.", "Accurate current quinn advisory bindings; historical lower bound is not a new security proof."],
-      "counts": {
-        "decision_items": 21,
-        "new_tests": 0,
-        "helper_runs": 0,
-        "repository_files_changed": 0
-      }
+      "status": "Historical round12 summary; superseded by round13 B execution plans,not erased evidence",
+      "immutable_source": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9:docs/analytix/governance-closeout.json /delivery_cycle_2026_10_25/reserved_decisions_current",
+      "old_value_sha256": "dc5696af471857904bc64d9b6632365d67a9665d2b00d525b20c2f91a5630787",
+      "current_pointer": "/delivery_cycle_2026_10_25_round13/B_plans",
+      "reason": "Singleactiveplan source;do notduplicatefull21summaries everyround. Priorcontent remainsrecoverableinGit."
     },
     "record_scope": "Dated pre-publication record. Final currentmain,complete inventory/PR/branch/check snapshot must be taken after publication; this JSON does not assert its own future merge SHA.",
     "security_channels_current": "未完成：安全开关与alert linkage仍待用户截图；不重试已拒API、不以publicrepo/auto_mergefalse/pushbanner推断开启或漏洞销项。三项旧botjobfailurecause仍未知，拒绝详情边界保留。",
@@ -3849,53 +3235,1352 @@
       "source": "Priorroundheld31bycanonicalrecords+lastpublic113ledgerrefa848; not reconstructedfromcurrentreachability.",
       "columns": ["index", "ref", "expected_SHA", "recovery_main", "status", "started_utc", "observed_SHA", "main_contains", "recoverable", "exit", "post_SHA", "finished_utc"],
       "records": [
-        [0, "codex/analytix-ui-refresh-20260917", "dde784437dc8563e84066629dd57f4a11fd9acc9", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [1, "codex/context-sample-truth", "f052e0f97a06a524bfd0a97a6722d4e9fe87ebd7", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [2, "codex/dependabot-minor-patch-groups", "3596b0faed06a473d01ef0237b746df7c950816d", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [3, "codex/dsh-composer-family", "e77c86854af0bb99ee475ece285f7f76d1987bd1", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [4, "codex/dsh-recursive-tool-calls", "423e84b38f9a628eec3fc1e3e338e5d4d243c588", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [5, "codex/excel-direct-editing", "eb1a556dc3009a86a30cee36cb4401d20d85549e", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [6, "codex/excel-native-save", "c71ca5d4d78b69e3246fe70412fa5bbb3726b209", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [7, "codex/finite-replay-validation-cancel", "0231104b9f2ed00b65fe4822f365cd7251cc1dbc", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [8, "codex/fork-legacy-owner-barrier", "89187f0b3039684a00fe42bf0406e390a3465a57", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [9, "codex/governance-closeout-ledger", "e60c8a5ad33379d9e846f90fd6f8458db1e7866b", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [10, "codex/governance-delivery-ledger-20261024", "cafcfed60ee3aad85d8940f1a64b0f1285cd2980", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [11, "codex/history-replay-start-diagnostics", "2d6d326b759f19353d627bf9704a8f607a5cc3a1", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [12, "codex/native-office-quit-lifecycle", "25ddfec93a998347f51bdee4b739d0aa35268b36", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [13, "codex/question-answer-handoff", "2ccbf335cfb5e9c8f04778dfb2dd1925ab3e81b4", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [14, "codex/question-reply-body-collector", "e4101a8a69984f35323446fc78afbe2e08957ca5", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [15, "codex/security-backend-ab-clean", "2141a09e730c4e20bfffcd15d325eccee831e988", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [16, "codex/security-backend-pypdf-6-21-2", "c205c99c3876add905294322ec07b011cb4593ba", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [17, "codex/security-ip-address-dual-tree", "d497a1483e78c7a778f36ab107eac18960021f8e", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [18, "codex/security-katex-complete", "9cf5498d3b7816030024866676f793cf14993dec", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [19, "codex/security-patch-package-contract", "54548e592436e0d0f03deca9919d78e75978bcfc", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [20, "codex/security-proxy-addr-patch", "7ae8b300c75f573338fd8ec0786c984333a5c440", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [21, "codex/security-runtime-source-map-js-1-2-2", "4a191f67db6014cefd2bb6e7c59546130707a3d8", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [22, "codex/security-selector-parser-patch", "21265d31228c5d24e47238cea7dfc4cced5e10bc", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [23, "codex/security-windows-ab-combined", "84ec6518dc4f3655f27a232024bd60dde61b9957", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [24, "codex/settings-reference-modal-20261018", "e33a3632fa1d09da1804deb51e293b8eb9635abe", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [25, "codex/unified-workspace-viewer", "7ea81cfd4377b8bdbd6c9cb71da96afd7abdae28", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [26, "codex/unused-findings-ratchet", "065b23bcb79062d2219eeb8e23df63a1a4b878e1", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [27, "codex/windows-candidate-requirements-input", "90e986b2b191fe9081ffc4b63364b4c796a99636", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [28, "codex/windows-lxml-native-contract", "091c45442de46312fb60c97d0e6390100621cb69", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [29, "codex/wip-terminal-workspace", "a96ac8108d17eeda8f1cdc742b87a8ea96bb670a", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [30, "codex/word-editing-closure", "a90352fda8ae34bd71293c1d37e5bab66536f6de", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null],
-        [31, "codex/governance-closeout-round12", "a84867f2dd15eb2da429de2fd91cd057b8722d09", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "planned", null, null, null, null, null, null, null]
+        [0, "codex/analytix-ui-refresh-20260917", "dde784437dc8563e84066629dd57f4a11fd9acc9", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:42:36.095278+00:00", "dde784437dc8563e84066629dd57f4a11fd9acc9", true, true, 0, null, "2026-10-25T12:42:44.934887+00:00"],
+        [1, "codex/context-sample-truth", "f052e0f97a06a524bfd0a97a6722d4e9fe87ebd7", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:42:57.175696+00:00", "f052e0f97a06a524bfd0a97a6722d4e9fe87ebd7", true, true, 0, null, "2026-10-25T12:43:07.905880+00:00"],
+        [2, "codex/dependabot-minor-patch-groups", "3596b0faed06a473d01ef0237b746df7c950816d", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:43:23.806708+00:00", "3596b0faed06a473d01ef0237b746df7c950816d", true, true, 0, null, "2026-10-25T12:43:34.584205+00:00"],
+        [3, "codex/dsh-composer-family", "e77c86854af0bb99ee475ece285f7f76d1987bd1", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:43:58.161105+00:00", "e77c86854af0bb99ee475ece285f7f76d1987bd1", true, true, 0, null, "2026-10-25T12:44:04.513236+00:00"],
+        [4, "codex/dsh-recursive-tool-calls", "423e84b38f9a628eec3fc1e3e338e5d4d243c588", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:44:12.044622+00:00", "423e84b38f9a628eec3fc1e3e338e5d4d243c588", true, true, 0, null, "2026-10-25T12:44:18.271318+00:00"],
+        [5, "codex/excel-direct-editing", "eb1a556dc3009a86a30cee36cb4401d20d85549e", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:44:26.858682+00:00", "eb1a556dc3009a86a30cee36cb4401d20d85549e", true, true, 0, null, "2026-10-25T12:44:38.480243+00:00"],
+        [6, "codex/excel-native-save", "c71ca5d4d78b69e3246fe70412fa5bbb3726b209", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:46:07.200790+00:00", "c71ca5d4d78b69e3246fe70412fa5bbb3726b209", true, true, 0, null, "2026-10-25T12:46:16.024702+00:00"],
+        [7, "codex/finite-replay-validation-cancel", "0231104b9f2ed00b65fe4822f365cd7251cc1dbc", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:46:26.588957+00:00", "0231104b9f2ed00b65fe4822f365cd7251cc1dbc", true, true, 0, null, "2026-10-25T12:46:33.691269+00:00"],
+        [8, "codex/fork-legacy-owner-barrier", "89187f0b3039684a00fe42bf0406e390a3465a57", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:46:42.111982+00:00", "89187f0b3039684a00fe42bf0406e390a3465a57", true, true, 0, null, "2026-10-25T12:46:51.357234+00:00"],
+        [9, "codex/governance-closeout-ledger", "e60c8a5ad33379d9e846f90fd6f8458db1e7866b", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:46:58.116579+00:00", "e60c8a5ad33379d9e846f90fd6f8458db1e7866b", true, true, 0, null, "2026-10-25T12:47:05.395201+00:00"],
+        [10, "codex/governance-delivery-ledger-20261024", "cafcfed60ee3aad85d8940f1a64b0f1285cd2980", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:47:13.434157+00:00", "cafcfed60ee3aad85d8940f1a64b0f1285cd2980", true, true, 0, null, "2026-10-25T12:47:24.530069+00:00"],
+        [11, "codex/history-replay-start-diagnostics", "2d6d326b759f19353d627bf9704a8f607a5cc3a1", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:48:54.794532+00:00", "2d6d326b759f19353d627bf9704a8f607a5cc3a1", true, true, 0, null, "2026-10-25T12:49:01.064704+00:00"],
+        [12, "codex/native-office-quit-lifecycle", "25ddfec93a998347f51bdee4b739d0aa35268b36", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:49:09.663987+00:00", "25ddfec93a998347f51bdee4b739d0aa35268b36", true, true, 0, null, "2026-10-25T12:49:17.248956+00:00"],
+        [13, "codex/question-answer-handoff", "2ccbf335cfb5e9c8f04778dfb2dd1925ab3e81b4", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:49:24.898652+00:00", "2ccbf335cfb5e9c8f04778dfb2dd1925ab3e81b4", true, true, 0, null, "2026-10-25T12:49:30.765579+00:00"],
+        [14, "codex/question-reply-body-collector", "e4101a8a69984f35323446fc78afbe2e08957ca5", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:49:38.320435+00:00", "e4101a8a69984f35323446fc78afbe2e08957ca5", true, true, 0, null, "2026-10-25T12:49:44.908701+00:00"],
+        [15, "codex/security-backend-ab-clean", "2141a09e730c4e20bfffcd15d325eccee831e988", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:49:56.484888+00:00", "2141a09e730c4e20bfffcd15d325eccee831e988", true, true, 0, null, "2026-10-25T12:50:03.453061+00:00"],
+        [16, "codex/security-backend-pypdf-6-21-2", "c205c99c3876add905294322ec07b011cb4593ba", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:50:11.097126+00:00", "c205c99c3876add905294322ec07b011cb4593ba", true, true, 0, null, "2026-10-25T12:50:19.419355+00:00"],
+        [17, "codex/security-ip-address-dual-tree", "d497a1483e78c7a778f36ab107eac18960021f8e", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:50:28.212896+00:00", "d497a1483e78c7a778f36ab107eac18960021f8e", true, true, 0, null, "2026-10-25T12:50:37.201121+00:00"],
+        [18, "codex/security-katex-complete", "9cf5498d3b7816030024866676f793cf14993dec", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:50:45.370529+00:00", "9cf5498d3b7816030024866676f793cf14993dec", true, true, 0, null, "2026-10-25T12:50:51.623333+00:00"],
+        [19, "codex/security-patch-package-contract", "54548e592436e0d0f03deca9919d78e75978bcfc", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:50:59.918997+00:00", "54548e592436e0d0f03deca9919d78e75978bcfc", true, true, 0, null, "2026-10-25T12:51:07.086533+00:00"],
+        [20, "codex/security-proxy-addr-patch", "7ae8b300c75f573338fd8ec0786c984333a5c440", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:51:19.681958+00:00", "7ae8b300c75f573338fd8ec0786c984333a5c440", true, true, 0, null, "2026-10-25T12:51:31.040169+00:00"],
+        [21, "codex/security-runtime-source-map-js-1-2-2", "4a191f67db6014cefd2bb6e7c59546130707a3d8", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:52:05.670104+00:00", "4a191f67db6014cefd2bb6e7c59546130707a3d8", true, true, 0, null, "2026-10-25T12:52:18.421569+00:00"],
+        [22, "codex/security-selector-parser-patch", "21265d31228c5d24e47238cea7dfc4cced5e10bc", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:52:49.887748+00:00", "21265d31228c5d24e47238cea7dfc4cced5e10bc", true, true, 0, null, "2026-10-25T12:52:58.202573+00:00"],
+        [23, "codex/security-windows-ab-combined", "84ec6518dc4f3655f27a232024bd60dde61b9957", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:53:06.666120+00:00", "84ec6518dc4f3655f27a232024bd60dde61b9957", true, true, 0, null, "2026-10-25T12:53:14.515475+00:00"],
+        [24, "codex/settings-reference-modal-20261018", "e33a3632fa1d09da1804deb51e293b8eb9635abe", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:53:22.280453+00:00", "e33a3632fa1d09da1804deb51e293b8eb9635abe", true, true, 0, null, "2026-10-25T12:53:29.956327+00:00"],
+        [25, "codex/unified-workspace-viewer", "7ea81cfd4377b8bdbd6c9cb71da96afd7abdae28", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:53:38.737004+00:00", "7ea81cfd4377b8bdbd6c9cb71da96afd7abdae28", true, true, 0, null, "2026-10-25T12:53:44.979799+00:00"],
+        [26, "codex/unused-findings-ratchet", "065b23bcb79062d2219eeb8e23df63a1a4b878e1", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:53:52.199930+00:00", "065b23bcb79062d2219eeb8e23df63a1a4b878e1", true, true, 0, null, "2026-10-25T12:53:58.534032+00:00"],
+        [27, "codex/windows-candidate-requirements-input", "90e986b2b191fe9081ffc4b63364b4c796a99636", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:54:05.452799+00:00", "90e986b2b191fe9081ffc4b63364b4c796a99636", true, true, 0, null, "2026-10-25T12:54:17.140624+00:00"],
+        [28, "codex/windows-lxml-native-contract", "091c45442de46312fb60c97d0e6390100621cb69", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:54:28.339878+00:00", "091c45442de46312fb60c97d0e6390100621cb69", true, true, 0, null, "2026-10-25T12:54:37.326496+00:00"],
+        [29, "codex/wip-terminal-workspace", "a96ac8108d17eeda8f1cdc742b87a8ea96bb670a", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:54:45.512706+00:00", "a96ac8108d17eeda8f1cdc742b87a8ea96bb670a", true, true, 0, null, "2026-10-25T12:54:51.820742+00:00"],
+        [30, "codex/word-editing-closure", "a90352fda8ae34bd71293c1d37e5bab66536f6de", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:55:00.245133+00:00", "a90352fda8ae34bd71293c1d37e5bab66536f6de", true, true, 0, null, "2026-10-25T12:55:08.831129+00:00"],
+        [31, "codex/governance-closeout-round12", "a84867f2dd15eb2da429de2fd91cd057b8722d09", "6243bcf17b0a4ae87fe1dfe44661192ad45261a9", "deleted_verified", "2026-10-25T12:55:15.994218+00:00", "a84867f2dd15eb2da429de2fd91cd057b8722d09", true, true, 0, null, "2026-10-25T12:55:24.959587+00:00"]
       ],
       "recovery": "Createonly normalgitpush recordedSHA:refs/heads/name after verifyingnameunused; everyapprovedtipmustremainancestorofretainedpublicmain. No reset/force/permanentdeletion.",
-      "unverified_disappearances": []
+      "unverified_disappearances": [],
+      "after_actions": {
+        "utc": "2026-10-25T12:56:05.226Z",
+        "branches": 29,
+        "our_verified_deletions": 32,
+        "unknown_disappearances": [],
+        "retained_tip_drift": []
+      }
     },
     "trim": {
-      "status": "read-only proofpending; baselineunchanged",
+      "status": "6sourceimports fixed;baseline unchanged pending targetedvalidation and explicitprune",
       "historical_source": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9:scripts/unused-findings-baseline.json",
       "historical_sha256": "0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae",
       "historical_identities": 1927,
       "historical_occurrences": 1933,
-      "planned_reductions": []
+      "planned_reductions": [
+        {
+          "identity": {
+            "key": "bd7475b5bc17ba1b547f2f16d12b89de77a6e569fb59baf3dd6cc13b0f3100e2",
+            "signature": {
+              "path": "scripts/runtime-go-release-finalization.test.mjs",
+              "rule": "no-unused-vars",
+              "binding": "resolve",
+              "category": "variable",
+              "declaration": {
+                "type": "ImportBinding",
+                "kind": null,
+                "pattern": [
+                  ["Identifier", "resolve"]
+                ],
+                "importSource": [
+                  ["String", "'node:path'"]
+                ]
+              },
+              "scope": []
+            },
+            "count": 1
+          },
+          "original_count": 1,
+          "old_source_blob": "615de7e68fae3264f590eb0936f027ba7429cf35",
+          "fixed_worktree_blob": "edf7be5cef40e13800811f33f49c87973e50bd66",
+          "binding_review": "Onlytheimportspecifier; resolve alsooccurs asa membername path.resolve inindependent generatedfixture string withitsownrequire(node:path). No eval accesses thisimportlexicalenvironment.",
+          "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
+          "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
+          "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
+          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+        },
+        {
+          "identity": {
+            "key": "0ebedaf35736fcb867dec2e703652234d887c4e2524749d04fca22eee1135382",
+            "signature": {
+              "path": "packages/runtime/src/tool-test-support/tool/builtin-tool-utils.ts",
+              "rule": "@typescript-eslint/no-unused-vars",
+              "binding": "readFile",
+              "category": "variable",
+              "declaration": {
+                "type": "ImportBinding",
+                "kind": null,
+                "pattern": [
+                  ["Identifier", "readFile"]
+                ],
+                "importSource": [
+                  ["String", "'node:fs/promises'"]
+                ]
+              },
+              "scope": []
+            },
+            "count": 1
+          },
+          "original_count": 1,
+          "old_source_blob": "163e3542d76f617369948e4ddf09a2e43eebde07",
+          "fixed_worktree_blob": "6e7a4d403bd651331d2e878cc5407a2eff52660d",
+          "binding_review": "Onlytheimportspecifier; resolve alsooccurs asa membername path.resolve inindependent generatedfixture string withitsownrequire(node:path). No eval accesses thisimportlexicalenvironment.",
+          "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
+          "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
+          "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
+          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+        },
+        {
+          "identity": {
+            "key": "0ccba0a4bb8fa9cd0428c2a5f46dfb0174151da6aad2867ec3bb131a78eb2872",
+            "signature": {
+              "path": "packages/runtime/src/services-test-support/turn-service.ts",
+              "rule": "@typescript-eslint/no-unused-vars",
+              "binding": "ThreadStatus",
+              "category": "variable",
+              "declaration": {
+                "type": "ImportBinding",
+                "kind": null,
+                "pattern": [
+                  ["Identifier", "ThreadStatus"]
+                ],
+                "importSource": [
+                  ["String", "'../contracts/threads.js'"]
+                ]
+              },
+              "scope": []
+            },
+            "count": 1
+          },
+          "original_count": 1,
+          "old_source_blob": "70114807a8e70e2b67955246f895f3dcf15049ff",
+          "fixed_worktree_blob": "f12b0ce80e4f66863a0163d479f8b758f2237f08",
+          "binding_review": "Onlytheimportspecifier; resolve alsooccurs asa membername path.resolve inindependent generatedfixture string withitsownrequire(node:path). No eval accesses thisimportlexicalenvironment.",
+          "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
+          "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
+          "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
+          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+        },
+        {
+          "identity": {
+            "key": "abbe8780f7d94ea0d5d09d6ee3e027f09744ca812e4d9da5c39f39257817961a",
+            "signature": {
+              "path": "src/main/ipc/register-app-ipc-handlers.test.ts",
+              "rule": "@typescript-eslint/no-unused-vars",
+              "binding": "mergeScheduleSettings",
+              "category": "variable",
+              "declaration": {
+                "type": "ImportBinding",
+                "kind": null,
+                "pattern": [
+                  ["Identifier", "mergeScheduleSettings"]
+                ],
+                "importSource": [
+                  ["String", "'../../shared/app-settings'"]
+                ]
+              },
+              "scope": []
+            },
+            "count": 1
+          },
+          "original_count": 1,
+          "old_source_blob": "52b17cd1f470378a26feb8033ad88434b4491ce0",
+          "fixed_worktree_blob": "4ca0d029c179850abedc1711192f9475c7031d37",
+          "binding_review": "Onlytheimportspecifier; resolve alsooccurs asa membername path.resolve inindependent generatedfixture string withitsownrequire(node:path). No eval accesses thisimportlexicalenvironment.",
+          "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
+          "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
+          "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
+          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+        },
+        {
+          "identity": {
+            "key": "7db360712403c8dec3c5200d1ac653fca54b12c3d44a69a486d8023219336759",
+            "signature": {
+              "path": "src/main/ipc/register-app-ipc-handlers.test.ts",
+              "rule": "@typescript-eslint/no-unused-vars",
+              "binding": "AppSettingsPatch",
+              "category": "variable",
+              "declaration": {
+                "type": "ImportBinding",
+                "kind": null,
+                "pattern": [
+                  ["Identifier", "AppSettingsPatch"]
+                ],
+                "importSource": [
+                  ["String", "'../../shared/app-settings'"]
+                ]
+              },
+              "scope": []
+            },
+            "count": 1
+          },
+          "original_count": 1,
+          "old_source_blob": "52b17cd1f470378a26feb8033ad88434b4491ce0",
+          "fixed_worktree_blob": "4ca0d029c179850abedc1711192f9475c7031d37",
+          "binding_review": "Onlytheimportspecifier; resolve alsooccurs asa membername path.resolve inindependent generatedfixture string withitsownrequire(node:path). No eval accesses thisimportlexicalenvironment.",
+          "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
+          "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
+          "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
+          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+        },
+        {
+          "identity": {
+            "key": "a9254acb49420365ca42be469a992d9c83b90bfd82c7d64f987c2ac5c2f5be4a",
+            "signature": {
+              "path": "src/renderer/src/components/chat/MessageTimeline.tool-summary.test.ts",
+              "rule": "@typescript-eslint/no-unused-vars",
+              "binding": "isSubagentProcessBlock",
+              "category": "variable",
+              "declaration": {
+                "type": "ImportBinding",
+                "kind": null,
+                "pattern": [
+                  ["Identifier", "isSubagentProcessBlock"]
+                ],
+                "importSource": [
+                  ["String", "'./SubagentCallCard'"]
+                ]
+              },
+              "scope": []
+            },
+            "count": 1
+          },
+          "original_count": 1,
+          "old_source_blob": "6d57602191a1e9e1d213d1d8ba7d8349959ec5b0",
+          "fixed_worktree_blob": "ff0894d95eaab01012b1e632197d1eb1e1fa957e",
+          "binding_review": "Onlytheimportspecifier; resolve alsooccurs asa membername path.resolve inindependent generatedfixture string withitsownrequire(node:path). No eval accesses thisimportlexicalenvironment.",
+          "initialization_review": "Named importbinding removal only; originalmoduleedge retained byotherusedbindings; noinitializer/call/getterdestructure/functionbody deleted. Type-only ThreadStatus/AppSettingsPatch have no runtimeevaluation.",
+          "public_contract_review": "Noneofthe6localbindings reexported. Importedtargetexports/modules remainunchanged.",
+          "guard_review": "Notoneof8guardkeys; noordinal/keyrelabel expectedforremainingentries.",
+          "repair_status": "source importfixed;localtests/lint running;baselineunchanged;finalCIrequired"
+        }
+      ],
+      "proof_source_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+      "source_diff": {
+        "files": 5,
+        "additions": 4,
+        "deletions": 6,
+        "net_LF": -2,
+        "numstat": [
+          {
+            "path": "scripts/runtime-go-release-finalization.test.mjs",
+            "before_LF": 419,
+            "after_LF": 419,
+            "additions": 1,
+            "deletions": 1
+          },
+          {
+            "path": "packages/runtime/src/tool-test-support/tool/builtin-tool-utils.ts",
+            "before_LF": 763,
+            "after_LF": 763,
+            "additions": 1,
+            "deletions": 1
+          },
+          {
+            "path": "packages/runtime/src/services-test-support/turn-service.ts",
+            "before_LF": 692,
+            "after_LF": 692,
+            "additions": 1,
+            "deletions": 1
+          },
+          {
+            "path": "src/main/ipc/register-app-ipc-handlers.test.ts",
+            "before_LF": 4410,
+            "after_LF": 4408,
+            "additions": 0,
+            "deletions": 2
+          },
+          {
+            "path": "src/renderer/src/components/chat/MessageTimeline.tool-summary.test.ts",
+            "before_LF": 3174,
+            "after_LF": 3174,
+            "additions": 1,
+            "deletions": 1
+          }
+        ]
+      },
+      "production_boundary": {
+        "runtime_build": "packages/runtime/tsconfig.build.json includesonlyindex/contracts/config/cli/telemetry/twohookfiles. packages/runtime/src/index.ts reexportscontracts/config/telemetry/cli. packageexports pointonlydistpublicsurface. Includeisnotusedasasolitaryproof: reachableimportscheckedalso.",
+        "electron_build": "electron.vite.config.ts maininputs src/main/index.ts,src/main/claw-schedule-mcp-node-entry.ts; preloadinputs src/preload/index.ts,src/main/office/office-preload.ts;rendererindex.html uses src/renderer/src/main.tsx.",
+        "static_reachability": {
+          "method": "ConservativeGit-onlyquotedrelative/aliasmodulegraph: resolvesallrelativequotedstrings, notjustimportsyntax; JSsuffix→TS counterpart/index resolution, @renderer/@sharedaliases; no project execution. Runtimebuildallrootfilesplus Electronentries asroots.",
+          "roots": 59,
+          "reachable_modules": 1077,
+          "target5files_reachable": 0,
+          "any_test_support_reachable": 0,
+          "limit": "Text-basedoverapproximation, not a compiler/bundler trace. Computedloaders reviewedseparately;doesnotprove absenceofarbitraryexternalcode."
+        },
+        "computed_loader_review": ["analytix-adapter.ts1434/1724 requireliteral taskscript scripts/lib/development-cache-environment.cjs", "chrome-browser-use-service.ts generatedbrowserprobe734 targets explicitlylocatedchrome/scripts/browser-client.mjs; externalcompatibilityinput, notTSsupportsource", "terminal-pty-ipc.ts60–79 targets executable-adjacent analytix-node-pty/lib/index.js ornode-pty", "computer-use-permissions.ts29–33 and203–205 targets @computer-use/node-mac-permissions and@computer-use/nut-js", "host-control.ts155–188 loadModule calls only@computer-use/nut-js andjimp", "highlight.ts350 import (once) iscomment,notcode"],
+        "packaging": "electron-builder.config.cjs140–157 whitelistoutplusruntime/dist/cli,config,contracts,hooks/packageJSON/node_modules, excludes**/*.ts. No targetrawsourceinshippingfilelist. Thesechecksprove declaredbuild/packagingboundary; no nativepackagingacceptanceclaim."
+      },
+      "consumer_review": {
+        "release_finalization_test": "OnlypublicexportexecutionFixture93 retained. VMSourceTextModule200 reads gatePath(runtime-go-release-gate.mjs),notthistestsource. Mocklink202 suppliesmodulesindependently. Generatedread-onlyguard330–334 has ownconstpath=require(node:path). Selfimportwrapper366 consumesexecutionFixture only. No sourcefixedhashregistration found in scopednon-docbasename search.",
+        "builtin_utils": "OnlyreadFile tokenisnamedimport2; lstat/readdir/remainderhavecallers. Directconsumers10matches: existingadapters/tool/builtin-tool-utils.test.ts andretainedloop/tooloracles. Test246 obtainsstat forfilefixture butdoesnotassertsize/hash. Allpath/content/securityfunctionsunchanged.",
+        "turn_service": "ThreadStatusonlyimport1; ThreadRecordusedmutator576. Directconsumers are retaineddelegation/loop/serveroracles,tests/harnesses; Gokernelconformance recordsfilepath124 andGo productmatrix93–98 sourcepaths. No targettype/modulepublicexportdeleted.",
+        "ipc_test": "Bothbindingsonlyimport12/19; AppSettingsV1 remainssettings112/defaultScheduleSettingsstill127. Dynamicimports targetactualhandler/services, not evaloftheseimportbindings. Sourcefilepathregistered inconformance fixtures/schema andproductregression640/648/1131; sovereignty1199/1309. Registrations arepaths/testplans, notfixedoldblobhashassertions; keepallregisteredpathsandtests.",
+        "timeline_test": "isSubagentProcessBlockonlyimport19; sameModuleprojectSubagentActionResponse3calls andSubagentDetailBody25otheruses retained. SourcefilepathregisteredGo matrix124–127,productregression1170,andpackagedsmoke75. No dynamic evaluator intargetfile. No renderer productionconsumer ofthistestfile."
+      },
+      "permanent_historical_anchor": {
+        "commit": "fca67b41b0eca05f084c7c7406790a50edea476a",
+        "is_ancestor_of_current": true,
+        "path": "scripts/unused-findings-baseline.json",
+        "git_blob": "ee7805c72c8ca02a14e5100ebc9df70d21ef7c38",
+        "sha256": "0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae",
+        "identities": 1927,
+        "occurrences": 1933,
+        "raw_findings_sha256": "dff6e88701aabb1d26794c84cb8661d04084b89181f5513ca1cbcdda1bc4458c",
+        "raw_source_sha": "2c5494642b35f7cdb9cd27939486beec7d5adaaf",
+        "public_ref": "https://github.com/Eysn0130/analytix/blob/fca67b41b0eca05f084c7c7406790a50edea476a/scripts/unused-findings-baseline.json",
+        "arrangement": "Keepthisimmutableancestorcommit+blob/SHA256pointerinhistoricalledger. Currentbaselineisoperationaltrim-onlySSOT. Preserveprovenance/1933auditrowsasexistinghistoricaldata; do notcopyold3MBbaselineorcreateanewresettool/tag. Recoverygitshowfromretainedmainancestrydoesnotrelyondeletedfeaturebranch."
+      },
+      "no_contract_changes": "All moduleedges retained;2type-onlybindings;no initializercall/functionbody/SQL/parameter/exception/assertion/publicexport changes; no production/Privacy source touched.",
+      "local_evidence": {
+        "normal_root_ESLint": "5changedfiles0errors0warnings;actualrootconfig;fixed132closure verified;0.897531208s",
+        "node_test": "node --test --test-timeout=120000 scripts/runtime-go-release-finalization.test.mjs",
+        "node_test_result": "36passed/0failed/0skipped;21.978948833s;exit0",
+        "other_affected_TS_tests": "Notrunlocally: toolonly132treeisnotwholeproject/currentReactruntime. FinalHEADCIactualnpmci mustexecute existing3testfiles/typechecks pluscompletegate. NooldReactsubstitution orfull-localinstall.",
+        "baseline_mutated": false,
+        "tool_preparation": "Standardhelperpass;new0700/noACLtaskcache;132policyclosure rawmetadata+lockresolution;130admittedinstalledcopies+2officialcachedSRI-verifiedtarballs;noinstallation/download/scripts duringacquisition;notwholeproject ortarbyte reattestationfor130."
+      }
     },
-    "B_plans": "pending readonlyreadyplans; no B construction",
+    "B_plans": {
+      "status": "Reference;onlyproposalnotconstructionoracceptance",
+      "source_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+      "index_columns": ["PR", "head", "packet_pointer", "readiness_limit"],
+      "index": [
+        [1, "027ab53ab470b6c0a545939eecd7000110c40eeb", "rust_go/rust_security_bundle57_1_29", "boundedplan;candidatechecksnotrun"],
+        [2, "946bb377ae3392408bec05474c4f0c67c45550f1", "rust_go/quinn_exceptions/0", "platformblocked;no executablepath"],
+        [4, "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "python_actions/items/0", "boundedplan;formalartifact/prerequisites unverified"],
+        [7, "cf368d0e088e49afb8f0ea9b314f95015047aeda", "python_actions/items/1", "boundedplan;formalartifact/prerequisites unverified"],
+        [12, "1cf3583b40fe4362ad786888ad500c17d24b94c3", "rust_go/icu12", "boundedplan;candidatechecksnotrun"],
+        [15, "f11600dd5b425c1292e16f635dfdf130d18f4fae", "python_actions/items/3", "boundedplan;formalartifact/prerequisites unverified"],
+        [29, "b35306029b571f090244bb0f26b0f50525a6222f", "rust_go/rust_security_bundle57_1_29", "boundedplan;candidatechecksnotrun"],
+        [31, "0ac9267c634927e172be535370ab15843007e715", "rust_go/quinn_exceptions/1", "platformblocked;no executablepath"],
+        [34, "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", "rust_go/electron34", "readytodispose/defer;no verifiedsafeElectrontarget"],
+        [57, "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "rust_go/rust_security_bundle57_1_29", "boundedplan;candidatechecksnotrun"],
+        [77, "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", "python_actions/items/5", "boundedplan;formalartifact/prerequisites unverified"],
+        [89, "da5871807db650e413bd6ca136175aa4e129ff3f", "rust_go/go89", "boundedplan;candidatechecksnotrun"],
+        [90, "1a224b640d5750a99932feaa4be656bd7c1dd433", "python_actions/items/2", "boundedplan;formalartifact/prerequisites unverified"],
+        [92, "a6682fcb98e266e0ca43130eeba447b62b0f1327", "js_sql/rows/0", "boundedplan;notvalidated"],
+        [93, "f699f8f660ef2429d2a106d970de3710985cb93b", "js_sql/rows/1", "boundedplan;notvalidated"],
+        [95, "f64678911e7da5a09ef6e849c83c43036f9d99d2", "python_actions/items/4", "boundedplan;formalartifact/prerequisites unverified"],
+        [97, "699c4c8f02adc5ed1840cb4d899ff13caf6485b3", "js_sql/rows/2", "boundedplan;notvalidated"],
+        [98, "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53", "js_sql/rows/3", "boundedplan;notvalidated"],
+        [102, "ad609e6a9a06de9c215c39d7747b88531a1bd262", "python_actions/items/6", "boundedplan;formalartifact/prerequisites unverified"],
+        [108, "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3", "js_sql/rows/4", "boundedplan;notvalidated"],
+        [110, "4882a9cc33392e295aefd17284c0645c1f4e5cf1", "python_actions/items/7", "boundedplan;formalartifact/prerequisites unverified"]
+      ],
+      "packets": {
+        "js_sql": {
+          "schema": "governance-b13-js-sql-plans-v1",
+          "status": "read-only proposal; no implementation, dependency acquisition, validation run, PR close or merge performed",
+          "main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+          "tree": "418a5feba916925a611411ac3d214531f1a112c3",
+          "fresh_remote_at_utc": "2026-10-25T12:35:14.712Z",
+          "scope_prs": [92, 93, 97, 98, 108],
+          "source_of_truth": "Existing B21 rows at docs/analytix/governance-closeout.json delivery_cycle_2026_10_25.reserved_decisions_current reused. All five fresh PR heads equal those rows. Current main immutable manifests/locks/checker/consumer/test source inspected.",
+          "execution_fence": ["Only a later explicit yes to a selected plan authorizes that implementation; this fragment authorizes none.", "One writer per source branch, fresh main/head, normal mechanical synchronization, final-head complete expected jobs+required gate from one valid verification chain, normal merge commit; no admin/force/auto-merge.", "Product/features/Privacy, real cases/credentials/live Providers remain frozen. No Node/Electron changes or Mac node/go sampling.", "No process enumeration, task-external environment reconnaissance, permission changes, or abandoned backend reuse.", "No helper/download/install/test in this read-only review. Future approved preparations must use new task-private0700/no-extra-ACL destinations,0600 private files and official exact-version artifacts verified before use; tests same-shell standard helper.", "All prior refused routes remain refused including large baseline API and109body. PR public text excludes local machine paths.", "Normal revert PR for source changes; preserve intervening security fixes. Any future Windows frozen change requires aggregate re-computation, never copied rollback hashes."],
+          "rows": [
+            {
+              "pr": 92,
+              "head": "a6682fcb98e266e0ca43130eeba447b62b0f1327",
+              "base": "742b6ccfb6d6819287e18dcf825f723ce705a0ab",
+              "fresh_files": 2,
+              "fresh_additions": 20,
+              "fresh_deletions": 20,
+              "current": "SQLGlot26.33.0; manifest>=25,<27; uv lock revision3/62nodes; Python>=3.10",
+              "proposal": "30.24.0; manifest>=25,<31; old proposal also revision5,exceptiongroup/pandas markers",
+              "recommendation": "Rebuild a three-file minimal compatibility carrier, not whole-old-lock adoption.",
+              "write_set": ["backend/pyproject.toml", "backend/uv.lock", "backend/tests/test_analysis_sqlglot_compatibility.py (new minimal parameterized tests)"],
+              "sequence": ["Capture fresh main/head and exact current SQL validators/source hash. Build isolated old26.33.0 and candidate30.24.0 environments against the same source and corpus; official wheel SHA256 already recorded9488828cc018453b7a3ba01e65d2749c9a731314c14583695163ca1f358203fe, no download performed here.", "Change only target specifier/SQLGlot node+artifact metadata. Preserve other61complete nodes, current certifi/urllib3/pypdf, Python>=3.10 and unrelated markers. Any unavoidable UV revision/marker drift outside this contract pauses for explanation.", "Add one table-driven direct AST validation suite using synthetic admitted-table set and _table_exists spy, no database SQL execution or real path access.", "Run old/new identical corpus then current existing public-entry boundary tests; review outputs and all safety precedence before final exact-head normal CI."],
+              "validation_commands": [
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && uv run --project backend --no-sync python -m pytest backend/tests/test_analysis_sqlglot_compatibility.py backend/tests/test_analysis_workbench_temp_scope_boundary.py -q",
+                  "status": "proposed; first file does not yet exist; execute separately with each version's matched isolated environment",
+                  "assertion": "Same allow/reject and first rejection stage; ordinary control boundary unchanged. Never call this current tested coverage."
+                }
+              ],
+              "allow_corpus": ["SELECT amount FROM analysis_txn_detail_idx", "WITH scoped AS (SELECT amount FROM analysis_txn_detail_idx) SELECT amount FROM scoped", "SELECT amount FROM main.analysis_txn_detail_idx", "SELECT EXTRACT(HOUR FROM txn_ts) AS h FROM analysis_txn_detail_idx", "SELECT 'drop;read_csv' AS note FROM analysis_txn_detail_idx -- ATTACH", "SELECT * FROM analysis_txn_detail_idx LIMIT 5 only when allow_select_star_with_limit=True"],
+              "reject_corpus": [
+                ["SELECT amount FROM analysis_txn_detail_idx; SELECT 1", "single-statement"],
+                ["DELETE FROM analysis_txn_detail_idx", "SELECT/WITH prefix"],
+                ["SELECT (", "AST parse"],
+                ["SELECT amount FROM analysis_txn_detail_idx UNION SELECT amount FROM analysis_txn_detail_idx", "current rootSelect requirement, characterize and retain"],
+                ["SELECT amount FROM read_csv_auto('/synthetic/not-opened.csv')", "AST external function, no file open"],
+                ["SELECT * FROM analysis_txn_detail_idx LIMIT 5 with default flag", "star admission"],
+                ["SELECT * FROM analysis_txn_detail_idx with preview flag", "star withoutLIMIT"],
+                ["SELECT * FROM fc_txn_raw default", "star first; limited+preview variant reaches raw rejection"],
+                ["SELECT amount FROM other_case.analysis_txn_detail_idx", "cross-database"],
+                ["SELECT amount FROM unapproved_table", "table whitelist"],
+                ["SELECT amount FROM analysis_txn_missing", "admitted prefix but unavailable"],
+                ["SELECT 1", "no admitted base table"],
+                ["parser unavailable", "fail closed; never regex fallback"]
+              ],
+              "characterization": "COUNT(*) must be characterized under old/new: current Star search includes aggregate stars; no unmeasured promise that it passes and no opportunistic behavior fix.",
+              "precedence": "nonempty -> single statement -> SELECT/WITH prefix -> parser available/parse/rootSelect -> forbiddenAST/externalfunction -> boundedStar -> crossdatabase -> regexDDL/external/ellipsis/star/raw -> at leastonebase -> whitelist -> tableexistence. Bind multi-violation cases to firststage, not library free-form text.",
+              "existing_test_mapping": [
+                {
+                  "path": "backend/tests/test_analysis_workbench_temp_scope_boundary.py",
+                  "test": "test_ordinary_sql_and_preview_fail_closed_before_duckdb_and_never_claim_zero",
+                  "line": 304,
+                  "coverage": "controlled_artifact_required before engine, NOT AST acceptance"
+                },
+                {
+                  "path": "backend/tests/test_analysis_workbench_temp_scope_boundary.py",
+                  "lines": [136, 173, 210, 245],
+                  "coverage": "diagnose/explain monkeypatch _validate_workbench_sql to SELECT1; no actual SQLGlot AST"
+                },
+                {
+                  "path": "backend/tests/test_analysis_workbench_temp_scope_boundary.py",
+                  "test": "test_sql_diagnostic_is_fixed_fact_ineligible_and_persists_no_hostile_text",
+                  "line": 352,
+                  "coverage": "fixed public projection/persistence rejection"
+                }
+              ],
+              "stop": "Any newly admitted unsafe SQL, changed first rejection stage/public error/exception contract, product-code requirement, unsupportedPython3.10, or unrelated lock drift. Do not relax assertions.",
+              "rollback": "Normal revert of target manifest/lock delta plus candidate regression additions as reviewed; preserve intervening security nodes via targeted lock generation. No Windows change in this plan, no frozen aggregate copied.",
+              "question": "是否批准SQLGlot30.24.0独立三文件最小候选及直接AST语料对照，保留拒绝优先级，任何需产品行为修改的差异单独停下？"
+            },
+            {
+              "pr": 93,
+              "head": "f699f8f660ef2429d2a106d970de3710985cb93b",
+              "base": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+              "fresh_files": 2,
+              "fresh_additions": 12,
+              "fresh_deletions": 12,
+              "current": "@tencent-weixin/openclaw-weixin2.4.3; Node requirement>=22; peeropenclaw>=2026.3.22",
+              "proposal": "2.4.10; Node>=22.13.0; peeropenclaw>=2026.5.12",
+              "correction": "Current root engines>=22.22.1<23 and .node-version/.nvmrc22.22.1 already exceed new package minimum. Current vendor shim2026.6.6+analytix.shim.0 numerically exceeds new peer minimum. No Node,Electron or shim version change needed; numeric satisfaction is not proof of deep-import compatibility.",
+              "write_set": ["package.json", "package-lock.json", "src/main/weixin-bridge-runtime.test.ts (only bounded synthetic missing media checks if needed)", "src/main/packaging-config.test.ts (only bounded real package/deep-import assertions if needed)"],
+              "unchanged": "No product weixin implementation, .d.ts signature, shim exports/license/provenance, Node pins or electron-builder configuration changes in this proposal. If any required, stop.",
+              "sequence": ["Rebuild only two dependency-input deltas on fresh main; never replace old whole lock that predates current security fixes. Official2.4.10 tarball SRI from fresh proposal sha512-qCN7rFtBK5BO/i5YGEJLdpC/8WQrm0dtPlQ0xNxku4RSyzGaRsiBoLVheU5hgpoOIBvfc5pUwKTktMbROLcIVg==; future preparation must verify before safe task-isolated extraction.", "From actual consumer createRequire, resolve candidate package.json and dynamic dist/src/messaging/send-media.js. Import real sendWeixinMediaFile, check callable signature. Trace exact emitted imports to existing shim exports account-id/infra-runtime/config-runtime/channel-config-schema. Missing/new non-admitted shim API stops, no hidden stub expansion.", "Use one tiny task-generated PNG/file fixture and controlled outbound fetch stub for candidate media API success and rejected upload. Assert requested to/baseUrl/cdn/context fields and bounded public failure, no real WeChat/credential path. Existing QR-start error and credential-generation synthetic tests reused but are not real media import coverage.", "Run source build once for candidate dependency consumption (not aggregate packaging wrappers). Inspect emitted main external reference and shipped dependency closure; resolve/import actual media module from isolated packaging-layout fixture with source node_modules unavailable, assert shim+license retained. Missing-resource negative must fail. No release/sign/install/live QR acceptance claimed.", "Final head normal complete CI; confirm only dependency target and synthetic tests differ."],
+              "validation_commands": [
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && npm test -- src/main/weixin-bridge-runtime.test.ts",
+                  "status": "existing suite; candidate run pending",
+                  "assertion": "bundled channel_version, account-id normalization, QR-start sanitized failure, canonical-authority nofallback, JIT generation recheck. Current suite has no real media import/call test; add bounded case explicitly."
+                },
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && npm test -- src/main/packaging-config.test.ts -t 'includes Analytix runtime dependencies|keeps the exact OpenClaw-derived shim'",
+                  "status": "existing selected tests; candidate run pending",
+                  "assertion": "shim dependency/link/version/license/provenance and nonexcluded real plugin chain; static checks alone do not prove packaging resolution"
+                },
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && npm run typecheck && npm run build",
+                  "status": "proposed candidate once; source-build only; existing build has runtime/office-codec hooks, use actual verified isolation and preexisting dependencies",
+                  "assertion": "declaration/public call shape typechecks; emitted main retains actual deep import and dependencies in packaging-layout probe, no publish"
+                }
+              ],
+              "source_refs": [
+                ["src/main/weixin-bridge-runtime.ts", 191, "actual package.json resolver"],
+                ["src/main/weixin-bridge-runtime.ts", 901, "lazy real send-media import"],
+                ["src/main/weixin-bridge-runtime.ts", 925, "JIT authority before/after actual media call"],
+                ["src/main/openclaw-weixin-media.d.ts", 4, "declaration explicitly mirrors old2.4.3; cannot assume2.4.10 shape"],
+                ["electron.vite.config.ts", 343, "main externalizeDepsPlugin"],
+                ["electron-builder.config.cjs", 185, "explicit required plugin->openclaw runtime chain"],
+                ["src/main/packaging-config.test.ts", 1707, "exact shim metadata/license assertions"]
+              ],
+              "stop": "Real candidate export/signature/shim contract missing, offline media behavior differs, newly required peer or package, bundling gap, product/shim/Node changes needed, unknown CI failure. Do not mock out real deep import to get pass.",
+              "rollback": "Normal revert PR of dependency/test changes, preserving later security lock nodes. No frozen Windows aggregate involved.",
+              "recommendation": "Approve bounded compatibility carrier because current numeric environment meets minima, but require actual media import+packaging-layout proof before merge.",
+              "question": "是否批准仅升Weixin2.4.10并验证真实媒体深导入、合成发送及打包可达性，保持现有Node/shim/产品实现不变，缺合同即停？"
+            },
+            {
+              "pr": 97,
+              "head": "699c4c8f02adc5ed1840cb4d899ff13caf6485b3",
+              "base": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+              "fresh_files": 2,
+              "fresh_additions": 40,
+              "fresh_deletions": 15,
+              "current": "mainKaTeX0.18.2 + @vscode/markdown-it-katex override $katex; runtime tree noKaTeX",
+              "proposal": "old97 proposes0.19.0 + commander15 and nested0.16.47",
+              "write_set": ["PR97 public close/mapping metadata only", "existing governance-closeout.json mapping row at final ledger integration"],
+              "sequence": ["Fresh check97 head unchanged and stillopen; read current root manifest/lock all KaTeX nodes and runtime absence; verify107merge877fdf52894c8953ca5593fee38276c90fc5ae3e is currentmain ancestor.", "Append public mapping:97 notadopted; security objective covered by107 minimum0.18.2+override; optional0.19/Commander15 migration declined/deferred, not claimed implemented. Link107merge+CI, retain old failure history.", "Close97 withoutmerge; preserve branch until separate recorded branch-disposition authority. Read back exact state/comment.", "Record close id/time and mapping. Do not run dependency tests or alter product."],
+              "validation_commands": [
+                {
+                  "command": "git merge-base --is-ancestor 877fdf52894c8953ca5593fee38276c90fc5ae3e <fresh-main> ; read allKaTeX lock nodes + overrides",
+                  "status": "planned readonly closure preflight",
+                  "assertion": "accepted107content stillpresent; no unsafe nestedversion reintroduced"
+                }
+              ],
+              "stop": "Changedhead/target, missing107 security constraint, or deniedmetadata write; no alternatecomment route.",
+              "rollback": "No source change to revert. If closure itself mistaken, report and use explicitly authorized normal PR reopen; never silently reopen.",
+              "recommendation": "Close97 with qualified107mapping rather than falsely claim full0.19/Commander15 target superseded.",
+              "question": "是否批准关闭#97，明确安全目标由#107承接、0.19/Commander15未采纳，保留历史与分支记录？"
+            },
+            {
+              "pr": 98,
+              "head": "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53",
+              "base": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+              "fresh_files": 4,
+              "fresh_additions": 15,
+              "fresh_deletions": 27,
+              "current": "root+runtimeZod4.4.3; rootZod belongs to132-package ratchet tool closure;1927identities/1933occurrences/8guards",
+              "proposal": "bothZod4.6.7; oldproposal includes12runtimeextraneous deletion and5rootUnicode-escape-only funding rewrites, all excluded from new carrier",
+              "existing_barrier": "ci.yml reads checker from trusted eventbase. gate294 rejects policy drift;269 rejects oldZodlockfingerprint. Modifying only candidate checker/baseline policy cannot make original98 acceptable.",
+              "write_set_phase1": ["scripts/unused-findings-gate.mjs", "scripts/unused-findings-gate.test.mjs", "docs/analytix/development-baseline.md"],
+              "write_set_phase2": ["package.json", "package-lock.json", "packages/runtime/package.json", "packages/runtime/package-lock.json", "scripts/unused-findings-baseline.json (only exact policy.closure Zod version/metadata/lock fingerprints; entries/guards/audit/provenance unchanged)"],
+              "sequence": ["Under explicit yes, safely acquire only official exact4.6.7 artifact+metadata, hashverify; materialize into new isolated matched existing tool tree, preserving old. Derive exact old/new policy and installed metadata fingerprints, do not run discovery to rewrite baseline.", "Phase1 independent tooling-contract PR on old dependencies: implement one exact reviewed old-policy->new-policy fingerprint transition, limited to existingZod node4.4.3->4.6.7 and unchanged131otherclosure nodes. Bind config/rule/identity/rawprovenance. No generic reset/accept-current/autoexpand or free environment approval. Add small negative tests for wrong fingerprint, extra toolnode, and new finding hidden by policy change. Existing strictcompare/prune unchanged. Normal finalCI then merge.", "Phase2 new dependency PR on that trusted base: preserve all otherlocknodes and12extraneousnode/funding text; pin4.6.7 both trees; change baselinepolicy only exact reviewed Zod fingerprints. Trusted checker verifies newtools and exact same findings entries/counts/guards. If any identity/count/guard changes, pause; no automatic relabel/expansion/cleanup.", "Run existing seven checker tests including sixrequired cases and committedsource selection, actual full gate exacteventbase/head, focused Zod production-schema/IPC tests/typecheck; then final exact-head fullCI. Compare source selection dynamically, not historical2339 whitelist.", "Only after accepted coordinatedmerge close superseded98/108 with exactmapping; no automaticclose in this readonly plan."],
+              "validation_commands": [
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && node --test scripts/unused-findings-gate.test.mjs",
+                  "status": "existing seven tests plus proposed3small migration negatives; not executed",
+                  "assertion": "six lifecycle/ambiguity contracts, committed-source detection, exact migration accepted, arbitrarypolicy/toolnode/newfinding rejected"
+                },
+                {
+                  "command": "UNUSED_EVENT=pull_request UNUSED_BASE=<trusted-phase1-main> UNUSED_HEAD=<phase2-head> node <checker-extracted-from-trusted-base>",
+                  "status": "future exactevent invocation in CI or verifiedisolatedworktree; ordinarycurrent node scripts/unused-findings-gate.mjs remains usable after trusted integration",
+                  "assertion": "132closure with onlyreviewedZodfingerprints; exact1927/1933/8guards onunchangedsource and unchangedRAW_SHA; no baselineexpansion"
+                },
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && npm --prefix packages/runtime test -- src/config/analytix-config.test.ts src/contracts/model-endpoint-format.test.ts",
+                  "status": "existing synthetic public-schema suites; pendingcandidate",
+                  "assertion": "owned defaults/absence, invalid protocol/timeout/step limits rejection unchanged"
+                },
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && npm --prefix packages/runtime test -- src/contracts/threads.test.ts -t 'formal own Side promotion intent|Thread todo lifecycle contracts|ListThreadsResponse'",
+                  "status": "existing public contract selection; pendingcandidate",
+                  "assertion": "strict extra properties, union trueonly promotion, duplicate-id rejection and trim/roundtrip unchanged"
+                },
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && npm test -- src/main/ipc/app-ipc-schemas.test.ts -t 'single message feedback admission'",
+                  "status": "existing rootZod consumer selection; pendingcandidate",
+                  "assertion": "root schema protocol/path/body admit/reject unchanged; no liveProvider/Privacy acceptance"
+                },
+                {
+                  "command": "source ./scripts/use-analytix-cache.sh && npm run typecheck && npm --prefix packages/runtime run typecheck",
+                  "status": "pendingcandidate",
+                  "assertion": "both actual Zod consumers typecheck, no product source workaround"
+                }
+              ],
+              "provenance": {
+                "raw_sha256": "dff6e88701aabb1d26794c84cb8661d04084b89181f5513ca1cbcdda1bc4458c",
+                "current_baseline_sha256": "0b5e77f7ff543b98b4b79f3c8bb71e865337b72b013b52245ab497a874028eae",
+                "old_policy_sha256": "4bbce2786556231865a666b9a42be2e54f9176141b219b968d7a89014a6bb21a",
+                "zod_old_metadata_sha256": "c630bd10b52dcf71c112a2bf78dbf2734b9db58d62de663b8d86c2ec2c8cda2e",
+                "zod_old_lock_sha256": "11ab6e9e2b4241b299f5098bf0dad6cd05adbc22dd0e8acb736eadf0e2d1acaa",
+                "new_fingerprints": "notacquired/notmeasuredinreadonlyreview; mustderivefromexactapprovedartifactbeforephase1review"
+              },
+              "stop": "Any identity/count/guard change, extra closure or config/rule/anchor drift, non-Zod lock drift, invalidmetadata/hash, productsource requirement or unknownCIcause. Do not weaken policy equality or grant broad future migration.",
+              "rollback": "Normal reverse migration PR using separately reviewed exact inverse policy tuple and target locknode, preserving all intervening security nodes; never reset baseline or autoaccept currentfindings. Ordinary source revert alone cannot bypass trustedpolicy migration checks.",
+              "recommendation": "Approve explicit two-phase independent tool migration, not direct98merge. Retain original1933 provenance permanently; no cleanup included.",
+              "question": "是否批准两阶段Zod4.6.7工具合同迁移：先可信base精确迁移凭据，再双树依赖及唯一Zod指纹更新，1927/1933/8guards与原始来源不变，任何身份变化即停？"
+            },
+            {
+              "pr": 108,
+              "head": "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3",
+              "base": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+              "fresh_files": 2,
+              "fresh_additions": 5,
+              "fresh_deletions": 17,
+              "current": "runtime4.4.3,root4.4.3",
+              "proposal": "runtime-only4.6.6; olddiff deletes12unrelatedextraneouslines",
+              "options": [
+                {
+                  "option": "A runtime-onlybridge",
+                  "write_set": ["packages/runtime/package.json", "packages/runtime/package-lock.json"],
+                  "scope": "Keep onlymanifest/lockspecifier plusruntimeZodversion/resolved/integrity4.6.6; expected5+/5− after restoring12unrelatedlines, no root change; preserve all othernodes/securitypatches.",
+                  "sequence": "Rebuild freshmain minimaldelta; independentlyresolve root4.4.3/runtime4.6.6 from actualconsumer createRequire; root132closureunchanged; run samefocused runtime schema suites/typecheck and real fullgate toprove unchangedtoolcontract; finalheadcompleteCI; normalmergeonlyafterselectedapproval.",
+                  "validation_commands": ["source ./scripts/use-analytix-cache.sh && npm --prefix packages/runtime test -- src/config/analytix-config.test.ts src/contracts/model-endpoint-format.test.ts", "source ./scripts/use-analytix-cache.sh && npm --prefix packages/runtime test -- src/contracts/threads.test.ts -t 'formal own Side promotion intent|Thread todo lifecycle contracts|ListThreadsResponse'", "source ./scripts/use-analytix-cache.sh && npm --prefix packages/runtime run typecheck", "exactevent full unused gate with unchangedrootpolicy and132closure"],
+                  "expected": "Strictschema/defaults/union behavior unchanged;root4.4.3 tooling unaffected. Not a dual-tree upgrade and98failure is not evidence108samefailure.",
+                  "rollback": "Normalrevert ofruntimeonlyfivefielddelta retaininglatersecuritynodes; no policy migration needed because roottoolsunchanged."
+                },
+                {
+                  "option": "B deferbridge/recommend",
+                  "write_set": ["PR108 qualified closure/mapping only after phase2 coordinatedmerge"],
+                  "scope": "Keep108open while explicit98toolmigration prepared; after accepted4.6.7both-tree successor, close108mapping. Avoid transient4.6.6then4.6.7 and duplicateCI; no claimcurrentruntimeupgradecomplete."
+                }
+              ],
+              "stop": "OptionA othernode drift, rootclosurechange, synthetic schema/publiccontract deviation, productsource requirement or unknownCIcause. Do not hide12deletion.",
+              "recommendation": "ChooseB coordinated4.6.7 unless a stated urgent runtime-only requirement exists; no such urgency evidenced here.",
+              "question": "是否选择B：不先落runtime4.6.6，待#98显式工具迁移后的双树4.6.7成功再关闭#108；若需过渡则改选A的剥离12行最小载体？"
+            }
+          ],
+          "counts": {
+            "items": 5,
+            "new_validation_runs": 0,
+            "helpers": 0,
+            "downloads": 0,
+            "repository_files_changed": 0,
+            "remote_mutations": 0
+          },
+          "completed_at_utc": "2026-10-25T12:39:16.180Z"
+        },
+        "python_actions": {
+          "schema": "governance-b-r13-execution-plans-v1",
+          "common": {
+            "status": "Plan only; no B candidate implementation, acquisition, installation or verification executed in this round",
+            "source_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+            "source_main_provenance": "origin/main read locally; remote main freshness is root responsibility before execution",
+            "head_metadata_as_of_utc": "2026-10-25T12:35:34Z",
+            "approval_interpretation": "One yes authorizes the stated bounded implementation and validations, not unconditional merge or acceptance of unresolved prerequisites. Any required extra scope stops that item.",
+            "immutable_boundaries": ["No product-code/feature/Privacy changes or execution; no real cases, credentials or live Providers.", "No process enumeration, task-external reconnaissance, permission repair, old abandoned backend isolation reuse, Mac node/go version sampling, denied-route retries or alternate routes.", "New task private roots/caches/output directories0700/no extraACL and files0600 at creation; verify actual cache placement before every allowed future command.", "Current task is plans-only. Commands below are not receipts and must not be executed under this brief.", "No npm ci, generic installation, helper, package download or B validation in this read-only round. Future dependency materialization needs exact approved isolated scope and hashes, never canonical or old cache mutation.", "No baseline finding reset, automatic regeneration, added identities/counts or trusted-policy weakening.", "Public PR text contains no machine paths/private evidence."],
+            "execution_preflight": ["Read fresh root and owning AGENTS; preserve canonical6tracked/22untracked; isolate one writer per carrier.", "Read current remote main and exact PR head; if changed, review delta, not old green checks.", "Admit only official fixed packages/metadata with checked SHA; extra version/node/manifest drift stops the carrier.", "Verify complete final-head expected job matrix and required gate from one effective run/attempt, plus applicable CodeQL/reviews; no mixing heads, no missing/cancelled/failed required jobs, no bypass.", "Normal merge commit only after the newly approved B scope is satisfied; record tree/parents/SHA, post-merge main CI and mapped old PR disposition."],
+            "rollback_contract": {
+              "command_template": "git switch -c codex/revert-<item> <fresh-main>\ngit revert -m 1 <recorded-merge-SHA>\ngit diff --check\n# review exact inverse diff; verify same affected contracts; normal PR/required CI/merge",
+              "limits": "No reset, force, history rewrite or dirty canonical switching. Commands are templates with explicit verified inputs, not executable under this read-only brief. If later carriers depend on the changed locks, create a fresh minimal inverse carrier preserving all later accepted nodes; do not revert their whole locks.",
+              "windows_partial_revert": "Choose current requirements with only the approved item restored; regenerate complete wheel/content/requirements digests and filecount on that current input, run unchanged production validator and native negatives. Never paste an old aggregate hash into a new combination."
+            },
+            "bundling_recommendation": {
+              "actions": "If4/7/90 all approved, one Actions carrier with union of four existing workflows plus one small synthetic probe workflow; three separate acceptance/rollback sections. Avoid three serial fullCI loops.",
+              "backend": "If15/102 and the chosen77 Python decision approved together, one backend lock carrier preserving current security nodes; distinct pytest/native/Pillow sections. Unapproved item never enters union.",
+              "windows": "If95/77/110 approved together, one final frozen combination, recompute once, preserve all other accepted pins; each item retains its own expected version, tests and inverse recipe."
+            },
+            "shared_actions_probe": {
+              "path": ".github/workflows/dependency-actions-contract-probe.yml",
+              "state": "proposed new small workflow; not present/not executed",
+              "contract": ["pull_request with exact changed-workflow paths, plus explicit workflow_dispatch; contents:read/actions:read only; no secrets, release, deployment, installer, Provider, protected user state or product build.", "Matrix ubuntu-24.04/windows-2022/macos-14, fixed action SHAs matching the approved target; timeout10min per job.", "checkout exact head with persist-credentials:false; assert local HEAD equals expected SHA and working tree clean; capture git config privately only to assert no persisted extraheader, never print token values.", "setup Python3.11; assert interpreter series and sys.executable source; exercise pip cache input using checked-in backend/uv.lock and no pip package install. Cache miss is legitimate, not a failing forced-hit requirement.", "Write a fixed tiny public probe payload, SHA256 it; upload once with if-no-files-found:error/retention-days:1, retrieve that run own artifact with existing runner gh API and actions:read, assert ZIP member path and byte hash exactly equal. No installer/source archive upload.", "The supplied commands require this newly implemented fixture. Until its exact contents are reviewed and actually run, these items remain unverified."],
+              "ci_command": ["gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>", "gh run view <actual-probe-run-id> --json headSha,event,status,conclusion,jobs"],
+              "expected": "One exact final-head probe run, all three matrix jobs pass; separate complete Development/CodeQL gate. No release.yml/package.yml/pr28 archival workflow dispatch."
+            },
+            "shared_windows_generation": {
+              "status": "specified recipe, not executed; finite task-only wrapper is not yet implemented",
+              "allowed_owner_exports": ["scripts/build-windows-backend-runtime-assets.cjs:extractBackendWheels", "scripts/windows-python-runtime-contract.cjs:wheelInventory/wheelSetSha256/signingInvariantTreeIdentity/verifyWheelhouse/verifySitePackages"],
+              "recipe": ["Createemptyprivatecandidateoutside source; preserveaccepted2lockbytes andproductionstagefingerprints.", "Validatefiniteper-itemexactpin/hashdeltaagainstfreshacceptedrequirements; assert45pins/unique names/order and backendderivedAnyIO.", "Reuseverifiedunchangedwheels; acquireonlyapprovedchangedexactofficialartifacts, SHAcheck andfullMETADATAdependencyclosurecheck.", "CallownerextractBackendWheels tosafeextract+prune; computeactualrequirementsSHA/wheelSetSHA/contentSHA/fileCount. CopyallpythonRuntimeidentityfieldsunchanged.", "Writecandidate2locks+manifest0600; projectunchangedcontract+native-componentdependenciesintoprivatefixturewithcandidate2locks, then requireit and callverifyWheelhouse/verifySitePackages onactualcandidate.", "Verifyproductionstage/sourceacceptedlocksunchanged beforeadmission; aftersourceadmission rerununchangedproductionvalidator onfinalpayload. Missingwheel/wrongversion/tampernegativecontrols mustfail."],
+              "command_template": "source ./scripts/use-analytix-cache.sh\nnode <task-owned-finite-candidate-wrapper.cjs> --requirements <exact-target-requirements> --wheelhouse <verified-task-wheelhouse> --output <empty-private-candidate>\nnode -e \"const c=require(process.argv[1]); c.verifyWheelhouse(process.argv[2]); c.verifySitePackages(process.argv[3])\" <isolated-unchanged-contract.cjs> <candidate-wheelhouse> <candidate-site>",
+              "readiness_limit": "Wrapperpath is explicitlyfuturefixture, not an existing CLI. Exactwrapperimplementation and hashes unavailable now; this block doesnotclaimWindowscarrierready. Ifuserrequiresalready-executableexistingCLIonly,95/110remainblockedpendingexplicitnarrowauthoringtoolcontractapproval,notanunboundedhelperextension."
+            }
+          },
+          "items": [
+            {
+              "pr": 4,
+              "head": "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f",
+              "head_unchanged_from_prior_review": true,
+              "state": "open",
+              "current_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+              "current_versions": {
+                "setup-python": "5.6.0/a26af69be951a213d495a4c3e4e4022e16d87065",
+                "python": "backend/Windows/release remain3.11"
+              },
+              "proposed_targets": {
+                "setup-python": "7.0.0/5fda3b95a4ea91299a34e894583c3862153e4b97"
+              },
+              "original_pr_files": [".github/workflows/ci.yml", ".github/workflows/release.yml"],
+              "planned_full_write_set": [".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/dependency-actions-contract-probe.yml"],
+              "sequence": ["Fresh-base on6243or later; replace all4 current setup-python uses (CI2 including addedWindows lxml +release2), not only oldPR3.", "Preserve Python inputs, architecture, cache keys and existing permissions. Add/reuse only approved shared synthetic probe; no release dispatch."],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\ngo run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
+              "expected_assertions": ["All4 occurrences exacttargetSHA, none old; no unsupported pip-install input.", "Three synthetic Python setup/cache jobs and current Development Windowsnative/Backend jobs pass; release file static-validated, not claimed executed."],
+              "failure_stop_points": ["Unexpected Python/runtime change or action-input removal used by repository.", "Cache/setup/probe or required job failure not localized; runner unsupported."],
+              "execution_prerequisites": [],
+              "recommendation": "Approve controlled action migration with actual consumer probe; no need full packaging.",
+              "decision_question": "是否批准#4按四处固定SHA替换并执行共享合成Python设置/缓存探针，保留现有Python与权限合同？",
+              "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
+              "evidence_primary_urls": ["https://github.com/actions/setup-python/releases/tag/v7.0.0"],
+              "source_paths": [
+                {
+                  "path": ".github/workflows/ci.yml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/.github/workflows/ci.yml"
+                },
+                {
+                  "path": ".github/workflows/release.yml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/.github/workflows/release.yml"
+                }
+              ],
+              "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
+              "notes": []
+            },
+            {
+              "pr": 7,
+              "head": "cf368d0e088e49afb8f0ea9b314f95015047aeda",
+              "head_unchanged_from_prior_review": true,
+              "state": "open",
+              "current_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+              "current_versions": {
+                "checkout": "4.4.0/11d5960a326750d5838078e36cf38b85af677262"
+              },
+              "proposed_targets": {
+                "checkout": "7.0.1/3d3c42e5aac5ba805825da76410c181273ba90b1"
+              },
+              "original_pr_files": [".github/workflows/ci.yml", ".github/workflows/package.yml", ".github/workflows/pr28-independent-environment.yml", ".github/workflows/release.yml"],
+              "planned_full_write_set": [".github/workflows/ci.yml", ".github/workflows/package.yml", ".github/workflows/pr28-independent-environment.yml", ".github/workflows/release.yml", ".github/workflows/dependency-actions-contract-probe.yml"],
+              "sequence": ["Mechanical fresh-base and all16 current uses (CI12/release2/package1/PR28one); preserve each exact ref/fetch-depth/submodule/LFS/credential flag.", "Verify official v7 fork protection behavior; never add allow-unsafe-pr-checkout. Execute only shared probe and normalPR CI."],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\ngo run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
+              "expected_assertions": ["All16 SHAs exact; events/refs/permissions unchanged; sourcebaseline still exact event head and full history.", "Three runner checkout probes assert exact expected head and no credential persistence; complete required matrix from finalhead."],
+              "failure_stop_points": ["A consumer needs unsafe fork opt-in, persisted credential relaxation or different source-ref semantics.", "Unsupported runner or required failure; stop rather than change fork/security contract."],
+              "execution_prerequisites": [],
+              "recommendation": "Approve v7 upgrade with same-source and credential boundary, no unsafe opt-in.",
+              "decision_question": "是否批准#7全16处固定SHA迁移，保留可信事件/准确HEAD/凭据隔离，并补共享三平台合成探针？",
+              "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
+              "evidence_primary_urls": ["https://github.com/actions/checkout", "https://github.com/actions/checkout/releases/tag/v7.0.1"],
+              "source_paths": [
+                {
+                  "path": ".github/workflows/ci.yml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/.github/workflows/ci.yml"
+                },
+                {
+                  "path": ".github/workflows/package.yml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/.github/workflows/package.yml"
+                },
+                {
+                  "path": ".github/workflows/pr28-independent-environment.yml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/.github/workflows/pr28-independent-environment.yml"
+                },
+                {
+                  "path": ".github/workflows/release.yml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/.github/workflows/release.yml"
+                }
+              ],
+              "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
+              "notes": ["No pull_request_target/workflow_run event exists in these4 source workflows; behavior for such events is official-reference only, not claimed repository runtime coverage.", "package workflow requires main and qualified self-hosted packaging runner; do not dispatch it just to test checkout."]
+            },
+            {
+              "pr": 90,
+              "head": "1a224b640d5750a99932feaa4be656bd7c1dd433",
+              "head_unchanged_from_prior_review": true,
+              "state": "open",
+              "current_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+              "current_versions": {
+                "upload-artifact": "4.6.2/ea165f8d65b6e75b540449e92b4886f43607fa02"
+              },
+              "proposed_targets": {
+                "upload-artifact": "7.0.2/cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+              },
+              "original_pr_files": [".github/workflows/package.yml", ".github/workflows/pr28-independent-environment.yml"],
+              "planned_full_write_set": [".github/workflows/package.yml", ".github/workflows/pr28-independent-environment.yml", ".github/workflows/dependency-actions-contract-probe.yml"],
+              "sequence": ["Fresh-base; replace exactly5 current uses; retain names, compression, retention and missing-file error flags.", "Shared probe uses same fixed action target and tiny public bytes; no installer, private evidence or source ancestry archive transfer."],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\ngit diff --check\ngo run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12", "gh workflow run dependency-actions-contract-probe.yml --ref <candidate-branch>"],
+              "expected_assertions": ["Artifact upload output provides actualartifactID; download exactlysame run artifact and verify exactZIP member SHA256/bytes.", "5 production uses exactSHA, all artifact metadata inputs unchanged; complete finalhead CI."],
+              "failure_stop_points": ["ZIP/path/content mismatch, artifact/API contract incompatible, permissions need expansion beyond own-run actions:read.", "No qualified isolated probe runner; do not run old PR28 provisioning or package workflow as workaround."],
+              "execution_prerequisites": [],
+              "recommendation": "Approve bounded actual artifact roundtrip before applying five uses.",
+              "decision_question": "是否批准#90五处固定SHA升级并上传/取回一个非敏感合成小文件验证内容，保留产物合同且不执行打包/发布？",
+              "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
+              "evidence_primary_urls": ["https://github.com/actions/upload-artifact/releases/tag/v7.0.2"],
+              "source_paths": [
+                {
+                  "path": ".github/workflows/package.yml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/.github/workflows/package.yml"
+                },
+                {
+                  "path": ".github/workflows/pr28-independent-environment.yml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/.github/workflows/pr28-independent-environment.yml"
+                }
+              ],
+              "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
+              "notes": []
+            },
+            {
+              "pr": 15,
+              "head": "f11600dd5b425c1292e16f635dfdf130d18f4fae",
+              "head_unchanged_from_prior_review": true,
+              "state": "open",
+              "current_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+              "current_versions": {
+                "pytest": "8.4.2",
+                "manifest": "pytest>=8.3.0,<9.0.0",
+                "requires-python": ">=3.10"
+              },
+              "proposed_targets": {
+                "pytest": "9.1.1",
+                "manifest": "pytest>=8.3.0,<10.0.0"
+              },
+              "original_pr_files": ["backend/pyproject.toml", "backend/uv.lock"],
+              "planned_full_write_set": ["backend/pyproject.toml", "backend/uv.lock"],
+              "sequence": ["Fresh-base; change only dev pytest ceiling, then pinneduv0.11.5 offline targeted resolve; keep acceptedsecurity/runtime nodes and Pythonminimum.", "Review normalized lockmarker changes semantically; no pyprojectmode change. Materialize a new isolated locked test environment only under future approval."],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\nexport UV_PROJECT_ENVIRONMENT=\"$TASK_ROOT/backend-venv\"\nexport UV_CACHE_DIR=\"$TASK_ROOT/uv-cache\"\nuv lock --project backend --offline --upgrade-package pytest==9.1.1\nuv lock --project backend --offline --check", "source ./scripts/use-analytix-cache.sh\nexport UV_PROJECT_ENVIRONMENT=\"$TASK_ROOT/backend-venv\"\nexport UV_CACHE_DIR=\"$TASK_ROOT/uv-cache\"\nuv sync --project backend --locked --extra dev --python 3.11 --offline\nuv run --project backend --no-sync python -c \"from importlib.metadata import version; assert version('pytest') == '9.1.1'\"\nuv run --project backend --no-sync python -m pytest backend/tests -q"],
+              "expected_assertions": ["Collection, fixture setup/teardown, parametrization and expected exception failures remain correct; no skip/xfail to hide regressions.", "Only pytest/iniconfig/packaging/pluggy requirement-necessary locked closure changes; exact change list reviewed, allproduction/security nodes equal freshmain.", "Existing complete Backendtests actualpass plus allrequired finalheadCI; no claim3.10execution from3.11."],
+              "failure_stop_points": ["Any production dependency drift or fixture behavior requiring productcode change.", "Missing offline package or unavailableformal interpreter: identify exact missinginput; do not silently install/change tools."],
+              "execution_prerequisites": ["Matching uv0.11.5 and exact candidate dependency closure must be present or separately admitted from official hashes; no such readiness verified in this plans-only round.", "If Python3.10 remains a supported tested platform, a formally admitted3.10 interpreter and run are an explicit additional prerequisite; do not download implicitly."],
+              "recommendation": "Adopt pytest9 as isolated test-tool migration after actual full backend run; retain>=3.10 until separately decided.",
+              "decision_question": "是否批准#15精确pytest9.1.1工具迁移与任务隔离环境验证，生产依赖/Python最低版本不变？",
+              "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
+              "evidence_primary_urls": ["https://docs.pytest.org/en/stable/announce/release-9.0.0.html", "https://docs.pytest.org/en/stable/backwards-compatibility.html"],
+              "source_paths": [
+                {
+                  "path": "backend/pyproject.toml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/backend/pyproject.toml"
+                },
+                {
+                  "path": "backend/uv.lock",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/backend/uv.lock"
+                }
+              ],
+              "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
+              "notes": []
+            },
+            {
+              "pr": 95,
+              "head": "f64678911e7da5a09ef6e849c83c43036f9d99d2",
+              "head_unchanged_from_prior_review": true,
+              "state": "open",
+              "current_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+              "current_versions": {
+                "windows-websockets": "16.0",
+                "runtime": "3.11.15+20260623/cp311-win_amd64"
+              },
+              "proposed_targets": {
+                "windows-websockets": "17.3",
+                "runtime": "unchanged"
+              },
+              "original_pr_files": ["scripts/windows-backend-requirements.lock.txt"],
+              "planned_full_write_set": ["scripts/windows-backend-requirements.lock.txt", "scripts/windows-python-runtime-lock.json", "scripts/windows-websockets-upgrade-probe.py", ".github/workflows/ci.yml"],
+              "sequence": ["Prepare exactofficial17.3 cp311/win_amd64-compatible wheel metadata+SHA in newtask cache, revalidate45wheel set; retain44other pins and allruntime identity fields.", "Do not feed websockets change into Pillow-only freeze-candidate. Use finite task-only generation recipe shared below, unchanged production validator, then admit2lock artifacts.", "Add small dedicated websocket fixture and invoke in existing requiredWindowsjob; no newframework/job/product server."],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\nnpm test -- src/main/windows-backend-candidate.test.ts --run", "python -I -B scripts/windows-websockets-upgrade-probe.py --site-packages <candidate-site> --expected-version 17.3 --timeout-seconds 15", "<verified-packaged-python3.11.15> -I -B scripts/windows-websockets-upgrade-probe.py --site-packages <candidate-site> --expected-version 17.3 --timeout-seconds 15"],
+              "expected_assertions": ["Version and module path belong to candidate, not host environment.", "Real Uvicorn ws=websockets + synthetic FastAPI loopback echo: text,unicode,binary/control/close1000 and cancellation; ownsubprocess stops using recordedhandle, no process enumeration.", "Wrongversion/missingwheel negatives fail; production verifyWheelhouse/verifySitePackages pass for newaggregate; existinglxml unchanged."],
+              "failure_stop_points": ["Protocol behavior mismatch requiring appcode or weakening assertion; wrongnative/moduleload.", "No exactacceptedruntime execution seam: CIsetup3.11.x success onlylimitedABI evidence, not formalpackaged3.11.15."],
+              "execution_prerequisites": ["scripts/windows-websockets-upgrade-probe.py is proposed and absent; command becomes executable only after approvedfixture implementation.", "Exactwheel filename/SHA and nativeformalruntime source are not newly acquired or verified here."],
+              "recommendation": "Approve complete frozen carrier with actual websocket backend handshake, not requirements-onlyPR.",
+              "decision_question": "是否批准#95完整Windows17.3载体、真实loopback协议探针与聚合重算，正式运行时缺口明确阻断正式验收？",
+              "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
+              "evidence_primary_urls": [],
+              "source_paths": [
+                {
+                  "path": "scripts/windows-backend-requirements.lock.txt",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/scripts/windows-backend-requirements.lock.txt"
+                }
+              ],
+              "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
+              "notes": []
+            },
+            {
+              "pr": 77,
+              "head": "57589814d34f4babaf1a7878fc13bcd3b0c33bb1",
+              "head_unchanged_from_prior_review": true,
+              "state": "open",
+              "current_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+              "current_versions": {
+                "backend-pillow": "12.3.0",
+                "windows-pillow": "12.3.0",
+                "backend-requires-python": ">=3.10",
+                "windows-runtime": "3.11.15+20260623"
+              },
+              "proposed_targets": {
+                "recommended": "RetireformalPython3.10; backendPillow13.0.0 and Windows13.0.0",
+                "backend-requires-python": ">=3.11",
+                "alternative1": "retain12.3 with explicitly acceptedtime-limited residual",
+                "alternative2": "Python-version split;3.10 remains12.3 and residual not fixed"
+              },
+              "original_pr_files": ["scripts/windows-backend-requirements.lock.txt"],
+              "planned_full_write_set": ["backend/pyproject.toml", "backend/uv.lock", "scripts/windows-backend-requirements.lock.txt", "scripts/windows-python-runtime-lock.json", "backend/tests/test_pillow_upgrade_contract.py", "scripts/windows-pillow-upgrade-probe.py", ".github/workflows/ci.yml", "docs/analytix/development-baseline.md"],
+              "sequence": ["Choose one Python support contract first; recommendation explicitlydrops3.10, so this is not a routine pin-onlyupgrade.", "Update manifestminimum and Pillowlowerbound; targeteduv13.0.0 resolve, preserve otherapproved nodes; Windows exact13wheel candidate via existing Pillow-only authoring entry, admitted source locks onlyafter review.", "Add tiny in-memoryPNG/JPEG/RGBA/EXIF/truncated-file/decompressionbomb fixture with boundedpixels/memory; native _imaging loader and libraryversion assertions in existingWindowsjob; retain error categories, no product API adaptation."],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\nexport UV_PROJECT_ENVIRONMENT=\"$TASK_ROOT/backend-venv\"\nexport UV_CACHE_DIR=\"$TASK_ROOT/uv-cache\"\nuv lock --project backend --offline --upgrade-package pillow==13.0.0\nuv sync --project backend --locked --extra dev --python 3.11 --offline\nuv run --project backend --no-sync python -m pytest backend/tests/test_pillow_upgrade_contract.py -q", "source ./scripts/use-analytix-cache.sh\nnode scripts/build-windows-backend-runtime-assets.cjs --freeze-candidate \"$WIN_CANDIDATE\" --candidate-requirements \"$WIN_REQUIREMENTS\"\nnpm test -- src/main/windows-backend-candidate.test.ts --run", "<verified-packaged-python3.11.15> -I -B scripts/windows-pillow-upgrade-probe.py --site-packages <candidate-site> --expected-version 13.0.0 --max-pixels 1048576"],
+              "expected_assertions": ["Both locktrees exact13.0.0; current runtimeidentity unchanged;45wheels,44otherpins equal unless separatelyjointapproved.", "ActualPIL._imaging nativeextension load, deterministicpixel/dimension outputs and malformed/bomb rejections; oldremovedAPIs notsilentlyshimmed.", "#100 remains toolingonly untilthiscarrier passes; successonCI3.11.x doesnotbyitself establishpackaged3.11.15."],
+              "failure_stop_points": ["Userdoesnotapprove3.10retirement: do not silentlydrop it; select alternative explicitly.", "RemovedPillowAPI affectsactual productconsumer: stopforproductcontract decision, notshim.", "Formalruntime/wheel absent or hash/aggregate mismatch."],
+              "execution_prerequisites": ["OfficialPillow13 drops3.10; no formal3.10 support evidence newlycollected.", "Two newprobe files are proposed/notexecuted; exact13wheel metadata/SHA and formal3.11.15 execution seam remain prerequisites.", "ExistingPillow-onlycandidate helper maydownload entire45wheel set; futureexecution must reuseverifiedunchangedwheels and enforce approvedcache/downloadscope ratherthan blindlyrepeat45downloads."],
+              "recommendation": "Prefer explicit3.10retirement then one coherenttwo-tree13carrier, conditional on formal supportdecision; otherwise recorddatedresidual ratherthanfalsefix.",
+              "decision_question": "是否明确退役Python3.10并批准上述两树Pillow13/原生验证写集，或选择保留/分版本方案及残余期限？",
+              "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
+              "evidence_primary_urls": ["https://pillow.readthedocs.io/en/stable/releasenotes/13.0.0.html", "https://pillow.readthedocs.io/en/stable/installation/python-support.html"],
+              "source_paths": [
+                {
+                  "path": "scripts/windows-backend-requirements.lock.txt",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/scripts/windows-backend-requirements.lock.txt"
+                }
+              ],
+              "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
+              "notes": []
+            },
+            {
+              "pr": 102,
+              "head": "ad609e6a9a06de9c215c39d7747b88531a1bd262",
+              "head_unchanged_from_prior_review": true,
+              "state": "open",
+              "current_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+              "current_versions": {
+                "fastapi": "0.141.1",
+                "pydantic": "2.13.5",
+                "pydantic-core": "2.46.5",
+                "duckdb": "1.5.4",
+                "cryptography": "50.0.1",
+                "pypdfium2": "5.13.0",
+                "security": "certifi2026.10.19/urllib3 2.8.0/pypdf6.21.2/AnyIO4.15.1"
+              },
+              "proposed_targets": {
+                "fastapi": "0.153.0",
+                "pydantic": "2.14.1",
+                "pydantic-core": "2.50.1",
+                "duckdb": "1.5.6",
+                "cryptography": "50.0.2",
+                "pypdfium2": "5.14.0",
+                "new-required-node": "opentelemetry-api1.45.1"
+              },
+              "original_pr_files": ["backend/pyproject.toml", "backend/uv.lock"],
+              "planned_full_write_set": ["backend/pyproject.toml", "backend/uv.lock", "backend/tests/test_dependency_native_upgrade_contract.py"],
+              "sequence": ["Rebuildtargetedgroup onfreshmain, neverreplaceold1ddwholelock. Preservecompletecertifi/urllib3/pypdf/AnyIOnodes andallseparatelyacceptedpytest/Pillowcontracts.", "Use pinneduv0.11.5 targetedoffline resolve; no pyprojectexecutablemodechange; semantically reviewmarker/revision normalization and exactclosure.", "Add small directnative tests; run existingbackend suite once afterstablecombinedinput, then finalCI."],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\nexport UV_PROJECT_ENVIRONMENT=\"$TASK_ROOT/backend-venv\"\nexport UV_CACHE_DIR=\"$TASK_ROOT/uv-cache\"\nuv lock --project backend --offline --upgrade-package duckdb==1.5.6 --upgrade-package fastapi==0.153.0 --upgrade-package pydantic==2.14.1 --upgrade-package pydantic-core==2.50.1 --upgrade-package cryptography==50.0.2 --upgrade-package pypdfium2==5.14.0\nuv lock --project backend --offline --check", "source ./scripts/use-analytix-cache.sh\nexport UV_PROJECT_ENVIRONMENT=\"$TASK_ROOT/backend-venv\"\nexport UV_CACHE_DIR=\"$TASK_ROOT/uv-cache\"\nuv sync --project backend --locked --extra dev --python 3.11 --offline\nuv run --project backend --no-sync python -m pytest backend/tests/test_dependency_native_upgrade_contract.py -q\nuv run --project backend --no-sync python -m pytest backend/tests -q"],
+              "expected_assertions": ["DuckDB actualnative: in-memorytypedNULL/unicode/decimalquery returnsfixedvalues; noexternalfile/networkfunctions.", "pdfium actualnative: generatedtinyPDF rendersboundeddimensions/pixelbuffer; malformed/truncatedPDFrejected; FakeDocumentaloneinsufficient.", "cryptography AESGCM roundtripandwrongtagInvalidTag usingfixedsynthetickey; actualbackendbindingversion; no realkeys.", "FastAPI/Pydantic validation/status/responsecontracts pass existingtests; unchangedcompleteacceptedsecuritynodes andAnyiopin."],
+              "failure_stop_points": ["Any ofcurrentsecuritynodesregresses toold7.22/2.7, extraunapprovedupgrade, modechange or unresolvednewmarker semantics.", "Nativewheel absent/unloadable oractualbackendAPIbehaviorregression requiringproductcode."],
+              "execution_prerequisites": ["Exactnewdependencyclosuremustbeadmitted; offlinecacheavailabilitynotprovenhere.", "Newtestfile is planned, absent; assertionsspecifiedbutnotrun."],
+              "recommendation": "Approve rebuildofcurrentminimalgroup withrealnativeevidence; notold294/236patch wholesale.",
+              "decision_question": "是否批准#102按上述七节点目标重建并补原生PDFium/crypto/DuckDB验证，保留所有现有安全与工具合同？",
+              "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
+              "evidence_primary_urls": [],
+              "source_paths": [
+                {
+                  "path": "backend/pyproject.toml",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/backend/pyproject.toml"
+                },
+                {
+                  "path": "backend/uv.lock",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/backend/uv.lock"
+                }
+              ],
+              "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
+              "notes": []
+            },
+            {
+              "pr": 110,
+              "head": "4882a9cc33392e295aefd17284c0645c1f4e5cf1",
+              "head_unchanged_from_prior_review": true,
+              "state": "open",
+              "current_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+              "current_versions": {
+                "requirements": "45 frozenpins; originalgroup22changes; acceptedsecuritylxml6.1.3/urllib3 2.8.0/certifi2026.10.19/pypdf6.21.2",
+                "pillow": "12.3.0",
+                "websockets": "16.0"
+              },
+              "proposed_targets": {
+                "annotated-doc": "0.0.5",
+                "annotated-types": "0.8.0",
+                "cffi": "2.1.1",
+                "charset-normalizer": "3.5.2",
+                "click": "8.5.0",
+                "duckdb": "1.5.6",
+                "fastapi": "0.156.4",
+                "httptools": "0.9.0",
+                "idna": "3.20",
+                "numpy": "2.5.4",
+                "packaging": "26.3",
+                "pandas": "3.0.6",
+                "pycparser": "3.11",
+                "pydantic": "2.14.1",
+                "pydantic-core": "2.50.1",
+                "pypdfium2": "5.14.0",
+                "python-dotenv": "1.2.4",
+                "reportlab": "5.0.1",
+                "starlette": "1.9.0",
+                "typing-inspection": "0.4.4",
+                "uvicorn": "0.54.0",
+                "watchfiles": "1.3.0"
+              },
+              "original_pr_files": ["scripts/windows-backend-requirements.lock.txt"],
+              "planned_full_write_set": ["scripts/windows-backend-requirements.lock.txt", "scripts/windows-python-runtime-lock.json", "scripts/windows-group-upgrade-probe.py", ".github/workflows/ci.yml"],
+              "sequence": ["Resolveexact22targetsagainstfreshaccepted45-pinlinecontract, preserveallnon-targetpins includinganyseparatelyacceptedPillow/websockets; no multihashallplatformlist admitted asWinexactpayload.", "Selectoneactualcp311/win_amd64-compatibleartifact perpin withofficialSHA, recheck45wheelclosure anddist-infoRequires-Dist; missingnewrequireddependency is a contractstop, notsilent46thwheel.", "Generatefinitecandidateusingexistingbottom-levelowner/productionvalidators; addboundedrealnativeHTTP/WS/PDF/dataframeprobeintoexistingWindowsrequiredjob, noinstallerbuild."],
+              "verification_commands": ["source ./scripts/use-analytix-cache.sh\nnpm test -- src/main/windows-backend-candidate.test.ts --run", "python -I -B scripts/windows-group-upgrade-probe.py --site-packages <candidate-site> --expected-targets <private-exact22-targets.json> --timeout-seconds 30", "<verified-packaged-python3.11.15> -I -B scripts/windows-group-upgrade-probe.py --site-packages <candidate-site> --expected-targets <private-exact22-targets.json> --timeout-seconds 30"],
+              "expected_assertions": ["All22targetsand23preservedpins exact; moduleoriginsunderactualcandidate; validRequires-Distclosure.", "RealNumPy/Pandasnullabledecimal/unicode/emptyandnonemptytable→DuckDBroundtrip; explicitdtype/order/nullpreservation.", "FastAPI/Starlette/PydanticactualUvicornHTTPvalidationandWSloopback; badJSON/requestbodyrejected, close/cancelbounded.", "PDFiumtinygeneratedPDFactualnative render andreportlabPDFoutputreopen; noFakeDocumentstand-in.", "Existinglxmlnative/XXEcontrolsunchanged; certififingerprintexactacceptedset; aggregateproductionvalidatorpasspluswrongversion/missingwheel/hashnegativecontrols."],
+              "failure_stop_points": ["Anyextraneouspinmovement/additionaldependency, securitypin/fingerprintdeviation, ABIloadfailure, frozenruntimeidentitychange, realHTTP/PDF/dataframebehaviorfailure.", "Contractcannotvalidateonactualcandidate/runtime: notacceptedsolelybecause52/52currentCI."],
+              "execution_prerequisites": ["22exactofficialartifacts/hash/closureandnativeexecutionsnotnewlyverifiedhere.", "Existing#100authoringentry isPillow-only; directusefor22changeswouldcorrectlyreject. No permissionto weakenit is inferred.", "Newprobeandfinitecandidate-generationwrappermustbeimplemented/reviewedunderthefutureapprovedwrite set; untilthen proposedcommandsarenotcurrentreadyreceipts."],
+              "recommendation": "Treatasnewfrozencarrierwith22itemsections; ifallWindowsdecisionsapprovedcombineonce,otherwise preserveunapprovedtargets.",
+              "decision_question": "是否批准#110完整22项Windows冻结组合与真实原生/HTTP/数据回归，保持其余23项及既有安全合同并重新计算聚合？",
+              "rollback": "common.rollback_contract applies; Windows partial reversal always regenerates combination",
+              "evidence_primary_urls": [],
+              "source_paths": [
+                {
+                  "path": "scripts/windows-backend-requirements.lock.txt",
+                  "url": "https://github.com/Eysn0130/analytix/blob/6243bcf17b0a4ae87fe1dfe44661192ad45261a9/scripts/windows-backend-requirements.lock.txt"
+                }
+              ],
+              "verification_state": "not_run; no new B candidate tests, helper, install or acquisition executed",
+              "notes": []
+            }
+          ],
+          "validation_of_this_document": {
+            "mode": "static only",
+            "fresh_PR_metadata": 8,
+            "all_heads_unchanged": true,
+            "candidate_tests": 0,
+            "helper_runs": 0,
+            "repository_edits": 0,
+            "new_package_acquisitions": 0,
+            "readiness": "Not all8areimmediatelymerge-ready. Plans identifyfinitewrite sets,commandsandassertions; Windowsformalruntime/artifacts and proposedfixtures remainexplicitpreconditions."
+          }
+        },
+        "rust_go": {
+          "schema": "governance-r13-rust-go-decision-proposals-v1",
+          "common": {
+            "status": "Reference / decision-ready proposal only; nothing authorized by this file",
+            "source_main": "6243bcf17b0a4ae87fe1dfe44661192ad45261a9",
+            "created_at_utc": "2026-10-25T12:48:34.233303+00:00",
+            "performed": ["FreshGitHubmain and8PRmetadata", "ReadfixedGitmanifests/locks/consumers/scripts", "Officialprimaryread-onlyresearch; pinnedduckdb/ICUtagresolvedtocommit"],
+            "not_performed": ["No repository edit/commit/push/merge/close", "Nohelper/tests/build/download/packageinstall/newcandidateacceptance", "NoMacnode--version/goversion sampling", "No processenumeration, task-externalreconnaissance, realcase/credentials/Provider/Privacy"],
+            "freeze": "Productsource/features/Privacy remainfrozen; approval of dependency plan doesnot authorize repairing productcode to fit it.",
+            "refusals": "All inherited logs/annotations/security/alerts/protection/PR70diff/Cquinn/KaTeXcollection/largebaselineAPI/3botjobs/genericindividualjob/PR109body restrictions remain; no route substitution.",
+            "approval_semantics": "A futureYES refers to the exact recommended decision/write set/preparation/test/stop/rollback below; it is not current implementation authority. Unselected alternative remains unapproved.",
+            "preparation_if_future_approved": "Newtask-owned0700root/noextraACL, files0600, actualcache destinations first. Existing standardhelper in same shell for commands using build storage. Proposed Go/Rust preparation additionally needs explicit officialproxy.golang.org/sum.golang.org andcrates.io exactapprovedversions/checksums, not merely npm/PyPI standing grant. No fullnpmci, no canonical dependency/permission changes; no blindresolver/fulltreecleanup.",
+            "git_if_future_approved": "Normalshortbranchfromfreshmain; preserve canonical6dirty/22untracked; one writer; show exactdelta; finalheadfullsamechainjobs+requiredgate+CodeQL; noadmin/force/auto-merge; finalmergemethodnormalmergecommit onlyif granted.",
+            "shared_rollback": "NormalrevertPR of the specific carrier commit (mergecommit uses mainline1 after verifying parents), preserve laterunrelated changes; redo affectedchecks. Securityrollback reintroduces oldrisk and must be explicit, not silently claimedsafe. Noreset/force/history rewrite.",
+            "verification_input_policy": "Only reuse prior evidence with identical ownerinputs. This plan contains proposedcommands/assertions; none were run. Standardfinal-headCI never substitutedbyoldheadgreen.",
+            "native_identity_coupling": "scripts/native-component-contract.cjs NATIVE_BUILD_CONTEXT_PATHS includesruntime-go/go.mod+go.sum; RustsourceSetDigest includes eachCargo.lock. Thus Go/Rustlockchanges invalidate oldnativecache/formalreceipt identity. Do not edit receipts or reuse mismatching artifacts. Consolidate one realnative build/package acceptance after the selected integration candidate stabilizes, ratherthanperdependency packaging loops.",
+            "artifact_scope": "Repositorydependencyfix acceptance is distinctfrominstalled/releasedartifactsecurity. Noautomaticrelease/deploy; retainedexistinginstallationsare notsilentlyclaimedupdated."
+          },
+          "fresh_prs": [
+            {
+              "pr": 89,
+              "state": "open",
+              "head": "da5871807db650e413bd6ca136175aa4e129ff3f",
+              "pr_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
+              "files": ["packages/runtime-go/go.mod", "packages/runtime-go/go.sum"],
+              "additions": 17,
+              "deletions": 11,
+              "url": "https://github.com/Eysn0130/analytix/pull/89",
+              "fresh_metadata": "GitHubget_pr_info at2026-10-25; allheads sameaspreviousBpacket; completefilelistfromexistingGitobjects"
+            },
+            {
+              "pr": 57,
+              "state": "open",
+              "head": "db19f2652cb618b8d45db48e76c2f57a6cba2d6a",
+              "pr_base": "28e0bfd7d8f6d1921aae530fc0390b7523a8a614",
+              "files": ["tools/data_engine/Cargo.lock"],
+              "additions": 4,
+              "deletions": 4,
+              "url": "https://github.com/Eysn0130/analytix/pull/57",
+              "fresh_metadata": "GitHubget_pr_info at2026-10-25; allheads sameaspreviousBpacket; completefilelistfromexistingGitobjects"
+            },
+            {
+              "pr": 12,
+              "state": "open",
+              "head": "1cf3583b40fe4362ad786888ad500c17d24b94c3",
+              "pr_base": "58b365b3bc878e987e215d1fb1862ef111a1a37e",
+              "files": ["tools/analysis_compute/Cargo.lock"],
+              "additions": 26,
+              "deletions": 15,
+              "url": "https://github.com/Eysn0130/analytix/pull/12",
+              "fresh_metadata": "GitHubget_pr_info at2026-10-25; allheads sameaspreviousBpacket; completefilelistfromexistingGitobjects"
+            },
+            {
+              "pr": 1,
+              "state": "open",
+              "head": "027ab53ab470b6c0a545939eecd7000110c40eeb",
+              "pr_base": "1e13bc6a1824207466f196af1f88a498bed1b34e",
+              "files": ["tools/cleaning_ops/Cargo.lock"],
+              "additions": 6,
+              "deletions": 15,
+              "url": "https://github.com/Eysn0130/analytix/pull/1",
+              "fresh_metadata": "GitHubget_pr_info at2026-10-25; allheads sameaspreviousBpacket; completefilelistfromexistingGitobjects"
+            },
+            {
+              "pr": 29,
+              "state": "open",
+              "head": "b35306029b571f090244bb0f26b0f50525a6222f",
+              "pr_base": "ce96cf12581acfa0e19fae7c6aa9c709371012c8",
+              "files": ["tools/analysis_compute/Cargo.lock"],
+              "additions": 6,
+              "deletions": 15,
+              "url": "https://github.com/Eysn0130/analytix/pull/29",
+              "fresh_metadata": "GitHubget_pr_info at2026-10-25; allheads sameaspreviousBpacket; completefilelistfromexistingGitobjects"
+            },
+            {
+              "pr": 2,
+              "state": "open",
+              "head": "946bb377ae3392408bec05474c4f0c67c45550f1",
+              "pr_base": "1e13bc6a1824207466f196af1f88a498bed1b34e",
+              "files": ["tools/cleaning_ops/Cargo.lock"],
+              "additions": 60,
+              "deletions": 24,
+              "url": "https://github.com/Eysn0130/analytix/pull/2",
+              "fresh_metadata": "GitHubget_pr_info at2026-10-25; allheads sameaspreviousBpacket; completefilelistfromexistingGitobjects"
+            },
+            {
+              "pr": 31,
+              "state": "open",
+              "head": "0ac9267c634927e172be535370ab15843007e715",
+              "pr_base": "ce96cf12581acfa0e19fae7c6aa9c709371012c8",
+              "files": ["tools/analysis_compute/Cargo.lock"],
+              "additions": 62,
+              "deletions": 26,
+              "url": "https://github.com/Eysn0130/analytix/pull/31",
+              "fresh_metadata": "GitHubget_pr_info at2026-10-25; allheads sameaspreviousBpacket; completefilelistfromexistingGitobjects"
+            },
+            {
+              "pr": 34,
+              "state": "open",
+              "head": "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb",
+              "pr_base": "cfb5d8d7cfa16d43d980ebdba0c3f7a7f4e61df9",
+              "files": ["package-lock.json", "package.json"],
+              "additions": 12,
+              "deletions": 12,
+              "url": "https://github.com/Eysn0130/analytix/pull/34",
+              "fresh_metadata": "GitHubget_pr_info at2026-10-25; allheads sameaspreviousBpacket; completefilelistfromexistingGitobjects"
+            }
+          ],
+          "sequence_recommended": ["SelectGo89minimumcontractindependently", "SelectsingleTLS+tar3locksecuritycarrier57/1/29;Cquinnremainsblocked", "Close/deferordinaryICU12unlessexplicitSyn3alternativechosen", "Consolidatenativebuild/packageproofonlyonstableintegratedselectedcandidate", "Quinn2/31andElectron34remainthisroundevidence-only"],
+          "go89": {
+            "prs": [89],
+            "recommendation": "Approve explicit minimumGo1.26 sourcecontract, rebuild minimal2filecarrier; keep existingformal/CIcompiler1.26.4 pin unchanged. Do not claim formalpackageacceptance fromthissourcePR.",
+            "current": {
+              "minimum_go": "1.25.0",
+              "x_sys": "0.46.0",
+              "x_text": "0.38.0",
+              "CI_and_formal_toolchain_declared": "1.26.4",
+              "actual_Mac_version": "not sampled"
+            },
+            "target": {
+              "minimum_go": "1.26.0",
+              "x_sys": "0.49.0",
+              "x_text": "0.43.0"
+            },
+            "write_set": ["packages/runtime-go/go.mod", "packages/runtime-go/go.sum"],
+            "unchanged": ["No Go source/SQL/publicparameters/errorcontracts", "No toolchainhash/CI/packagingguard edit", "Keep x/crypto0.53.0/x/net0.56.0 and unrelatedmodules"],
+            "sum_detail": "OriginalPR17+/11- includes5newsum-only modules:go-spew1.1.1,go-difflib1.0.0,testify1.11.1,x/image0.38.0,yaml.v3.0.1. Thesearechecksums,notproofselectedruntimedependencyupgrades. Recompute onlynecessarysums; no blanketextraneouscleanup.",
+            "evidence": ["https://raw.githubusercontent.com/golang/sys/v0.49.0/go.mod", "https://raw.githubusercontent.com/golang/text/v0.43.0/go.mod", "packages/runtime-go/go.mod", ".github/workflows/ci.yml", "scripts/go-runtime-toolchain.json", "scripts/go-runtime-build-contract.cjs", "scripts/native-component-contract.cjs", "scripts/after-pack.cjs"],
+            "reason": "Both exactofficialmoduleversions requirego1.26.0. Actualconsumers include x/sys atomicfilesystem/locks and x/text norm/GBK/cases. CI using1.26.4 doesnot authorize retiring1.25 byitself.",
+            "order": ["Checkfreshmainandhead89; createcleanisolated2filecarrier", "Applyonlyminimum/directtwoexactversions; reconcileexactnecessarygo.sum againstofficialchecksums", "Run focusedsyntheticseams and production-tagcompile, thenfullnormalCI", "MergeonlyunderselectedBapproval; recordminimum1.25retiredandformalpackagegap separately; consolidatepackageevidencewithstableRustcandidate"],
+            "commands_proposed": [
+              {
+                "cwd": "packages/runtime-go",
+                "command": "GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go mod verify",
+                "expect": "exit0; declaredlockedmodulecontent verifies; nocredentials/networkfallback"
+              },
+              {
+                "cwd": "packages/runtime-go",
+                "command": "GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go list -m -json all",
+                "expect": "selectedx/sys0.49.0,text0.43.0; unrelatedmoduleMVS unchanged; nohiddenlanguage/toolchainraise"
+              },
+              {
+                "cwd": "packages/runtime-go",
+                "command": "GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -timeout 5m ./internal/adapters/outbound/filestore ./internal/app/fundscsvadmission ./internal/domain/caseentity -run 'TestAtomicTextReplace|TestApplyTextWrite|TestDisplayLabelV1|TestHostImportCSVAndZIPStagePreviewConfirmLifecycle'",
+                "expect": "actualselectedtests>0 andallpass; atomicwrite/rollback/mode/symlink and Unicode/GBK fixturecontracts remain; syntheticonly"
+              },
+              {
+                "cwd": "packages/runtime-go",
+                "command": "GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build -mod=readonly -buildvcs=false -trimpath -tags analytix_prod -o \"$TASK/bin/runtime-server\" ./cmd/runtime-server",
+                "expect": "exit0/nonemptytaskownedbinary; compileonly, noexecution/Provider/installerclaim"
+              },
+              {
+                "cwd": "repo",
+                "command": "npx --no-install vitest run src/main/go-runtime-build-contract.test.ts",
+                "expect": "all4existingauthoritytestsrun/pass; mockedtoolidentity notactualMacversionreceipt"
+              },
+              {
+                "cwd": "GitHubfinalhead",
+                "command": "existingDevelopmentworkflow/completeexpectedmatrix andCodeQL",
+                "expect": "sameheadsameeffectiveattempt52jobsinclgate; Go2modes/platformseams actuallyrun"
+              }
+            ],
+            "formal_build_vs_package": "FormalproductionbuilderpinsGo1.26.4 andembedsnativeauthority/signingidentity. Directgotagbuild+mockedauthoritytests provecompiler/sourcecontracts only. Package acceptance requires normalexistingafter-pack path, exactnative receipts/fuses/runtimeidentity andsyntheticstartup; no bypass or handwritten receipt. No release/tag/publish; unchangedno-live scope. Marknotrun if prerequisites absent.",
+            "stop": ["MinimumGo1.26decisionnotapproved", "Requiredtoolchain/cache unavailable withoutscopedpreparation", "Changesoutside2files/unrelatedselectedmodules", "Anyproductfix/Privacy needed", "UnknownCIfailure or mismatchnativeartifactidentity; holddependentpackageonly"],
+            "rollback": "Revert2filecarrier via normalPR; restoreoldmoduleminimum/directversions/sums asreviewed; do notchangepinned1.26.4hashes tofakeGo1.25support. Record support/securitytradeoff.",
+            "question": "是否明确退役Go1.25，将最低版本升1.26并按上述两文件/合成验证计划执行，现有正式编译器1.26.4不变、正式包验收另列？",
+            "generation_method": "Startfromfreshmain andonlyreviewed2-filePR89semanticdelta. Usego mod edit -go=1.26.0 plusdeclared2exactrequireversions,thenofficiallypreparedofflinego mod graph/list/verify. Do notrununboundedgo get -u/tidytoacceptnewmodules; ifnecessarysumsdifferfromtheclosedknownversionlist,holdandreport."
+          },
+          "rust_security_bundle57_1_29": {
+            "prs": [57, 1, 29],
+            "recommendation": "One minimal3lockTLS+tar carrier canavoidrepeatedsame-lockCI; eachrootversion/feature/probe independentlyverified. Noquinnupgrade orCresumption. Original57/1/29 remainopenuntilcarrieracceptedandmappingexplicit.",
+            "write_set": ["tools/analysis_compute/Cargo.lock", "tools/cleaning_ops/Cargo.lock", "tools/data_engine/Cargo.lock"],
+            "current_per_root": {
+              "analysis_compute": {
+                "rustls": "0.23.39",
+                "rustls-webpki": "0.103.13",
+                "webpki-roots": "1.0.7",
+                "tar": "0.4.45",
+                "quinn-proto": "0.11.14"
+              },
+              "cleaning_ops": {
+                "rustls": "0.23.39",
+                "rustls-webpki": "0.103.13",
+                "webpki-roots": "1.0.7",
+                "tar": "0.4.45",
+                "quinn-proto": "0.11.14"
+              },
+              "data_engine": {
+                "rustls": "0.23.41",
+                "rustls-webpki": "0.103.13",
+                "webpki-roots": "1.0.8",
+                "tar": "0.4.46",
+                "quinn-proto": "0.11.16"
+              }
+            },
+            "target_all3": {
+              "rustls": "0.23.46",
+              "rustls-webpki": "0.103.16",
+              "webpki-roots": "1.0.10",
+              "tar": "0.4.46"
+            },
+            "allowed_delta": "Onlycompletepackages/requireddependencyedgesofthese4names/checksums in3locks. Dataenginetaralready.46unchanged. Preserve windows-sys,quinn/rand/getrandom,ICU/syn andallunrelatednodes. Anyadditionalresolverdrift isahold,notnewautomaticallowlist.",
+            "official_advisory_binding": [
+              ["rustls", "RUSTSEC-2026-0346", ">=0.23.46", "Debugsessionsecret exposure; current.39/.41in affectedversionline; noappcustomsessionloggerdemonstrated", "https://rustsec.org/advisories/RUSTSEC-2026-0346.html"],
+              ["rustls", "RUSTSEC-2026-0347", ">=0.23.46", "ECHrejectionbuffer; affected>=.23.44 soexisting.39/.41notthiscase. Do notinflatecurrentrisk", "https://rustsec.org/advisories/RUSTSEC-2026-0347.html"],
+              ["rustls", "RUSTSEC-2026-0348", ">=0.23.46", "Nondefaultbrotlicertificatefeature; featureactivationmustbeproved,not1GiBstress-tested", "https://rustsec.org/advisories/RUSTSEC-2026-0348.html"],
+              ["rustls", "RUSTSEC-2026-0349", ">=0.23.46", "UnauthenticatedKXhint; versioncoverage isnotproofactualhandshakeexploit", "https://rustsec.org/advisories/RUSTSEC-2026-0349.html"],
+              ["rustls-webpki", "RUSTSEC-2026-0382/CVE-2026-111943", ">=0.103.16,<0.104alpha", "DistrustedemSignintermediatepublickeys;57target.103.15insufficient", "https://rustsec.org/advisories/RUSTSEC-2026-0382.html"],
+              ["webpki-roots", "RUSTSEC-2026-0381/CVE-2026-111943", ">=1.0.10", "removesemSignECCG3;0.26.11compatmustalsoresolveits1.xparent>=1.0.10", "https://rustsec.org/advisories/RUSTSEC-2026-0381.html"],
+              ["tar", "GHSA-3pv8-6f4r-ffg2", "0.4.46", "officialtarpackageaffected<=0.4.45; PAXxheaderappliesnextfile,notGNUextensionheader", "https://github.com/composefs/tar-rs/security/advisories/GHSA-3pv8-6f4r-ffg2"]
+            ],
+            "tar_binding_correction": "GHSA-3cv2-h65g-fgmm belongsastral-tokio-tar; tarrsrelease mirrorssamebugbutitsownexactpackageadvisoryis3pv8. CurrenttargetisthisspecificknownPAXfix,notproofalltarvulnerabilitiesresolved.",
+            "pinned_upstream": {
+              "duckdb_rs_commit": "452fc0b6650edd8c8aac5c83a98d320bc31cb5bc",
+              "urls": ["https://github.com/duckdb/duckdb-rs/blob/452fc0b6650edd8c8aac5c83a98d320bc31cb5bc/crates/libduckdb-sys/Cargo.toml", "https://github.com/duckdb/duckdb-rs/blob/452fc0b6650edd8c8aac5c83a98d320bc31cb5bc/crates/libduckdb-sys/build.rs", "https://github.com/duckdb/duckdb-rs/blob/452fc0b6650edd8c8aac5c83a98d320bc31cb5bc/crates/libduckdb-sys/build_bundled_cc.rs"]
+            },
+            "consumer_boundary": "All3locks:reqwest/tar soleparentlibduckdb-sys1.10504.0. Upstreamclassifiesthembuild-dependencies; reqwestdefault-features=false,blocking+rustls-tls. Repo3rootsenableDuckDBbundled. bundled_cc usesRusttar::Archive oncrate-ownedduckdb.tar.gz duringbuild; reqwestdownloadpathisinnot(bundled) module gatedDUCKDB_DOWNLOAD_LIB=true. NoRustappdirectreqwest/tarcall foundinthe3src trees. This narrowscurrentRustchain tobuild-time; DuckDBC++runtimeHTTPS/extensions area separateTLSimplementation andarenotprovedsafe/unreachablebythisRustlockanalysis.",
+            "native_consumers": ["data_engine→backenddata_engine_client/db_engine andGo nativecomponentregistry/runner", "analysis_compute→backendanalysis_compute_runner andGo registry", "cleaning_ops→data_engine pathcrate andnativecomponentregistry"],
+            "order": ["Freshmainandhead/filediff; source3lockbaseline fullnodecatalog", "ReadexactofficialCargoartifactchecksums; materializetaskcacheonlyiffutureapprovalexplicitlycoversCargo; offlinegenerationinprivatecandidate,nevercanonical", "Buildcandidatewithonlyclosed4nametargetdeltas; enumeratenodesandassertallothercompletenodes unchanged", "Runperrootmetadata/features thenboundedtar/TLSprobes andexistingRusttests; C-refusedpurposeunchanged/neverexecuted", "OnecompletefinalheadCIchain; thennormalmergemap57+1+29totree-specificcoverage; keepquinnresidualopen", "Consolidatenativebuild/artifactacceptanceonceonstableintegratedcandidate; oldreceiptsinvalidatedbychangedCargo.lock,notmanuallyrefreshed"],
+            "commands_proposed_nonC": [
+              {
+                "cwd": "repo",
+                "command": "cargo metadata --locked --offline --format-version 1 --manifest-path tools/<root>/Cargo.toml",
+                "roots": ["analysis_compute", "cleaning_ops", "data_engine"],
+                "expect": "sameexacttargetversionseachownresolvercontext;allnonallowednodefieldsunchanged;noquinn/windowsreselection"
+              },
+              {
+                "cwd": "repo",
+                "command": "cargo tree --locked --offline --manifest-path tools/<root>/Cargo.toml -e features -i rustls",
+                "roots": ["analysis_compute", "cleaning_ops", "data_engine"],
+                "expect": "recordbuildedgeandactualrustlsfeaturesfromeachroot;donotinferfromlockoptionalnodes;brotil/ECHclaimsconditional"
+              },
+              {
+                "cwd": "taskprivateprobe",
+                "command": "cargo test --locked --offline --manifest-path \"$TASK/probes/dependency-contracts/Cargo.toml\" -- --test-threads=1",
+                "expect": "declaredsmallsyntheticprobesbelow run;notactualproduct/Provider/case;outertimeout60s/RSS256MiB/output64KiB"
+              },
+              {
+                "cwd": "repo",
+                "command": "cargo test --locked --offline --manifest-path tools/<root>/Cargo.toml --all-targets",
+                "roots": ["analysis_compute", "cleaning_ops", "data_engine"],
+                "expect": "allactualexistingunitcontractsrun;notproductionadmission. IndependentTLS/tartestingonlyifplatformallows; neverusecommandtoresumeCquinnrefusedpurpose"
+              },
+              {
+                "cwd": "GitHubfinalhead",
+                "command": "existingfullDevelopmentmatrix +CodeQL",
+                "expect": "sameeffectivefinalheadchain52/52inclgate andallRustcomponentjobs; anyC-specificplatformblockreportednotcountedpassed"
+              }
+            ],
+            "synthetic_probe_spec": {
+              "tar": "Handwrittenfixed512-byteheaders/checksums, <=16KiBarchive: PAXsize→GNUlongname→fileA+fileB. Assert2entries/names/exactbytes/sizes, nohiddenextra member; ordinaryustarandPAX-onlycontrols pass. Baseline.45mustfaildeclaredoracleandcandidate.46pass. Extractionifneededonlynew0700taskroot; noambientpath/symlinktarget/userfile. DonotuseBuildernormalizationthatremovesbug.",
+              "TLS": "Useonlytask-generatedsyntheticcert/keyorlicensedpublicupstreamcertfixtures. ExacttargetRustls/WebPKI loopbackpair: trustedmatchingnameconnects,wrongname/untrustedCAreject,close/cancelends. EnumeraterootanchorsproveemSignECCG3absent(knownDERSHA25686a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b); exerciseofficialdistrustedSPKIpubliccertificateverificationfixturewithoutreadingprivatekeys. Version/advisorycheckscovernonactivefeatures; do notmanufacture1GiBdecompressionorclaimall6TLSexploitpathsreproduced."
+            },
+            "stop": ["Anyquinn/C-refusedpurpose requiresexecution; do notprovidealternativeroute", "Anylockchangeoutsideclosedtargetnodes/3files", "Publicartifactchecksum/registryidentitymismatch", "Target-behaviornegativetestactuallyfailsorbaselinecontrolcannotdetectcase; retainfailure,noassertionweakening", "Anyproductcode/Privacychange needed", "UnknownCIfailure", "Noactualnativeidentity/prerequisites: holdartifactclaim,notfakesourcefailure"],
+            "rollback": "NormalcarrierrevertPR restoringreviewedparent3locks;recheck3rootnodesandunitmatrix;explicitlyregisterreturnedTLS/PAXrisk.Nocachedreceiptcopy,Go/nativeauthorityweaken,resetorforce.",
+            "mapping_if_accepted": {
+              "57": "carriermerge→TLS3ownroots→targetenumeration/features/probe/CI",
+              "1": "carriermerge→cleaning_opstar0.4.46→PAXprobe/ownRusttests;quinnnotclosed",
+              "29": "carriermerge→analysis_computetar0.4.46→sameprobe/ownRusttests;data_enginetaralready.46notclaimednewfix"
+            },
+            "question": "是否批准将#57/#1/#29重建为上述三锁最小TLS＋tar安全载体（含官方Cargo精确包准备和逐根合成验证），quinn/C操作不变，超出封闭目标即停该项？",
+            "platform_evidence_limit": "ExistingRustrequiredjobsrunLinux1.94.1unitcontracts; theydonotproveWindows/Darwinpackagedbinaries. Exactnewnativepublication/buildcontextreceipts andsyntheticartifactconsumers mustbeconsolidatedforclaimedtargetsupport; noinstaller/releaseclaimfrom52/52. IfaC-relatedplatformrestrictionalsoblocksindependentTLS/tarvalidationoncleaning_ops,holdthatrootandreportpartialcoverage; neverroutearoundorclaim3rootsdone."
+          },
+          "icu12": {
+            "prs": [12],
+            "recommendation": "Defaultrecommendation: do nottakeordinaryICUupgradeinthiscloseout;closeold12unmergedwithtrackeddecisionandretainbranchuntilseparatelypermittedcleanup. No independentlyboundurgentsecuritygoalforICU2.3provedhere. Ifuserchoosesupgrade,exactalternativebelowrequiresacceptingSyn3,notpretendingFminoronly.",
+            "write_set_recommended": ["governance ledger disposition only; PR12stateclosure afterfutureapproval; noCargo/manifest/sourcechange"],
+            "current": "analysis_compute icu_locale_core2.2.0,icu_collator2.2.0;Rust1.94.1CI/nativepins unchanged",
+            "proposal_target": "original2.3localeclosure:icu_locale_core2.3.0,tinystr0.8.4,writeable0.6.4,yoke0.8.3,zerovec0.11.8,zerovec-derive0.11.6,newSyn3.0.5",
+            "minimum_closure_proof": "OfficialICU2.3tagcommitb1cec62bb76ddd8f1f7f52616997f0f243d5eb9e setsworkspaceSyn3.0,zerovec>=0.11.7andderive>=0.11.4;derive0.11.4alreadyusesworkspaceSyn3. Thusdowngrading.11.6→.11.4doesnotavoidmajorandmisses.11.5soundnessrepair. Old.11.3isnotavalidautomaticretentionchoice.",
+            "source_refs": ["https://github.com/unicode-org/icu4x/blob/b1cec62bb76ddd8f1f7f52616997f0f243d5eb9e/Cargo.toml", "https://github.com/unicode-org/icu4x/blob/b1cec62bb76ddd8f1f7f52616997f0f243d5eb9e/utils/zerovec/derive/Cargo.toml", "tools/analysis_compute/src/flow_graph_layout_contract.rs", "tools/analysis_compute/src/flow_graph_render_plan/viewport_expand.rs", "tools/analysis_compute/src/flow_layout_node_plan.rs", "tools/analysis_compute/src/flow_projection_layout_sync.rs"],
+            "contract": "zh-CNcollator sortsvisiblegraphIDswithlexicaltie-break;notjustcompile-timeunusedmetadata. Other2independentnativeCargo.lockstillembedanalysispathcratebutselectownICU2.2closure. Analysis-onlyupgradecannotbecalledallappICUupgrade.",
+            "order_recommended": ["FreshcheckPR12headunchangedandcurrentICUnodes", "Close12withoutmerge;recordnoFqualification,Syn3coupling,unverifiedbenefitandretainedbranch;do notignorefuturemajorsglobally"],
+            "validation_recommended": ["ReadbackPRclosed/unmergedandexactbranchretained", "Gitdiff/JSON/linkchecksforledgeronly;noRustbuild/testforno-codeclosure"],
+            "alternative_if_explicitly_selected": {
+              "scope": "ApproveICU2.3+Syn3closed7packageupgrade; chooseall3nativeCargo.lockstounifyactualbinaryconsumers, retainallTLS/tar/quinn/currentsecuritynodes; donotmakeproductsortcoderepairs",
+              "write_set": ["tools/analysis_compute/Cargo.lock", "tools/cleaning_ops/Cargo.lock", "tools/data_engine/Cargo.lock"],
+              "commands": ["cargo test --locked --offline --manifest-path tools/analysis_compute/Cargo.toml --lib flow_graph_layout_contract::tests::layout_contract_uses_zh_cn_order_for_non_ascii_ids -- --exact --nocapture", "cargo test --locked --offline --manifest-path tools/analysis_compute/Cargo.toml --lib flow_layout_node_plan -- --nocapture", "cargo test --locked --offline --manifest-path tools/data_engine/Cargo.toml --all-targets", "existingfullfinalheadCI"],
+              "assertions": ["existing9-idChinese/accent/clusterorderbyte-exact", "fixedsortcorpusincludingempty,Han,ASCII,e/é,tiesandmixedclusterIDscompare2.2/2.3withoutweakeningoldoracle", "nochangedSQL/materialization/publicparams/exceptions", "all3ownrootsenumerateconsistentapprovedICU/Synclosure;noWindowsedgesreselected;alloldsecuritytargetsretained"],
+              "stop": "Anyobservedgraphorderingchange,unrelatedlockdrift,newMSRVbeyondpinned1.94.1,productcodeneeded,platformCrefusalorunknownCI→holdupgrade;neverchangeexpectedordertoforcegreen",
+              "rollback": "NormalrevertcarrierPR3locks,stablecache/sourceidentityrecalculated;neverrestoreoldnativeblobundernewsourcehash"
+            },
+            "question": "是否同意本轮不采纳#12、关闭并登记ICU2.3/Syn3合同待办（保留分支），不为普通minor制造升级施工？如选升级则明确采用所列三锁七包替代方案。"
+          },
+          "quinn_exceptions": [
+            {
+              "pr": 2,
+              "scope": "Platform-blocked evidence-only exception; no executable remediation/alternate/manualrunbook",
+              "write_set": [],
+              "current": "quinn-proto0.11.14",
+              "old_pr_target": "0.11.17",
+              "head": "946bb377ae3392408bec05474c4f0c67c45550f1",
+              "file": "tools/cleaning_ops/Cargo.lock",
+              "judgment": "Existingproposalalsoreselectsrand/getrandomclosure;historical>=0.11.19doesnotproveasof2026-10-25security. Noexecuting/downloading/retryingCpurpose underthisplan.",
+              "advisories_new_readonly": [
+                ["RUSTSEC-2026-0338", ">=0.11.18"],
+                ["RUSTSEC-2026-0339", ">=0.11.17"],
+                ["RUSTSEC-2026-0340", ">=0.11.18"],
+                ["RUSTSEC-2026-0341", ">=0.11.17; versions<.11.15unaffectedbythisspecificfollowup"],
+                ["RUSTSEC-2026-0342", ">=0.11.17"],
+                ["RUSTSEC-2026-0343", ">=0.11.18"]
+              ],
+              "sources": ["https://rustsec.org/advisories/RUSTSEC-2026-0338.html", "https://rustsec.org/advisories/RUSTSEC-2026-0339.html", "https://rustsec.org/advisories/RUSTSEC-2026-0340.html", "https://rustsec.org/advisories/RUSTSEC-2026-0341.html", "https://rustsec.org/advisories/RUSTSEC-2026-0342.html", "https://rustsec.org/advisories/RUSTSEC-2026-0343.html"],
+              "limitations": ["Noassertionall6applyto.11.14; theiraffectedranges/featuresdiffer", "0185officialwebpagereadinaccessiblethisround; not retried/rerouted. Oldtwo-advisorybindingnotconsideredcomplete", "CurrentRustreqwestchainisbuild-dependencyandhttp3featureactivationnotproved;lockpresencealoneisnotexploitable/runtimeproof", "Dataengineseparatequinn0.11.16alsoinventoryresidual;notcoveredbyclosing2/31"],
+              "risk": "Versionresidualandfeature/egress/exploitabilityproofremain. Reviewdeadline2026-11-01isnotacceptedresidualriskwithoutuserdecision.",
+              "commands": [],
+              "rollback": "Noimplementationoccurred;noactionorrollbacksequenceprovided.",
+              "question": "是否维持2为平台阻塞证据项、指定限期风险决定，待平台合规恢复及完整公告/消费证据齐备后重新决策（本批准不恢复执行）？"
+            },
+            {
+              "pr": 31,
+              "scope": "Platform-blocked evidence-only exception; no executable remediation/alternate/manualrunbook",
+              "write_set": [],
+              "current": "quinn-proto0.11.14",
+              "old_pr_target": "0.11.18",
+              "head": "0ac9267c634927e172be535370ab15843007e715",
+              "file": "tools/analysis_compute/Cargo.lock",
+              "judgment": "Existingproposalalsoreselectsrand/getrandomclosure;historical>=0.11.19doesnotproveasof2026-10-25security. Noexecuting/downloading/retryingCpurpose underthisplan.",
+              "advisories_new_readonly": [
+                ["RUSTSEC-2026-0338", ">=0.11.18"],
+                ["RUSTSEC-2026-0339", ">=0.11.17"],
+                ["RUSTSEC-2026-0340", ">=0.11.18"],
+                ["RUSTSEC-2026-0341", ">=0.11.17; versions<.11.15unaffectedbythisspecificfollowup"],
+                ["RUSTSEC-2026-0342", ">=0.11.17"],
+                ["RUSTSEC-2026-0343", ">=0.11.18"]
+              ],
+              "sources": ["https://rustsec.org/advisories/RUSTSEC-2026-0338.html", "https://rustsec.org/advisories/RUSTSEC-2026-0339.html", "https://rustsec.org/advisories/RUSTSEC-2026-0340.html", "https://rustsec.org/advisories/RUSTSEC-2026-0341.html", "https://rustsec.org/advisories/RUSTSEC-2026-0342.html", "https://rustsec.org/advisories/RUSTSEC-2026-0343.html"],
+              "limitations": ["Noassertionall6applyto.11.14; theiraffectedranges/featuresdiffer", "0185officialwebpagereadinaccessiblethisround; not retried/rerouted. Oldtwo-advisorybindingnotconsideredcomplete", "CurrentRustreqwestchainisbuild-dependencyandhttp3featureactivationnotproved;lockpresencealoneisnotexploitable/runtimeproof", "Dataengineseparatequinn0.11.16alsoinventoryresidual;notcoveredbyclosing2/31"],
+              "risk": "Versionresidualandfeature/egress/exploitabilityproofremain. Reviewdeadline2026-11-01isnotacceptedresidualriskwithoutuserdecision.",
+              "commands": [],
+              "rollback": "Noimplementationoccurred;noactionorrollbacksequenceprovided.",
+              "question": "是否维持31为平台阻塞证据项、指定限期风险决定，待平台合规恢复及完整公告/消费证据齐备后重新决策（本批准不恢复执行）？"
+            }
+          ],
+          "electron34": {
+            "pr": 34,
+            "write_set": [],
+            "recommendation": "Do notadopt42.11.16aslong-termsecuritytarget; noNode/Electronimplementationnow. Prefer44supportedstablecandidateonlyafterofficialproof10/21fixes,45notautomaticfallback.",
+            "current_source": {
+              "electron": "41.10.3",
+              "node_tools_pins": ".nvmrc/.node-version22.22.1",
+              "Macactual": "not sampled"
+            },
+            "official_table": [
+              ["41series/current41.10.3", "EOL2026-08-24", "currentembeddedNodeexactpatchnotre-readinthisround", "notacceptedsecuritytarget"],
+              ["42.11.16", "EOL2026-10-20", "Node24.19.0", "before10/21release;hasseparateeMudhramitigationbutnotallNodefixes"],
+              ["44.9.3", "supported;EOL2027-03-02tentative", "Node24.22.0", "below24.22.1;do notclaim10/21bundlefixed"],
+              ["45.0.0", "supported;EOL2027-04-27tentative", "Node24.22.0", "below24.22.1;majoralsoremovesglobals/modulesfromsandboxpreload"],
+              ["46alpha/nightly", "prerelease", "Node24.22.1", "notstableproductioncandidate;notproposedautomaticadoption"]
+            ],
+            "node_oct21_fixed": ["22.23.4", "24.22.1", "26.12.1"],
+            "primary_urls": ["https://nodejs.org/en/blog/vulnerability/october-2026-security-releases", "https://releases.electronjs.org/schedule", "https://releases.electronjs.org/release/v42.11.16", "https://releases.electronjs.org/release/v44.9.3", "https://releases.electronjs.org/release/v45.0.0", "https://releases.electronjs.org/"],
+            "validation_plan_only": {
+              "candidate_selector": "Firstofficialsupported44stablepatchwithNode>=24.22.1and10/21fixcoverage(orofficialexactbackportproof);freshmetadatafirst.Nomatchingversiontoday→recordnofullsafe-stablecandidate,notfallbacktoalpha/45/unsupported42.",
+              "future_dependency_write_set": ["package.json", "package-lock.json"],
+              "future_tool_pin_separate": [".nvmrc", ".node-version"],
+              "required_seams": ["Exactelectron/version/transitive-node ABI metadata+officialchecksum", "preloadcontextBridge sandboxnegativecontrols, noNodegloballeak", "pty/canvas/office/nativeABIexactcandidatechecks", "normalisolatedstartup/shutdown/GoHTTP/SSEwithsyntheticfixtures", "fixedlight/darkrendererandIPC/clipboard/saveauthorityfixtures", "singleconsolidatedno-publishpackagedcandidate;exactfuses/nativebuildidentity/providerabsence"],
+              "source_tests_if_futureapproved": "npx --no-install vitest run src/preload/preload-sandbox.test.ts src/preload/preload-runtime-request.test.ts src/preload/preload-sse-bridge.test.ts src/preload/preload-write-shutdown.test.ts; npm run typecheck; existingfinalheadCI",
+              "compatibility_limit": "StaticproductionpreloadgrepfoundnoremovedBuffer/events/timers/urlcalls;onlytestBufferuse. Thisdoesnotprovebundle/transitivepreloadcompatibility.45needsrealartifactevidence;donotaddpolyfillproductchangesunderfrozenpermission.",
+              "resource_and_authority": "No versioncommandsnow.Noactualpkgdownload/build now.FutureofficialElectronartifactpreparationandnormalbuild acceptance mustbeexplicitselectedapproval, cacheisolated; nocredentials/liveProviders/installreleasepublishing.",
+              "stop": "Noofficialsafe44stableorABI/bridgebehaviorregressionorproductfixneeded→holdcandidateandreportprecisely;do notweakenassertions/forcepackage."
+            },
+            "rollback": "Noimplementationthisround. AnyfutureadoptedcandidateusesnormalrevertPRwithknownoldsecurityriskregistered;noforcedmanifestrewriteorartifactreuse.",
+            "question": "是否采纳“暂不合#34、优先44受支持且确含10月21修复的稳定patch；现阶段只保留决策/验证计划”，而不把42.11.16或当前44/45误报为Node安全已修？"
+          },
+          "checks": {
+            "repository_changes": 0,
+            "helper_runs": 0,
+            "new_candidate_tests": 0,
+            "package_downloads": 0,
+            "private_root_mode": "0700/noextraACL",
+            "file_mode": "0600"
+          }
+        }
+      },
+      "readiness_meaning": "Ayesselectsastatedboundedplan/disposition,notfakeprevalidatedcandidate. Missingformalartifact/safeofficialElectronstable/unknownprerequisites remain explicitstops;C2/31areplatformblockedexceptions,noapprovalunblocksforbiddenexecution. NoBcandidateexecuted/closed/merged inthisround."
+    },
     "security_evidence": "Incomplete; userprovidedsettings/alert screenshots stillneeded. Existingdeniedroutes not retried.",
-    "decisions": ["Exactstartmain6243,21open,61refs matchespreviousendpoint.", "32allowlist fixedbeforeanydelete; staticsha256 prevents reachability-basedexpansion."],
+    "decisions": ["Exactstartmain6243,21open,61refs matchespreviousendpoint.", "32allowlist fixedbeforeanydelete; staticsha256 prevents reachability-basedexpansion.", "32actions completed independently,eachwith own SHA/containment/recovery and postabsence proof; no batchedpush/looprelease/newref expansion. Firstprivate runner syntaxerror parsedbeforebody,allplanned; correctedbefore anyrefaction,not a permissionrefusal.", "A1all32singleactions exited0;freshpostlist29refs exactly61minus32,unknown disappearances0;no otherref/tipchanged.", "A2bounded6pureimportbindings repaired:5non-productiontest/supportfiles4+/6-.Moduleedgesretained,noinitializer/function/SQL/parameter/error/assertion changes.", "Historicalfullbaseline retainedbyimmutablefca67b41blobee7805c7/hash0b5e77... andmainancestor;no duplicatebigbaselinefile.", "Onlymatching132toolclosure materialized; localfullVitest/typecheck unavailable withoutwholecurrentprojectdeps,so currentHEADrequiredCIis designatedremainingactualtest evidence; no misleadinglocalpass.", "Bpriorroundsummary storedas recoverablehistory at6243 whilecurrent21executionplans liveoncehere; sourceoldreasons notsilentlyrewritten."],
     "verification": "pending; thisispre-actionrecordnotcloseout"
   }
 }
