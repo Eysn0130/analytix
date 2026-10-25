@@ -271,6 +271,32 @@ export function verifyTools(root, toolRoot, policy) {
     if (installed.version !== expected.version || digest(read(toolRoot, `${rel}/package.json`)) !== expected.metadata_sha256) throw Error(`Installed tool drift: ${rel}`)
   }
 }
+// One reviewed Zod tuple, not an operator-controlled migration registry or reset.
+// The trusted-event-base checker must contain this code before phase2 can use it.
+const ZOD_TRANSITION = Object.freeze({"from_baseline_sha256":"cbbcea1c35c4ed9f17dd69ba81a2c6b171a39ca05b839d89011b6292013caaca","to_baseline_sha256":"6ad6f36bfd915413595fec62109797d58426456987b00686ae2531dd55c81ba5","from_policy_sha256":"4bbce2786556231865a666b9a42be2e54f9176141b219b968d7a89014a6bb21a","to_policy_sha256":"2fc898bf01b0fa8081599e8874cea4870ba2145ec364d0b1e5c13a1d55a00d3d"})
+const ZOD_TARGET = Object.freeze({"version":"4.6.7","metadata_sha256":"c2d190d9ee4e0bdb60332aaa2130a6a98d65ddb903fe1d29248b15de57832c45","lock_sha256":"2386775066fb278468d1f294993648c7d8840587c8b3158895f26b26b47e8500"})
+
+// Semantic seam for focused tests. CLI additionally binds both complete byte hashes.
+export function reviewedZodPolicy(trusted, declared) {
+  if (digest(json(trusted.policy)) !== ZOD_TRANSITION.from_policy_sha256) throw Error('Unapproved Zod source policy')
+  const expected = structuredClone(trusted)
+  expected.policy.closure['node_modules/zod'] = ZOD_TARGET
+  if (digest(json(expected.policy)) !== ZOD_TRANSITION.to_policy_sha256 || json(expected) !== json(declared)) {
+    throw Error('Unapproved Zod policy or baseline payload change')
+  }
+  return expected.policy
+}
+export function policyForEvent(trustedBytes, declaredBytes) {
+  const trusted = JSON.parse(trustedBytes), declared = JSON.parse(declaredBytes)
+  if (json(trusted.policy) === json(declared.policy)) return trusted.policy
+  const policy = reviewedZodPolicy(trusted, declared)
+  if (digest(trustedBytes) !== ZOD_TRANSITION.from_baseline_sha256
+      || digest(declaredBytes) !== ZOD_TRANSITION.to_baseline_sha256) {
+    throw Error('Unapproved tooling migration baseline bytes')
+  }
+  return policy
+}
+
 export function eventRefs(env) {
   const event = env.UNUSED_EVENT, base = env.UNUSED_BASE, head = env.UNUSED_HEAD
   if (!['pull_request', 'push', 'workflow_dispatch'].includes(event) || !/^[a-f0-9]{40}$/.test(base ?? '') || !/^[a-f0-9]{40}$/.test(head ?? '') || /^0+$/.test(base) || /^0+$/.test(head)) throw Error('Missing trusted event base/head')
@@ -286,13 +312,18 @@ async function main() {
   if (read(root, BASELINE) !== bytes) throw Error('Working baseline differs from event head')
   if (git(root, 'diff', '--name-only', head).trim()) throw Error('Working source differs from event head')
   const baseFiles = git(root, 'ls-tree', '--name-only', base, '--', BASELINE).trim()
-  let trusted
+  let trusted, trustedBytes
   if (!baseFiles) {
     if (base !== SOURCE || digest(bytes) !== BOOTSTRAP_SHA) throw Error('Unapproved or missing bootstrap baseline')
+    trustedBytes = bytes
     trusted = declared
-  } else trusted = JSON.parse(git(root, 'show', `${base}:${BASELINE}`))
-  if (json(trusted.policy) !== json(declared.policy)) throw Error('Baseline policy drift')
-  verifyTools(root, toolRoot, trusted.policy)
+  } else {
+    trustedBytes = git(root, 'show', `${base}:${BASELINE}`)
+    trusted = JSON.parse(trustedBytes)
+  }
+  const policy = policyForEvent(trustedBytes, bytes)
+  if (json(trusted.policy) !== json(policy) && process.argv.includes('--prune')) throw Error('Tool migration cannot prune findings')
+  verifyTools(root, toolRoot, policy)
   const actual = await scan(root, toolRoot)
   if (process.argv.includes('--prune')) {
     const next = prune(trusted, actual, actual.allGuards)

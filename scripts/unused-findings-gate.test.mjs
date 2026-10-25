@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { tools, indexSource, label, snapshot, compare, prune, eventRefs, scan, sourceFiles } from './unused-findings-gate.mjs'
+import { tools, indexSource, label, snapshot, compare, prune, eventRefs, scan, sourceFiles, BASELINE, reviewedZodPolicy, policyForEvent } from './unused-findings-gate.mjs'
 
 const { eslint, parser } = await tools(process.cwd(), process.env.UNUSED_TOOL_ROOT ?? process.cwd())
 async function fixture(code, extension = 'mjs') {
@@ -178,4 +178,50 @@ test('7 committed source selection excludes install output, retains ignores and 
   assert.equal(after.entries[0].signature.binding, 'newlyCommittedDebt')
   assert.throws(() => check(empty, empty, after), /Findings differ/)
   assert.throws(() => sourceFiles(history.dir, 'f'.repeat(40)), /Command failed/)
+})
+
+// These synthetic payloads test the exact policy seam, not phase2 event acceptance.
+async function reviewedToolFixture() {
+  const actual = await fixture('const retainedToolingDebt = 1;')
+  const policy = JSON.parse(fs.readFileSync(BASELINE, 'utf8')).policy
+  policy.closure['node_modules/zod'] = {"version":"4.4.3","metadata_sha256":"c630bd10b52dcf71c112a2bf78dbf2734b9db58d62de663b8d86c2ec2c8cda2e","lock_sha256":"11ab6e9e2b4241b299f5098bf0dad6cd05adbc22dd0e8acb736eadf0e2d1acaa"}
+  const trusted = { schema: 1, entries: actual.entries, guards: actual.guards, policy, provenance: { raw: 'synthetic-only' } }
+  const declared = structuredClone(trusted)
+  declared.policy.closure['node_modules/zod'] = {"version":"4.6.7","metadata_sha256":"c2d190d9ee4e0bdb60332aaa2130a6a98d65ddb903fe1d29248b15de57832c45","lock_sha256":"2386775066fb278468d1f294993648c7d8840587c8b3158895f26b26b47e8500"}
+  return { trusted, declared, actual }
+}
+
+test('8 reviewed exact Zod semantic policy tuple transfers no finding allowance', async () => {
+  const { trusted, declared, actual } = await reviewedToolFixture()
+  assert.deepEqual(reviewedZodPolicy(trusted, declared), declared.policy)
+  check(trusted, declared, actual)
+  assert.throws(() => policyForEvent(JSON.stringify(trusted), JSON.stringify(declared)), /migration baseline bytes/)
+  assert.deepEqual(policyForEvent(JSON.stringify(trusted), JSON.stringify(trusted)), trusted.policy)
+})
+
+test('9 wrong Zod fingerprint, extra tool node and config drift remain rejected', async () => {
+  const { trusted, declared } = await reviewedToolFixture()
+  const wrong = structuredClone(declared)
+  wrong.policy.closure['node_modules/zod'].metadata_sha256 = '0'.repeat(64)
+  assert.throws(() => reviewedZodPolicy(trusted, wrong), /Unapproved Zod/)
+  const extra = structuredClone(declared)
+  extra.policy.closure['node_modules/extra-unapproved-tool'] = declared.policy.closure['node_modules/zod']
+  assert.throws(() => reviewedZodPolicy(trusted, extra), /Unapproved Zod/)
+  const config = structuredClone(declared)
+  config.policy.config_sha256 = '0'.repeat(64)
+  assert.throws(() => reviewedZodPolicy(trusted, config), /Unapproved Zod/)
+  assert.throws(() => reviewedZodPolicy(declared, trusted), /Unapproved Zod source/)
+})
+
+test('10 tooling changes cannot hide a new finding, count expansion or stale prune', async () => {
+  const { trusted, declared } = await reviewedToolFixture()
+  const adopted = await fixture('const newHiddenFinding = 1;')
+  const hidden = { ...declared, entries: adopted.entries, guards: adopted.guards }
+  assert.throws(() => reviewedZodPolicy(trusted, hidden), /Unapproved Zod/)
+  assert.throws(() => check(trusted, hidden, adopted), /Baseline expansion/)
+  const count = structuredClone(declared)
+  count.entries[0].count += 1
+  assert.throws(() => reviewedZodPolicy(trusted, count), /Unapproved Zod/)
+  const pruned = { ...declared, entries: [], guards: [] }
+  assert.throws(() => reviewedZodPolicy(trusted, pruned), /Unapproved Zod/)
 })
