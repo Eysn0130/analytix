@@ -44,8 +44,9 @@ incomplete postinstall does not receive a new success stamp. These fingerprints
 check installation inputs, not every transitive package byte or native ABI.
 
 Use Node **22.22.1**, npm **10.9.4** and Go **1.26.4** for the tested baseline.
-`.nvmrc`, `.node-version`, `packageManager` and CI agree. Go's `go 1.22` directive
-is the language minimum, not a claim that every packaging toolchain is admitted.
+`.nvmrc`, `.node-version`, `packageManager` and CI agree. The Go language minimum
+is declared in [`go.mod`](../../packages/runtime-go/go.mod); it does not admit
+every packaging toolchain.
 Native builds additionally use the pinned Rust **1.94.1**, SDK/tool identities,
 verified build storage and native execution authority. Do not weaken those
 checks to accommodate a new machine.

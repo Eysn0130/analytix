@@ -1385,8 +1385,8 @@
   },
   "standing_execution_rules": {
     "status": "Operational; read before every continuation and delegation",
-    "approved_at_utc": "2026-10-25T12:28:00Z",
-    "authority": "User-approvedRound13A1/A2;Bplansonly. Latestdelta at delivery_cycle_2026_10_25_round13; historical scope.delivery/merge_policy are not current authority.",
+    "approved_at_utc": "2026-10-26T06:45:59Z",
+    "authority": "User-approvedRound15closeout;116then117andexplicitofficialmechanicalderivatives;notblanketproductadoption. Latestdelta delivery_cycle_2026_10_26_round15",
     "frozen": ["product code", "feature development", "Privacy changes, merges and acceptance execution", "real cases, credentials and live Providers"],
     "prohibited": ["process enumeration or equivalent discovery", "environment reconnaissance outside the declared task scope", "permission repairs or deletion of preserved evidence", "bypass, force-push, settings changes, release, tag or deploy"],
     "isolation": {
@@ -1395,11 +1395,11 @@
       "mode_scope": "0700/no-extra-ACL applies to isolation roots and all private cache/evidence/output directories. Public Git checkout subdirectories may retain normal0755 behind the verified0700 worktree root; do not chmod them or place private outputs there."
     },
     "downloads": {
-      "sources": ["official PyPI", "official npm"],
-      "scope": "Only metadata and exact-version packages of already approved items; verify against approved artifact hashes or fingerprints before offline generation or validation.",
+      "sources": ["official PyPI", "official npm", "explicitly approved fixed official Rustcrate catalog/upstream fixtures", "official fixed Go module metadata"],
+      "scope": "Onlyapprovedexactinputs;Round15officialrequiredWindowsOTel/tzdataderivativescontinuouslynumbered,GoactualofficialprunedMVSfive-nodechange,andtar1/29eachfixed22oldnewinputs.Noarbitrarylatest/newscope. Hash/fingerprintverifybeforeuse;acquisitiondoesnotauthorizeinstall/build/projectexecution.",
       "preparation": "No installation, build or project execution during acquisition. This does not cancel separately approved synthetic tests or the real patch-package CLI contract."
     },
-    "git": "One writer per branch;fresh main/head;mechanical sync only;normal finalHEAD full expected matrix+required gate before ready/mergecommit. No force/admin/bypass/auto-merge. Only exact pre-recorded32 refs admitted for individual reversible deletion this round, now all executed; no batchpush/automatic release loop/list expansion/newbranch deletion.",
+    "git": "RootsoleGit/PR/integrationwriter;normalmergecommitonlyafterfreshmain/finalheadcomplete52+gate/CodeQL. Everymerge mainmustpasscompletejobsBEFOREnextmerge. Approvedreplacementclosureswithqualifiedmapping;97/12branchesretain;frozen/unproved5retain. Individualpre-recordedrefdeletiononlyafterfreshSHA/maincontains/recovery. Replacedclosed isnot tipancestry. No force/admin/bypass/automerge/settings.",
     "public_pr_text": "Public PR/SHA/CI links and coverage mapping only; no local machine paths or unsafe machine evidence.",
     "verification": "Reuse unchanged passing inputs;honest pass/partial/skipped/blocked. Unused strict equality preserved:source repair first;explicit --prune only previously recorded fixed keys/counts,never add or increase. Historical1927/1933 preserved by immutable retained-main ancestor+hash;current baseline is operational SSOT. No automatic regeneration or restoration of fixed findings.",
     "refusals": {
@@ -1415,19 +1415,21 @@
       "individual_job_route": "Genericgithub_fetch/actions/jobs/<id>isnotanallowedendpointfamily;do not probeothervariants. The3explicitlyrefusedjobsremainunreadthroughalternativeroutes.",
       "other_public_actions": "PR109 old body update failed with unknown cause/raw error unavailable;do not retry that action or alternate comments. R12 bulk70ref deletion denied/unexecuted;not restored by newexact32single-ref authority.",
       "large_baseline_independent_read": "ParentfixedHEADlargebaseline read400too-large/unsupported;no alternate retrieval for that refusal. Existing authorizedlocal baseline may be used with accurate attribution.",
-      "rustsec_0185": "RUSTSEC-2026-0185 official page unavailable in boundedB review;no retry or alternate lookup for refused target;gap retained."
+      "rustsec_0185": "RUSTSEC-2026-0185 official page unavailable in boundedB review;no retry or alternate lookup for refused target;gap retained.",
+      "round15": "Libraryscope403remainsunread/notrerouted/notreuploaded;notprerequisite. NewRusttarprobeagentcybersafetyflagisNOTcapacity;no retry/rephrase/alternateexecutor/manualbypass. Windows95materializationthenauto-reviewdeniedbeforeCreateProcess;no retry/split/alternateentry.Newscript0644holdwasresolvedONLYbyuser07:39:15Zexactone-file0600exception;rootidentity/hashverified,nootherchmod.Generalpermission-repairbanremains."
     },
-    "hard_stops": ["product code or Privacy required", "certifi fingerprint differs from the accepted comparison", "lock drift outside the declared write set", "behavior change beyond approved exact-version contract alignment", "unofficial source or hash mismatch", "CI failure with unlocated cause", "reserved E/H, Electron/rustls, Pillow or Python 3.10 decision"],
+    "hard_stops": ["product code or Privacy required", "certifi fingerprint differs from the accepted comparison", "lock drift outside the declared write set", "behavior change beyond approved exact-version contract alignment", "unofficial source or hash mismatch", "CI failure with unlocated cause", "Unapproved product-contract decisions;Round15 explicitly permits named Go/Actions/backend candidates and official mechanical derivatives only. Node/Electron,93shim,77Pillow/Python3.10,118productjoin and platform-refused operations remain held."],
     "item_holds": "Unexpected external candidate-head changes or an unlocated failure hold that item only. A target-behavior probe failure is retained as failed evidence and holds its merge; other approved items continue.",
-    "reporting": "Hard stops immediately; otherwise one final same-main/same-window package receipt. Queue/running is work, not delivery. CI observer finite declared targets only, stop at terminal. No globalcloseout/unfreeze untiluser accepts.",
-    "supersession": "CurrentRound13 delta supersedes historical narrower no-deletion/baseline-not-moving wording ONLY for exact32 and verified trim-only. Product/features/Privacy frozen. B21 plans/disposition only, no B upgrades/closures/candidate execution. Node/Electron changes and Macgo/nodeversion sampling remain unapproved. All safety/API refusals remain.",
+    "reporting": "Hardstopimmediate;otherwisewholepackageonce. Noordinaryqueueasdelivery. Preservecurrentfinalhead/attemptCI,nosuccesssplice. PostcommitresultsinexistingPRreceipts;noselfSHAreportcommitloops;finalsnapshotshortwindownotatomic. No globalcloseout/unfreezewithoutuseracceptance.",
+    "supersession": "Round15liftsnamedmerge/close/reversibleindividualdeleteandofficialmechanicalderivativepreparationonly;93shim/77support-risk/118productjoin/Privacyremainfrozen. Phase2Zodrequiresphase1actualtrustedmain. Attachment403notretried/localroute/reupload,butuserremovedasprerequisite.",
     "explicit_resumption": {
       "backend_metadata": ["pypdf6.21.2", "urllib3 2.8.0", "certifi2026.10.19"],
       "patch_package": "Previously verified official8.0.1 artifact and its real-CLI evidence admitted; do not redownload or rerun unchanged verification."
     },
     "frozen_pr_policy": "51/70 closed and registered as feature-freeze decisions inRound12;their branches remain retained. Historical still-open recommendations are superseded, never authorization to reopen or implement.",
     "observation_control": "Onlydeclaredexactheads/runs;one60smetadataobserver. Eachcompletedexeccommitsactualjob/stepdata. Withinthiscontinuouspackage,finite4hwindowsmaycheckpointandresumesamedeclaredtargetswithoutnewuserapproval;neverextendarefusedactionoroldPR80budget,neveraddendpoints/logs. Stopwhenalltargetsdone.",
-    "current_delta_pointer": "delivery_cycle_2026_10_25_round13"
+    "current_delta_pointer": "delivery_cycle_2026_10_26_round15",
+    "capacity_rule": "Onlyexact Selected model is at capacity. Please try a different model.:backoffthenretrySAMEGPT6.1SolUltra;nomodelswitch/noendingwholepackageforcapacity.Doesnotextendtopermission/policy/cybersafetyrefusals."
   },
   "delivery_cycle_2026_10_24": {
     "source_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
@@ -5500,5 +5502,239 @@
       "publication_record": "This is prepublicationlocalreceipt. Exactcandidateandmergedmain CI plus same-windowterminalsnapshot will be attached to its publicPR;do not keep committing a self-referential report solely to change itsownSHA/CI. Branch/rawsource/baseline proof stays in thisledger."
     },
     "prepublication_utc": "2026-10-25T13:32:05.708514+00:00"
+  },
+  "delivery_cycle_2026_10_26_round15": {
+    "status": "Operational datedRound15record;notglobalcloseout/productacceptance",
+    "authority_utc": "2026-10-26T06:45:59Z",
+    "baseline": "4084b7aba1058dac480633faa59223d21edaa8c5",
+    "start_utc": "2026-10-26T05:51:36.885Z–05:51:37.702Z",
+    "start_open": 25,
+    "start_refs": 34,
+    "source_of_truth": "Existingledgerhistorical2c/R13snapshotsretained;R14accepteduserrecapandpublic115-118receipts;held118NOTmergedforledger. LibraryattachmentnotreadinRound15,notrequiredbyuser06:06clarification.",
+    "current_snapshot_note": "Pre-publicationfactsbelow;afterthisledgercommititsownCI/finalsame-maininventoryonlyinPRreceipt,noselfSHAcommitloop.",
+    "merge_columns": ["PR", "candidateHEAD", "merge/main", "tree", "mergedUTC", "mainDevelopment", "mainCodeQL", "status"],
+    "merges": [
+      [116, "00eb93b3bef95988c4d02c07ee47a49a5f239032", "7fed5d06f27f9daf880bd37392447709d8b35aee", "6d6aee58a7d8f3a081a96c98a673b0b48f88573e", "2026-10-26T06:11:28Z", 40278372806, 40278372600, "52/52and4/4attempt1successverifiedbefore117sync"],
+      [117, "6254c2fc2ac46c696b31c61587707c25098290c2", "02998f0de1499204005ed2e89bd84d938d95acf3", "fc419e300fe72903110d046da6d17ae5387a4993", "2026-10-26T07:28:19Z", 40285989719, 40285988947, "52/52Development+4/4CodeQLattempt1sameheadsuccessverified08:13:48Z;lastcompletion08:13:02Z/07:44:42Z"],
+      [115, "431a737dd93bf1b24cfd9c533a4591892ba88c2d", "2928d399da8f444b1fa17e9a69ffc77aa241a9fb", "81162a706b83076812a699dc53748edc1e02ceb5", "2026-10-26T08:28:53Z", 40292550148, 40292549517, "PR52+4+3/60checkspass;maincompletejobsPENDING;nextmergeblockeduntilfullsuccess"]
+    ],
+    "candidate_columns": ["PR", "head", "base", "diff", "state"],
+    "candidates": [
+      [118, "74a1d7c5ddb3b874c110171712ec8d64a4d39274", "4084b7aba1058dac480633faa59223d21edaa8c5", "R14Zodphase1only", "heldproductjoin-gap;notmerged;phase2nottrusted"]
+    ],
+    "closure_columns": ["oldPR", "reviewedHEAD", "replacement", "acceptedmerge", "actor/state", "qualification"],
+    "closures": [
+      [4, "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", 116, "7fed5d06f27f9daf880bd37392447709d8b35aee", "manualclosed2026-10-26T06:57:55Z", "notmergedoldtip;noancestryassumption"],
+      [7, "cf368d0e088e49afb8f0ea9b314f95015047aeda", 116, "7fed5d06f27f9daf880bd37392447709d8b35aee", "manualclosed2026-10-26T06:58:00Z", "notmergedoldtip;noancestryassumption"],
+      [90, "1a224b640d5750a99932feaa4be656bd7c1dd433", 116, "7fed5d06f27f9daf880bd37392447709d8b35aee", "botclosed06:13:36Z;manualmappingreviewaftermainfullpass", "botclose/refdeleteNOTcountedasrootoperation"],
+      [15, "f11600dd5b425c1292e16f635dfdf130d18f4fae", 117, "02998f0de1499204005ed2e89bd84d938d95acf3", "manualclosed2026-10-26T08:17:03Z", "sourcepytest9.1.1covered;notWindows/Pillow"],
+      [92, "a6682fcb98e266e0ca43130eeba447b62b0f1327", 117, "02998f0de1499204005ed2e89bd84d938d95acf3", "botclosed07:30:41Z;manualmapping08:17:09Z", "actualSQLGlot30.24andfixed24+24corpusreviewed;notrootclose/refdelete"],
+      [102, "ad609e6a9a06de9c215c39d7747b88531a1bd262", 117, "02998f0de1499204005ed2e89bd84d938d95acf3", "manualclosed2026-10-26T08:17:13Z", "backendcombinedtargetsaccepted;Windows110notcovered"],
+      [97, "699c4c8f02adc5ed1840cb4d899ff13caf6485b3", 107, "877fdf52894c8953ca5593fee38276c90fc5ae3e", "manualclosed2026-10-26T08:17:18Z", "onlyKaTeXsecuritymapping;extra0.19/Commander15notadopted;branchretain"],
+      [12, "1cf3583b40fe4362ad786888ad500c17d24b94c3", null, null, "manualclosed2026-10-26T08:17:22Z", "ICU/Syn3contractTODO;notupgraded;branchretain"],
+      [89, "da5871807db650e413bd6ca136175aa4e129ff3f", 115, "2928d399da8f444b1fa17e9a69ffc77aa241a9fb", "botclosed08:31:09Z;manualcoverageconfirmationPENDINGmainfullCI", "Goactualfive-nodeprunedMVS/20nodesverifiedat431a;notmanualclose"]
+    ],
+    "external_ref_columns": ["ref", "lastSHA", "actor", "eventUTC", "evidence"],
+    "external_ref_disappearances": [
+      ["dependabot/github_actions/actions/upload-artifact-7.0.2", "1a224b640d5750a99932feaa4be656bd7c1dd433", "dependabot[bot]", "2026-10-26T06:13:40Z", "issue90head_ref_deletedevent;notrootdelete"],
+      ["dependabot/uv/backend/sqlglot-30.23.0", "a6682fcb98e266e0ca43130eeba447b62b0f1327", "dependabot[bot]", "2026-10-26T07:30:45Z", "issue92closed07:30:41/head_ref_deleted07:30:45events;notrootdelete"],
+      ["dependabot/github_actions/actions/setup-python-7.0.0", "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "dependabot[bot]", "2026-10-26T06:58:04Z", "issue4head_ref_deletedevent;notrootdelete"],
+      ["dependabot/github_actions/actions/checkout-7.0.1", "cf368d0e088e49afb8f0ea9b314f95015047aeda", "dependabot[bot]", "2026-10-26T06:58:10Z", "issue7head_ref_deletedevent;notrootdelete"],
+      ["dependabot/uv/backend/pytest-9.1.1", "f11600dd5b425c1292e16f635dfdf130d18f4fae", "dependabot[bot]", "2026-10-26T08:17:14Z", "issue15head_ref_deletedevent;notrootdelete"],
+      ["dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0", "1cf3583b40fe4362ad786888ad500c17d24b94c3", "dependabot[bot]", "2026-10-26T08:17:32Z", "issue12head_ref_deletedevent;notrootdelete;explicituserbranchretainrequiresrestoration"],
+      ["dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47", "da5871807db650e413bd6ca136175aa4e129ff3f", "dependabot[bot]", "2026-10-26T08:31:13Z", "issue89botclosed08:31:09Z;notrootdelete"]
+    ],
+    "deletion_policy": "Nobulkoperations.Norecovery/ancestryproofmeansretain;recordpreciseapprovedtargetbeforeeachsingledelete;97/12/frozen2/unproved5retain;114/localpreparationdispositionrecordedexplicitly.",
+    "deletion_records": [
+      ["codex/r14-actions-ready", "00eb93b3bef95988c4d02c07ee47a49a5f239032", 116, "7fed5d06f27f9daf880bd37392447709d8b35aee", "02998f0de1499204005ed2e89bd84d938d95acf3", "deleted;normalgitpushsingle-refexit0;exacttiprecoverablefromretainedmain/116merge", "2026-10-26T08:17:53.842503+00:00", "2026-10-26T08:18:32.761173+00:00"],
+      ["codex/r14-backend-ready", "6254c2fc2ac46c696b31c61587707c25098290c2", 117, "02998f0de1499204005ed2e89bd84d938d95acf3", "02998f0de1499204005ed2e89bd84d938d95acf3", "deleted;normalgitpushsingle-refexit0;exacttiprecoverablefromretainedmain/117merge", "2026-10-26T08:18:33.807825+00:00", "2026-10-26T08:19:11.779261+00:00"],
+      ["codex/governance-round13", "5582f8b1c27fb3f0f43791630ce7d273bb9fb8ba", 114, "4084b7aba1058dac480633faa59223d21edaa8c5", "02998f0de1499204005ed2e89bd84d938d95acf3", "deleted;normalgitpushsingle-refexit0;exacttiprecoverablefromretainedmain/114merge", "2026-10-26T08:19:12.917521+00:00", "2026-10-26T08:21:36.406838+00:00"],
+      ["codex/r14-go-minimum", "431a737dd93bf1b24cfd9c533a4591892ba88c2d", 115, "2928d399da8f444b1fa17e9a69ffc77aa241a9fb", "2928d399da8f444b1fa17e9a69ffc77aa241a9fb", "plannedNOTexecuted;AFTERmainfullCInewrefSHA/ancestry/recoveryrecheck;postpublicationresultinPRreceipt", null, null]
+    ],
+    "derivatives": {
+      "Go115": {
+        "prepared_change": "Nodeprintsactualfullbefore/afterMVSBEFOREassertions;requiresfiveexactaftertargetsandunchangedotherselectedgraph/nodekeys;graphcommands/toolchain/sourcecleanunchanged",
+        "targets": ["sys0.49.0", "text0.43.0", "tools0.51.0", "mod0.41.0", "sync0.24.0"],
+        "actual_values": [
+          ["sys", "0.46.0", "0.49.0"],
+          ["text", "0.38.0", "0.43.0"],
+          ["tools", "0.45.0", "0.51.0"],
+          ["mod", "0.36.0", "0.41.0"],
+          ["sync", "0.21.0", "0.24.0"]
+        ],
+        "boundary": "ActualprunedMVSbuildlist,notrecursiveunprunedupstreamclosure;tools.51metadataalsohasnet.59/telemetry,doNOTsilentlyaddthem.",
+        "state": "merged2928afterfresh02998+60checks;newmain40292550148/49517completejobsPENDING;noclaimmainalreadygreen",
+        "head": "431a737dd93bf1b24cfd9c533a4591892ba88c2d",
+        "tree": "81162a706b83076812a699dc53748edc1e02ceb5",
+        "actual_scope": "ordinaryGojob121454176685success08:18:03Z;20->20selecteddependencyMVSnodeversions,15unchanged;notrecursivegraph/notmainnode",
+        "before_graph_sha256": "59bdc8cbe03e594bbf88bd19efea508bb15b6a3263a37a6c3425267b637298df",
+        "after_graph_sha256": "d23bf1256695bf7fdbde66bdff393d0c8d4b5057ebb3388ce091e23a0f9d12e4",
+        "graph_hash_method": "JSONarrayUTF8compact/noendingLF;modulepaths+versions",
+        "immutable_source": "go mod verify allmodulesverified;go.mod/go.sum gitdiffpass;actualobserved+passJSON"
+      },
+      "Windows": {
+        "proposed_new_items": [
+          [46, "opentelemetry-api", "1.45.1", "FastAPI0.156.4official>=1.44;exactfrom117merged02998andmain52/52+4/4verified08:13:48Z"],
+          [47, "tzdata", "2026.3", "existingmain7fedbackendlockandpandasWindowsmarker"]
+        ],
+        "proposed_names": 47,
+        "state": "110targetPythonfloorconflict;95newmaterializationauto-reviewdenial/notexecuted;metadata/archiveonly.NoWindowscandidatecreated.",
+        "formalruntime": "Officialfixed3.11.15+20260623URL+expectedSHAfromproductionbuildscriptlocated,notdownloaded/verifiedthisround",
+        "permission_hold": {
+          "target": "newtaskWindowsacquire_inputs.py",
+          "sha256": "4a2ec8694c8ee821b9dc1c692596a893b51754b25333129e31a24ae10a45a854",
+          "bytes": 6110,
+          "mode": "0600",
+          "owner_matches_current_user": true,
+          "regular_nonsymlink": true,
+          "parent": "0700/noextraACL",
+          "executed": false,
+          "status": "User07:39:15Zsingle-fileexceptionapproved;rootverifiedregularnonsymlinkowner501/hash/parent0700noACL;changedonly0644to0600;bytes/identityunchanged",
+          "resolved": true
+        },
+        "derivation_registry": "46OTel1.45.1reservedforheld110;47tzdata2026.3for95;do notrenumberorclaim47installednames"
+      },
+      "Tar1_29": {
+        "source": "eachown22graph,oldtar.4.45/new.4.46;union23artifactsisnot23rdgraphnode",
+        "completed": "Reportedexact23cacheartifactsSHAverified/copied;6144BfixtureGitblob/SHAmatched;licensesretained;Rust1.94.1binaryhashesmatched;4privateharnessprepared",
+        "stop": "Newplatformcybersafetyflag;NOTcapacity;no retry/rephrase/alternateexecutor/manualprobe",
+        "error": "This content was flagged for possible cybersecurity risk.",
+        "execution": "Uncertainwhetherfirstcompile/probewasissued;lastconfirmedpreparationexit0,noactualold/newreceiptrecovered.NoRED/GREEN/compilefailureclaims."
+      }
+    },
+    "residuals": {
+      "118": {
+        "status": "productjoincoveragegapconfirmedstatically;hold/notmerged/noWait-onlytestmask",
+        "evidence": "R15-118-lifecycle-closure-readonly,fixed74a1d7c5Goidentical4084;no dynamicreproduction",
+        "path": "registeredturnownerwithoutBeginTurnOperation->ShutdownWaitForTurnOperationsobservesonlyoperationcount;Stop/DrainAllnotjoinrunningcallback;WithoutCanceltelemetrysettlementcanfinishdurableCASaftercancel",
+        "limits": "ActualfailedTempDirrole/relativeleaf,activeownerandwritingCAScorrelation,anddeterministicnegativecontrolstillmissing.RecordFailureNOTidentifiedasactualwriter;ShutdownHostTerminalTakeovercan skip somecancelterminalwork. NoZodregression/flaky/datacorruptionclaim.",
+        "next": "Productauthorizationneededbeforelifecycleoperation/joinrepair;firstdeterministicsyntheticchannelnegativecontrolusingexistingcontrol/serverfixtures.98phase2/108stillrequirephase1actualtrustedmain."
+      },
+      "93": "Producthold.Twoabsententrypoints:temp-path(resolvePreferredOpenClawTmpDir;realexistingimplementationininfra-runtimebutnotexported)andconfig-mutation(mutateConfigFile;accountsloginpaths).Config/logauthority,persistence/afterWrite/error/revocationcontractunresolved.No shim/no-op/rewrite.",
+      "77": "NoPillowcandidate/supportdecision;routeselectionanddatedriskacceptancenotmade.",
+      "57": "NoeffectiveoldTLS/compiledrootsnegative/verifiedtargetregistryartifact;oldrefusalsnotretried;compileerrornotRED.",
+      "34": "Existingallowedofficialpageconfirms44.9.3/45.0.0Node24.22.0vs24.22.1securityrelease;nostablepatchedtargetverified;exactUTCmissing/source-dateconflict;oldrelease-tagAPIrefusalnotretried.NoNodeElectronchange/Macsample.",
+      "2_31": "Platformblocked,noactiveprobe/retry/manualworkaround;oldlowerboundnotnewsafetyproof.",
+      "security_channels": "Settings/alertlinkageproofpendinguser;3botfailurecausesunreadunderexistingrefusal.",
+      "110": {
+        "status": "targetsupportconflict;notcandidate/notmerged",
+        "official": "https://pypi.org/pypi/numpy/2.5.4/json",
+        "metadata_sha256": "a42b40d53fac5388e974f21aa1f01d3b47440ad8181fc827b08023bf8ca3cc96",
+        "evidence": "Requires-Python>=3.12;66officialartifactsnonecp311;Windowscp312/313/314/315;original110hashesmatchthoseofficialartifacts",
+        "conflict": "FixedformalWindowsruntime3.11.15doesnotmeetNumPy2.5.4target;notselectorambiguity",
+        "completed": "9officialmetadatarecords;noWindowswheel/runtime downloadatthisstop",
+        "next": "Separateexplicitruntime/supportdecisionorrevise110target;noautomaticNumPydowngrade/interpreterupgrade.Target22groupnotapprovedsafe."
+      },
+      "95": {
+        "status": "officialmetadata+formalarchiveverified;materializationauto-reviewdenied/notexecuted",
+        "completed": "websockets17.3+tzdata2026.3metadatafixed;formal3.11.15+20260623archive48412195B/SHA7e0a8abfee952efc63dff290022a73f0185b586f522678ae7a757a56f23c289bverified;noformalnativeexecution",
+        "rejection": "ReviewerassociatedPythontar.gzunpackingwithpreviousRusttarcrateprobehold;CreateProcessdenied,nosession.No retry/split/alternateentry/manualbypass.",
+        "next": "Staticexactscope/inputproofforplatformboundaryclarification;materialization/validator/nativeWebSocketpositive-negativeandcandidateCIremainunverified;nomerge/safetycompletionclaim.",
+        "input_requirement_lines": 46,
+        "requirements_sha256": "a9ffd035814bb1701a7d3ac702f142c5727ed7c9d7f2b94c12a573a96121baa6",
+        "requirements_delta": "45->46LF,+2/-1;original44pinsunchanged;WebSockets16->17.3,tzdata2026.3added;noreordering",
+        "scope_clarification": "Private12342BscriptSHA8561caf9b92d9440f8d895a8e01561406bb4b29efe7881a71ce9a1ecda06f9e3uniquetarinputisfixedofficialCPythonarchive.NoRustcrate/Cargo/rustc/old-newRustprobe.Candidateoutput/receiptabsent;noexecution.",
+        "named_evidence": "R15-Windows95-materialization-denial-facts;SHA4814f8749908181e30e4b4f41b31e5bc47c509dae1bb994b20e0ec897715f19f",
+        "native_seam": "ExistingrequiredWindowsjobwouldneedexactformalpython.exeisolatedexecutionof46RequiresDistclosure/realHTTP-WebSocketpositiveandmissing-wheel/metadata/content/runtime negatives;notsetup-python3.11.xsubstitution.Currentproposalonly,noexecutedresults.",
+        "aggregate": "wheelSet/content/fileCountnotcomputed;nevercopy45-packageoldhashes"
+      }
+    },
+    "decisions": ["116mergeexacthead60checks/reviews0/threads0/fresh4084;normalmergecommitdualparents4084+00eb;main52+4then117sync.", "117onlysharedCIcontextconflict:retainfetchdepth0andfixedsetupPython7;new3.10stepusesalreadyacceptedSHA.Fivebackendpayloadblobsbyte-identical625cca;ownnewheadcompleteCIrequired.", "90botclosureandrefdeleteobserved,notrootaction;manualgoalcoverage/mappingreviewperformedafter116mainfullpass.", "Capacityruleupdatedonlyforspecificmodelcapacityerror,notcyber/policy/permissionrefusals.Noothermodel.", "Historical1933andcurrent1921/1927/8kept;noautomaticbaselinegenerationorquotaexpansion.", "117final6254complete52+4+3/60checks;freshbase7fed/reviews0/threads0;normalmerge02998treeequalscandidate,parents7fed+6254.Newmain52+4requiredBEFOREnextmerge.", "115reviewedofficialprunedfive-nodechangeappliedinCI-onlycommitebee0c5d4,thenautomerge02998withnoconflict;mod/sumpayloadunchanged;push431a737d,notyetvalidated.", "KaTeXmappingcorrection:currentoverrideownerismicromark-extension-math.katex=$katex,not@vscode/markdown-it-katex;rootonly0.18.2/runtimenone.Qualified97closuremaymaponlyaccepted107safetytarget;extra.19/Commander15notadopted.", "92nowexternallyclosed;actor/timependingissueeventevidence,notcountedrootclosure.", "Windowsnewacquirescriptprivate-modeomissioncorrectedonlyafterexactuser07:39:15Zpermissionexception;rootFDverifiedidentity/hashandfchmodonefileonly;nootherpath/permissionchange.Officiallimitedpreparationresumes,safetyrefusalsunchanged.", "118staticproductionjoincoveragegapconfirmed;noclaimactualCIwriteridentified.No productfix/Wait-onlytestmask/re-run-to-green.", "Existingdevelopment-baseline.mdline47stillmentionsgo1.22languagefloorwhilemainpre115go.modis1.25/candidate1.26;recordedlegacydocumentationdrift,notMac/toolchainmeasurement.", "110officialNumPy2.5.4RequiresPython>=3.12andnocp311provesfixed3.11.15contractconflict.Stop110withoutloweringNumPy/upgradingruntime/removingtarget;95independentminimalweb17.3/tzdataonlycontinues.", "NecessaryGominimumdocumentationpropagation:development-baseline.mdreplacesstalego1.22literalwithlinktoowninggo.mod;466->467LF,3+/2-.Currentmainalready1.25,candidate1.26;formaltoolchain1.26.4unchanged.NoNode/Electron/productcodechange.Link/diffchecks pass;finaldocPRCIrequired.", "95privateofficialPythonarchive materialization denied atCreateProcesswithnosession;reviewerreasonassociatedwithRusttarhold.Noretry/split/alternateentry;staticexact-inputdistinctiononly.OldRustprobeholdremainsnotcapacity.", "12branchwasdeletedbyDependabot08:17:32despiteuserexplicitretain;notrootdelete.Notmainancestor,existingexactpublictipretainedlocally.Normalabsent-refrestorationplannedtomeetoriginalbranch-retentionoutcome;noPRreopen/newcandidate/force.", "Publicationefficiency:ledgerrecordsactualprepublicationfactsincluding115mainPENDING andpreplannedrecoverablesingle-refcleanup. CompletednewmainCI,postpublicationclosures/deletesandownfinalSHA/inventorybelonginexistingPRreceipt;no secondsourcecommit/CIsolelyforreportselfreference.", "Taskdocbranchmechanicallyfast-forwarded7fed->2928withoutoverlap;privatescopedpatchandbothfileSHAsproveuncommitteddocbytespreserved.Canonicaldirty6/22untouched."],
+    "prepublication_utc": "2026-10-26T08:36:07.718533+00:00",
+    "deletion_columns": ["ref", "recordedTipSHA", "associatedPR", "recoveryMerge", "retainedMain", "status", "precheckUTC", "deleteUTC"],
+    "branch_snapshot_note": "07:37:52Z30refs/page2empty;4/7absentactorunverified;90/92botdeletioneventsproven;nonecreditedroot.Antecedenttips15/102notmainancestorsretainifnotbotdeleted.97/12/frozen2/recovery-unproved5retain.",
+    "restoration_records": [
+      ["dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0", "1cf3583b40fe4362ad786888ad500c17d24b94c3", "restoredoriginalrefnormalgitpushcreateexit0;freshAPIsha1cf358unchanged;PR12stillclosed/notmerged;noPRopened", "2026-10-26T08:24:50.271585+00:00", "2026-10-26T08:25:12.118183+00:00"]
+    ],
+    "prepublication_snapshot": {
+      "recorded_at_utc": "2026-10-26T08:34:16.499Z",
+      "source": "RetainedlatestAPIpage1+emptypage2;recordtimeispreparationtime,notsingleatomicmeasurement. FinalpostpublicationfreshshortwindowinPRreceipt.",
+      "main": "2928d399da8f444b1fa17e9a69ffc77aa241a9fb",
+      "open": 13,
+      "refs": 25,
+      "page2_empty": true,
+      "open_columns": ["PR", "HEAD", "branch"],
+      "open_records": [
+        [118, "74a1d7c5ddb3b874c110171712ec8d64a4d39274", "codex/r14-zod-policy"],
+        [110, "4882a9cc33392e295aefd17284c0645c1f4e5cf1", "dependabot/pip/scripts/pip-minor-patch-8d12d4c10b"],
+        [108, "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3", "dependabot/npm_and_yarn/packages/runtime/zod-4.6.6"],
+        [98, "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53", "dependabot/npm_and_yarn/npm_and_yarn-b94f287d41"],
+        [95, "f64678911e7da5a09ef6e849c83c43036f9d99d2", "dependabot/pip/scripts/websockets-17.3"],
+        [93, "f699f8f660ef2429d2a106d970de3710985cb93b", "dependabot/npm_and_yarn/npm_and_yarn-823d526490"],
+        [77, "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", "dependabot/pip/scripts/pillow-13.0.0"],
+        [57, "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "dependabot/cargo/tools/data_engine/rustls-0.23.46"],
+        [34, "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", "dependabot/npm_and_yarn/electron-41.10.6"],
+        [31, "0ac9267c634927e172be535370ab15843007e715", "dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18"],
+        [29, "b35306029b571f090244bb0f26b0f50525a6222f", "dependabot/cargo/tools/analysis_compute/tar-0.4.46"],
+        [2, "946bb377ae3392408bec05474c4f0c67c45550f1", "dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17"],
+        [1, "027ab53ab470b6c0a545939eecd7000110c40eeb", "dependabot/cargo/tools/cleaning_ops/tar-0.4.46"]
+      ],
+      "ref_columns": ["ref", "SHA"],
+      "refs_records": [
+        ["codex/excel-preview-polish", "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3"],
+        ["codex/finite-replay-archive-reuse", "af74a35b9165590c8f1e63f1ae858b7f83bdb9c9"],
+        ["codex/r14-go-minimum", "431a737dd93bf1b24cfd9c533a4591892ba88c2d"],
+        ["codex/r14-zod-policy", "74a1d7c5ddb3b874c110171712ec8d64a4d39274"],
+        ["codex/repository-maintenance-20261018", "e664f9ea03d3a7da6f671408763b667ef025c14b"],
+        ["codex/retire-unused-quality-20261018", "db3a73f883448e2ff370d02c3900839390510ba3"],
+        ["codex/tool-result-local-snapshots", "2ab4de9c58b81a82af51f0f525d64320a7486a31"],
+        ["dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0", "1cf3583b40fe4362ad786888ad500c17d24b94c3"],
+        ["dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18", "0ac9267c634927e172be535370ab15843007e715"],
+        ["dependabot/cargo/tools/analysis_compute/tar-0.4.46", "b35306029b571f090244bb0f26b0f50525a6222f"],
+        ["dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17", "946bb377ae3392408bec05474c4f0c67c45550f1"],
+        ["dependabot/cargo/tools/cleaning_ops/tar-0.4.46", "027ab53ab470b6c0a545939eecd7000110c40eeb"],
+        ["dependabot/cargo/tools/data_engine/rustls-0.23.46", "db19f2652cb618b8d45db48e76c2f57a6cba2d6a"],
+        ["dependabot/npm_and_yarn/electron-41.10.6", "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb"],
+        ["dependabot/npm_and_yarn/ip-address-10.7.2", "d3c1fc74af37ac2ffa44180fe257c79ddc22f639"],
+        ["dependabot/npm_and_yarn/katex-0.18.2", "0f7fb08d81d563ad9f7daf23c80ac7dc38b90e66"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-823d526490", "f699f8f660ef2429d2a106d970de3710985cb93b"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-89976db822", "699c4c8f02adc5ed1840cb4d899ff13caf6485b3"],
+        ["dependabot/npm_and_yarn/npm_and_yarn-b94f287d41", "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53"],
+        ["dependabot/npm_and_yarn/packages/runtime/zod-4.6.6", "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3"],
+        ["dependabot/pip/scripts/pillow-13.0.0", "57589814d34f4babaf1a7878fc13bcd3b0c33bb1"],
+        ["dependabot/pip/scripts/pip-minor-patch-8d12d4c10b", "4882a9cc33392e295aefd17284c0645c1f4e5cf1"],
+        ["dependabot/pip/scripts/websockets-17.3", "f64678911e7da5a09ef6e849c83c43036f9d99d2"],
+        ["dependabot/uv/backend/uv-minor-patch-cbb656aa63", "ad609e6a9a06de9c215c39d7747b88531a1bd262"],
+        ["main", "2928d399da8f444b1fa17e9a69ffc77aa241a9fb"]
+      ]
+    },
+    "local_preparation_disposition": {
+      "scope": "Onlytaskcodex/r14-*refs;notprivate/archivebranchinventory",
+      "columns": ["branch", "tip"],
+      "refs": [
+        ["codex/r14-actions-ready", "00eb93b3bef95988c4d02c07ee47a49a5f239032"],
+        ["codex/r14-artifact", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-backend-group", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-backend-ready", "6254c2fc2ac46c696b31c61587707c25098290c2"],
+        ["codex/r14-checkout", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-go-minimum", "431a737dd93bf1b24cfd9c533a4591892ba88c2d"],
+        ["codex/r14-pytest", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-setup-python", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-sqlglot", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-websockets", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-weixin", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-windows-group", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-windows-ready", "4084b7aba1058dac480633faa59223d21edaa8c5"],
+        ["codex/r14-zod-policy", "74a1d7c5ddb3b874c110171712ec8d64a4d39274"]
+      ],
+      "decision": "Alllocalpreparationbranches/worktreesretained,noadditionalremotepublication/deletion;mergedcandidate remoteshandledindividuallyabove.Originalsources/diffsnotdiscarded."
+    },
+    "ledger_branch_disposition": "codex/governance-round15:newlocaldocumentationbranch;publishonefocusedPR.ThenormalmergeCIandexactownhead/deleterecordbelonginthatPRreceipt,no self-SHAcommitloop.",
+    "residual_decision_groups": {
+      "accepted": "116Actions,117backend,115Gomerged;115mainCIstillpendingatpublication",
+      "sequence": "98/108Zodstillblockedby118phase1notinactualtrustedmain;noquotareset/phase2adoption",
+      "closed_with_mapping": "4/7/90->116,15/92/102->117,89bot->115pendingmain,97limited107mapping,12unadoptedICU/Syn3TODO;retained97/12branches",
+      "evidence_holds": "1/29Rusttarplatformcyberhold;57TLSvalidnegative/targetartifactmissing;34patchedstableElectron/preciseUTCunproved;noAPIrefusalretry",
+      "maintained_platform_holds": "2/31Cquinn;nomaterial/platformrecoverypermission;noexecutionroute",
+      "product_support": "93shimexports/configauthority;77Python3.10/Pillowchoice;118productionjoinrepair;110NumPy>=3.12vsfixed3.11.15;95officialinputreadybutnewmaterializationreviewdenial"
+    },
+    "acceptance_criteria": [
+      ["storedPRdisposition", "partial", "Acceptedmerged/closedsubsetrecorded;13openresidualsbeforethisdocPR;nodecisionrisklaundering"],
+      ["unusedratchet", "pass-existing", "1921identities/1927occurrences/8guards;historical1927/1933immutable;noquota/baselinechange;finalmainactualgatependingreceipt"],
+      ["dependencymaintenance", "partial", "Existing6ecologiesweeklyminorpatchgroups/noauto-mergepreserved;safetysettings/alertlinkageuserproofmissing"],
+      ["largefiles", "inventory-retained", "Historic74narrownon-testcatalogpreserved;finalcurrentstockmeasurementinPRreceipt;nomechanicalsplitclaim"],
+      ["branches", "partial", "3singleeligibledeletescompleted;12botdeletionnormallyrestored;115plannedaftermainCI;97/12/frozen2/recovery-unproved5retain;finalrefsreceipt"],
+      ["closeout_and_freeze", "not-final", "Product/Privacy/Node-Electronfreezesmaintained;remainingproduct/support/platformdecisionsneeduser;nooverallcloseout/unfreezeclaim"]
+    ]
   }
 }
