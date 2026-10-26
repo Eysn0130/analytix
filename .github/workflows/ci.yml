@@ -298,6 +298,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.26.4'
@@ -305,6 +306,43 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
+      - name: Verify the selected Go module tuple and immutable checksum inputs
+        working-directory: packages/runtime-go
+        run: |
+          umask 077
+          base="$RUNNER_TEMP/analytix-go-module-base"
+          mkdir -m 700 "$base"
+          git show 4084b7aba1058dac480633faa59223d21edaa8c5:packages/runtime-go/go.mod > "$base/go.mod"
+          git show 4084b7aba1058dac480633faa59223d21edaa8c5:packages/runtime-go/go.sum > "$base/go.sum"
+          (cd "$base" && go mod download && go list -m -f '{{.Path}} {{.Version}}' all) > "$RUNNER_TEMP/go-base-modules.txt"
+          go mod download
+          go mod verify
+          go list -mod=readonly -m -f '{{.Path}} {{.Version}}' all > "$RUNNER_TEMP/go-candidate-modules.txt"
+          git diff --exit-code -- go.mod go.sum
+          node --input-type=module - "$RUNNER_TEMP/go-base-modules.txt" "$RUNNER_TEMP/go-candidate-modules.txt" <<'NODE'
+          import fs from 'node:fs'
+          import assert from 'node:assert/strict'
+          const parse = file => new Map(fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(([name]) => name !== 'analytix.local/runtime-go'))
+          const before = parse(process.argv[2]), after = parse(process.argv[3])
+          const expected = new Map([
+            ['golang.org/x/sys', 'v0.49.0'],
+            ['golang.org/x/text', 'v0.43.0'],
+            ['golang.org/x/tools', 'v0.51.0'],
+            ['golang.org/x/mod', 'v0.41.0'],
+            ['golang.org/x/sync', 'v0.24.0'],
+          ])
+          const names = [...new Set([...before.keys(), ...after.keys()])].sort()
+          const changed = names.filter(name => before.get(name) !== after.get(name))
+          const selected = [...expected.keys()].map(name => [name, before.get(name) ?? null, after.get(name) ?? null])
+          // Print real values before any assertion, including unexpected modules.
+          console.log(JSON.stringify({status:'observed', baseline:'4084b7aba1058dac480633faa59223d21edaa8c5', selected, changed, before:[...before].sort(), after:[...after].sort(), checksum_inputs:'unchanged', scope:'actual pruned MVS build list; not recursive unpruned upstream closure'}))
+          assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort())
+          assert.deepEqual(changed, [...expected.keys()].sort())
+          for (const [name, version] of expected) assert.equal(after.get(name), version, name)
+          assert.equal(before.get('golang.org/x/sys'), 'v0.46.0')
+          assert.equal(before.get('golang.org/x/text'), 'v0.38.0')
+          console.log(JSON.stringify({status:'pass', baseline:'4084b7aba1058dac480633faa59223d21edaa8c5', selected, changed, modules:after.size, checksum_inputs:'unchanged', toolchain_scope:'CI only; no Mac version sampling'}))
+          NODE
       - name: Test all other Go packages with bounded concurrency
         working-directory: packages/runtime-go
         env:
