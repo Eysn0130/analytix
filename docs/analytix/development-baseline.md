@@ -464,3 +464,18 @@ Run `node --test scripts/unused-findings-gate.test.mjs` for the six synthetic
 lifecycle/ambiguity contracts and committed-source selection regression. This
 gate covers only the inherited JS/TS scan; it establishes neither unused-code
 removability nor product/Privacy acceptance.
+
+### Reviewed Zod migration candidate
+
+Status: Reference — phase1 candidate only; this text does not adopt Zod4.6.7.
+The checker contains one fixed Zod4.4.3→4.6.7 policy tuple, complete old/new
+baseline byte hashes and unchanged remaining tool closure. A migration preserves
+all entries, counts, guards, audit and provenance; it cannot also prune.
+Normal same-policy strict equality and explicit trim-only behavior remain.
+There is no accept-current flag, environment approval or generic reset registry.
+
+The official artifact and tuple evidence is indexed by
+[the governance ledger](governance-closeout.json). Phase2 still requires phase1
+in the actual trusted main event base. A candidate checker or different PR base
+cannot establish that condition. This round does not merge phase1 or claim
+phase2 official CI; normal final-head gates remain required after future approval.

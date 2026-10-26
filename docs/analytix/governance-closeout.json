@@ -1385,8 +1385,8 @@
   },
   "standing_execution_rules": {
     "status": "Operational; read before every continuation and delegation",
-    "approved_at_utc": "2026-10-25T12:28:00Z",
-    "authority": "User-approvedRound13A1/A2;Bplansonly. Latestdelta at delivery_cycle_2026_10_25_round13; historical scope.delivery/merge_policy are not current authority.",
+    "approved_at_utc": "2026-10-25T15:09:45Z",
+    "authority": "Round14 namedcandidate/evidencepreparationonly;zero merge/closeoriginalPR/branchdelete. Latestdelta delivery_cycle_2026_10_25_round14;R13acceptedhistorynotnewmutationauthority.",
     "frozen": ["product code", "feature development", "Privacy changes, merges and acceptance execution", "real cases, credentials and live Providers"],
     "prohibited": ["process enumeration or equivalent discovery", "environment reconnaissance outside the declared task scope", "permission repairs or deletion of preserved evidence", "bypass, force-push, settings changes, release, tag or deploy"],
     "isolation": {
@@ -1399,7 +1399,7 @@
       "scope": "Only metadata and exact-version packages of already approved items; verify against approved artifact hashes or fingerprints before offline generation or validation.",
       "preparation": "No installation, build or project execution during acquisition. This does not cancel separately approved synthetic tests or the real patch-package CLI contract."
     },
-    "git": "One writer per branch;fresh main/head;mechanical sync only;normal finalHEAD full expected matrix+required gate before ready/mergecommit. No force/admin/bypass/auto-merge. Only exact pre-recorded32 refs admitted for individual reversible deletion this round, now all executed; no batchpush/automatic release loop/list expansion/newbranch deletion.",
+    "git": "OnecoordinatorGit/PRowner;isolatedcandidatewriters andsharedciowner. Normaldraftpush/CIonly;no merge/readyadoption/close/deleterefsincluding114;no force/admin/bypass/settings. Allnewlocal/remoterefsregisterretention.",
     "public_pr_text": "Public PR/SHA/CI links and coverage mapping only; no local machine paths or unsafe machine evidence.",
     "verification": "Reuse unchanged passing inputs;honest pass/partial/skipped/blocked. Unused strict equality preserved:source repair first;explicit --prune only previously recorded fixed keys/counts,never add or increase. Historical1927/1933 preserved by immutable retained-main ancestor+hash;current baseline is operational SSOT. No automatic regeneration or restoration of fixed findings.",
     "refusals": {
@@ -1420,14 +1420,14 @@
     "hard_stops": ["product code or Privacy required", "certifi fingerprint differs from the accepted comparison", "lock drift outside the declared write set", "behavior change beyond approved exact-version contract alignment", "unofficial source or hash mismatch", "CI failure with unlocated cause", "reserved E/H, Electron/rustls, Pillow or Python 3.10 decision"],
     "item_holds": "Unexpected external candidate-head changes or an unlocated failure hold that item only. A target-behavior probe failure is retained as failed evidence and holds its merge; other approved items continue.",
     "reporting": "Hard stops immediately; otherwise one final same-main/same-window package receipt. Queue/running is work, not delivery. CI observer finite declared targets only, stop at terminal. No globalcloseout/unfreeze untiluser accepts.",
-    "supersession": "CurrentRound13 delta supersedes historical narrower no-deletion/baseline-not-moving wording ONLY for exact32 and verified trim-only. Product/features/Privacy frozen. B21 plans/disposition only, no B upgrades/closures/candidate execution. Node/Electron changes and Macgo/nodeversion sampling remain unapproved. All safety/API refusals remain.",
+    "supersession": "R13Bplan-only liftedONLYfor11namedcandidate/evidenceobjects;notproductcontractadoption. Product/feature/Privacy/NodeElectron/Macgo-nodeversion sampling remainfrozen. Phase2Zodblockeduntilphase1actualtrustedmain;zeroalternatebase/checkerroute.",
     "explicit_resumption": {
       "backend_metadata": ["pypdf6.21.2", "urllib3 2.8.0", "certifi2026.10.19"],
       "patch_package": "Previously verified official8.0.1 artifact and its real-CLI evidence admitted; do not redownload or rerun unchanged verification."
     },
     "frozen_pr_policy": "51/70 closed and registered as feature-freeze decisions inRound12;their branches remain retained. Historical still-open recommendations are superseded, never authorization to reopen or implement.",
     "observation_control": "Onlydeclaredexactheads/runs;one60smetadataobserver. Eachcompletedexeccommitsactualjob/stepdata. Withinthiscontinuouspackage,finite4hwindowsmaycheckpointandresumesamedeclaredtargetswithoutnewuserapproval;neverextendarefusedactionoroldPR80budget,neveraddendpoints/logs. Stopwhenalltargetsdone.",
-    "current_delta_pointer": "delivery_cycle_2026_10_25_round13"
+    "current_delta_pointer": "delivery_cycle_2026_10_25_round14"
   },
   "delivery_cycle_2026_10_24": {
     "source_base": "1dd053cc3b3891a1b9776f0e554fb808bf1a9ea7",
@@ -5500,5 +5500,249 @@
       "publication_record": "This is prepublicationlocalreceipt. Exactcandidateandmergedmain CI plus same-windowterminalsnapshot will be attached to its publicPR;do not keep committing a self-referential report solely to change itsownSHA/CI. Branch/rawsource/baseline proof stays in thisledger."
     },
     "prepublication_utc": "2026-10-25T13:32:05.708514+00:00"
+  },
+  "delivery_cycle_2026_10_25_round14": {
+    "status": "CANDIDATE execution only;prepublicationrecord;notmainadoption/closeout",
+    "authority_utc": "2026-10-25T15:09:45Z",
+    "source_main": "4084b7aba1058dac480633faa59223d21edaa8c5",
+    "start_utc": ["2026-10-25T15:11:45.862Z", "2026-10-25T15:11:46.534Z"],
+    "start_page2_empty": {
+      "open": 0,
+      "refs": 0
+    },
+    "start_open_columns": ["PR", "head", "ref"],
+    "start_open": [
+      [110, "4882a9cc33392e295aefd17284c0645c1f4e5cf1", "dependabot/pip/scripts/pip-minor-patch-8d12d4c10b"],
+      [108, "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3", "dependabot/npm_and_yarn/packages/runtime/zod-4.6.6"],
+      [102, "ad609e6a9a06de9c215c39d7747b88531a1bd262", "dependabot/uv/backend/uv-minor-patch-cbb656aa63"],
+      [98, "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53", "dependabot/npm_and_yarn/npm_and_yarn-b94f287d41"],
+      [97, "699c4c8f02adc5ed1840cb4d899ff13caf6485b3", "dependabot/npm_and_yarn/npm_and_yarn-89976db822"],
+      [95, "f64678911e7da5a09ef6e849c83c43036f9d99d2", "dependabot/pip/scripts/websockets-17.3"],
+      [93, "f699f8f660ef2429d2a106d970de3710985cb93b", "dependabot/npm_and_yarn/npm_and_yarn-823d526490"],
+      [92, "a6682fcb98e266e0ca43130eeba447b62b0f1327", "dependabot/uv/backend/sqlglot-30.23.0"],
+      [90, "1a224b640d5750a99932feaa4be656bd7c1dd433", "dependabot/github_actions/actions/upload-artifact-7.0.2"],
+      [89, "da5871807db650e413bd6ca136175aa4e129ff3f", "dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47"],
+      [77, "57589814d34f4babaf1a7878fc13bcd3b0c33bb1", "dependabot/pip/scripts/pillow-13.0.0"],
+      [57, "db19f2652cb618b8d45db48e76c2f57a6cba2d6a", "dependabot/cargo/tools/data_engine/rustls-0.23.46"],
+      [34, "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb", "dependabot/npm_and_yarn/electron-41.10.6"],
+      [31, "0ac9267c634927e172be535370ab15843007e715", "dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18"],
+      [29, "b35306029b571f090244bb0f26b0f50525a6222f", "dependabot/cargo/tools/analysis_compute/tar-0.4.46"],
+      [15, "f11600dd5b425c1292e16f635dfdf130d18f4fae", "dependabot/uv/backend/pytest-9.1.1"],
+      [12, "1cf3583b40fe4362ad786888ad500c17d24b94c3", "dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0"],
+      [7, "cf368d0e088e49afb8f0ea9b314f95015047aeda", "dependabot/github_actions/actions/checkout-7.0.1"],
+      [4, "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f", "dependabot/github_actions/actions/setup-python-7.0.0"],
+      [2, "946bb377ae3392408bec05474c4f0c67c45550f1", "dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17"],
+      [1, "027ab53ab470b6c0a545939eecd7000110c40eeb", "dependabot/cargo/tools/cleaning_ops/tar-0.4.46"]
+    ],
+    "start_ref_columns": ["ref", "SHA"],
+    "start_refs": [
+      ["codex/excel-preview-polish", "430589d91d5630d5ab3b4e250aa4ddd3ad2b06b3"],
+      ["codex/finite-replay-archive-reuse", "af74a35b9165590c8f1e63f1ae858b7f83bdb9c9"],
+      ["codex/governance-round13", "5582f8b1c27fb3f0f43791630ce7d273bb9fb8ba"],
+      ["codex/repository-maintenance-20261018", "e664f9ea03d3a7da6f671408763b667ef025c14b"],
+      ["codex/retire-unused-quality-20261018", "db3a73f883448e2ff370d02c3900839390510ba3"],
+      ["codex/tool-result-local-snapshots", "2ab4de9c58b81a82af51f0f525d64320a7486a31"],
+      ["dependabot/cargo/tools/analysis_compute/icu_locale_core-2.3.0", "1cf3583b40fe4362ad786888ad500c17d24b94c3"],
+      ["dependabot/cargo/tools/analysis_compute/quinn-proto-0.11.18", "0ac9267c634927e172be535370ab15843007e715"],
+      ["dependabot/cargo/tools/analysis_compute/tar-0.4.46", "b35306029b571f090244bb0f26b0f50525a6222f"],
+      ["dependabot/cargo/tools/cleaning_ops/quinn-proto-0.11.17", "946bb377ae3392408bec05474c4f0c67c45550f1"],
+      ["dependabot/cargo/tools/cleaning_ops/tar-0.4.46", "027ab53ab470b6c0a545939eecd7000110c40eeb"],
+      ["dependabot/cargo/tools/data_engine/rustls-0.23.46", "db19f2652cb618b8d45db48e76c2f57a6cba2d6a"],
+      ["dependabot/github_actions/actions/checkout-7.0.1", "cf368d0e088e49afb8f0ea9b314f95015047aeda"],
+      ["dependabot/github_actions/actions/setup-python-7.0.0", "14e3eb5e8e5d7ed38a13339f6cb5afee62e0179f"],
+      ["dependabot/github_actions/actions/upload-artifact-7.0.2", "1a224b640d5750a99932feaa4be656bd7c1dd433"],
+      ["dependabot/go_modules/packages/runtime-go/gomod-minor-patch-e2377d9e47", "da5871807db650e413bd6ca136175aa4e129ff3f"],
+      ["dependabot/npm_and_yarn/electron-41.10.6", "a9d21e4453dc64701f43bc9e7aff4274b8dc4cbb"],
+      ["dependabot/npm_and_yarn/ip-address-10.7.2", "d3c1fc74af37ac2ffa44180fe257c79ddc22f639"],
+      ["dependabot/npm_and_yarn/katex-0.18.2", "0f7fb08d81d563ad9f7daf23c80ac7dc38b90e66"],
+      ["dependabot/npm_and_yarn/npm_and_yarn-823d526490", "f699f8f660ef2429d2a106d970de3710985cb93b"],
+      ["dependabot/npm_and_yarn/npm_and_yarn-89976db822", "699c4c8f02adc5ed1840cb4d899ff13caf6485b3"],
+      ["dependabot/npm_and_yarn/npm_and_yarn-b94f287d41", "2d4b4c8a3e5f5c5141d6da5efb0f97b165d83d53"],
+      ["dependabot/npm_and_yarn/packages/runtime/zod-4.6.6", "1b1ef4e3fa56fb13d71ba4f02170f2c7339f89f3"],
+      ["dependabot/pip/scripts/pillow-13.0.0", "57589814d34f4babaf1a7878fc13bcd3b0c33bb1"],
+      ["dependabot/pip/scripts/pip-minor-patch-8d12d4c10b", "4882a9cc33392e295aefd17284c0645c1f4e5cf1"],
+      ["dependabot/pip/scripts/websockets-17.3", "f64678911e7da5a09ef6e849c83c43036f9d99d2"],
+      ["dependabot/uv/backend/pytest-9.1.1", "f11600dd5b425c1292e16f635dfdf130d18f4fae"],
+      ["dependabot/uv/backend/sqlglot-30.23.0", "a6682fcb98e266e0ca43130eeba447b62b0f1327"],
+      ["dependabot/uv/backend/uv-minor-patch-cbb656aa63", "ad609e6a9a06de9c215c39d7747b88531a1bd262"],
+      ["main", "4084b7aba1058dac480633faa59223d21edaa8c5"]
+    ],
+    "scope": {
+      "candidate_objects": [89, 4, 7, 90, 15, 95, 92, 93, 102, 110, 98],
+      "zero": ["merge", "close originalPR", "delete anybranchincluding114", "productimplementation", "featuredevelopment", "Privacy", "Node/ElectronchangeorMacgo-nodeversionsampling", "processenumeration/taskexternalrecon/realcasescredentials/liveProvider", "permissionrepair/bypass/force/admin/settings/release/tag/deploy"],
+      "supersession": "R13Bplan-only supersededONLYfornamedcandidate/evidenceexecution;noformalcontractadoption. Alloldrefusalscontinue."
+    },
+    "branch_columns": ["id", "branch", "current_tip", "role", "remotePR"],
+    "branches": [
+      ["actions4", "codex/r14-setup-python", "4084b7aba1058dac480633faa59223d21edaa8c5", "localpreparation_retained_notpublished", null],
+      ["actions7", "codex/r14-checkout", "4084b7aba1058dac480633faa59223d21edaa8c5", "localpreparation_retained_notpublished", null],
+      ["actions90", "codex/r14-artifact", "4084b7aba1058dac480633faa59223d21edaa8c5", "localpreparation_retained_notpublished", null],
+      ["backend15", "codex/r14-pytest", "4084b7aba1058dac480633faa59223d21edaa8c5", "localpreparation_retained_notpublished", null],
+      ["backend92", "codex/r14-sqlglot", "4084b7aba1058dac480633faa59223d21edaa8c5", "localpreparation_retained_notpublished", null],
+      ["backend102", "codex/r14-backend-group", "4084b7aba1058dac480633faa59223d21edaa8c5", "localpreparation_retained_notpublished", null],
+      ["windows95", "codex/r14-websockets", "4084b7aba1058dac480633faa59223d21edaa8c5", "localblockedpreparation_retained_notpublished", null],
+      ["windows110", "codex/r14-windows-group", "4084b7aba1058dac480633faa59223d21edaa8c5", "localblockedpreparation_retained_notpublished", null],
+      ["weixin93", "codex/r14-weixin", "4084b7aba1058dac480633faa59223d21edaa8c5", "localblockedpreparation_retained_notpublished", null],
+      ["go89", "codex/r14-go-minimum", "31a75d749d78ba794bf8633346f06410d4e315c0", "finalcandidate", 115],
+      ["zod98phase1", "codex/r14-zod-policy", "prepublication base 4084b7aba1058dac480633faa59223d21edaa8c5;actualcandidateheadinPRreceipt", "finalcandidate", null],
+      ["actionsready", "codex/r14-actions-ready", "00eb93b3bef95988c4d02c07ee47a49a5f239032", "finalcandidate", 116],
+      ["backendready", "codex/r14-backend-ready", "625cca68f15c657644d3070ba77403790cd48ae4", "finalcandidate", 117],
+      ["windowsready", "codex/r14-windows-ready", "4084b7aba1058dac480633faa59223d21edaa8c5", "localblockedpreparation_retained_notpublished", null]
+    ],
+    "combination_strategy": {
+      "Actions": "4/7/90 shareci.yml andone3-platformprobe;onefinalsharedfilecandidate. Separatethinworktrees retainedlocal,not publishedasjointgreenproof.",
+      "Backend": "15/92/102 ononefinalsharedlockcandidate. Fixed4084/pytest8.4.2/24caseSQL26vs30control separatefrommixeddependencyenv;combination then3.11+3.10 suites.",
+      "Windows": "Both95and110blocked beforeproductionprojection;windowsreadyunusedlocalregistered,notfakecombined. No45contractextensionorformalruntime substitution.",
+      "Cross_domain": "Actions/Backend/Windowsshareci.yml;oneownereditsserially. Individuallygreenbranchesarenotjointintegrationproof;futureadoptionneedsfreshbaseresolutionandfinalheadCI.",
+      "Zod": "Phase1toolcontractcandidateonolddepsonly;phase2dependsactualtrustedmaincontainingphase1. NoalternatePRbase/checker-selection or phase2formalCIclaim."
+    },
+    "candidates": {
+      "89": {
+        "PR": 115,
+        "head": "31a75d749d78ba794bf8633346f06410d4e315c0",
+        "files": 3,
+        "diff": [43, 3],
+        "state": "draft;newheadfullCIpending;oldhead52/4historyonly;actualMVS/checksum/source-cleanproofnowwiredintoexistingGo2modejobs",
+        "rollback": "Normal3filerevert;preserveindependentlaterchanges;sum-onlyrowsnotruntimeupgrades",
+        "tree": "420708bbf06b68bf2f365961336d8a05caff94bd"
+      },
+      "4_7_90": {
+        "PR": 116,
+        "head": "00eb93b3bef95988c4d02c07ee47a49a5f239032",
+        "files": 5,
+        "diff": [129, 25],
+        "state": "draft;full52/CodeQLpending;real3platformprobeactualsuccessrecordattachedPRaftercommit",
+        "rollback": "Normalgrouprevert orperactionSHA+matchingprobeinputrevert,preserveothersandrerun"
+      },
+      "15_92_102": {
+        "PR": 117,
+        "head": "625cca68f15c657644d3070ba77403790cd48ae4",
+        "files": 6,
+        "diff": [742, 233],
+        "state": "draft;newhead52/4pending;actual24+24old/newSQL,1648Python3.11and1648Python3.10pass beforepublication;oldfixturefailurepreserved",
+        "rollback": "Normalrevertwholeorselecteddependencywithnewremaininglockcalculation;no oldhashcopy",
+        "tree": "1502816a2d7cff334fbbdcbc98a900c1128c1f7c"
+      },
+      "95": {
+        "state": "blocked:unchangedpandas3.0.3WinRequires-Disttzdatamissingfrom45;formalruntimeinputnotpresent;no sourceprojection/CI/passclaim",
+        "rollback": "Normal95source/locks/manifest/proberevert,realaggregatefromremaininginputs"
+      },
+      "98_phase1": {
+        "state": "local10/10+realrawtuple+132tool/rootlintpass;cleanpostcommitfullgateandnormalCIpending;phase2notformallyverified",
+        "write_set": ["scripts/unused-findings-gate.mjs", "scripts/unused-findings-gate.test.mjs", "docs/analytix/development-baseline.md", "docs/analytix/governance-closeout.json"],
+        "rollback": "Normaltoolcontractrevertwhilephase2notadopted;afterphase2requiresseparatelyreviewedinversetuple,notbaseline reset"
+      }
+    },
+    "zod_tuple": {
+      "from_baseline_sha256": "cbbcea1c35c4ed9f17dd69ba81a2c6b171a39ca05b839d89011b6292013caaca",
+      "to_baseline_sha256": "6ad6f36bfd915413595fec62109797d58426456987b00686ae2531dd55c81ba5",
+      "from_policy_sha256": "4bbce2786556231865a666b9a42be2e54f9176141b219b968d7a89014a6bb21a",
+      "to_policy_sha256": "2fc898bf01b0fa8081599e8874cea4870ba2145ec364d0b1e5c13a1d55a00d3d",
+      "from_zod": {
+        "version": "4.4.3",
+        "metadata_sha256": "c630bd10b52dcf71c112a2bf78dbf2734b9db58d62de663b8d86c2ec2c8cda2e",
+        "lock_sha256": "11ab6e9e2b4241b299f5098bf0dad6cd05adbc22dd0e8acb736eadf0e2d1acaa"
+      },
+      "to_zod": {
+        "version": "4.6.7",
+        "metadata_sha256": "c2d190d9ee4e0bdb60332aaa2130a6a98d65ddb903fe1d29248b15de57832c45",
+        "lock_sha256": "2386775066fb278468d1f294993648c7d8840587c8b3158895f26b26b47e8500"
+      },
+      "phase2_target_root_node": {
+        "version": "4.6.7",
+        "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
+        "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+        "license": "MIT",
+        "funding": {
+          "url": "https://github.com/sponsors/colinhacks"
+        }
+      },
+      "phase2_baseline_change": "policy.closure.node_modules/zod only;entries/guards/audit/provenanceexact",
+      "current_counts": [1921, 1927, 8],
+      "scope": "Fingerprintpreparationonly;no phase2sourcechange/CI/adoption"
+    },
+    "named_evidence": [
+      ["rust/bounded-followup-scope.json", "5bd8be32ed68c32be4222fa01b7afcf9732cbca7923eceba967bafa2f75a47a5", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["rust/round14-rust-receipt.json", "672c296239eb685922fa9bc8bf372e453ec67ff621dbeabeea5f51618005acef", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["rust/tar-analysis_compute-input-catalog.json", "12cfae0ff805c5eb24799eb7ed43b1ef36d55cc1265ee9077f709757707c9826", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["rust/tar-cleaning_ops-input-catalog.json", "3d0246ad5b824cf74332a552f6f725eea15208c00fe8c379188add7296e29e39", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["rust/tls57-input-and-control-gaps.json", "eddb2f74e73b1e3ddcdcbe6dd3e134c6757c46be4c7191305508524efd4292ca", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["electron-pillow/electron34-official-target-review.json", "1a9c0edf9f4d29978799e0b660bbbcd3c3cd4ca70c21d6309a4e0b47b3fbf298", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["electron-pillow/pillow77-python310-options.json", "07890b27c189656f49de6a81fe8bd8bcafe95de050616f0e7eca8a68fe5817ee", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["weixin93/artifact-receipt.json", "6fce52f8869bb76021aac5a84ecaff2bbbb8e83ede4922c5fe566ece109e3176", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["weixin93/compatibility-stop-receipt.json", "a07eeb4b104b1eda53360bec4256efe043b20b96db7b25f2101548fb1ecf5ede", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["zod98/migration-fingerprints.json", "e5a8b4d707c1d462bdac560e1f92e23ddc3ce9df836b8e9cb7159d50e423761f", "privateboundedreceipt;publicsourcefacts summarizedhere,notmachinelogs"],
+      ["windows-source-blockers.json", "f3833eb8441d23592835ccbd1ab08426ea5310184d728770b1cce349e8d9074e", "privateboundedreceipt;notcommittedrawmachinelog"],
+      ["zod98/local-precommit-checks.json", "b3a6239cb64e42d2000a506a90394175b493f5bcb6162ffa98f71dbc152d9153", "privateboundedreceipt;notcommittedrawmachinelog"]
+    ],
+    "hard_gaps": {
+      "93": {
+        "status": "blocked_product_shim_contract;zero sourcechange",
+        "artifact_sha256": "69dd18af16a992edbe3700d244f9591ab52f5f58abfe976a9f1250bd8eacdbbb",
+        "missing_exports": ["openclaw/plugin-sdk/temp-path", "openclaw/plugin-sdk/config-mutation"],
+        "proof": "Verifiedofficial2.4.10real18filemediaimportclosure,notrootrequire/mock. No dynamicmedia/build/CIclaimed;no shimfix."
+      },
+      "110": {
+        "status": "blocked45itemcontract",
+        "source": "OfficialPyPIFastAPI0.156.4metadata",
+        "required": "opentelemetry-api>=1.44.0 unconditional",
+        "missing": "notinaccepted45pins =>46thdistribution",
+        "action": "Noextra22downloads/lock/aggregate/CI;no100helperbroaden",
+        "minimum_missing": "opentelemetry-api plus separatelyobservedbaselineWinpandas tzdata;noexhaustiveclosureclaim"
+      },
+      "1_29": {
+        "status": "separatecatalogued22nodes;old19fromdata_enginecannotprovetwoownroots",
+        "correction": ["bitflags2.13.0→2.11.1", "filetime0.2.29→0.2.27", "addlibredox0.1.16/plain0.2.3/redox_syscall0.7.4"],
+        "action": "Noexpandexactdownloads;oldnewprobesnotexecuted;completefollowingapprovalinputs in namedartifact"
+      },
+      "57": {
+        "status": "not_ready;existingregistryrefusalsnotretried",
+        "missing": ["effectiveoldTLSbehaviornegative", "compiledrootsSPKInegative", "targetartifacts/metadata", "exactversionregression"]
+      },
+      "34": {
+        "status": "safe44/45targetnotconfirmed",
+        "observed": "44.9.3/45.0.0officialNode24.22.0;10/21securitytarget24.22.1;noverifiedcompletebackport",
+        "action": "NoNodeElectronchangeorMacsampling"
+      },
+      "2_31": {
+        "status": "platformblocked;norestorationevidencereceived;zero trial/retry/workaround",
+        "action": "Riskregisteronly;noexecutablemanualalternative"
+      },
+      "77": {
+        "status": "comparisononly;no candidate",
+        "main": "two12.3trees;backendminimum>=3.10 unchanged;100toolonly",
+        "choices": "Retire3.10thentwotreePillow13 ORretain3.10withverifiedmitigation/explicitdatedresidual;noautomaticriskacceptance"
+      },
+      "safety_evidence": {
+        "status": "settings/alertlinkage userproofstillpending;3oldbotfailurecausesunknown",
+        "action": "No oldrefusalendpointretried"
+      },
+      "95": {
+        "status": "blocked45itemcontract_and_formalruntimeinput",
+        "evidence": "unchangedpandas3.0.3officialWinwheelMETADATA59:tzdata;sys_platform==win32;17.3itselfnoRequires-Dist",
+        "diagnostic": "exit1/0.193224srequired_distribution_missing:tzdata;fail-firstnotexhaustive",
+        "partial": "45wheelhashes/versions/45namesverified,old44bytesretained;safeextractonly,noproductioncandidateowner/lock/aggregate",
+        "generation": "priorwholegenerationended,exitunknownaftercontexttruncation;noowner/lock/receipt;notrepeated",
+        "remaining": ["productionvalidatorpositive/negative", "formal3.11.15+20260623input", "native/HTTP/WebSocketexecution"],
+        "action": "No46thdownload,validatorweakening,100helperbroadenorCIpretend"
+      }
+    },
+    "environment": {
+      "helper_failures": "Actions2andWindows1use_defaultparametercallsexit1 Cannotresolvebackingauthority;followingroot/backendandcorrectedActions/Windows require_escalatedcallsactualexit0. Noauthority/mount/permissionchanges;initialrootcausenotfullyproved.",
+      "principle": "No bypass:unmodifiedentrystillfailsclosed. Correctexecutionparameterwentthroughnormalreview,newtaskroot700noACL,taskcachelandingverified;oldbackendabandoned.",
+      "Zod_acquisition": "Firstofficialregistrymetadatareadtimeout30s,nofilesstored,notpolicydenial. ExactSRIcachemiss;officialsameversiontarballthenacquiredandverifiedbeforemetadataread;noinstall/projectexecution.",
+      "subagent_model": "Oldandfreshdefault-inheritedZodreadonlyreview failedbeforeoutput:gpt-6.1-solnotsupportedwithChatGPTaccount. Nomodeloverride/retrythirdtime;rootcode/testreviewcontinues,independentreviewnotclaimed."
+    },
+    "decisions": ["Reuseonecanonicalledger;R13currentplansbecomehistoricalasR14actualcandidate/gaprecords supersede. No copiedfullB21plan.", "All14localnamedbranchesregistered;onlyconcretefinalcandidatebranchespublished;no deleteincludingmerged114.", "RootsoleGit/PR/integrationowner;workersisolatedsourceonly;ci.ymlsinglewriterthenrootintegration.", "No newfindings/quotas/automaticbaselinegeneration.1921/1927/8 remainscurrent;historic1927/1933 unchanged.", "OriginalPRsallremainopen;no mainwrite. AllsourceacceptedlevelCANDIDATEonlyuntilactualheadchecksanduserdecision.", "ThinparsedprobePython/ZIPsourcebyteidentityreused;real3-platformactionrun separatelyexecuted;publicpayloadcorrected29→31 actualASCIIbytes,codeunchanged.", "PostcommitCI/terminalsame-mainrefinventoryrecordinexistingPRreceipts,notselfreferentialreportcommits.", "Go89e17full52/4didnotprintMVS/source-clean;addboundedexistingjobproofandoriginalproposalsum-onlyhashes,newhead31aawaitsownCI;noMacsampling/localGodownload.", "Backendold6866failureisnewtestfixturePdfPagecontextmanagerunsupported,notproductfailure;explicitclosefinallyfixpreservessize/hash/negativeassertions,new625ownCIrequired;old1647/1failand3.10skipretained.", "Windows95confirmedbaseline45closuregapfromunchangedpandasWinmarker;do notaddtzdataorclaimwebsocketsregression.110OTel46thcontractgapheldseparately;nofinalsourceprojectionorCI.", "Zodtoolmigrationisperfectlyfixedtuplewithsameentries/guards/audit,phase1olddepsonly;phase2actualtrusted-mainprerequisiteunmet. Rootreviewand10testsactual;independentreviewunavailablemodelerrornotclaimed."],
+    "verification": "Allactualresultsboundtofinalcandidatehead;pending/skipped/localstaticnotfullpass. Main4084acceptedR13full52/CodeQLreusedunchanged,notnewlyrerun.",
+    "prepublication_utc": "2026-10-25T16:36:14.751000+00:00",
+    "prepublication_checks": {
+      "zod10synthetic": "10pass/0fail/0skip;exit0;7.065739s;existing7retained+3policytests",
+      "zod132closure_and_rootlint": "exit0;15.385088s;132tools,2files0errors0warnings;actualoldCBB/new6adtuplepositive;entries1921/count1927/guards8exact;purepolicyunitnotphase2eventgate",
+      "backend_newhead": "run40211389823/job121223603950:SQL26.33/30.24each24/0skip samefixed4084samecorpus343bec8a;3.11suite1648pass58.55s;3.10.22pytest9.1.1suite1648pass61.70s;full52/4stillpending",
+      "Actions": "run40209238749:Ubuntu/Windows/macOSrealcheckout7/setupPython7/artifact7probe3/3;31bytepayload0950e3a4 and2negativecontrolseach;full52/4pending",
+      "Go": "newhead31a75d74CIpending;oldheadfullsuccessnotactualmodule-selectionproof",
+      "diff_paths_links": "gitdiffcheck+JSONparse+realrelativegovernanceledgerlink;newledgersectionnohostpaths"
+    }
   }
 }
