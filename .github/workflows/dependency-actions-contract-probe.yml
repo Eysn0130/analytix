@@ -1,0 +1,104 @@
+name: Dependency action contract probe
+
+# Synthetic public bytes only; no project installation, packaging or release.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/package.yml'
+      - '.github/workflows/pr28-independent-environment.yml'
+      - '.github/workflows/dependency-actions-contract-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    name: Dependency action contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-14]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        id: python
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/uv.lock
+      - name: Check exact source and prepare a fixed public payload
+        shell: python
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PROBE_ROOT: ${{ runner.temp }}/analytix-dependency-action-probe
+          PYTHON_CACHE_HIT: ${{ steps.python.outputs.cache-hit }}
+        run: |
+          import hashlib, json, os, pathlib, subprocess, sys
+          assert sys.version_info[:2] == (3, 11), 'unexpected Python series'
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert head == os.environ['EXPECTED_HEAD'], 'checkout head mismatch'
+          assert not subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip(), 'dirty source'
+          credentials = subprocess.run(['git', 'config', '--local', '--name-only', '--get-regexp', r'http\..*\.extraheader'], capture_output=True, text=True)
+          assert credentials.returncode in (0, 1) and not credentials.stdout.strip(), 'persisted checkout credential'
+          assert os.environ['PYTHON_CACHE_HIT'] in ('', 'true', 'false'), 'invalid cache result'
+          cache = subprocess.check_output([sys.executable, '-m', 'pip', 'cache', 'dir'], text=True).strip()
+          assert pathlib.Path(cache).is_absolute(), 'pip cache path is not absolute'
+          root = pathlib.Path(os.environ['PROBE_ROOT'])
+          root.mkdir(mode=0o700)
+          payload = b'analytix action contract probe\n'
+          fd = os.open(root / 'payload.bin', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(fd, 'wb') as output:
+              output.write(payload)
+          print(json.dumps({'status': 'prepared', 'head': head, 'python': sys.version.split()[0], 'cache_hit': os.environ['PYTHON_CACHE_HIT'], 'sha256': hashlib.sha256(payload).hexdigest()}))
+      - name: Upload only the public synthetic payload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        id: upload
+        with:
+          name: dependency-action-${{ matrix.os }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/analytix-dependency-action-probe/payload.bin
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - name: Verify the real artifact roundtrip and negative controls
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROBE_REPOSITORY: ${{ github.repository }}
+          PROBE_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          import hashlib, io, json, os, subprocess, zipfile
+          payload = b'analytix action contract probe\n'
+          artifact_id = os.environ['PROBE_ARTIFACT_ID']
+          assert artifact_id.isdecimal(), 'missing artifact identity'
+          repository = os.environ['PROBE_REPOSITORY']
+          assert repository == 'Eysn0130/analytix', 'unexpected repository'
+          response = subprocess.run(['gh', 'api', f'repos/{repository}/actions/artifacts/{artifact_id}/zip'], capture_output=True, timeout=30)
+          assert response.returncode == 0, 'artifact retrieval failed'
+          assert len(response.stdout) <= 1048576, 'artifact response exceeds bound'
+          def verify(data):
+              with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                  assert archive.namelist() == ['payload.bin'], 'artifact member mismatch'
+                  assert archive.getinfo('payload.bin').file_size == len(payload), 'artifact size mismatch'
+                  actual = archive.read('payload.bin')
+                  assert actual == payload and hashlib.sha256(actual).digest() == hashlib.sha256(payload).digest(), 'artifact bytes mismatch'
+          verify(response.stdout)
+          rejected = 0
+          for name, content in [('other.bin', payload), ('payload.bin', b'X' * len(payload))]:
+              bad = io.BytesIO()
+              with zipfile.ZipFile(bad, 'w') as archive:
+                  archive.writestr(name, content)
+              try:
+                  verify(bad.getvalue())
+              except AssertionError:
+                  rejected += 1
+          assert rejected == 2, 'negative control did not reject'
+          print(json.dumps({'status': 'pass', 'artifact_id': artifact_id, 'negative_controls': rejected, 'sha256': hashlib.sha256(payload).hexdigest()}))
