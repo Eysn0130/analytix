@@ -86,7 +86,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version-file: .node-version
       - name: Prepare isolated locked Node inputs without lifecycle scripts
