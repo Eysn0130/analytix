@@ -125,7 +125,7 @@
     "@shikijs/langs": "3.23.0",
     "@superdoc/docx-engine": "0.23.0",
     "@superdoc/react": "2.19.0",
-    "@tencent-weixin/openclaw-weixin": "2.4.3",
+    "@tencent-weixin/openclaw-weixin": "2.4.10",
     "@tiptap/core": "3.30.5",
     "@tiptap/extension-image": "3.30.5",
     "@tiptap/extension-list": "3.30.5",
